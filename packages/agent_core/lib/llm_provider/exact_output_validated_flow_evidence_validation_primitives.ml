@@ -133,6 +133,21 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && attempt.http_status = Some http_status
     && Option.is_some attempt.provider_trace_sha256
     && Option.is_some attempt.raw_response_sha256
+  (* These status classes match [Retry.classify_error]: 529 is the provider's
+     explicit overload response; other 5xx responses are server errors. A
+     complete refusal body must have been recorded in either case. *)
+  | Overloaded { http_status }, Response_received ->
+    http_status = 529
+    && attempt.dispatch_count = 1
+    && attempt.http_status = Some http_status
+    && Option.is_some attempt.provider_trace_sha256
+    && Option.is_some attempt.raw_response_sha256
+  | Server_error { http_status }, Response_received ->
+    Cohttp.Code.is_server_error http_status && http_status <> 529
+    && attempt.dispatch_count = 1
+    && attempt.http_status = Some http_status
+    && Option.is_some attempt.provider_trace_sha256
+    && Option.is_some attempt.raw_response_sha256
   | Invalid_json_output, (Response_received | Terminal) ->
     attempt.dispatch_count = 1
     && successful_http_status attempt.http_status
@@ -142,6 +157,7 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
   | Completion_failed_before_dispatch, (Response_received | Terminal)
   | Serialized_request_refused _, (Before_dispatch | Terminal)
   | Rate_limited _, (Before_dispatch | Terminal)
+  | (Overloaded _ | Server_error _), (Before_dispatch | Terminal)
   | Invalid_json_output, Before_dispatch -> false
 ;;
 

@@ -24,6 +24,23 @@ type line =
 
 module Tui_decode = Masc.Tui_decode
 
+type confirmation = {
+  goal_id : string;
+  phase : Goal_phase.t;
+  verdict : Goal_verification.verdict;
+}
+
+type confirmation_state =
+  | Inspecting of (string, confirmation) Masc_tui_fetched.t
+  | Submitting of string * (string, confirmation) Masc_tui_fetched.t
+
+val decode_confirmation : goal_id:string -> Yojson.Safe.t -> (confirmation, string) result
+val confirmation_body : confirmation -> Yojson.Safe.t
+val same_confirmation_binding : confirmation -> confirmation -> bool
+val confirmation_lines : width:int -> confirmation -> line list
+(** The exact proof displayed before the operator confirms. Its binding is
+    retained for the POST, so a newer proof cannot silently replace it. *)
+
 val timestamp_line : label:string -> string -> string
 (** One timeline row of the detail pane. The field is one wider than the
     longest label ("reviewed:"), so a value never starts immediately after

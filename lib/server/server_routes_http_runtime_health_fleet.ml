@@ -346,7 +346,7 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
       |> without "backlog_clean"
     in
     `Assoc
-      ([ "schema", `String "masc.keeper_event_queue.fleet_summary.v6"
+      ([ "schema", `String Keeper_event_queue_schema.fleet_health_summary
        ; "queue_residence", queue_residence
        ; "status", `String status
        ; "operator_action_required", `Bool operator_action_required
@@ -395,7 +395,7 @@ let keeper_event_queue_health_json ~execution_snapshot () =
     keeper_event_queue_health_dimensions
       ~source_unavailable:true
       (`Assoc
-      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
+      [ "schema", `String Keeper_event_queue_schema.fleet_summary
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
       ; "pending_count", `Int 0

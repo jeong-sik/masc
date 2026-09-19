@@ -143,13 +143,37 @@ status: reference
 ## Continuity
 
 **Checkpoint**
-: agent core conversation과 Keeper working context의 durable 저장점.
+: agent core conversation과 Keeper working context의 durable 저장점. trace당 파일
+  하나(`<trace 디렉터리>/<trace id>.json`)다.
+
+**History**
+: Checkpoint의 `messages`. 그 trace에서 오간 message가 시간순으로 쌓인 목록이다.
+  Keeper turn은 이 목록 끝에 message를 덧붙인다. 목록 안에는 어느 message가 어느
+  Keeper turn의 것인지 표시가 없다.
+
+**Message**
+: History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content
+  조각(`Text`, `Thinking`, `ToolUse`, `ToolResult`, `Image`)의 목록으로 이뤄진다.
+
+**Atom**
+: History를 자를 때 쓰는 가장 작은 단위. `User` message 하나, 또는 `Assistant`
+  message 하나와 그것에 답한 `Tool` message들이다. 따로 저장되지 않고 History를
+  앞에서부터 세면 나온다(`Runtime_model_input_tail_window`). tool 호출과 결과가
+  갈라지면 provider가 요청을 거절하므로 자르는 자리는 Atom 경계에만 온다. Atom의
+  크기는 고르지 않아서 Atom 개수는 위치를 말할 뿐 요청 크기를 말하지 않는다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
 
 **Trace ID**
-: 현재 Keeper generation의 실행 식별자.
+: 현재 Keeper generation의 실행 식별자. Checkpoint의 `session_id` 필드와
+  `Turn_ref`의 trace id가 이 값이다.
 
 **Memory OS**
 : Keeper의 durable personal facts와 recall을 소유하는 typed memory store.
+
+**Librarian**
+: Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을
+  한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
+  호출에서 Keeper가 받은 요청을 묶어 working context로 정리한다. Keeper의 판단을
+  대신하지 않는다.

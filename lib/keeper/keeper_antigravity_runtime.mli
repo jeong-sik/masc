@@ -56,23 +56,18 @@ val run :
     new turn, so what the model reads is not this process's to measure. *)
 
 module For_testing : sig
-  val capacity_bounded_model_input_projection
-    :  declared_max_prompt_bytes:int option
-    -> system_prompt:string
-    -> goal:string
-    -> ?on_model_input_window_observation:
+  val observed_history_projection
+    :  ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> Agent_core.Agent.model_input_projection option
-    -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
-  (** The admission contract over the provider-bound history. [None] declared
-      capacity passes the source projection through unchanged. A declared
-      capacity returns a projection that runs the source projection first
-      (the production source appends a bounded typed Gate replay reference)
-      and then windows the result to the capacity minus the bytes the fixed
-      prompt sections always occupy, refusing with a typed config error when
-      those fixed sections alone leave no room. agy truncates oversized stdin
-      prompts silently instead of refusing them, so this window is the only
-      bound the turn gets. *)
+    -> Agent_core.Agent.model_input_projection
+  (** Runs the source projection (the production source appends a bounded
+      typed Gate replay reference) and hands the result over whole, reporting
+      what went as a window reading. Nothing is cut: agy states no prompt
+      size limit and carried a 2,078,915-byte prompt end to end, answering
+      from markers placed at every quarter of it (2026-09-18, agy 1.2.6). The
+      reading still has to be published, because a keeper's next turn starts
+      from the range its last one carried. *)
 
   val start_prompt_bytes :
     system_prompt:string ->
@@ -81,13 +76,4 @@ module For_testing : sig
     (int, string) result
   (** Render through the production start-turn formatter and return the exact
       transmitted prompt byte count. *)
-
-  val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
-  (** The bytes the admission contract reserves for the fixed prompt sections
-      out of a declared capacity. One byte more than this is the smallest
-      admissible declared capacity; the tail window can still refuse such a
-      capacity when its constant undroppable preamble does not fit in what
-      remains. Not the rendered empty-history prompt: the reserve charges
-      both separators (the with-history worst case), while an empty-history
-      render joins its two sections with one. *)
 end

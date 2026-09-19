@@ -34,6 +34,7 @@ let runpod_provider =
   ; display_name = "RunPod"
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
+  ; wire_kind = None
   ; transport = Http "https://example-runpod.proxy.runpod.net/v1"
   ; is_non_interactive = true
   ; credentials = Some (Inline "rp-test-token")
@@ -1688,6 +1689,7 @@ let test_dashboard_runtime_probe_auth_header_follows_provider_kind () =
     ; display_name = "Gemini"
     ; protocol = "gemini-http"
     ; api_format = Runtime_schema.Gemini_api
+    ; wire_kind = None
     ; transport = Runtime_schema.Http "https://generativelanguage.googleapis.com/v1beta"
     ; credentials = Some (Runtime_schema.Inline "gm-test-key")
     }
@@ -1732,6 +1734,7 @@ let test_dashboard_runtime_probe_vertex_is_a_stated_skip () =
       display_name = "Vertex"
     ; protocol = "vertex-gemini"
     ; api_format = Runtime_schema.Vertex_gemini_api
+    ; wire_kind = None
     ; transport = Runtime_schema.Http base_url
     ; credentials = None
     }
@@ -2656,55 +2659,9 @@ let test_clock_failfast_names_idle_when_both_deadlines_set () =
     fail (Printf.sprintf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err))
   | Ok _ -> fail "expected typed error when both deadlines set without clock"
 
-(* ── Runtime.decide_capability_gate (AGENT_CORE catalog binding gate) ── *)
-
-let mentions ~sub s =
-  let ls = String.length sub and lc = String.length s in
-  let rec go i = i + ls <= lc && (String.sub s i ls = sub || go (i + 1)) in
-  ls = 0 || go 0
-
-let test_capability_gate_empty () =
-  match Runtime.decide_capability_gate ~config_path:"cfg" [] with
-  | Ok () -> ()
-  | Error msg -> failf "expected Ok for empty bindings, got: %s" msg
-
-let test_capability_gate_all_known () =
-  match Runtime.decide_capability_gate ~config_path:"cfg" [ "a", true; "b", true ] with
-  | Ok () -> ()
-  | Error msg -> failf "expected Ok when all models known, got: %s" msg
-
-let test_capability_gate_partial_unknown_aborts () =
-  match
-    Runtime.decide_capability_gate
-      ~config_path:"cfg"
-      [ "known", true; "missing-model", false ]
-  with
-  | Ok () -> fail "expected Error when a model is missing from a populated catalog"
-  | Error msg ->
-    check bool "error names the missing model" true (mentions ~sub:"missing-model" msg)
-
-let test_capability_gate_all_unknown_aborts () =
-  match Runtime.decide_capability_gate ~config_path:"cfg" [ "a", false; "b", false ] with
-  | Ok () -> fail "expected Error when all configured models are missing"
-  | Error msg ->
-    check bool "error names first missing model" true (mentions ~sub:"a" msg);
-    check bool "error names second missing model" true (mentions ~sub:"b" msg)
-
 let () =
   run "runtime_provider_auth_headers"
-    [ ( "capability_gate"
-      , [ test_case "empty -> ok" `Quick test_capability_gate_empty
-        ; test_case "all known -> ok" `Quick test_capability_gate_all_known
-        ; test_case
-            "partial unknown -> abort"
-            `Quick
-            test_capability_gate_partial_unknown_aborts
-        ; test_case
-            "all unknown -> abort"
-            `Quick
-            test_capability_gate_all_unknown_aborts
-        ] )
-    ; ( "provider_config"
+    [ ( "provider_config"
       , [ test_case
             "runtime binding materialization preserves failure reason"
             `Quick

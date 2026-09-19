@@ -13,16 +13,14 @@ def section(start, end):
 
 
 class UpgradeConfigTest(unittest.TestCase):
-    def exercise(self, reset=False, missing_overlay=False, init_failure="", later_failure=False, terminal=None):
+    def exercise(self, reset=False, missing_runtime=False, init_failure="", later_failure=False, terminal=None):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             config = base / '.masc/config'
             config.mkdir(parents=True)
             runtime = config / 'runtime.toml'
-            runtime.write_text('[runtime]\ndefault = "operator-choice"\n')
-            overlay = config / 'agent-core-models-overlay.toml'
-            if not missing_overlay:
-                overlay.write_text('custom overlay\n')
+            if not missing_runtime:
+                runtime.write_text('[runtime]\ndefault = "operator-choice"\n')
             keeper = config / 'keepers/custom.toml'
             keeper.parent.mkdir()
             keeper.write_text('custom instructions\n')
@@ -62,7 +60,7 @@ test -n "$seed_base"
 if [ "$record_default" -eq 1 ]; then touch "$seed_base/record-default-requested"; fi
 cfg="$seed_base/.masc/config"
 if [ "$skills_only" -eq 0 ]; then
-  for name in runtime.toml agent-core-models-overlay.toml optional.toml; do
+  for name in runtime.toml optional.toml; do
     if [ ! -e "$cfg/$name" ] || [ "$force_seed" -eq 1 ]; then
       echo seeded > "$cfg/$name"
     fi
@@ -156,11 +154,10 @@ curl() {
                 return
             self.assertIn('initialized', diagnostics)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(runtime.read_text(), 'seeded\n' if reset else '[runtime]\ndefault = "operator-choice"\n')
+            self.assertEqual(runtime.read_text(), 'seeded\n' if reset or missing_runtime else '[runtime]\ndefault = "operator-choice"\n')
             self.assertEqual(keeper.read_text(), 'reset instructions\n' if reset else 'custom instructions\n')
             self.assertEqual((base / 'wizard-ran').exists(), reset)
-            self.assertTrue(overlay.exists())
-            self.assertEqual((config / 'optional.toml').exists(), reset or missing_overlay,
+            self.assertEqual((config / 'optional.toml').exists(), reset or missing_runtime,
                              'ordinary upgrade must preserve removed optional config')
             self.assertEqual(skill.read_text(), 'operator skill\n')
             self.assertEqual((base / '.masc/skills/browser-lanes/SKILL.md').read_text(), 'builtin\n')
@@ -170,8 +167,8 @@ curl() {
     def test_force_upgrade_preserves_custom_config_and_team(self):
         self.exercise()
 
-    def test_force_upgrade_repairs_missing_overlay_without_resetting_default(self):
-        self.exercise(missing_overlay=True)
+    def test_upgrade_reseeds_a_missing_runtime_without_resetting_the_team(self):
+        self.exercise(missing_runtime=True)
 
     def test_skill_seed_failure_preserves_full_diagnostics_and_fails_install(self):
         self.exercise(init_failure="skills")
@@ -179,17 +176,17 @@ curl() {
     # A scripted install once left a temp workspace as a developer machine's
     # default (measured 2026-09-15). Only a person on a terminal records one.
     def test_scripted_config_seed_does_not_record_the_default_workspace(self):
-        self.exercise(missing_overlay=True, terminal=False)
+        self.exercise(missing_runtime=True, terminal=False)
 
     def test_terminal_config_seed_records_the_default_workspace(self):
-        self.exercise(missing_overlay=True, terminal=True)
+        self.exercise(missing_runtime=True, terminal=True)
 
     def test_config_seed_failure_preserves_full_diagnostics_and_fails_install(self):
-        self.exercise(missing_overlay=True, init_failure="config")
+        self.exercise(missing_runtime=True, init_failure="config")
 
     def test_later_failure_does_not_publish_skills_before_commit(self):
         self.exercise(later_failure=True)
-        self.exercise(missing_overlay=True, later_failure=True)
+        self.exercise(missing_runtime=True, later_failure=True)
         self.exercise(reset=True, later_failure=True)
 
     def test_explicit_reset_replaces_config_and_team_and_runs_wizard(self):

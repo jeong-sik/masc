@@ -17,6 +17,10 @@ type container =
 type resource_config =
   { memory : string option
   ; cpus : string option
+  (* Why the guest size could not be resolved. Set when the keeper's or the
+     workspace's size does not parse, which is the same refusal the next boot
+     gives, so the operator reads it here before a turn hits it. *)
+  ; guest_size_error : string option
   ; work_volume_size : string option
   ; pids_limit : int option
   ; tmpfs_size : string option
@@ -178,12 +182,16 @@ let decode_resource_config ~sanitize fields =
     (fun inner ->
       let* memory = string_opt ~sanitize ~key:"memory" ~path:"resource_config.memory" inner in
       let* cpus = string_opt ~sanitize ~key:"cpus" ~path:"resource_config.cpus" inner in
+      let* guest_size_error =
+        string_opt ~sanitize ~key:"guest_size_error"
+          ~path:"resource_config.guest_size_error" inner
+      in
       let* work_volume_size =
         string_opt ~sanitize ~key:"work_volume_size" ~path:"resource_config.work_volume_size" inner
       in
       let* pids_limit = int_opt ~key:"pids_limit" ~path:"resource_config.pids_limit" inner in
       let* tmpfs_size = string_opt ~sanitize ~key:"tmpfs_size" ~path:"resource_config.tmpfs_size" inner in
-      Ok { memory; cpus; work_volume_size; pids_limit; tmpfs_size })
+      Ok { memory; cpus; guest_size_error; work_volume_size; pids_limit; tmpfs_size })
     fields
 ;;
 
@@ -411,6 +419,9 @@ let resource_rows ~width = function
     (match compute with
      | None -> []
      | Some compute -> wrapped_rows ~width ~label:"Limits" ~tone:`Info compute)
+    @ (match resources.guest_size_error with
+       | None -> []
+       | Some detail -> wrapped_rows ~width ~label:"Guest size" ~tone:`Bad detail)
     @ (match storage with
        | None -> []
        | Some storage -> wrapped_rows ~width ~label:"Volume caps" ~tone:`Muted storage)

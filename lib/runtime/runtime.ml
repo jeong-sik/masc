@@ -708,35 +708,6 @@ let lanes_of_decls
        lane_decls)
 ;;
 
-(* Pure decision for the capability gate, separated from the global AGENT_CORE catalog
-   lookup so it is unit-testable. [entries] is [(label, known_to_agent_core)] per runtime.
-
-   An unknown model resolves to AGENT_CORE [provider_default], whose guessed capabilities
-   (notably [thinking_control_format = No_thinking_control]) silently drop
-   thinking/sampling control a binding may require. Reject such a binding at
-   load instead of discovering corruption at runtime
-   (Unknown->Permissive anti-pattern; mirrors [runtime].default validation,
-   RFC-0206 §2.1 no-silent-fallback).
-
-   An empty runtime list is allowed for focused unit tests/config probes, but any
-   configured runtime whose model is absent from the catalog is rejected before it
-   can inherit guessed provider_default capabilities. *)
-let decide_capability_gate ~(config_path : string) (entries : (string * bool) list)
-  : (unit, string) result
-  =
-  let unknown = List.filter (fun (_, known) -> not known) entries in
-  match unknown with
-  | [] -> Ok ()
-  | _ ->
-    Error
-      (Printf.sprintf
-         "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
-          would use provider_default and silently drop thinking/sampling control. \
-          Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
-         config_path
-         (List.length unknown)
-         (String.concat ", " (List.map fst unknown)))
-;;
 
 type missing_catalog_model =
   { runtime_id : string
@@ -797,7 +768,7 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
   Printf.sprintf
     "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
      would use provider_default and silently drop thinking/sampling control. \
-     Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
+     Add a row for each to the AGENT_CORE embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
     (String.concat ", " (List.map missing_catalog_model_to_string report.missing_models))
@@ -1162,9 +1133,13 @@ let missing_reference_error
   in
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
-     are referenced by routing config: %s. %s Add catalog rows to \
-     agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove those routing references; MASC will not erase \
-     explicit runtime intent into [runtime].default fallback."
+     are referenced by routing config: %s. %s A model AGENT_CORE ships no row \
+     for is declared by the deployment that runs it: give its [models.<id>] a \
+     [models.<id>.capabilities] table, which is how a deployment vouches for a \
+     model of its own. A connection the install wizard wrote before this became \
+     the contract has no such table, and re-running the wizard writes one. \
+     Otherwise remove those routing references; MASC will not erase explicit \
+     runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)
     default_fallback_explanation

@@ -11,8 +11,16 @@ type shape =
   | Round
   | Diamond
 
+(* What names a node. [Named] is an id the source wrote. A state diagram's
+   [[*]] names no state: on the left of a transition it is where the diagram
+   starts, on the right where it ends, and those are two nodes. *)
+type node_id =
+  | Named of string
+  | Initial
+  | Final
+
 type node = {
-  id : string;
+  id : node_id;
   label : string;
   shape : shape;
 }
@@ -23,8 +31,8 @@ type line_style =
   | Thick
 
 type edge = {
-  from_id : string;
-  to_id : string;
+  from_id : node_id;
+  to_id : node_id;
   directed : bool;
   style : line_style;
   label : string option;
@@ -39,7 +47,7 @@ type group = {
   group_id : string;
   group_label : string;
   group_direction : direction option;
-  group_nodes : string list;  (* ids declared directly inside, source order *)
+  group_nodes : node_id list;  (* ids declared directly inside, source order *)
   group_children : group list;
 }
 
@@ -102,6 +110,21 @@ type failure =
     }
 
 let ( let* ) = Result.bind
+
+(* How a state diagram's source writes a start or an end. *)
+let pseudo_state_mark = "[*]"
+
+(* What a message calls a node: the id the source wrote, or the [[*]] that
+   stood for a start or an end. *)
+let node_id_text = function
+  | Named id -> id
+  | Initial | Final -> pseudo_state_mark
+
+let node_id_equal a b =
+  match (a, b) with
+  | Named a, Named b -> String.equal a b
+  | Initial, Initial | Final, Final -> true
+  | (Named _ | Initial | Final), _ -> false
 
 let direction_word = function
   | Top_down -> "TD"
@@ -262,8 +285,8 @@ let parse_group_header text =
       else Ok (id, label_text (String.sub rest 1 (n - 2)))
 
 type declared = {
-  mutable order : string list;  (* ids, newest first *)
-  table : (string, node) Hashtbl.t;
+  mutable order : node_id list;  (* newest first *)
+  table : (node_id, node) Hashtbl.t;
 }
 
 (* One [subgraph] the parser has opened and not yet closed. *)
@@ -271,7 +294,7 @@ type frame = {
   f_id : string;
   f_label : string;
   mutable f_direction : direction option;
-  mutable f_nodes : string list;  (* reverse source order *)
+  mutable f_nodes : node_id list;  (* reverse source order *)
   mutable f_children : group list;  (* reverse source order *)
 }
 
@@ -289,8 +312,8 @@ let parse_node c declared =
   else
     let rec try_openers = function
       | [] ->
-          declare declared id ~label:id ~shape:Rect ~explicit:false;
-          Ok id
+          declare declared (Named id) ~label:id ~shape:Rect ~explicit:false;
+          Ok (Named id)
       | (opener, closer, shape) :: rest ->
           if starts c opener then (
             let start = c.pos + String.length opener in
@@ -311,9 +334,9 @@ let parse_node c declared =
                 | None -> Error (Printf.sprintf "%s after %s is never closed" opener id)
                 | Some stop ->
                     let raw = String.sub c.text start (stop - start) in
-                    declare declared id ~label:(label_text raw) ~shape ~explicit:true;
+                    declare declared (Named id) ~label:(label_text raw) ~shape ~explicit:true;
                     c.pos <- stop + String.length closer;
-                    Ok id))
+                    Ok (Named id)))
           else try_openers rest
     in
     try_openers openers
@@ -600,6 +623,203 @@ let parse_sequence lines =
   in
   Ok { participants; events = List.rev !events }
 
+(* ── State diagrams ────────────────────────────────────────────────────── *)
+
+(* Mermaid's one transition arrow. [->] is not one: its lexer reads a lone
+   dash as nothing it knows. *)
+let state_arrow = "-->"
+
+(* The names on a line, split at each arrow. One piece means the line holds
+   no transition. *)
+let split_on_arrow text =
+  let rec collect pos =
+    match find_from text pos state_arrow with
+    | None -> [ String.sub text pos (String.length text - pos) ]
+    | Some i -> String.sub text pos (i - pos) :: collect (i + String.length state_arrow)
+  in
+  collect 0
+
+(* A colon ends the names of a statement. What follows it is a transition's
+   label or a state's description, and may hold anything, an arrow
+   included. *)
+let split_at_colon line =
+  match String.index_opt line ':' with
+  | Some i ->
+      ( String.sub line 0 i
+      , Some (String.trim (String.sub line (i + 1) (String.length line - i - 1))) )
+  | None -> (line, None)
+
+(* A state id is one token of the characters a flowchart node id is made
+   of. A line whose names are not that is refused, not drawn as a box
+   around whatever text it held. *)
+let state_id text =
+  let text = String.trim text in
+  if text <> "" && String.for_all is_id_char text then Some text else None
+
+(* One end of a transition. [[*]] is where the diagram starts on the left of
+   an arrow and where it ends on the right; [pseudo] says which end this is. *)
+let state_ref text ~pseudo =
+  let text = String.trim text in
+  if String.equal text pseudo_state_mark then Some pseudo
+  else Option.map (fun id -> Named id) (state_id (strip_quotes text))
+
+(* A state named again with no description keeps the one it has, as Mermaid
+   keeps it (stateDb.addState adds a description only when one is given). *)
+let declare_state declared id =
+  declare declared id ~label:(node_id_text id) ~shape:Round ~explicit:false
+
+let is_digit = function
+  | '0' .. '9' -> true
+  | _ -> false
+
+(* A [note left of X] or [note right of X] with no colon opens a note whose
+   text runs to an [end note] line. *)
+type state_step =
+  | Read
+  | Note_opened
+
+let parse_state_statement line current_dir declared edges =
+  let word, rest = first_word line in
+  match word with
+  | "direction" -> (
+      match direction_of_word (String.uppercase_ascii rest) with
+      | Some d ->
+          current_dir := d;
+          Ok Read
+      | None -> Error ("unknown direction: " ^ rest))
+  (* Styling names what it styles first: [class A,B name], [classDef name …],
+     [style A …], [click A …]. Mermaid reads these words in any case, so
+     [Class --> X] is not a transition from a state called Class; it is
+     refused there and here, not dropped. [linkStyle] is a flowchart word
+     that Mermaid's state grammar does not have, so there it is a state id. *)
+  | "classdef" | "class" | "style" | "click" ->
+      let targets, _ = first_word rest in
+      if List.for_all (fun target -> Option.is_some (state_id target)) (String.split_on_char ',' targets)
+      then Ok Read
+      else Error ("not a styling statement: " ^ line)
+  (* [hide empty description] and [scale N width] trim and size the boxes in
+     a browser. A box here is one row whatever they say. *)
+  | "hide" when String.equal (String.lowercase_ascii rest) "empty description" -> Ok Read
+  | "scale" ->
+      let number, measure = first_word rest in
+      if number <> "" && String.for_all is_digit number
+         && String.equal (String.lowercase_ascii measure) "width"
+      then Ok Read
+      else Error ("not a scale statement: " ^ line)
+  (* The text of a note is not drawn. The state it is about is a state all
+     the same, as Mermaid reads it. *)
+  | "note" -> (
+      let placement, text = split_at_colon rest in
+      let side, placement = first_word placement in
+      let of_word, target = first_word placement in
+      match (side, of_word, state_id target) with
+      | ("left" | "right"), "of", Some id ->
+          declare_state declared (Named id);
+          Ok
+            (match text with
+             | Some _ -> Read
+             | None -> Note_opened)
+      | _ -> Error ("a note is left of or right of one state: " ^ line))
+  (* Before any arrow is looked for: a description in quotes may hold one. *)
+  | "state" -> (
+      if rest = "" then Error "expected state identifier after 'state'"
+      else if rest.[0] = '"' then
+        match String.index_from_opt rest 1 '"' with
+        | Some close -> (
+            let desc = String.sub rest 1 (close - 1) in
+            let after = String.trim (String.sub rest (close + 1) (String.length rest - close - 1)) in
+            let as_word, id = first_word after in
+            match (as_word, state_id id) with
+            | "as", Some id ->
+                declare declared (Named id) ~label:desc ~shape:Round ~explicit:true;
+                Ok Read
+            | _ -> Error "expected 'as <id>' after state description")
+        | None -> Error "unclosed quote in state description"
+      else
+        let name, desc = split_at_colon rest in
+        match (state_id name, desc) with
+        | Some id, Some desc ->
+            declare declared (Named id) ~label:desc ~shape:Round ~explicit:true;
+            Ok Read
+        | Some id, None ->
+            declare_state declared (Named id);
+            Ok Read
+        | None, (Some _ | None) -> Error ("not a state id: " ^ name))
+  | _ -> (
+      let names, text = split_at_colon line in
+      match split_on_arrow names with
+      (* A line that is only [[*]] is a start: Mermaid's stateDb names it the
+         start of its scope and draws the start shape for it. *)
+      | [ name ] -> (
+          match (state_ref name ~pseudo:Initial, text) with
+          | Some (Named id), Some desc ->
+              declare declared (Named id) ~label:desc ~shape:Round ~explicit:true;
+              Ok Read
+          | Some id, None ->
+              declare_state declared id;
+              Ok Read
+          | Some (Initial | Final), Some _ | None, (Some _ | None) ->
+              Error ("not a state statement: " ^ line))
+      | ends ->
+          let label =
+            match text with
+            | Some "" | None -> None
+            | Some text -> Some (label_text text)
+          in
+          let rec transitions = function
+            | source :: (target :: _ as more) -> (
+                match (state_ref source ~pseudo:Initial, state_ref target ~pseudo:Final) with
+                | Some from_id, Some to_id ->
+                    declare_state declared from_id;
+                    declare_state declared to_id;
+                    edges := { from_id; to_id; directed = true; style = Solid; label } :: !edges;
+                    transitions more
+                | Some _, None | None, (Some _ | None) ->
+                    Error ("not a state transition: " ^ line))
+            | [ _ ] | [] -> Ok Read
+          in
+          transitions ends)
+
+(* Whether the reader is among statements, or inside the text of a note
+   and then the line that note opened on. *)
+type state_reading =
+  | Statements
+  | Note_text of int
+
+let closes_note statement =
+  let word, rest = first_word statement in
+  String.equal word "end" && String.equal (String.lowercase_ascii rest) "note"
+
+let parse_state_diagram ?(initial_dir = Top_down) lines =
+  let declared = { order = []; table = Hashtbl.create 16 } in
+  let edges = ref [] in
+  let current_dir = ref initial_dir in
+  let rec go reading = function
+    | [] -> (
+        match reading with
+        | Statements -> Ok ()
+        | Note_text opened ->
+            Error (Parse_error { line = opened; what = "a note that no end note closes" }))
+    | (number, statement) :: more -> (
+        match reading with
+        | Note_text _ -> go (if closes_note statement then Statements else reading) more
+        | Statements -> (
+            match parse_state_statement statement current_dir declared edges with
+            | Ok Read -> go Statements more
+            | Ok Note_opened -> go (Note_text number) more
+            | Error what -> Error (Parse_error { line = number; what })))
+  in
+  let* () = go Statements (split_statements lines) in
+  let nodes =
+    List.rev declared.order |> List.map (fun id -> Hashtbl.find declared.table id)
+  in
+  Ok
+    { direction = !current_dir
+    ; nodes
+    ; edges = List.rev !edges
+    ; groups = []
+    }
+
 let parse text =
   match source_lines text with
   | [] -> Error (Parse_error { line = 1; what = "empty diagram" })
@@ -661,7 +881,7 @@ let parse text =
                     match parse_group_header text with
                     | Error what -> fail what
                     | Ok (id, label) ->
-                        if Hashtbl.mem declared.table id then
+                        if Hashtbl.mem declared.table (Named id) then
                           fail ("subgraph " ^ id ^ " has the name of a node")
                         else if List.exists (fun f -> String.equal f.f_id id) !stack then
                           fail ("subgraph " ^ id ^ " is already open")
@@ -719,6 +939,17 @@ let parse text =
       | [ "sequenceDiagram" ] ->
           let* sequence = parse_sequence rest in
           Ok (Sequence sequence)
+      | [ ("stateDiagram" | "stateDiagram-v2") ] ->
+          let* graph = parse_state_diagram ~initial_dir:Top_down rest in
+          Ok (Graph graph)
+      | [ ("stateDiagram" | "stateDiagram-v2"); dir_word ] ->
+          let* initial_dir =
+            match direction_of_word (String.uppercase_ascii dir_word) with
+            | Some d -> Ok d
+            | None -> Error (Unsupported ("stateDiagram direction " ^ dir_word))
+          in
+          let* graph = parse_state_diagram ~initial_dir rest in
+          Ok (Graph graph)
       | word :: _ -> Error (Unsupported word)
       | [] -> Error (Parse_error { line = header_line; what = "empty header" }))
 
@@ -912,9 +1143,9 @@ let along_flow direction =
   | Left_right | Right_left -> `Cols
 
 let item_id = function
-  | Real node -> node.id
-  | Cluster c -> c.c_group.group_id
-  | Dummy -> ""
+  | Real node -> Some node.id
+  | Cluster c -> Some (Named c.c_group.group_id)
+  | Dummy -> None
 
 let rec map_result f = function
   | [] -> Ok []
@@ -925,7 +1156,8 @@ let rec map_result f = function
 
 (* Every id a subgraph holds, itself included. *)
 let rec ids_beneath group =
-  group.group_id :: (group.group_nodes @ List.concat_map ids_beneath group.group_children)
+  Named group.group_id
+  :: (group.group_nodes @ List.concat_map ids_beneath group.group_children)
 
 (* Which item of a scope stands for [id]: the item itself when it is
    declared right here, otherwise the subgraph that has it somewhere below. *)
@@ -933,7 +1165,8 @@ let owner_table ~nodes ~groups =
   let table = Hashtbl.create 16 in
   List.iter (fun node -> Hashtbl.replace table node.id node.id) nodes;
   List.iter
-    (fun group -> List.iter (fun id -> Hashtbl.replace table id group.group_id) (ids_beneath group))
+    (fun group ->
+      List.iter (fun id -> Hashtbl.replace table id (Named group.group_id)) (ids_beneath group))
     groups;
   table
 
@@ -945,7 +1178,7 @@ let owner_table ~nodes ~groups =
 let partition_edges ~nodes ~groups ~edges =
   let owner = owner_table ~nodes ~groups in
   let inside_a_group = Hashtbl.create 8 in
-  List.iter (fun group -> Hashtbl.replace inside_a_group group.group_id []) groups;
+  List.iter (fun group -> Hashtbl.replace inside_a_group (Named group.group_id) []) groups;
   let rec walk here = function
     | [] ->
         (* Both lists were built by consing; source order is what the layout
@@ -955,12 +1188,17 @@ let partition_edges ~nodes ~groups ~edges =
         Ok (List.rev here, inside_a_group)
     | edge :: more -> (
         match Hashtbl.find_opt owner edge.from_id, Hashtbl.find_opt owner edge.to_id with
-        | None, _ -> Error (Unsupported ("an edge from a node no statement declared: " ^ edge.from_id))
-        | _, None -> Error (Unsupported ("an edge to a node no statement declared: " ^ edge.to_id))
+        | None, _ ->
+            Error
+              (Unsupported
+                 ("an edge from a node no statement declared: " ^ node_id_text edge.from_id))
+        | _, None ->
+            Error
+              (Unsupported ("an edge to a node no statement declared: " ^ node_id_text edge.to_id))
         | Some from_owner, Some to_owner ->
-            if String.equal edge.from_id from_owner && String.equal edge.to_id to_owner then
+            if node_id_equal edge.from_id from_owner && node_id_equal edge.to_id to_owner then
               walk (edge :: here) more
-            else if String.equal from_owner to_owner then (
+            else if node_id_equal from_owner to_owner then (
               Hashtbl.replace inside_a_group from_owner
                 (edge :: Option.value (Hashtbl.find_opt inside_a_group from_owner) ~default:[]);
               walk here more)
@@ -968,7 +1206,7 @@ let partition_edges ~nodes ~groups ~edges =
               Error
                 (Unsupported
                    (Printf.sprintf "an edge that crosses a subgraph boundary, %s to %s"
-                      edge.from_id edge.to_id)))
+                      (node_id_text edge.from_id) (node_id_text edge.to_id))))
   in
   walk [] edges
 
@@ -989,7 +1227,8 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
               ~cols:(max 1 (cols - cluster_pad))
               ~direction:(Option.value group.group_direction ~default:direction)
               ~node_of ~nodes:members ~groups:group.group_children
-              ~edges:(Option.value (Hashtbl.find_opt inner_edges group.group_id) ~default:[])
+              ~edges:
+                (Option.value (Hashtbl.find_opt inner_edges (Named group.group_id)) ~default:[])
           with
           (* The box is the border plus what it holds, and the pane that
              cannot take it is this one, not the budget handed down. *)
@@ -1006,7 +1245,9 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
   let entries = Array.of_list (List.map (fun node -> Real node) nodes @ clusters) in
   let node_count = Array.length entries in
   let index_of = Hashtbl.create 16 in
-  Array.iteri (fun i entry -> Hashtbl.replace index_of (item_id entry) i) entries;
+  Array.iteri
+    (fun i entry -> Option.iter (fun id -> Hashtbl.replace index_of id i) (item_id entry))
+    entries;
   let nodes = entries in
   (* Back edges are turned around for layering: a DFS in source order marks
      an edge whose target is still on the stack. *)
@@ -1037,11 +1278,11 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
     List.find_map
       (fun edge ->
         if not (Hashtbl.mem index_of edge.from_id) then
-          Some ("an edge from a node no statement declared: " ^ edge.from_id)
+          Some ("an edge from a node no statement declared: " ^ node_id_text edge.from_id)
         else if not (Hashtbl.mem index_of edge.to_id) then
-          Some ("an edge to a node no statement declared: " ^ edge.to_id)
-        else if String.equal edge.from_id edge.to_id then
-          Some ("an edge from " ^ edge.from_id ^ " to itself")
+          Some ("an edge to a node no statement declared: " ^ node_id_text edge.to_id)
+        else if node_id_equal edge.from_id edge.to_id then
+          Some ("an edge from " ^ node_id_text edge.from_id ^ " to itself")
         else None)
       here
   in
@@ -1386,9 +1627,9 @@ let render_graph ~cols graph =
     List.find_map
       (fun edge ->
         if not (known edge.from_id) then
-          Some ("an edge from a node no statement declared: " ^ edge.from_id)
+          Some ("an edge from a node no statement declared: " ^ node_id_text edge.from_id)
         else if not (known edge.to_id) then
-          Some ("an edge to a node no statement declared: " ^ edge.to_id)
+          Some ("an edge to a node no statement declared: " ^ node_id_text edge.to_id)
         else None)
       graph.edges
   in
@@ -1401,7 +1642,8 @@ let render_graph ~cols graph =
       let node_of id =
         match Hashtbl.find_opt node_of_table id with
         | Some node -> Ok node
-        | None -> Error (Unsupported ("a subgraph member no statement declared: " ^ id))
+        | None ->
+            Error (Unsupported ("a subgraph member no statement declared: " ^ node_id_text id))
       in
       let* rows, _, _ =
         layout_scope ~cols ~direction:graph.direction ~node_of ~nodes:free ~groups:graph.groups

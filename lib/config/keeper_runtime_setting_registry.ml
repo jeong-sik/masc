@@ -529,6 +529,35 @@ let all =
         ]
       ~category:"turn"
       "Maximum durable queue selections admitted into one turn; the rest stay pending for a later turn (#29365)"
+  ; (* The workspace default for a microVM guest's size. A keeper's own
+       [microvm_memory] / [microvm_cpus] wins per dimension. Read at each
+       guest start, and a running guest booted with another size is replaced
+       at the keeper's next turn rather than adopted. *)
+    setting
+      ~reload_class:Next_turn
+      ~env_name:"MASC_KEEPER_MICROVM_MEMORY"
+      ~exposure:(Toml_and_env "sandbox.microvm_memory")
+      ~value_kind:String
+      ~default:Env_config_sandbox.Runtime.microvm_memory_default
+      ~consumers:
+        [ "Keeper_turn_sandbox_runtime microvm boot"
+        ; "Keeper_sandbox_control resource_config"
+        ]
+      ~category:"sandbox"
+      "MicroVM guest memory: a whole number followed by m or g"
+  ; setting
+      ~range:(int_range ~min:1 ())
+      ~reload_class:Next_turn
+      ~env_name:"MASC_KEEPER_MICROVM_CPUS"
+      ~exposure:(Toml_and_env "sandbox.microvm_cpus")
+      ~value_kind:Integer
+      ~default:(string_of_int Env_config_sandbox.Runtime.microvm_cpus_default)
+      ~consumers:
+        [ "Keeper_turn_sandbox_runtime microvm boot"
+        ; "Keeper_sandbox_control resource_config"
+        ]
+      ~category:"sandbox"
+      "MicroVM guest CPU count"
   ; setting
       ~env_name:"MASC_SEARXNG_URL"
       ~exposure:(Toml_and_env "web_search.searxng_url")

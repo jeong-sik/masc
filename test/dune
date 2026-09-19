@@ -1,8 +1,7 @@
 (rule
  (alias runtest-test_dashboard_observation_quota)
  (deps test_dashboard_observation_quota.py ../bin/main_eio.exe
-  ../scripts/fixtures/release-evidence/runtime.toml
-  ../scripts/fixtures/release-evidence/agent-core-models-overlay.toml)
+  ../scripts/fixtures/release-evidence/runtime.toml)
  (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
 
 (alias
@@ -1138,7 +1137,6 @@
  ; scripts/fixtures/<name>/runtime.toml, so a fixture added later is covered
  ; without editing this stanza.
  (deps
-  ../config/agent-core-models-overlay.toml
   ../config/runtime.toml
   (source_tree ../scripts/fixtures))
  (libraries masc_test_deps exact_output_fixture))
@@ -2029,7 +2027,7 @@
  (modules
   test_exact_output_catalog_precedence
   test_exact_output_catalog_precedence_fixture)
- (deps ../config/agent-core-models-overlay.toml ../config/runtime.toml)
+ (deps ../config/runtime.toml)
  (libraries alcotest masc_server masc_test_deps eio_main unix))
 
 
@@ -2311,6 +2309,7 @@
  (libraries masc_test_deps))
 (include stanzas/test_verification_collaboration_evidence.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
+(include stanzas/test_keeper_microvm_guest_size.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
@@ -5085,6 +5084,9 @@
   ../lib/fs_compat/capability_exact_read_stubs.c))
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
+(include stanzas/test_keeper_turn_boundaries.inc)
+(include stanzas/test_keeper_librarian_progress.inc)
+(include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
 (include stanzas/test_keeper_gate_replay.inc)
@@ -5944,7 +5946,7 @@
  (alias runtest-test_install_runtime_setup)
  (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
        ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence)
-       ../config/runtime.toml ../config/agent-core-models-overlay.toml)
+       ../config/runtime.toml)
  (action
   (run python3 %{dep:test_install_runtime_setup.py} --binary %{dep:../bin/main_eio.exe})))
 

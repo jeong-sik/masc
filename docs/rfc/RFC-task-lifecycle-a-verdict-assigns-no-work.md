@@ -48,7 +48,7 @@ Task 하나에는 서로 다른 사실 세 가지가 들어 있다.
 
 ### 0.1 이 문서가 쓰는 말
 
-코드에 있는 이름은 영어 그대로 쓴다. 우리말은 아래 아홉 개만 쓰고, 한 이름에 한 말만 붙인다.
+코드에 있는 이름은 영어 그대로 쓴다. 우리말은 아래 열 개만 쓰고, 한 이름에 한 말만 붙인다.
 
 | 이 문서의 말 | 코드 이름 | 뜻 |
 |---|---|---|
@@ -242,6 +242,10 @@ type task_status =
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string }
 ```
 
+- 이름은 비어 있다. `task_status` 에 `Rejected` 는 없다. 다만 이벤트 종류에는 이미 있고
+  (`event_kind.ml:11`), 줄에 `task.rejected` 로 나간다(`:23`). 반려를 기록할 이벤트 종류를 새로
+  만들 필요가 없다는 뜻이다. 대신 로그에서 `rejected` 로 거르면 "판정이 반려였다"는 사건과 "Task 가
+  반려된 채 있다"는 상태가 같이 걸린다. 둘은 다른 것이다.
 - `assignee` 를 `producer` 로 바꾸면 이 생성자를 패턴 매치하는 자리는 컴파일러가 짚는다: orphan 점검
   (`workspace_query.ml:247-252`), Keeper 설정 제거 거절(`keeper_configuration_removal.ml:170-178`),
   대시보드 rollup(`server_dashboard_http.ml:607-613`), `task_actor_of_status`(`types_core.ml:303-309`).
@@ -301,6 +305,15 @@ stateDiagram-v2
 `cancel` 은 만든 쪽과 운영자만 한다. 판정에서 나가는 화살표는 `Done` 과 `Rejected` 둘뿐이고, 어느
 것도 누군가의 `InProgress` 로 가지 않는다. `Rejected` 는 `claim_next` 가 자동으로 권하지 않는다.
 낸 사람이 알림에 붙은 id 로 다시 맡거나, 목록을 보고 고른 Keeper 가 맡는다(§3.7).
+
+**"맡을 수 있다" 와 "권한다" 는 지금 같은 함수다.** id 로 맡는 길과 `claim_next` 가 고르는 길이 둘 다
+`task_claim_decision_for_status` 하나를 본다(`types_core.ml:643-664`). id 로 맡는 쪽은
+`resolve_claim` 이 그 답을 읽고(`workspace_task_lifecycle.ml:35-54`), `claim_next` 는 같은 답을 후보
+거르개로 쓴다(`workspace_task_schedule.ml:247`). 그래서 `Rejected` 를 그 함수에 한 줄로 더하면 두 길이
+같이 정해진다. 맡을 수 있게 하면 `claim_next` 도 권하고, 권하지 않게 하면 아무도 못 맡는 무덤이 된다.
+D1 을 하려면 축을 갈라야 한다. `task_claim_decision_for_status` 는 `Rejected` 를 `Todo` 와 같이
+받아들이고, `task_claim_next_action` 이 파생을 그만두고 자기 `match` 를 가져서 `Rejected` 만 건너뛴다.
+건너뛰는 이유는 `task_claim_block` 에 없는 값이므로 그 합타입에 한 줄을 더한다. 1단계에 넣는다.
 
 지금과 달라진 것은 `Cancel` 줄이다. 맡은 쪽의 `Cancel` 이 `AwaitingVerification` 으로 가던 칸이 없어지고,
 어느 상태에서든 자격이 있는 쪽만 즉시 취소한다. `Cancel` 은 이제 상태만으로 정해지지 않으므로 `decide` 가
@@ -423,7 +436,10 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 | (없음) | `Rejected_unclaimed` — 반려된 채 아무도 안 맡은 Task. 자동으로 권하지 않기로 했으므로(D1) 이 목록이 유일한 입구다 |
 
 `Rejected` 는 `claim_next` 가 권하지 않으므로 이 목록이 없으면 아무에게도 안 보인다. 그래서 목록은
-운영자 화면과 Keeper 의 `keeper_tasks_list` 양쪽에 있어야 한다. 낸 사람에게는 알림이 id 를 들고 가므로
+운영자 화면과 Keeper 의 `keeper_tasks_list` 양쪽에 있어야 하고, **`Rejected` 를 만드는 단계와 같은
+단계에 나가야 한다.** 초안은 상태를 1단계에, 목록을 3단계에 두었다. 그 사이 두 단계 동안 반려된
+Task 는 맡은 사람도 없고 목록에도 없어서, 낸 사람이 알림을 놓치면 아무 데서도 안 보인다. 그러면
+이 RFC 가 없애려는 방치가 새 이름으로 다시 생긴다. 2026-09-19 교차 리뷰에서 나왔다. 낸 사람에게는 알림이 id 를 들고 가므로
 목록을 거치지 않고 바로 맡을 수 있다(§3.6).
 
 목록은 backlog 에서 만든다. 실행 기록에서 만들면 안 된다. 실행 기록은 끝난 줄을 최근 64개만 남기므로
@@ -440,6 +456,16 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 | `keeper_task_release` | `when_to_use` 에 "하면 안 되는 일이라고 보지만 내가 만든 Task 가 아닐 때도 여기로"를 넣는다 |
 | `keeper.md` | `world.current_task.status.awaiting_verification` 문구 삭제(제출하면 current 가 아니다). §3.6 의 두 문장 |
 | TUI·dashboard | Task 취소를 인증된 운영자 경로로 옮긴다. 목록 행의 `assignee` 는 판정을 기다리는 줄에서 `producer` 로 보인다 |
+
+**대시보드는 이름을 모르는 상태를 그냥 버린다.** OCaml 쪽은 합타입이라 `Rejected` 를 더하면 모든
+`match` 가 컴파일 때 걸리지만, 대시보드는 TypeScript 라 그런 것이 없다. 상태 목록은 문자열 유니온이고
+(`dashboard/src/types/core.ts:57`), 거기에는 OCaml 이 만들지 않는 `blocked`·`paused`·`unknown` 이 이미
+들어 있다. 화면을 채우는 `tasksByStatus` 는 칸이 넷뿐이고 문자열이 정확히 같은지로만 고른다
+(`dashboard/src/store.ts:540-547`). `rejected` 는 어느 칸에도 안 들어가고, 오류도 없이 사라진다.
+이것은 가정이 아니다. 같은 일이 이미 한 번 일어났다. 계획 화면은 칸 셋만 꺼내 쓰므로
+(`dashboard/src/components/goals/planning.ts:204`) 판정을 기다리는 Task 가 지금도 거기 안 보인다.
+D1 로 `Rejected` 의 입구가 목록 하나가 됐으니, 그 목록을 그리는 화면이 상태를 버리면 입구가 없는 것과
+같다. 칸을 더하는 것으로 끝내지 않고, 모르는 상태를 조용히 버리지 않게 고친다. 1단계에 넣는다.
 
 ### 3.9 지워지는 것
 
@@ -495,7 +521,7 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 
 | cfg | 모델 | 검사한 것 | 결과 |
 |---|---|---|---|
-| `TaskOwnership.cfg` | 목표 생애주기 | `Safety` 전체와 `VerdictNeverAssigns` | 오류 없음. 서로 다른 상태 128,448개, 깊이 17 |
+| `TaskOwnership.cfg` | 목표 생애주기 | `Safety` 전체와 `VerdictNeverAssigns` | 오류 없음. 서로 다른 상태 146,304개, 깊이 17 |
 | `-buggy` | 반려가 제출자에게 돌려줌(지금 코드) | `OneTaskPerAgent` | 위반, 반례 6상태 |
 | `-verdict-assigns-buggy` | 같은 버그 | `VerdictNeverAssigns` | 위반, 반례 5상태 |
 | `-cancel-request-buggy` | 운영자만 답하는 취소 요청(지금 코드) | `NoOperatorOnlySubmissionKind` | 위반, 반례 3상태 |
@@ -506,18 +532,29 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 | `-rejected-forgets-producer-buggy` | 반려된 Task 를 `Todo` 로 보내 누가 냈는지를 잃음 | `RejectedNamesItsProducer` | 위반, 반례 5상태 |
 | `-done-without-verdict-buggy` | 판정 없이 완료 | `DoneRequiresLiveApproval` | 위반, 반례 3상태 |
 | `-superseded-verdict-buggy` | 교체된 제출에 대한 판정이 완료시킴 | `DoneRequiresLiveApproval` | 위반, 반례 6상태 |
+| `-claim-keeps-returned-buggy` | 반려된 Task 를 맡으면서 반려 표시를 안 지움 | `RejectedIsOpenAndUnheld` | 위반, 반례 6상태 |
 
 - 스펙은 `Claimed` 와 `InProgress` 를 하나로 본다. `Start` 는 누가 맡는지를 바꾸지 않는다. 운영자가
   놓아 주는 것은 `Release` 와 결과가 같아 따로 두지 않았다.
+- 스펙의 `Claim` 은 아무도 안 맡은 Task 에만 걸린다. 코드에서 자기가 맡은 Task 를 다시 claim 하면
+  상태가 그대로 돌아오는데(§3.2 표의 "본인: 그대로"), 상태를 바꾸지 않으므로 스펙에 넣지 않았다.
 - `TaskLifecycle.tla` 의 `InProgressRequiresClaim` 은 `SubmissionRequiresHold` 로,
   `DoneRequiresConfiguredLlmVerification` 은 `DoneRequiresLiveApproval` 로 옮겼다. 버그 모델
   `BugSkipClaim` 과 `BugSupersededVerdictCompletes` 도 같이 옮겼다.
 - `NoOperatorOnlySubmissionKind` 는 제출의 **종류**에 대한 말이다. 판정이 고장 나서 운영자가 고쳐야 하는
   경우는 깨끗한 모델에도 있고, 이 속성은 그것을 막지 않는다. 기다리는 시간에 대한 주장은 스펙에 없다.
-- 깨끗한 모델의 상태 수는 `Rejected` 를 넣기 전과 똑같은 128,448개다. 새 상태가 새로운 경우를 만들지
-  않는다는 뜻이다. 모델 안에서는 "열려 있고, 아무도 안 맡았고, 제출도 없는데, 낸 사람이 있다" 로
-  이미 구별되던 자리에 이름을 붙였을 뿐이다. 값은 다른 데 있다. 코드의 `Todo` 는 칸이 없어서 그
-  이름을 들고 있을 수 없고, `-rejected-forgets-producer-buggy` 가 그때 무엇을 잃는지 보여 준다.
+- 이 절의 앞 판에는 틀린 근거가 있었다. "상태 수가 `Rejected` 전후로 128,448개 그대로이니 새 상태가
+  새 경우를 만들지 않는다"고 적었는데, 그 숫자가 같았던 이유는 깨끗한 모델이 `Rejected` 에 **한 번도
+  닿지 않았기** 때문이다. `ApplyRejected` 가 반려 표시를 세우지 않아서(`returned` 를 UNCHANGED 에 두고
+  있었다) `RejectedIsOpenAndUnheld` 와 `RejectedNamesItsProducer` 둘 다 공허하게 참이었다. 두 속성이
+  아무것도 검사하지 않는 동안 깨끗한 모델은 통과했고, 그 통과를 근거로 썼다. 2026-09-19 교차 리뷰에서
+  나왔다.
+- 고친 뒤 깨끗한 모델은 146,304개 상태를 돈다. 17,856개가 늘었고, 그게 반려된 Task 가 실제로 만드는
+  경우의 수다. `-claim-keeps-returned-buggy` 의 반례는 `Claim` → `Submit` → `JudgeReturns` →
+  `ApplyRejected` → 버그 순으로 가므로, 깨끗한 경로를 지나 온 자리에서 속성이 깨진다. 속성이 일을
+  한다는 증거는 이것이지 상태 수가 아니다.
+- 코드의 `Todo` 는 낸 사람의 이름을 들고 있을 칸이 없고, `-rejected-forgets-producer-buggy` 가 그때
+  무엇을 잃는지 보여 준다.
 - `-buggy` 의 반례는 §1.1 의 실제 경로와 같다: a1 이 t1 을 맡는다. 제출한다. t2 를 맡는다. t1 이
   반려된다. a1 이 t1 과 t2 를 맡고 있다.
 
@@ -559,10 +596,10 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 | 단계 | 내용 | 끝났다는 증거 |
 |---|---|---|
-| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 10개 위반 |
-| 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id` | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않는 테스트 |
+| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개 위반 |
+| 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id`. **맡는 축과 권하는 축 가르기**(§3.2). **`Rejected_unclaimed` 목록과 대시보드 칸**(§3.7, §3.8) | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않고 id 로는 맡아지는 테스트. 반려된 Task 가 목록과 대시보드 양쪽에 보이는 테스트 |
 | 2 | `Cancel` 의 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명 | `release` 다음 `cancel` 이 만든 쪽 아닌 호출자에게 거절되는 테스트 |
-| 3 | 운영자 목록(`Awaiting_verdict`, `Rejected_unclaimed`), 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
+| 3 | 운영자 목록에 `Awaiting_verdict` 추가, 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절 정정(`Rejected` 항목은 여기서 들어간다. 글로서리는 코드에 있는 말만 싣는다)과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
 | 4 | D6 을 하기로 하면: `Claimed` 와 `Start` 삭제 | `test_task_status_vocabulary` 와 화면 집계가 다섯 상태로 통과 |
 
 초안은 1단계를 저장 형식 변경 없이 잡았는데, D1 로 `Rejected` 가 생기면서 그럴 수 없게 됐다. 새 상태
@@ -571,7 +608,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 **1단계의 배포 전 조건.** 새 reader 는 `intent` 와 `AwaitingVerification.assignee` 를 모르고, 옛 reader 는
 `Rejected` 를 모른다. 이 저장소는
-과거 데이터용 reader 를 만들지 않으므로, 2단계를 배포하는 시점에 `awaiting_verification` 줄이 하나도
+과거 데이터용 reader 를 만들지 않으므로, 1단계를 배포하는 시점에 `awaiting_verification` 줄이 하나도
 없어야 한다. 한 줄이라도 남으면 그 줄 하나의 디코드 실패가 backlog 전체를 못 읽게 만든다
 (`types_core.ml:1236-1244`). claim, 전이, 판정, Keeper 관측이 모두 멈춘다. 그래서 순서를 지킨다.
 
@@ -589,7 +626,15 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 배포 전 검사(`bin/deployment_preflight_helper.ml:1070-1079`)는 지금 저장소 8개를 읽는데 backlog 와
 `verification-runs.jsonl` 은 거기 없다. 2단계가 둘을 더한다. 바꾸지 않고 거절만 하므로 변환 코드가
-아니다. 되돌릴 때도 조건이 같다. 새 형식의 대기 줄이 있으면 옛 바이너리가 backlog 를 못 읽는다.
+아니다.
+
+**되돌리는 쪽은 조건이 하나 더 있다.** 옛 바이너리는 새 형식의 대기 줄도 못 읽지만 `Rejected` 줄도
+못 읽는다. 그런데 대기 줄은 판정을 받아 비울 수 있는 반면, `Rejected` 는 누가 맡아 주어야 비워지고
+`claim_next` 가 권하지도 않는다. 더 나쁜 것은 `Todo` 로 되돌릴 도구가 없다는 점이다. 운영자 복구
+도구는 `Claimed` 와 `InProgress` 만 받고 나머지는 `InvalidState` 로 거절한다
+(`workspace_task.ml:230-320`). 그래서 1단계 배포 뒤 반려가 한 건이라도 나면, 되돌리려면 backlog 를
+손으로 고쳐야 한다. 이건 받아들일 만한 절차가 아니다. 1단계에서 `recover_owned_task_to_todo_r` 가
+`Rejected` 도 받게 한다. 이때 `expected_assignee` 는 맡은 쪽이 아니라 `producer` 와 맞춘다.
 
 이미 `InProgress` 로 돌아와 있는 것들(2026-09-18 기준 13건)은 운영자 복구 도구
 (`masc_operator_task_recovery_resolve`)로 `Todo` 에 돌린다. 그 도구는 `Rejected` 를 만들지 못하므로,
@@ -620,7 +665,7 @@ claimable 줄은 `task_id` 만 보여 주므로 사유는 맡은 뒤에야 읽�
 붙은 id 로 바로 다시 맡고, 그 밖에는 목록을 보고 고른 쪽만 맡는다. 어느 쪽이든 handoff 에 남은
 제출자의 summary 와 evidence_refs 로 브랜치와 PR 위치를 먼저 본다(§3.3).
 
-**아무도 목록을 안 보면 두 번째 방치 더미가 되지 않나?** 그 위험은 있다. 지금도 `todo` 641건이 쌓여
+**아무도 목록을 안 보면 두 번째 방치 더미가 되지 않나?** 그 위험은 있다. 지금도 `todo` 640건이 쌓여
 있다. 다만 `Rejected` 는 낸 사람이 알림을 받은 Task 라서 임자가 분명하고, 운영자 목록에도 올라간다
 (§3.7). RFC-0455 의 규칙("끝나지 않은 상태에는 확인된 행위자가 있거나 운영자 목록에 투영이 있다")을
 두 가지로 다 만족한다. 재는 값은 §4.2 에 넣었다.

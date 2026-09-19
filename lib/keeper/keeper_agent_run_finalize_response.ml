@@ -59,12 +59,13 @@ let record_turn_boundary
     (* The restart goes on record before the line that ends the turn, never
        after: a reader takes a restart that follows a line as proof that the
        line's history is gone, and would drop this turn's own atoms. The
-       notice is still pending only when no stage save was accepted, so the
-       save this turn just made is the restart. *)
+       notice is still pending only when no stage save was accepted, and
+       [position] says whether the save this turn just made replaced the
+       history at all. The notice is taken either way -- the turn is over. *)
     if
       Keeper_agent_run_turn_helpers.restart_line_owed_at_finalize
         ~notice_pending:(Atomic.exchange restart_notice_pending false)
-        ~saved_checkpoint_present:(Option.is_some saved_checkpoint)
+        ~position
     then
       Keeper_agent_run_turn_helpers.record_history_restart
         ~config

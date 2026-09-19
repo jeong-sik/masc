@@ -384,8 +384,20 @@ let record_history_restart ~(config : Workspace.config) ~keeper_name ~trace_id s
    replaced the history. The line is owed then, and only then: a save the
    store refused as stale replaced nothing and restarted nothing. Pure, so the
    Stale_noop case is pinned by a test rather than by reading the call site. *)
-let restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present =
-  notice_pending && saved_checkpoint_present
+let restart_line_owed_at_finalize
+      ~notice_pending
+      ~(position : Keeper_turn_boundaries.position)
+  =
+  (* Every constructor named. The position is how this turn's save came back,
+     so it already says whether the history was replaced; deciding from it
+     rather than from "a checkpoint came back" means a new kind of position
+     cannot be read as a restart by default. *)
+  notice_pending
+  && (match position with
+      | Keeper_turn_boundaries.Atom_history _ | Keeper_turn_boundaries.Empty_atom_history
+        -> true
+      | Keeper_turn_boundaries.No_atom_history | Keeper_turn_boundaries.Stale_noop ->
+        false)
 ;;
 
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =

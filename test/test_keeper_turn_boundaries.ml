@@ -681,17 +681,24 @@ let test_a_refused_line_does_not_stop_the_turn () =
    line for a history that never changed, which makes a reader drop every atom
    the earlier lines describe. *)
 let test_only_an_accepted_finalize_save_owes_the_line () =
-  let owed ~notice_pending ~saved_checkpoint_present =
-    Turn_helpers.restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present
+  let owed ~notice_pending position =
+    Turn_helpers.restart_line_owed_at_finalize ~notice_pending ~position
   in
-  check bool "pending, and the finalize save was accepted" true
-    (owed ~notice_pending:true ~saved_checkpoint_present:true);
-  check bool "pending, but the save was a stale no-op" false
-    (owed ~notice_pending:true ~saved_checkpoint_present:false);
-  check bool "a stage save already wrote the line" false
-    (owed ~notice_pending:false ~saved_checkpoint_present:true);
-  check bool "nothing pending and nothing saved" false
-    (owed ~notice_pending:false ~saved_checkpoint_present:false)
+  (* Every position, so the two that are easy to read as a restart are
+     written down rather than inferred from "a checkpoint came back". *)
+  check bool "pending, and this turn's save holds atoms" true
+    (owed ~notice_pending:true atom_history);
+  check bool "pending, and this turn's save holds none" true
+    (owed ~notice_pending:true Boundaries.Empty_atom_history);
+  check bool "pending, but the store refused the save as stale" false
+    (owed ~notice_pending:true Boundaries.Stale_noop);
+  check bool "pending, but an official client saved nothing" false
+    (owed ~notice_pending:true Boundaries.No_atom_history);
+  List.iter
+    (fun position ->
+       check bool "a stage save already wrote the line" false
+         (owed ~notice_pending:false position))
+    every_position
 ;;
 
 let () =

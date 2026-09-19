@@ -675,6 +675,31 @@ let test_a_refused_line_does_not_stop_the_turn () =
   | Ok _ | Error _ -> fail "the refused line changed the store"
 ;;
 
+let stood_in () =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string HistoryRestartStoodIn)
+    ~labels:[ "keeper", keeper_id ]
+    ()
+;;
+
+(* A turn owing [Notice_after_first_save] that reaches its end with no stage
+   save accepted writes no restart line of its own: its [Fresh_history] end
+   line is the restart line. Nothing is lost, and nothing marks the branch
+   either -- this counter is that mark, so a zero means the branch never ran
+   rather than meaning no one looked. *)
+let test_a_line_that_stood_in_is_counted () =
+  let before = stood_in () in
+  let failures_before = restart_failures Turn_helpers.After_first_save in
+  Turn_helpers.note_restart_line_stood_in ~keeper_name:keeper_id;
+  check (float 0.0001) "the turn's own line standing in is counted"
+    (before +. 1.0) (stood_in ());
+  (* It is not the failure counter: a line that stood in is not a line that
+     failed, and an operator reading failures must not see this. *)
+  check (float 0.0001) "it is not counted as a failure"
+    failures_before
+    (restart_failures Turn_helpers.After_first_save)
+;;
+
 let () =
   run
     "keeper_turn_boundaries"
@@ -719,6 +744,8 @@ let () =
             test_a_restart_is_recorded_from_either_site
         ; test_case "a refused line does not stop the turn" `Quick
             test_a_refused_line_does_not_stop_the_turn
+        ; test_case "a line that stood in is counted" `Quick
+            test_a_line_that_stood_in_is_counted
         ] )
     ]
 ;;

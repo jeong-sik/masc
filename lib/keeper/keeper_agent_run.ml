@@ -1926,6 +1926,7 @@ let run_turn
                              ~max_context:selected_max_context
                              ~checkpoint_owner
                              ~history_at_start
+                             ~restart_notice_pending:restart_notice_after_first_save
                              ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage

@@ -192,6 +192,7 @@ type t =
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
   | TurnBoundaryFailures
+  | HistoryRestartStoodIn
 
 val to_string : t -> string
 

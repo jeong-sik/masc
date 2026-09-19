@@ -36,6 +36,7 @@ let record_turn_boundary
       ~turn
       ~checkpoint_owner
       ~history_at_start
+      ~restart_notice_pending
       saved_checkpoint
   =
   let not_recorded ~site detail =
@@ -73,7 +74,12 @@ let record_turn_boundary
          ~keeper_id:meta.name
          record
      with
-     | Ok () -> ()
+     | Ok () ->
+       (* The notice is still pending only when no stage save of this turn was
+          accepted, so the line just appended is the restart line. Consumed
+          here as well as at the stage sink, so it is answered exactly once. *)
+       if Atomic.compare_and_set restart_notice_pending true false
+       then Keeper_agent_run_turn_helpers.note_restart_line_stood_in ~keeper_name:meta.name
      | Error error ->
        not_recorded ~site:"append" (Keeper_turn_boundaries.append_error_to_string error)
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -101,6 +107,7 @@ let finalize
     ~max_context
     ~checkpoint_owner
     ~history_at_start
+    ~(restart_notice_pending : bool Atomic.t)
     ~official_client_settlement
     ~history_messages
     ~prompt_metrics
@@ -320,6 +327,7 @@ let finalize
       ~turn:manifest_keeper_turn_id
       ~checkpoint_owner
       ~history_at_start
+      ~restart_notice_pending
       saved_checkpoint;
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge

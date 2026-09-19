@@ -379,6 +379,20 @@ let record_history_restart ~(config : Workspace.config) ~keeper_name ~trace_id s
   | exception exn -> not_recorded (Printexc.to_string exn)
 ;;
 
+(* A turn owing [Notice_after_first_save] writes no restart line of its own
+   when no stage save was accepted before the finalize save: its
+   [Fresh_history] end line is the restart line. A reader gets the same
+   answer either way, so nothing is missing -- but the branch leaves no trace
+   of itself, and someone reading the log later stops at "why has this turn no
+   restart line". Counting it answers that, and a zero says the branch does
+   not run. *)
+let note_restart_line_stood_in ~keeper_name =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string HistoryRestartStoodIn)
+    ~labels:[ "keeper", keeper_name ]
+    ()
+;;
+
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
   Keeper_turn_preview.reset ~keeper_name ~now:(Time_compat.now ());
   let record_turn_progress event_kind =

@@ -85,7 +85,9 @@ type restart_notice =
           loaded. What is saved may still hold atoms; the restart happens only
           if a save of this turn is accepted, so the line follows the first
           accepted stage save. If the first accepted save is the finalize
-          save, the turn's own [Fresh_history] line is that line. *)
+          save, this turn writes no restart line of its own and its
+          [Fresh_history] end line is that line, counted by
+          {!note_restart_line_stood_in} so the branch is not silent. *)
 
 (** Pure. Every pair is listed. *)
 val restart_notice :
@@ -108,6 +110,13 @@ val record_history_restart :
   trace_id:string ->
   restart_site ->
   unit
+
+(** Count a turn that owed [Notice_after_first_save] and reached its end with
+    the notice unconsumed: no stage save was accepted, so its own
+    [Fresh_history] line stood in for the restart line. Not a failure -- a
+    reader is told the same thing -- but the only record that this branch
+    ran. *)
+val note_restart_line_stood_in : keeper_name:string -> unit
 
 val turn_progress_callbacks :
   config:Workspace.config ->

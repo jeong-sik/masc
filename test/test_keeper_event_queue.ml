@@ -2003,6 +2003,8 @@ let () =
         (bool_field "counts_complete" json);
       Alcotest.(check int) "owner lookup failure is not a queue read error" 0
         (int_field "read_error_count" json);
+      Alcotest.(check string) "raw summary carries the projection schema"
+        Keeper_event_queue_schema.fleet_summary (string_field "schema" json);
       let summary = keeper_summary keeper_name json in
       Alcotest.(check string) "unknown lifecycle keeps its cause"
         "durable keeper metadata missing"
@@ -2021,6 +2023,8 @@ let () =
       in
       let storage = Option.get (json_field "storage_integrity" health) in
       let work = Option.get (json_field "work_liveness" health) in
+      Alcotest.(check string) "served health carries its projection schema"
+        Keeper_event_queue_schema.fleet_health_summary (string_field "schema" health);
       Alcotest.(check string) "readable queue storage is healthy" "ok"
         (string_field "status" storage);
       Alcotest.(check string) "unclassified work remains a warning" "warning"

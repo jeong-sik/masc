@@ -13,6 +13,85 @@ let with_tmp_dir (f : string -> unit) : unit =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () -> f tmp)
 ;;
 
+let with_optional_read_fs fs test () =
+  let previous = Fs_compat.get_fs_opt () in
+  let restore = function
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  restore fs;
+  Fun.protect ~finally:(fun () -> restore previous) test
+;;
+
+let check_optional_read_error path =
+  match Fs_compat.load_file_opt path with
+  | exception Sys_error _ -> ()
+  | None -> fail "an unreadable path must not become an absent file"
+  | Some _ -> fail "an unreadable path must not return content"
+;;
+
+let test_optional_read_absence_and_content () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  check (option string) "missing leaf" None (Fs_compat.load_file_opt path);
+  check (option string) "missing ancestors" None
+    (Fs_compat.load_file_opt (Filename.concat base "fresh/nested/snapshot"));
+  Fs_compat.save_file path "";
+  check (option string) "empty is present" (Some "") (Fs_compat.load_file_opt path);
+  Fs_compat.save_file path "snapshot bytes";
+  let alias = Filename.concat base "alias" in
+  Unix.symlink path alias;
+  check (option string) "file aliases remain readable" (Some "snapshot bytes")
+    (Fs_compat.load_file_opt alias);
+  Sys.remove path;
+  check (option string) "dangling alias is absent" None (Fs_compat.load_file_opt alias)
+;;
+
+let test_optional_read_non_directory_parent () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "file" in
+  Fs_compat.save_file path "parent is a file";
+  check_optional_read_error (Filename.concat path "child")
+;;
+
+let with_optional_read_permission path mode test =
+  let previous = (Unix.stat path).Unix.st_perm in
+  Unix.chmod path mode;
+  Fun.protect ~finally:(fun () -> Unix.chmod path previous) test
+;;
+
+let test_optional_read_parent_permission () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  Fs_compat.save_file path "retained bytes";
+  with_optional_read_permission base 0o600 (fun () ->
+    (match Unix.stat path with
+     | exception Unix.Unix_error (Unix.EACCES, _, _) -> ()
+     | _ -> fail "fixture must deny parent-directory search");
+    check_optional_read_error path);
+  check (option string) "bytes survive the denied read" (Some "retained bytes")
+    (Fs_compat.load_file_opt path)
+;;
+
+let test_optional_read_leaf_permission () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  Fs_compat.save_file path "retained bytes";
+  with_optional_read_permission path 0o000 (fun () -> check_optional_read_error path);
+  check (option string) "bytes survive the denied read" (Some "retained bytes")
+    (Fs_compat.load_file_opt path)
+;;
+
+let optional_read_cases =
+  [ "absence, empty content and aliases", test_optional_read_absence_and_content
+  ; "non-directory parent is an error", test_optional_read_non_directory_parent
+  ; "parent permission failure is an error", test_optional_read_parent_permission
+  ; "leaf permission failure is an error", test_optional_read_leaf_permission
+  ]
+;;
+
 (* [raise_with_backtrace] uses the supplied trace as the exception's origin;
    propagation through the callback, cleanup and atomic writer may append
    frames. Every original raw slot must remain in order at the front. Raw
@@ -709,7 +788,14 @@ let () =
   Eio_guard.enable ();
   run
     "fs_compat"
-    [ ( "mkdir_p"
+    [ ( "optional read fallback"
+      , List.map (fun (name, test) ->
+          test_case name `Quick (with_optional_read_fs None test)) optional_read_cases )
+    ; ( "optional read Eio"
+      , List.map (fun (name, test) ->
+          test_case name `Quick (with_optional_read_fs (Some (Eio.Stdenv.fs env)) test))
+          optional_read_cases )
+    ; ( "mkdir_p"
       , [ test_case "creates nested dirs" `Quick test_mkdir_p_creates_nested_dirs
         ; test_case "no shell injection" `Quick test_mkdir_p_does_not_shell_inject
         ] )

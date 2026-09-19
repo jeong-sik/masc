@@ -8308,11 +8308,25 @@ let approval_items (state : state) =
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
+(* Everything on the Approvals surface waiting on the operator: the three
+   approval row kinds plus the questions keepers have open. The surface
+   answers both -- that is why it fetches asks -- so its ring entry, badge
+   and alert colour must all count the same thing. One count here, not
+   three copies that can drift: with zero approvals and one open question
+   the entry still has to be reachable, or the question has nowhere to be
+   seen from. *)
+let approvals_surface_pending (state : state) =
+  List.length (approval_items state)
+  +
+  match state.asks_snapshot with
+  | Some snapshot -> List.length (Masc_tui_ask_projection.open_rows snapshot)
+  | None -> 0
+
 let is_surface_active (state : state) (s : surface) =
   match s with
   | Metrics -> false
   | Approvals ->
-      state.view = Approvals || List.length (approval_items state) > 0
+      state.view = Approvals || approvals_surface_pending state > 0
   | _ -> true
 ;;
 

@@ -655,7 +655,7 @@ let surface_strip (state : state) ~cols =
   let badge surface =
     match (surface : surface) with
     | Approvals ->
-        (match List.length (Masc_tui_types.approval_items state) with
+        (match Masc_tui_types.approvals_surface_pending state with
          | 0 -> ""
          | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
@@ -715,7 +715,7 @@ let surface_strip (state : state) ~cols =
     let surface, _ = ring.(i) in
     let is_alert =
       match surface with
-      | Approvals -> List.length (Masc_tui_types.approval_items state) > 0
+      | Approvals -> Masc_tui_types.approvals_surface_pending state > 0
       | _ -> false
     in
     if i = active then

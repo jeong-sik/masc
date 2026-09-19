@@ -988,19 +988,6 @@ let exact_lane_supports_cli_tail = function
   | Workspace_curator -> false
 ;;
 
-let verifier_exact_slot_ids_of_lane_decls
-      (decls : Runtime_schema.exact_output_lane_decl list)
-  =
-  match
-    List.find_opt
-      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id verifier_exact_lane_id)
-      decls
-  with
-  | None -> []
-  | Some lane -> lane.slot_ids
-;;
-
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
    twice. The exact registry admits them against the AGENT_CORE catalog, and
    completion-authority judgement admits each one through
@@ -1011,23 +998,41 @@ let verifier_exact_slot_ids_of_lane_decls
    sent judgements to such an id 113 times, one failure each, and the trace
    was a Board post per attempt rather than a config that refused to load.
 
+   [cli_slots] are read the same way: [verifier_exact_lane_slot_ids] admits
+   every one through [verifier_cli_slot_admission] and fails the whole lane
+   on the first id that names no configured runtime, so an unknown CLI slot
+   also loads and then refuses every judgement.
+
    The sibling lanes are deliberately not checked here. They dispatch through
-   the registry alone, so a catalog-only target id is right for them, and
-   [hitl_auto_judge] holds one today. *)
+   the registry alone, so a catalog-only target id is right for their slots,
+   and [hitl_auto_judge] holds one today; their CLI slots answer an
+   unresolved id with a typed error at execution and walk on. *)
 let verifier_exact_slot_references
       (decls : Runtime_schema.exact_output_lane_decl list)
   =
-  List.map
-    (fun id ->
-       { site =
-           Printf.sprintf
-             "[runtime.exact_output_lanes.%s].slots"
-             verifier_exact_lane_id
-       ; shape = List_entry
-       ; id
-       ; domain = Runtime_only
-       })
-    (verifier_exact_slot_ids_of_lane_decls decls)
+  let references key ids =
+    List.map
+      (fun id ->
+         { site =
+             Printf.sprintf
+               "[runtime.exact_output_lanes.%s].%s"
+               verifier_exact_lane_id
+               key
+         ; shape = List_entry
+         ; id
+         ; domain = Runtime_only
+         })
+      ids
+  in
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id verifier_exact_lane_id)
+      decls
+  with
+  | None -> []
+  | Some lane ->
+    references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE

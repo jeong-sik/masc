@@ -2832,6 +2832,24 @@ let candidates_of lanes name =
   | Some lane -> Runtime_lane.ordered_candidates lane
 ;;
 
+(* [cli_slots] of verifier_exact go through the same direct-runtime admission
+   as its slots, and one unknown id fails the whole lane at every judgement,
+   so the load refuses a CLI slot that names a lane rather than a runtime. *)
+let test_a_verifier_cli_slot_naming_a_lane_is_refused () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.lanes.judge]\ncandidates = [\"openai.gpt\"]\n\
+       \n[runtime.exact_output_lanes.verifier_exact]\n\
+       slots = [\"openai.gpt\"]\ncli_slots = [\"judge\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "a verifier CLI slot naming a lane loaded"
+  | Error msg ->
+    let needle = {|[runtime.exact_output_lanes.verifier_exact].cli_slots entry "judge"|} in
+    if not (string_contains msg needle)
+    then Alcotest.failf "the refusal %S does not name %S" msg needle
+;;
+
 let test_an_assignment_names_a_lane_of_its_own_name () =
   match load_lane_config runtime_config_lane_named_freely with
   | Error msg -> Alcotest.failf "a freely named lane must load: %s" msg
@@ -3124,6 +3142,10 @@ let () =
             "an exact slot append keeps the declared order"
             `Quick
             test_an_exact_slot_append_keeps_the_declared_order
+        ; Alcotest.test_case
+            "a verifier CLI slot naming a lane is refused"
+            `Quick
+            test_a_verifier_cli_slot_naming_a_lane_is_refused
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

@@ -1,15 +1,9 @@
-(* [Id_prefix] opaque boundary — regression suite.  Legacy round c-ffbfc4c6
-   (p-5d6ad8f6, 2026-09-18): prefix matching must live inside the opaque
-   boundary with the same semantics as [equal].  Since the #37022 functor
-   round, [of_string] stores the outside system's spelling verbatim and
-   [equal] / [starts_with] fold ASCII case at comparison time.
-
-   The property groups below replace the task-1621 stage-3 suite that
-   lived on the pre-rewrite #37026 stack. [to_string] returns the outside
-   system's spelling, while comparisons remain case-insensitive. The
-   catalog-lookup cases keep the evidence the deleted
-   [test_model_catalog_overlay] suite used to provide: the lookup path
-   folds query case while row bytes retain their declared spelling. *)
+(* Identifier boundary — regression suite.  Prefix matching lives inside
+   the opaque boundary with the same semantics as [equal]: [of_string]
+   stores the outside system's spelling verbatim, [to_string] returns it
+   unchanged, and [equal] / [starts_with] fold ASCII case at comparison
+   time.  The catalog-lookup cases check that the lookup path folds query
+   case while row bytes retain their declared spelling. *)
 open Llm_provider
 
 let prefix_of entry = Model_identifiers.Id_prefix.of_string_exn entry
@@ -99,7 +93,8 @@ let test_three_modules_share_one_rule () =
             (M.equal value (match M.of_string "abc-XYZ" with Ok v -> v | Error _ -> assert false));
           Alcotest.(check string) "to_string preserves outside spelling" "AbC-xYz" (M.to_string value)
         | Error message -> Alcotest.failf "plain id must parse: %s" message))
-    [ (module Api_name : STRINGY)
+    [ (module Id_prefix : STRINGY)
+    ; (module Api_name : STRINGY)
     ; (module Model_id : STRINGY) ];
   check_error ~of_string:Api_name.of_string ~show:Api_name.to_string
     ~expected:"api_name must not be empty" "";
@@ -109,16 +104,10 @@ let test_three_modules_share_one_rule () =
    | Ok _ -> Alcotest.fail "Model_id empty input must be rejected")
 ;;
 
-let test_original_bytes_round_trip () =
-  Alcotest.(check string) "original casing is preserved" "Claude-Opus-5"
-    (Llm_provider.Model_identifiers.Id_prefix.to_string (prefix_of "Claude-Opus-5"))
-;;
-
 (* Catalog lookup path: the row keeps its declared spelling; comparison folds
-   ASCII case. The general lookup parses the query through [Model_id] and
-   therefore rejects padding, while provider-scoped lookup folds case.
-   These cases replace the evidence lost with the [test_model_catalog_overlay]
-   suite that #37016 deletes. *)
+   ASCII case. [lookup] rejects a padded query; [lookup_for_provider] trims
+   its query instead, so the two entry points apply different padding rules
+   and only [lookup]'s is pinned here. *)
 let test_lookup_folds_case_and_rejects_padding () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog
@@ -162,8 +151,7 @@ let () =
         ; Alcotest.test_case "not_suffix" `Quick test_starts_with_not_suffix ] )
     ; ( "Id_prefix.of_string properties"
       , [ Alcotest.test_case "rejects_padded_and_empty" `Quick test_of_string_rejects_padded_and_empty
-        ; Alcotest.test_case "three_modules_share_one_rule" `Quick test_three_modules_share_one_rule
-        ; Alcotest.test_case "original_bytes_round_trip" `Quick test_original_bytes_round_trip ] )
+        ; Alcotest.test_case "three_modules_share_one_rule" `Quick test_three_modules_share_one_rule ] )
     ; ( "Model_catalog.lookup case properties"
       , [ Alcotest.test_case "query_case_fold_and_padding_rejection" `Quick test_lookup_folds_case_and_rejects_padding
         ; Alcotest.test_case "misses_stay_misses" `Quick test_lookup_misses_stay_misses ] ) ]

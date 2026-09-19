@@ -1720,9 +1720,8 @@ let verifier_exact_lane_readiness () =
                    selected_slots @ List.rev rejected))))
 ;;
 
-(* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
-   reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
-   Atomic ref set by [init_default]. *)
+(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+   by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 
 (* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref

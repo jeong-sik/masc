@@ -187,6 +187,42 @@ let test_the_overview_row_counts_every_approval_list () =
          ; "gate_queue_unavailable"
          ])
 
+(* The strip's Approvals badge counts what the tab renders: the approval rows
+   plus the open asks beside them (test_tui_keys pins the tab itself). It
+   counted the approval rows alone, so a question that was the only thing
+   waiting drew a bare "Approvals" -- hiding the one datum that would have
+   led the operator to it. Ported from PR #37062; this tree routes the count
+   through one helper (approvals_surface_pending), so the badge's contract
+   is that it walks the helper and the helper walks both populations. *)
+let test_the_strip_badge_counts_the_open_asks_too () =
+  let count ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name ~callee
+  in
+  Alcotest.(check bool) "the badge walks the asks the tab renders" true
+    (count ~binding_name:"surface_strip"
+       ~callee:"Masc_tui_types.approvals_surface_pending"
+     >= 1);
+  Alcotest.(check bool) "the badge keeps walking the approval rows" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"approvals_surface_pending"
+       ~callee:"Masc_tui_types.approval_items"
+     + Ast_grep.count_calls_in_value_binding
+         ~module_path:"bin/masc_tui_types.ml"
+         ~binding_name:"approvals_surface_pending" ~callee:"approval_items"
+     >= 1);
+  Alcotest.(check bool)
+    "the helper keeps walking the asks the tab renders" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"approvals_surface_pending" ~callee:"open_rows"
+     + Ast_grep.count_calls_in_value_binding
+         ~module_path:"bin/masc_tui_types.ml"
+         ~binding_name:"approvals_surface_pending"
+         ~callee:"Masc_tui_ask_projection.open_rows"
+     >= 1)
+
 (* The briefing answers with two lists that carry the same incidents, and the
    loader folds them into one. It also read a third key, "attention_items",
    that the briefing has never sent -- so that read was always the empty list,
@@ -808,6 +844,8 @@ let () =
             test_the_title_does_not_count_another_queue
         ; Alcotest.test_case "the Overview row counts every approval list"
             `Quick test_the_overview_row_counts_every_approval_list
+        ; Alcotest.test_case "the strip badge counts the open asks too" `Quick
+            test_the_strip_badge_counts_the_open_asks_too
         ; Alcotest.test_case "the summary row does not count the panel below"
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the fleet row reads the control plane's word"

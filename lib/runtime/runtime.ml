@@ -396,9 +396,11 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
 ;;
 
 (* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id. media_failover is the only
-     field on it: its entries name runtimes that can read an image, and the
-     order of that list is the whole walk. No lane expands underneath it.
+   - [Runtime_only] requires a declared runtime id. media_failover is on it:
+     its entries name runtimes that can read an image, and the order of that
+     list is the whole walk. verifier_exact slots are on it: judgement admits
+     each slot as a direct runtime and dispatches that id alone. No lane
+     expands underneath either.
    - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
      assignments and route ids are on it, so validation judges the same target
      [resolve_assignment] hands the consumer: lane first, runtime second.
@@ -688,14 +690,10 @@ let validate_lanes
          })
 ;;
 
-let with_terminal_default ~default_runtime_id candidates =
-  if List.exists (String.equal default_runtime_id) candidates
-  then candidates
-  else candidates @ [ default_runtime_id ]
-;;
-
+(* A lane is exactly the candidates it declares: a keeper reaches another
+   runtime only when a lane names it. *)
 let lanes_of_decls
-    ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
+    ~(dropped_bindings : (string * drop_reason) list)
     (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (Runtime_lane.t list, load_failure) result
@@ -704,7 +702,7 @@ let lanes_of_decls
   Ok
     (List.map
        (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id (with_terminal_default ~default_runtime_id candidate_ids))
+          Runtime_lane.make ~id candidate_ids)
        lane_decls)
 ;;
 
@@ -1005,9 +1003,10 @@ let verifier_exact_slot_ids_of_lane_decls
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
    twice. The exact registry admits them against the AGENT_CORE catalog, and
-   completion-authority judgement dispatches them through
-   [resolve_assignment], which knows only configured runtimes and lanes. An id
-   that satisfies the catalog but names no configured route is admitted at
+   completion-authority judgement admits each one through
+   [verifier_exact_slot_admission], which takes a configured direct runtime
+   (or a CLI slot) and never a lane, then dispatches that id alone. An id
+   that satisfies the catalog but names no configured runtime is admitted at
    boot and then fails at every judgement: on 2026-09-02 a degraded first slot
    sent judgements to such an id 113 times, one failure each, and the trace
    was a Board post per attempt rather than a config that refused to load.
@@ -1026,7 +1025,7 @@ let verifier_exact_slot_references
              verifier_exact_lane_id
        ; shape = List_entry
        ; id
-       ; domain = Lane_then_runtime
+       ; domain = Runtime_only
        })
     (verifier_exact_slot_ids_of_lane_decls decls)
 ;;
@@ -1317,7 +1316,7 @@ let materialize_config
      A typo'd lane candidate can now surface before a typo'd assignment — the
      lane list the assignment names is the thing that had to exist first. *)
   let* lanes =
-    lanes_of_decls ~dropped_bindings ~default_runtime_id:rt.id runtimes cfg.lane_decls
+    lanes_of_decls ~dropped_bindings runtimes cfg.lane_decls
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
@@ -1724,9 +1723,8 @@ let verifier_exact_lane_readiness () =
                    selected_slots @ List.rev rejected))))
 ;;
 
-(* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
-   reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
-   Atomic ref set by [init_default]. *)
+(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+   by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 
 (* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref
@@ -1788,9 +1786,8 @@ let max_context_of_runtime (rt : t) : int =
 
 (* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
    id can shadow a runtime id (lanes are explicit operator routing constructs).
-   An assignment naming a bare runtime gets a lane of its own rather than a
-   bare dispatch target: the lane is what carries failover and quota demotion,
-   so without one those mechanisms are simply off for that keeper.
+   An assignment naming a bare runtime resolves to a lane holding that runtime
+   alone.
    [Unavailable] retains a configured ID whose capability catalog entry is
    absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment (assigned_id : string) =
@@ -1799,14 +1796,7 @@ let resolve_assignment (assigned_id : string) =
   | Some lane -> `Lane lane
   | None ->
     (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
-     | Some runtime ->
-       let candidates =
-         match state.default_runtime with
-         | Some default ->
-           with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
-         | None -> [ runtime.id ]
-       in
-       `Lane (Runtime_lane.make ~id:runtime.id candidates)
+     | Some runtime -> `Lane (Runtime_lane.make ~id:runtime.id [ runtime.id ])
      | None ->
        (match Option.bind state.startup_degradation (fun degradation ->
           List.find_opt (fun (missing : missing_catalog_model) ->
@@ -3044,14 +3034,18 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
   set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
-let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
+let validated_lane_id lane_id =
   let lane_id = String.trim lane_id in
-  let runtime_ids = List.map String.trim runtime_ids in
   if String.equal lane_id ""
   then Error "lane id must not be empty"
   else if contains_newline lane_id
   then Error "lane id must not contain newlines"
-  else if runtime_ids = []
+  else Ok lane_id
+;;
+
+let validated_lane_candidates runtime_ids =
+  let runtime_ids = List.map String.trim runtime_ids in
+  if runtime_ids = []
   then
     (* An empty list is not "no failover", it is a lane that resolves to
        nothing. Removing a lane is a different edit than emptying it. *)
@@ -3060,22 +3054,126 @@ let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
   then Error "runtime_ids must not contain empty entries"
   else if List.exists contains_newline runtime_ids
   then Error "runtime_ids must not contain newlines"
-  else (
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* locked =
-      with_runtime_config_write_lock path (fun () ->
-        let* content = load_file_result path in
-        let next =
-          Toml_line_editor.edit_table_multiline_array
-            content
-            ~path:(lane_table_path lane_id)
-            ~key:"candidates"
-            ~values:runtime_ids
-        in
-        commit_runtime_config_text ~path next)
-    in
-    let* receipt = locked.value in
-    Ok (attach_lock_warnings locked.warnings receipt))
+  else Ok runtime_ids
+;;
+
+(* One lane edit under the runtime.toml write lock: [decide] reads the parsed
+   file and either refuses or returns the edited text, which the commit
+   validates as a whole before anything is written. *)
+let edit_runtime_lanes ?runtime_config_path decide =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      let* content = load_file_result path in
+      let* config =
+        Runtime_toml.parse_string content
+        |> Result.map_error runtime_parse_errors_to_string
+      in
+      let* next = decide ~content config in
+      commit_runtime_config_text ~path next)
+  in
+  let* receipt = locked.value in
+  Ok (attach_lock_warnings locked.warnings receipt)
+;;
+
+let lane_is_declared (config : Runtime_schema.config) lane_id =
+  List.exists
+    (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane_id)
+    config.lane_decls
+;;
+
+let write_lane_candidates ~content ~lane_id ~runtime_ids =
+  Toml_line_editor.edit_table_multiline_array
+    content
+    ~path:(lane_table_path lane_id)
+    ~key:"candidates"
+    ~values:runtime_ids
+;;
+
+let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
+  let* lane_id = validated_lane_id lane_id in
+  let* runtime_ids = validated_lane_candidates runtime_ids in
+  edit_runtime_lanes ?runtime_config_path (fun ~content _config ->
+    Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+;;
+
+(* A lane shadows the runtime of the same id ([resolve_assignment] reads lanes
+   first), so a lane created under a runtime id would silently hand its
+   candidates to every keeper that names that runtime -- and to every keeper
+   without an assignment when it is the default. A runtime's own lane is
+   edited through [set_runtime_lane_candidates], which says what it does. *)
+let declares_runtime (config : Runtime_schema.config) id =
+  List.exists
+    (fun (binding : Runtime_schema.binding) -> String.equal (id_of_binding binding) id)
+    config.bindings
+;;
+
+let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
+  let* lane_id = validated_lane_id lane_id in
+  let* runtime_ids = validated_lane_candidates runtime_ids in
+  edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+    if lane_is_declared config lane_id
+    then Error (Printf.sprintf "lane %S already exists" lane_id)
+    else if declares_runtime config lane_id
+    then
+      Error
+        (Printf.sprintf
+           "%S is a runtime id; a new lane needs a name of its own" lane_id)
+    else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+;;
+
+(* What still reaches a lane through its id. A keeper's route is its
+   assignment or, without one, the default, and [resolve_assignment] reads a
+   lane before a runtime of the same id -- so removing the lane would hand the
+   keeper the bare runtime of that id, or nothing at all. media_failover and
+   verifier_exact slots name runtimes only and never reach a lane. *)
+type lane_reference =
+  | Keeper_assignment of string
+  | Default_runtime
+
+let lane_reference_to_string = function
+  | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
+  | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
+;;
+
+let lane_references (config : Runtime_schema.config) ~lane_id =
+  let names id = String.equal id lane_id in
+  let assignments =
+    List.filter_map
+      (fun (keeper_name, target) ->
+         if names target then Some (Keeper_assignment keeper_name) else None)
+      config.keeper_assignments
+  in
+  let default =
+    match config.default_runtime_id with
+    | Some id when names id -> [ Default_runtime ]
+    | Some _ | None -> []
+  in
+  assignments @ default
+;;
+
+let remove_runtime_lane ?runtime_config_path ~lane_id () =
+  let* lane_id = validated_lane_id lane_id in
+  edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+    if not (lane_is_declared config lane_id)
+    then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
+    else
+      match lane_references config ~lane_id with
+      | _ :: _ as references ->
+        Error
+          (Printf.sprintf
+             "lane %S is in use by %s"
+             lane_id
+             (String.concat ", " (List.map lane_reference_to_string references)))
+      | [] ->
+        (match Toml_line_editor.remove_table content ~path:(lane_table_path lane_id) with
+         | Toml_line_editor.Table_removed next -> Ok next
+         | Toml_line_editor.Table_absent ->
+           Error
+             (Printf.sprintf
+                "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
+                 removed here"
+                lane_id)))
 ;;
 
 (* Exact-output lanes name their walk order in [slots]; the routing API edits

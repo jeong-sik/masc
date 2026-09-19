@@ -537,13 +537,14 @@ type runtime_route_lane =
   | Runtime_default
   | Runtime_media_failover
   | Runtime_named_lane of string
-      (** A [\[runtime.lanes."<id>"\]] failover ladder. The id is a runtime id:
-          a lane shadows the runtime it is named after, which is how an
-          assignment reaches it. *)
+      (** A name {!Runtime.resolve_assignment} knows: a declared
+          [\[runtime.lanes."<id>"\]] lane, whose name is the operator's own
+          (RFC-0457), or a configured runtime id, whose order a [set] writes as
+          a lane of that id. *)
   | Runtime_exact_lane of string
       (** A [\[runtime.exact_output_lanes."<name>"\]] walk order, e.g.
           verifier_exact or librarian_exact. The "exact/" prefix keeps the
-          name space disjoint from conversation-lane runtime ids. *)
+          name space disjoint from conversation-lane names. *)
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
@@ -551,13 +552,10 @@ let runtime_route_lane_to_string = function
   | Runtime_named_lane lane_id -> lane_id
   | Runtime_exact_lane name -> "exact/" ^ name
 
-(* An unrecognised name used to be rejected outright, which left the Runtime
-   screen's failover picker with nowhere to post: it names the lane under the
-   cursor, and those are runtime ids. A name is admitted when the runtime
-   resolver knows it — [resolve_assignment] answers [`Missing] for an id that
-   is neither a declared lane nor a configured runtime — so a typo is still
-   refused, and it is refused with the name it could not find. An exact-output
-   lane name is not a runtime id and never reaches that resolver: the prefix
+(* A name is admitted when the runtime resolver knows it: a declared lane,
+   whatever its name, or a configured runtime id. [resolve_assignment] answers
+   [`Missing] for anything else, so a typo is refused with the name it could
+   not find. An exact-output lane name never reaches that resolver: the prefix
    names which name space the rest of the string belongs to, and the setter's
    own validation rejects a name the loaded config does not declare. *)
 let parse_runtime_route_lane = function
@@ -580,6 +578,28 @@ let parse_runtime_route_lane = function
 type runtime_route_body =
   | Runtime_route_runtime_id of runtime_route_lane * string option
   | Runtime_route_runtime_ids of runtime_route_lane * string list
+  | Runtime_route_lane_created of string * string list
+  | Runtime_route_lane_removed of string
+
+(* What a routing body asks of a lane. [set], the action a body without one
+   names, replaces the order of a lane or route the resolver already knows.
+   [create] declares a lane under a name nothing resolves yet, which [set]
+   refuses so that a typo cannot become a lane. [remove] deletes a declared
+   lane. *)
+type runtime_lane_action =
+  | Lane_set
+  | Lane_create
+  | Lane_remove
+
+let parse_runtime_lane_action json =
+  match Json_util.assoc_member_opt "action" json with
+  | None | Some `Null -> Ok Lane_set
+  | Some (`String "set") -> Ok Lane_set
+  | Some (`String "create") -> Ok Lane_create
+  | Some (`String "remove") -> Ok Lane_remove
+  | Some (`String other) ->
+    Error (Printf.sprintf "unknown lane action: %s (expected set, create or remove)" other)
+  | Some _ -> Error "action must be a string"
 
 let required_string_field json name =
   match Json_util.assoc_member_opt name json with
@@ -614,27 +634,50 @@ let required_string_array_field json name =
   | None -> Error (name ^ " required")
 ;;
 
+let parse_set_route_body json lane =
+  match parse_runtime_route_lane lane with
+  | Error _ as err -> err
+  | Ok parsed_lane ->
+    (match parsed_lane with
+     | Runtime_named_lane _ | Runtime_media_failover | Runtime_exact_lane _ ->
+       (match required_string_array_field json "runtime_ids" with
+        | Error _ as err -> err
+        | Ok runtime_ids -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
+     | Runtime_default ->
+       (match optional_string_field json "runtime_id" with
+        | Error _ as err -> err
+        | Ok runtime_id -> Ok (Runtime_route_runtime_id (parsed_lane, runtime_id))))
+
+(* A new lane's name must not read as one of the other routes this endpoint
+   edits. A name the resolver does not know is what a create expects, so the
+   resolver's refusal is not an error here; whether the file already declares
+   the lane is decided under the write lock ({!Runtime.create_runtime_lane}). *)
+let parse_create_route_body json lane =
+  match parse_runtime_route_lane lane with
+  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
+    Error (Printf.sprintf "%S names another route, not a lane" lane)
+  | Ok (Runtime_named_lane _) | Error _ ->
+    (match required_string_array_field json "runtime_ids" with
+     | Error _ as err -> err
+     | Ok runtime_ids -> Ok (Runtime_route_lane_created (lane, runtime_ids)))
+
+let parse_remove_route_body lane =
+  match parse_runtime_route_lane lane with
+  | Ok (Runtime_named_lane lane_id) -> Ok (Runtime_route_lane_removed lane_id)
+  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
+    Error (Printf.sprintf "%S names another route, not a lane" lane)
+  | Error _ as err -> err
+
 let parse_runtime_route_body body_str =
   try
     match Yojson.Safe.from_string body_str with
     | `Assoc _ as json ->
-      (match required_string_field json "lane" with
-       | Error _ as err -> err
-       | Ok lane ->
-         (match parse_runtime_route_lane lane with
-         | Error _ as err -> err
-         | Ok parsed_lane ->
-           (match parsed_lane with
-            | Runtime_named_lane _ | Runtime_media_failover | Runtime_exact_lane _ ->
-              (match required_string_array_field json "runtime_ids" with
-               | Error _ as err -> err
-               | Ok runtime_ids ->
-                 Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
-            | Runtime_default ->
-              (match optional_string_field json "runtime_id" with
-               | Error _ as err -> err
-               | Ok runtime_id ->
-                 Ok (Runtime_route_runtime_id (parsed_lane, runtime_id))))))
+      (match required_string_field json "lane", parse_runtime_lane_action json with
+       | (Error _ as err), _ -> err
+       | Ok _, (Error _ as err) -> err
+       | Ok lane, Ok Lane_set -> parse_set_route_body json lane
+       | Ok lane, Ok Lane_create -> parse_create_route_body json lane
+       | Ok lane, Ok Lane_remove -> parse_remove_route_body lane)
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -669,6 +712,8 @@ type runtime_config_write_operation =
   | Runtime_config_raw_save
   | Runtime_config_routing of runtime_route_lane * string option
   | Runtime_config_routing_list of runtime_route_lane * string list
+  | Runtime_config_lane_created of string * string list
+  | Runtime_config_lane_removed of string
   | Runtime_config_assignment of string * string option
 
 let runtime_config_write_operation_details = function
@@ -693,6 +738,17 @@ let runtime_config_write_operation_details = function
     ; ("cleared", `Bool (List.length runtime_ids = 0))
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
     ]
+  | Runtime_config_lane_created (lane_id, runtime_ids) ->
+    [ ("operation", `String "routing")
+    ; ("lane", `String lane_id)
+    ; ("action", `String "create")
+    ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
+  | Runtime_config_lane_removed lane_id ->
+    [ ("operation", `String "routing")
+    ; ("lane", `String lane_id)
+    ; ("action", `String "remove")
+    ]
   | Runtime_config_assignment (keeper_name, runtime_id) ->
     [ ("operation", `String "assignment")
     ; ("keeper_name", `String keeper_name)
@@ -709,7 +765,8 @@ let runtime_config_write_operation_details = function
 
 let runtime_config_write_operation_label = function
   | Runtime_config_raw_save -> "raw_save"
-  | Runtime_config_routing _ | Runtime_config_routing_list _ -> "routing"
+  | Runtime_config_routing _ | Runtime_config_routing_list _
+  | Runtime_config_lane_created _ | Runtime_config_lane_removed _ -> "routing"
   | Runtime_config_assignment _ -> "assignment"
 ;;
 
@@ -932,6 +989,108 @@ let handle_runtime_assignment_post state agent_name req reqd body_str =
         ~keeper_name ~runtime_id ~expected ())
     state agent_name req reqd body_str
 
+(* POST /api/v1/runtime/config/routing, after authentication: one routing
+   body, parsed to a variant, answered by the Runtime writer it names. *)
+let handle_runtime_routing_post state agent_name req reqd body_str =
+  match parse_runtime_route_body body_str with
+  | Error msg ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+  | Ok (Runtime_route_runtime_id (Runtime_default, Some runtime_id)) ->
+    (match Runtime.set_runtime_default ~runtime_id () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name
+         ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
+         ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name
+         ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
+         ~receipt req reqd)
+  | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+      "default runtime_id required"
+  | Ok (Runtime_route_runtime_id (Runtime_media_failover, _)) ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+      "media_failover runtime_ids required"
+  | Ok (Runtime_route_runtime_ids (Runtime_media_failover, runtime_ids)) ->
+    (match Runtime.set_runtime_media_failover ~runtime_ids () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name
+         ~operation:
+           (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
+         ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name
+         ~operation:
+           (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
+         ~receipt req reqd)
+  | Ok (Runtime_route_runtime_id (Runtime_named_lane lane_id, _)) ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+      (Printf.sprintf "%s runtime_ids required" lane_id)
+  | Ok (Runtime_route_runtime_ids (Runtime_named_lane lane_id, runtime_ids))
+    ->
+    (match Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name
+         ~operation:
+           (Runtime_config_routing_list
+              (Runtime_named_lane lane_id, runtime_ids))
+         ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name
+         ~operation:
+           (Runtime_config_routing_list
+              (Runtime_named_lane lane_id, runtime_ids))
+         ~receipt req reqd)
+  | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+      "exact-output lane runtime_ids required"
+  | Ok (Runtime_route_runtime_ids (Runtime_exact_lane lane_name, slots))
+    ->
+    (match Runtime.set_exact_output_lane_slots ~lane_name ~slots () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name
+         ~operation:
+           (Runtime_config_routing_list
+              (Runtime_exact_lane lane_name, slots))
+         ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name
+         ~operation:
+           (Runtime_config_routing_list
+              (Runtime_exact_lane lane_name, slots))
+         ~receipt req reqd)
+  | Ok (Runtime_route_runtime_ids (lane, _)) ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+      (Printf.sprintf
+         "%s runtime_id required"
+         (runtime_route_lane_to_string lane))
+  | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
+    let operation = Runtime_config_lane_created (lane_id, runtime_ids) in
+    (match Runtime.create_runtime_lane ~lane_id ~runtime_ids () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+  | Ok (Runtime_route_lane_removed lane_id) ->
+    let operation = Runtime_config_lane_removed lane_id in
+    (match Runtime.remove_runtime_lane ~lane_id () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+
 type gate_mode_recovery =
   | Recovery_completed of Keeper_gate.operator_recovery_report
   | Recovery_failed of string
@@ -994,6 +1153,9 @@ module For_testing = struct
           , match runtime_id with None -> [] | Some value -> [ value ] )
     | Ok (Runtime_route_runtime_ids (lane, runtime_ids)) ->
         Ok (lane_string lane, "runtime_ids", runtime_ids)
+    | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
+        Ok (lane_id, "create", runtime_ids)
+    | Ok (Runtime_route_lane_removed lane_id) -> Ok (lane_id, "remove", [])
   type nonrec gate_mode_recovery = gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report
     | Recovery_failed of string
@@ -1004,6 +1166,7 @@ module For_testing = struct
   let runtime_probe_read_permission = runtime_probe_read_permission
   let handle_runtime_assignment_post = handle_runtime_assignment_post
   let handle_runtime_assignment_post_with = handle_runtime_assignment_post_with
+  let handle_runtime_routing_post = handle_runtime_routing_post
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
 end
@@ -2281,86 +2444,7 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
-             match parse_runtime_route_body body_str with
-             | Error msg ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-             | Ok (Runtime_route_runtime_id (Runtime_default, Some runtime_id)) ->
-               (match Runtime.set_runtime_default ~runtime_id () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok receipt ->
-                  respond_runtime_config_commit state agent_name
-                    ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
-                    ~receipt req reqd)
-             | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd
-                 "default runtime_id required"
-             | Ok (Runtime_route_runtime_id (Runtime_media_failover, _)) ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd
-                 "media_failover runtime_ids required"
-             | Ok (Runtime_route_runtime_ids (Runtime_media_failover, runtime_ids)) ->
-               (match Runtime.set_runtime_media_failover ~runtime_ids () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:
-                      (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok receipt ->
-                  respond_runtime_config_commit state agent_name
-                    ~operation:
-                      (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
-                    ~receipt req reqd)
-             | Ok (Runtime_route_runtime_id (Runtime_named_lane lane_id, _)) ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd
-                 (Printf.sprintf "%s runtime_ids required" lane_id)
-             | Ok (Runtime_route_runtime_ids (Runtime_named_lane lane_id, runtime_ids))
-               ->
-               (match Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:
-                      (Runtime_config_routing_list
-                         (Runtime_named_lane lane_id, runtime_ids))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok receipt ->
-                  respond_runtime_config_commit state agent_name
-                    ~operation:
-                      (Runtime_config_routing_list
-                         (Runtime_named_lane lane_id, runtime_ids))
-                    ~receipt req reqd)
-             | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd
-                 "exact-output lane runtime_ids required"
-             | Ok (Runtime_route_runtime_ids (Runtime_exact_lane lane_name, slots))
-               ->
-               (match Runtime.set_exact_output_lane_slots ~lane_name ~slots () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:
-                      (Runtime_config_routing_list
-                         (Runtime_exact_lane lane_name, slots))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok receipt ->
-                  respond_runtime_config_commit state agent_name
-                    ~operation:
-                      (Runtime_config_routing_list
-                         (Runtime_exact_lane lane_name, slots))
-                    ~receipt req reqd)
-             | Ok (Runtime_route_runtime_ids (lane, _)) ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd
-                 (Printf.sprintf
-                    "%s runtime_id required"
-                    (runtime_route_lane_to_string lane))
+             handle_runtime_routing_post state agent_name req reqd body_str
            )
          ) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/assignment" (fun request reqd ->

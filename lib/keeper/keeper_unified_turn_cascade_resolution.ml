@@ -1,37 +1,22 @@
 (** Keeper_unified_turn_cascade_resolution — Telemetry-event publishing
-    for cascade (retry/rotation) resolution decisions.
+    for the end of a unified keeper cycle that has no lane candidate left.
 
-    Publishes a [telemetry_event] on the MASC Event_bus each time the
-    keeper retry loop resolves a cascade decision type.
+    Publishes a [telemetry_event] on the MASC Event_bus with the reason the
+    cycle stopped.
 
     @since task-786 *)
-
-type cascade_decision_kind =
-  | Degraded_retry_allowed
-  | No_degraded_retry
-
-let decision_kind_to_string : cascade_decision_kind -> string = function
-  | Degraded_retry_allowed -> "degraded_retry_allowed"
-  | No_degraded_retry -> "no_degraded_retry"
 
 let publish_cascade_resolution
     ~keeper_name
     ~runtime_id
-    ~decision
     ~reason
-    ~next_runtime
-    ~attempt
     ~error_kind
     ~error_message
   =
   let payload = `Assoc
     [ "keeper_name", `String keeper_name
     ; "runtime_id", `String runtime_id
-    ; "decision", `String (decision_kind_to_string decision)
     ; "reason", `String reason
-    ; "next_runtime",
-      (match next_runtime with Some r -> `String r | None -> `Null)
-    ; "attempt", `Int attempt
     ; "error_kind",
       (match error_kind with Some k -> `String k | None -> `Null)
     ; "error_message",

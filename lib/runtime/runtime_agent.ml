@@ -763,24 +763,14 @@ let runtime_accepts_image_input ~(runtime : Runtime.t) =
   (input_capabilities_of_runtime runtime).Llm_provider.Capabilities.supports_image_input
 ;;
 
-(* RFC-0440: one candidate set for every media consumer. The keeper reroute
-   (RFC-0265) used to see only the lane it dispatched on and the vision tool
-   only [runtime.media_failover]; a lane whose one image-capable head was down
-   therefore dropped the image while a capable runtime sat unused in
-   [media_failover]. Order: the lane's own candidates first (the operator's
-   preference for this keeper), then [runtime.media_failover] in declared
-   order. Ids are unique, first occurrence wins. No capability or execution
-   filter here: the reroute filters by the modalities the turn actually
-   requires, and the vision tool narrows to [Agent_core] because it calls the
-   provider itself.
-
-   Every other declared runtime used to follow, and #34720 turned this set
-   from "pick one" into "dispatch each in turn", which made that tail
-   reachable: a declared-but-unassigned runtime nothing routes to was being
-   dispatched ahead of the live candidates behind it. The reach is the routed
-   list. [media_failover] is where an operator says a runtime should take
-   images for keepers that do not otherwise route to it (#34823). *)
-let media_candidates_of ~(lane : Runtime.t list) ~(runtimes : Runtime.t list)
+(* The vision read fleet: [runtime.media_failover] resolved against the
+   configured runtimes in declared order. Ids are unique, first occurrence
+   wins; an id that resolves to nothing is skipped. The vision tool and the
+   image readings made for a runtime that cannot take the image call these.
+   A keeper turn never dispatches to them: its image reroute stays inside its
+   own lane. No capability or execution filter here: the vision tool admits
+   by modality and execution itself. *)
+let media_candidates_of ~(runtimes : Runtime.t list)
     ~(media_failover : string list) : Runtime.t list =
   let by_id id =
     List.find_opt
@@ -793,17 +783,17 @@ let media_candidates_of ~(lane : Runtime.t list) ~(runtimes : Runtime.t list)
       if List.mem runtime.Runtime.id seen then dedupe seen rest
       else runtime :: dedupe (runtime.Runtime.id :: seen) rest
   in
-  dedupe [] (List.concat [ lane; List.filter_map by_id media_failover ])
+  dedupe [] (List.filter_map by_id media_failover)
 
-let media_candidates ~lane =
+let media_candidates () =
   let runtimes, media_failover = Runtime.runtimes_and_media_failover () in
-  media_candidates_of ~lane ~runtimes ~media_failover
+  media_candidates_of ~runtimes ~media_failover
 
 (* RFC-0440 §3: an image turn walks the candidates that take the image, in the
    order the candidate set gives them. A text-only candidate is not part of
-   that walk; the driver appends the lane's text candidates after it as the
-   degrade tail until delegation replaces that tail (PR-C). A run that
-   requires no media has no media walk at all and keeps its lane order. *)
+   that walk; the driver walks the rest of the lane after it, in declared
+   order, as the degrade tail. A run that requires no media has no media walk
+   at all and keeps its lane order. *)
 let media_walk ~(candidates : Runtime.t list)
     ?(checkpoint_messages = [])
     ?(initial_messages = [])
@@ -849,8 +839,8 @@ let validate_content_blocks_for_config
    the turn's required input modalities and the candidate runtimes' declared
    capabilities — no I/O, no provider liveness (liveness-aware skipping is
    deferred to RFC-0260), so two identical turns reroute identically. The caller
-   gathers [candidates] from the configured runtimes (media_failover order, then
-   declaration order) and resolves [assigned_caps]/[candidate caps] via
+   passes [candidates] in the order it wants them tried (the keeper driver: its
+   lane) and resolves [assigned_caps]/[candidate caps] via
    [input_capabilities_for_config]. *)
 (* ['target] is what a reroute names. The capability-level decision below names a
    runtime id ([string]); the keeper-dispatch decision names an already-resolved

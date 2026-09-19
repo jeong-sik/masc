@@ -61,10 +61,15 @@ type consumer =
         (Yojson.Safe.t ->
          (acceptance_commit, consumer_dispatch_error) result) ->
       (consumer_dispatch_result, consumer_dispatch_error) result
-  ; defer_wake : Workspace_utils.config -> Schedule_domain.schedule_request -> bool
+  ; defer_wake :
+      Workspace_utils.config ->
+      occurrence_id:Schedule_occurrence_id.t ->
+      Schedule_domain.schedule_request -> bool
       (** Self-clock: [true] leaves this due schedule unfired this tick — no
           signal, no dispatch, no advance — because its target still holds the
-          previous, unconsumed occurrence. Emission then tracks consumption
+          previous, unconsumed occurrence. The current [occurrence_id] is a
+          retry, not a new wake, and must remain eligible for reconciliation.
+          Emission then tracks consumption
           rather than wall-clock, bounding a slow keeper to one pending
           occurrence per instance. The consumer decides which schedules
           self-clock; a schedule whose every occurrence is distinct work returns
@@ -508,7 +513,8 @@ let tick ?consumer ?clock config ~now ~retention_days =
       match consumer with
       | Some consumer ->
         List.partition
-          (fun (request, _signal) -> consumer.defer_wake config request)
+          (fun (request, (signal : wake_signal)) ->
+             consumer.defer_wake config ~occurrence_id:signal.occurrence_id request)
           all_candidates
       | None -> [], all_candidates
     in

@@ -312,7 +312,7 @@ let make_append_manifest
    (a stage save, the finalize save, the approval-input admission, the official
    client host's reject flush).
 
-   A turn that starts from no atom because its checkpoint could not be loaded
+   A turn that starts fresh after an intentional checkpoint version cut
    has not seen the saved history, which may still hold atoms. The restart
    happens only if a save of this turn is accepted and replaces it, so the
    line follows the first accepted save. When that first accepted save is the
@@ -330,11 +330,11 @@ let restart_notice
   | ( Keeper_turn_boundaries.Continued_history
     , ( Keeper_run_context.Saved_history_loaded
       | Keeper_run_context.Saved_history_absent
-      | Keeper_run_context.Saved_history_unread ) ) -> No_restart_notice
+      | Keeper_run_context.Saved_history_superseded ) ) -> No_restart_notice
   | ( Keeper_turn_boundaries.Fresh_history
     , (Keeper_run_context.Saved_history_loaded | Keeper_run_context.Saved_history_absent) )
     -> Notice_at_turn_start
-  | Keeper_turn_boundaries.Fresh_history, Keeper_run_context.Saved_history_unread ->
+  | Keeper_turn_boundaries.Fresh_history, Keeper_run_context.Saved_history_superseded ->
     Notice_after_first_save
 ;;
 

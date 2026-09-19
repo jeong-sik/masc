@@ -30,10 +30,10 @@
       checkpoint is already durable. After a transient append failure the next
       line's span covers both turns, so nothing is lost.
     - A crash in the middle of an append can leave the file ending mid-line.
-      Every later append is then refused until process-start recovery
-      ([Fs_compat.recover_private_jsonl_durable_locked_result]) truncates the
-      torn tail. That call belongs to the reader's boot path (RFC §8 step 4),
-      not to this module; until it runs, turns of that keeper go unrecorded.
+      The next append cuts that fragment back to the last complete line before
+      it writes ([Fs_compat.append_private_jsonl_durable_locked_result]). The
+      cut line is lost like any failed append, and the next line's span
+      covers its turn.
     - A reader orders the [Atom_history] lines of one trace by [end_atom], not
       by their position in the file: a position is a value, and a value does
       not depend on when a line reached the file. Turns of one keeper do not
@@ -184,9 +184,9 @@ val append_error_to_string : append_error -> string
 
 (** One record in one durable append -- fsynced, and rolled back when the
     write fails -- or an error and nothing written. A record {!record_of_json}
-    would reject is not written. A store that ends mid-line refuses the
-    append, as every durable JSONL store here does, so a crash during an
-    append is reported rather than written over. *)
+    would reject is not written. A store that ends mid-line holds the remains
+    of an append a crash cut short; the append cuts them back to the last
+    complete line before it writes. *)
 val append
   :  keepers_dir:string
   -> keeper_id:string

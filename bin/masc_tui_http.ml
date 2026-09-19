@@ -1737,9 +1737,9 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
 
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server
-    stamps the author from the agent header, so the payload carries text
-    only. The response is the tools envelope [{ok, message}]; interpreting it
-    stays with the caller. *)
+    stamps the author from the authenticated HTTP actor, so the payload carries
+    text only. The response is the tools envelope [{ok, message}]; interpreting
+    it stays with the caller. *)
 let post_board_new ~(host : string) ~(port : int) ~(title : string)
     ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
   let hearth_field =
@@ -1798,8 +1798,8 @@ let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_vote"
     ~body:(Yojson.Safe.to_string payload)
 
-(** POST /api/v1/tools/masc_board_comment. The author is stamped by the
-    route from the agent header, exactly as for a new post. *)
+(** POST /api/v1/tools/masc_board_comment. The route stamps the author from the
+    authenticated HTTP actor, exactly as for a new post. *)
 let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =

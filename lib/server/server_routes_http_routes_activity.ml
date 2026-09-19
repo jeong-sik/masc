@@ -1349,13 +1349,13 @@ let add_routes ~sw ~clock router =
                      respond_json_with_cors ~status request reqd body))
        ) request reqd)
 
-  (* Board write APIs — used by dashboard + Bevy Viewer.
-     Uses with_tool_auth to allow same-origin or allowlisted local dev browser
-     requests without a bearer token. *)
+  (* Board write APIs — used by dashboard + Bevy Viewer. Actor auth binds a
+     bearer credential to its owner. An admitted token-less same-origin local
+     dashboard request keeps the actor attribution selected by that dashboard;
+     the routes consume the resolver's answer and never re-read the header. *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_vote"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+       with_tool_actor_auth ~tool_name:"masc_board_vote"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1384,9 +1384,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_post"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+       with_tool_actor_auth ~tool_name:"masc_board_post"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1424,9 +1423,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_comment"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+       with_tool_actor_auth ~tool_name:"masc_board_comment"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1454,12 +1452,11 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
-  (* Comment vote — mirrors masc_board_vote. Server re-derives [voter] from the
-     agent header so the client cannot forge the voting identity. *)
+  (* Comment vote — mirrors masc_board_vote. Server derives [voter] from the
+     authenticated actor so the client cannot forge the voting identity. *)
   |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_comment_vote"
-         (fun _state _req reqd ->
-         let agent_name = board_tool_agent_name_from_request request in
+       with_tool_actor_auth ~tool_name:"masc_board_comment_vote"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =

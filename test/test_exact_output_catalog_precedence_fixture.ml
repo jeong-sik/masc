@@ -36,7 +36,7 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 ;;
 
-let overlay_target = "overlay-only-target"
+let deployment_target = "deployment-only-target"
 let replacement_target = "replacement-only-target"
 let replacement_runtime_target = "replacement_provider.replacement"
 let replacement_secondary_runtime_target = "replacement_provider.secondary"
@@ -100,11 +100,11 @@ model_id = %S
   String.concat "\n" (primary :: additional)
 ;;
 
-let overlay_catalog =
+let deployment_catalog =
   catalog_toml
-    ~provider_id:"overlay_provider"
-    ~model_id:"overlay-model"
-    ~target_id:overlay_target
+    ~provider_id:"deployment_provider"
+    ~model_id:"deployment-model"
+    ~target_id:deployment_target
     ()
 ;;
 

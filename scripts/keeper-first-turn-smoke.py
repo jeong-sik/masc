@@ -426,21 +426,12 @@ def run(args):
             # exact-output lanes; only endpoint and transport streaming differ.
             fixtures = Path(__file__).resolve().parent / 'fixtures/release-evidence'
             endpoint = f'http://127.0.0.1:{model_server.server_port}/v1'
-            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                content = (fixtures / name).read_text()
-                if 'http://127.0.0.1:9/v1' not in content:
-                    raise SmokeError('release runtime fixture endpoint contract changed')
-                content = content.replace('http://127.0.0.1:9/v1', endpoint)
-                content = content.replace('streaming = true', 'streaming = false')
-                if name == 'agent-core-models-overlay.toml':
-                    # The boot-only fixture supplies exact-output lanes but
-                    # leaves the fleet provider's embedded credentials intact.
-                    # Bind that provider to this fixture too before any turn.
-                    content += ('\n[[providers]]\nid = "ollama_cloud"\n'
-                                'kind = "openai_compat"\nbase_url = ' + json.dumps(endpoint)
-                                + '\nrequest_path = "/chat/completions"\napi_key_env = ""\n'
-                                'capabilities_base = "openai_chat"\n')
-                (config / name).write_text(content)
+            content = (fixtures / 'runtime.toml').read_text()
+            if 'http://127.0.0.1:9/v1' not in content:
+                raise SmokeError('release runtime fixture endpoint contract changed')
+            content = content.replace('http://127.0.0.1:9/v1', endpoint)
+            content = content.replace('streaming = true', 'streaming = false')
+            (config / 'runtime.toml').write_text(content)
             keepers = config / 'keepers'
             keepers.mkdir(exist_ok=True)
             if sorted(path.name for path in keepers.iterdir()) != ['imp.toml']:

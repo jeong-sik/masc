@@ -1063,7 +1063,7 @@ let test_absence_acknowledgement_refuses_task_and_receipt_obligations () =
       [ Masc_domain.Claimed { assignee = operation.keeper_name; claimed_at = now }
       ; Masc_domain.AwaitingVerification
           { assignee = operation.keeper_name; started_at = now; submitted_at = now
-          ; intent = Masc_domain.Complete_task; verification_id = "verification-absence-fixture" } ] in
+          ; verification_id = "verification-absence-fixture" } ] in
     List.iter (fun status ->
       let backlog = strict_backlog_exn config in
       Workspace_backlog.write_backlog config

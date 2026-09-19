@@ -1,10 +1,4 @@
 type item =
-  | Cancel_claim of
-      { task_id : string
-      ; assignee : string
-      ; submitted_at : string
-      ; reason : Workspace_verification_store.cancellation_reason_read
-      }
   | Held_without_actor of
       { task_id : string
       ; assignee : string
@@ -18,27 +12,15 @@ type item =
       }
 
 let task_id = function
-  | Cancel_claim { task_id; _ }
   | Held_without_actor { task_id; _ }
   | Producer_record_unreadable { task_id; _ } -> task_id
 ;;
 
 let waiting_since = function
-  | Cancel_claim { submitted_at; _ } -> submitted_at
   | Held_without_actor { since; _ } | Producer_record_unreadable { since; _ } -> since
 ;;
 
 let summary = function
-  | Cancel_claim { task_id; assignee; reason; _ } ->
-    let stated =
-      match reason with
-      | Workspace_verification_store.Cancellation_reason_stated reason -> reason
-      | Workspace_verification_store.Cancellation_reason_absent ->
-        "no reason on the record"
-      | Workspace_verification_store.Cancellation_reason_unreadable detail ->
-        "reason unreadable: " ^ detail
-    in
-    Printf.sprintf "%s: %s gave up — %s" task_id assignee stated
   | Held_without_actor { task_id; assignee; _ } ->
     Printf.sprintf "%s: held by %s, which has no Keeper queue" task_id assignee
   | Producer_record_unreadable { task_id; producer; detail; _ } ->
@@ -46,7 +28,6 @@ let summary = function
 ;;
 
 let next_step = function
-  | Cancel_claim _ -> "grant or refuse the stop in the verify queue"
   | Held_without_actor _ -> "masc_operator_task_recovery_resolve"
   | Producer_record_unreadable _ -> "repair the Keeper record, then this resolves itself"
 ;;
@@ -70,23 +51,10 @@ let project ~(config : Workspace_utils_backend_setup.config) tasks =
   List.filter_map
     (fun (task : Masc_domain.task) ->
        match task.task_status with
-       | Masc_domain.AwaitingVerification
-           { assignee; submitted_at; intent = Masc_domain.Cancel_task; verification_id; _ }
-         ->
-         Some
-           (Cancel_claim
-              { task_id = task.id
-              ; assignee
-              ; submitted_at
-              ; reason =
-                  Workspace_verification_store.read_cancellation_reason
-                    ~base_path:config.Workspace.base_path
-                    ~verification_id
-              })
-       (* A completion waits on the system authority, which is running: today's
-          verdicts and rejection deliveries both moved. It is not the
+       (* A submission waits on the system authority, which is running:
+          today's verdicts and rejection deliveries both moved. It is not the
           operator's row. *)
-       | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } -> None
+       | Masc_domain.AwaitingVerification _ -> None
        | Masc_domain.Claimed { assignee; claimed_at = since } ->
          classify_held ~config ~task_id:task.id ~assignee ~since
        | Masc_domain.InProgress { assignee; started_at = since } ->

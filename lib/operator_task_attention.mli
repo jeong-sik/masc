@@ -23,16 +23,6 @@
     task. *)
 
 type item =
-  | Cancel_claim of
-      { task_id : string
-      ; assignee : string
-      ; submitted_at : string
-      ; reason : Workspace_verification_store.cancellation_reason_read
-            (** What the producer said when it gave up. Typed rather than
-                [string option]: a stop from before the record kept the copy
-                and a record that cannot be read are different answers, and an
-                operator deciding on a missing sentence should know which. *)
-      }
   | Held_without_actor of
       { task_id : string
       ; assignee : string

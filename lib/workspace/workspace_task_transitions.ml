@@ -82,11 +82,8 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
 
      A stop used to be the other way round, waiting on a verdict with its whole
      payload in one sentence. It is terminal now, so the [Cancelled] arm above
-     carries that sentence and the reason still reaches a reader. No transition
-     produces the arm below any more; it stays only until [intent] goes. *)
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } -> None
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Cancel_task; _ } ->
-    with_reason "Cancellation requested for"
+     carries that sentence and the reason still reaches a reader. *)
+  | Masc_domain.AwaitingVerification _ -> None
   (* [Done] never reaches this commit: the lifecycle answers [Done_action] with
      [Verification_submission_required] from every non-terminal status, and
      Done→Done is filtered earlier as a no-op. Completion commits through
@@ -262,12 +259,6 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "a completion verdict requires a non-empty authenticated \
                      authority identity"))
-          | Error Workspace_task_lifecycle.Verdict_cancel_requires_operator ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "a cancellation verdict requires an operator's signature \
-                     (RFC-0417 §4.4)"))
           | Error
               (Workspace_task_lifecycle.Verification_id_mismatch
                  { expected; actual }) ->
@@ -334,7 +325,7 @@ let transition_task_outcome_r
         let* pending_verification =
           match new_status with
           | Masc_domain.AwaitingVerification
-              { assignee; verification_id; intent = Masc_domain.Complete_task; _ } ->
+              { assignee; verification_id; _ } ->
             let has_summary =
               match handoff_context with
               | Some context -> String.trim context.Masc_domain.summary <> ""
@@ -360,22 +351,6 @@ let transition_task_outcome_r
                              ~notes
                              handoff_context
                        } ))
-          | Masc_domain.AwaitingVerification
-              { assignee; verification_id; intent = Masc_domain.Cancel_task; _ } ->
-            (match stated_reason with
-             | None ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                       "cancel requires a stated reason: pass reason, or state it in \
-                        handoff_context (summary or reason). The operator judges \
-                        that sentence and nothing else"))
-             | Some reason ->
-               Ok
-                 (Some
-                    ( assignee
-                    , verification_id
-                    , Masc_domain.Cancellation_reason { reason } )))
           | Masc_domain.Todo
           | Masc_domain.Claimed _
           | Masc_domain.InProgress _
@@ -879,12 +854,6 @@ let commit_verdict_r
                     (Masc_domain.Task_error.InvalidState
                         "a completion verdict requires a non-empty authenticated \
                         authority identity"))
-             | Error Workspace_task_lifecycle.Verdict_cancel_requires_operator ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                        "a cancellation verdict requires an operator's signature \
-                        (RFC-0417 §4.4)"))
              | Error
                  (Workspace_task_lifecycle.Verification_id_mismatch
                     { expected; actual }) ->

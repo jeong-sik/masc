@@ -761,10 +761,7 @@ type admission =
   | Not_awaiting
 
 let admission_of_status = function
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } ->
-    Review_completion
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Cancel_task; _ } ->
-    Operator_routed
+  | Masc_domain.AwaitingVerification _ -> Review_completion
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _

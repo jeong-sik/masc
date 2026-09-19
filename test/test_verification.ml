@@ -1118,25 +1118,20 @@ let test_cancelled_retry_does_not_publish_into_a_fresh_runtime () =
    cancel could render through. *)
 let test_cancel_claim_is_routed_to_the_operator () =
   let module For_testing = Masc.Completion_authority_agent.For_testing in
-  let awaiting intent =
+  let awaiting =
     Masc_domain.AwaitingVerification
       { assignee = "keeper-a"
       ; started_at = "2026-09-05T00:00:00Z"
       ; submitted_at = "2026-09-05T00:01:00Z"
-      ; intent
       ; verification_id = "vrf-routing"
       }
   in
+  (* One question waits here now, so there is one admission. A stop never
+     reaches this lane: whoever holds the work ends it at the transition. *)
   Alcotest.(check bool)
-    "completion review stays with the system lane"
+    "a submission is a completion review"
     true
-    (For_testing.admission_of_status (awaiting Masc_domain.Complete_task)
-     = For_testing.Review_completion);
-  Alcotest.(check bool)
-    "a cancel claim is the operator's, and no review starts"
-    true
-    (For_testing.admission_of_status (awaiting Masc_domain.Cancel_task)
-     = For_testing.Operator_routed);
+    (For_testing.admission_of_status awaiting = For_testing.Review_completion);
   Alcotest.(check bool)
     "a Task that is not awaiting anything is not an obligation"
     true
@@ -1760,7 +1755,6 @@ let test_system_llm_agent_defers_invalid_contract_without_rejecting_task () =
                        { assignee = "contract-retry-worker"
                        ; started_at = original_started_at
                        ; submitted_at = "2026-08-04T00:01:00Z"
-                       ; intent = Complete_task
                        ; verification_id
                        }
                  })
@@ -1990,7 +1984,6 @@ let test_rejected_verdict_audit_preserves_reason () =
                    { assignee = "audit-producer"
                    ; started_at = "2026-07-27T23:59:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
-                   ; intent = Complete_task
                    ; verification_id = "vrf-audit-rejected"
                    }
              }
@@ -2088,7 +2081,6 @@ let test_verdict_audit_names_the_judging_runtime () =
                    { assignee = "runtime-producer"
                    ; started_at = "2026-08-05T00:00:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
-                   ; intent = Complete_task
                    ; verification_id = "vrf-runtime-named"
                    }
              }
@@ -3488,7 +3480,6 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
                  { assignee = "omega"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
-                 ; intent = Complete_task
                  ; verification_id = request_id
                  }
            })

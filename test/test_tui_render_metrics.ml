@@ -205,7 +205,7 @@ let test_retained_task_outcomes () =
     [ task "old-completed" "2026-09-01T00:00:00Z" (done_at "2026-09-07T11:00:00Z");
       task "submitted" "2026-09-07T10:00:00Z"
         (AwaitingVerification { assignee = "producer"; started_at = "2026-09-07T10:00:00Z";
-          submitted_at = "2026-09-07T11:00:00Z"; intent = Complete_task; verification_id = "proof" });
+          submitted_at = "2026-09-07T11:00:00Z"; verification_id = "proof" });
       task "boundary" "2026-09-06T12:00:00Z" Todo;
       task "cancelled" "2026-09-07T09:00:00Z"
         (Cancelled { cancelled_by = "producer"; cancelled_at = "2026-09-07T11:30:00Z"; reason = None });

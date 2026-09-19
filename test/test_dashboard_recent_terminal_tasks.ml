@@ -114,7 +114,6 @@ let test_excludes_non_terminal_and_out_of_window () =
                { assignee = "k"
                ; started_at = iso_at (-120.0)
                ; submitted_at = iso_at (-60.0)
-               ; intent = Complete_task
                ; verification_id = "vrf-1"
                })
       ; done_at ~id:"task-stale" ~offset:(-90_000.0)

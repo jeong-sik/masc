@@ -66,12 +66,12 @@ let in_progress ~assignee ~started_at = D.InProgress { assignee; started_at }
 let project config =
   Attention.project ~config (ok (Workspace_backlog.read_backlog_r config)).tasks
 
-(* The producer states its whole claim and the operator reads it from the list.
-   Before the record kept a copy the sentence existed only in the body of an
-   unlisted Board post, which a list built from the backlog cannot reach. *)
-let test_a_cancel_claim_carries_its_reason () =
+(* A cancel by the holder ends the Task where it is asked, so nothing lands in
+   the operator's list. The row this replaces existed because a stop waited for
+   an operator's answer; nothing waits now. *)
+let test_a_cancel_leaves_no_operator_row () =
   with_workspace (fun config ->
-    add_task config ~title:"a task its producer gives up on";
+    add_task config ~title:"a task its holder gives up on";
     ignore
       (workspace_ok
          (W.transition_task_r config ~agent_name:live_keeper ~task_id:"task-001"
@@ -85,19 +85,9 @@ let test_a_cancel_claim_carries_its_reason () =
          (W.transition_task_r config ~agent_name:live_keeper ~task_id:"task-001"
             ~action:D.Cancel ~reason:stop_reason ()));
     match project config with
-    | [ Attention.Cancel_claim { task_id; assignee; reason; _ } ] ->
-      Alcotest.(check string) "the stop names its task" "task-001" task_id;
-      Alcotest.(check string) "and its producer" live_keeper assignee;
-      (match reason with
-       | Store.Cancellation_reason_stated stated ->
-         Alcotest.(check string) "the operator reads what the producer said"
-           stop_reason stated
-       | Store.Cancellation_reason_absent ->
-         Alcotest.fail "the record kept no copy of the producer's reason"
-       | Store.Cancellation_reason_unreadable detail ->
-         Alcotest.failf "the record could not be read: %s" detail)
+    | [] -> ()
     | items ->
-      Alcotest.failf "a stop is one operator row, got %d" (List.length items))
+      Alcotest.failf "a stop asks nobody, got %d operator rows" (List.length items))
 
 (* A completion waits on the system authority, which is running. Only a stop
    waits on a person. *)
@@ -111,7 +101,6 @@ let test_a_completion_is_not_the_operators_row () =
            { assignee = live_keeper
            ; started_at = "2026-09-01T00:00:00Z"
            ; submitted_at = "2026-09-02T00:00:00Z"
-           ; intent = D.Complete_task
            ; verification_id = "vrf-completion"
            });
     Alcotest.(check int) "a completion is nobody's operator row" 0
@@ -194,7 +183,7 @@ let () =
   Alcotest.run "operator_task_attention"
     [ ( "tasks only an operator can move"
       , [ Alcotest.test_case "a cancel claim carries its reason" `Quick
-            test_a_cancel_claim_carries_its_reason
+            test_a_cancel_leaves_no_operator_row
         ; Alcotest.test_case "a completion is not an operator row" `Quick
             test_a_completion_is_not_the_operators_row
         ; Alcotest.test_case "only work with no actor is listed" `Quick

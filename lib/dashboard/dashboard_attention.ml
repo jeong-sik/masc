@@ -123,13 +123,11 @@ let detect_operator_tasks (items : Operator_task_attention.item list)
     (fun item ->
        let severity =
          match item with
-         | Operator_task_attention.Cancel_claim _
          | Operator_task_attention.Held_without_actor _ -> Critical
          | Operator_task_attention.Producer_record_unreadable _ -> Warning
        in
        let category =
          match item with
-         | Operator_task_attention.Cancel_claim _ -> "cancel_claim"
          | Operator_task_attention.Held_without_actor _ -> "held_without_actor"
          | Operator_task_attention.Producer_record_unreadable _ ->
            "producer_record_unreadable"

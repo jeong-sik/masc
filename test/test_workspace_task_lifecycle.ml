@@ -33,7 +33,6 @@ let awaiting =
     { assignee = owner
     ; started_at = now
     ; submitted_at = now
-    ; intent = Complete_task
     ; verification_id = "vrf-1"
     }
 ;;
@@ -93,7 +92,6 @@ let test_the_producer_of_a_pending_submission_may_stop_it () =
       { assignee = owner
       ; started_at = began
       ; submitted_at = now
-      ; intent = D.Complete_task
       ; verification_id = "vrf-0"
       }
   in
@@ -145,15 +143,13 @@ let test_cancel_cannot_undo_a_finished_task () =
   |> expect_error L.Invalid_transition
 ;;
 
-(* The verdict is where the two intents part. Same authority, same call, two
-   terminals — and a rejection returns a cancellation to its producer exactly
-   as it returns a completion. *)
-let awaiting_with intent =
+(* One question waits here, so the verdict has one terminal. An approval ends
+   the Task as Done and a rejection returns it to the producer. *)
+let awaiting_submission =
   D.AwaitingVerification
     { assignee = owner
     ; started_at = now
     ; submitted_at = now
-    ; intent
     ; verification_id = "vrf-1"
     }
 ;;
@@ -170,30 +166,25 @@ let approve status =
 ;;
 
 let test_approval_ends_the_task_the_way_it_was_asked () =
-  (match approve (awaiting_with D.Complete_task) with
-   | Ok { decision = { new_status = D.Done _; _ }; _ } -> ()
-   | Ok _ | Error _ -> failwith "an approved completion must end as Done");
-  match approve (awaiting_with D.Cancel_task) with
-  | Ok { decision = { new_status = D.Cancelled { cancelled_by; reason; _ }; _ }; _ }
-    when String.equal cancelled_by owner
-         && reason = Some "the premise no longer holds" -> ()
-  | Ok _ | Error _ -> failwith "an approved cancellation must end as Cancelled"
+  match approve awaiting_submission with
+  | Ok { decision = { new_status = D.Done _; _ }; _ } -> ()
+  | Ok _ | Error _ -> failwith "an approved completion must end as Done"
 ;;
 
-let test_a_rejected_cancellation_returns_to_its_producer () =
+let test_a_rejected_submission_returns_to_its_producer () =
   match
     L.decide_verdict
-      ~authority:(D.System_llm_agent { agent_run_id = "judge-run-cancel" })
+      ~authority:(D.System_llm_agent { agent_run_id = "judge-run" })
       ~verdict:(D.Verdict_rejected { reason = "the task is still doable" })
       ~task_id:"task-1"
       ~verification_id:"vrf-1"
-      ~task_status:(awaiting_with D.Cancel_task)
+      ~task_status:awaiting_submission
       ~now
       ~notes:""
   with
   | Ok { decision = { new_status = D.InProgress { assignee; _ }; _ }; _ }
     when String.equal assignee owner -> ()
-  | Ok _ | Error _ -> failwith "a refused cancellation must go back to the producer"
+  | Ok _ | Error _ -> failwith "a refused submission must go back to the producer"
 ;;
 
 let test_verification_preserves_original_start_time () =
@@ -215,7 +206,7 @@ let test_verification_preserves_original_start_time () =
            && String.equal submitted_at now
            && String.equal verification_id "vrf-1" ->
       D.AwaitingVerification
-        { assignee = owner; started_at; submitted_at; intent = Complete_task; verification_id }
+        { assignee = owner; started_at; submitted_at; verification_id }
     | Ok _ | Error _ -> failwith "submission must preserve the producer start time"
   in
   match
@@ -246,7 +237,6 @@ let test_awaiting_metrics_use_original_start_time () =
          { assignee = owner
          ; started_at = original_started_at
          ; submitted_at = "2026-07-13T00:00:00Z"
-         ; intent = Complete_task
          ; verification_id = "vrf-metrics"
          })
   in
@@ -268,54 +258,33 @@ let test_verdict_is_not_an_agent_action () =
     [ "approve"; "reject" ]
 ;;
 
-(* RFC-0417 §4.4: a cancel claim's terminal [Cancelled] record may carry only
-   an operator's signature. The system lane's approval of a cancel claim is
-   refused at the commit funnel itself, not merely at the review entrance. *)
-let awaiting_cancel =
-  D.AwaitingVerification
-    { assignee = owner
-    ; started_at = now
-    ; submitted_at = now
-    ; intent = Cancel_task
-    ; verification_id = "vrf-1"
-    }
-;;
-
-let test_system_approval_of_cancel_claim_is_refused () =
-  match
+(* RFC-0417 §4.4 said a cancel claim's terminal record may carry only an
+   operator's signature, and enforced it by refusing one authority at the
+   commit funnel. There is no cancel claim any more, so the rule is kept by
+   construction instead: a verdict answers a submission, and the only terminal
+   it can reach is Done. Whoever wants a Task cancelled cancels it, with
+   standing, at the transition. *)
+let test_no_verdict_can_end_a_task_as_cancelled () =
+  let approved_by authority =
     L.decide_verdict
-      ~authority:(D.System_llm_agent { agent_run_id = "fusion-run-9" })
+      ~authority
       ~verdict:D.Verdict_approved
       ~task_id:"task-1"
       ~verification_id:"vrf-1"
-      ~task_status:awaiting_cancel
+      ~task_status:awaiting_submission
       ~now
       ~notes:"the upstream schema landed instead"
-  with
-  | Error L.Verdict_cancel_requires_operator -> ()
-  | Ok _ | Error _ ->
-    failwith "a system signature must not end a cancel claim as Cancelled"
-;;
-
-let test_operator_approval_still_cancels_a_cancel_claim () =
-  match
-    L.decide_verdict
-      ~authority:(D.Human_operator { operator_id = "op-1" })
-      ~verdict:D.Verdict_approved
-      ~task_id:"task-1"
-      ~verification_id:"vrf-1"
-      ~task_status:awaiting_cancel
-      ~now
-      ~notes:"the upstream schema landed instead"
-  with
-  | Ok
-      { decision = { new_status = D.Cancelled { cancelled_by; _ }; _ }
-      ; authority = D.Human_operator { operator_id }
-      ; _ }
-    when String.equal cancelled_by owner && String.equal operator_id "op-1" ->
-    ()
-  | Ok _ | Error _ ->
-    failwith "operator approval must still end a cancel claim as Cancelled"
+  in
+  List.iter
+    (fun authority ->
+       match approved_by authority with
+       | Ok { decision = { new_status = D.Done _; _ }; _ } -> ()
+       | Ok { decision = { new_status = D.Cancelled _; _ }; _ } ->
+         failwith "a verdict ended a Task as Cancelled"
+       | Ok _ | Error _ -> failwith "an approved submission must end as Done")
+    [ D.System_llm_agent { agent_run_id = "fusion-run-9" }
+    ; D.Human_operator { operator_id = "op-1" }
+    ]
 ;;
 
 (* The verdict path is separate from agent actions. The producer boundary owns
@@ -467,7 +436,6 @@ let () =
   test_the_producer_of_a_pending_submission_may_stop_it ();
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_the_way_it_was_asked ();
-  test_a_rejected_cancellation_returns_to_its_producer ();
-  test_system_approval_of_cancel_claim_is_refused ();
-  test_operator_approval_still_cancels_a_cancel_claim ();
+  test_a_rejected_submission_returns_to_its_producer ();
+  test_no_verdict_can_end_a_task_as_cancelled ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

@@ -375,7 +375,7 @@ let test_task_status_awaiting_round_trip_preserves_start () =
   match Masc_domain.task_status_of_yojson awaiting_status_json with
   | Ok
       (Masc_domain.AwaitingVerification
-         { assignee; started_at; submitted_at; intent = Complete_task; verification_id }) ->
+         { assignee; started_at; submitted_at; verification_id }) ->
     check string "assignee" "producer" assignee;
     check string "started_at" "2026-07-12T23:59:00Z" started_at;
     check string "submitted_at" "2026-07-13T00:00:00Z" submitted_at;
@@ -387,7 +387,7 @@ let test_task_status_awaiting_round_trip_preserves_start () =
          awaiting_status_json
          (Masc_domain.task_status_to_yojson
             (Masc_domain.AwaitingVerification
-               { assignee; started_at; submitted_at; intent = Complete_task; verification_id })))
+               { assignee; started_at; submitted_at; verification_id })))
   | Ok _ | Error _ -> fail "awaiting_verification must decode with its original start"
 
 let test_task_status_awaiting_rejects_missing_or_invalid_start () =
@@ -1611,7 +1611,6 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
       assignee = "producer";
       started_at = "2026-07-12T23:59:00Z";
       submitted_at = "2026-07-13T00:00:00Z";
-      intent = Masc_domain.Complete_task;
       verification_id = "vrf-006";
     };
     priority = 1;

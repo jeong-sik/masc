@@ -99,10 +99,7 @@ let operator_evidence_json ~config ~operator_id ~task_id =
      field, one owner. *)
   let intent =
     match task.task_status with
-    | Masc_domain.AwaitingVerification { intent; _ } -> (
-      match intent with
-      | Masc_domain.Complete_task -> "completion"
-      | Masc_domain.Cancel_task -> "cancellation")
+    | Masc_domain.AwaitingVerification _ -> "completion"
     (* Unreachable: [awaiting_task] only returns tasks in this status. Kept
        total so a future awaiting_task change fails here, not in JSON. *)
     | _ -> "unknown"

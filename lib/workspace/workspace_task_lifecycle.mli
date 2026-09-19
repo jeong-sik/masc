@@ -14,11 +14,6 @@ type invalid =
       (** The caller is neither an authenticated operator nor the agent the
           state names. A [Todo] names nobody, so only an operator may end it;
           that is what closes release-then-cancel. *)
-  | Verdict_cancel_requires_operator
-      (** RFC-0417 §4.4: the terminal [Cancelled] record of a cancel claim may
-          carry only an operator's signature. A system-lane approval of a
-          cancel claim is refused at the commit funnel, where every verdict
-          caller converges. *)
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 

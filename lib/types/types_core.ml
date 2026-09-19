@@ -201,35 +201,10 @@ let completion_authority_has_identity authority =
   not (String.equal (String.trim (completion_authority_actor authority)) "")
 ;;
 
-(** Which question a completion authority is being asked. A producer submits
-    work it believes is finished, or a stop it believes is right; both wait in
-    the same place and both end on one verdict, so the verdict needs to know
-    which terminal state it is authorising. *)
-type verification_intent =
-  | Complete_task
-  | Cancel_task
-[@@deriving show]
-
-let verification_intent_to_string = function
-  | Complete_task -> "complete"
-  | Cancel_task -> "cancel"
-;;
-
-let verification_intent_of_string = function
-  | "complete" -> Ok Complete_task
-  | "cancel" -> Ok Cancel_task
-  | other ->
-    Error
-      (Printf.sprintf
-         "verification intent must be \"complete\" or \"cancel\", got %S"
-         other)
-;;
-
-(** What the producer places before the authority. [verification_intent] is
-    the projection of this that the task status carries; the request record
-    the authority reads carries the claim itself, so whoever answers a stop
-    sees the stated reason rather than completion evidence the producer never
-    had. *)
+(** What the producer places before the authority. The only question that
+    reaches an authority is whether submitted work is finished; a stop no
+    longer waits here, because stopping work you hold is not a permission to
+    ask for. *)
 type verification_claim =
   | Completion_evidence of { evidence_refs : string list }
   | Cancellation_reason of { reason : string }
@@ -242,11 +217,6 @@ type task_status =
       assignee: string;
       started_at: string;
       submitted_at: string;
-      intent: verification_intent;
-        (** What an approval means for this obligation. Without it the
-            authority reads one shape for two questions — "is this done" and
-            "should this stop" — and an approval has no way to say which
-            terminal state it authorised. *)
       verification_id: string;
         (** An obligation with no assignable satisfier. There is deliberately no
             [phase]/verifier binding: the previous [Verifier_assigned] field made
@@ -410,7 +380,6 @@ let task_status_schema_witnesses : task_status list =
       { assignee = placeholder
       ; started_at = placeholder
       ; submitted_at = placeholder
-      ; intent = Complete_task
       ; verification_id = placeholder
       }
   ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
@@ -445,13 +414,12 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; started_at; submitted_at; intent; verification_id } ->
+  | AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
       `Assoc [
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
         ("started_at", `String started_at);
         ("submitted_at", `String submitted_at);
-        ("intent", `String (verification_intent_to_string intent));
         ("verification_id", `String verification_id);
       ]
   | Cancelled { cancelled_by; cancelled_at; reason } ->
@@ -485,23 +453,16 @@ let task_status_of_yojson json =
          | Some started_at ->
            (match parse_iso8601_opt started_at with
             | Some _ ->
-              (* [intent] is required: an approval has to know which terminal
-                 state it authorises, and a default here would silently make
-                 every cancellation read as a completion. *)
-              (match Json_util.get_string json "intent" with
-               | None -> Error "awaiting_verification requires intent"
-               | Some raw ->
-                 (match verification_intent_of_string raw with
-                  | Error message -> Error message
-                  | Ok intent ->
-                    Ok
-                      (AwaitingVerification
-                         { assignee = req "assignee"
-                         ; started_at
-                         ; submitted_at = req "submitted_at"
-                         ; intent
-                         ; verification_id = req "verification_id"
-                         })))
+              (* An older row may still carry [intent]; it is read past rather
+                 than rejected, because the only question that reaches an
+                 authority now is whether the work is finished. *)
+              Ok
+                (AwaitingVerification
+                   { assignee = req "assignee"
+                   ; started_at
+                   ; submitted_at = req "submitted_at"
+                   ; verification_id = req "verification_id"
+                   })
             | None ->
               Error
                 (Printf.sprintf

@@ -4,7 +4,6 @@ type invalid =
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
   | Cancel_requires_standing
-  | Verdict_cancel_requires_operator
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
@@ -165,7 +164,6 @@ let decide
            { assignee
            ; started_at = claimed_at
            ; submitted_at = now
-           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -178,7 +176,6 @@ let decide
            { assignee
            ; started_at
            ; submitted_at = now
-           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -202,7 +199,6 @@ let decide
            { assignee
            ; started_at
            ; submitted_at = now
-           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -251,7 +247,7 @@ let decide_verdict
   in
   match task_status with
   | Masc_domain.AwaitingVerification
-      { assignee; started_at; intent; verification_id = actual_verification_id; _ } ->
+      { assignee; started_at; verification_id = actual_verification_id; _ } ->
     if not (String.equal expected_verification_id actual_verification_id)
     then
       Error
@@ -259,34 +255,18 @@ let decide_verdict
            { expected = expected_verification_id; actual = actual_verification_id })
     else
       (match verdict with
-       (* One verdict, two terminals. The obligation records which question
-          was asked, so an approval ends the Task the way the producer asked
-          rather than the way this branch used to assume. RFC-0417 §4.4: a
-          cancellation is a permission, not a judgment — the terminal
-          [Cancelled] record of a cancel claim may carry only an operator's
-          signature, so the system lane's approval of a cancel claim is
-          refused here at the commit funnel, where every caller converges. *)
+       (* One question reaches an authority, so one terminal comes back. A
+          stop is not asked here any more: whoever holds the work ends it
+          themselves, and RFC-0417's rule that a cancellation carries only an
+          operator's signature is kept by standing at the transition rather
+          than by a verdict at this funnel. *)
        | Masc_domain.Verdict_approved ->
-         (match intent with
-          | Masc_domain.Complete_task ->
-            provenance
-              ~producer:assignee
-              ~verification_id:actual_verification_id
-              { new_status = done_status ~assignee ~now ~notes
-              ; set_current = None
-              }
-          | Masc_domain.Cancel_task ->
-            (match authority with
-             | Masc_domain.Human_operator _ ->
-               provenance
-                 ~producer:assignee
-                 ~verification_id:actual_verification_id
-                 { new_status =
-                     cancelled_status ~agent_name:assignee ~now ~reason:notes
-                 ; set_current = None
-                 }
-             | Masc_domain.System_llm_agent _ ->
-               Error Verdict_cancel_requires_operator))
+         provenance
+           ~producer:assignee
+           ~verification_id:actual_verification_id
+           { new_status = done_status ~assignee ~now ~notes
+           ; set_current = None
+           }
        | Masc_domain.Verdict_rejected { reason } ->
          if String.equal (String.trim reason) ""
          then Error Verdict_rejection_reason_required

@@ -58,8 +58,6 @@ type dashboard_purge_artifact =
   | Keeper_memory_absorbed_artifact
   | Keeper_turn_boundaries_artifact
   | Keeper_librarian_progress_artifact
-  | Keeper_legacy_turn_boundaries_artifact
-  | Keeper_legacy_librarian_progress_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact
@@ -541,11 +539,6 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        apart and has to violate that spec's one invariant, so the harness
        reports what the separation costs and this comment does not. *)
   ; Keeper_librarian_progress_artifact
-    (* Hard cut: releases before the cluster-scoped store wrote both files as
-       flat config/keepers sidecars. Nothing reads or migrates those files;
-       purge removes the unreachable residue. *)
-  ; Keeper_legacy_turn_boundaries_artifact
-  ; Keeper_legacy_librarian_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot
        inherit files from an earlier Local, Docker, microVM, or SSH lane. *)

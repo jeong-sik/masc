@@ -932,6 +932,12 @@ supports_native_streaming = true
 # OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
 supports_structured_output = false
 
+# response_format is in Ollama's OpenAI-compatibility field list, so a model
+# reached over the /v1 wire can be asked for JSON even though the native
+# ollama_cloud preset leaves the flag off for the /api/chat wire
+# (docs.ollama.com/api/openai-compatibility, checked 2026-09-19). The same
+# list has no tool_choice, which is why no row here claims one for this
+# provider.
 [[models]]
 id_prefix = "kimi-k2.6"
 provider_name = "ollama_cloud"
@@ -1012,6 +1018,12 @@ supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
+# response_format is in Ollama's OpenAI-compatibility field list, so a model
+# reached over the /v1 wire can be asked for JSON even though the native
+# ollama_cloud preset leaves the flag off for the /api/chat wire
+# (docs.ollama.com/api/openai-compatibility, checked 2026-09-19). The same
+# list has no tool_choice, which is why no row here claims one for this
+# provider.
 [[models]]
 id_prefix = "minimax-m3"
 provider_name = "ollama_cloud"

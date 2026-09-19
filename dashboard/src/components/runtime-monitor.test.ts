@@ -475,18 +475,24 @@ describe('RuntimeMonitor', () => {
   })
 
   it.each([
+    [1200, '1200'],
+    [1200.5, '1200.5'],
     [NaN, '--'],
     [Infinity, '--'],
     [-Infinity, '--'],
     [null, undefined],
     [undefined, undefined],
-  ])('preserves the existing missing or non-finite parameter display for %s', async (value, expected) => {
+  ])('shows setting values without count formatting for %s', async (value, expected) => {
     const baseline = await apiMocks.fetchRuntimeProviders()
     apiMocks.fetchRuntimeProviders.mockResolvedValue({
       ...baseline,
       providers: baseline.providers.map((provider: typeof baseline.providers[number]) => ({
         ...provider,
         request_config: { ...provider.request_config, connect_timeout_s: value },
+        declared_spec: {
+          ...provider.declared_spec,
+          provider: { ...provider.declared_spec.provider, connect_timeout_s: value },
+        },
       })),
     })
     render(h(RuntimeMonitor, {}), container)
@@ -495,6 +501,8 @@ describe('RuntimeMonitor', () => {
       'runtime parameter missing or non-finite value',
     )
     expect(parameterValue(container, 'request · connect timeout')).toBe(expected)
+    expect(parameterValue(container, 'declared provider · connect timeout')).toBe(expected)
+    expect(parameterValue(container, 'effective · max context')).toBe('131,072')
   })
 
   it('shows per-turn cache read/write tokens in recent model entries', async () => {

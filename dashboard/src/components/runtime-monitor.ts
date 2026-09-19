@@ -203,10 +203,13 @@ function flagText(
   return value ? enabled : (disabled ?? `${enabled} off`)
 }
 
-function numberText(value: number | null | undefined): string | null {
+function countText(value: number | null | undefined): string | null {
+  return typeof value === 'number' ? formatNumber(value) : null
+}
+
+function settingText(value: number | null | undefined): string | null {
   if (typeof value !== 'number') return null
-  if (Number.isFinite(value) && !Number.isInteger(value)) return String(value)
-  return formatNumber(value)
+  return Number.isFinite(value) ? String(value) : '--'
 }
 
 function textList(values: readonly (string | null | undefined)[]): string | null {
@@ -406,8 +409,8 @@ function runtimeParameterDetailRows(
     detailRow('request', 'provider kind', request?.provider_kind),
     detailRow('request', 'endpoint', runtimeRequestPathText(provider)),
     detailRow('request', 'system prompt', boolText(request?.has_system_prompt)),
-    detailRow('request', 'max context', numberText(request?.max_context)),
-    detailRow('request', 'max output', numberText(request?.max_tokens)),
+    detailRow('request', 'max context', countText(request?.max_context)),
+    detailRow('request', 'max output', countText(request?.max_tokens)),
     detailRow('request', 'sampling', requestSampling),
     detailRow('request', 'thinking', onOffText(request?.enable_thinking)),
     detailRow('request', 'preserve thinking', onOffText(request?.preserve_thinking)),
@@ -424,12 +427,12 @@ function runtimeParameterDetailRows(
     detailRow('request', 'tool choice override', onOffText(request?.supports_tool_choice_override)),
     detailRow('request', 'schema override', onOffText(request?.supports_structured_output_override)),
     detailRow('request', 'capability override', boolText(request?.has_model_capabilities_override)),
-    detailRow('request', 'seed', numberText(request?.seed)),
-    detailRow('request', 'rotation count', numberText(request?.internal_model_rotation_count)),
-    detailRow('request', 'num_ctx', numberText(request?.num_ctx)),
+    detailRow('request', 'seed', countText(request?.seed)),
+    detailRow('request', 'rotation count', countText(request?.internal_model_rotation_count)),
+    detailRow('request', 'num_ctx', countText(request?.num_ctx)),
     detailRow('request', 'keep alive', request?.keep_alive),
     detailRow('request', 'previous response', boolText(request?.has_previous_response_id)),
-    detailRow('request', 'connect timeout', numberText(request?.connect_timeout_s)),
+    detailRow('request', 'connect timeout', settingText(request?.connect_timeout_s)),
     detailRow('declared provider', 'source', spec?.source),
     detailRow('declared provider', 'provider', spec?.provider?.id),
     detailRow('declared provider', 'display name', spec?.provider?.display_name),
@@ -440,26 +443,26 @@ function runtimeParameterDetailRows(
     detailRow('declared provider', 'non-interactive', boolText(spec?.provider?.is_non_interactive)),
     detailRow('declared provider', 'capabilities block', boolText(spec?.provider?.has_capabilities)),
     detailRow('declared provider', 'behavior', runtimeProviderBehaviorText(provider)),
-    detailRow('declared provider', 'custom headers', numberText(spec?.provider?.custom_header_count)),
-    detailRow('declared provider', 'connect timeout', numberText(spec?.provider?.connect_timeout_s)),
+    detailRow('declared provider', 'custom headers', countText(spec?.provider?.custom_header_count)),
+    detailRow('declared provider', 'connect timeout', settingText(spec?.provider?.connect_timeout_s)),
     detailRow('declared model', 'model id', declaredModel?.id),
     detailRow('declared model', 'api name', declaredModel?.api_name),
-    detailRow('declared model', 'context', numberText(declaredModel?.max_context)),
+    detailRow('declared model', 'context', countText(declaredModel?.max_context)),
     detailRow('declared model', 'tools', onOffText(declaredModel?.tools_support)),
     detailRow('declared model', 'streaming', onOffText(declaredModel?.streaming)),
     detailRow('declared model', 'thinking', onOffText(declaredModel?.thinking_support)),
     detailRow('declared model', 'preserve thinking', onOffText(declaredModel?.preserve_thinking)),
-    detailRow('declared model', 'temperature', numberText(declaredModel?.temperature)),
+    detailRow('declared model', 'temperature', settingText(declaredModel?.temperature)),
     detailRow('declared model', 'sampling', declaredSampling),
     detailRow('declared model', 'capability source', declaredCaps?.source),
-    detailRow('declared model', 'max output', numberText(declaredCaps?.max_output_tokens)),
+    detailRow('declared model', 'max output', countText(declaredCaps?.max_output_tokens)),
     detailRow('declared model', 'thinking wire', declaredCaps?.thinking_control_format),
     detailRow('declared model', 'format', declaredFormat),
     detailRow('declared model', 'inputs', runtimeDeclaredInputText(provider)),
     detailRow('declared model', 'controls', runtimeDeclaredModelControlText(provider)),
     detailRow('binding', 'provider.model', textList([binding?.provider_id, binding?.model_id])),
     detailRow('binding', 'default', boolText(binding?.is_default)),
-    detailRow('binding', 'concurrency', numberText(binding?.max_concurrent)),
+    detailRow('binding', 'concurrency', countText(binding?.max_concurrent)),
     detailRow(
       'binding',
       'price',
@@ -469,10 +472,10 @@ function runtimeParameterDetailRows(
       ]),
     ),
     detailRow('binding', 'keep alive', binding?.keep_alive),
-    detailRow('binding', 'num_ctx', numberText(binding?.num_ctx)),
+    detailRow('binding', 'num_ctx', countText(binding?.num_ctx)),
     detailRow('effective', 'source', caps?.source),
-    detailRow('effective', 'max context', numberText(caps?.max_context_tokens)),
-    detailRow('effective', 'max output', numberText(caps?.max_output_tokens)),
+    detailRow('effective', 'max context', countText(caps?.max_context_tokens)),
+    detailRow('effective', 'max output', countText(caps?.max_output_tokens)),
     detailRow('effective', 'tools', runtimeEffectiveToolText(provider)),
     detailRow('effective', 'tool content', caps?.assistant_tool_content_format),
     detailRow('effective', 'reasoning', runtimeEffectiveReasoningText(provider)),

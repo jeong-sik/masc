@@ -71,12 +71,17 @@ let[@warning "+9"] canonical_spec_of
     | None -> `Null
     | Some (Env_reference name) -> `List [`String "env"; `String name]
     | Some (File_reference path) -> `List [`String "file"; `String path] in
+  (* Destructured, not field-accessed: warning 9 fires on a record pattern and
+     says nothing about [h.endpoint], so a fourth field on either constructor
+     would drop out of the identity the same way a seventh on [t] would. *)
   let transport_json = match transport with
-    | Http h -> `Assoc ["endpoint",`String h.endpoint; "kind",`String (wire_kind_name h.kind);
-                        "credential", credential_json h.credential]
-    | Client c -> `Assoc ["command",`String c.command;
-                          "oauth",(match c.oauth with None -> `Null | Some path -> `String path);
-                          "timeout",(match c.timeout with None -> `Null | Some value -> `Float value)] in
+    | Http {endpoint; kind; credential} ->
+      `Assoc ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
+              "credential", credential_json credential]
+    | Client {command; oauth; timeout} ->
+      `Assoc ["command",`String command;
+              "oauth",(match oauth with None -> `Null | Some path -> `String path);
+              "timeout",(match timeout with None -> `Null | Some value -> `Float value)] in
   Yojson.Safe.to_string (`Assoc [
     "choice",`String (choice_name choice); "model",`String model;
     "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;

@@ -448,12 +448,128 @@ let terminal_outcome = function
   | Error (Domain_output_invalid _) -> Invalid_domain_output
 ;;
 
-let observe_terminal prepared result =
-  Log.Keeper.info
+(* What TypeSafe AI Jev answered for a candidate before any catalog slot ran.
+   Only [Jev_relevant] settles the candidate: a not-relevant verdict drops the
+   post for this keeper, so the LLM lane judges it again, and so does every arm
+   where Jev gave no answer. The terminal log line carries this value, so what
+   Jev said and what the lane then decided are read from one entry. *)
+type jev_first =
+  | Jev_off
+      (** No [TYPESAFEAI_API_KEY], or [MASC_TYPESAFEAI_ENABLED=false]. *)
+  | Jev_cli_only
+      (** Jev is on, but the lane declares no HTTP slot. Jev is asked only in
+          front of the HTTP lane. *)
+  | Jev_not_pending
+      (** Jev is on, but the candidate is not [Pending], so there is no
+          material to send. *)
+  | Jev_relevant of
+      { model : string
+      ; verdict : Keeper_board_attention_judgment.t
+      ; judged_at : float
+      }
+  | Jev_not_relevant of
+      { model : string
+      ; rationale : string
+      }
+  | Jev_failed of { reason : string }
+
+let ask_jev ~clock prepared =
+  if not (Typesafeai_config.is_enabled ())
+  then Jev_off
+  else (
+    match Typesafeai_config.api_key () with
+    | None -> Jev_off
+    | Some api_key ->
+      (match prepared.transport with
+       | Cli_only -> Jev_cli_only
+       | Http_flow _ ->
+         (match prepared.candidate.status with
+          | Keeper_board_attention_candidate.Judged _
+          | Keeper_board_attention_candidate.Consumed _
+          | Keeper_board_attention_candidate.Quarantine _ -> Jev_not_pending
+          | Keeper_board_attention_candidate.Pending { material; _ } ->
+            (* A direct-style Eio request on this keeper's board-attention
+               worker fiber: the wait suspends that fiber alone, as the
+               [Exact_output] request does, so it delays this candidate's
+               judgment and nothing else on the domain. *)
+            (match
+               Typesafeai_board_attention.judge_candidate
+                 ~clock
+                 ~api_key
+                 ~candidate:prepared.candidate
+                 ~material
+                 ()
+             with
+             | Error reason -> Jev_failed { reason }
+             | Ok { Typesafeai_board_attention.verdict; model } ->
+               (match verdict.Keeper_board_attention_judgment.decision with
+                | Keeper_board_attention_judgment.Relevant ->
+                  (* The lane's clock, never the wall: both entries into this
+                     flow hold one, so a judgment's time comes from the same
+                     source the rest of the turn is measured against. *)
+                  Jev_relevant { model; verdict; judged_at = Eio.Time.now clock }
+                | Keeper_board_attention_judgment.Not_relevant ->
+                  Jev_not_relevant
+                    { model
+                    ; rationale = verdict.Keeper_board_attention_judgment.rationale
+                    })))))
+;;
+
+let jev_answer_label = function
+  | Jev_off -> "off"
+  | Jev_cli_only -> "cli_only"
+  | Jev_not_pending -> "not_pending"
+  | Jev_relevant _ ->
+    Keeper_board_attention_judgment.decision_to_string
+      Keeper_board_attention_judgment.Relevant
+  | Jev_not_relevant _ ->
+    Keeper_board_attention_judgment.decision_to_string
+      Keeper_board_attention_judgment.Not_relevant
+  | Jev_failed _ -> "failed"
+;;
+
+(* [rejudged] appears only after a not-relevant answer. It is the decision the
+   LLM lane then returned, or [null] when this flow returned no judgment; the
+   worker may still ask a CLI slot after that, which this entry does not see. *)
+let jev_first_to_yojson jev_first result =
+  let answer = "answer", `String (jev_answer_label jev_first) in
+  match jev_first with
+  | Jev_off | Jev_cli_only | Jev_not_pending -> `Assoc [ answer ]
+  | Jev_relevant { model; _ } -> `Assoc [ answer; "model", `String model ]
+  | Jev_failed { reason } -> `Assoc [ answer; "reason", `String reason ]
+  | Jev_not_relevant { model; rationale } ->
+    let rejudged =
+      match result with
+      | Ok (judgment : Keeper_board_attention_candidate.judgment) ->
+        `String
+          (Keeper_board_attention_judgment.decision_to_string
+             judgment.Keeper_board_attention_candidate.verdict.Keeper_board_attention_judgment.decision)
+      | Error _ -> `Null
+    in
+    `Assoc
+      [ answer
+      ; "model", `String model
+      ; "rationale", `String rationale
+      ; "rejudged", rejudged
+      ]
+;;
+
+let observe_terminal prepared ~jev_first result =
+  let outcome = result |> terminal_outcome |> terminal_outcome_to_string in
+  Log.Keeper.emit
+    Log.Info
     ~keeper_name:prepared.candidate.keeper_name
-    "board_attention exact_flow.execute terminal candidate_id=%s outcome=%s"
-    prepared.candidate.candidate_id
-    (result |> terminal_outcome |> terminal_outcome_to_string)
+    ~details:
+      (`Assoc
+          [ "candidate_id", `String prepared.candidate.candidate_id
+          ; "outcome", `String outcome
+          ; "jev", jev_first_to_yojson jev_first result
+          ])
+    (Printf.sprintf
+       "board_attention exact_flow.execute terminal candidate_id=%s outcome=%s jev=%s"
+       prepared.candidate.candidate_id
+       outcome
+       (jev_answer_label jev_first))
 ;;
 
 let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
@@ -548,104 +664,50 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
     | Exact_output.Flow_exact_execution_failed { evidence; _ } ->
       Error (Exact_execution_failed (evidence_provenance evidence))
   in
-  let result =
+  let jev_first, result =
     try
-      match prepared.transport with
-      | Cli_only ->
-        (match run_cli_tail ?runner:cli_runner ~base_path:prepared.base_path prepared with
-         | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
-         | Error _ -> Error (Exact_execution_failed []))
-      | Http_flow attempt ->
-        let typesafeai_judgment_opt =
-          if Typesafeai_config.is_enabled ()
-          then
-            match Typesafeai_config.api_key () with
-            | Some api_key ->
-              (match prepared.candidate.status with
-               | Keeper_board_attention_candidate.Pending { material; _ } ->
-                 (* A direct-style Eio request on this keeper's board-attention
-                    worker fiber: the wait suspends that fiber alone, as the
-                    [Exact_output] request below does, so it delays this
-                    candidate's judgment and nothing else on the domain. *)
-                 (match
-                    Typesafeai_board_attention.judge_candidate
-                      ~clock
-                      ~api_key
-                      ~candidate:prepared.candidate
-                      ~material
-                      ()
-                  with
-                  | Ok { Typesafeai_board_attention.verdict; model } ->
-                    (match verdict.Keeper_board_attention_judgment.decision with
-                     | Keeper_board_attention_judgment.Relevant ->
-                       (* The lane's clock, never the wall: both entries into
-                          this flow hold one, so a judgment's time comes from
-                          the same source the rest of the turn is measured
-                          against. *)
-                       let now = Eio.Time.now clock in
-                       let judgment =
-                         { Keeper_board_attention_candidate.verdict
-                         ; slot_id = model
-                         ; source =
-                             Keeper_board_attention_candidate.Vendor_system_one
-                               { model }
-                         ; judged_at = now
-                         }
-                       in
-                       Log.Keeper.info
-                         "board_attention_typesafeai_jev_judged keeper=%s candidate=%s"
-                         prepared.candidate.keeper_name
-                         prepared.candidate.candidate_id;
-                       Some judgment
-                     | Keeper_board_attention_judgment.Not_relevant ->
-                       (* A not-relevant verdict drops the post for this
-                          keeper, so Jev's is not the last word on it: the
-                          LLM lane below judges the candidate again. Jev's
-                          answer is kept in this line only. *)
-                       Log.Keeper.info
-                         "board_attention_typesafeai_not_relevant_rejudged keeper=%s candidate=%s model=%s rationale=%s"
-                         prepared.candidate.keeper_name
-                         prepared.candidate.candidate_id
-                         model
-                         verdict.Keeper_board_attention_judgment.rationale;
-                       None)
-                  | Error reason ->
-                    Log.Keeper.info
-                      "board_attention_typesafeai_fallback keeper=%s candidate=%s reason=%s"
-                      prepared.candidate.keeper_name
-                      prepared.candidate.candidate_id
-                      reason;
-                    None)
-               | _ -> None)
-            | None -> None
-          else None
-        in
-        match typesafeai_judgment_opt with
-        | Some judgment -> Ok judgment
-        | None ->
-        match
-          Exact_output.execute_flow_once
-            ~net:prepared.net
-            ~clock
-            ~before_measurement_dispatch:(fun _ -> Ok ())
-            ~on_measurement_terminal:(fun _ -> Ok ())
-            ~before_dispatch:agent_core_before_dispatch
-            ~before_advance:agent_core_before_advance
-            ~validate
-            attempt
-        with
-        | Ok success -> Ok success.accepted
-      | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-        terminal_error cause
-      | Error
-          (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
-        let rejection =
-          List.fold_left
-            (fun _ rejection -> rejection)
-            rejections.first
-            rejections.rest
-        in
-        Error rejection.rejection
+      let jev_first = ask_jev ~clock prepared in
+      let result =
+        match prepared.transport with
+        | Cli_only ->
+          (match run_cli_tail ?runner:cli_runner ~base_path:prepared.base_path prepared with
+           | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
+           | Error _ -> Error (Exact_execution_failed []))
+        | Http_flow attempt ->
+          (match jev_first with
+           | Jev_relevant { model; verdict; judged_at } ->
+             Ok
+               { Keeper_board_attention_candidate.verdict
+               ; slot_id = model
+               ; source = Keeper_board_attention_candidate.Vendor_system_one { model }
+               ; judged_at
+               }
+           | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_failed _ ->
+             (match
+                Exact_output.execute_flow_once
+                  ~net:prepared.net
+                  ~clock
+                  ~before_measurement_dispatch:(fun _ -> Ok ())
+                  ~on_measurement_terminal:(fun _ -> Ok ())
+                  ~before_dispatch:agent_core_before_dispatch
+                  ~before_advance:agent_core_before_advance
+                  ~validate
+                  attempt
+              with
+              | Ok success -> Ok success.accepted
+              | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+                terminal_error cause
+              | Error
+                  (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
+                let rejection =
+                  List.fold_left
+                    (fun _ rejection -> rejection)
+                    rejections.first
+                    rejections.rest
+                in
+                Error rejection.rejection))
+      in
+      jev_first, result
     with
     | Eio.Cancel.Cancelled _ as exn ->
       complete Exact_lane_run_registry.Cancelled `Null;
@@ -667,7 +729,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
      complete
        (Exact_lane_run_registry.Failed { code; detail = code })
        (`Assoc [ "terminal_outcome", `String code ]));
-  observe_terminal prepared result;
+  observe_terminal prepared ~jev_first result;
   result
 ;;
 

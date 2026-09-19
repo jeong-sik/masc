@@ -782,10 +782,10 @@ let run_eio_with_http_pool f =
     f ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env))
 ;;
 
-let with_env key value f =
-  let previous = Sys.getenv_opt key in
-  Unix.putenv key value;
-  Fun.protect ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:"")) f
+(* Jev is on for [f] and asks the server at [endpoint]. *)
+let with_jev ~endpoint f =
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
+    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some endpoint) f)
 ;;
 
 (* A System One answer to the adapter's one question, [relevance]. *)
@@ -807,9 +807,42 @@ let jev_response ~choice =
         ])
 ;;
 
+let json_string_field name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`String value) -> Some value
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let last_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+;;
+
+(* The [jev] details of every terminal entry the flow logged for this
+   candidate after [since_seq]. *)
+let terminal_jev_entries ~since_seq ~candidate_id =
+  Log.Ring.recent ~limit:1000 ~module_filter:"Keeper" ~since_seq ~order:`Oldest_first ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    match entry.details with
+    | `Assoc fields ->
+      (match List.assoc_opt "candidate_id" fields, List.assoc_opt "jev" fields with
+       | Some (`String id), Some jev when String.equal id candidate_id -> Some jev
+       | _ -> None)
+    | _ -> None)
+;;
+
+type jev_run =
+  { result : (Candidate.judgment, string Exact_flow.execution_error) result
+  ; jev_posts : int
+  ; llm_posts : int
+  ; terminal_jev : Yojson.Safe.t list
+  }
+
 (* Runs the exact flow with Jev switched on and answering [jev_choice], in
-   front of one LLM slot that answers relevant. Returns the flow's result and
-   how many requests each of the two servers received. *)
+   front of one LLM slot that answers relevant. *)
 let execute_behind_jev ~name ~jev_choice =
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
@@ -832,35 +865,61 @@ let execute_behind_jev ~name ~jev_choice =
         | Ok prepared -> prepared
         | Error _ -> Alcotest.fail "the Jev fixture candidate was not admitted"
       in
-      with_env "TYPESAFEAI_API_KEY" "test-typesafeai-key" (fun () ->
-        with_env "MASC_TYPESAFEAI_ENDPOINT" jev.base_url (fun () ->
-          let result =
-            Exact_flow.execute
-              ~clock
-              ~before_dispatch:(fun _ -> Ok ())
-              ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-              prepared
-          in
-          result, Fixture.post_count jev, Fixture.post_count llm))))
+      with_jev ~endpoint:jev.base_url (fun () ->
+        let since_seq = last_log_seq () in
+        let result =
+          Exact_flow.execute
+            ~clock
+            ~before_dispatch:(fun _ -> Ok ())
+            ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+            prepared
+        in
+        { result
+        ; jev_posts = Fixture.post_count jev
+        ; llm_posts = Fixture.post_count llm
+        ; terminal_jev =
+            terminal_jev_entries ~since_seq ~candidate_id:candidate.candidate_id
+        })))
+;;
+
+let check_terminal_jev label ~answer ~rejudged run =
+  match run.terminal_jev with
+  | [ jev ] ->
+    Alcotest.(check (option string))
+      (label ^ ": Jev's answer on the terminal entry")
+      (Some answer)
+      (json_string_field "answer" jev);
+    Alcotest.(check (option string))
+      (label ^ ": what the LLM lane decided after Jev")
+      rejudged
+      (json_string_field "rejudged" jev)
+  | entries ->
+    Alcotest.failf
+      "%s: expected one terminal entry for the candidate, found %d"
+      label
+      (List.length entries)
 ;;
 
 let test_jev_relevant_is_kept () =
-  match execute_behind_jev ~name:"board-attention-jev-relevant" ~jev_choice:"relevant" with
-  | Ok judgment, jev_posts, llm_posts ->
-    Alcotest.(check int) "Jev asked once" 1 jev_posts;
-    Alcotest.(check int) "the LLM lane is not asked" 0 llm_posts;
+  let run = execute_behind_jev ~name:"board-attention-jev-relevant" ~jev_choice:"relevant" in
+  check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
+  match run.result with
+  | Ok judgment ->
+    Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
+    Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
     (match judgment.Candidate.source with
      | Candidate.Vendor_system_one { model } ->
        Alcotest.(check string) "the model Jev's response named" "jev-latest" model
      | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
        Alcotest.fail "a relevant Jev answer must be recorded as Jev's")
-  | Error _, _, _ -> Alcotest.fail "a relevant Jev answer did not complete the flow"
+  | Error _ -> Alcotest.fail "a relevant Jev answer did not complete the flow"
 ;;
 
-let check_judged_again_by_the_llm_lane label = function
-  | Ok judgment, jev_posts, llm_posts ->
-    Alcotest.(check int) (label ^ ": Jev asked once") 1 jev_posts;
-    Alcotest.(check int) (label ^ ": the LLM lane judges it again") 1 llm_posts;
+let check_judged_by_the_llm_lane label run =
+  match run.result with
+  | Ok judgment ->
+    Alcotest.(check int) (label ^ ": Jev asked once") 1 run.jev_posts;
+    Alcotest.(check int) (label ^ ": the LLM lane judges it") 1 run.llm_posts;
     (match judgment.Candidate.source with
      | Candidate.Exact_attempt _ -> ()
      | Candidate.Vendor_system_one _ | Candidate.Cli_lane_slot ->
@@ -869,17 +928,81 @@ let check_judged_again_by_the_llm_lane label = function
      | Judgment.Relevant -> ()
      | Judgment.Not_relevant ->
        Alcotest.failf "%s: the LLM lane's relevant verdict was not the one kept" label)
-  | Error _, _, _ -> Alcotest.failf "%s: the LLM lane did not complete the flow" label
+  | Error _ -> Alcotest.failf "%s: the LLM lane did not complete the flow" label
 ;;
 
+(* The terminal entry is what tells these two apart: both end in one Jev call
+   and one LLM call, but only the first had an answer from Jev. *)
 let test_jev_not_relevant_is_judged_again () =
-  execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant"
-  |> check_judged_again_by_the_llm_lane "not_relevant"
+  let run =
+    execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant"
+  in
+  check_judged_by_the_llm_lane "not_relevant" run;
+  check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:(Some "relevant") run
 ;;
 
 let test_jev_choice_outside_the_question_is_judged_again () =
-  execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe"
-  |> check_judged_again_by_the_llm_lane "unknown choice"
+  let run = execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe" in
+  check_judged_by_the_llm_lane "unknown choice" run;
+  check_terminal_jev "unknown choice" ~answer:"failed" ~rejudged:None run
+;;
+
+(* The adapter alone, against the same stand-in: the request offers the two
+   decisions under their labels, and a not-relevant answer decodes to
+   [Not_relevant] rather than an error. *)
+let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    let candidate = candidate "board-attention-jev-adapter" in
+    let material =
+      match candidate.Candidate.status with
+      | Candidate.Pending { material; _ } -> material
+      | Candidate.Judged _ | Candidate.Consumed _ | Candidate.Quarantine _ ->
+        Alcotest.fail "the candidate fixture is not pending"
+    in
+    let jev =
+      Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant"))
+    in
+    with_jev ~endpoint:jev.base_url (fun () ->
+      (match
+         Typesafeai_board_attention.judge_candidate
+           ~clock
+           ~api_key:"test-typesafeai-key"
+           ~candidate
+           ~material
+           ()
+       with
+       | Ok { Typesafeai_board_attention.verdict; model } ->
+         Alcotest.(check string) "the model Jev's response named" "jev-latest" model;
+         (match verdict.Judgment.decision with
+          | Judgment.Not_relevant -> ()
+          | Judgment.Relevant -> Alcotest.fail "a not_relevant answer decoded as Relevant")
+       | Error detail -> Alcotest.failf "the not_relevant answer did not decode: %s" detail);
+      match Fixture.request_bodies jev with
+      | [ body ] ->
+        let relevance =
+          match Yojson.Safe.from_string body with
+          | `Assoc fields ->
+            (match List.assoc_opt "questions" fields with
+             | Some (`Assoc questions) -> List.assoc_opt "relevance" questions
+             | Some _ | None -> None)
+          | _ -> None
+        in
+        (match relevance with
+         | Some (`Assoc question) ->
+           Alcotest.(check (option string))
+             "the relevance question is a choice"
+             (Some "choice")
+             (json_string_field "type" (`Assoc question));
+           (match List.assoc_opt "criteria" question with
+            | Some (`Assoc criteria) ->
+              Alcotest.(check (list string))
+                "the request offers every decision under its label"
+                Judgment.decision_tokens
+                (List.map fst criteria)
+            | Some _ | None -> Alcotest.fail "the relevance question has no criteria map")
+         | Some _ | None -> Alcotest.fail "the request carries no relevance question")
+      | bodies ->
+        Alcotest.failf "expected one request to Jev, saw %d" (List.length bodies)))
 ;;
 
 let () =
@@ -939,6 +1062,10 @@ let () =
             "a Jev choice the question did not offer goes to the LLM lane"
             `Quick
             test_jev_choice_outside_the_question_is_judged_again
+        ; Alcotest.test_case
+            "the adapter offers every decision and reads not_relevant"
+            `Quick
+            test_jev_adapter_sends_the_decisions_and_reads_not_relevant
         ] )
     ]
 ;;

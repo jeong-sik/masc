@@ -137,6 +137,9 @@
    (MASC_BASE_PATH "")
    ; Avoid non-deterministic external network calls during unit tests.
    (ZAI_API_KEY "")
+   ; A key exported in the shell would turn TypeSafe AI Jev on in every
+   ; board-attention test; the cases that need it set it themselves.
+   (TYPESAFEAI_API_KEY "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false)
    ; Standard tests keep the Docker playground disabled. A dedicated
    ; regression test below pins that sandbox_profile=local still resolves

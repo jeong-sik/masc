@@ -100,17 +100,22 @@ type team =
   | Frontend
   | Backend
 
-let teams : team T.choice_set =
-  { T.options = [ Frontend; Backend ]
-  ; label =
-      (function
-        | Frontend -> "frontend"
-        | Backend -> "backend")
-  ; describe =
-      (function
+let team_label = function
+  | Frontend -> "frontend"
+  | Backend -> "backend"
+;;
+
+let teams () =
+  match
+    T.choice_set
+      ~options:[ Frontend; Backend ]
+      ~label:team_label
+      ~describe:(function
         | Frontend -> Some "React / UI changes"
         | Backend -> Some "OCaml / database changes")
-  }
+  with
+  | Ok set -> set
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let choice_answer ~choice ~probabilities =
@@ -118,7 +123,7 @@ let choice_answer ~choice ~probabilities =
 ;;
 
 let test_choice_set_builds_request_and_decodes_answer () =
-  (match T.question_to_yojson (T.choice_of_set ~instructions:"Which team?" teams) with
+  (match T.question_to_yojson (T.choice_of_set ~instructions:"Which team?" (teams ())) with
    | `Assoc fields ->
      (match List.assoc_opt "criteria" fields with
       | Some (`Assoc criteria) ->
@@ -130,7 +135,7 @@ let test_choice_set_builds_request_and_decodes_answer () =
    | _ -> Alcotest.fail "question must be an assoc");
   match
     T.decode_choice
-      teams
+      (teams ())
       (choice_answer ~choice:"backend" ~probabilities:[ "frontend", 0.05; "backend", 0.95 ])
   with
   | Ok { T.choice = Backend; probabilities = [ (Frontend, _); (Backend, _) ]; _ } -> ()
@@ -140,7 +145,7 @@ let test_choice_set_builds_request_and_decodes_answer () =
 
 let test_answer_outside_the_set_is_an_error () =
   let check_error label answer =
-    match T.decode_choice teams answer with
+    match T.decode_choice (teams ()) answer with
     | Error _ -> ()
     | Ok _ -> Alcotest.failf "%s decoded to an option" label
   in
@@ -153,6 +158,16 @@ let test_answer_outside_the_set_is_an_error () =
   check_error
     "a score answer"
     (T.Score_answer { score = 1.0; probabilities = []; confidence = 0.9 })
+;;
+
+let test_choice_set_rejects_no_options_and_shared_labels () =
+  let describe _ = None in
+  (match T.choice_set ~options:[] ~label:team_label ~describe with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a choice set with no options was accepted");
+  match T.choice_set ~options:[ Frontend; Backend ] ~label:(fun _ -> "team") ~describe with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "two options sharing a label were accepted"
 ;;
 
 let test_config_defaults () =
@@ -174,6 +189,10 @@ let () =
             "an answer outside the choice set is an error"
             `Quick
             test_answer_outside_the_set_is_an_error
+        ; Alcotest.test_case
+            "a choice set needs options with distinct labels"
+            `Quick
+            test_choice_set_rejects_no_options_and_shared_labels
         ] )
     ; "config", [ Alcotest.test_case "defaults" `Quick test_config_defaults ]
     ]

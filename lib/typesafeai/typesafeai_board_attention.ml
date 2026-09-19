@@ -7,42 +7,40 @@ type judged =
 
 let ( let* ) = Result.bind
 
-(* Jev picks between the Board-attention decisions themselves. The request's
-   criteria and the decoding of its answer both come from this one set, so a
-   decision cannot be offered under one name and read back under another. *)
-let relevance_choices : Judgment.decision Typesafeai_types.choice_set =
-  { Typesafeai_types.options = [ Judgment.Relevant; Judgment.Not_relevant ]
-  ; label =
-      (function
-        | Judgment.Relevant -> "relevant"
-        | Judgment.Not_relevant -> "not_relevant")
-  ; describe =
-      (function
-        | Judgment.Relevant ->
-          Some
-            "The post directly mentions, requests, assigns tasks to, or concerns this keeper's instructions."
-        | Judgment.Not_relevant ->
-          Some
-            "The post is aimed at a different keeper, is general noise, or does not require this keeper to act.")
-  }
+(* Jev picks between the Board-attention decisions themselves, offered and
+   read back under the labels the LLM lane uses for them. The options and the
+   labels come from the variant, so a new decision reaches Jev without an edit
+   here, and [describe] does not compile until it says what that decision
+   means. *)
+let relevance_choices =
+  Typesafeai_types.choice_set
+    ~options:Judgment.all_of_decision
+    ~label:Judgment.decision_to_string
+    ~describe:(function
+      | Judgment.Relevant ->
+        Some
+          "The post directly mentions, requests, assigns tasks to, or concerns this keeper's instructions."
+      | Judgment.Not_relevant ->
+        Some
+          "The post is aimed at a different keeper, is general noise, or does not require this keeper to act.")
 ;;
 
 let relevance_question_id = "relevance"
 
-let relevance_question candidate =
+let relevance_question ~choices candidate =
   Typesafeai_types.choice_of_set
     ~instructions:
       (Printf.sprintf
          "Does the Board post in items[0] require attention, review, or action from keeper %S based on keeper_context?"
          candidate.Keeper_board_attention_candidate.keeper_name)
-    relevance_choices
+    choices
 ;;
 
 let rationale
       ({ Typesafeai_types.choice; probabilities; confidence } :
         Judgment.decision Typesafeai_types.decoded_choice)
   =
-  let label = relevance_choices.Typesafeai_types.label in
+  let label = Judgment.decision_to_string in
   let probabilities =
     List.map
       (fun (decision, probability) -> Printf.sprintf "%s:%.2f" (label decision) probability)
@@ -57,6 +55,7 @@ let rationale
 ;;
 
 let judge_candidate ?clock ~api_key ~candidate ~material () =
+  let* choices = relevance_choices in
   let state =
     Keeper_board_attention_candidate.singleton_judgment_request
       candidate
@@ -67,7 +66,7 @@ let judge_candidate ?clock ~api_key ~candidate ~material () =
       ?clock
       ~api_key
       ~state
-      ~questions:[ relevance_question_id, relevance_question candidate ]
+      ~questions:[ relevance_question_id, relevance_question ~choices candidate ]
       ()
   in
   let* answer =
@@ -76,7 +75,7 @@ let judge_candidate ?clock ~api_key ~candidate ~material () =
     | None -> Error "typesafeai: response missing answer for relevance question"
   in
   let* (decided : Judgment.decision Typesafeai_types.decoded_choice) =
-    Typesafeai_types.decode_choice relevance_choices answer
+    Typesafeai_types.decode_choice choices answer
   in
   Ok
     { verdict =

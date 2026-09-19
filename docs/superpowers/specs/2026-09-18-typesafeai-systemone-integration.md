@@ -39,8 +39,9 @@ When opted in:
 1. MASC attempts the TypeSafe AI Jev evaluation first. The request is bounded by `Masc_http_client.default_request_timeout_sec`, the deadline the other outbound clients share.
 2. The kind of decision Jev picks decides what happens next. No confidence value is compared against a number; the confidence and probabilities Jev reported are written into the verdict's rationale for the record.
    - `Relevant`: the verdict is returned. The durable judgment records `source = Vendor_system_one { model }`, where `model` is the model the System One response says answered; no catalog slot or AGENT_CORE receipt is claimed.
-   - `Not_relevant`: MASC logs `board_attention_typesafeai_not_relevant_rejudged` with Jev's rationale and runs the standard exact-output pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek) for the same candidate. A not-relevant verdict drops the post for that keeper, so it is the one Jev does not settle alone.
-3. If the API call fails, times out, or the answer does not decode (including a choice the question did not offer), MASC logs `board_attention_typesafeai_fallback` and runs the same exact-output pipeline.
+   - `Not_relevant`: MASC runs the standard exact-output pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek) for the same candidate. A not-relevant verdict drops the post for that keeper, so it is the one Jev does not settle alone. Jev confirms only "send it to the keeper"; "don't send it" is always judged again by the LLM lane.
+3. If the API call fails, times out, or the answer does not decode (including a choice the question did not offer), MASC runs the same exact-output pipeline.
+4. What Jev answered is recorded on the flow's existing terminal log entry (`board_attention exact_flow.execute terminal`), whose `details` carry `candidate_id`, `outcome` and a `jev` object. `jev.answer` is one of `off`, `cli_only`, `not_pending`, `relevant`, `not_relevant`, `failed`. After `not_relevant`, `jev.rejudged` holds the decision the LLM lane returned (`null` when the flow returned none), so an overturned Jev answer is one entry with `answer = not_relevant` and `rejudged = relevant`. The judgment record itself is unchanged: it names the lane that answered, not what Jev said first.
 
 ---
 
@@ -55,6 +56,6 @@ When opted in:
 
 ## 4. Operational Invariants
 
-1. **Closed Sum Types**: The relevance question offers the `Keeper_board_attention_judgment.decision` variant (`Relevant | Not_relevant`) through one `Typesafeai_types.choice_set`. The request's criteria and the decoding of the answer are both built from that set, and a choice or probability key outside it decodes to `Error`.
-2. **Deterministic Fallback**: Failure of the external TypeSafe AI endpoint never crashes the worker; it logs a fallback event and proceeds with the configured exact catalog slots.
+1. **Closed Sum Types**: The relevance question offers every constructor of the `Keeper_board_attention_judgment.decision` variant (`all_of_decision`, derived by `ppx_enumerate`), under the labels `decision_to_string` gives the LLM lane, through one `Typesafeai_types.choice_set`. `choice_set` rejects an empty option list and shared labels. The request's criteria and the decoding of the answer are both built from that set, and a choice or probability key outside it decodes to `Error`.
+2. **Deterministic Fallback**: Failure of the external TypeSafe AI endpoint never crashes the worker; the terminal entry records `jev.answer = failed` with the reason, and the configured exact catalog slots judge the candidate.
 3. **Zero Blast Radius**: Existing tests and pipelines without `TYPESAFEAI_API_KEY` continue to run completely unaffected.

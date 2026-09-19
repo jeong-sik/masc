@@ -74,12 +74,18 @@ val eval_response_of_yojson : Yojson.Safe.t -> (eval_response, string) result
 (** The closed option set of one [Choice] question. The request's criteria and
     the decoding of its answer are both built from this one value, so they
     cannot name different options. *)
-type 'option choice_set =
-  { options : 'option list
-  ; label : 'option -> string
-      (** The key the request sends for this option and the answer returns. *)
-  ; describe : 'option -> string option
-  }
+type 'option choice_set
+
+val choice_set :
+  options:'option list ->
+  label:('option -> string) ->
+  describe:('option -> string option) ->
+  ('option choice_set, string) result
+(** [label] is the key the request sends for an option and the answer
+    returns. [Error] when [options] is empty or two options share a label:
+    a question with no option has nothing to ask, and a shared label would
+    send one criteria key twice and read an answer back as whichever option
+    came first. *)
 
 val choice_of_set : instructions:string -> 'option choice_set -> question
 (** A [Choice] question whose criteria are the set's [options], in order. *)

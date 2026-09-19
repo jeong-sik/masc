@@ -238,6 +238,20 @@ type 'option choice_set =
   ; describe : 'option -> string option
   }
 
+let choice_set ~options ~label ~describe =
+  let labels = List.map label options in
+  match options with
+  | [] -> Error "typesafeai: a choice question needs at least one option"
+  | _ :: _ ->
+    if List.length (List.sort_uniq String.compare labels) = List.length labels
+    then Ok { options; label; describe }
+    else
+      Error
+        (Printf.sprintf
+           "typesafeai: choice options share a label: %s"
+           (String.concat ", " labels))
+;;
+
 let choice_of_set ~instructions set =
   Choice
     { instructions

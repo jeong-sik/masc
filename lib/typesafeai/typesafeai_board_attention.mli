@@ -20,5 +20,6 @@ val judge_candidate :
     decision Jev picked, whichever it is; what a decision leads to is the
     caller's. The confidence and probabilities Jev reported are kept in the
     verdict's rationale for the record and are not compared against anything.
-    Returns [Error reason] if the HTTP call fails, the response does not
+    Returns [Error reason] if the question's option set is rejected by
+    {!Typesafeai_types.choice_set}, the HTTP call fails, the response does not
     decode, or Jev picks an option the question did not offer. *)

@@ -7,15 +7,18 @@ blanks comments, string literals and quoted strings first, the way the OCaml
 lexer reads them, and only then matches:
 
   - comments nest, and inside a comment the lexer still reads string
-    literals, quoted strings and character literals, so `(* "*)" *)` is one
-    comment and `(* '"' *)` opens no string;
-  - `{|...|}` and `{id|...|id}` end only at their own terminator;
-  - `'"'` and `'\\''` are characters, and an identifier such as `don't` or
-    `x'` keeps its quote.
+    literals, quoted strings, character literals, `''` and identifiers, so
+    `(* "*)" *)` is one comment and `(* '"' *)` opens no string;
+  - `{|...|}`, `{id|...|id}` and the quoted extensions `{%ext|...|}`,
+    `{%%ext|...|}` and `{%ext id|...|id}` (the name may be dotted) end only
+    at their own terminator, in code and in comments;
+  - `'"'`, `'\\''` and a quote around a raw newline are characters; a
+    character literal holds one ASCII byte, so `'é'` is not one;
+  - an identifier, including one with UTF-8 letters such as `café'`, keeps
+    its trailing quote.
 
-Blanking keeps newlines, so a match keeps its line. Input the OCaml lexer
-would reject (an unterminated comment, string or quoted string) is an error,
-not a guess.
+Blanking keeps newlines, so a match keeps its line. An unterminated comment,
+string or quoted string is an error that names the file, not a guess.
 
 Usage:
   count_ocaml_code_matches.py files   PATTERN ROOT   # .ml files with a match
@@ -31,11 +34,17 @@ import re
 import sys
 from pathlib import Path
 
-IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_']*")
+# OCaml 5 identifiers take UTF-8 letters; the lexer checks them later, so
+# any non-ASCII character is read as part of an identifier here.
+IDENTIFIER_START = r"A-Za-z_\u0080-\U0010ffff"
+IDENTIFIER = re.compile(rf"[{IDENTIFIER_START}][{IDENTIFIER_START}0-9']*")
+EXTENSION_NAME = rf"[{IDENTIFIER_START}][{IDENTIFIER_START}0-9']*(?:\.[{IDENTIFIER_START}][{IDENTIFIER_START}0-9']*)*"
 CHARACTER_LITERAL = re.compile(
-    r"'(?:\\(?:[\\\"'ntbr ]|[0-9]{3}|o[0-3][0-7]{2}|x[0-9A-Fa-f]{2})|[^\\'\n\r])'"
+    r"'(?:\r*\n|\\(?:[\\\"'ntbr ]|[0-9]{3}|o[0-3][0-7]{2}|x[0-9A-Fa-f]{2})|(?![\\'\n\r])[\x00-\x7f])'"
 )
-QUOTED_STRING_START = re.compile(r"\{([a-z_]*)\|")
+# The lexer's [\'\'] rule: inside a comment two quotes are one token.
+EMPTY_QUOTES = "''"
+QUOTED_STRING_START = re.compile(rf"\{{(?:%%?{EXTENSION_NAME}[ \t]*)?([a-z_]*)\|")
 
 
 class OcamlLexError(ValueError):
@@ -90,6 +99,9 @@ def mask_ocaml_non_code(text: str) -> str:
             quoted = QUOTED_STRING_START.match(text, index)
             if quoted is not None:
                 index = end_of_quoted(quoted)
+                continue
+            if text.startswith(EMPTY_QUOTES, index):
+                index += len(EMPTY_QUOTES)
                 continue
             character = CHARACTER_LITERAL.match(text, index)
             if character is not None:

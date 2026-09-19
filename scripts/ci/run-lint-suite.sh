@@ -43,7 +43,9 @@ run_lint() {
 
 run_self_test_when_changed() {
   local label="$1"
-  local script="$2"
+  # One path, or several separated by spaces (the checker and its self-test).
+  local -a watched
+  read -r -a watched <<< "$2"
   shift 2
 
   # A checker's synthetic fixtures validate the checker implementation, not
@@ -52,9 +54,9 @@ run_self_test_when_changed() {
   # unavailable (manual/initial push), fail safe by running the self-test.
   if [[ -n "${base_sha}" && "${base_sha}" != "0000000000000000000000000000000000000000" ]] \
     && git cat-file -e "${base_sha}^{commit}" 2>/dev/null \
-    && git diff --quiet "${base_sha}" HEAD -- "${script}"
+    && git diff --quiet "${base_sha}" HEAD -- "${watched[@]}"
   then
-    echo "::notice::Skipping ${label}; ${script} is unchanged"
+    echo "::notice::Skipping ${label}; ${watched[*]} unchanged"
     return
   fi
 
@@ -275,7 +277,7 @@ blocking_lints() {
   # moving; each fixture is a shape the OCaml lexer reads differently from a
   # plain search.
   run_self_test_when_changed "OCaml code-only counter self-test" \
-    scripts/ci/count_ocaml_code_matches.py \
+    "scripts/ci/count_ocaml_code_matches.py scripts/ci/test_count_ocaml_code_matches.py" \
     python3 scripts/ci/test_count_ocaml_code_matches.py
   run_lint "TLA ppx coverage floor" bash scripts/tla-ppx-ratchet.sh
   run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh

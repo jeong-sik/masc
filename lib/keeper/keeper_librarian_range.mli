@@ -19,9 +19,6 @@ type range =
   ; last_atom_digest : string
       (** Of atom [end_atom - 1], as the line that is the cut point states it
           and as the checkpoint has it. *)
-  ; turns : int
-      (** Finished turns whose end lies in [(start_atom, end_atom]]: the lines
-          of the current history counted as read by this range. *)
   }
 
 (** How much of what is unread a round takes (row 3a). *)
@@ -29,7 +26,13 @@ type extent =
   | All_unread
   | Oldest_turn_only
       (** After a round that failed on a range of several turns: up to the
-          first cut point only. *)
+          first cut point only.
+
+          A caller does not have to know first whether the range held several
+          turns. On a range of one it returns that same range, which is the
+          retry it wanted anyway. The count is also not the caller's to hold:
+          a failed append leaves one line spanning two finished turns, so
+          cut points and turns are not the same number. *)
 
 type stop =
   | Unreadable_line of

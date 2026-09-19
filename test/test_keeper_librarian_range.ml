@@ -74,10 +74,9 @@ let progress_at ~seen messages end_atom : Progress.t =
 let describe = function
   | Range.Read { range; boundary_lines_seen } ->
     Printf.sprintf
-      "read [%d,%d) turns=%d seen=%d"
+      "read [%d,%d) seen=%d"
       range.Range.start_atom
       range.Range.end_atom
-      range.Range.turns
       boundary_lines_seen
   | Range.Baseline { position; boundary_lines_seen } ->
     Printf.sprintf "baseline %d seen=%d" position.Progress.end_atom boundary_lines_seen
@@ -99,7 +98,7 @@ let select ?(extent = Range.All_unread) ?progress ~lines messages =
 let test_a_new_trace_is_read_from_zero () =
   let saved = history 2 in
   check string "start line, then the turn's own line"
-    "read [0,2) turns=1 seen=2"
+    "read [0,2) seen=2"
     (select ~lines:(numbered [ restarted (); turn_ended ~fresh:true saved ]) saved)
 ;;
 
@@ -113,7 +112,7 @@ let test_reading_continues_from_the_position () =
       ]
   in
   check string "the first range was read, the second turn is next"
-    "read [2,4) turns=1 seen=3"
+    "read [2,4) seen=3"
     (select ~progress:(progress_at ~seen:2 saved 2) ~lines saved)
 ;;
 
@@ -131,7 +130,7 @@ let test_a_restart_line_wins_over_a_position_that_seems_to_match () =
       ]
   in
   check string "read again from zero"
-    "read [0,2) turns=2 seen=4"
+    "read [0,2) seen=4"
     (select ~progress:(progress_at ~seen:2 saved 2) ~lines saved)
 ;;
 
@@ -145,7 +144,7 @@ let test_a_restart_line_already_passed_is_not_used_again () =
       ]
   in
   check string "the restart lines lie before the count the progress file holds"
-    "read [2,4) turns=1 seen=3"
+    "read [2,4) seen=3"
     (select ~progress:(progress_at ~seen:2 saved 2) ~lines saved);
   check string "and once everything is read there is nothing"
     "nothing"
@@ -189,7 +188,7 @@ let test_a_line_of_an_earlier_history_is_not_a_cut_point () =
       ]
   in
   check string "only the line of the current history cuts"
-    "read [0,2) turns=1 seen=4"
+    "read [0,2) seen=4"
     (select ~lines saved)
 ;;
 
@@ -235,7 +234,7 @@ let test_an_unreadable_line_stops_and_a_torn_tail_does_not () =
          ]
        saved);
   check string "a fragment with no newline is not a line, and is not counted"
-    "read [0,2) turns=1 seen=2"
+    "read [0,2) seen=2"
     (select ~lines:(readable @ [ 3, Error Boundaries.Incomplete_line ]) saved)
 ;;
 
@@ -245,7 +244,7 @@ let test_an_unreadable_line_stops_and_a_torn_tail_does_not () =
 let test_a_restart_after_an_unreadable_line_lets_the_rounds_go_on () =
   let saved = history 2 in
   check string "the restart decides the start, so the refused line cannot"
-    "read [0,2) turns=1 seen=3"
+    "read [0,2) seen=3"
     (select
        ~lines:
          [ 1, Ok (restarted ())
@@ -309,9 +308,9 @@ let test_after_a_failed_round_only_the_oldest_turn_is_read () =
       ; turn_ended ~turn:3 ~fresh:false saved
       ]
   in
-  check string "everything unread" "read [0,6) turns=3 seen=4" (select ~lines saved);
+  check string "everything unread" "read [0,6) seen=4" (select ~lines saved);
   check string "the oldest turn only"
-    "read [0,2) turns=1 seen=4"
+    "read [0,2) seen=4"
     (select ~extent:Range.Oldest_turn_only ~lines saved)
 ;;
 
@@ -327,7 +326,7 @@ let test_model_a_fresh_turn_that_saves_and_dies () =
     "baseline 2 seen=1"
     (select ~lines:(numbered [ turn_ended ~turn:2 ~fresh:false saved ]) saved);
   check string "with it the first span is read"
-    "read [0,2) turns=1 seen=2"
+    "read [0,2) seen=2"
     (select ~lines:(numbered [ restarted (); turn_ended ~turn:2 ~fresh:false saved ]) saved)
 ;;
 
@@ -344,7 +343,7 @@ let test_model_an_unread_turn_that_replaces_the_history_and_dies () =
     "nothing"
     (select ~progress:passed ~lines:before_the_turn same_text);
   check string "with the line the new history is read from zero"
-    "read [0,1) turns=1 seen=3"
+    "read [0,1) seen=3"
     (select ~progress:passed ~lines:after_its_save same_text);
   let other_text = history ~tag:"new" 1 in
   check string "where the text differs the missing line is at least a visible stop"
@@ -355,7 +354,7 @@ let test_model_an_unread_turn_that_replaces_the_history_and_dies () =
     (select ~progress:passed ~lines:after_its_save other_text);
   let continued = history ~tag:"new" 2 in
   check string "and then what the dead turn saved is read with the turn that ended"
-    "read [0,2) turns=1 seen=4"
+    "read [0,2) seen=4"
     (select
        ~progress:passed
        ~lines:(after_its_save @ [ 4, Ok (turn_ended ~turn:3 ~fresh:false continued) ])
@@ -390,7 +389,7 @@ let test_slice_returns_the_atoms_of_the_range () =
     [ message ~role:Types.System "pinned"; user "u0"; assistant "a1"; tool; user "u2" ]
   in
   let range : Range.range =
-    { Range.start_atom = 1; end_atom = 3; last_atom_digest = digest_of saved 2; turns = 1 }
+    { Range.start_atom = 1; end_atom = 3; last_atom_digest = digest_of saved 2 }
   in
   check int "the assistant, its tool result, and the next user message" 3
     (List.length (Range.slice saved range));

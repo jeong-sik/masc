@@ -18,10 +18,10 @@
 \*
 \* The clean model is explored to the end, so its state count is the same on
 \* every run. A buggy model stops at the first violation, and what a parallel
-\* search had explored by then is not: run those with -workers 1 to get the
-\* same answer twice. Measured that way, the shortest counterexample is 9
-\* steps for the refused line, 12 for the position taken over a restart line,
-\* and 9 for the log purged without the read position.
+\* search had explored by then is not: run those with -workers 1 for a state
+\* count that repeats. Each -buggy cfg switches one rule off and has to violate
+\* the invariant, and scripts/tla-check.sh runs all of them, so what each one
+\* costs is in that run and not in this comment, which cannot be kept true.
 \*
 \* Not modelled: how much of what is unread one round takes (row 3a) and which
 \* trace the caller reads (row 1b). Neither decides whether an atom is lost --

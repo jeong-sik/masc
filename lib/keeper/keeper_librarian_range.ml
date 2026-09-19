@@ -9,7 +9,6 @@ type range =
   { start_atom : int
   ; end_atom : int
   ; last_atom_digest : string
-  ; turns : int
   }
 
 type extent =
@@ -204,13 +203,7 @@ let select ~trace_id ~lines ~progress ~messages extent =
           (match chosen with
            | None -> Nothing_to_read
            | Some (end_atom, last_atom_digest) ->
-             let turns =
-               List.length (List.filter (fun (cut, _) -> cut <= end_atom) beyond)
-             in
-             Read
-               { range = { start_atom; end_atom; last_atom_digest; turns }
-               ; boundary_lines_seen
-               })))
+             Read { range = { start_atom; end_atom; last_atom_digest }; boundary_lines_seen })))
 ;;
 
 let progress_after ~trace_id = function

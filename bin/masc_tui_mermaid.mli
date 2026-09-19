@@ -11,8 +11,14 @@
     directions, with rectangular, rounded and diamond nodes, solid, dotted
     and thick edges, edge labels in both spellings, chains and [&] groups.
     [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
-    state boxes, initial and terminal [[*]] pseudo-states, transition labels,
-    state descriptions, choice pseudo-states, and composite state bounding boxes.
+    state boxes, initial and terminal [[*]] pseudo-states, [-->] transitions
+    and their labels, state descriptions, [<<choice>>] states drawn as a
+    diamond, and composite states drawn as titled boxes around their members.
+    A [[*]] inside a composite state is that state's own start or end.
+    [<<fork>>] and [<<join>>] states are drawn as plain boxes. A state id is
+    one token of letters, digits, [_] or non-ASCII text. A [note left of] or
+    [note right of] a state, on one line or running to [end note], is read
+    and its text is not drawn.
     [sequenceDiagram] draws participants, lifelines, messages with their
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the
@@ -42,8 +48,24 @@ type shape =
   | Stadium  (** [id([label])]; drawn with rounded ends *)
   | Circle  (** [id((label))]; drawn as a circle node *)
 
+(** Where a state diagram's [[*]] was written: at the top of the diagram, or
+    inside the composite state of that id. Each has a start and an end of
+    its own. *)
+type scope =
+  | Top_level
+  | Inside of string
+
+(** What names a node. A state diagram's [[*]] names no state: it is where
+    its scope starts on the left of a transition, and where it ends on the
+    right. Those are nodes of their own, and none of them can meet a state
+    the source named. *)
+type node_id =
+  | Named of string  (** an id the source wrote *)
+  | Initial of scope  (** [[*] --> X] *)
+  | Final of scope  (** [X --> [*]] *)
+
 type node = {
-  id : string;
+  id : node_id;
   label : string;
   shape : shape;
 }
@@ -54,8 +76,8 @@ type line_style =
   | Thick
 
 type edge = {
-  from_id : string;
-  to_id : string;
+  from_id : node_id;
+  to_id : node_id;
   directed : bool;  (** [-->] against [---] *)
   style : line_style;
   label : string option;
@@ -75,7 +97,7 @@ type group = {
   group_id : string;
   group_label : string;  (** the title on the box, [group_id] when untitled *)
   group_direction : direction option;
-  group_nodes : string list;  (** ids declared directly inside, source order *)
+  group_nodes : node_id list;  (** ids declared directly inside, source order *)
   group_children : group list;
 }
 

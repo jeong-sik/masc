@@ -123,6 +123,13 @@ type task_status =
   | Todo
   | Claimed of { assignee: string; claimed_at: string }
   | InProgress of { assignee: string; started_at: string }
+  | AwaitingVerification of {
+      assignee: string;
+      started_at: string;
+      submitted_at: string;
+      intent: verification_intent;
+      verification_id: string;
+    }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 ```

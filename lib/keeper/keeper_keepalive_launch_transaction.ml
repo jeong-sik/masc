@@ -75,7 +75,6 @@ let rollback_registry rollback token reg =
 let run
       ?lifecycle_token
       ?intake_token
-      ?(on_lifecycle_open = fun ~base_path:_ ~keeper_name:_ -> ())
       ~base_path
       ~keeper_name
       ~register
@@ -145,7 +144,9 @@ let run
                 Error (Lifecycle_open_failed { error; rollback_error })
               | Ok () ->
                 (try
-                   on_lifecycle_open ~base_path ~keeper_name;
+                   Keeper_librarian_queue_refresh.submit_durable
+                     ~base_path
+                     ~keeper_name;
                    Ok (launch intake_token token reg)
                  with
                  | exn ->

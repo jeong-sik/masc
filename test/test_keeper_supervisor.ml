@@ -37,7 +37,6 @@ module Launch_transaction = Masc.Keeper_keepalive_launch_transaction
 module Librarian_boundaries = Masc.Keeper_turn_boundaries
 module Librarian_checkpoint_store = Masc.Keeper_checkpoint_store
 module Librarian_progress = Masc.Keeper_librarian_progress
-module Librarian_refresh = Masc.Keeper_librarian_queue_refresh
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    unit projection over [resolve_with_policy] (production resolution path). *)
@@ -412,6 +411,12 @@ let with_librarian_enabled f =
     Env_config.KeeperMemoryOs.librarian_env_key
     (Some "true")
     f
+;;
+
+let memory_lane_submitted_total () =
+  Masc.Otel_metric_store.metric_total
+    Keeper_metrics.(to_string MemoryLaneSubmitted)
+  |> int_of_float
 ;;
 
 let create_started_task_for_meta config (meta : Keeper_meta_contract.keeper_meta) ~title =
@@ -2474,6 +2479,7 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -2486,14 +2492,15 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
        let config = Masc.Workspace.default_config base_dir in
        ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
        Memory_lane.For_testing.reset ();
+       Memory_lane.init ~sw;
        let name = "durable-catchup-order" in
        let meta = make_meta name in
        seed_durable_librarian_baseline config meta;
        let offline = Reg.register_offline ~base_path:config.base_path name meta in
+       let submitted_before = memory_lane_submitted_total () in
        let order = ref [] in
        let result =
          Launch_transaction.run
-           ~on_lifecycle_open:Librarian_refresh.submit_durable
            ~base_path:config.base_path
            ~keeper_name:name
            ~register:(fun _token _intake_token ->
@@ -2501,7 +2508,9 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
              Ok offline)
            ~rollback:Launch_transaction.Retain_registered
            (fun _intake_token _token entry ->
-              check_durable_librarian_baseline config ~keeper_name:name;
+              check int "durable catch-up submitted before launch"
+                (submitted_before + 1)
+                (memory_lane_submitted_total ());
               order := "launch" :: !order;
               entry)
        in
@@ -2512,6 +2521,14 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
         | Error _ -> fail "ordered catch-up launch transaction failed");
        check (list string) "registration precedes launch" [ "register"; "launch" ]
          (List.rev !order);
+       (match
+          Memory_lane.drain_and_join_librarian
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | Ok Memory_lane.Librarian_drained -> ()
+        | Ok Memory_lane.No_librarian_work -> fail "durable catch-up was not admitted"
+        | Error error -> fail (Memory_lane.librarian_drain_error_to_string error));
        check_durable_librarian_baseline config ~keeper_name:name)
 ;;
 
@@ -2533,13 +2550,14 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
        let config = Masc.Workspace.default_config base_dir in
        ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
        Memory_lane.For_testing.reset ();
+       Memory_lane.init ~sw;
        let name = "librarian-launch-exception-rollback" in
        let meta = make_meta name in
        seed_durable_librarian_baseline config meta;
        let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let submitted_before = memory_lane_submitted_total () in
        (match
           Launch_transaction.run
-            ~on_lifecycle_open:Librarian_refresh.submit_durable
             ~base_path:config.base_path
             ~keeper_name:name
             ~register:(register_restart ~base_path:config.base_path ~name ~meta)
@@ -2552,7 +2570,9 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
                { librarian_abort_error = None; rollback_error = None; _ }) -> ()
         | Error _ -> fail "launch exception produced the wrong transaction outcome"
         | Ok _ -> fail "launch exception unexpectedly committed");
-       check_durable_librarian_baseline config ~keeper_name:name;
+       check int "failed launch admitted durable catch-up"
+         (submitted_before + 1)
+         (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
           check bool "launch exception restores exact crashed authority" true
@@ -2593,10 +2613,12 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        let config = Masc.Workspace.default_config base_dir in
        ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
        Memory_lane.For_testing.reset ();
+       Memory_lane.init ~sw;
        let name = "librarian-launch-cancellation-rollback" in
        let meta = make_meta name in
        seed_durable_librarian_baseline config meta;
        let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let submitted_before = memory_lane_submitted_total () in
        let cancel_context, resolve_cancel_context = Eio.Promise.create () in
        let launch_entered, resolve_launch_entered = Eio.Promise.create () in
        let cancelled, resolve_cancelled = Eio.Promise.create () in
@@ -2608,7 +2630,6 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
                Eio.Promise.resolve resolve_cancel_context context;
                ignore
                  (Launch_transaction.run
-                    ~on_lifecycle_open:Librarian_refresh.submit_durable
                     ~base_path:config.base_path
                     ~keeper_name:name
                     ~register:
@@ -2628,7 +2649,9 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        Eio.Cancel.cancel context (Failure "cancel injected launch callback");
        check bool "launch cancellation propagates after rollback" true
          (Eio.Promise.await cancelled);
-       check_durable_librarian_baseline config ~keeper_name:name;
+       check int "cancelled launch admitted durable catch-up"
+         (submitted_before + 1)
+         (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
           check bool "launch cancellation restores exact crashed authority" true

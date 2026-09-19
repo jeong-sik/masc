@@ -296,7 +296,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             let old_crash_log = old_entry.crash_log in
          (match
             Keeper_keepalive_launch_transaction.run
-              ~on_lifecycle_open:Keeper_librarian_queue_refresh.submit_durable
               ~base_path
               ~keeper_name:old_entry.name
               ~register:(fun token intake_token ->

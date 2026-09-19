@@ -1072,7 +1072,6 @@ let rec start_keepalive
          Keeper_keepalive_launch_transaction.run
            ?lifecycle_token
            ?intake_token
-           ~on_lifecycle_open:Keeper_librarian_queue_refresh.submit_durable
            ~base_path:ctx.config.base_path
            ~keeper_name:m.name
            ~register:(fun token intake_token ->

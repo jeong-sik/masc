@@ -51,7 +51,10 @@ type 'callback_error execution_error =
       ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
-  | Exact_execution_failed of attempt_provenance list
+  | Exact_execution_failed of
+      { attempts : attempt_provenance list
+      ; detail : string
+      }
   | Provenance_mismatch of string
   | Domain_output_invalid of string
 
@@ -361,22 +364,17 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
 ;;
 
 (* RFC cli-runtimes-as-lane-slots: after every catalog slot is exhausted the
-   lane may walk its declared official clients as one-shots. This lane is
+   lane walks its declared official clients as one-shots. This lane is
    boot-mandatory and its catalog slots share two quota pools, so without a
    tail an exhausted pool stops Board attention outright.
 
-   The walk is deliberately not part of [execute]: a caller must ask for it,
-   and the judgment it produces says [Cli_lane_slot] so the durable record
-   never claims an AGENT_CORE attempt that was not allocated. *)
+   The walk runs inside [execute_current], which also closes the lane's run
+   record, so the record names the slot that answered (RFC §3: [selected_slot]
+   is the runtime id). The judgment says [Cli_lane_slot], so the durable
+   record never claims an AGENT_CORE attempt that was not allocated. *)
 type cli_tail_error =
   | No_cli_slots
   | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
-
-let has_http_flow prepared =
-  match prepared.transport with Http_flow _ -> true | Cli_only -> false
-;;
-
-let cli_slots prepared = prepared.cli_slots
 
 let cli_tail_error_to_string = function
   | No_cli_slots -> "lane declares no cli slots"
@@ -595,10 +593,13 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
   let bound = ref None in
   let cli_selected_slot = ref None in
   let complete outcome output =
+    (* A CLI answer after the HTTP slots failed leaves [bound] on the last
+       failed HTTP slot; the slot that answered is the CLI one. *)
     let selected_slot =
-      match !bound with
-      | Some (provenance : attempt_provenance) -> Some provenance.slot_id
-      | None -> !cli_selected_slot
+      match !cli_selected_slot, !bound with
+      | Some _, _ -> !cli_selected_slot
+      | None, Some (provenance : attempt_provenance) -> Some provenance.slot_id
+      | None, None -> None
     in
     match
       Exact_lane_run_registry.mark_completed
@@ -665,13 +666,17 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
            ; next = candidate_visit next
            ; evidence = evidence_provenance evidence
            })
-    | Exact_output.Flow_attempt_start_failed { evidence; _ }
-    | Exact_output.Flow_measurement_start_failed { evidence; _ }
-    | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
-    | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ }
-    | Exact_output.Flow_candidates_exhausted { evidence; _ }
-    | Exact_output.Flow_exact_execution_failed { evidence; _ } ->
-      Error (Exact_execution_failed (evidence_provenance evidence))
+    | ( Exact_output.Flow_attempt_start_failed { evidence; _ }
+      | Exact_output.Flow_measurement_start_failed { evidence; _ }
+      | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
+      | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ }
+      | Exact_output.Flow_candidates_exhausted { evidence; _ }
+      | Exact_output.Flow_exact_execution_failed { evidence; _ } ) as cause ->
+      Error
+        (Exact_execution_failed
+           { attempts = evidence_provenance evidence
+           ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+           })
   in
   let jev_first, result =
     try
@@ -681,7 +686,10 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
         | Cli_only ->
           (match run_cli_tail ?runner:cli_runner ~base_path:prepared.base_path prepared with
            | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
-           | Error _ -> Error (Exact_execution_failed []))
+           | Error error ->
+             Error
+               (Exact_execution_failed
+                  { attempts = []; detail = cli_tail_error_to_string error }))
         | Http_flow attempt ->
           (match jev_first with
            | Jev_relevant { provenance; verdict; judged_at } ->
@@ -706,7 +714,47 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
               with
               | Ok success -> Ok success.accepted
               | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-                terminal_error cause
+                (* Provider exhaustion is the one terminal a second transport
+                   can answer. The persistence and provenance arms say the
+                   durable record is in doubt, and asking another model does
+                   not settle that; a domain-invalid answer is a contract
+                   failure, not an unreachable provider. Every arm is written
+                   out so a new terminal has to be classified here rather than
+                   silently inheriting the fallback. *)
+                (match terminal_error cause with
+                 | Ok judgment -> Ok judgment
+                 | Error
+                     ( Flow_already_started _
+                     | Before_dispatch_persistence_failed _
+                     | Before_advance_persistence_failed _
+                     | Provenance_mismatch _
+                     | Domain_output_invalid _ ) as terminal -> terminal
+                 | Error (Exact_execution_failed { attempts; detail }) as exhausted ->
+                   (match
+                      run_cli_tail
+                        ?runner:cli_runner
+                        ~base_path:prepared.base_path
+                        prepared
+                    with
+                    | Ok (slot_id, judgment) ->
+                      Log.Keeper.info
+                        "board_attention_cli_tail_judged keeper=%s slot=%s"
+                        prepared.candidate.keeper_name
+                        slot_id;
+                      cli_selected_slot := Some slot_id;
+                      Ok judgment
+                    | Error No_cli_slots -> exhausted
+                    | Error (Cli_slots_exhausted _ as error) ->
+                      Log.Keeper.warn
+                        "board_attention_cli_tail_failed keeper=%s reason=%s"
+                        prepared.candidate.keeper_name
+                        (cli_tail_error_to_string error);
+                      Error
+                        (Exact_execution_failed
+                           { attempts
+                           ; detail =
+                               detail ^ "; cli tail: " ^ cli_tail_error_to_string error
+                           })))
               | Error
                   (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
                 let rejection =
@@ -734,10 +782,19 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
      complete
        Exact_lane_run_registry.Succeeded
        (Keeper_board_attention_candidate.judgment_to_yojson judgment)
-   | Error _ ->
+   | Error error ->
      let code = result |> terminal_outcome |> terminal_outcome_to_string in
+     let detail =
+       match error with
+       | Exact_execution_failed { detail; _ } -> detail
+       | Flow_already_started _
+       | Before_dispatch_persistence_failed _
+       | Before_advance_persistence_failed _
+       | Provenance_mismatch _
+       | Domain_output_invalid _ -> code
+     in
      complete
-       (Exact_lane_run_registry.Failed { code; detail = code })
+       (Exact_lane_run_registry.Failed { code; detail })
        (`Assoc [ "terminal_outcome", `String code ]));
   observe_terminal prepared ~jev_first result;
   result

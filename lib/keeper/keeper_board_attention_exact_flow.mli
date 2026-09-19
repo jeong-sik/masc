@@ -61,7 +61,12 @@ type 'callback_error execution_error =
       ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
-  | Exact_execution_failed of attempt_provenance list
+  | Exact_execution_failed of
+      { attempts : attempt_provenance list
+      ; detail : string
+          (** Why the lane gave up: the flow error's label and payload, and
+              the CLI tail's failures when it walked one. *)
+      }
   | Provenance_mismatch of string
   | Domain_output_invalid of string
 
@@ -81,39 +86,6 @@ val prepare :
 (** Freeze one complete ordered AGENT_CORE flow. Missing network context fails before
     AGENT_CORE allocates an attempt. *)
 
-type cli_tail_error =
-  | No_cli_slots
-  | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
-
-val cli_tail_error_to_string : cli_tail_error -> string
-
-val has_http_flow : prepared -> bool
-(** Whether preparation allocated an HTTP attempt. CLI-only lanes allocate none. *)
-
-val cli_slots : prepared -> string list
-(** The lane's declared official-client tail, in declaration order. Empty when
-    the lane declares none. *)
-
-val run_cli_tail :
-  ?runner:Keeper_lane_cli_oneshot.runner ->
-  base_path:string ->
-  prepared ->
-  ( string * Keeper_board_attention_candidate.judgment
-  , cli_tail_error )
-  result
-(** Walk [cli_slots] as one-shots and return the first slot whose answer judges
-    this candidate, as [(slot_id, judgment)].
-
-    For an HTTP flow, call this only after {!execute} reported [Exact_execution_failed], which is
-    the provider-exhaustion arm. The persistence and provenance arms keep their
-    terminal: they say the durable record is in doubt, and a second transport
-    does not settle that (RFC cli-runtimes-as-lane-slots, the same split the
-    librarian and HITL lanes apply).
-
-    CLI-only flows call this directly. The judgment carries [Cli_lane_slot];
-    completion is owned by the durable candidate claim, without fabricating
-    an HTTP attempt receipt. *)
-
 val execute :
   ?cli_runner:Keeper_lane_cli_oneshot.runner ->
   clock:_ Eio.Time.clock ->
@@ -129,7 +101,11 @@ val execute :
   result
 (** Execute the prepared affine flow exactly once. Domain identity and
     provenance failures are terminal results and never request AGENT_CORE
-    advancement. Cancellation is not caught. The caller's durable callback
+    advancement. When every HTTP slot is exhausted ([Exact_execution_failed]),
+    the lane's declared official clients are walked as one-shots
+    ([cli_runner], default the real client) before this returns; a CLI-only
+    lane walks them directly. The run record is closed after that walk and
+    names the slot that answered. Cancellation is not caught. The caller's durable callback
     progress is the sole terminalization authority and must be quarantined
     under cancellation protection; no AGENT_CORE receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.

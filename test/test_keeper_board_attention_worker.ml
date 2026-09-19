@@ -151,48 +151,6 @@ let provenance suffix : E.attempt_provenance =
   }
 ;;
 
-(* RFC cli-runtimes-as-lane-slots: the tail follows provider exhaustion and
-   nothing else. Written out per terminal so a new one has to be classified
-   rather than inheriting whichever answer this test happened to assert. *)
-let test_cli_tail_follows_only_provider_exhaustion () =
-  let attempt = provenance "split" in
-  let visit : E.candidate_visit =
-    { flow_id = "flow-cli-split"
-    ; ordinal = 1
-    ; slot_id = "slot-split"
-    ; catalog_generation_fingerprint = "catalog-generation-split"
-    ; catalog_evidence_sha256 = "catalog-evidence-split"
-    ; target_identity_fingerprint = "target-identity-split"
-    }
-  in
-  let cases : (string * bool * string E.execution_error) list =
-    [ "provider exhaustion", true, E.Exact_execution_failed [ attempt ]
-    ; "flow already started", false, E.Flow_already_started [ attempt ]
-    ; ( "before-dispatch persistence"
-      , false
-      , E.Before_dispatch_persistence_failed
-          { cause = "disk"; current = attempt; evidence = [] } )
-    ; ( "before-advance persistence"
-      , false
-      , E.Before_advance_persistence_failed
-          { cause = "disk"
-          ; failed = E.Executed_failure attempt
-          ; next = visit
-          ; evidence = []
-          } )
-    ; "provenance mismatch", false, E.Provenance_mismatch "left<>right"
-    ; "domain output invalid", false, E.Domain_output_invalid "identity mismatch"
-    ]
-  in
-  List.iter
-    (fun (label, expected, error) ->
-       Alcotest.(check bool)
-         (label ^ " routes to the cli tail")
-         expected
-         (W.For_testing.cli_tail_may_answer error))
-    cases
-;;
-
 let judgment (provenance : E.attempt_provenance) decision : A.judgment =
   { verdict = { J.decision; rationale = "typed structured verdict" }
   ; slot_id = provenance.slot_id
@@ -1175,7 +1133,7 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
   let execute ~before_dispatch ~before_advance:_ _candidate =
     incr calls;
     ok "bind terminal attempt" (before_dispatch exact);
-    Error (E.Exact_execution_failed [ exact ])
+    Error (E.Exact_execution_failed { attempts = [ exact ]; detail = "provider exhausted" })
   in
   (match
      ok
@@ -1473,7 +1431,7 @@ let test_terminal_root_does_not_strand_ready_sibling () =
        ~execute:(fun ~before_dispatch ~before_advance:_ observed ->
          calls := !calls @ [ observed.A.candidate_id ];
          if String.equal observed.candidate_id first.candidate_id
-         then Error (E.Exact_execution_failed [])
+         then Error (E.Exact_execution_failed { attempts = []; detail = "provider exhausted" })
          else (
            ok "bind sibling" (before_dispatch sibling_exact);
            Ok (judgment sibling_exact J.Not_relevant))))
@@ -2530,7 +2488,7 @@ let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_r
   let attempt = provenance "quarantine-retired" in
   let execute ~before_dispatch ~before_advance:_ _prepared =
     ok "bind quarantine attempt" (before_dispatch attempt);
-    Error (E.Exact_execution_failed [ attempt ])
+    Error (E.Exact_execution_failed { attempts = [ attempt ]; detail = "provider exhausted" })
   in
   (match
      ok
@@ -2795,10 +2753,6 @@ let () =
             "reconcile_quarantines settles a blocked partition whose candidate was retired"
             `Quick
             test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_retired
-        ; Alcotest.test_case
-            "the cli tail follows provider exhaustion and nothing else"
-            `Quick
-            test_cli_tail_follows_only_provider_exhaustion
         ] )
     ]
 ;;

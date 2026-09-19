@@ -3065,6 +3065,10 @@ reasoning_streaming_format = "delta:reasoning_content"
 #   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
 #   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
 # The bare row stays for callers that resolve by model id alone.
+# Z.AI takes tool_choice but accepts one value: "The default value is auto,
+# and only auto is supported" (docs.z.ai/api-reference/llm/chat-completion,
+# checked 2026-09-19). A named function reaches the wire and is not honoured,
+# so this row states auto-only like every other glm row.
 [[models]]
 id_prefix = "glm-5.3"
 provider_name = "glm-coding"
@@ -3073,7 +3077,7 @@ max_context_tokens = 1048576
 max_output_tokens = 131072
 supports_tools = true
 supports_tool_choice = true
-supports_named_tool_choice = true
+supports_named_tool_choice = false
 supports_reasoning = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true

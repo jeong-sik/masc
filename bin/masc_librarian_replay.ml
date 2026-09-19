@@ -13,7 +13,7 @@
     measures in §9 (output rejection rate, continuity scoring) need a provider
     and an operator's choice of keeper; they are not here.
 
-    What it reads is every Keeper conversation on the machine, so what it
+    It reads the current Keeper trace in the selected workspace cluster, so what it
     prints is counts, atom numbers and digests -- never message text. Adding a
     field that carries text turns a local measurement into a disclosure.
 
@@ -29,19 +29,14 @@ module Keeper_librarian_range = Masc.Keeper_librarian_range
 module Keeper_librarian_progress = Masc.Keeper_librarian_progress
 module Keeper_checkpoint_store = Masc.Keeper_checkpoint_store
 
-let boundary_suffix =
-  (* Asked of the module that writes the file instead of spelled out here, so
-     renaming the artifact cannot leave this tool scanning for the old name. *)
-  Filename.basename
-    (Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir:"." ~keeper_id:"")
-;;
-
 let usage =
   "usage: masc-librarian-replay [--base-path DIR] [--keeper NAME]... [--extent \
    all|cut-points]\n\
   \  --base-path DIR   workspace to read (default: the resolved MASC base path)\n\
   \  --keeper NAME     replay only this keeper; repeatable, default every one\n\
   \                    that has a turn-boundary log\n\
+  \                    Current cluster metadata is required; archived logs\n\
+  \                    without it are skipped, never guessed from log order.\n\
   \  --extent all         each round takes the whole backlog (default)\n\
   \  --extent cut-points  each round takes to the first cut point, which is\n\
   \                       what a round takes after one failed on a longer\n\
@@ -80,23 +75,27 @@ type outcome =
       }
   | Skipped of string
 
-(** The trace a round is asked about. The boundary log names it, so the tool
-    does not need the keeper's meta record and therefore does not need a
-    [Workspace.config] -- which would mean opening a storage backend to read
-    files that are already on disk. The last ended turn is the trace the
-    checkpoint on disk belongs to. *)
-let trace_of_lines lines =
-  List.fold_left
-    (fun acc (_, decoded) ->
-      match decoded with
-      | Error _ -> acc
-      | Ok (record : Keeper_turn_boundaries.record) ->
-        (match record.event with
-         | Keeper_turn_boundaries.Turn_ended { turn_ref; _ } ->
-           Some (Ids.Turn_ref.trace_id turn_ref)
-         | Keeper_turn_boundaries.History_restarted _ -> acc))
-    None
-    lines
+(** The selected cluster's typed metadata owns its current trace. This reader
+    neither creates directories nor repairs metadata, and opens no storage
+    backend. *)
+let trace_of_metadata ~runtime_root ~keepers_dir keeper_id =
+  let path =
+    Filename.concat
+      keepers_dir
+      (Masc.Keeper_runtime_root_entry.keeper_basename
+         ~keeper_name:keeper_id Masc.Keeper_runtime_root_entry.Metadata)
+  in
+  match Masc.Keeper_meta_store.read_meta_file_path_read_only
+          ~ownership_root:runtime_root path with
+  | Error (Masc.Keeper_meta_store.Unreadable detail) ->
+    Error ("metadata_unreadable:" ^ detail)
+  | Error (Masc.Keeper_meta_store.Not_current detail) ->
+    Error ("metadata_not_current:" ^ detail)
+  | Ok None -> Error "metadata_absent"
+  | Ok (Some meta) ->
+    if String.equal meta.name keeper_id
+    then Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    else Error "metadata_identity_mismatch"
 ;;
 
 let stop_of_selection_stop = function
@@ -227,17 +226,15 @@ let replay ~extent ~trace_id ~lines ~messages =
   loop ~progress:None ~reached:0 []
 ;;
 
-let replay_keeper ~extent ~base_path ~keepers_dir keeper_id =
+let replay_keeper ~extent ~runtime_root ~session_store ~keepers_dir keeper_id =
   match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
   | Error detail -> Skipped ("boundary_log_unreadable:" ^ detail)
   | Ok [] -> Skipped "boundary_log_empty"
   | Ok lines ->
-    (match trace_of_lines lines with
-     | None -> Skipped "no_ended_turn_in_log"
-     | Some trace_id ->
-       let session_dir =
-         Filename.concat (Filename.concat base_path "traces") trace_id
-       in
+    (match trace_of_metadata ~runtime_root ~keepers_dir keeper_id with
+     | Error detail -> Skipped detail
+     | Ok trace_id ->
+       let session_dir = Filename.concat session_store trace_id in
        (match
           Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id
         with
@@ -306,17 +303,28 @@ let outcome_to_json keeper = function
 
 let keepers_with_a_log keepers_dir =
   match Sys.readdir keepers_dir with
-  | exception Sys_error detail ->
-    prerr_endline ("cannot list " ^ keepers_dir ^ ": " ^ detail);
-    []
+  | exception Sys_error detail -> Error detail
   | entries ->
-    Array.to_list entries
-    |> List.filter_map (fun entry ->
-      let suffix_at = String.length entry - String.length boundary_suffix in
-      if suffix_at > 0 && String.sub entry suffix_at (String.length boundary_suffix) = boundary_suffix
-      then Some (String.sub entry 0 suffix_at)
-      else None)
-    |> List.sort compare
+    Ok
+      (Array.to_list entries
+       |> List.filter_map (fun entry ->
+         match Keeper_id.Keeper_name.of_string entry with
+         | Error _ -> None
+         | Ok name ->
+           let keeper_id = Keeper_id.Keeper_name.to_string name in
+           let path =
+             Keeper_turn_boundaries.path_for_keepers_dir
+               ~keepers_dir ~keeper_id
+           in
+           (match Unix.lstat path with
+            | _ -> Some keeper_id
+            | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+              None
+            | exception Unix.Unix_error (error, fn, arg) ->
+              prerr_endline
+                (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error));
+              exit 2))
+       |> List.sort compare)
 ;;
 
 let () =
@@ -352,15 +360,27 @@ let () =
   | Ok () ->
     let base_path =
       match !base_path with
-      | Some dir -> dir
-      | None -> Config_dir_resolver.base_path_or_cwd ()
+      | Some dir ->
+        dir
+        |> Config_dir_resolver.absolute_path
+        |> Masc.Workspace.runtime_base_path_for_request
+      | None ->
+        Config_dir_resolver.base_path_or_cwd ()
+        |> Masc.Workspace.runtime_base_path_for
     in
-    let keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path ~base_path
+    let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+    let runtime_root = Filename.dirname session_store in
+    let keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+    let keepers_with_logs =
+      match keepers_with_a_log keepers_dir with
+      | Ok keepers -> keepers
+      | Error detail ->
+        prerr_endline ("cannot list " ^ keepers_dir ^ ": " ^ detail);
+        exit 2
     in
     let keepers =
       match List.rev !wanted with
-      | [] -> keepers_with_a_log keepers_dir
+      | [] -> keepers_with_logs
       | named -> named
     in
     let results =
@@ -368,7 +388,8 @@ let () =
         (fun keeper ->
           outcome_to_json
             keeper
-            (replay_keeper ~extent:!extent ~base_path ~keepers_dir keeper))
+            (replay_keeper
+               ~extent:!extent ~runtime_root ~session_store ~keepers_dir keeper))
         keepers
     in
     print_endline

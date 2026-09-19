@@ -39,6 +39,11 @@ val archive_path : config -> string
     [Common.keepers_runtime_dir_of_base] instead. *)
 val keepers_runtime_dir : config -> string
 
+val keepers_runtime_dir_for_base_path : string -> string
+(** Pure cluster-aware Keeper output directory for an already resolved
+    runtime base path. This is the base-path form of {!keepers_runtime_dir};
+    it opens no backend and creates no directory. *)
+
 (** Cluster-root state.json path. Used by bootstrap/init to gate
     one-time root setup. *)
 val root_state_path : config -> string

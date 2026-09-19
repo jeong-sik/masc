@@ -648,6 +648,10 @@ let handle_keeper_lifecycle_completion config operation = function
     Keeper_supervisor_cleanup.handle_completion config operation action
 ;;
 
+module For_testing = struct
+  let purge_keeper_artifacts = purge_keeper_artifacts
+end
+
 let keeper_purge_resolve_status = function
   | Keeper_dashboard_purge.Empty_requested_name -> `Bad_request
   | Invalid_requested_name _ -> `Bad_request

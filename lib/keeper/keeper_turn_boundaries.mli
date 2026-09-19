@@ -2,7 +2,10 @@
     librarian-lifecycle §4.6).
 
     A finished turn appends one line to a per-keeper append-only
-    [<runtime-root>/keepers/<keeper>.turn-boundaries.jsonl], after its checkpoint is saved. The line
+    [<keepers_dir>/<keeper>/turn-boundaries.jsonl], after its checkpoint is saved.
+    [keepers_dir] is {!Workspace.keepers_runtime_dir} for the selected cluster,
+    not the operator's config directory. Path construction and reads create
+    no directories. The line
     names the turn and the end of the saved history in the atom vocabulary of
     {!Runtime_model_input_tail_window}: how many atoms the checkpoint holds and
     the digest of the message that opens the last one. Where a turn started is

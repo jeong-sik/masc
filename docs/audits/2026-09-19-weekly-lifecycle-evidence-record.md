@@ -50,7 +50,7 @@ git diff <base> <head> -- lib/keeper lib/runtime lib/runtime_model docs/spec
 
 | 경계 | 사실을 소유하는 곳 | 다음 회차에 보존해야 할 것 | 이번 확인 범위 |
 |---|---|---|---|
-| Runtime Attempt → 다음 후보 | 실제 요청 범위와 후보별 provider usage | 거절 후 좁힌 History가 후보를 바꿔 다시 넓어지지 않음 | #37073 재현·수정, CI 추적 |
+| 같은 Keeper Turn의 Runtime Attempt → 다음 후보 | 실제 요청 범위와 후보별 provider usage | 같은 턴에서 거절 후 좁힌 History가 후보를 바꿔 다시 넓어지지 않음 | #37073 재현·수정; 다음 턴의 runtime별 원장 우선순위는 아래에서 구분 |
 | Keeper Turn → 다음 Turn | checkpoint와 turn boundary | message/tool-result Atom 경계, trace와 digest의 일치 | 읽기 실패 수정 #37089; clear 경합은 #37021 잔여 |
 | History → Librarian | History/boundary와 read position | 읽지 않은 구간 보존, 실패를 읽기 성공으로 처리하지 않음 | #37031 및 #37061 추적; 완결된 runtime loop 증거 없음 |
 | Librarian → Memory | current snapshot의 잠금된 disposition 적용 | 동시 explicit write 보존, 흡수 원문 기록 실패 시 commit 거절 | 소스 대조, 문서의 옛 retain/CAS 계약 정정 |
@@ -67,7 +67,7 @@ git diff <base> <head> -- lib/keeper lib/runtime lib/runtime_model docs/spec
 ### 실제 발견과 작업 단위
 
 - [#37070](https://github.com/jeong-sik/masc/pull/37070): Librarian API 후보가 모두 projection에서 거절되면 declared CLI를 시도하지 않던 분기. 동일 domain validation을 거친 CLI 답만 받도록 연결했다. exact deadline 설정 문제까지 이 패치가 해결한다고 주장하지 않는다.
-- [#37073](https://github.com/jeong-sik/masc/pull/37073): 원장이 있는 후보의 overflow 축소가 다음 warm/cold 후보로 전달되지 않던 경로. halving·block eviction·오래된 원장 범위를 한 불변식으로 수정했다.
+- [#37073](https://github.com/jeong-sik/masc/pull/37073): 원장이 있는 후보의 overflow 축소가 같은 턴의 다음 warm/cold 후보로 전달되지 않던 경로. halving·block eviction·오래된 원장 범위를 같은 턴의 불변식으로 수정했다.
 - [#37076](https://github.com/jeong-sik/masc/pull/37076): TUI에서 검증된 Goal의 최종 확인을 보낼 수 없던 연결. 먼저 exact proof를 읽고 같은 binding을 기존 admin API로 확인한다. 이 누락은 9/10에 도입되어 이번 주에도 남아 있던 happy-path gap이다.
 - [#37077](https://github.com/jeong-sik/masc/pull/37077): Harbor의 per-agent key를 무시하고 host key만 읽던 설치 경로. 세 어댑터 × 두 환경 조합을 재현하고 Harbor resolver를 사용했다.
 - [#37089](https://github.com/jeong-sik/masc/pull/37089): checkpoint 읽기 실패를 빈 Context로 바꾸던 경로. 실패 원인을 보존해 턴 시작 전에 반환하고, 파일 없음·명시적 버전 교체·승인된 continuation을 구분한다. 다음 Tick에서 원래 이력을 다시 읽는 회귀를 포함한다.
@@ -101,11 +101,33 @@ main `e50d28963b`의 실제 event producer를 확인했다. `Retrieved`는 검�
 
 추가 검증에서는 0.35.20 릴리스 두 아키텍처를 내려받고 4.0 task 66개의 자원 선언을 읽었다. 이 Docker보다 큰 CPU/메모리를 요구하는 task 10개와 GPU task 3개가 있다. 전체 실행은 코드 검증 후 사용자가 Runpod에서 진행할 예정이다. 현재 호스트의 `openrouter.z-ai/glm-5.3-flash` 단일 Keeper 점검은 public MCP 제출 → `Execute ["touch", "/tmp/arm-k-keeper-was-here"]` → `remote_ssh`, `sandbox_applied`, exit 0과 파일 생성을 확인했다. 이는 도구 연결 증거이며 벤치 점수 또는 여러 Tick의 연속성 증거가 아니다. 기본 Anthropic arm의 provider/model 계약 해상 실패는 #37086으로 별도 기록했다.
 
+### 최초 스냅샷 이후의 검증 (2026-09-19 13:31:16~14:14:48 UTC)
+
+아래는 앞의 1,248개 변경 집계와 별도인 후속 검증이다. 사용자 요청에 따라 공유 opam 환경을 바꾸지 않은 private OCaml 5.5.1에서 필요한 target만 직접 빌드·실행했다. PR 후보, 설치 바이너리, 소스 감사의 근거를 구분하며 운영 배포나 전 기능 완료를 뜻하지 않는다.
+
+| 경로·후보 | 실제 결과 | 검증 경계 |
+|---|---|---|
+| [Goal TUI #37076](https://github.com/jeong-sik/masc/pull/37076), `0b72a75ccf82` | 14:07:41Z 상세 화면 10개와 실제 후보 PTY 2개 통과. 각 시나리오 GET 1회·POST 1회, 최초 criterion/request/run binding 보존, 전송 중 연속 입력·상세 재진입에도 중복 없음 | 기존 controlled HTTP fixture의 성공·변경 거절 응답 표시. 실제 서버 권한·Goal 영속 완료를 이 PTY로 검증한 것은 아님 |
+| [Task Activity #37134](https://github.com/jeong-sik/masc/pull/37134), `0f3cfe377331` | 13:44:23Z `test_task_transition_broadcast` 15개, `test_activity_graph` 38개 통과. 취소 승인·완료 승인·취소 거절에서 상태와 producer의 작업 edge/span 확인 | Workspace 전이 → 영속 Activity event → graph/span. 검증 요청 준비 fixture를 사용하므로 전체 VerificationProtocol E2E는 아님 |
+| [완료 집계 후속 #37135](https://github.com/jeong-sik/masc/pull/37135), `77db8e4f851c` | 13:57:11Z 자식 후보의 Activity suite 39개 통과. Done/Approved만 완료로 세고 Cancelled/Submit_for_verification/Rejected는 세지 않는 실제 event slice 확인 | 부모의 38개와 겹치는 suite이므로 부모 53개와 합산하지 않음 |
+| [Memory 읽기 #37137](https://github.com/jeong-sik/masc/pull/37137), `981c72a9f269` | 14:14:48Z 공통 `Fs_compat.load_file_opt` 수정 후 Fs suite 36개·Memory suite 70개 각각 통과, UID 502·권한 시험 skip 0. 부모 경로 EACCES/ENOTDIR의 두 backend 회귀는 baseline 8개 중 4개 실패 → 수정 후 통과 | Memory별 우회를 제거한 최종 공통 helper에서 새로 실행한 결과이며 이전 `b2a480` 결과를 옮긴 것이 아님. 동시 rename 경합은 실측하지 않음 |
+
+근거는 각 후보의 실행 명령·exit code·바이너리 SHA256을 담은 `result.json`/`local-test-result.json`, 원본 suite 로그, TUI `observed-payloads.json`과 raw PTY다. Memory의 최종 근거는 `fs-optional-final/result.json`, `test_fs_compat.log`, `test_keeper_memory_os_current.log`와 baseline `fs-optional-baseline-test.log`다. 이 기록의 신뢰도는 각 실행 범위에 대해 High이며, 부모·자식 suite 수를 고유 검증 수로 합산하지 않는다.
+
+격리 workspace에서 실제 OpenRouter `z-ai/glm-5.3-flash`로 Instruction Skill과 readonly inline Composition을 **각각 세 Keeper 턴** 실행했다. 두 실행의 고정 바이너리는 `941a727ea954`/0.35.20, SHA256 `6521b0e28421ef39f61a76c1ecdb0b155a3d95472ae97f5b5532b6b70ac585df`다. 감사 소스 `c4f382210901`과 각각 명시한 관련 8개·13개 파일이 같음을 확인했으며 전체 소스가 같다는 주장은 아니다.
+
+- Instruction(13:31:16Z): A 발행 → 첫 턴의 exact reference 호출·본문 hash·model-delivery receipt, B 교체 발행 → 둘째 턴의 새 revision 호출, 삭제 발행 → 셋째 턴의 도구 제공·실제 호출·새 activation 부재를 확인했다. provider-input 수집의 HTTP 400은 `turn_ref`를 빠뜨린 collector 오류다. provider-input 캡처나 모델 재실행 성공으로 바꾸어 기록하지 않고 저장된 checkpoint·tool-call·activation/delivery·turn record를 근거로 삼는다.
+- Composition(13:47:01Z): 같은 발행·교체·삭제 순서에서 첫 두 턴에 각각 실제 모델의 composition 호출 1개와 readonly 내부 도구 실행 3개를 확인했다. 같은 실행의 lane 출력이 search 입력으로 연결되고 교체한 입력도 반영됐다. 삭제 뒤 셋째 턴에는 도구 제공·호출·새 activation이 없었다. provider-input은 서버의 `Pre_dispatch_serialization` 캡처이며 원격 provider receipt는 아니다.
+
+두 실행의 근거는 원본 API/SSE·checkpoint·activation·실행 기록을 검사하는 `verify.py`와 각 `skill-cycle-live/verified-summary.json`, `composition-cycle-live/verified-summary.json`이다. 시험용 Skill 문서만 사용했으며 개인 대화나 credential은 문서에 싣지 않았다. 서버·임시 workspace 정리도 확인했다. 이 결과는 수동 발행·교체·삭제의 세 턴 경로에 한정한다. 자동 Skill mining, Memory에서 반복 해결법을 합성·검증·발행하는 순환, 외부 효과 Composition, 임의 N Tick의 안정성, 전체 벤치 통과는 미검증이다.
+
+14:10Z Context 소스 감사는 main `941a727ea954`와 #37073의 `4113b199009a`를 기준으로 한다. #37073의 [턴별 refusal front](https://github.com/jeong-sik/masc/blob/4113b199009afbcce7b454332e2a92b201a51285/lib/keeper/keeper_turn_driver.ml#L1533)는 같은 턴의 후보들이 공유한다. [front 선택](https://github.com/jeong-sik/masc/blob/4113b199009afbcce7b454332e2a92b201a51285/lib/keeper/keeper_turn_driver_try_provider.ml#L810)은 그 위치와 유효한 runtime별 원장 중 뒤쪽을 고르지만, 다음 턴에는 공유 ref가 새로 시작하고 유효한 해당 runtime 원장이 cold seed보다 먼저 쓰인다. 따라서 A가 8, B가 12까지 좁힌 뒤 다음 턴 A가 8부터 시작할 수 있다. 이는 canonical History의 중복 추가가 아니라 runtime을 바꿀 때 전송 범위가 넓어지는 현재 우선순위다. 모든 다음 턴이 마지막 성공 후보보다 좁아진다는 계약으로 일반화하지 않는다. 관련 소스를 대조한 결과이며 overflow → checkpoint 복원 → 다음 턴의 전체 연결을 실제로 실행한 증거는 아니다.
+
 ## 검증 (Verification)
 
 - 1차: Git 날짜별 고정 구간과 producer → store → consumer 코드를 대조했다.
 - 2차: 실제 포트의 health, Keeper MCP 상태, exact lane 기록, pinned Harbor 구현과 공식 문서를 읽었다.
-- 3차: Harbor 인증 6개 실패 재현 뒤 관련 67개 테스트 통과. GitHub의 #37077 `pytest`도 success. TUI 설치본은 새 확인 키를 찾지 못하는 PTY 실패를 재현했다. OCaml candidate는 로컬 빌드 없이 PR CI로 검증 중이다.
+- 3차: 초기에는 Harbor 인증 6개 실패 재현 뒤 관련 67개 테스트 통과, #37077 `pytest` success, TUI 설치본의 확인 키 부재를 확인하고 OCaml 후보를 PR CI로 검증했다. 이후 후보별 직접 로컬 실행과 실제 GLM 세 턴 검증은 위 별도 구간에 기록했다.
 - 재현 결과: 여러 개의 좁은 수정 PR과 live catalog mismatch를 확인했다. 모든 PR이 통과·병합·배포됐다는 뜻은 아니다. 각 PR의 현재 head/check/review가 마무리 판정의 근거다.
 
 ## 불확실성 (Uncertainty)

@@ -20,6 +20,7 @@ let step
     ?(state = "DONE")
     ?(step_type = "agent_response")
     ?tool_name
+    ?text_delta
     ()
   =
   let tool_name_field =
@@ -27,13 +28,19 @@ let step
     | Some value -> Printf.sprintf ",\"tool_name\":%S" value
     | None -> ""
   in
+  let text_delta_field =
+    match text_delta with
+    | Some value -> Printf.sprintf ",\"text_delta\":%S" value
+    | None -> ""
+  in
   Printf.sprintf
-    {|{"event":"step_update","step_update":{"conversation_id":%S,"step_index":%d,"state":%S,"step_type":%S%s}}|}
+    {|{"event":"step_update","step_update":{"conversation_id":%S,"step_index":%d,"state":%S,"step_type":%S%s%s}}|}
     conversation_id
     index
     state
     step_type
     tool_name_field
+    text_delta_field
 ;;
 
 let result
@@ -302,6 +309,64 @@ let test_stream_events_preserve_available_wire_data () =
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
          | _ -> fail "Antigravity stream did not preserve available wire data")
+;;
+
+(* agy carries the answer on the agent_response steps as the model writes it
+   (measured 2026-09-18, agy 1.2.6), and the result event then repeats the
+   whole thing. Both reaching the reader would print the answer twice, so the
+   pieces go out as they arrive and the result adds nothing. The stream above
+   with no piece at all is the other half of this: there the result is the
+   only account of the answer and still goes out. *)
+let test_answer_pieces_reach_the_reader_and_the_result_adds_nothing () =
+  let events = ref [] in
+  with_fixture
+    [ init ()
+    ; step ~index:1 ~state:"ACTIVE" ~step_type:"agent_response" ~text_delta:"PO" ()
+    ; step ~index:1 ~state:"DONE" ~step_type:"agent_response" ~text_delta:"NG\n" ()
+    ; result ~response:"PONG\n" ()
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> events := event :: !events)
+           path
+       with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ ->
+         match List.rev !events with
+         | [ Runtime_antigravity.Turn_started
+               { conversation_id = "conversation-1"; model = "gemini-fixture" }
+           ; Text_delta "PO"
+           ; Text_delta "NG\n"
+           ; Turn_finished { text = "PONG\n" }
+           ] -> ()
+         | _ ->
+           fail "Antigravity answer pieces did not reach the reader exactly once")
+;;
+
+(* An empty piece says nothing, and forwarding it would make a reader show a
+   delta that carries no character. *)
+let test_an_empty_piece_is_not_forwarded () =
+  let events = ref [] in
+  with_fixture
+    [ init ()
+    ; step ~index:1 ~state:"ACTIVE" ~step_type:"agent_response" ~text_delta:"" ()
+    ; result ~response:"PONG\n" ()
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> events := event :: !events)
+           path
+       with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ ->
+         match List.rev !events with
+         | [ Runtime_antigravity.Turn_started _
+           ; Text_delta "PONG\n"
+           ; Turn_finished { text = "PONG\n" }
+           ] -> ()
+         | _ -> fail "An empty piece changed what the reader was shown")
 ;;
 
 let test_stream_events_preserve_exact_native_tool_steps () =
@@ -1164,6 +1229,14 @@ let () =
             "stream preserves available wire data"
             `Quick
             test_stream_events_preserve_available_wire_data
+        ; test_case
+            "answer pieces reach the reader once"
+            `Quick
+            test_answer_pieces_reach_the_reader_and_the_result_adds_nothing
+        ; test_case
+            "an empty piece is not forwarded"
+            `Quick
+            test_an_empty_piece_is_not_forwarded
         ; test_case
             "stream preserves exact native tool steps"
             `Quick

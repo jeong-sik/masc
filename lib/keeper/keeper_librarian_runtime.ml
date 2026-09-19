@@ -539,7 +539,11 @@ let execute_exact_output_classified
        slots still own a chance to answer, just as after API exhaustion. *)
     (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
-     | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
+     | Some (runtime_id, selection, output) ->
+       Log.Keeper.warn ~keeper_name:keeper_id
+         "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
+         exact_lane_id runtime_id (extraction_error_to_string error);
+       Ok ((selection, output), runtime_id)
      | None -> Error error)
   | Ok lane_unusable ->
   (if lane_unusable <> [] then

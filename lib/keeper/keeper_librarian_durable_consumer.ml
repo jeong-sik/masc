@@ -68,7 +68,8 @@ let error_to_string = function
 ;;
 
 let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest lines =
-  List.filter_map
+  let matches =
+    List.filter_map
     (fun (line, decoded) ->
        let admitted =
          match through with
@@ -105,9 +106,12 @@ let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest li
                  }
            ; _
            } -> None)
-    lines
-  |> List.sort (fun (left, _) (right, _) -> Float.compare right left)
-  |> List.hd_opt
+      lines
+    |> List.sort (fun (left, _) (right, _) -> Float.compare right left)
+  in
+  match matches with
+  | [] -> None
+  | latest :: _ -> Some latest
 ;;
 
 let tool_observations messages =

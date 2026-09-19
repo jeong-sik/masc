@@ -22,18 +22,17 @@ type prepared_turn =
 
 (** What an official-client lane can say about one turn's model input.
 
-    [Whole_input_transmitted] carries the list the lane rendered into the
-    request in full, which is what a [Start] does: the seed history, the
-    prompt-context carrier and the goal all leave this process on this turn,
-    so the bytes can be attributed.
+    [Whole_input_transmitted] carries the MASC-prepared messages rendered into
+    this request. Starts send the seed history; Claude Code and Codex resumes
+    also send the canonical snapshot through replacement configuration.
+    Client-owned native conversation and tool history outside that snapshot
+    are not included in this capture.
 
-    [Held_by_client_session] is a [Resume]. The client owns the conversation
-    server-side and masc sends only the new turn, so the accumulated history
-    the model reads never crosses this process and no measurement of it exists
-    here. Reporting the local list for these turns attributes bytes that were
-    not sent -- and on Antigravity inverts the record outright, because the
-    carrier that {b is} sent is the one message
-    {!Keeper_agent_prompt_metrics.provider_content_of_transmitted} removes. *)
+    [Held_by_client_session] means that the lane did not retransmit that
+    history, as on Antigravity resume. The current goal and ephemeral context
+    may still be sent. The accumulated client-owned history is not observable
+    here, so attributing the local prepared list would count bytes that were
+    not sent. This distinction is not the [Start]/[Resume] distinction. *)
 type transmitted_model_input =
   | Whole_input_transmitted of Agent_core.Types.message list
   | Held_by_client_session

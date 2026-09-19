@@ -614,4 +614,6 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
 
    라이브에서 두 레인을 섞는 Keeper 가 몇이고 그 안의 agent core 턴이 몇인지는 다른 세션이 쟀고(14개 중 6개, 326턴), 여기서 따로 세어 7개·328턴으로 같은 답을 얻었다. 레인은 `runtime_profile` 의 앞부분으로 가른다 — `total_atoms` 로 가르면 공식 클라이언트가 11% 로 나와 알려진 56% 와 어긋난다.
 
-   **그 레인이 도구를 안 써서 내용이 없는 것이 아니다**(09-19, 턴 기록의 `input_components`). 공식 클라이언트 턴 1,018건 중 **819건(80%)** 에 도구 바이트가 있고 합이 **1.59 GB** 다. agent core 는 694건 전부에 있지만 합은 0.18 GB 다. 이 값은 masc 가 조립한 입력을 잰 것이므로(`keeper_run_prompt.ml` 의 `build_prompt_metrics`) 그 순간 손에 있었다는 뜻이다. 그러니 §2.5 의 D6 은 43% 의 문제가 아니라 **100% 의 문제**이고, 버려지는 양은 공식 클라이언트 쪽이 9배 크다. 도구 본문을 어디에 남길지는 §6 이 정하는데, 그 자리가 checkpoint 라면 이 1.59 GB 는 계속 버려진다.
+   **입력 구성 바이트는 도구 본문의 소실량이 아니다.** `Turn_record.input_components`는 Keeper 턴에서 관측한 마지막 요청의 구성 비용이다(`lib/types/turn_record.mli`). `keeper_agent_run.ml`이 넘긴 `input_messages` 전체에서 `Keeper_agent_prompt_metrics.build_ctx_segments`가 도구 호출·결과 바이트를 합하므로, 같은 이력을 다음 요청에 다시 실으면 다시 세어진다. 호출 id·도구 이름·인자도 포함하며, 새로 생성된 결과나 유일한 본문, 삭제된 바이트를 세지 않는다.
+
+   Claude Code와 Codex는 재개할 때도 MASC의 canonical snapshot을 설정으로 다시 보내고 그 메시지를 `Whole_input_transmitted`로 보고한다. 이 측정에는 클라이언트가 따로 보유한 native 대화·도구 이력이 포함되지 않는다. 따라서 이 합계로 D6의 발생률이나 실행 방식별 소실량을 비교할 수 없다. source로 확인되는 D6의 경계는 `keeper_librarian.ml`의 `text_of_content`가 도구 호출·결과 본문을 생략하고, checkpoint가 없는 공식 클라이언트 턴의 `librarian_messages`가 assistant 메시지만 받는다는 것이다. 실제 본문이 어디에 보관되고 무엇이 빠지는지는 이 프롬프트 입력 계약과 별도로 확인해야 한다(§6).

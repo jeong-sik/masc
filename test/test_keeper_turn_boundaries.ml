@@ -54,6 +54,21 @@ let history_restarted ?(trace_id = "trace") () : Boundaries.record =
 
 let atom_history = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "digest" }
 
+(* The compiler keeps the two lists below honest. A constructor added to either
+   type makes one of these matches inexhaustive and the build stops, so a list
+   named for every kind cannot quietly hold fewer than every kind. Without them
+   the round-trip test keeps its name and covers one case less. *)
+let _every_position_is_listed : Boundaries.position -> unit = function
+  | Boundaries.Atom_history _
+  | Boundaries.Empty_atom_history
+  | Boundaries.No_atom_history
+  | Boundaries.Stale_noop -> ()
+;;
+
+let _every_history_at_start_is_listed : Boundaries.history_at_start -> unit = function
+  | Boundaries.Fresh_history | Boundaries.Continued_history -> ()
+;;
+
 let every_position =
   [ atom_history
   ; Boundaries.Empty_atom_history

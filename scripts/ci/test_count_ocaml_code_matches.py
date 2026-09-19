@@ -77,6 +77,73 @@ CASES: list[tuple[str, str, int]] = [
         1,
     ),
     (
+        # Without the character rule in code, the first " opens a string
+        # that swallows the text up to the attribute and exposes it.
+        "a character literal in code opens no string",
+        "let q = '\"'\nlet s = \"[@@deriving tla]\"\nlet r = '\"'\n",
+        0,
+    ),
+    (
+        # x' is one identifier, so the " after it opens a string; read as
+        # x then '"' the attribute would sit in code.
+        "an identifier in code keeps its trailing quote",
+        "let x' s = s\nlet y = x'\"'[@@deriving tla]\"\n",
+        0,
+    ),
+    (
+        # '\"' is a character; read as ' \ then " a string would open and
+        # expose the attribute on the next line.
+        "an escaped character literal in code opens no string",
+        "let q = '\\\"'\nlet s = \"[@@deriving tla]\"\nlet r = '\\\"'\n",
+        0,
+    ),
+    (
+        "a quoted string inside a comment hides a close",
+        "(* {|*)|} [@@deriving tla] *)\ntype t = A [@@deriving tla]\n",
+        1,
+    ),
+    (
+        "an escaped quote does not end a string",
+        "let s = \"\\\" [@@deriving tla]\"\n",
+        0,
+    ),
+    (
+        # '' is one token in a comment; read as ' then ' ' the next " would
+        # open a string that ends inside the comment's close.
+        "two quotes inside a comment are one token",
+        "(* '' '\"' *)\nlet s = \"a *) [@@deriving tla] \"\nlet c = '\"'\n",
+        0,
+    ),
+    (
+        "a character literal may hold a raw newline",
+        "let l = ['\n';'\"']\ntype t = A [@@deriving tla]\n",
+        1,
+    ),
+    (
+        "a character literal may hold a raw CRLF",
+        "let l = ['\r\n';'\"']\ntype t = A [@@deriving tla]\n",
+        1,
+    ),
+    (
+        # café' is one identifier, so '"' is not a character and the "
+        # after it opens a string that ends before *).
+        "an identifier with UTF-8 letters keeps its trailing quote",
+        "(* café'\"' \" *)\ntype t = A [@@deriving tla]\n",
+        1,
+    ),
+    ("a quoted extension does not count", "let s = {%foo|[@@deriving tla]|}\n", 0),
+    ("an item quoted extension does not count", "{%%foo|[@@deriving tla]|}\n", 0),
+    (
+        "a dotted quoted extension with an id ends at its own terminator",
+        "let s = {%foo.bar id|a |} [@@deriving tla] |id}\ntype t = A [@@deriving tla]\n",
+        1,
+    ),
+    (
+        "a quoted extension inside a comment hides a close",
+        "(* {%foo| *) [@@deriving tla] |} *)\ntype t = A [@@deriving tla]\n",
+        1,
+    ),
+    (
         "two in code both count",
         "type a = A [@@deriving tla]\ntype b = B [@@deriving tla]\n",
         2,
@@ -108,7 +175,12 @@ def main() -> int:
     failures = 0
 
     for name, text, expected in CASES:
-        masked = counter.mask_ocaml_non_code(text)
+        try:
+            masked = counter.mask_ocaml_non_code(text)
+        except counter.OcamlLexError as error:
+            print(f"FAIL {name}: rejected valid OCaml ({error})")
+            failures += 1
+            continue
         found = len(pattern.findall(masked))
         if found != expected:
             print(f"FAIL {name}: expected {expected}, found {found}")

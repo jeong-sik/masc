@@ -11,10 +11,20 @@
 # the same weights reached through a different wire have a different window or
 # a different way of being told to think.
 #
-# Serving a model this file has no row for: add the row. There is no
-# deployment-side overlay; a second copy of a fact is a second thing to keep in
-# step, and the one that used to exist ended up disagreeing with this file on
-# tool support, on replay policy, and on one window by a factor of five.
+# Serving a model this file has no row for: add the row. A deployment does not
+# restate a row that exists here -- a second copy of a fact is a second thing to
+# keep in step, and the overlay that used to hold those copies ended up
+# disagreeing with this file on tool support, on replay policy, and on one
+# window by a factor of five.
+#
+# One endpoint cannot be given a row here. The install wizard builds its
+# provider id from a hash of the operator's answers, so no row can ever name it,
+# and the model behind it is the operator's own. That deployment declares the
+# model's capabilities in its own runtime.toml and names the endpoint's dialect
+# with [providers.<id>] kind. Neither declaration can meet a row in this file,
+# so neither is a second copy; a provider this file does have a row for is
+# refused outright if it states the same facts.
+#
 # AGENT_CORE_MODEL_CATALOG replaces this file wholesale for a deployment that
 # must not edit it, and then owns every row.
 

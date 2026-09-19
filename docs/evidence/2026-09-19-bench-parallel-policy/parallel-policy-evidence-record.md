@@ -21,7 +21,7 @@
 - 1차: renderer가 `supports-parallel-tool-calls`를 arm별로 바꾸지만 catalog 분기는 그 값을 읽지 않음을 확인했다. 요청의 `disable_parallel_tool_use` 기본값은 false였다.
 - 2차: 캡처의 `toml`을 임시 `<base-path>/.masc/config/runtime.toml`에 저장하고 `masc runtime-verify --base-path <base-path> --timeout 15 claude.claude-fable-5`를 실행했다. loopback 서버는 count-tokens에 `input_tokens: 8`, completion에 캡처 완료를 알리는 HTTP 400을 답했다.
 - 3차: parallel capability를 false와 true로 바꾼 두 실행 모두 `/v1/messages` 요청에 tools가 1개 있고 `tool_choice`는 없었다. 동일한 전송 경로에서 억제 정책이 빠졌음을 확인했다.
-- 재현 결과: 결함 재현. 두 명령의 종료 코드는 의도한 HTTP 400에 따른 1이며 모델 응답·도구 실행·benchmark 통과를 뜻하지 않는다. 새 테스트는 binding TOML부터 fresh/resumed Agent 설정을 거쳐 Anthropic·OpenAI Chat·Responses 요청 JSON까지 검사한다. 로컬 Dune 빌드는 하지 않았고 OCaml 실행 검증은 PR CI에 맡긴다.
+- 재현 결과: 결함 재현. 두 명령의 종료 코드는 의도한 HTTP 400에 따른 1이며 모델 응답·도구 실행·benchmark 통과를 뜻하지 않는다. 새 테스트는 binding TOML부터 fresh/resumed Agent 설정을 거쳐 Anthropic·OpenAI Responses 요청 JSON까지 검사한다. 로컬 Dune 빌드는 하지 않았고 OCaml 실행 검증은 PR CI에 맡긴다.
 
 ## 불확실성
 
@@ -38,9 +38,9 @@
 ## Provider 계약 리뷰 보완
 
 - 항목: HTTP serializer가 필드를 만들 수 있어도 모든 호환 서비스가 억제 정책을 지원하는 것은 아니다. 모델의 병렬 생성 능력과 provider의 억제 제어 지원은 별도 사실이다.
-- 출처: [Anthropic](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use#disable-parallel-tool-use), [OpenAI](https://developers.openai.com/api/docs/guides/function-calling#parallel-function-calling), [OpenRouter](https://openrouter.ai/docs/api_reference/parameters#parallel-tool-calls), [Z.ai request reference](https://docs.z.ai/api-reference/llm/chat-completion).
-- 확인일시: 2026-09-19T20:05:28+09:00
+- 출처: [Anthropic](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use#disable-parallel-tool-use), [OpenAI](https://developers.openai.com/api/docs/guides/function-calling#parallel-function-calling), [OpenRouter routing](https://openrouter.ai/docs/guides/routing/provider-selection#requiring-providers-to-support-all-parameters), [Z.ai request reference](https://docs.z.ai/api-reference/llm/chat-completion).
+- 확인일시: 2026-09-19T20:18:12+09:00
 - 신뢰도: High
 - 제한조건: 각 서비스의 공식 요청 계약이다. 개별 모델 호출·성공률을 실측했다는 뜻은 아니다. Z.ai는 이 문서에서 해당 제어를 확인하지 못했으므로 지원한다고 추정하지 않는다.
-- 검증: provider catalog의 `supports_parallel_tool_suppression`을 strict bool로 파싱하고, canonical ID/alias로 조회한다. 미선언/false/unknown provider는 억제 요청을 거절한다. 현재 true 선언은 공식 근거를 확인한 `claude`, `openai-responses`, `openrouter` 세 provider뿐이다. 모델의 `supports_parallel_tool_calls`는 유지한다.
+- 검증: provider catalog의 `supports_parallel_tool_suppression`을 strict bool로 파싱하고, canonical ID/alias로 조회한다. 미선언/false/unknown provider는 억제 요청을 거절한다. 현재 true 선언은 native `claude`, `openai-responses` 두 provider뿐이다. OpenRouter의 일반 인자 문서만으로 gateway downstream의 억제 지원을 보장할 수 없다. 기본 routing은 미지원 인자를 무시할 수 있고 MASC는 `require_parameters`를 보내지 않으므로 OpenRouter도 미선언으로 유지하여 억제 요청을 거절한다. 모델의 `supports_parallel_tool_calls`는 유지한다.
 - 추가 확인 필요: 보완 head에서 provider 계약/alias/잘못된 타입/미확인 endpoint 거부 및 기존 actual wire tests를 CI에서 다시 실행한다. 이전 cad3066b68의 targeted CI는 249 tests 통과했으나 이 보완의 검증으로 재사용하지 않는다.

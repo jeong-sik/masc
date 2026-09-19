@@ -2709,10 +2709,6 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
          | `Null -> `Null
          | choice -> Json.member "disable_parallel_tool_use" choice),
       `Bool true
-    ; "openrouter", "openai-compatible-http", "z-ai/glm-4.7-flash",
-      (fun config -> Llm_provider.Backend_openai.build_request_assoc
-          ~config ~messages:[] ~tools:[ tool_json ] ()),
-      Json.member "parallel_tool_calls", `Bool false
     ; "openai-responses", "openai-compatible-http", "gpt-5.6-luna",
       (fun config -> Llm_provider.Backend_openai_responses.build_request
           ~config ~messages:[] ~tools:[ tool_json ] () |> Yojson.Safe.from_string),
@@ -2807,7 +2803,7 @@ let test_parallel_policy_requires_provider_contract () =
       | Ok _ -> fail "wire compatibility silently accepted suppression" in
     check_refusal (Runtime_adapter.binding_to_execution cfg binding);
     check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
-  ) [ "glm-coding"; "unregistered-endpoint" ];
+  ) [ "glm-coding"; "openrouter"; "unregistered-endpoint" ];
   let cfg, binding = parallel_policy_runtime ~provider_id:"claude"
       ~protocol:"messages-http" ~model_id:"claude-fable-5" ~policy:"" in
   let provider = { (List.hd cfg.providers) with Runtime_schema.id = "fixture-alias" } in

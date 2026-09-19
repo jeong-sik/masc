@@ -7,6 +7,11 @@ module U = Yojson.Safe.Util
 let trace_id = "replay-trace"
 let keeper_id = "replay-keeper"
 
+let librarian_replay_exe () =
+  let path = Sys.getenv "MASC_TEST_LIBRARIAN_REPLAY_EXE" in
+  if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
+;;
+
 let checkpoint ~trace_id messages : Agent_core.Checkpoint.t =
   { version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = trace_id
@@ -76,7 +81,7 @@ let run_cli ?base_argument ?env_base_path env ~base_path ~config_root ~cluster_n
           ; "MASC_CLUSTER_NAME=" ^ cluster_name
           |]
     (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
-    [ Sys.getenv "MASC_TEST_LIBRARIAN_REPLAY_EXE"
+    [ librarian_replay_exe ()
     ; "--base-path"; Option.value ~default:base_path base_argument
     ; "--keeper"; keeper_id; "--extent"; extent
     ]
@@ -261,7 +266,7 @@ let test_missing_store_is_not_an_empty_replay keeper_argument () =
     ~env:[| "MASC_BASE_PATH=" ^ base_path; "MASC_CONFIG_DIR=" ^ base_path ^ "/config" |]
     ~is_success:(Int.equal 2)
     (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
-    ([ Sys.getenv "MASC_TEST_LIBRARIAN_REPLAY_EXE"; "--base-path"; base_path ]
+    ([ librarian_replay_exe (); "--base-path"; base_path ]
      @ keeper_argument) in
   check string "a failed directory read is not a successful JSON result" "" output;
   check (list (pair string string)) "failed read creates no files" [] (files_under base_path)

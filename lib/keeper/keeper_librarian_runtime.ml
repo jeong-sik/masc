@@ -533,7 +533,15 @@ let execute_exact_output_classified
      | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
      | None -> Error Cli_slots_exhausted)
   | _ :: _ ->
-  let* lane_unusable = preflight_slots ~selected_slots ~messages in
+  match preflight_slots ~selected_slots ~messages with
+  | Error error ->
+    (* No API slot can project this request. The independently admitted CLI
+       slots still own a chance to answer, just as after API exhaustion. *)
+    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+       ~selected_input ~messages with
+     | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
+     | None -> Error error)
+  | Ok lane_unusable ->
   (if lane_unusable <> [] then
      Log.Keeper.warn ~keeper_name:keeper_id
        "librarian lane=%s pre-flight excluded slot(s) from this run: %s"

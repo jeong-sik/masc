@@ -5150,6 +5150,7 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
+(include stanzas/test_keeper_projection_change.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
 

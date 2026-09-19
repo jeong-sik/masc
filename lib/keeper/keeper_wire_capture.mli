@@ -122,6 +122,41 @@ val capture_response :
     projection snapshot. This closes the loop for analysis: turn N's response
     is turn N+1's replayed history input. No-op unless {!enabled}. *)
 
+val capture_request_projection_change :
+  masc_root:string ->
+  keeper_name:string ->
+  turn_id:int ->
+  agent_core_turn:int ->
+  trace_id:Keeper_id.Trace_id.t ->
+  runtime_profile:string ->
+  memo:Keeper_projection_change.digest_memo ->
+  previous:Keeper_projection_change.previous_request ->
+  tools:Agent_core.Tool.t list ->
+  messages:Agent_core.Types.message list ->
+  Keeper_projection_change.previous_request
+(** Called once per provider request with the values that request carries:
+    its tool schemas, and its messages after projection without the
+    extra-system-context carrier AGENT_CORE appends last, so [message_count]
+    is one less than the provider received when a carrier was sent.
+    Digests [tools] and [messages] on the CPU domain pool, compares them with
+    [previous] through {!Keeper_projection_change.compare_requests}, and
+    appends one [kind:"request_projection_change"] row. Returns the state the
+    next request of the same keeper turn compares against: [Request_digested]
+    when hashing succeeded, whether or not the row was written, and
+    [Request_not_digested] after a hashing failure, which is logged as a
+    warning. Cancellation propagates. Unless {!enabled} it digests and writes
+    nothing and returns [Request_not_digested], so a request sent while
+    capture is off is not compared across once capture is on again.
+
+    The caller waits for it before the request is dispatched. While capture is
+    on, every request therefore pays one serialization and SHA-256 of its tool
+    schemas and of the messages [memo] has not seen in this keeper turn, plus
+    one [memo] lookup per message.
+
+    [trace_id], [turn_id] and [agent_core_turn] are the values the cost
+    ledger records as [trace_id], [keeper_turn_id] and
+    [agent_core_turn_ordinal] for the response to this request. *)
+
 val capture_rejected_reasoning :
   base_path:string ->
   masc_root:string ->

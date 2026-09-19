@@ -907,7 +907,10 @@ let test_runtime_route_writer_updates_default () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
-let check_first_run_lanes path runtime_id ~cli =
+(* [judges] says whether completion judgement can use the runtime. A CLI
+   runtime it cannot use (Codex, which cannot suppress its native tools) is
+   left out of verifier_exact, because the load refuses such a CLI slot. *)
+let check_first_run_lanes ?(judges = true) path runtime_id ~cli =
   match Runtime_toml.parse_string (read_file path) with
   | Error _ -> Alcotest.fail "first-run configuration must parse"
   | Ok config ->
@@ -917,6 +920,8 @@ let check_first_run_lanes path runtime_id ~cli =
         config.exact_output_lane_decls with
       | None ->
         if cli && not (Option.fold ~none:true ~some:Runtime.exact_lane_supports_cli_tail (Runtime.exact_lane_of_id id))
+        then ()
+        else if cli && (not judges) && String.equal id Runtime.verifier_exact_lane_id
         then ()
         else Alcotest.failf "missing first-run lane %s" id
       | Some lane ->
@@ -959,7 +964,7 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
       (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"codex.codex" () with
        | Ok _ -> ()
        | Error detail -> Alcotest.fail detail);
-      check_first_run_lanes path "codex.codex" ~cli:true;
+      check_first_run_lanes ~judges:false path "codex.codex" ~cli:true;
       (* This is the offline first-run writer. The runtime registry is a
          server-bootstrap publication, not a side effect of saving a file.
          test_verifier_official_client exercises that publication through the
@@ -2887,6 +2892,25 @@ let test_a_verifier_cli_slot_naming_a_lane_is_refused () =
     then Alcotest.failf "the refusal %S does not name %S" msg needle
 ;;
 
+(* Resolving is not enough for a verifier CLI slot: judgement dispatches it as
+   an official client, so an HTTP runtime there loaded and then failed every
+   review. The load refuses it with the reason dispatch would give. *)
+let test_a_verifier_cli_slot_naming_an_http_runtime_is_refused () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.verifier_exact]\n\
+       slots = [\"openai.gpt\"]\ncli_slots = [\"openai.gpt\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "an HTTP runtime loaded as a verifier CLI slot"
+  | Error msg ->
+    let needle =
+      {|[runtime.exact_output_lanes.verifier_exact].cli_slots entry "openai.gpt" cannot judge: openai.gpt: verifier CLI slot must name an official client|}
+    in
+    if not (string_contains msg needle)
+    then Alcotest.failf "the refusal %S does not name %S" msg needle
+;;
+
 let test_an_assignment_names_a_lane_of_its_own_name () =
   match load_lane_config runtime_config_lane_named_freely with
   | Error msg -> Alcotest.failf "a freely named lane must load: %s" msg
@@ -3191,6 +3215,10 @@ let () =
             "a verifier CLI slot naming a lane is refused"
             `Quick
             test_a_verifier_cli_slot_naming_a_lane_is_refused
+        ; Alcotest.test_case
+            "a verifier CLI slot naming an HTTP runtime is refused"
+            `Quick
+            test_a_verifier_cli_slot_naming_an_http_runtime_is_refused
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

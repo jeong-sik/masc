@@ -434,6 +434,29 @@ type resolution_failure =
   ; runtime_count : int
   }
 
+(* Why judgement cannot use a runtime, whether it is a verifier slot or a
+   CLI slot. One predicate serves the load and the dispatch, so a slot the
+   load admits is one judgement can use. *)
+type verifier_admission_refusal =
+  | Verifier_needs_tools_support
+  | Verifier_needs_native_tool_suppression
+  | Verifier_cli_slot_is_lane
+  | Verifier_cli_slot_unconfigured
+  | Verifier_cli_slot_not_official_client
+
+let verifier_admission_refusal_to_string ~runtime_id = function
+  | Verifier_needs_tools_support ->
+    runtime_id ^ ": completion verifier requires model tools-support"
+  | Verifier_needs_native_tool_suppression ->
+    runtime_id
+    ^ ": completion verifier requires native-tool suppression, which this client does not support"
+  | Verifier_cli_slot_is_lane ->
+    runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane"
+  | Verifier_cli_slot_unconfigured -> runtime_id ^ ": verifier CLI runtime is not configured"
+  | Verifier_cli_slot_not_official_client ->
+    runtime_id ^ ": verifier CLI slot must name an official client"
+;;
+
 (* The ways loading runtime.toml fails, closed so a consumer decides per case
    instead of matching rendered text — the contract [drop_reason] already keeps
    one level down. [Toml_unparsable] is the single case whose text comes from
@@ -462,6 +485,10 @@ type load_failure =
       { runtime_id : string
       ; high_water_tokens : int
       ; max_context : int
+      }
+  | Verifier_cli_slot_inadmissible of
+      { runtime_id : string
+      ; refusal : verifier_admission_refusal
       }
 
 (* A dangling reference is an operator typo, and unlike every other drop reason
@@ -570,6 +597,12 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
+  | Verifier_cli_slot_inadmissible { runtime_id; refusal } ->
+    Printf.sprintf
+      "%s: [runtime.exact_output_lanes.verifier_exact].cli_slots entry %S cannot judge: %s"
+      config_path
+      runtime_id
+      (verifier_admission_refusal_to_string ~runtime_id refusal)
 ;;
 
 (* The same account, minus the one part this repository did not write. A parse
@@ -592,7 +625,8 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Reference_unresolved _
   | Lane_candidate_unresolved _
   | Max_context_absent _
-  | Context_marks_exceed_max_context _ -> to_diagnostic_text ~config_path failure
+  | Context_marks_exceed_max_context _
+  | Verifier_cli_slot_inadmissible _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -988,6 +1022,31 @@ let exact_lane_supports_cli_tail = function
   | Workspace_curator -> false
 ;;
 
+let verifier_runtime_admissibility (runtime : t) =
+  match runtime.execution with
+  | Runtime_execution.Agent_core _ -> Ok ()
+  | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
+  | Runtime_execution.Claude_code _ -> Error Verifier_needs_tools_support
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ ->
+    Error Verifier_needs_native_tool_suppression
+;;
+
+(* Verifier slots name direct bindings even when ordinary Keeper routing
+   declares a same-named failover lane. Never resolve that lane here. *)
+let verifier_cli_slot_admissibility ~(runtimes : t list) ~(lanes : Runtime_lane.t list)
+      runtime_id
+  =
+  match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
+  | None when Option.is_some (find_declared_lane lanes runtime_id) ->
+    Error Verifier_cli_slot_is_lane
+  | None -> Error Verifier_cli_slot_unconfigured
+  | Some runtime ->
+    (match runtime.execution with
+     | Runtime_execution.Agent_core _ -> Error Verifier_cli_slot_not_official_client
+     | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admissibility runtime)
+;;
+
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
    twice. The exact registry admits them against the AGENT_CORE catalog, and
    completion-authority judgement admits each one through
@@ -1000,8 +1059,10 @@ let exact_lane_supports_cli_tail = function
 
    [cli_slots] are read the same way: [verifier_exact_lane_slot_ids] admits
    every one through [verifier_cli_slot_admission] and fails the whole lane
-   on the first id that names no configured runtime, so an unknown CLI slot
-   also loads and then refuses every judgement.
+   on the first it refuses, so an unknown CLI slot also loaded and then
+   refused every judgement. Resolution is checked here, with the binding's own
+   drop reason when one was declared; what else a CLI slot must be is checked
+   by [validate_verifier_cli_slots] with the predicate dispatch uses.
 
    The sibling lanes are deliberately not checked here. They dispatch through
    the registry alone, so a catalog-only target id is right for their slots,
@@ -1033,6 +1094,34 @@ let verifier_exact_slot_references
   | None -> []
   | Some lane ->
     references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
+;;
+
+(* Every verifier CLI slot that resolves must also be one judgement can use:
+   an official client, and one that can suppress its native tools or declares
+   tools-support. [verifier_exact_slot_references] has already refused an id
+   that resolves to nothing. *)
+let validate_verifier_cli_slots (runtimes : t list) (lanes : Runtime_lane.t list)
+      (decls : Runtime_schema.exact_output_lane_decl list)
+  : (unit, load_failure) result
+  =
+  let cli_slot_ids =
+    match
+      List.find_opt
+        (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+           String.equal lane.id verifier_exact_lane_id)
+        decls
+    with
+    | None -> []
+    | Some lane -> lane.cli_slot_ids
+  in
+  List.fold_left
+    (fun result runtime_id ->
+       let* () = result in
+       match verifier_cli_slot_admissibility ~runtimes ~lanes runtime_id with
+       | Ok () -> Ok ()
+       | Error refusal -> Error (Verifier_cli_slot_inadmissible { runtime_id; refusal }))
+    (Ok ())
+    cli_slot_ids
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
@@ -1335,6 +1424,7 @@ let materialize_config
     validate_runtime_references ~dropped_bindings runtimes lanes
       (verifier_exact_slot_references cfg.exact_output_lane_decls)
   in
+  let* () = validate_verifier_cli_slots runtimes lanes cfg.exact_output_lane_decls in
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
@@ -1615,29 +1705,16 @@ let dashboard_runtime_defaults_snapshot () =
    lane cannot judge (registry not published, lane unconfigured, or no admitted
    slots); there is no fallback to another route. *)
 let verifier_runtime_admission (runtime : t) =
-  match runtime.execution with
-  | Runtime_execution.Agent_core _ -> Ok ()
-  | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
-  | Runtime_execution.Claude_code _ ->
-    Error (runtime.id ^ ": completion verifier requires model tools-support")
-  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ ->
-    Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
+  Result.map_error
+    (verifier_admission_refusal_to_string ~runtime_id:runtime.id)
+    (verifier_runtime_admissibility runtime)
 ;;
 
 let verifier_cli_slot_admission ~runtime_id =
   let state = runtime_state () in
-  (* Verifier slots name direct bindings even when ordinary Keeper routing
-     declares a same-named failover lane. Never resolve that lane here. *)
-  match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
-  | None when List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes ->
-    Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
-  | None -> Error (runtime_id ^ ": verifier CLI runtime is not configured")
-  | Some runtime ->
-    (match runtime.execution with
-     | Runtime_execution.Agent_core _ ->
-       Error (runtime_id ^ ": verifier CLI slot must name an official client")
-     | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admission runtime)
+  Result.map_error
+    (verifier_admission_refusal_to_string ~runtime_id)
+    (verifier_cli_slot_admissibility ~runtimes:state.runtimes ~lanes:state.lanes runtime_id)
 ;;
 
 let verifier_exact_lane_slot_ids () =
@@ -3015,7 +3092,19 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
               let lane_id = exact_lane_id lane in
               let path = "runtime.exact_output_lanes." ^ lane_id in
               let lane_cli_slots =
-                if exact_lane_supports_cli_tail lane then cli_slots else []
+                if not (exact_lane_supports_cli_tail lane)
+                then []
+                else (
+                  match lane with
+                  | Verifier ->
+                    (* The load refuses a verifier CLI slot judgement cannot
+                       use; leave the lane out rather than write a file that
+                       does not load. *)
+                    (match verifier_runtime_admissibility runtime with
+                     | Ok () -> cli_slots
+                     | Error _ -> [])
+                  | Librarian | Hitl_auto_judge | Board_attention | Workspace_curator ->
+                    cli_slots)
               in
               if slots = [] && lane_cli_slots = []
               then content

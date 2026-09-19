@@ -275,6 +275,19 @@ let test_unsafe_slots_refused_before_spawn () =
       (replace "claude-code" "antigravity-cli" (runtime_config command))
     ^ Printf.sprintf "\n[providers.official.credentials]\ntype = \"file\"\npath = %S\n" credential_path
   in
+  (* A CLI slot judgement cannot use is refused when the file loads, with the
+     reason dispatch gives. The explicit override is still checked at
+     dispatch, so those cases then load the same runtime without the verifier
+     lane naming it. *)
+  let verifier_lane =
+    "[runtime.exact_output_lanes.verifier_exact]\nslots = []\ncli_slots = [\"official.verifier\"]\n"
+  in
+  let refused_at_load = [ "Codex"; "Antigravity"; "disabled tools" ] in
+  let contains ~needle text =
+    let n = String.length needle and t = String.length text in
+    let rec at i = i + n <= t && (String.sub text i n = needle || at (i + 1)) in
+    at 0
+  in
   let cases =
     [ "Codex", replace "claude-code" "codex-app-server" (runtime_config command), "official.verifier"
     ; "Antigravity", antigravity_config, "official.verifier"
@@ -284,6 +297,18 @@ let test_unsafe_slots_refused_before_spawn () =
     ; "lane", runtime_config command ^ "\n[runtime.lanes.verifier_lane]\ncandidates = [\"official.verifier\"]\n", "verifier_lane"
     ] in
   List.iter (fun (label,text,slot) ->
+    let text =
+      if List.mem label refused_at_load then begin
+        write config_path text;
+        (match Runtime.init_default ~config_path with
+         | Ok () -> fail (label ^ ": a verifier CLI slot judgement cannot use loaded")
+         | Error e ->
+           check bool (label ^ " load names the CLI slot") true
+             (contains ~needle:"cli_slots entry \"official.verifier\" cannot judge" e));
+        replace verifier_lane "" text
+      end
+      else text
+    in
     write config_path text;
     (match Runtime.init_default ~config_path with Ok () -> () | Error e -> fail e);
     check bool (label ^ " CLI admission") (label <> "unsupported media")

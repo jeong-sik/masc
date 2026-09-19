@@ -231,6 +231,16 @@ type resolution_failure =
     reason when one was declared under that id, [None] when nothing declared
     it. *)
 
+type verifier_admission_refusal =
+  | Verifier_needs_tools_support
+  | Verifier_needs_native_tool_suppression
+  | Verifier_cli_slot_is_lane
+  | Verifier_cli_slot_unconfigured
+  | Verifier_cli_slot_not_official_client
+(** Why completion judgement cannot use a runtime as a verifier slot or a
+    verifier CLI slot. The load ({!load_list}) and the dispatch
+    ({!verifier_cli_slot_admission}) decide it with the same predicate. *)
+
 type load_failure =
   | Toml_unparsable of Runtime_toml.parse_error list
   | Undeclared_bindings of (string * drop_reason) list
@@ -254,6 +264,10 @@ type load_failure =
       { runtime_id : string
       ; high_water_tokens : int
       ; max_context : int
+      }
+  | Verifier_cli_slot_inadmissible of
+      { runtime_id : string
+      ; refusal : verifier_admission_refusal
       }
       (** Why {!load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract

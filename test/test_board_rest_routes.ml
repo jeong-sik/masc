@@ -235,9 +235,20 @@ let dispatch_json ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () 
          else body_offset (index + 1)
        in
        let offset = body_offset 0 in
-       ( status
-       , Yojson.Safe.from_string
-           (String.sub raw offset (String.length raw - offset)) ))
+       let response_body =
+         String.sub raw offset (String.length raw - offset)
+       in
+       let response =
+         match Yojson.Safe.from_string response_body with
+         | json -> json
+         | exception Yojson.Json_error detail ->
+           failf
+             "HTTP %d returned a non-JSON response (%s): %s"
+             status
+             detail
+             response_body
+       in
+       status, response)
 ;;
 
 let with_authenticated_activity_router ~prefix ~agent_name f =

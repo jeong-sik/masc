@@ -52,41 +52,7 @@ llama-server의 프리픽스 캐시는 요청 토큰열이 슬롯의 기존 열�
 
 ## 3. MASC 등록
 
-### 3.1 `<MASC_BASE_PATH>/config/agent-core-models-overlay.toml`
-
-```toml
-[[providers]]
-id = "llama_cpp"
-kind = "openai_compat"
-base_url = "http://127.0.0.1:<port>"
-request_path = "/v1/chat/completions"
-api_key_env = ""
-capabilities_base = "openai_chat_extended"
-
-[[models]]
-id_prefix = "<model-alias>"
-provider_name = "llama_cpp"
-base = "openai_chat"
-max_context_tokens = <slot-ctx>          # -c/-np, 모델 카드가 아니라 서버 실효값
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-reasoning_streaming_format = "delta:reasoning_content"
-supports_response_format_json = true
-supports_structured_output = true        # llama-server json_schema 지원
-supports_native_streaming = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[targets]]
-id = "llama_cpp.<model-row-id>"
-provider_ref = "llama_cpp"
-model_id = "<model-alias>"
-```
-
-### 3.2 `<MASC_BASE_PATH>/config/runtime.toml`
+### 3.1 `<MASC_BASE_PATH>/config/runtime.toml`
 
 ```toml
 [providers.llama_cpp]
@@ -96,11 +62,19 @@ endpoint = "http://127.0.0.1:<port>/v1"
 
 [models.<model-row-id>]
 api-name = "<model-alias>"
-max-context = <slot-ctx>
+max-context = <slot-ctx>       # -c/-np, 모델 카드가 아니라 서버 실효값
 tools-support = true
 thinking-support = true        # keeper 대화 레인: thinking on
 preserve-thinking = true       # 이전 턴 reasoning_content 재주입 (KV 연속 + 사고 연속)
 streaming = true
+
+[models.<model-row-id>.capabilities]
+max-output-tokens = <n>
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true      # llama-server json_schema 지원
+thinking-control-format = "chat_template_kwargs"
+reasoning-streaming-format = "delta:reasoning_content"
 
 [llama_cpp.<model-row-id>]
 # prefill 동안 prompt_progress SSE 청크를 요청한다 (#28791). 콜드/딥 prefill이
@@ -109,11 +83,28 @@ streaming = true
 return-progress = true
 ```
 
+`[models.<model-row-id>.capabilities]` 블록은 빼면 안 된다. AGENT_CORE 내장 카탈로그에
+없는 모델은 이 블록이 있어야만 능력이 정해지고, 없으면 서버가 부팅을 거부한다
+(`runtime_adapter.ml:478`이 블록이 없을 때 `None`을 돌려주고, `runtime.ml:1068`이 그걸
+"카탈로그에 없는 모델"로 판정한다).
+
+**적지 않은 불리언은 꺼진 것으로 읽힌다.** 기준선이
+`Capabilities.default_capabilities`라서, 모델이 지원하는 것은 전부 적어야 한다
+(`runtime_toml.ml:825`의 기본값이 `false`, `emits-usage-tokens`만 `true`).
+`max-context`·`tools-support`·`thinking-support`·`streaming`은 `[models.<model-row-id>]`
+쪽에서 읽어가므로 capabilities 블록에 다시 적지 않는다.
+
+`preserve-thinking = true`는 예외다. "이전 턴 reasoning을 다시 넣어라"까지만 말하고,
+**어떤 형식으로 넣을지는 runtime.toml에 적을 키가 없다.** 카탈로그 행이 없으면 그 형식이
+`No_preserve_thinking_control`로 떨어진다(`capabilities.ml:256`). 2절 표의
+preserve + append-only(26 tok / 0.7s)를 실제로 받으려면 이 모델이 AGENT_CORE 내장
+카탈로그에 행을 가져야 한다. 행 없이 켜 두면 플래그만 켜진 상태가 된다.
+
 exact-output(JSON) 레인에 같은 서버를 쓸 때는 **별도의 모델 행**을 만들어 `thinking-support = false`로 둔다. reasoning이 출력 예산을 소진해 JSON이 잘리는 결함(2026-08-10 librarian 사례)은 thinking off로만 막는다.
 
-### 3.3 반영과 검증
+### 3.2 반영과 검증
 
-overlay는 서버 부트스트랩에서 로드된다(`Model_catalog.set_global_overlay`) — **재시작 필요**. runtime.toml은 dashboard API로 핫 반영 가능:
+runtime.toml은 dashboard API로 핫 반영할 수 있다:
 
 ```sh
 # 검증만 (저장 안 함)

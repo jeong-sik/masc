@@ -195,23 +195,12 @@ class Setup(unittest.TestCase):
                 (base / '.masc').rename(volume)
                 (base / '.masc').symlink_to(volume, target_is_directory=True)
             config = base / '.masc/config'
-            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                (config / name).write_bytes((ROOT / 'scripts/fixtures/release-evidence' / name).read_bytes().replace(b'ollama_cloud', b'setup_fixture'))
-            # This model exists only in this workspace's overlay. Setup must
-            # load the same catalog the wizard validated, not an embedded alias.
             runtime = config / 'runtime.toml'
+            runtime.write_bytes((ROOT / 'scripts/fixtures/release-evidence/runtime.toml').read_bytes().replace(b'ollama_cloud', b'setup_fixture'))
+            # setup_fixture/setup-fixture-owned-model is the one catalog row no
+            # other runtime names, so a pass here cannot be an embedded alias
+            # answering in its place.
             runtime.write_text(runtime.read_text().replace('deepseek-v4-flash','setup-fixture-owned-model'))
-            overlay = config / 'agent-core-models-overlay.toml'
-            with overlay.open('a') as stream:
-                stream.write('''
-[[models]]
-id_prefix = "setup-fixture-owned-model"
-provider_name = "setup_fixture"
-base = "openai_chat"
-max_context_tokens = 32768
-supports_tools = true
-supports_native_streaming = true
-''')
             if missing_key:
                 runtime = config / 'runtime.toml'
                 runtime.write_text(runtime.read_text() + '\n[providers.setup_fixture.credentials]\ntype = "env"\nkey = "MASC_SETUP_TEST_KEY"\n')
@@ -294,10 +283,9 @@ supports_native_streaming = true
                 def log_message(self, *args):
                     pass
             with http.server.HTTPServer(('127.0.0.1', 0), Handler) as server:
-                for name in ('runtime.toml','agent-core-models-overlay.toml'):
-                    path = config / name
-                    path.write_text(path.read_text().replace('http://127.0.0.1:9/v1',
-                                                            'http://127.0.0.1:'+str(server.server_port)+'/v1'))
+                path = config / 'runtime.toml'
+                path.write_text(path.read_text().replace('http://127.0.0.1:9/v1',
+                                                         'http://127.0.0.1:'+str(server.server_port)+'/v1'))
                 thread = threading.Thread(target=server.serve_forever)
                 thread.start()
                 try:

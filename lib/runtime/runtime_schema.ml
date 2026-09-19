@@ -20,6 +20,28 @@ type api_format =
   | Claude_code_runtime
 [@@deriving show, eq]
 
+(** Which vendor dialect an endpoint speaks. [protocol] names the request
+    shape; this names the dialect inside it, and the two do not determine each
+    other — [openai-compatible-http] is spoken both by plain OpenAI-compatible
+    servers and by GLM, [messages-http] both by Anthropic and by Kimi.
+
+    A provider the AGENT_CORE catalog knows states its dialect there, and
+    restating it here is refused at load. The key exists for an endpoint the
+    catalog has never seen: the install wizard builds its provider id from a
+    hash of the operator's answers, so no catalog row can ever match it.
+
+    Re-exports the AGENT_CORE type so a variant added there breaks this
+    compile instead of leaving a stale local mirror. *)
+type provider_wire_kind =
+  Llm_provider.Provider_config.provider_kind =
+  | Anthropic
+  | Kimi
+  | OpenAI_compat
+  | Ollama
+  | Gemini
+  | Glm
+[@@deriving show, eq]
+
 type transport =
   | Http of string
   | Cli of string
@@ -74,6 +96,10 @@ type provider =
   ; display_name : string
   ; protocol : string
   ; api_format : api_format
+  ; wire_kind : provider_wire_kind option
+    (** The dialect this endpoint speaks, for an endpoint the AGENT_CORE
+        catalog does not know. [None] means the catalog answers, and a
+        provider that has a catalog row is refused if it states this. *)
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option

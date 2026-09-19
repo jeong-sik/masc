@@ -502,15 +502,6 @@ let () =
   Eio_context.set_env env;
   Eio_context.set_clock (Eio.Stdenv.clock env);
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
-  (* 배포 capability overlay 를 embedded 카탈로그 위에 설치한다. 서버는 부팅에서
-     이걸 하고 CLI 는 하지 않아, 같은 runtime.toml 이 서버에서는 뜨는데 이 하네스에서는
-     "absent from the AGENT_CORE capability catalog" 로 죽었다 — overlay 에 행이
-     있는 런타임인데도. Eio_context 를 서버와 맞춘 것과 같은 이유로 여기서도 맞춘다. *)
-  ignore
-    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-       ~config_root:(Filename.dirname config_path)
-       ()
-     : string option);
   (match Runtime.init_default_strict ~config_path with
    | Error msg ->
      Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;

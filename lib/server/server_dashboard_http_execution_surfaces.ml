@@ -975,53 +975,83 @@ let patched_keeper_status row ~event ~keepalive_running =
            status)
 ;;
 
+(* A lifecycle event reaches a published keeper list as a patch of the named
+   row. A declaration row ([Keeper_declared_roster]) is a Keeper the snapshot
+   saw before it ever booted: it has no diagnostic or trust to become a runtime
+   row from, and a lifecycle event for it means boot has since touched that
+   Keeper. So the row is not patched; the surface holding it is stale and has
+   to be rebuilt from a fresh snapshot. *)
+type 'rows row_patch =
+  | Patched of 'rows
+  | Declaration_row_is_stale
+
+let patch_runtime_row ~event ~keepalive_running fields row =
+  let lifecycle_display = lifecycle_display_for_row row event in
+  let row_fields : (string * Yojson.Safe.t) list = fields in
+  let row_fields =
+    row_fields
+    |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
+    |> upsert_assoc_field
+         "status"
+         (patched_keeper_status row ~event ~keepalive_running)
+  in
+  let row_fields =
+    match lifecycle_display with
+    | Some { ld_paused = Some paused; _ } ->
+      upsert_assoc_field "paused" (`Bool paused) row_fields
+    | Some { ld_paused = None; _ } | None -> row_fields
+  in
+  let row_fields =
+    match lifecycle_display with
+    | Some { ld_phase; _ } ->
+      upsert_assoc_field "phase" (`String ld_phase) row_fields
+    | None -> row_fields
+  in
+  let row_fields =
+    match lifecycle_display with
+    | Some { ld_pipeline_stage; _ } ->
+      upsert_assoc_field
+        "pipeline_stage"
+        (`String ld_pipeline_stage)
+        row_fields
+    | None -> row_fields
+  in
+  `Assoc row_fields
+;;
+
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
   | `Assoc fields as row ->
     (match Json_util.assoc_member_opt "name" row with
      | Some (`String name) when String.equal name keeper_name ->
-       let lifecycle_display = lifecycle_display_for_row row event in
-       let row_fields : (string * Yojson.Safe.t) list = fields in
-       let row_fields =
-         row_fields
-         |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
-         |> upsert_assoc_field
-              "status"
-              (patched_keeper_status row ~event ~keepalive_running)
-       in
-       let row_fields =
-         match lifecycle_display with
-         | Some { ld_paused = Some paused; _ } ->
-           upsert_assoc_field "paused" (`Bool paused) row_fields
-         | Some { ld_paused = None; _ } | None -> row_fields
-       in
-       let row_fields =
-         match lifecycle_display with
-         | Some { ld_phase; _ } ->
-           upsert_assoc_field "phase" (`String ld_phase) row_fields
-         | None -> row_fields
-       in
-       let row_fields =
-         match lifecycle_display with
-         | Some { ld_pipeline_stage; _ } ->
-           upsert_assoc_field
-             "pipeline_stage"
-             (`String ld_pipeline_stage)
-             row_fields
-         | None -> row_fields
-       in
-       `Assoc row_fields
-     | _ -> row)
-  | other -> other
+       (match Keeper_declared_roster.row_kind_of_json row with
+        | Ok Keeper_declared_roster.Runtime_row ->
+          Patched (patch_runtime_row ~event ~keepalive_running fields row)
+        | Ok Keeper_declared_roster.Declaration_row -> Declaration_row_is_stale
+        | Error detail ->
+          invalid_arg
+            (Printf.sprintf
+               "dashboard execution cache: keeper %S: %s"
+               name
+               detail))
+     | _ -> Patched row)
+  | other -> Patched other
 ;;
 
 let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
-  List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
+  List.fold_right
+    (fun row patched ->
+       match patched, patch_keeper_row ~keeper_name ~event ~keepalive_running row with
+       | Patched rows, Patched row -> Patched (row :: rows)
+       | Declaration_row_is_stale, (Patched _ | Declaration_row_is_stale)
+       | Patched _, Declaration_row_is_stale -> Declaration_row_is_stale)
+    rows
+    (Patched [])
 ;;
 
 let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fields =
   let fields = upsert_assoc_field "keepers" keepers_json fields in
   match List.assoc_opt "continuity_briefs" fields with
-  | Some (`List existing_briefs) ->
+  | Some (`List _) ->
     upsert_assoc_field
       "continuity_briefs"
       (`List
@@ -1050,14 +1080,26 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
       let patch_rows rows =
         List.fold_left
           (fun acc keeper_name ->
-             patch_keeper_rows
-               ~keeper_name
-               ~event:
-                 (Keeper_lifecycle_events.Custom_event
-                    { verb = Keeper_lifecycle_events.Reconciled
-                    ; phase = None
-                    })
-               ~keepalive_running:true
+             match
+               patch_keeper_rows
+                 ~keeper_name
+                 ~event:
+                   (Keeper_lifecycle_events.Custom_event
+                      { verb = Keeper_lifecycle_events.Reconciled
+                      ; phase = None
+                      })
+                 ~keepalive_running:true
+                 acc
+             with
+             | Patched rows -> rows
+             | Declaration_row_is_stale ->
+               (* The snapshot this surface was computed from predates this
+                  Keeper's boot. Its declaration row stays as the snapshot
+                  described it. The boot also published a lifecycle event, and
+                  that event's patch of the published surface finds this same
+                  row and invalidates the surface; the publication generation
+                  it advances drops this computation if it has not published
+                  yet. *)
                acc)
           rows
           running
@@ -1096,34 +1138,44 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 ;;
 
 let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
-  with_execution_publication_lock (fun () ->
-    incr execution_publication_generation;
-    let generation = !execution_publication_generation in
-    clear_execution_default_light_http_body ();
-    match (Server_dashboard_http_cache.snapshot execution_cache).json with
-    | `Assoc fields ->
-      let json =
-        match List.assoc_opt "keepers" fields with
-        | Some (`List rows) ->
-          let keeper_rows =
-            patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
-          in
-          if keeper_rows = rows
-          then `Assoc fields
-          else
-            `Assoc
-              (replace_keeper_rows_and_rebuild_briefs
-                 ~now_ts:(Time_compat.now ())
-                 ~keeper_rows
-                 ~keepers_json:(`List keeper_rows)
-                 fields)
-        | Some _ | None -> `Assoc fields
+  let patch =
+    with_execution_publication_lock (fun () ->
+      incr execution_publication_generation;
+      let generation = !execution_publication_generation in
+      clear_execution_default_light_http_body ();
+      let publish json =
+        execution_cache.Server_dashboard_http_cache.current
+        <- { (Server_dashboard_http_cache.snapshot execution_cache) with
+             json = with_execution_publication_generation ~generation json
+           };
+        Patched ()
       in
-      execution_cache.Server_dashboard_http_cache.current
-      <- { (Server_dashboard_http_cache.snapshot execution_cache) with
-           json = with_execution_publication_generation ~generation json
-         }
-    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ())
+      match (Server_dashboard_http_cache.snapshot execution_cache).json with
+      | `Assoc fields ->
+        (match List.assoc_opt "keepers" fields with
+         | Some (`List rows) ->
+           (match patch_keeper_rows ~keeper_name ~event ~keepalive_running rows with
+            | Declaration_row_is_stale -> Declaration_row_is_stale
+            | Patched keeper_rows ->
+              if keeper_rows = rows
+              then publish (`Assoc fields)
+              else
+                publish
+                  (`Assoc
+                    (replace_keeper_rows_and_rebuild_briefs
+                       ~now_ts:(Time_compat.now ())
+                       ~keeper_rows
+                       ~keepers_json:(`List keeper_rows)
+                       fields)))
+         | Some _ | None -> publish (`Assoc fields))
+      | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+        Patched ())
+  in
+  (* Invalidation takes the publication lock itself and broadcasts outside it,
+     so it runs after the patch has released the lock. *)
+  match patch with
+  | Patched () -> ()
+  | Declaration_row_is_stale -> invalidate_execution_cache ()
 ;;
 
 let patch_keeper_dependent_caches ~keeper_name ~event =

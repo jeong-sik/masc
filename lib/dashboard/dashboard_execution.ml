@@ -268,7 +268,13 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
   | `Assoc fields ->
     (match Keeper_declared_roster.row_kind_of_json keeper_json with
      | Error detail ->
-       invalid_arg (Printf.sprintf "dashboard execution: %s" detail)
+       let keeper =
+         match Json_util.assoc_member_opt "name" keeper_json with
+         | Some name -> Yojson.Safe.to_string name
+         | None -> "without a name"
+       in
+       invalid_arg
+         (Printf.sprintf "dashboard execution: keeper %s: %s" keeper detail)
      | Ok Keeper_declared_roster.Declaration_row ->
        (* A Keeper declared in config that has never booted has no metadata,
           so there is no diagnostic or trust to read for it. The row stays in
@@ -932,4 +938,5 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
 module For_test = struct
   let agents_json = agents_json
   let render_under_timeout = render_under_timeout
+  let enrich_keeper_with_diagnostic = enrich_keeper_with_diagnostic
 end

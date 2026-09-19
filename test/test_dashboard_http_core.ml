@@ -4222,6 +4222,17 @@ let test_lifecycle_event_display_values () =
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event event))
     cases
 
+(* A runtime row always comes back [Patched]; the declaration-row outcome has
+   its own tests below. *)
+let patched_runtime_row ~keeper_name ~event ~keepalive_running row =
+  match
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name ~event ~keepalive_running row
+  with
+  | Server_dashboard_http_execution_surfaces.Patched row -> row
+  | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
+    fail "a runtime row was reported as a stale declaration row"
+
 (* The [paused] lifecycle event patches with [keepalive_running = true], so the
    row goes through the keepalive branch of the status patcher. That branch used
    to classify against the surface vocabulary alone, where "paused" is not a
@@ -4230,7 +4241,7 @@ let test_lifecycle_event_display_values () =
    then read the row as live. *)
 let test_paused_lifecycle_event_keeps_paused_status () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"pause-target"
       ~event:
         (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused)
@@ -4244,7 +4255,7 @@ let test_paused_lifecycle_event_keeps_paused_status () =
 
 let test_reconciled_lifecycle_event_preserves_durable_pause () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"paused-reconcile-target"
       ~event:
         (Keeper_lifecycle_events.Custom_event
@@ -4270,7 +4281,7 @@ let test_reconciled_lifecycle_event_preserves_durable_pause () =
 
 let test_stopped_lifecycle_event_stays_offline () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"stop-target"
       ~event:
         (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
@@ -4288,7 +4299,7 @@ let test_stopped_lifecycle_event_stays_offline () =
 
 let test_stopped_lifecycle_event_preserves_durable_pause () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"paused-stop-target"
       ~event:
         (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
@@ -4306,7 +4317,7 @@ let test_stopped_lifecycle_event_preserves_durable_pause () =
 
 let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
   let patch row =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"drift-target"
       ~event:
         (Keeper_lifecycle_events.Custom_event
@@ -4533,6 +4544,135 @@ let test_running_keeper_reconciliation_skips_declaration_rows () =
          "only the running keeper gets a continuity brief"
          [ keeper_name ]
          (names "continuity_briefs"))
+
+let declared_keeper_row name =
+  Masc.Keeper_declared_roster.to_json
+    { Masc.Keeper_declared_roster.name
+    ; requirements = [ Masc.Keeper_declared_roster.Runtime_check_required ]
+    }
+
+(* The events a Keeper's boot publishes. Each one that names a declaration
+   row used to either raise ("unknown current keeper status \"unbooted\"") or
+   build a row that was declaration-only and running at once. *)
+let boot_lifecycle_events =
+  [ Keeper_lifecycle_events.Custom_event
+      { verb = Keeper_lifecycle_events.Started; phase = None }
+  ; Keeper_lifecycle_events.Custom_event
+      { verb = Keeper_lifecycle_events.Reconciled; phase = None }
+  ; Keeper_lifecycle_events.Phase_event Keeper_state_machine.Running
+  ]
+
+let test_lifecycle_patch_never_patches_a_declaration_row () =
+  List.iter
+    (fun event ->
+       let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
+       (match
+          Server_dashboard_http_execution_surfaces.patch_keeper_row
+            ~keeper_name:"imp"
+            ~event
+            ~keepalive_running:true
+            (declared_keeper_row "imp")
+        with
+        | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale -> ()
+        | Server_dashboard_http_execution_surfaces.Patched row ->
+          failf "%s patched a declaration row into %s" label
+            (Yojson.Safe.to_string row));
+       match
+         Server_dashboard_http_execution_surfaces.patch_keeper_row
+           ~keeper_name:"another-keeper"
+           ~event
+           ~keepalive_running:true
+           (declared_keeper_row "imp")
+       with
+       | Server_dashboard_http_execution_surfaces.Patched row ->
+         check bool (label ^ " leaves another keeper's declaration row alone")
+           true
+           (Yojson.Safe.equal row (declared_keeper_row "imp"))
+       | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
+         failf "%s for another keeper reported imp's row stale" label)
+    boot_lifecycle_events
+
+(* Route 1: the dashboard's Boot button, or any other boot, publishes a
+   lifecycle event, and the listener patches the cached execution surface with
+   it. The cached surface lists the Keeper as a declaration row, so the patch
+   cannot apply: the cache is invalidated and its row is left as it was. *)
+let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  let surface =
+    `Assoc
+      [ "keepers", `List [ declared_keeper_row "imp" ]
+      ; "continuity_briefs", `List []
+      ]
+  in
+  List.iter
+    (fun event ->
+       let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
+       with_cached_surface_success
+         Server_dashboard_http_execution_surfaces.execution_cache
+         surface
+       @@ fun () ->
+       Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
+         ~keeper_name:"imp"
+         ~event;
+       let cache = Server_dashboard_http_execution_surfaces.execution_cache in
+       check bool (label ^ " invalidates the cached surface") false
+         (Server_dashboard_http_cache.cached_surface_has_success cache);
+       let open Yojson.Safe.Util in
+       check bool (label ^ " leaves the declaration row unpatched") true
+         (Yojson.Safe.equal
+            (declared_keeper_row "imp")
+            ((Server_dashboard_http_cache.snapshot cache).json
+             |> member "keepers" |> to_list |> List.hd)))
+    boot_lifecycle_events
+
+(* Route 2: a fresh render whose operator snapshot predates the boot. The
+   Keeper already runs, so the running-keeper reconciliation reaches its row,
+   which is still the declaration row. It stays as the snapshot described it;
+   the boot's own lifecycle event invalidates the published surface. *)
+let test_running_keeper_reconciliation_leaves_a_stale_declaration_row () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-booted-declared-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "continuity-booted-declared-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let surface =
+         `Assoc
+           [ "keepers", `List [ declared_keeper_row keeper_name ]
+           ; "continuity_briefs", `List []
+           ]
+       in
+       check bool
+         "the surface comes back as the snapshot described it"
+         true
+         (Yojson.Safe.equal
+            surface
+            (Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+               config
+               surface)))
 
 let test_composite_preserves_runtime_attempt_scopes () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -6106,6 +6246,13 @@ let () =
             test_running_keeper_reconciliation_rebuilds_continuity_brief;
           test_case "reconciliation skips declaration rows" `Quick
             test_running_keeper_reconciliation_skips_declaration_rows;
+          test_case "lifecycle patch never patches a declaration row" `Quick
+            test_lifecycle_patch_never_patches_a_declaration_row;
+          test_case "declared keeper's boot event invalidates the execution cache"
+            `Quick
+            test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache;
+          test_case "reconciliation leaves a booted keeper's declaration row" `Quick
+            test_running_keeper_reconciliation_leaves_a_stale_declaration_row;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "success clears the previous error" `Quick

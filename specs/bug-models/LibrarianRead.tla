@@ -1,6 +1,10 @@
 ---- MODULE LibrarianRead ----
 \* Which atoms a Librarian round reads, against the writers of the turn-boundary
-\* log (RFC librarian-lifecycle 4.4 and 4.6; lib/keeper/keeper_librarian_range.ml).
+\* log (RFC librarian-lifecycle 4.4 and 4.6).
+\*
+\* Mirrors: lib/keeper/keeper_librarian_range.ml (the rules this spec varies)
+\*          lib/keeper/keeper_turn_boundaries.ml (the lines it reads)
+\*          lib/keeper/keeper_librarian_progress.ml (the position it writes)
 \*
 \* A finished Keeper turn appends a line saying where the saved history ended.
 \* A round of the Librarian reads the lines, loads the checkpoint, picks the

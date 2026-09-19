@@ -193,7 +193,11 @@ Keeper 는 다음 턴의 첫 요청에서 facts 전부를 `Memory OS Recall` 블
 | `keeper_librarian_runtime.ml` 의 `Keeper_librarian_queue_signal.changed` 호출 | 받은 일 정리가 진척되면 스스로를 다시 깨운다 | 깨우는 호출은 지운다. 진척 비교는 루프의 조건으로 남는다(§4.4 의 9) |
 | 창: `runtime.toml` 의 `high_water_tokens`·`low_water_tokens`(라이브 값 100000·70000), `keeper_turn_driver_try_provider.ml` `context_overflow_shrink_divisor` = 2, `runtime_model_input_tail_window.ml` `atoms_per_window` = 60, `max-prompt-bytes` | 전부 고른 숫자 | 창 RFC §13 의 몫 |
 
-**72 가 작아서 잃는 것이 아니다**(09-19 라이브 실측, 읽기만). 지금 checkpoint 27개에 메시지가 178,701개 있고, 어느 순간에도 창이 닿는 것은 Keeper 당 72개다. 다만 상위 8개 기준 턴당 메시지가 1.96개라 72개는 약 **37턴 치**이고, cadence 3 이면 회차 사이에 평균 5.9개가 들어오니 **12배 여유**다. 평소 운행에서 창이 모자라지는 않는다. 잃으려면 **회차가 연속 37턴쯤 안 돌아야** 하고, 그걸 실제로 만드는 것이 §2.3 의 L3(31시간에 대기 칸 5,211회 덮어쓰기)·L5·L6, 그리고 09-18 부터 이어지는 정지(#37004)다. 그래서 고칠 것은 창의 크기가 아니라 **창이 회차 빈도에 묶여 있다는 것**이고, 읽은 위치가 그 묶임을 없앤다.
+**72 가 작아서 잃는 것이 아니다**(09-19 라이브 실측, 읽기만). 지금 checkpoint 28개에 메시지가 181,461개 있고, 어느 순간에도 창이 닿는 것은 Keeper 당 72개다.
+
+이 창이 **몇 턴 치인지는 여기 적지 않는다 — 확인 필요**. 한때 "턴당 1.96개라 약 37턴 치"라고 적었는데, 분모를 안 적어 둔 탓에 다시 재현되지 않는다. 09-19 에 세 가지로 세 봤고 어느 것도 1.96 이 아니다: 9월 턴 기록 전체를 분모로 하면 62.09, 그중 agent core 턴만 세면 182.73, `absolute_turn` 의 최댓값을 생애 턴으로 보면 3.51. 분모가 정해지지 않은 채로는 "몇 턴을 쉬면 잃는가"의 문턱을 말할 수 없다. 이 절을 다시 쓸 때는 분자와 분모를 각각 한 문장으로 적는다.
+
+분모와 무관하게 남는 것은 **잃는 방식**이다. 창은 회차가 돌 때만 앞으로 간다. 그래서 잃는 것은 창이 좁아서가 아니라 **회차가 한동안 안 돌아서**이고, 그걸 실제로 만드는 것이 §2.3 의 L3(31시간에 대기 칸 5,211회 덮어쓰기)·L5·L6, 그리고 09-18 부터 이어지는 정지(#37004)다. 그래서 고칠 것은 창의 크기가 아니라 **창이 회차 빈도에 묶여 있다는 것**이고, 읽은 위치가 그 묶임을 없앤다.
 
 부분 문자열 검사가 아닌 것도 적어 둔다. agent_core 는 provider 의 종료 사유 토큰을 경계에서 한 번 variant 로 바꾼다(`packages/agent_core/lib/llm_provider/types.ml` `stop_reason_of_string`). HTTP 400 본문의 글을 읽어 overflow 를 추측하지 않으며, 그 사실을 고정하는 테스트가 있다(`retry.ml` 의 "HTTP 400 prose does not synthesize ContextOverflow"). 새 생명주기가 provider 거절을 다룰 때는 이 typed 값만 쓴다.
 

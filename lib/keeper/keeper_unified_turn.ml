@@ -552,7 +552,6 @@ let run_keeper_cycle
     ; last_execution = None
     ; degraded_retry_info
     ; deferred_runtime_lane = None
-    ; runtime_rotation_attempts = []
     ; failure_reason = None
     ; retry_phase_started_at = None
     ; runtime_attempt_errors = []

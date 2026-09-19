@@ -271,8 +271,6 @@ let run (ctx : ctx)
                       (fun (retry : EC.degraded_retry) ->
                          retry.fallback_reason)
                       turn_state.degraded_retry_info)
-                 ~runtime_rotation_attempts:
-                   (List.rev turn_state.runtime_rotation_attempts)
                  ?deferred_runtime_lane:
                    (if is_retry then None else deferred_runtime_lane)
                  ~runtime_retry_deferral:

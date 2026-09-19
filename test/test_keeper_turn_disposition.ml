@@ -410,7 +410,6 @@ let empty_turn_state : Unified_types.turn_state =
   ; current_turn_blocker_info = None
   ; last_execution = None
   ; degraded_retry_info = None
-  ; runtime_rotation_attempts = []
   ; failure_reason = None
   ; retry_phase_started_at = None
     (* [empty_turn_state] is the pre-execution state: no runtime has failed, so

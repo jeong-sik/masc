@@ -266,7 +266,6 @@ val run_turn
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
-  -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
   -> ?direct_resume:direct_continuation
   -> ?official_task_reference:Keeper_official_task_reference.t
   -> ?on_gate_evidence_admitted:(Agent_core.Checkpoint.t -> (unit, string) result)

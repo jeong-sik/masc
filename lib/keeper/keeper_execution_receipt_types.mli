@@ -16,10 +16,6 @@ val assert_receipt_authoritative :
 type tool_surface = {
   turn_lane : Keeper_agent_tool_surface.turn_lane;
 }
-type runtime_rotation_outcome =
-    Rotation_setup_failed
-  | Rotation_retry_scheduled
-val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
 type runtime_outcome =
     Runtime_passed_to_next_model
   | Runtime_completed
@@ -34,17 +30,6 @@ type completion_contract_result =
   | Completion_response_observed
   | Completion_tool_execution_observed
 val completion_contract_result_to_string : completion_contract_result -> string
-type runtime_rotation_attempt = {
-  from_runtime : string;
-  to_runtime : string;
-  reason : Keeper_error_classify.degraded_retry_reason;
-  outcome : runtime_rotation_outcome;
-  productive_phase_elapsed_ms : int option;
-  retry_phase_elapsed_ms : int option;
-  error_kind : error_kind option;
-  error_message : string option;
-  recorded_at : string;
-}
 type t = {
   keeper_name : string;
   trace_id : string;
@@ -83,7 +68,6 @@ type t = {
   degraded_retry_runtime : string option;
   fallback_reason :
     Keeper_error_classify.degraded_retry_reason option;
-  runtime_rotation_attempts : runtime_rotation_attempt list;
   stop_reason : Runtime_agent.stop_reason option;
   error_kind : error_kind option;
   error_message : string option;

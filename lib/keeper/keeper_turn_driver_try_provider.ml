@@ -813,7 +813,7 @@ let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal
       match Keeper_carried_front.for_history ~digest_at seed with
       | Ok seed -> Some seed
       | Error reason ->
-        Log.Keeper.info ~keeper_name
+        Log.Keeper.warn ~keeper_name
           "model input refusal front dropped runtime=%s reason=%s front=%s"
           runtime_id
           (Keeper_carried_front.dropped_front_to_string reason)

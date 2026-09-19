@@ -1063,6 +1063,54 @@ let test_runtime_route_writer_rejects_unknown_default_without_write () =
    those names are runtime ids. Before this writer existed the picker had
    nowhere to post: the route parser admitted only "default" and
    "media_failover", so every pick came back "unknown runtime routing lane". *)
+(* A lane created under a name of its own takes a keeper assignment, and while
+   one names it the lane cannot be removed: the assignment would otherwise point
+   at nothing and the next load would fail. Once no keeper names it, removal
+   takes the table out of the file and the resolver forgets it. *)
+let test_a_created_lane_is_assigned_then_removed () =
+  with_runtime_file (fun path ->
+    let ok label = function
+      | Ok _ -> ()
+      | Error msg -> Alcotest.failf "%s: %s" label msg
+    in
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+      ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ] ()
+    |> ok "create";
+    (match Runtime.get_lane_by_id "coding" with
+     | None -> Alcotest.fail "the created lane does not resolve"
+     | Some lane ->
+       Alcotest.(check (list string)) "the created lane walks what it was given"
+         [ "openai.gpt"; "runpod_mtp.qwen" ] (Runtime_lane.ordered_candidates lane));
+    (match
+       Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+         ~runtime_ids:[ "openai.gpt" ] ()
+     with
+     | Ok _ -> Alcotest.fail "a second create replaced an existing lane"
+     | Error _ -> ());
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest"
+      ~runtime_id:"coding" ()
+    |> ok "assign the lane";
+    Alcotest.(check (option string)) "the keeper is assigned the lane"
+      (Some "coding") (Runtime.runtime_id_for_keeper "routingtest");
+    (match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" () with
+     | Ok _ -> Alcotest.fail "an assigned lane was removed"
+     | Error msg ->
+       Alcotest.(check bool) "the refusal names the keeper" true
+         (string_contains msg "routingtest"));
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest"
+      ~runtime_id:"openai.gpt" ()
+    |> ok "assign a runtime";
+    Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()
+    |> ok "remove";
+    Alcotest.(check bool) "the table left the file" false
+      (string_contains (Fs_compat.load_file path) "[runtime.lanes.coding]");
+    Alcotest.(check bool) "the resolver forgot the lane" true
+      (Option.is_none (Runtime.get_lane_by_id "coding"));
+    match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" () with
+    | Ok _ -> Alcotest.fail "removing an undeclared lane reported success"
+    | Error _ -> ())
+;;
+
 let test_lane_candidates_create_the_lane_table () =
   with_runtime_file (fun path ->
     (match
@@ -2943,6 +2991,10 @@ let () =
             "a picked lane gets its own table"
             `Quick
             test_lane_candidates_create_the_lane_table
+        ; Alcotest.test_case
+            "a created lane is assigned, then removed once no keeper names it"
+            `Quick
+            test_a_created_lane_is_assigned_then_removed
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

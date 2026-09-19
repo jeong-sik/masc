@@ -152,3 +152,11 @@ val remove_table_array_entry
     the header below it, not this entry.
 
     Every entry carrying [id] is dropped, not only the first. *)
+
+val remove_table : string -> path:string -> string
+(** Drop the standard table [[path]]: its header, its body, and any table named
+    under its path. Comments above the header and a comment block documenting
+    the next header stay where they are, for the reasons
+    {!remove_table_array_entry} gives. Content that does not open [[path]] comes
+    back unchanged, so a caller that must remove something compares the result
+    with its input. *)

@@ -3044,14 +3044,18 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
   set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
-let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
+let validated_lane_id lane_id =
   let lane_id = String.trim lane_id in
-  let runtime_ids = List.map String.trim runtime_ids in
   if String.equal lane_id ""
   then Error "lane id must not be empty"
   else if contains_newline lane_id
   then Error "lane id must not contain newlines"
-  else if runtime_ids = []
+  else Ok lane_id
+;;
+
+let validated_lane_candidates runtime_ids =
+  let runtime_ids = List.map String.trim runtime_ids in
+  if runtime_ids = []
   then
     (* An empty list is not "no failover", it is a lane that resolves to
        nothing. Removing a lane is a different edit than emptying it. *)
@@ -3060,22 +3064,86 @@ let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
   then Error "runtime_ids must not contain empty entries"
   else if List.exists contains_newline runtime_ids
   then Error "runtime_ids must not contain newlines"
-  else (
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* locked =
-      with_runtime_config_write_lock path (fun () ->
-        let* content = load_file_result path in
-        let next =
-          Toml_line_editor.edit_table_multiline_array
-            content
-            ~path:(lane_table_path lane_id)
-            ~key:"candidates"
-            ~values:runtime_ids
-        in
-        commit_runtime_config_text ~path next)
+  else Ok runtime_ids
+;;
+
+(* One lane edit under the runtime.toml write lock: [decide] reads the parsed
+   file and either refuses or returns the edited text, which the commit
+   validates as a whole before anything is written. *)
+let edit_runtime_lanes ?runtime_config_path decide =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      let* content = load_file_result path in
+      let* config =
+        Runtime_toml.parse_string content
+        |> Result.map_error runtime_parse_errors_to_string
+      in
+      let* next = decide ~content config in
+      commit_runtime_config_text ~path next)
+  in
+  let* receipt = locked.value in
+  Ok (attach_lock_warnings locked.warnings receipt)
+;;
+
+let lane_is_declared (config : Runtime_schema.config) lane_id =
+  List.exists
+    (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane_id)
+    config.lane_decls
+;;
+
+let write_lane_candidates ~content ~lane_id ~runtime_ids =
+  Toml_line_editor.edit_table_multiline_array
+    content
+    ~path:(lane_table_path lane_id)
+    ~key:"candidates"
+    ~values:runtime_ids
+;;
+
+let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
+  let* lane_id = validated_lane_id lane_id in
+  let* runtime_ids = validated_lane_candidates runtime_ids in
+  edit_runtime_lanes ?runtime_config_path (fun ~content _config ->
+    Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+;;
+
+let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
+  let* lane_id = validated_lane_id lane_id in
+  let* runtime_ids = validated_lane_candidates runtime_ids in
+  edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+    if lane_is_declared config lane_id
+    then Error (Printf.sprintf "lane %S already exists" lane_id)
+    else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+;;
+
+let remove_runtime_lane ?runtime_config_path ~lane_id () =
+  let* lane_id = validated_lane_id lane_id in
+  edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+    let assigned =
+      List.filter_map
+        (fun (keeper_name, target) ->
+           if String.equal target lane_id then Some keeper_name else None)
+        config.keeper_assignments
     in
-    let* receipt = locked.value in
-    Ok (attach_lock_warnings locked.warnings receipt))
+    if not (lane_is_declared config lane_id)
+    then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
+    else if assigned <> []
+    then
+      Error
+        (Printf.sprintf
+           "lane %S is assigned to %s; assign them elsewhere before removing the lane"
+           lane_id
+           (String.concat ", " assigned))
+    else (
+      let next = Toml_line_editor.remove_table content ~path:(lane_table_path lane_id) in
+      if String.equal next content
+      then
+        Error
+          (Printf.sprintf
+             "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
+              removed here"
+             lane_id)
+      else Ok next))
 ;;
 
 (* Exact-output lanes name their walk order in [slots]; the routing API edits

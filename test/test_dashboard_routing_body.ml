@@ -101,6 +101,13 @@ let check_case name body lane field ids =
         Alcotest.(check (list string)) (name ^ " ids") ids got_ids)
 ;;
 
+let expect_error name body =
+  with_declared_lane (fun () ->
+      match parse body with
+      | Ok (lane, field, _) -> Alcotest.failf "%s: expected a refusal, got %s/%s" name lane field
+      | Error _ -> ())
+;;
+
 let () =
   Alcotest.run "dashboard_routing_body"
     [ ( "parse"
@@ -130,5 +137,27 @@ let () =
                 {|{"lane":"exact/verifier_exact","runtime_ids":["runpod_mtp.qwen"]}|}
                 "exact/verifier_exact" "runtime_ids"
                 [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "create takes a name nothing resolves yet" `Quick
+            (fun () ->
+              check_case "create"
+                {|{"lane":"coding","action":"create","runtime_ids":["runpod_mtp.qwen"]}|}
+                "coding" "create" [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "set refuses a name nothing resolves" `Quick
+            (fun () ->
+              expect_error "set-new-name"
+                {|{"lane":"coding","runtime_ids":["runpod_mtp.qwen"]}|})
+        ; Alcotest.test_case "create refuses a route keyword as a lane name" `Quick
+            (fun () ->
+              expect_error "create-default"
+                {|{"lane":"default","action":"create","runtime_ids":["runpod_mtp.qwen"]}|})
+        ; Alcotest.test_case "remove names a declared lane and carries no ids" `Quick
+            (fun () ->
+              check_case "remove"
+                {|{"lane":"runpod_mtp.qwen","action":"remove"}|}
+                "runpod_mtp.qwen" "remove" [])
+        ; Alcotest.test_case "an unknown action is refused" `Quick
+            (fun () ->
+              expect_error "unknown-action"
+                {|{"lane":"runpod_mtp.qwen","action":"rename","runtime_ids":[]}|})
         ] )
     ]

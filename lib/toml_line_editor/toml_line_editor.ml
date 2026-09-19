@@ -810,6 +810,13 @@ let upsert_table_array_entry content ~path ~id_key ~id ~fields =
     Ok (join_lines updated ~trailing_newline:true)
 ;;
 
+(* The lines of a removed body that stay: a comment block documenting the next
+   header is not the removed table's to take. *)
+let documentation_of_next_header body =
+  let documented = trailing_documentation_count body in
+  snd (split_at (List.length body - documented) body)
+;;
+
 let remove_table_array_entry content ~path ~id_key ~id =
   let lines, _trailing = split_lines content in
   let segments = path_segments path in
@@ -818,13 +825,22 @@ let remove_table_array_entry content ~path ~id_key ~id =
     | line :: rest when is_structural state && is_table_array ~path line ->
       let body, after = split_entry_body ~segments rest in
       if entry_has_id ~id_key ~id body
-      then (
-        (* A comment block documenting the next header is not this entry's to
-           take. *)
-        let documented = trailing_documentation_count body in
-        let kept = snd (split_at (List.length body - documented) body) in
-        loop (List.rev_append kept acc) outside after)
+      then
+        loop (List.rev_append (documentation_of_next_header body) acc) outside after
       else loop (List.rev_append body (line :: acc)) outside after
+    | line :: rest -> loop (line :: acc) (scan_line state line) rest
+  in
+  join_lines (loop [] outside lines) ~trailing_newline:true
+;;
+
+let remove_table content ~path =
+  let lines, _trailing = split_lines content in
+  let segments = path_segments path in
+  let rec loop acc state = function
+    | [] -> List.rev acc
+    | line :: rest when is_structural state && is_table ~path line ->
+      let body, after = split_entry_body ~segments rest in
+      loop (List.rev_append (documentation_of_next_header body) acc) outside after
     | line :: rest -> loop (line :: acc) (scan_line state line) rest
   in
   join_lines (loop [] outside lines) ~trailing_newline:true

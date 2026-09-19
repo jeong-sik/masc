@@ -407,6 +407,39 @@ let test_removing_an_absent_id_changes_nothing () =
     (Toml_line_editor.table_array_entry_ids out ~path:endpoints ~id_key:"id");
   check_comments_unchanged endpoints_fixture out
 
+let lanes_fixture =
+  {|[runtime]
+default = "a.one"
+
+# polisher.
+[runtime.lanes."a.one"]
+candidates = [
+  "a.one",
+  "b.two",
+]
+
+# kept: this documents the lane below it.
+[runtime.lanes.coding]
+candidates = ["b.two"]
+|}
+
+(* Removing a lane takes its header and its candidates. The note above its
+   header stays, as it does for an array-of-tables entry, and so does the note
+   documenting the next lane. *)
+let test_remove_table_drops_one_lane () =
+  let out = Toml_line_editor.remove_table lanes_fixture ~path:{|runtime.lanes."a.one"|} in
+  Alcotest.(check bool) "the header is gone" false (has_line out {|[runtime.lanes."a.one"]|});
+  Alcotest.(check bool) "its candidates went with it" false (has_line out {|  "a.one",|});
+  Alcotest.(check bool) "the next lane stays" true (has_line out "[runtime.lanes.coding]");
+  Alcotest.(check bool) "the next lane's note stays" true
+    (has_line out "# kept: this documents the lane below it.");
+  Alcotest.(check bool) "the note above the removed header stays" true
+    (has_line out "# polisher.")
+
+let test_remove_table_of_an_absent_path_changes_nothing () =
+  Alcotest.(check string) "unchanged" lanes_fixture
+    (Toml_line_editor.remove_table lanes_fixture ~path:"runtime.lanes.absent")
+
 (* [a.b] and [[a.b]] carry the same path and mean different things to a loader,
    so an editor that confused them would write a field into the wrong shape. *)
 let test_a_table_and_a_table_array_of_one_path_stay_apart () =
@@ -869,6 +902,10 @@ let () =
             test_a_new_entry_lands_above_a_comment_documenting_the_next_table
         ; Alcotest.test_case "a duplicated id addresses every match" `Quick
             test_a_duplicated_id_addresses_every_match
+        ; Alcotest.test_case "remove_table drops one lane" `Quick
+            test_remove_table_drops_one_lane
+        ; Alcotest.test_case "remove_table of an absent path changes nothing" `Quick
+            test_remove_table_of_an_absent_path_changes_nothing
         ] )
     ; ( "keys the writer has to quote"
       , [ Alcotest.test_case "a key that is not bare is quoted" `Quick

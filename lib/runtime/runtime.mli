@@ -869,6 +869,30 @@ val set_runtime_lane_candidates :
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. *)
 
+val create_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Declare a new [\[runtime.lanes."<lane_id>"\]] with [runtime_ids] as its
+    candidates, through the same validated write as
+    {!set_runtime_lane_candidates}. The id may be any name, not only a runtime
+    id. Refused when the file already declares that lane, read under the write
+    lock: a create that landed on an existing lane would replace its
+    candidates without the operator having seen them. *)
+
+val remove_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
+    SSOT writer. Refused, naming the keepers, when [\[runtime.assignments\]]
+    names the lane: an assignment to a lane that is gone either fails the load
+    or silently walks a runtime of the same name. Refused when the file does
+    not declare the lane as its own table. *)
+
 val set_exact_output_lane_slots :
   ?runtime_config_path:string ->
   lane_name:string ->

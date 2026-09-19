@@ -6545,7 +6545,10 @@ let search_jump ?(backwards = false) state ~query ~after =
               else (after + step + total) mod total
             in
             if matches index then begin
-              if state.view = Lanes then state.lanes_action_error <- None;
+              if state.view = Lanes then begin
+                state.lanes_action_error <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state
+              end;
               place_row_cursor state index
             end
             else scan (step + 1)
@@ -6565,6 +6568,8 @@ let goto_surface state ~mailbox (destination : surface) =
     close_repository_changes state;
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
+  (* The lane editor's line belongs to the view that drew it. *)
+  if destination <> state.view then Masc_tui_types.dismiss_runtime_lane_notice state;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
    | Clients -> launch_clients_load state ~mailbox
@@ -7395,11 +7400,11 @@ let handle_runtime_lane_edit state ~mailbox edit =
   match Masc_tui_types.plan_runtime_lane_edit state edit with
   | Masc_tui_types.Open_lane_name_field ->
       state.runtime_lane_name_draft <- Some "";
-      state.runtime_lane_notice <- None;
+      Masc_tui_types.dismiss_runtime_lane_notice state;
       launch_runtime_catalog_load state ~mailbox
   | Masc_tui_types.Arm_lane_removal lane ->
       state.runtime_lane_remove_armed <- Some lane;
-      state.runtime_lane_notice <- None
+      Masc_tui_types.dismiss_runtime_lane_notice state
   | Masc_tui_types.Send_lane_write { lane; request; cursor_after } ->
       (match request with
        | Masc_tui_types.Write_lane_removal -> state.runtime_lane_remove_armed <- None
@@ -10288,6 +10293,7 @@ let handle_lanes_overview_click state ~base_path:_ ~mailbox ~terminal_rows ~row 
       then open_lanes_standalone_selection state ~mailbox
       else begin
         state.lanes_action_error <- None;
+        Masc_tui_types.dismiss_runtime_lane_notice state;
         state.lanes_standalone_cursor <- index
       end
 
@@ -17720,7 +17726,7 @@ and is loaded on demand through keeper_skill.
                    state.runtime_lane_name_draft <- None;
                    state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
                    state.runtime_lane_pick_cursor <- 0;
-                   state.runtime_lane_notice <- None
+                   Masc_tui_types.dismiss_runtime_lane_notice state
                  end
                | "\127" | "\b" | "backspace" ->
                  let length = String.length draft in
@@ -18910,7 +18916,7 @@ and is loaded on demand through keeper_skill.
                          (Masc_tui_types.Pick_conversation_lane
                             row.Masc.Tui_decode.rcr_lane_id);
                      state.runtime_lane_pick_cursor <- 0;
-                     state.runtime_lane_notice <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
        | Some k
          when state.view = Runtime
@@ -18935,7 +18941,7 @@ and is loaded on demand through keeper_skill.
                 state.runtime_lane_pick <-
                   Some (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
                 state.runtime_lane_pick_cursor <- 0;
-                state.runtime_lane_notice <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)
         | Some ("T" | "t")
@@ -21658,6 +21664,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      let count = lanes_standalone_count state in
                      state.lanes_action_error <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      state.lanes_standalone_cursor <-
                        max 0
                          (min (count - 1)
@@ -22020,6 +22027,7 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_scroll <- scroll)
                  | Lanes_overview ->
                      state.lanes_action_error <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      state.lanes_standalone_cursor <-
                        max 0 (state.lanes_standalone_cursor - 1))
             | Harness ->

@@ -1521,17 +1521,26 @@ type runtime_lane_notice =
          send. *)
   | Lane_write_pending
       (* A key that would write, pressed while the previous write is out. *)
-  | Lane_list_unread of string
+  | Lane_list_unread of runtime_lane_list * string
       (* The re-read after a write failed; the list on screen is the one
-         from before the write. *)
+         from before the write. It stays until that list loads again, so a
+         key pressed meanwhile is pressed knowing the list may be stale. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
-  | Lane_list_unread detail ->
+  | Lane_list_unread (_list, detail) ->
     "the lane list could not be re-read after the change and may be stale: " ^ detail
+
+(* A new view, a moved cursor or a newly opened field ends what the last key
+   or write said about itself. That the list on screen may be stale is not
+   about a key: it holds until the list loads again
+   ([runtime_lane_list_reread]). *)
+let dismissed_runtime_lane_notice = function
+  | Some (Lane_list_unread _ as unread) -> Some unread
+  | Some (Lane_write_refused _ | Lane_write_pending) | None -> None
 
 (** Stable identity of the Runtime row opened for detail. The cursor is only a
     position and can move to another runtime after refresh; detail stays bound
@@ -8207,12 +8216,15 @@ let same_runtime_lane_list a b =
   | Runtime_surface_list, Standalone_lanes_list
   | Standalone_lanes_list, Runtime_surface_list -> false
 
+let dismiss_runtime_lane_notice (state : state) =
+  state.runtime_lane_notice <- dismissed_runtime_lane_notice state.runtime_lane_notice
+
 (* A lane write answered. A refusal ends it here. A success keeps lane edits
    waiting for a re-read of the list it changed that starts after this
    point; the caller launches that re-read. *)
 let settle_runtime_lane_write (state : state) ~written = function
   | Ok () ->
-    state.runtime_lane_notice <- None;
+    dismiss_runtime_lane_notice state;
     state.runtime_lane_write <-
       Lane_write_rereading (written, runtime_lane_list_generation state written)
   | Error detail ->
@@ -8221,17 +8233,25 @@ let settle_runtime_lane_write (state : state) ~written = function
 
 (* A load of [list] with [generation] landed. When it is the re-read a write
    waits for, lane edits open again: with the "still being written" line
-   cleared if the list came back, or with a line saying it did not. *)
+   cleared if the list came back, or with a line saying it did not. Any load
+   of a list that comes back, awaited or not, ends the line saying that list
+   could not be re-read. *)
 let runtime_lane_list_reread (state : state) ~list ~generation result =
-  match state.runtime_lane_write with
-  | Lane_write_rereading (written, answered_at)
-    when same_runtime_lane_list written list && generation > answered_at ->
-    state.runtime_lane_write <- Lane_write_idle;
-    (match result, state.runtime_lane_notice with
-     | Error detail, _ -> state.runtime_lane_notice <- Some (Lane_list_unread detail)
-     | Ok (), Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Ok (), (Some (Lane_write_refused _ | Lane_list_unread _) | None) -> ())
-  | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
+  (match state.runtime_lane_write with
+   | Lane_write_rereading (written, answered_at)
+     when same_runtime_lane_list written list && generation > answered_at ->
+     state.runtime_lane_write <- Lane_write_idle;
+     (match result, state.runtime_lane_notice with
+      | Error detail, _ ->
+        state.runtime_lane_notice <- Some (Lane_list_unread (list, detail))
+      | Ok (), Some Lane_write_pending -> state.runtime_lane_notice <- None
+      | Ok (), (Some (Lane_write_refused _ | Lane_list_unread _) | None) -> ())
+   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ());
+  match result, state.runtime_lane_notice with
+  | Ok (), Some (Lane_list_unread (unread, _)) when same_runtime_lane_list unread list ->
+    state.runtime_lane_notice <- None
+  | Ok (), (Some (Lane_list_unread _ | Lane_write_refused _ | Lane_write_pending) | None)
+  | Error _, _ -> ()
 
 type runtime_lane_write_request =
   | Write_lane_order of string list
@@ -8285,6 +8305,10 @@ let plan_runtime_lane_edit (state : state) = function
             (Write_lane_order
                (List.filter (fun id -> not (String.equal id runtime_id)) order))
             ~cursor_after
+        | Move_candidate _ when runtime_lane_write_busy state ->
+          (* The order on screen is the one before the write that is out, so
+             it cannot say where the candidate stands now. *)
+          Refuse_lane_edit Lane_write_pending
         | Move_candidate move ->
           let by, edge =
             match move with

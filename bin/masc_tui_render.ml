@@ -4238,18 +4238,10 @@ let keeper_operations_preview (state : state) =
                  state.runtime_assignments
              with
              | Some a ->
-                 let is_l =
-                   match a.ra_target_id with
-                   | Some tid ->
-                       List.exists
-                         (fun (l : Tui_decode.runtime_resolved_lane) ->
-                            String.equal l.rrl_id tid)
-                         state.runtime_lanes
-                   | None -> false
-                 in
-                 Printf.sprintf " \xc2\xb7 target %s (%s)"
-                   (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
-                   (if is_l then "lane" else "model")
+                 runtime_assignment_label
+                   ~runtime_lanes:state.runtime_lanes
+                   a
+                 |> runtime_assignment_operations_note
              | None ->
                  match state.runtime_surface with
                  | Some s ->
@@ -6251,20 +6243,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let target_str, is_lane =
       match assignment with
       | Some a ->
-          let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
-          let is_l =
-            match a.ra_target_id with
-            | Some tid ->
-                List.exists
-                  (fun (l : Tui_decode.runtime_resolved_lane) ->
-                     String.equal l.rrl_id tid)
-                  state.runtime_lanes
-            | None -> false
+          let label =
+            runtime_assignment_label ~runtime_lanes:state.runtime_lanes a
           in
-          Printf.sprintf "%s (%s, %s)" target
-            (if is_l then "lane" else "model")
-            (Terminal_text.single_line a.ra_source),
-          is_l
+          runtime_assignment_stats_value label, runtime_assignment_is_lane label
       | None ->
           let def_name =
             match state.runtime_surface with
@@ -11717,24 +11699,8 @@ let render_runtime_pick (state : state) =
         state.runtime_assignments
     with
     | Some a ->
-        let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
-        let kind =
-          match a.ra_target_id with
-          | Some tid
-            when List.exists
-                   (fun (l : Tui_decode.runtime_resolved_lane) ->
-                     String.equal l.rrl_id tid)
-                   state.runtime_lanes ->
-              "lane"
-          | Some _ -> "model"
-          | None -> "default"
-        in
-        Printf.sprintf "%s (%s, %s)%s"
-          target kind
-          (Terminal_text.single_line a.ra_source)
-          (match a.ra_unavailable_reason with
-           | None -> ""
-           | Some reason -> " — unavailable: " ^ Terminal_text.single_line reason)
+        runtime_assignment_label ~runtime_lanes:state.runtime_lanes a
+        |> runtime_assignment_stats_value
     | None -> "-"
   in
   let items = Masc_tui_types.runtime_picker_items state in

@@ -45,6 +45,62 @@ module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 
+type runtime_assignment_kind =
+  | Runtime_assignment_lane
+  | Runtime_assignment_model
+  | Runtime_assignment_default
+  | Runtime_assignment_unavailable of string
+
+type runtime_assignment_label =
+  { ral_target : string
+  ; ral_source : string
+  ; ral_kind : runtime_assignment_kind
+  }
+
+let runtime_assignment_label ~runtime_lanes (assignment : runtime_assignment) =
+  let ral_target = Terminal_text.single_line_or ~default:"-" assignment.ra_target_id in
+  let ral_source = Terminal_text.single_line assignment.ra_source in
+  let ral_kind =
+    match assignment.ra_unavailable_reason with
+    | Some reason -> Runtime_assignment_unavailable (Terminal_text.single_line reason)
+    | None ->
+      (match assignment.ra_target_id with
+       | None -> Runtime_assignment_default
+       | Some target
+         when List.exists
+                (fun (lane : runtime_resolved_lane) -> String.equal lane.rrl_id target)
+                runtime_lanes ->
+         Runtime_assignment_lane
+       | Some _ -> Runtime_assignment_model)
+  in
+  { ral_target; ral_source; ral_kind }
+;;
+
+let runtime_assignment_label_text label =
+  let kind =
+    match label.ral_kind with
+    | Runtime_assignment_lane -> "lane"
+    | Runtime_assignment_model -> "model"
+    | Runtime_assignment_default -> "default"
+    | Runtime_assignment_unavailable reason -> "unavailable: " ^ reason
+  in
+  Printf.sprintf "%s (%s, %s)" label.ral_target kind label.ral_source
+;;
+
+let runtime_assignment_operations_note label =
+  " \xc2\xb7 target " ^ runtime_assignment_label_text label
+;;
+
+let runtime_assignment_stats_value = runtime_assignment_label_text
+
+let runtime_assignment_is_lane label =
+  match label.ral_kind with
+  | Runtime_assignment_lane -> true
+  | Runtime_assignment_model
+  | Runtime_assignment_default
+  | Runtime_assignment_unavailable _ -> false
+;;
+
 let acting_pane_reserved_cols = ref 0
 
 

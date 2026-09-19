@@ -140,6 +140,18 @@ val start_keeper_loops :
     Synchronous startup failure is retained in the lifecycle and raised as
     [Keeper_persistence_start_failed]. *)
 
+(** What the Keeper lifecycle listener did with one event it took off its
+    subscription. *)
+type keeper_lifecycle_refresh =
+  | Lifecycle_refreshed
+  | Lifecycle_not_refreshed
+  (** Not a lifecycle event, or a lifecycle payload that did not decode. *)
+  | Lifecycle_refresh_failed of
+      { keeper_name : string
+      ; event : Keeper_lifecycle_events.lifecycle_event
+      ; error : exn
+      }
+
 module For_testing : sig
   type keeper_loops_start_ownership
 
@@ -188,6 +200,15 @@ module For_testing : sig
     keeper_name:string ->
     Keeper_lifecycle_events.lifecycle_event ->
     unit
+
+  val handle_keeper_lifecycle_batch :
+    refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->
+    invalidate_all:(unit -> unit) ->
+    Runtime_event_bus.batch ->
+    keeper_lifecycle_refresh list
+  (** One drained batch of the lifecycle listener: each event is refreshed on
+      its own, and a refresh failure or an overflow drop calls
+      [invalidate_all] once after the batch. *)
 end
 
 val start_background_maintenance :

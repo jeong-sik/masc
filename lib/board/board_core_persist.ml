@@ -33,6 +33,9 @@ let persist_io_error ~where msg =
 let create_store () =
   { posts_load_result = Ok ()
   ; comments_load_result = Ok ()
+  ; votes_load_result = Ok ()
+  ; reactions_load_result = Ok ()
+  ; sub_boards_load_result = Ok ()
   ; workspace_masc_dir = None
   ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -57,6 +60,11 @@ let create_store () =
   ; posts_by_turn_ref = Hashtbl.create 256
   ; posts_by_run_id = Hashtbl.create 256
   }
+;;
+
+let require_persisted_snapshot_readable = function
+  | Ok () -> Ok ()
+  | Error detail -> Error (Io_error detail)
 ;;
 
 (* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create
@@ -229,30 +237,36 @@ let sweep store =
        so a large backlog drains across sweeps without a long lock hold; disk is
        compacted by the next full snapshot flush, which dumps the pruned tables. *)
     let orphan_reaction_keys =
-      Hashtbl.to_seq store.reactions
-      |> Seq.filter_map (fun (key, (reaction : reaction)) ->
-        let target_present =
-          match reaction.target_type with
-          | Reaction_post -> Hashtbl.mem store.posts reaction.target_id
-          | Reaction_comment -> Hashtbl.mem store.comments reaction.target_id
-        in
-        if target_present then None else Some key)
-      |> Seq.take Limits.sweeper_batch_size
-      |> List.of_seq
+      match store.reactions_load_result with
+      | Error _ -> []
+      | Ok () ->
+        Hashtbl.to_seq store.reactions
+        |> Seq.filter_map (fun (key, (reaction : reaction)) ->
+          let target_present =
+            match reaction.target_type with
+            | Reaction_post -> Hashtbl.mem store.posts reaction.target_id
+            | Reaction_comment -> Hashtbl.mem store.comments reaction.target_id
+          in
+          if target_present then None else Some key)
+        |> Seq.take Limits.sweeper_batch_size
+        |> List.of_seq
     in
     List.iter (Hashtbl.remove store.reactions) orphan_reaction_keys;
     let orphan_vote_keys =
-      Hashtbl.to_seq store.vote_log
-      |> Seq.filter_map (fun (key, _) ->
-        match vote_key_target key with
-        | Some (`Post, target_id) when not (Hashtbl.mem store.posts target_id) ->
-          Some key
-        | Some (`Comment, target_id)
-          when not (Hashtbl.mem store.comments target_id) ->
-          Some key
-        | Some _ | None -> None)
-      |> Seq.take Limits.sweeper_batch_size
-      |> List.of_seq
+      match store.votes_load_result with
+      | Error _ -> []
+      | Ok () ->
+        Hashtbl.to_seq store.vote_log
+        |> Seq.filter_map (fun (key, _) ->
+          match vote_key_target key with
+          | Some (`Post, target_id) when not (Hashtbl.mem store.posts target_id) ->
+            Some key
+          | Some (`Comment, target_id)
+            when not (Hashtbl.mem store.comments target_id) ->
+            Some key
+          | Some _ | None -> None)
+        |> Seq.take Limits.sweeper_batch_size
+        |> List.of_seq
     in
     List.iter (Hashtbl.remove store.vote_log) orphan_vote_keys;
     let removed_reactions = List.length orphan_reaction_keys in

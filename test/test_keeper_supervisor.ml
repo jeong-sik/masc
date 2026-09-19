@@ -34,6 +34,10 @@ module Tool_accumulator = Masc.Keeper_tool_emission_hook
 module Latched_reason = Keeper_latched_reason
 module Lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Launch_transaction = Masc.Keeper_keepalive_launch_transaction
+module Librarian_boundaries = Masc.Keeper_turn_boundaries
+module Librarian_checkpoint_store = Masc.Keeper_checkpoint_store
+module Librarian_progress = Masc.Keeper_librarian_progress
+module Librarian_refresh = Masc.Keeper_librarian_queue_refresh
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    unit projection over [resolve_with_policy] (production resolution path). *)
@@ -312,6 +316,103 @@ let make_meta name =
   with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
+
+let seed_durable_librarian_baseline
+  config
+  (meta : Keeper_meta_contract.keeper_meta)
+  =
+  let config_dir = Filename.concat (Workspace.masc_root_dir config) "config" in
+  write_keeper_toml config_dir ~name:meta.name;
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> fail ("write Librarian fixture metadata: " ^ detail));
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let messages =
+    [ Agent_core.Types.make_message
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "durable baseline" ]
+    ]
+  in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id
+    ; agent_name = meta.name
+    ; model = "fixture-model"
+    ; system_prompt = None
+    ; messages
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 1
+    ; created_at = 1.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  (match
+     Librarian_checkpoint_store.save_agent_core_classified
+       ~session_dir
+       ~history_retained:0
+       checkpoint
+   with
+   | Ok (Librarian_checkpoint_store.Saved _) -> ()
+   | Ok (Librarian_checkpoint_store.Stale_noop _) ->
+     fail "Librarian fixture checkpoint was stale"
+   | Error detail -> fail ("save Librarian fixture checkpoint: " ^ detail));
+  let position =
+    match Librarian_boundaries.position_of_messages messages with
+    | Ok position -> position
+    | Error detail -> fail ("Librarian fixture boundary: " ^ detail)
+  in
+  let record : Librarian_boundaries.record =
+    { recorded_at = 1.0
+    ; event =
+        Librarian_boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          ; history_at_start = Librarian_boundaries.Continued_history
+          ; position
+          }
+    }
+  in
+  match
+    Librarian_boundaries.append
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:meta.name
+      record
+  with
+  | Ok () -> ()
+  | Error error -> fail (Librarian_boundaries.append_error_to_string error)
+
+let check_durable_librarian_baseline config ~keeper_name =
+  match
+    Librarian_progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+  with
+  | Ok (Some progress) ->
+    check int "durable baseline end" 1 progress.position.end_atom
+  | Ok None -> fail "durable Librarian callback did not write progress"
+  | Error error -> fail (Librarian_progress.read_error_to_string error)
+
+let with_librarian_enabled f =
+  Masc_test_deps.with_process_env
+    Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+    f
+;;
 
 let create_started_task_for_meta config (meta : Keeper_meta_contract.keeper_meta) ~title =
   let created =
@@ -2369,6 +2470,7 @@ let register_restart ~base_path ~name ~meta token intake_token =
 ;;
 
 let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
+  with_librarian_enabled @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
   ensure_test_runtime ();
@@ -2385,21 +2487,13 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
        ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
        Memory_lane.For_testing.reset ();
        let name = "durable-catchup-order" in
-       let offline = Reg.register_offline ~base_path:config.base_path name (make_meta name) in
+       let meta = make_meta name in
+       seed_durable_librarian_baseline config meta;
+       let offline = Reg.register_offline ~base_path:config.base_path name meta in
        let order = ref [] in
        let result =
          Launch_transaction.run
-           ~on_lifecycle_open:(fun ~base_path ~keeper_name ->
-             check string "catch-up base path" config.base_path base_path;
-             check string "catch-up keeper" name keeper_name;
-             order := "catch-up" :: !order;
-             match Memory_lane.submit ~base_path ~keeper_name ignore with
-             | Memory_lane.Ran_inline -> ()
-             | Memory_lane.Submitted
-             | Memory_lane.Coalesced
-             | Memory_lane.Dropped
-             | Memory_lane.Rejected_draining ->
-               fail "admitted catch-up did not enter the opened memory lane")
+           ~on_lifecycle_open:Librarian_refresh.submit_durable
            ~base_path:config.base_path
            ~keeper_name:name
            ~register:(fun _token _intake_token ->
@@ -2407,6 +2501,7 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
              Ok offline)
            ~rollback:Launch_transaction.Retain_registered
            (fun _intake_token _token entry ->
+              check_durable_librarian_baseline config ~keeper_name:name;
               order := "launch" :: !order;
               entry)
        in
@@ -2415,12 +2510,13 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
           check bool "launch retains registered entry" true
             (Lane.Id.equal (Lane.id entry.lane) (Lane.id offline.lane))
         | Error _ -> fail "ordered catch-up launch transaction failed");
-       check (list string) "registration, catch-up, launch order"
-         [ "register"; "catch-up"; "launch" ]
-         (List.rev !order))
+       check (list string) "registration precedes launch" [ "register"; "launch" ]
+         (List.rev !order);
+       check_durable_librarian_baseline config ~keeper_name:name)
 ;;
 
 let test_launch_callback_failure_rolls_back_restart_transaction () =
+  with_librarian_enabled @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
   ensure_test_runtime ();
@@ -2439,9 +2535,11 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
        Memory_lane.For_testing.reset ();
        let name = "librarian-launch-exception-rollback" in
        let meta = make_meta name in
+       seed_durable_librarian_baseline config meta;
        let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
        (match
           Launch_transaction.run
+            ~on_lifecycle_open:Librarian_refresh.submit_durable
             ~base_path:config.base_path
             ~keeper_name:name
             ~register:(register_restart ~base_path:config.base_path ~name ~meta)
@@ -2454,6 +2552,7 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
                { librarian_abort_error = None; rollback_error = None; _ }) -> ()
         | Error _ -> fail "launch exception produced the wrong transaction outcome"
         | Ok _ -> fail "launch exception unexpectedly committed");
+       check_durable_librarian_baseline config ~keeper_name:name;
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
           check bool "launch exception restores exact crashed authority" true
@@ -2477,6 +2576,7 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
 ;;
 
 let test_launch_callback_cancellation_rolls_back_restart_transaction () =
+  with_librarian_enabled @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
   ensure_test_runtime ();
@@ -2495,6 +2595,7 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        Memory_lane.For_testing.reset ();
        let name = "librarian-launch-cancellation-rollback" in
        let meta = make_meta name in
+       seed_durable_librarian_baseline config meta;
        let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
        let cancel_context, resolve_cancel_context = Eio.Promise.create () in
        let launch_entered, resolve_launch_entered = Eio.Promise.create () in
@@ -2507,6 +2608,7 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
                Eio.Promise.resolve resolve_cancel_context context;
                ignore
                  (Launch_transaction.run
+                    ~on_lifecycle_open:Librarian_refresh.submit_durable
                     ~base_path:config.base_path
                     ~keeper_name:name
                     ~register:
@@ -2526,6 +2628,7 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        Eio.Cancel.cancel context (Failure "cancel injected launch callback");
        check bool "launch cancellation propagates after rollback" true
          (Eio.Promise.await cancelled);
+       check_durable_librarian_baseline config ~keeper_name:name;
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
           check bool "launch cancellation restores exact crashed authority" true

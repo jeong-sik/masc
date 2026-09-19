@@ -11,8 +11,11 @@
     directions, with rectangular, rounded and diamond nodes, solid, dotted
     and thick edges, edge labels in both spellings, chains and [&] groups.
     [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
-    state boxes, initial and terminal [[*]] pseudo-states, transition labels,
-    and state descriptions.
+    state boxes, initial and terminal [[*]] pseudo-states, [-->] transitions
+    and their labels, and state descriptions. A state id is one token of
+    letters, digits, [_] or non-ASCII text. A [note left of] or [note right
+    of] a state, on one line or running to [end note], is read and its text
+    is not drawn.
     [sequenceDiagram] draws participants, lifelines, messages with their
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the
@@ -38,8 +41,17 @@ type shape =
   | Round  (** [id(label)], [id([label])], [id[(label)]], [id((label))] *)
   | Diamond  (** [id{label}], [id{{label}}]; drawn as a box whose label wears ⟨ ⟩ *)
 
+(** What names a node. A state diagram's [[*]] names no state: it is where
+    the diagram starts on the left of a transition, and where it ends on
+    the right. Those are two nodes, and neither can meet a state the source
+    named. *)
+type node_id =
+  | Named of string  (** an id the source wrote *)
+  | Initial  (** [[*] --> X] *)
+  | Final  (** [X --> [*]] *)
+
 type node = {
-  id : string;
+  id : node_id;
   label : string;
   shape : shape;
 }
@@ -50,8 +62,8 @@ type line_style =
   | Thick
 
 type edge = {
-  from_id : string;
-  to_id : string;
+  from_id : node_id;
+  to_id : node_id;
   directed : bool;  (** [-->] against [---] *)
   style : line_style;
   label : string option;
@@ -71,7 +83,7 @@ type group = {
   group_id : string;
   group_label : string;  (** the title on the box, [group_id] when untitled *)
   group_direction : direction option;
-  group_nodes : string list;  (** ids declared directly inside, source order *)
+  group_nodes : node_id list;  (** ids declared directly inside, source order *)
   group_children : group list;
 }
 

@@ -143,10 +143,11 @@ tools-support = true
 # its catalog row and takes only the output ceiling and the thinking-control
 # dialect from here.
 [models."{binding_id}".capabilities]
-{max_output_lines}{thinking_control}supports-parallel-tool-calls = {parallel}
+{max_output_lines}{thinking_control}
 
 [{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
+disable-parallel-tool-use = {disable_parallel}
 
 # Boot gate (server_runtime_bootstrap.require_explicit_mandatory_exact_output_
 # lanes): hitl_auto_judge and board_attention_exact must be declared with
@@ -480,6 +481,11 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         raise ValueError(
             f"effort {effort!r} is not admitted by Claude Code; "
             f"expected one of {CLAUDE_CODE_EFFORTS}")
+    if is_official_client(provider) and not spec["parallel"]:
+        raise ValueError(
+            f"arm {arm} requires disabling parallel tool calls, but the "
+            f"{provider} runtime cannot carry that request policy; "
+            "use an HTTP runtime for arms b, c, d")
 
     # Before anything is written: a lookup that fails must not leave a
     # half-rendered config directory behind.
@@ -553,7 +559,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             f"max-context = {openrouter.max_context}\n" if openrouter else ""),
         max_output_lines=max_output_lines,
         thinking_control=thinking_control,
-        parallel=str(spec["parallel"]).lower(),
+        disable_parallel=str(not spec["parallel"]).lower(),
         **pcfg)
     if spec["skills"]:
         # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.

@@ -1,0 +1,149 @@
+{
+  "binary": "/Users/dancer/.local/bin/masc",
+  "sha256": "17263266737c5edb5f0bae01a771cc55fc51ad2c264bdbaa1857de6f4eb55261",
+  "build_commit": "8021c64ac303bdc8e7f3ac815f29b6ce38e1912f",
+  "arms": [
+    {
+      "arm": "b",
+      "toml": "[runtime]\ndefault = \"claude.claude-fable-5\"\n[providers.claude]\nprotocol = \"messages-http\"\nendpoint = \"http://127.0.0.1:51570\"\n[providers.claude.credentials]\ntype = \"inline\"\nvalue = \"audit-loopback-no-account\"\n[models.claude-fable-5]\napi-name = \"claude-fable-5\"\ntools-support = true\nthinking-support = true\n[models.claude-fable-5.capabilities]\nmax-output-tokens = 64000\nsupports-parallel-tool-calls = false\n[claude.claude-fable-5]\nmax-concurrent = 1\n",
+      "exit_code": 1,
+      "stdout": "{\"schema\":\"masc.runtime_verification.v1\",\"runtime_id\":\"claude.claude-fable-5\",\"model\":\"claude-fable-5\",\"observed_model\":null,\"status\":\"failed\",\"checks\":{\"response\":false,\"tool_called\":false,\"tool_roundtrip\":false},\"failure\":{\"code\":\"provider_rejected\",\"message\":\"The selected model request failed; check model access, endpoint and authentication.\",\"detail\":\"Invalid request (unknown): audit capture completed; no provider called\"}}\n",
+      "stderr": "[2026-09-19 18:14:02] [INFO] [MCP] Tag registry initialized: 174 tools registered\n[2026-09-19 18:14:02] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog\n[llm_provider] [WARN] [complete] HTTP 400 from anthropic (model=claude-fable-5 base_url=http://127.0.0.1:51570 request_path=/v1/messages key=[REDACTED]:3b544a2d(len:25)): req_body=865 bytes balanced=true parse_ok=true resp_body={\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\", \"message\": \"audit capture completed; no provider called\"}}\n",
+      "requests": [
+        {
+          "path": "/v1/messages/count_tokens",
+          "body": {
+            "tools": [
+              {
+                "name": "runtime_readiness_challenge",
+                "description": "Return a fresh readiness challenge. This tool has no external effects.",
+                "input_schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            ],
+            "system": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools.",
+            "model": "claude-fable-5",
+            "messages": [
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools."
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "path": "/v1/messages",
+          "body": {
+            "tools": [
+              {
+                "name": "runtime_readiness_challenge",
+                "description": "Return a fresh readiness challenge. This tool has no external effects.",
+                "input_schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            ],
+            "system": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools.",
+            "model": "claude-fable-5",
+            "max_tokens": 64000,
+            "messages": [
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools."
+                  }
+                ]
+              }
+            ],
+            "stream": false
+          }
+        }
+      ]
+    },
+    {
+      "arm": "e",
+      "toml": "[runtime]\ndefault = \"claude.claude-fable-5\"\n[providers.claude]\nprotocol = \"messages-http\"\nendpoint = \"http://127.0.0.1:51570\"\n[providers.claude.credentials]\ntype = \"inline\"\nvalue = \"audit-loopback-no-account\"\n[models.claude-fable-5]\napi-name = \"claude-fable-5\"\ntools-support = true\nthinking-support = true\n[models.claude-fable-5.capabilities]\nmax-output-tokens = 64000\nsupports-parallel-tool-calls = true\n[claude.claude-fable-5]\nmax-concurrent = 4\n",
+      "exit_code": 1,
+      "stdout": "{\"schema\":\"masc.runtime_verification.v1\",\"runtime_id\":\"claude.claude-fable-5\",\"model\":\"claude-fable-5\",\"observed_model\":null,\"status\":\"failed\",\"checks\":{\"response\":false,\"tool_called\":false,\"tool_roundtrip\":false},\"failure\":{\"code\":\"provider_rejected\",\"message\":\"The selected model request failed; check model access, endpoint and authentication.\",\"detail\":\"Invalid request (unknown): audit capture completed; no provider called\"}}\n",
+      "stderr": "[2026-09-19 18:14:02] [INFO] [MCP] Tag registry initialized: 174 tools registered\n[2026-09-19 18:14:03] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog\n[llm_provider] [WARN] [complete] HTTP 400 from anthropic (model=claude-fable-5 base_url=http://127.0.0.1:51570 request_path=/v1/messages key=[REDACTED]:3b544a2d(len:25)): req_body=865 bytes balanced=true parse_ok=true resp_body={\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\", \"message\": \"audit capture completed; no provider called\"}}\n",
+      "requests": [
+        {
+          "path": "/v1/messages/count_tokens",
+          "body": {
+            "tools": [
+              {
+                "name": "runtime_readiness_challenge",
+                "description": "Return a fresh readiness challenge. This tool has no external effects.",
+                "input_schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            ],
+            "system": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools.",
+            "model": "claude-fable-5",
+            "messages": [
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools."
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "path": "/v1/messages",
+          "body": {
+            "tools": [
+              {
+                "name": "runtime_readiness_challenge",
+                "description": "Return a fresh readiness challenge. This tool has no external effects.",
+                "input_schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            ],
+            "system": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools.",
+            "model": "claude-fable-5",
+            "max_tokens": 64000,
+            "messages": [
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Verify this exact model connection. Call runtime_readiness_challenge with no arguments. Read its result, then reply with only the JSON object {\"challenge\":\"the exact challenge returned by the tool\"}. Do not invent a challenge or use other tools."
+                  }
+                ]
+              }
+            ],
+            "stream": false
+          }
+        }
+      ]
+    }
+  ]
+}

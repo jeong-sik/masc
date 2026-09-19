@@ -86,7 +86,11 @@ let notice_text = function
   | None -> "no line"
   | Some (Lane_write_refused reason) -> "refuse: " ^ reason
   | Some Lane_write_pending -> "pending"
-  | Some (Lane_list_unread detail) -> "unread: " ^ detail
+
+let stale_text state =
+  match runtime_lane_stale_lines state with
+  | [] -> "fresh"
+  | lines -> String.concat " | " lines
 
 let plan_text = function
   | Open_lane_name_field -> "open the name field"
@@ -133,6 +137,7 @@ let test_a_lane_edit_waits_for_the_previous_write () =
     let state = lane_state () in
     state.runtime_lane_write <- write;
     expect_plan (phase ^ ": J") state down busy;
+    expect_plan (phase ^ ": K on the head is pending, not 'already first'") state up busy;
     expect_plan (phase ^ ": x") state drop busy;
     expect_plan (phase ^ ": the first D still arms") state remove "arm primary";
     state.runtime_lane_remove_armed <- Some "primary";
@@ -184,16 +189,83 @@ let test_a_refused_write_opens_edits_at_once () =
   Alcotest.(check string) "the refusal is drawn" "refuse: HTTP 400: no"
     (notice_text state.runtime_lane_notice)
 
-let test_a_failed_reread_opens_edits_with_a_line () =
+let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
   state.runtime_lane_write <- Lane_write_posting;
   settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
     (Error "HTTP 503: down");
-  expect_plan "edits are open" state down "write primary [b; a], cursor 1";
-  Alcotest.(check string) "the list is said to be stale" "unread: HTTP 503: down"
+  expect_plan "move is refused" state down
+    "refuse: the lane list may be stale; reload it before changing candidates";
+  expect_plan "drop is refused" state drop
+    "refuse: the lane list may be stale; reload it before changing candidates";
+  Alcotest.(check string) "the list is said to be stale"
+    "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
+    (stale_text state);
+  Alcotest.(check string) "the pending line went" "no line"
     (notice_text state.runtime_lane_notice)
+
+let stale_after_503 =
+  "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
+
+(* The stale line is about the list, not about a key, so it is not the notice:
+   no key, refusal or dismissal reaches it, and only that list loading again
+   ends it. *)
+let test_a_stale_line_holds_until_its_list_loads () =
+  let state = lane_state () in
+  state.runtime_surface_generation <- 1;
+  state.runtime_lane_write <- Lane_write_posting;
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
+    (Error "HTTP 503: down");
+  dismiss_runtime_lane_notice state;
+  Alcotest.(check string) "a view change keeps it" stale_after_503 (stale_text state);
+  runtime_lane_list_reread state ~list:Standalone_lanes_list ~generation:3 (Ok ());
+  Alcotest.(check string) "the other list loading keeps it" stale_after_503
+    (stale_text state);
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:3
+    (Error "HTTP 503: still down");
+  Alcotest.(check string) "a failed load with no write out keeps it" stale_after_503
+    (stale_text state);
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:4 (Ok ());
+  Alcotest.(check string) "its list loading ends it" "fresh" (stale_text state)
+
+(* The review's case. A drop's read-back fails, so the list on screen still
+   shows the dropped candidate. A refused key then says something of its own
+   and a view change dismisses that. The stale line outlives both, and the
+   stale order is never sent as a second write. *)
+let test_a_refusal_and_a_dismissal_leave_the_stale_line () =
+  let state = lane_state () in
+  state.runtime_surface_generation <- 1;
+  state.runtime_lane_write <- Lane_write_posting;
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
+    (Error "HTTP 503: down");
+  (match plan_runtime_lane_edit state up with
+   | Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
+   | plan -> Alcotest.failf "K on the head: %s" (plan_text plan));
+  Alcotest.(check string) "the refusal is drawn"
+    "refuse: the lane list may be stale; reload it before changing candidates"
+    (notice_text state.runtime_lane_notice);
+  Alcotest.(check string) "beside the stale line" stale_after_503 (stale_text state);
+  dismiss_runtime_lane_notice state;
+  Alcotest.(check string) "the dismissal ended the refusal" "no line"
+    (notice_text state.runtime_lane_notice);
+  state.runtime_cursor <- 1;
+  expect_plan "x cannot write from the stale list" state drop
+    "refuse: the lane list may be stale; reload it before changing candidates";
+  Alcotest.(check string) "and the stale line is still drawn" stale_after_503
+    (stale_text state)
+
+let test_a_new_view_ends_what_a_key_said () =
+  let state = lane_state () in
+  List.iter (fun notice ->
+    state.runtime_lane_notice <- Some notice;
+    dismiss_runtime_lane_notice state;
+    Alcotest.(check string) (notice_text (Some notice)) "no line"
+      (notice_text state.runtime_lane_notice))
+    [ Lane_write_refused "HTTP 400: no"; Lane_write_pending ]
 
 let test_lane_keys_parse_to_edits () =
   let parsed key = Option.map (fun edit -> plan_text (plan_runtime_lane_edit (lane_state ()) edit))
@@ -266,6 +338,9 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
       Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
       Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;
-      Alcotest.test_case "a failed re-read opens edits with a line" `Quick test_a_failed_reread_opens_edits_with_a_line;
+      Alcotest.test_case "a failed re-read refuses candidate edits with a line" `Quick test_a_failed_reread_refuses_candidate_edits_with_a_line;
+      Alcotest.test_case "a stale line holds until its list loads" `Quick test_a_stale_line_holds_until_its_list_loads;
+      Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;
+      Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
       Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
       Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode]]

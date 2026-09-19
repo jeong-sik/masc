@@ -101,6 +101,9 @@ def run(executable: str, *, replace_proof: bool) -> None:
             final_cursor=b"\x1b[?25l",
         )
         h.open_loaded_planning(process, master_fd, output)
+        # Keep the Goal visible when its phase changes to completed.
+        for phase_filter in (b"completed", b"dropped", b"all"):
+            h.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
         h.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
         proof_frame = h.send_and_wait(
             process, master_fd, output, b"a", b"CONFIRM THIS PROOF"

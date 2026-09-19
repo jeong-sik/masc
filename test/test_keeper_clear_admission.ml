@@ -8,7 +8,7 @@ let require_ok = function
   | Error detail -> fail detail
 ;;
 
-let with_keeper ~paused ~install_owner f =
+let with_keeper ?(save_checkpoint = true) ~paused ~install_owner f =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "keeper-clear-admission-" "" in
@@ -74,7 +74,22 @@ max-context = 4096
       fail (Context.checkpoint_write_error_to_string
         ~persistence_error_to_string:Fun.id error)
   in
-  save saved;
+  if save_checkpoint then save saved;
+  let _official_session =
+    Keeper_official_client_session_store.claim
+      ~base_path
+      ~keeper_name:meta.name
+      ~expected:None
+      ~client_kind:Keeper_official_client_session_store.Claude_code
+      ~owner_epoch:(Keeper_official_client_session_store.process_epoch ())
+      ~runtime_id:"clear_fixture.model"
+      ~tool_surface_sha256:
+        (Keeper_official_client_session_store.tool_surface_sha256
+           ~native_posture:Runtime_native_tools.Native_none
+           [])
+      ~updated_at:1.0
+    |> require_ok
+  in
   let load () =
     match Context.load_context_from_checkpoint ~trace_id ~base_dir with
     | _, Some context -> context
@@ -92,7 +107,13 @@ max-context = 4096
     | Some result -> result
     | None -> fail "clear tool was not dispatched"
   in
-  f ~config ~meta ~saved ~save ~load ~clear
+  let official_session () =
+    Keeper_official_client_session_store.load
+      ~base_path
+      ~keeper_name:meta.name
+    |> require_ok
+  in
+  f ~config ~meta ~saved ~save ~load ~clear ~official_session
 ;;
 
 let check_refused result =
@@ -109,13 +130,20 @@ let check_empty load =
        message.role = Agent_core.Types.System) messages)
 ;;
 
+let check_official_session_cleared official_session =
+  check bool "official-client session is absent" true
+    (Option.is_none (official_session ()))
+;;
+
 let test_clear_does_not_race_the_active_turn () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved ~save ~load ~clear ->
+  @@ fun ~config ~meta ~saved ~save ~load ~clear ~official_session ->
   (match Keeper_owner_registry.run_autonomous_if_idle
     ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
       let before = Context.messages_of_context (load ()) in
       check_refused (clear ());
+      check bool "busy clear kept the official-client session" true
+        (Option.is_some (official_session ()));
       check bool "busy clear left canonical history untouched" true
         (before = Context.messages_of_context (load ()));
       (* The turn still owns its original history and is allowed to finish. *)
@@ -126,6 +154,7 @@ let test_clear_does_not_race_the_active_turn () =
   let result = clear () in
   check bool (Tool_result.message result) true (Tool_result.is_success result);
   check_empty load;
+  check_official_session_cleared official_session;
   (match Keeper_owner_registry.run_autonomous_if_idle
     ~base_path:config.base_path ~keeper_name:meta.name (fun () -> check_empty load) with
    | Ok (`Ran ()) -> ()
@@ -135,10 +164,11 @@ let test_clear_does_not_race_the_active_turn () =
 
 let test_paused_keeper_can_clear_without_resuming () =
   with_keeper ~paused:true ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ->
   let result = clear () in
   check bool (Tool_result.message result) true (Tool_result.is_success result);
   check_empty load;
+  check_official_session_cleared official_session;
   match Keeper_meta_store.read_meta config meta.name |> require_ok with
   | Some current -> check bool "clear does not resume the keeper" true current.paused
   | None -> fail "keeper metadata disappeared"
@@ -146,14 +176,27 @@ let test_paused_keeper_can_clear_without_resuming () =
 
 let test_missing_owner_does_not_clear () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config:_ ~meta:_ ~saved ~save:_ ~load ~clear ->
+  @@ fun ~config:_ ~meta:_ ~saved ~save:_ ~load ~clear ~official_session ->
   check_refused (clear ());
+  check bool "unavailable owner kept the official-client session" true
+    (Option.is_some (official_session ()));
   check bool "unavailable owner left history untouched" true
     (Context.messages_of_context saved = Context.messages_of_context (load ()))
+;;
+
+let test_missing_checkpoint_still_clears_official_session () =
+  with_keeper ~save_checkpoint:false ~paused:false ~install_owner:true
+  @@ fun ~config:_ ~meta:_ ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_official_session_cleared official_session
 ;;
 
 let () =
   run "keeper clear admission"
     [ "owner", [ test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
                ; test_case "paused keeper remains paused" `Quick test_paused_keeper_can_clear_without_resuming
-               ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear ] ]
+               ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear
+               ; test_case "missing checkpoint clears official-client session" `Quick
+                   test_missing_checkpoint_still_clears_official_session
+               ] ]

@@ -53,6 +53,35 @@ let wire_kind_name = function
   | Glm -> "glm"
   | Ollama_kind -> "ollama"
 
+(* Identity comes from the parsed connection, not from the text that produced
+   it. Hashing the raw field bag made a field left out and the same field
+   written with its default two different connections, and the inventory fills
+   [provider_kind] on every round trip -- so adding an endpoint and
+   reconfiguring it answered with two ids for one endpoint, and the second
+   arrived as a duplicate row beside a stale one.
+
+   Destructured exhaustively with warning 9 forced on, because the failure in
+   the other direction is worse: a field added to [t] and forgotten here would
+   give two different connections one id, and an overwritten row is invisible
+   where a duplicate row is not. *)
+let[@warning "+9"] canonical_spec_of
+      ({ choice; model; context; tools; streaming; transport; canonical_spec = _ } : t)
+  =
+  let credential_json = function
+    | None -> `Null
+    | Some (Env_reference name) -> `List [`String "env"; `String name]
+    | Some (File_reference path) -> `List [`String "file"; `String path] in
+  let transport_json = match transport with
+    | Http h -> `Assoc ["endpoint",`String h.endpoint; "kind",`String (wire_kind_name h.kind);
+                        "credential", credential_json h.credential]
+    | Client c -> `Assoc ["command",`String c.command;
+                          "oauth",(match c.oauth with None -> `Null | Some path -> `String path);
+                          "timeout",(match c.timeout with None -> `Null | Some value -> `Float value)] in
+  Yojson.Safe.to_string (`Assoc [
+    "choice",`String (choice_name choice); "model",`String model;
+    "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
+    "transport", transport_json])
+
 let of_json ?home_dir = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) ->
     let* name = required fields "choice" in
@@ -99,29 +128,8 @@ let of_json ?home_dir = function
           | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout})) in
-    (* Identity comes from the parsed connection, not from the text that
-       produced it. Hashing the raw field bag made a field left out and the
-       same field written with its default two different connections, and the
-       inventory fills [provider_kind] on every round trip -- so adding an
-       endpoint and reconfiguring it answered with two ids for one endpoint,
-       and the second arrived as a duplicate row beside a stale one. Every
-       field the type carries is included, so a real change still names a new
-       connection. *)
-    let credential_json = function
-      | None -> `Null
-      | Some (Env_reference name) -> `List [`String "env"; `String name]
-      | Some (File_reference path) -> `List [`String "file"; `String path] in
-    let transport_json = match transport with
-      | Http h -> `Assoc ["endpoint",`String h.endpoint; "kind",`String (wire_kind_name h.kind);
-                          "credential", credential_json h.credential]
-      | Client c -> `Assoc ["command",`String c.command;
-                            "oauth",(match c.oauth with None -> `Null | Some path -> `String path);
-                            "timeout",(match c.timeout with None -> `Null | Some value -> `Float value)] in
-    let canonical_spec = Yojson.Safe.to_string (`Assoc [
-      "choice",`String (choice_name choice); "model",`String model;
-      "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
-      "transport", transport_json]) in
-    Ok {choice;model;context;tools;streaming;transport;canonical_spec}
+    let parsed = {choice;model;context;tools;streaming;transport;canonical_spec=""} in
+    Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
    refuses a restated one rather than ignoring it, so the wizard writes [kind]

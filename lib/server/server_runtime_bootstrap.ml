@@ -254,7 +254,7 @@ let warn_rejected_exact_output_slots registry =
             registries; #32653 measured the catalog-id form failing at
             dispatch 27 times on 2026-08-29. *)
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; a subscription CLI has no endpoint to resolve against the catalog, so this lane needs an HTTP binding for model %S"
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches through Runtime.resolve_assignment, so its slot ids must resolve as a runtime AND as a target, and the catalog-id form failed at dispatch 27 times on 2026-08-29 (#32653); a subscription CLI resolves as a runtime and never as a target, so keep the binding id and give the lane an HTTP binding for model %S"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -263,7 +263,7 @@ let warn_rejected_exact_output_slots registry =
            api_name
        | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by admitted target, and a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
            slot.lane_id
            slot.position
            slot.slot_id

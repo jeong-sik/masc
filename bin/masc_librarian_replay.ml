@@ -26,6 +26,7 @@
    ask whether some of them came from somewhere else. *)
 module Keeper_turn_boundaries = Masc.Keeper_turn_boundaries
 module Keeper_librarian_range = Masc.Keeper_librarian_range
+module Keeper_librarian_progress = Masc.Keeper_librarian_progress
 module Keeper_checkpoint_store = Masc.Keeper_checkpoint_store
 
 let boundary_suffix =
@@ -105,6 +106,12 @@ let stop_to_string = function
     checkpoint's atom count beside the reason, and the two together answer the
     question the spec calls [AtomsUpToLastCutRead]. *)
 let replay ~trace_id ~lines ~messages =
+  (* Counted through [Keeper_turn_boundaries.position_of_messages], which is
+     the same [Runtime_model_input_tail_window.annotate] the selection counts
+     with. That is deliberate -- the two numbers have to be in one numbering
+     for their difference to mean anything -- and it is also the limit: this
+     measures coverage inside that numbering and cannot catch a miscount by
+     the function both sides share. *)
   let atoms_total =
     match Keeper_turn_boundaries.position_of_messages messages with
     | Ok (Keeper_turn_boundaries.Atom_history { end_atom; _ }) -> Ok end_atom
@@ -152,15 +159,21 @@ let replay ~trace_id ~lines ~messages =
           ~progress:(Keeper_librarian_range.progress_after ~trace_id selection)
           ~reached:range.end_atom
           (round :: acc))
-    | Keeper_librarian_range.Baseline { boundary_lines_seen; _ } ->
+    | Keeper_librarian_range.Baseline { position; boundary_lines_seen } ->
       let next = Keeper_librarian_range.progress_after ~trace_id selection in
       if next = progress
       then stop ~rounds:acc ~reached "baseline_without_progress"
-      else
+      else (
+        (* A baseline round reads nothing and moves the position to the
+           smallest cut point: the history before it predates the log and is
+           deliberately not read (RFC §10 decision 1). Carrying [reached]
+           forward unchanged here would count that history as a backlog the
+           rules failed to reach, which is the opposite of what happened. *)
+        let at = position.Keeper_librarian_progress.end_atom in
         loop
           ~progress:next
-          ~reached
-          ({ start_atom = 0; end_atom = 0; lines_seen = boundary_lines_seen } :: acc)
+          ~reached:(max reached at)
+          ({ start_atom = at; end_atom = at; lines_seen = boundary_lines_seen } :: acc))
     | Keeper_librarian_range.Nothing_to_read ->
       stop ~rounds:acc ~reached "nothing_to_read"
     | Keeper_librarian_range.Position_in_other_trace _ ->

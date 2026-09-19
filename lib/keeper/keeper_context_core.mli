@@ -141,8 +141,8 @@ val load_context_from_checkpoint_classified :
   base_dir:string ->
   session_context * checkpoint_load
 
-(** Optional projection for inspection-only callers. [None] covers absence
-    and a diagnosed load failure; it cannot authorize starting a fresh turn.
+(** Optional projection for callers acting only on a loaded context. [None]
+    covers absence and a diagnosed failure; it cannot authorize a fresh turn.
     Turn execution uses {!load_context_from_checkpoint_classified}. *)
 val load_context_from_checkpoint :
   trace_id:string ->

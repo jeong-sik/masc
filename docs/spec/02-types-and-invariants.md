@@ -567,61 +567,10 @@ type rate_limit_error = {
 
 아래 불변식은 MASC 도메인 전체에 적용되며, 각 행의 `검증 방법` 열이 현재 근거를 지정한다. `INV-TYPE-*` ID 자체는 이 문서 안의 앵커이며 코드·테스트 식별자와 자동으로 연결된다는 뜻은 아니다. 연결이 필요한 항목은 검증 방법에 실제 코드 또는 테스트 좌표를 적는다.
 
-### Identity
+### Evidence-backed invariants
 
-| ID | 불변식 | 검증 방법 |
+좌표를 확인할 수 있는 불변식만 이 목록에 둔다. 문서 설명이나 일반적인 테스트 방법만 남은 항목은 불변식 ID를 부여하지 않는다.
+
+| ID | 불변식 | 검증 좌표 |
 |----|--------|----------|
-| INV-TYPE-001 | 에이전트 name은 scope 내에서 유일하다. 동일 이름 세션 등록 시 중복 등록을 거부한다. | Client_identity 레지스트리 중복 등록 검증 |
-| INV-TYPE-002 | Newtype ID 모듈(`Agent_id`, `Task_id`, `Thread_id`, `Turn_id`)은 모듈 경계에서 타입이 불투명하다. 서로 다른 ID 타입 간 직접 비교/대입은 컴파일 에러다. | 컴파일러가 강제 |
-
-### State Machine
-
-| ID | 불변식 | 검증 방법 |
-|----|--------|----------|
-| INV-TYPE-003 | `task_status` 전이는 단방향이다: `Todo -> Claimed -> InProgress -> Done\|Cancelled`. `Done`에서 `Todo`로 역전이하거나, `Todo`에서 `Done`으로 건너뛰는 것은 허용되지 않는다. | `task_status` 전이 함수 + 단위 테스트 |
-| INV-TYPE-004 | `checkpoint_status` (`Completed`, `Rejected`, `Reverted`) 상태머신은 은퇴한 계약(retired contract)이다. 체크포인트는 `Agent_core.Checkpoint.t` 및 `Keeper_checkpoint_store`가 단일 소유한다. | Checkpoint store invariant 검증 |
-| INV-TYPE-005 | `agent_status` 파싱은 알 수 없는 문자열을 암묵적으로 `Active`로 매핑하지 않는다 (#10748 fail-closed). 알 수 없는 입력 시 `Error` 또는 `None`을 반환한다. | `agent_status_of_string_r "unknown"` 에러 검증 |
-
-### Error Handling
-
-| ID | 불변식 | 검증 방법 |
-|----|--------|----------|
-| INV-TYPE-007 | `masc_error`의 모든 variant는 `masc_error_to_string`에서 처리된다. 새 variant 추가 시 `masc_error_to_string`도 반드시 업데이트해야 한다 (exhaustive match). | 컴파일러 warning 8 |
-
-### Concurrency
-
-| ID | 불변식 | 검증 방법 |
-|----|--------|----------|
-| INV-TYPE-009 | 모든 공유 가변 상태는 `Eio.Mutex`로 보호된다. `Stdlib.Mutex`는 Eio 환경에서 EDEADLK를 유발하므로 사용 금지다. | `rg 'Stdlib\.Mutex\|Mutex\.create\b' lib/` (Stdlib.Mutex 사용 0건 확인) |
-
-### Dispatch
-
-| ID | 불변식 | 검증 방법 |
-|----|--------|----------|
-| INV-TYPE-010 | 도구 핸들러 등록은 서버 시작(init) 시점에 완료된다. init 이후 동적 등록은 발생하지 않는다. `is_tag_registry_initialized()`가 `true`를 반환한 후에는 `register_module_tag` 호출이 없어야 한다. | init 직후 `registered_count()` 스냅샷 비교 |
-| INV-TYPE-011 | `dispatch`는 O(1) Hashtbl lookup이다. 등록된 도구 수에 비례하는 순차 탐색은 발생하지 않는다. | 구현 검사 (Hashtbl.find) |
-| INV-TYPE-012 | `pre_hook`이 `Reject result`를 반환하면 핸들러를 건너뛴다 (short-circuit). dispatch observer는 실행되지 않는다. | hook 테스트 |
-
-### Auth
-
-| ID | 불변식 | 검증 방법 |
-|----|--------|----------|
-| INV-TYPE-013 | `auth_config.enabled = false`이면 모든 도구 호출이 인가된다. 토큰 검증을 수행하지 않는다. | `check_permission` with `enabled = false` 테스트 |
-| INV-TYPE-014 | raw token은 저장하지 않는다. `agent_credential.token` 필드에는 SHA256 해시만 저장된다. | `create_token` 후 credential 파일 내용 검사 |
-| INV-TYPE-015 | initial admin(auth를 활성화한 에이전트)은 bootstrap grace로 모든 permission을 갖는다. | `check_permission` with initial_admin 테스트 |
-| INV-TYPE-016 | 알려진 내부 도구와 `masc_*` 도구는 최소 `CanBroadcast` 권한을 요구하고, unknown external 도구는 거부한다. 이 fail-closed 동작은 환경변수로 완화할 수 없다. | unmapped tool name 테스트 |
-
-### Serialization
-
-| ID | 불변식 | 검증 방법 |
-|----|--------|----------|
-| INV-TYPE-017 | 도메인 메시지 및 envelope JSON 직렬화는 roundtrip 무손실이다. | 메시지 직렬화 단위 테스트 |
-| INV-TYPE-018 | (Reserved / Retired envelope contract) | N/A |
-| INV-TYPE-019 | 모든 `_to_yojson`/`_of_yojson` 쌍은 roundtrip 호환이다. JSON 직렬화 후 역직렬화하면 원본과 동일한 값을 복원한다. | 주요 타입별 roundtrip 테스트 |
-
-### Auth Role System
-
-| ID | 불변식 | 검증 방법 |
-|----|--------|----------|
-| INV-TYPE-020 | `agent_role`은 `Worker | Admin` 두 단계만 가진다. | `agent_role` witness 테스트 |
-| INV-TYPE-021 | `Admin`은 모든 권한을 가지며, `Worker`는 `CanAdmin`을 포함하지 않는다. | permission 단위 테스트 |
+| INV-TYPE-003 | `task_status`는 `Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`를 가진다. `Release`는 `Claimed`를 `Todo`로 되돌리고, 검증 거절은 `AwaitingVerification`을 `InProgress`로 되돌릴 수 있으므로 전이는 단방향이 아니다. `Todo`에서 `Cancelled`로 직접 전이할 수도 있다. | `lib/types/types_core.ml:136,237`; `lib/workspace/workspace_task_lifecycle.ml` |

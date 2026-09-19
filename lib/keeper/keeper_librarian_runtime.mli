@@ -56,7 +56,7 @@ val preflight_slots
     place it reaches disk; this function is the one place the classification
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
-type trigger = Conversation_completed | Queue_changed
+type trigger = Conversation_completed | Queue_changed | Durable_range
 
 type input_projection =
   | Recent_window

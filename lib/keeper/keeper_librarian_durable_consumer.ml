@@ -291,7 +291,7 @@ let consume_one ~config ~keeper_name ~commit =
 let commit_with_runtime ~base_path ~keepers_dir ~keeper_id ~expected_revision input =
   let committed = ref false in
   Keeper_librarian_runtime.run_best_effort
-    ~trigger:Keeper_librarian_runtime.Queue_changed
+    ~trigger:Keeper_librarian_runtime.Durable_range
     ~input_projection:Keeper_librarian_runtime.Already_selected_range
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path

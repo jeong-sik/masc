@@ -170,8 +170,9 @@ let test_n_tick_reads_every_intermediate_turn () =
   with_workspace @@ fun config ->
   let trace_id = "trace-n-tick" in
   establish_progress config ~trace_id "turn-1";
-  let messages = [ message "turn-1"; message "turn-2"; message "turn-3" ] in
-  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 (List.take 2 messages);
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let messages = first_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
   append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
   save_checkpoint config ~trace_id messages 3;
   let carried = ref [] in
@@ -206,8 +207,9 @@ let test_failed_commit_and_restart_retry_the_same_range () =
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _ -> fail "failed commit advanced the pass");
   let after_failure = read_progress config in
-  check int "failed commit keeps progress" 1
-    (Option.get after_failure).position.end_atom;
+  (match after_failure with
+   | Some progress -> check int "failed commit keeps progress" 1 progress.position.end_atom
+   | None -> fail "failed commit removed existing progress");
   let after_restart = ref [] in
   (match
      consume config (fun ~expected_revision:_ input ->

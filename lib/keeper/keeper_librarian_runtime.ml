@@ -729,7 +729,7 @@ let completed_output
 let failed_output = `Assoc []
 ;;
 
-type trigger = Conversation_completed | Queue_changed
+type trigger = Conversation_completed | Queue_changed | Durable_range
 
 type input_projection =
   | Recent_window
@@ -753,7 +753,10 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  if (match trigger with Queue_changed -> true | Conversation_completed -> cadence_due ~keeper_id ~trace_id)
+  if
+    (match trigger with
+     | Queue_changed | Durable_range -> true
+     | Conversation_completed -> cadence_due ~keeper_id ~trace_id)
   then (
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with

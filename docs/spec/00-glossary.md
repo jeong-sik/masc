@@ -54,7 +54,7 @@ status: reference
   Lane과 Memory Lane은 각각 작업 목적과 작업 제출·직렬화를 말한다.
 
 **Runtime Lane**
-: Keeper turn이 선언된 Runtime 후보를 시도하는 순서.
+: Keeper turn이 Runtime 후보를 시도할 순서.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Runtime Execution**
@@ -76,7 +76,7 @@ status: reference
   [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
 **Composition**
-: Tool 노드 사이의 실행 선후 관계와 결과 참조를 명시한 검증된 계획. 합성 Skill은
+: Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
   허용된 계획을 Tool로 노출한다. → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
   [실행 계획](../../lib/keeper/keeper_tool_plan.mli)
 

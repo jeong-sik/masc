@@ -12,7 +12,8 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
-(** Complete counterpart evidence in [[after, before)]. [after = None] means
+(** Complete counterpart evidence after [after] through [before], inclusive of
+    [before]. [after = None] means
     that the selected range starts with this trace's current atom history.
     Both append-only stores are read fail-closed: a cursor must not advance
     over a bounded tail or an unreadable row. *)

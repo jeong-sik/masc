@@ -73,9 +73,9 @@ let may_have_unread ~trace_id ~lines ~progress =
             | Error _ -> false
             | Ok (written : B.record) ->
               (match written.event with
-               | B.History_restarted { trace_id } ->
+               | B.History_restarted { trace_id = restarted_trace_id } ->
                  line > boundary_lines_seen
-                 && String.equal trace_id position.trace_id
+                 && String.equal restarted_trace_id position.trace_id
                | B.Turn_ended
                    { turn_ref; history_at_start; position = boundary_position } ->
                  let same_trace =

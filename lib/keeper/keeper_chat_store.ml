@@ -2542,13 +2542,39 @@ let transcript_identity path =
   | exception Unix.Unix_error _ -> None
 ;;
 
+let parse_transcript_row ~path ~redaction ~line_no line =
+  let trimmed = String.trim line in
+  if String.equal trimmed ""
+  then `Blank
+  else
+    match parse_line ~file_path:path trimmed with
+    | Some message -> `Message (redact_message redaction message)
+    | None -> `Unreadable (Printf.sprintf "%s:%d unreadable chat row" path line_no)
+;;
+
 let parse_transcript_rows ~path ~redaction rows =
   rows
   |> String.split_on_char '\n'
-  |> List.filter_map (fun line ->
-    let trimmed = String.trim line in
-    if trimmed = "" then None else parse_line ~file_path:path trimmed)
-  |> List.map (redact_message redaction)
+  |> List.mapi (fun index line -> parse_transcript_row ~path ~redaction ~line_no:(index + 1) line)
+  |> List.filter_map (function
+    | `Blank | `Unreadable _ -> None
+    | `Message message -> Some message)
+;;
+
+let parse_transcript_rows_result ~path ~redaction rows =
+  rows
+  |> String.split_on_char '\n'
+  |> List.fold_left
+       (fun state line ->
+          let ( let* ) = Result.bind in
+          let* messages_rev, line_no = state in
+          let line_no = line_no + 1 in
+          match parse_transcript_row ~path ~redaction ~line_no line with
+          | `Blank -> Ok (messages_rev, line_no)
+          | `Message message -> Ok (message :: messages_rev, line_no)
+          | `Unreadable detail -> Error detail)
+       (Ok ([], 0))
+  |> Result.map (fun (messages_rev, _line_no) -> List.rev messages_rev)
 ;;
 
 let load_transcript_fully ~path ~redaction =
@@ -2633,42 +2659,23 @@ let load_all ~base_dir ~keeper_name : chat_message list =
 
 let load_all_result ~base_dir ~keeper_name : (chat_message list, string) result =
   let path = chat_path ~base_dir ~keeper_name in
-  if not (Sys.file_exists path)
-  then Ok []
-  else (
-    let redaction = redaction_for ~base_dir ~keeper_name in
-    match Fs_compat.read_private_jsonl_rows_locked_result path with
-    | Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing
-    | Private_file_succeeded_with_cleanup_failure
-        { value = Fs_compat.Private_jsonl_rows.Rows_missing; _ } -> Ok []
-    | Private_file_succeeded
-        (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end = _; end_offset = _ })
-    | Private_file_succeeded_with_cleanup_failure
-        { value =
-            Fs_compat.Private_jsonl_rows.Rows_present
-              { rows; rows_end = _; end_offset = _ }
-        ; _
-        } ->
-      rows
-      |> String.split_on_char '\n'
-      |> List.fold_left
-           (fun state line ->
-              let ( let* ) = Result.bind in
-              let* messages_rev, line_no = state in
-              let line_no = line_no + 1 in
-              let trimmed = String.trim line in
-              if String.equal trimmed ""
-              then Ok (messages_rev, line_no)
-              else (
-                match parse_line ~file_path:path trimmed with
-                | Some message ->
-                  Ok (redact_message redaction message :: messages_rev, line_no)
-                | None -> Error (Printf.sprintf "%s:%d unreadable chat row" path line_no)))
-           (Ok ([], 0))
-      |> Result.map (fun (messages_rev, _line_no) -> List.rev messages_rev)
-    | Private_file_failed error
-    | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
-      Error (Fs_compat.Private_jsonl_rows.error_to_string error))
+  let redaction = redaction_for ~base_dir ~keeper_name in
+  (* The [load_all] cache is permissive: malformed rows are omitted. A strict
+     caller must parse the durable file so it cannot advance past such a row. *)
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing
+  | Private_file_succeeded_with_cleanup_failure
+      { value = Fs_compat.Private_jsonl_rows.Rows_missing; _ } -> Ok []
+  | Private_file_succeeded
+      (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end = _; end_offset = _ })
+  | Private_file_succeeded_with_cleanup_failure
+      { value =
+          Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end = _; end_offset = _ }
+      ; _
+      } -> parse_transcript_rows_result ~path ~redaction rows
+  | Private_file_failed error
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
+    Error (Fs_compat.Private_jsonl_rows.error_to_string error)
 
 (* Content equality for the [Already_present] branch of the append-once
    paths: does the row that already holds this approval's slot say the same

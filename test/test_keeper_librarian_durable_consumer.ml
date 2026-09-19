@@ -527,6 +527,58 @@ let test_counterpart_range_reads_beyond_recent_windows () =
     [ 0; 2; 4 ]
 ;;
 
+let test_counterpart_range_includes_upper_boundary_once () =
+  with_workspace @@ fun config ->
+  let base_dir = config.Workspace.base_path in
+  let record ~dedupe_key ~content_preview ~received_at =
+    let surface = Keeper_external_attention.Agent in
+    let item : Keeper_external_attention.item =
+      { event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key
+      ; dedupe_key
+      ; keeper_name
+      ; conversation = { conversation_id = "agent:boundary"; surface }
+      ; external_message = None
+      ; source_label = "agent"
+      ; actor =
+          { actor_id = Some "external"
+          ; display_name = Some "External"
+          ; authority = Keeper_chat_store.External
+          }
+      ; urgency = Keeper_external_attention.Ambient
+      ; content_preview
+      ; content_ref = None
+      ; received_at
+      ; metadata = []
+      }
+    in
+    match Keeper_external_attention.record ~base_path:base_dir item with
+    | `Recorded -> ()
+    | `Duplicate _ -> fail "unexpected duplicate external fixture"
+    | `Error detail -> fail detail
+  in
+  record ~dedupe_key:"at-lower" ~content_preview:"at-lower" ~received_at:1.;
+  record ~dedupe_key:"at-upper" ~content_preview:"at-upper" ~received_at:2.;
+  let observations =
+    match
+      Masc.Keeper_librarian_input_sources.counterpart_observations_between
+        ~base_dir
+        ~keeper_name
+        ~after:(Some 1.)
+        ~before:2.
+    with
+    | Ok observations -> observations
+    | Error error ->
+      fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  in
+  check
+    (list string)
+    "range is open after and closed before"
+    [ "at-upper" ]
+    (List.map
+       (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+       observations)
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -551,6 +603,8 @@ let () =
             test_selected_range_bypasses_recent_window
         ; test_case "counterpart range exceeds recent windows" `Quick
             test_counterpart_range_reads_beyond_recent_windows
+        ; test_case "counterpart range includes upper boundary once" `Quick
+            test_counterpart_range_includes_upper_boundary_once
         ] )
     ]
 ;;

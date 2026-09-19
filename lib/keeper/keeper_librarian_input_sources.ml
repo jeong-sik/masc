@@ -41,7 +41,7 @@ let read_error_to_string = function
 let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   let ( let* ) = Result.bind in
   let in_range ts =
-    ts < before
+    ts <= before
     &&
     match after with
     | None -> true
@@ -50,8 +50,6 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   let* user_rows =
     Keeper_chat_store.load_all_result ~base_dir ~keeper_name
     |> Result.map_error (fun detail -> Chat_store_unreadable detail)
-    |> Result.map (List.filter (fun (message : Keeper_chat_store.chat_message) ->
-      message.ts < before))
   in
   let user_rows =
     user_rows

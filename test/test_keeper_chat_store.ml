@@ -136,6 +136,31 @@ let test_load_records_malformed_row_drops () =
         1.0
         (drop_value invalid_payload -. before_invalid_payload))
 
+let test_load_all_result_rejects_malformed_row () =
+  let base_dir = temp_base_path "keeper-chat-store-strict-load" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-strict-load" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "id", `String "valid-user"
+              ; "role", `String "user"
+              ; "content", `String "hello"
+              ; "ts", `Float 1.0
+              ])
+         ^ "\n{not-json\n");
+      match K.load_all_result ~base_dir ~keeper_name with
+      | Ok _ -> Alcotest.fail "strict load accepted a malformed row"
+      | Error detail ->
+        Alcotest.(check string)
+          "error identifies the unreadable row"
+          (Printf.sprintf "%s:2 unreadable chat row" path)
+          detail)
+;;
+
 let roles messages =
   List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
 
@@ -3373,6 +3398,8 @@ let () =
         [
           Alcotest.test_case "malformed rows increment drop metrics" `Quick
             test_load_records_malformed_row_drops;
+          Alcotest.test_case "strict load rejects malformed rows" `Quick
+            test_load_all_result_rejects_malformed_row;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
           Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick

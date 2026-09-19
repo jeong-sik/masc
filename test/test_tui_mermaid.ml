@@ -110,9 +110,9 @@ let rl_rows =
   ]
 
 let shapes_rows =
-  [ {|╭───────╮ no  ┌───────┐ yes  ┌─────┐|}
-  ; {|│ start ├<───>┤ ⟨ok?⟩ ├─────>┤ end │|}
-  ; {|╰───────╯     └───────┘      └─────┘|}
+  [ {|╭───────╮ no  ┌───────┐ yes  ╔═════╗|}
+  ; {|│ start ├<───>┤ ⟨ok?⟩ ├─────>┤ end ║|}
+  ; {|╰───────╯     └───────┘      ╚═════╝|}
   ]
 
 let korean_rows =
@@ -355,8 +355,8 @@ let test_both_label_spellings_read_the_same () =
 let test_strokes_heads_and_shapes_are_read () =
   let graph = parsed "graph TD\nA(round) -.-> B{dia}\nB ==> C[[rect]]\nC --- A" in
   let shapes = List.map (fun (node : Mermaid.node) -> node.shape) graph.nodes in
-  Alcotest.(check bool) "round, diamond, rect" true
-    (shapes = [ Mermaid.Round; Mermaid.Diamond; Mermaid.Rect ]);
+  Alcotest.(check bool) "round, diamond, subroutine" true
+    (shapes = [ Mermaid.Round; Mermaid.Diamond; Mermaid.Subroutine ]);
   let strokes = List.map (fun (edge : Mermaid.edge) -> (edge.style, edge.directed)) graph.edges in
   Alcotest.(check bool) "dotted, thick, undirected solid" true
     (strokes = [ (Mermaid.Dotted, true); (Mermaid.Thick, true); (Mermaid.Solid, false) ])
@@ -368,6 +368,46 @@ let test_styling_statements_change_nothing () =
   in
   Alcotest.(check int) "same nodes" (List.length plain.nodes) (List.length styled.nodes);
   Alcotest.(check int) "same edges" (List.length plain.edges) (List.length styled.edges)
+
+let test_node_shapes_database_subroutine_stadium () =
+  let g =
+    parsed "flowchart TD\nDB[(Postgres)]\nSUB[[Worker]]\nST([Pill])\nCIR((Ring))\nREC[Box]"
+  in
+  let shapes = List.map (fun (n : Mermaid.node) -> n.shape) g.nodes in
+  Alcotest.(check bool) "all shapes recognized" true
+    (shapes = [ Mermaid.Database; Mermaid.Subroutine; Mermaid.Stadium; Mermaid.Circle; Mermaid.Rect ])
+
+let test_database_cylinder_renders () =
+  Alcotest.check rows "database cylinder"
+    [ {|╓──────╖|}
+    ; {|║ Data ║|}
+    ; {|╙──────╜|}
+    ]
+    (render "flowchart TD\nDB[(Data)]")
+
+let test_subroutine_double_box_renders () =
+  Alcotest.check rows "subroutine double box"
+    [ {|╔══════╗|}
+    ; {|║ Call ║|}
+    ; {|╚══════╝|}
+    ]
+    (render "flowchart TD\nSUB[[Call]]")
+
+let test_stadium_pill_renders () =
+  Alcotest.check rows "stadium pill"
+    [ {|╭──────╮|}
+    ; {|│ Pill │|}
+    ; {|╰──────╯|}
+    ]
+    (render "flowchart TD\nST([Pill])")
+
+let test_circle_renders () =
+  Alcotest.check rows "circle node"
+    [ {|╭──────╮|}
+    ; {|│ Ring │|}
+    ; {|╰──────╯|}
+    ]
+    (render "flowchart TD\nCIR((Ring))")
 
 (* {1 Subgraphs} *)
 
@@ -1032,6 +1072,16 @@ let () =
             test_strokes_heads_and_shapes_are_read
         ; Alcotest.test_case "styling statements change nothing" `Quick
             test_styling_statements_change_nothing
+        ; Alcotest.test_case "node shapes database subroutine stadium recognized" `Quick
+            test_node_shapes_database_subroutine_stadium
+        ; Alcotest.test_case "database cylinder renders" `Quick
+            test_database_cylinder_renders
+        ; Alcotest.test_case "subroutine double box renders" `Quick
+            test_subroutine_double_box_renders
+        ; Alcotest.test_case "stadium pill renders" `Quick
+            test_stadium_pill_renders
+        ; Alcotest.test_case "circle renders" `Quick
+            test_circle_renders
         ] )
     ; ( "state"
       , [ Alcotest.test_case "top down state diagram" `Quick test_state_diagram_top_down

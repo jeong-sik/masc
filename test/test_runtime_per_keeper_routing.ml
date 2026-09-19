@@ -1816,6 +1816,16 @@ max-concurrent = 1
 
 let runtime_thinking_model_catalog =
   {|
+# This isolated inventory fixture declares its own provider contract; the
+# shipped Ollama provider remains undeclared and refuses suppression.
+[[providers]]
+id = "ollama_cloud"
+kind = "openai_compat"
+base_url = "https://ollama.example/v1"
+request_path = "/chat/completions"
+api_key_env = ""
+supports_parallel_tool_suppression = true
+
 [[models]]
 id_prefix = "qwen36-35b-a3b-mtp"
 provider_name = "ollama_cloud"

@@ -631,7 +631,19 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
          "binding %s.%s declares disable-parallel-tool-use = true, but \
           protocol %s cannot carry that request policy"
          provider.id model_id provider.protocol)
-  | (Messages_api | Chat_completions_api), _
+  | (Messages_api | Chat_completions_api), true ->
+    let declared =
+      Option.bind (Llm_provider.Model_catalog.global ()) (fun catalog ->
+        Llm_provider.Model_catalog.provider_entry_for_label catalog provider.id)
+    in
+    (match declared with
+     | Some entry when entry.supports_parallel_tool_suppression -> Ok ()
+     | Some _ | None ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares disable-parallel-tool-use = true, but provider %S has no catalog-declared parallel tool suppression contract"
+            provider.id model_id provider.id))
+  | (Messages_api | Chat_completions_api), false
   | (Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
     | Ollama_api | Gemini_api | Vertex_gemini_api), false -> Ok ()
 ;;

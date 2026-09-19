@@ -44,7 +44,9 @@ status: reference
 **Parallel Tool Calls**
 : 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의
   `supports_parallel_tool_calls`, 실행별 억제는 runtime binding의
-  `disable-parallel-tool-use`가 정한다. 이 요청 정책은 도구를 실행할 때의 동시성이나
+  `disable-parallel-tool-use`가 정한다. 억제 요청을 받아들이는 provider 계약은
+  provider catalog의 `supports_parallel_tool_suppression`이며, 미선언이면 억제를
+  요청할 수 없다. 이 요청 정책은 도구를 실행할 때의 동시성이나
   spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
 ## Collaboration State

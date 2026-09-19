@@ -810,7 +810,15 @@ let request_view
 let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal ~cold =
   let after_refusal =
     Option.bind after_refusal (fun seed ->
-      Result.to_option (Keeper_carried_front.for_history ~digest_at seed))
+      match Keeper_carried_front.for_history ~digest_at seed with
+      | Ok seed -> Some seed
+      | Error reason ->
+        Log.Keeper.info ~keeper_name
+          "model input refusal front dropped runtime=%s reason=%s front=%s"
+          runtime_id
+          (Keeper_carried_front.dropped_front_to_string reason)
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed));
+        None)
   in
   let without_ledger () =
     match after_refusal with Some _ as front -> front | None -> cold ()

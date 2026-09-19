@@ -10,6 +10,9 @@ open Alcotest
 module Librarian = Masc.Keeper_librarian
 module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
+module Current = Masc.Keeper_memory_os_current
+module Cli = Masc.Keeper_lane_cli_oneshot
+module Exact_lane_run_registry = Masc.Exact_lane_run_registry
 module Fixture = Exact_output_fixture
 module Ids = Ids
 
@@ -102,7 +105,34 @@ let with_eio f =
     ~sw
   @@ fun () ->
   let base_path = Filename.temp_dir "librarian-cli-lane" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
+  @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key
+    (Some (Filename.concat base_path "config"))
+  @@ fun () ->
   f ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ~base_path
+;;
+
+let projection_failure =
+  "librarian request projection failed for slot=librarian-cli-unreachable reason=librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
+;;
+
+let invalid_domain_failure () =
+  match Librarian.selection_of_json_result (input ()) (`Assoc []) with
+  | Ok _ -> fail "empty object must fail the real Librarian decoder"
+  | Error error -> Cli.Invalid_domain_output
+      { runtime_id = Fixture.cli_primary_runtime
+      ; detail = Librarian.parse_error_to_string error }
+;;
+
+let check_detail ?api_failure ?cli_failure detail =
+  Option.iter (fun expected ->
+    check bool "original API failure remains visible" true
+      (Astring.String.is_infix ~affix:expected detail)) api_failure;
+  Option.iter (fun failure ->
+    check bool "CLI failure remains visible" true
+      (Astring.String.is_infix ~affix:(Cli.failure_to_string failure) detail)) cli_failure
 ;;
 
 let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
@@ -233,11 +263,46 @@ let test_projection_refusal_survives_failed_cli_slots () =
   (match execute ~net ~clock ~base_path ~runner with
    | Ok _ -> fail "a domain-invalid CLI answer must not be accepted"
    | Error error ->
-     check string "the original projection failure remains available"
-       "librarian request projection failed for slot=librarian-cli-unreachable reason=librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
+     check_detail ~api_failure:projection_failure
+       ~cli_failure:(invalid_domain_failure ())
        (Runtime.For_testing.classified_error_detail error));
   check (list string) "the declared CLI slot was attempted"
     [Fixture.cli_primary_runtime] !attempts
+;;
+
+let test_failure_reaches_journal ~cli_only ~cli_slot_ids ~answer ~failure ~calls () =
+  with_eio @@ fun ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  publish_unreachable_lane ~cli_only ~projection_refused:true ~cli_slot_ids
+    ~source:"librarian failure journal" ();
+  let keeper_id = Filename.basename base_path in
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Unix.mkdir keepers_dir 0o700;
+  let attempts = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr attempts;
+    answer
+  in
+  Runtime.run_best_effort ~trigger:Runtime.Queue_changed ~cli_runner:runner
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
+  check int "only admitted CLI slots reach the runner" calls !attempts;
+  let api_failure = if cli_only then None else Some projection_failure in
+  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+   | [Ok (Current.Journal_failed { detail; cadence_deferred; _ })] ->
+     check_detail ?api_failure ?cli_failure:failure detail;
+     check bool "failure retains the existing cadence policy" true cadence_deferred
+   | _ -> fail "failed pass must write one decodable journal failure");
+  let runs = Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+    |> List.filter (fun (run : Exact_lane_run_registry.run) ->
+      String.equal run.actor keeper_id) in
+  (match runs with
+   | [{ status = Exact_lane_run_registry.Completed
+          { outcome = Exact_lane_run_registry.Failed { detail; _ }; _ }; _ }] ->
+     check_detail ?api_failure ?cli_failure:failure detail
+   | _ -> fail "exact-run projection must retain the same failed pass");
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+  | Ok None -> ()
+  | Ok (Some _) | Error _ -> fail "failure must leave the current snapshot absent"
 ;;
 
 let () =
@@ -263,6 +328,28 @@ let () =
             "a domain-invalid cli answer keeps the terminal"
             `Quick
             test_domain_invalid_cli_answer_keeps_the_terminal
+        ; test_case "no CLI declaration preserves the API failure" `Quick
+            (test_failure_reaches_journal ~cli_only:false ~cli_slot_ids:[]
+              ~answer:(Error "must not run") ~failure:None ~calls:0)
+        ; test_case "CLI admission refusal reaches journal and exact-run projection" `Quick
+            (test_failure_reaches_journal ~cli_only:false
+              ~cli_slot_ids:["missing-cli-runtime"] ~answer:(Error "must not run")
+              ~failure:(Some (Cli.Not_an_official_client {runtime_id = "missing-cli-runtime"}))
+              ~calls:0)
+        ; test_case "CLI domain failure reaches journal and exact-run projection" `Quick
+            (fun () -> test_failure_reaches_journal ~cli_only:false
+              ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Ok "{}")
+              ~failure:(Some (invalid_domain_failure ())) ~calls:1 ())
+        ; test_case "CLI execution failure reaches journal and exact-run projection" `Quick
+            (test_failure_reaches_journal ~cli_only:false
+              ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Error "synthetic bridge failure")
+              ~failure:(Some (Cli.Execution_failed
+                {runtime_id = Fixture.cli_primary_runtime; detail = "synthetic bridge failure"}))
+              ~calls:1)
+        ; test_case "CLI-only failure reaches journal and exact-run projection" `Quick
+            (fun () -> test_failure_reaches_journal ~cli_only:true
+              ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Ok "{}")
+              ~failure:(Some (invalid_domain_failure ())) ~calls:1 ())
         ] )
     ]
 ;;

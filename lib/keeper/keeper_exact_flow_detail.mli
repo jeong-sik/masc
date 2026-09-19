@@ -42,3 +42,11 @@ val candidates_exhausted_detail
   :  rejection:Agent_core.Exact_output.candidate_rejection_receipt
   -> evidence:Agent_core.Exact_output.flow_evidence
   -> string
+
+(** One line for any terminal flow error: a static label ("attempt_start_failed",
+    "candidates_exhausted: ...", "agent_core_execution_failed: ...") followed by
+    the payload the branch carries. Callback arms read
+    "unexpected_callback_failure". *)
+val flow_execution_error_detail
+  :  _ Agent_core.Exact_output.flow_execution_error
+  -> string

@@ -32,7 +32,7 @@ let unavailable_runtime_json =
 ;;
 
 let test_unavailable_assignment_reaches_both_keeper_surfaces () =
-  match Tui_decode.decode_runtime_resolved_full unavailable_runtime_json with
+  match Masc.Tui_decode.decode_runtime_resolved_full unavailable_runtime_json with
   | Error detail -> Alcotest.fail detail
   | Ok (_, _, [ assignment ]) ->
     (match assignment.ra_resolution with

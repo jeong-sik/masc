@@ -423,16 +423,13 @@ let request_capabilities_for_config (config : t) =
 ;;
 
 let tool_choice_capabilities_for_config (config : t) =
-  let caps =
-    match capabilities_for_config_model config with
-    | Some caps -> caps
-    | None ->
-      (match config.kind with
-       | Glm -> Capabilities.glm_capabilities
-       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini ->
-         Capabilities.default_capabilities)
-  in
-  caps
+  match capabilities_for_config_model config with
+  | Some caps -> caps
+  | None ->
+    (match config.kind with
+     | Glm -> Capabilities.glm_capabilities
+     | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini ->
+       Capabilities.default_capabilities)
 ;;
 
 let validate_tool_choice_request_with_capabilities

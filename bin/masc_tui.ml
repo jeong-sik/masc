@@ -7375,7 +7375,12 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     match pick, Masc_tui_types.runtime_lane_candidate_write_refusal state with
     | Masc_tui_types.Pick_conversation_lane _, Some notice ->
         state.runtime_lane_notice <- Some notice
-    | _ ->
+    | Masc_tui_types.Pick_conversation_lane _, None
+    | (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_new_lane _),
+      (None | Some _) ->
+        (* Exact lanes append one slot to the server's current order. A new
+           lane sends only the pick. Neither operation rewrites a stale list;
+           only the conversation-lane arm above sends [existing] in full. *)
         if List.exists (String.equal runtime_id) existing then
           state.runtime_lane_notice <-
             Some

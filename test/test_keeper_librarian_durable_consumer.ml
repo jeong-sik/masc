@@ -224,6 +224,49 @@ let test_failed_commit_and_restart_retry_the_same_range () =
   check (list string) "restart reads identical range" !first !after_restart
 ;;
 
+let test_failed_long_range_retries_only_oldest_cut_point () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-bounded-retry" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  save_checkpoint config ~trace_id first_two 2;
+  (match consume config (fun ~expected_revision:_ _ -> false) with
+   | Consumer.Memory_not_committed -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _ -> fail "failed range unexpectedly advanced");
+  let first_four = first_two @ [ message "turn-3"; message "turn-4" ] in
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0
+    (first_two @ [ message "turn-3" ]);
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 first_four;
+  save_checkpoint config ~trace_id first_four 4;
+  let retry = ref [] in
+  (match
+     consume config (fun ~expected_revision:_ input ->
+       retry := text_markers input;
+       true)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "bounded retry reaches oldest cut" 2 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Memory_not_committed -> fail "bounded retry did not advance");
+  check (list string) "retry does not grow with later turns" [ "turn-2" ] !retry;
+  let remaining = ref [] in
+  (match
+     consume config (fun ~expected_revision:_ input ->
+       remaining := text_markers input;
+       true)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "success clears bounded retry" 4 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Memory_not_committed -> fail "remaining range did not advance");
+  check (list string) "later turns remain readable" [ "turn-3"; "turn-4" ] !remaining
+;;
+
 let test_last_matching_boundary_wins_when_clock_moves_backward () =
   with_workspace @@ fun config ->
   let trace_id = "trace-clock-regression" in
@@ -302,6 +345,84 @@ let test_selected_range_bypasses_recent_window () =
     (List.length projected.messages)
 ;;
 
+let test_counterpart_range_reads_beyond_recent_windows () =
+  with_workspace @@ fun config ->
+  let base_dir = config.Workspace.base_path in
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "owner"
+    ; speaker_name = Some "Owner"
+    ; speaker_authority = Keeper_chat_store.Owner
+    }
+  in
+  List.iter
+    (fun index ->
+       Keeper_chat_store.append_user_message
+         ~base_dir
+         ~keeper_name
+         ~content:(Printf.sprintf "chat-%03d" index)
+         ~speaker
+         ())
+    (List.init 105 Fun.id);
+  let payload = String.make (1024 * 1024) 'x' in
+  let external_contents =
+    List.init 5 (fun index -> Printf.sprintf "external-%d:%s" index payload)
+  in
+  List.iteri
+    (fun index content_preview ->
+       let surface = Keeper_external_attention.Agent in
+       let dedupe_key = Printf.sprintf "complete-range-%d" index in
+       let item : Keeper_external_attention.item =
+         { event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key
+         ; dedupe_key
+         ; keeper_name
+         ; conversation = { conversation_id = "agent:test"; surface }
+         ; external_message = None
+         ; source_label = "agent"
+         ; actor =
+             { actor_id = Some "external"
+             ; display_name = Some "External"
+             ; authority = Keeper_chat_store.External
+             }
+         ; urgency = Keeper_external_attention.Ambient
+         ; content_preview
+         ; content_ref = None
+         ; received_at = Float.of_int (index + 1)
+         ; metadata = []
+         }
+       in
+       match Keeper_external_attention.record ~base_path:base_dir item with
+       | `Recorded -> ()
+       | `Duplicate _ -> fail "unexpected duplicate external fixture"
+       | `Error detail -> fail detail)
+    external_contents;
+  let observations =
+    match
+      Masc.Keeper_librarian_input_sources.counterpart_observations_between_offloaded
+        ~base_dir
+        ~keeper_name
+        ~after:None
+        ~before:(Time_compat.now () +. 100.)
+    with
+    | Ok observations -> observations
+    | Error error ->
+      fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  in
+  let contents =
+    List.map (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+      observations
+  in
+  List.iter
+    (fun expected ->
+       check bool expected true (List.exists (String.equal expected) contents))
+    [ "chat-000"; "chat-052"; "chat-104" ];
+  List.iter
+    (fun index ->
+       let expected = List.nth external_contents index in
+       check bool (Printf.sprintf "external-%d" index) true
+         (List.exists (String.equal expected) contents))
+    [ 0; 2; 4 ]
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -310,12 +431,16 @@ let () =
             test_n_tick_reads_every_intermediate_turn
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
+        ; test_case "failed growing range retries oldest cut" `Quick
+            test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick
             test_last_matching_boundary_wins_when_clock_moves_backward
         ; test_case "same-name clusters isolate range progress" `Quick
             test_same_name_clusters_keep_independent_ranges
         ; test_case "selected range bypasses recent window" `Quick
             test_selected_range_bypasses_recent_window
+        ; test_case "counterpart range exceeds recent windows" `Quick
+            test_counterpart_range_reads_beyond_recent_windows
         ] )
     ]
 ;;

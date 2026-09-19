@@ -49,7 +49,6 @@ let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn 
     ~agent_core_turn_count:1
     ~tool_observations:[]
     ~librarian_messages:[]
-    ~checkpoint_owner:Runtime_execution.Official_client
     ~post_turn_t0:(Time_compat.now ())
     ~inference_telemetry:None
     ()

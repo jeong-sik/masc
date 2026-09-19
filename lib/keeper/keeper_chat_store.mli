@@ -536,6 +536,12 @@ val load :
 val load_all :
   base_dir:string -> keeper_name:string -> chat_message list
 
+val load_all_result :
+  base_dir:string -> keeper_name:string -> (chat_message list, string) result
+(** Fail-closed whole-transcript reader for consumers whose durable cursor
+    advances past the returned rows. Unlike {!load_all}, one unreadable row or
+    store read failure is an error rather than a silently shorter history. *)
+
 type page = { messages : chat_message list; has_more : bool }
 
 (** [load_page ~base_dir ~keeper_name ?before ()] is the paged form of

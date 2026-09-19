@@ -21,6 +21,7 @@ type error =
   | Range_end_boundary_missing of R.range
   | Progress_boundary_missing of P.position
   | Memory_snapshot_unreadable of string
+  | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of P.write_error
 
 let range_stop_to_string = function
@@ -64,6 +65,8 @@ let error_to_string = function
       position.last_atom_digest
   | Memory_snapshot_unreadable detail ->
     "current Memory OS snapshot is unreadable: " ^ detail
+  | Counterpart_observations_unreadable error ->
+    Keeper_librarian_input_sources.read_error_to_string error
   | Progress_write_failed error -> P.write_error_to_string error
 ;;
 
@@ -175,7 +178,26 @@ let write_progress ~keepers_dir ~keeper_name progress outcome =
   | Error error -> Error (Progress_write_failed error)
 ;;
 
-let consume_one ~config ~keeper_name ~commit =
+let failed_ranges : (string, unit) Hashtbl.t = Hashtbl.create 16
+let failed_ranges_mu = Stdlib.Mutex.create ()
+
+let range_key ~runtime_keepers_dir ~keeper_name =
+  Filename.concat runtime_keepers_dir keeper_name
+;;
+
+let failed_before key =
+  Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.mem failed_ranges key)
+;;
+
+let mark_failed key =
+  Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.replace failed_ranges key ())
+;;
+
+let clear_failed key =
+  Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.remove failed_ranges key)
+;;
+
+let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
   let ( let* ) = Result.bind in
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let memory_keepers_dir =
@@ -212,7 +234,7 @@ let consume_one ~config ~keeper_name ~commit =
     |> Result.map_error (fun error -> Checkpoint_unreadable error)
   in
   let messages = checkpoint.Agent_core.Checkpoint.messages in
-  let selection = R.select ~trace_id ~lines ~progress ~messages R.All_unread in
+  let selection = R.select ~trace_id ~lines ~progress ~messages extent in
   match selection with
   | R.Nothing_to_read -> Ok Nothing_to_read
   | R.Position_in_other_trace position -> Error (Position_in_other_trace position)
@@ -255,6 +277,14 @@ let consume_one ~config ~keeper_name ~commit =
     in
     let selected_messages = R.slice messages range in
     let* current, expected_revision = current_memory ~keepers_dir:memory_keepers_dir ~keeper_name in
+    let* counterpart_observations =
+      Keeper_librarian_input_sources.counterpart_observations_between_offloaded
+        ~base_dir:config.Workspace.base_path
+        ~keeper_name
+        ~after
+        ~before:ended_at
+      |> Result.map_error (fun error -> Counterpart_observations_unreadable error)
+    in
     let input : Keeper_librarian.input =
       { turn_ref
       ; goal_context =
@@ -271,12 +301,7 @@ let consume_one ~config ~keeper_name ~commit =
               ~keeper_name)
       ; messages = selected_messages
       ; tool_observations = tool_observations selected_messages
-      ; counterpart_observations =
-          Keeper_librarian_input_sources.counterpart_observations_between_offloaded
-            ~base_dir:config.Workspace.base_path
-            ~keeper_name
-            ~after
-            ~before:ended_at
+      ; counterpart_observations
       }
     in
     if not (commit ~expected_revision input)
@@ -290,6 +315,22 @@ let consume_one ~config ~keeper_name ~commit =
           ~keeper_name
           next
           (fun progress -> Progress_advanced progress))
+;;
+
+let consume_one ~config ~keeper_name ~commit =
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let key = range_key ~runtime_keepers_dir ~keeper_name in
+  let extent = if failed_before key then R.To_first_cut_point else R.All_unread in
+  (* Leave the marker set across exceptions and cancellation. A completed
+     attempt clears it only after it either advances or proves there is no
+     range to read. *)
+  mark_failed key;
+  let result = consume_one_with_extent ~extent ~config ~keeper_name ~commit in
+  (match result with
+   | Ok Memory_not_committed | Error _ -> ()
+   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _) ->
+     clear_failed key);
+  result
 ;;
 
 let commit_with_runtime ~base_path ~keepers_dir ~keeper_id ~expected_revision input =

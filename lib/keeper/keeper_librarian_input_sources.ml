@@ -28,7 +28,18 @@ let goal_context_for_task ~config = function
     Keeper_librarian.Task_goals { task_id; criteria }
 ;;
 
+type read_error =
+  | Chat_store_unreadable of string
+  | External_attention_unreadable of string
+
+let read_error_to_string = function
+  | Chat_store_unreadable detail -> "keeper chat store is unreadable: " ^ detail
+  | External_attention_unreadable detail ->
+    "external attention store is unreadable: " ^ detail
+;;
+
 let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
+  let ( let* ) = Result.bind in
   let in_range ts =
     ts < before
     &&
@@ -36,8 +47,14 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
     | None -> true
     | Some lower -> ts > lower
   in
+  let* user_rows =
+    Keeper_chat_store.load_all_result ~base_dir ~keeper_name
+    |> Result.map_error (fun detail -> Chat_store_unreadable detail)
+    |> Result.map (List.filter (fun (message : Keeper_chat_store.chat_message) ->
+      message.ts < before))
+  in
   let user_rows =
-    (Keeper_chat_store.load_page ~base_dir ~keeper_name ~before ()).messages
+    user_rows
     |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
       in_range message.ts
       &&
@@ -48,11 +65,12 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
       | Keeper_chat_store.Role.System, _
       | Keeper_chat_store.Role.Tool, _ -> false)
   in
-  let external_items =
-    Keeper_external_attention.load_recent_evidence_events ~base_path:base_dir ~keeper_name
-    |> List.filter_map (function
+  let* external_items =
+    Keeper_external_attention.load_events_result ~base_path:base_dir ~keeper_name
+    |> Result.map_error (fun detail -> External_attention_unreadable detail)
+    |> Result.map (List.filter_map (function
       | Keeper_external_attention.Recorded item when in_range item.received_at -> Some item
-      | Keeper_external_attention.Recorded _ -> None)
+      | Keeper_external_attention.Recorded _ -> None))
   in
   let external_delivery_keys =
     external_items
@@ -87,6 +105,7 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   external_observations @ chat_observations
   |> List.stable_sort (fun (left_ts, _) (right_ts, _) -> Float.compare left_ts right_ts)
   |> List.map snd
+  |> Result.ok
 ;;
 
 let counterpart_observations_between_offloaded ~base_dir ~keeper_name ~after ~before =

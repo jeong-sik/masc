@@ -2631,6 +2631,45 @@ let load_all ~base_dir ~keeper_name : chat_message list =
        | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ ->
          load_transcript_fully ~path ~redaction)
 
+let load_all_result ~base_dir ~keeper_name : (chat_message list, string) result =
+  let path = chat_path ~base_dir ~keeper_name in
+  if not (Sys.file_exists path)
+  then Ok []
+  else (
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    match Fs_compat.read_private_jsonl_rows_locked_result path with
+    | Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing
+    | Private_file_succeeded_with_cleanup_failure
+        { value = Fs_compat.Private_jsonl_rows.Rows_missing; _ } -> Ok []
+    | Private_file_succeeded
+        (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end = _; end_offset = _ })
+    | Private_file_succeeded_with_cleanup_failure
+        { value =
+            Fs_compat.Private_jsonl_rows.Rows_present
+              { rows; rows_end = _; end_offset = _ }
+        ; _
+        } ->
+      rows
+      |> String.split_on_char '\n'
+      |> List.fold_left
+           (fun state line ->
+              let ( let* ) = Result.bind in
+              let* messages_rev, line_no = state in
+              let line_no = line_no + 1 in
+              let trimmed = String.trim line in
+              if String.equal trimmed ""
+              then Ok (messages_rev, line_no)
+              else (
+                match parse_line ~file_path:path trimmed with
+                | Some message ->
+                  Ok (redact_message redaction message :: messages_rev, line_no)
+                | None -> Error (Printf.sprintf "%s:%d unreadable chat row" path line_no)))
+           (Ok ([], 0))
+      |> Result.map (fun (messages_rev, _line_no) -> List.rev messages_rev)
+    | Private_file_failed error
+    | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
+      Error (Fs_compat.Private_jsonl_rows.error_to_string error))
+
 (* Content equality for the [Already_present] branch of the append-once
    paths: does the row that already holds this approval's slot say the same
    thing as the row we were about to write? Only durable facts take part:

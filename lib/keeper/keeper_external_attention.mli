@@ -131,6 +131,10 @@ val attention_path : base_path:string -> keeper_name:string -> string
 
 val load_events : base_path:string -> keeper_name:string -> event list
 
+val load_events_result :
+  base_path:string -> keeper_name:string -> (event list, string) result
+(** Fail-closed whole-log reader for durable consumers. *)
+
 val recorded_items_by_event_ids :
   base_path:string -> keeper_name:string -> event_ids:string list ->
   (string * item) list

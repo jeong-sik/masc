@@ -1,26 +1,16 @@
 val remember_turn : base_path:string -> keeper_name:string -> trace_id:string ->
   (meta:Keeper_meta_contract.keeper_meta -> Keeper_librarian_runtime.trigger -> unit) -> unit
-(** Retain immutable latest-turn evidence for an official-client turn, which
-    has no Agent-Core checkpoint range. Agent-Core turns use the durable store
-    and never call this function. *)
-
-val forget_turn : base_path:string -> keeper_name:string -> unit
-(** Remove a direct official-client closure when the same Keeper resumes on an
-    Agent-Core checkpoint. The durable range is then the only conversation
-    producer for that Keeper. *)
+(** Retain immutable latest-turn evidence so a queue wake cannot replace a
+    pending post-turn extraction with an empty conversation. Each attempt passes
+    current Owner metadata; an instructions or task change invalidates the last
+    attempt without discarding the completed-turn evidence. *)
 val install : unit -> unit
 (** Install after the detached memory executor. Queue producers never wait for
     this extraction; source selection happens when the latest unit runs. *)
 
-val start_existing : base_path:string -> unit
-(** Submit one disk-selected pass for every persisted Keeper after the exact
-    output registry is published. This is the restart path: no process-local
-    remembered closure participates. *)
-
 val run_completed_turn : base_path:string -> keeper_name:string -> unit
-(** Run the durable Agent-Core consumer, then attempt an official-client
-    closure when one exists. Normal return records an attempt, not extraction
-    or commit success. *)
+(** Attempt the latest remembered turn, independently of queue source coverage.
+    Normal return records an attempt, not extraction or commit success. *)
 
 module For_testing : sig
   val attempt_remembered : base_path:string -> keeper_name:string ->

@@ -172,7 +172,7 @@ goo-yang-bong = "librarian_exact"
 
 `AGENT_CORE_MODEL_CATALOG` 로 카탈로그를 통째로 바꾼 배포는 타깃을 그 파일의 `[[targets]]` 에서 읽는다(`server_runtime_bootstrap.ml:441`). 그 경로의 마감은 그 행의 `connect_timeout_s`·`body_timeout_s` 다.
 
-`decide_capability_gate`(`runtime.ml:724`)는 이 표의 규칙이 아니다. 규칙 2 하나만 보고, 부르는 곳이 테스트뿐이다(`test/test_runtime_provider_auth_headers.ml:2659-2690`). 같은 검사는 부팅 경로의 `missing_runtime_model_capabilities` 가 이미 한다. 구현은 이 함수를 꽂지 않고 지운다. 규칙 3·4 는 로드 경로에 새로 쓴다.
+규칙 3·4 는 로드 경로에 새로 쓴다.
 
 ## 우리가 안 싣는 모델
 

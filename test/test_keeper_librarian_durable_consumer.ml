@@ -596,6 +596,73 @@ let test_counterpart_range_includes_upper_boundary_once () =
        observations)
 ;;
 
+let test_restart_cut_never_commits_a_current_unfinished_turn () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let trace_id = "trace-restart-cut" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path in
+  establish_progress config ~trace_id "old first";
+  let write_claims claims =
+    let facts = List.map (fun claim -> Memory.observed ~claim ~category:Memory.Fact
+        ~now:1. ~origin:{ kind = Memory.Authored; trace_id }) claims in
+    match Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1.
+        ~source:{ kind = Current.Librarian; trace_id } ~new_claims:facts ~absorbed:[] () with
+    | Ok snapshot -> snapshot | Error detail -> fail detail in
+  let seed = write_claims ["seed fact"] in
+  check int "seed revision" 1 seed.revision;
+  let old = List.map message ["old first"; "old middle"; "repeated endpoint"] in
+  save_checkpoint config ~trace_id old 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2. old;
+  save_checkpoint config ~trace_id [] 3;
+  let append event recorded_at =
+    match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name { Boundaries.recorded_at; event } with
+    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error) in
+  append (Boundaries.History_restarted { trace_id }) 3.;
+  let completed = [message "new completed"] in
+  save_checkpoint config ~trace_id completed 4;
+  let position = match Boundaries.position_of_messages completed with
+    | Ok position -> position | Error detail -> fail detail in
+  append (Boundaries.Turn_ended
+      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:3;
+        history_at_start = Boundaries.Fresh_history; position }) 4.;
+  let in_flight = completed @ List.map message ["new unfinished"; "repeated endpoint"] in
+  save_checkpoint config ~trace_id in_flight 5;
+  let inputs = ref [] in
+  let commit ~expected_revision:_ input =
+    let markers = text_markers input in
+    inputs := !inputs @ [markers];
+    let (_ : Current.t) = write_claims markers in
+    true in
+  let cursor () = match read_progress config with
+    | Some progress -> progress.position.end_atom | None -> fail "missing progress" in
+  let snapshot () =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name with
+    | Ok (Some snapshot) -> snapshot | Ok None -> fail "missing Memory"
+    | Error detail -> fail detail in
+  (match consume config commit with
+   | Consumer.Progress_advanced _ -> () | _ -> fail "current completed turn not consumed");
+  let committed = snapshot () in
+  check (triple (list (list string)) int (list string))
+    "only completed current input reaches actual Memory and progress"
+    ([["new completed"]], 1, ["new completed"; "seed fact"])
+    (!inputs, cursor (), List.map (fun (fact : Memory.fact) -> fact.claim) committed.facts
+                         |> List.sort String.compare);
+  check int "one Memory commit" 2 committed.revision;
+  (match consume config commit with
+   | Consumer.Nothing_to_read -> () | _ -> fail "unfinished turn was consumed on next tick");
+  check int "no Memory commit while current turn remains unfinished" 2 (snapshot ()).revision;
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:6. in_flight;
+  (match consume config commit with
+   | Consumer.Progress_advanced _ -> () | _ -> fail "newly completed turn not consumed");
+  check (list (list string)) "each current message is consumed after its own turn ends"
+    [["new completed"]; ["new unfinished"; "repeated endpoint"]] !inputs;
+  check int "all current atoms now acknowledged" 3 (cursor ());
+  check int "one further Memory commit" 3 (snapshot ()).revision
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -622,6 +689,8 @@ let () =
             test_counterpart_range_reads_beyond_recent_windows
         ; test_case "counterpart range includes upper boundary once" `Quick
             test_counterpart_range_includes_upper_boundary_once
+        ; test_case "restart cut excludes current unfinished turn" `Quick
+            test_restart_cut_never_commits_a_current_unfinished_turn
         ] )
     ]
 ;;

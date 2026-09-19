@@ -192,6 +192,76 @@ let test_a_line_of_an_earlier_history_is_not_a_cut_point () =
     (select ~lines saved)
 ;;
 
+(* Repeating the same message at the same atom index is enough to match an
+   older history's digest; no hash collision is needed. The new turn has only
+   stage-saved its tail, so no current completed-turn boundary owns that tail. *)
+let matching_prior_history_cuts () =
+  let saved = history 6 in
+  let lines = numbered
+      [ restarted ()
+      ; turn_ended ~fresh:true (history 2)
+      ; turn_ended ~turn:2 ~fresh:false saved
+      ; restarted ()
+      ; turn_ended ~turn:3 ~fresh:true (history 2)
+      ] in
+  saved, lines
+;;
+
+let test_prior_history_cannot_complete_a_current_turn () =
+  let saved, lines = matching_prior_history_cuts () in
+  let selection = Range.select ~trace_id:trace ~lines
+      ~progress:(Some (progress_at ~seen:2 saved 2)) ~messages:saved Range.All_unread in
+  let sliced_count = match selection with
+    | Range.Read { range; _ } -> Some (List.length (Range.slice saved range))
+    | _ -> None in
+  let next_end = Option.map (fun (p : Progress.t) -> p.position.end_atom)
+      (Range.progress_after ~trace_id:trace selection) in
+  check (triple string (option int) (option int))
+    "only current completed atoms may be read and acknowledged"
+    ("read [0,2) seen=5", Some 2, Some 2)
+    (describe selection, sliced_count, next_end)
+;;
+
+let test_passed_restart_still_excludes_prior_history_cuts () =
+  let saved, lines = matching_prior_history_cuts () in
+  check string "reading current cut does not revive an older larger endpoint"
+    "nothing"
+    (select ~progress:(progress_at ~seen:5 saved 2) ~lines saved)
+;;
+
+let test_restart_without_new_cut_waits_for_current_turn () =
+  let saved = history 6 in
+  let lines = numbered
+      [ restarted (); turn_ended ~fresh:true saved; restarted () ] in
+  check string "a stage save after restart does not finish the turn"
+    "nothing"
+    (select ~progress:(progress_at ~seen:2 saved 6) ~lines saved)
+;;
+
+let test_retry_cut_excludes_a_smaller_prior_history_endpoint () =
+  let saved = history 4 in
+  let lines = numbered
+      [ restarted ()
+      ; turn_ended ~fresh:true (history 1)
+      ; restarted ()
+      ; turn_ended ~turn:2 ~fresh:true saved
+      ] in
+  check string "retry uses the oldest cut of the current history"
+    "read [0,4) seen=4"
+    (select ~extent:Range.To_first_cut_point ~lines saved)
+;;
+
+let test_fresh_turn_alone_starts_the_current_cut_segment () =
+  let saved = history 6 in
+  let lines = numbered
+      [ turn_ended ~fresh:true saved
+      ; turn_ended ~turn:2 ~fresh:true (history 2)
+      ] in
+  check string "a fresh completed turn supplies both the restart and its own cut"
+    "read [0,2) seen=2"
+    (select ~progress:(progress_at ~seen:1 saved 6) ~lines saved)
+;;
+
 let test_lines_of_another_trace_take_no_part () =
   let saved = history 2 in
   let lines =
@@ -342,8 +412,10 @@ let test_model_an_unread_turn_that_replaces_the_history_and_dies () =
   check string "with no line after the replacing save the new atom is never read"
     "nothing"
     (select ~progress:passed ~lines:before_the_turn same_text);
-  check string "with the line the new history is read from zero"
-    "read [0,1) seen=3"
+  (* Matching text cannot turn the earlier history's endpoint into a completed
+     turn of the replacement history. Only its start has been recorded. *)
+  check string "with the line the reader waits for a current completed turn"
+    "nothing"
     (select ~progress:passed ~lines:after_its_save same_text);
   let other_text = history ~tag:"new" 1 in
   check string "where the text differs the missing line is at least a visible stop"
@@ -441,6 +513,16 @@ let () =
     ; ( "cut points"
       , [ test_case "a line of an earlier history is not a cut point" `Quick
             test_a_line_of_an_earlier_history_is_not_a_cut_point
+        ; test_case "prior history cannot complete a current turn" `Quick
+            test_prior_history_cannot_complete_a_current_turn
+        ; test_case "passed restart still excludes prior history cuts" `Quick
+            test_passed_restart_still_excludes_prior_history_cuts
+        ; test_case "restart without new cut waits for current turn" `Quick
+            test_restart_without_new_cut_waits_for_current_turn
+        ; test_case "retry cut excludes a smaller prior history endpoint" `Quick
+            test_retry_cut_excludes_a_smaller_prior_history_endpoint
+        ; test_case "fresh turn alone starts the current cut segment" `Quick
+            test_fresh_turn_alone_starts_the_current_cut_segment
         ; test_case "lines of another trace take no part" `Quick
             test_lines_of_another_trace_take_no_part
         ; test_case "a position of another trace is reported" `Quick

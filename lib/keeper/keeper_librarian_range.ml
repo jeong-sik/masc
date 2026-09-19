@@ -134,9 +134,9 @@ let matches_checkpoint ~digest_at ~atom_count ~end_atom ~digest =
   | None -> false
 ;;
 
-(* Row 2a: a line of the current history. Lines of an earlier history of the
-   trace, and lines for a history that was never stored, do not match and are
-   left out without being an error. *)
+(* Row 2a: an endpoint must match the loaded checkpoint. Repeated messages
+   can also match an earlier history, so [select] first discards cut points
+   before the latest restart of this trace. A mismatching line is not an error. *)
 let cut_point ~digest_at ~atom_count (written : B.record) =
   match written.event with
   | B.Turn_ended
@@ -195,7 +195,16 @@ let select ~trace_id ~lines ~progress ~messages extent =
        let boundary_lines_seen = complete_line_count lines in
        let _labelled, atom_count = Window.annotate messages in
        let digest_at = Window.atom_opening_digest messages in
-       let cuts = List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written) own in
+       let cuts =
+         List.fold_left
+           (fun cuts (_, written) ->
+              let cuts = if is_restart written then [] else cuts in
+              match cut_point ~digest_at ~atom_count written with
+              | None -> cuts
+              | Some point -> point :: cuts)
+           []
+           own
+       in
        (* Row 3c: a restart line beyond the count the progress file holds was
           appended after the position last moved. It wins over a position that
           seems to match: a digest carries no index and no time. *)

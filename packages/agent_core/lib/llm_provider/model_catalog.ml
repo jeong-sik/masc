@@ -931,8 +931,7 @@ let lookup_entries entries raw_model_id =
         entries
     in
     List.find_opt
-      (fun entry ->
-         Model_identifiers.Id_prefix.matches_model_id ~prefix:entry.id_prefix model_id)
+      (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
       sorted_t
 ;;
 

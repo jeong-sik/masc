@@ -12,7 +12,7 @@ let starts_with ~prefix raw =
 ;;
 
 let matches_model_id ~prefix raw =
-  Llm_provider.Model_identifiers.Id_prefix.matches_model_id
+  Llm_provider.Model_identifiers.Model_id.starts_with
     ~prefix:(prefix_of prefix)
     (Llm_provider.Model_identifiers.Model_id.of_string_exn raw)
 ;;

@@ -43,6 +43,19 @@ let prompt_too_long_statusless_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
 ;;
 
+(* CLI 2.1.278 refuses to send a request its own count puts past the window:
+   it emits a synthetic API-error assistant message and ends the loop with
+   [terminal_reason = "blocking_limit"] and no API status. Seen live on
+   2026-09-19 as "terminal subtype=success api_status=unknown
+   reason=blocking_limit: Prompt is too long". *)
+let blocking_limit_diagnostic =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-blocking-limit-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}|}
+;;
+
+let blocking_limit_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-blocking-limit-1","result":"Prompt is too long","terminal_reason":"blocking_limit"}|}
+;;
+
 let mcp_initialize =
   {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
@@ -939,7 +952,10 @@ let history_uses_current_schema history =
     history
 ;;
 
-let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=false) () =
+let test_keeper_shrinks_history_after_statusless_context_error
+    ?(native_gate=false)
+    ?(overflow_frames = [ prompt_too_long_statusless_result ])
+    () =
   let base_path = temp_workspace () in
   let first_system_marker = Filename.concat base_path "full-system.txt" in
   let second_system_marker = Filename.concat base_path "shrunk-system.txt" in
@@ -978,7 +994,7 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
          ~first_system_marker ~second_system_marker
          ~first_prompt_marker
          ~second_prompt_marker
-         [ Emit prompt_too_long_statusless_result ]
+         (List.map (fun frame -> Emit frame) overflow_frames)
          [ Emit (assistant ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ; Emit (result ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ]
@@ -1898,6 +1914,11 @@ let () =
             (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:false)
         ; test_case "native Gate retains its session across overflow shrink" `Quick
             (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:true)
+        ; test_case
+            "shrinks history after the CLI's blocking_limit refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
         ; test_case
             "projects typed tool history and lifecycle"
             `Quick

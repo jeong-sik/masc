@@ -8238,6 +8238,22 @@ let runtime_lane_write_busy (state : state) =
   | Lane_write_idle -> false
   | Lane_write_posting | Lane_write_rereading _ -> true
 
+(* Candidate edits replace the conversation lane's whole order. After its
+   awaited read-back fails, that order is only evidence of the state before
+   the last write; sending it again could restore a candidate another writer
+   removed. Keep the refusal typed by the list state rather than guessing
+   freshness from elapsed time or the notice text. *)
+let runtime_lane_candidate_write_refusal (state : state) =
+  if runtime_lane_write_busy state
+  then Some Lane_write_pending
+  else
+    match state.runtime_surface_lane_freshness with
+    | Lane_list_read -> None
+    | Lane_list_unread _ ->
+      Some
+        (Lane_write_refused
+           "the lane list may be stale; reload it before changing candidates")
+
 let runtime_lane_list_generation (state : state) = function
   | Runtime_surface_list -> state.runtime_surface_generation
   | Standalone_lanes_list -> state.standalone_lanes_generation
@@ -8319,8 +8335,10 @@ let plan_runtime_lane_edit (state : state) = function
          then Refuse_lane_edit Lane_write_pending
          else Send_lane_write { lane; request; cursor_after }
        in
-       (match row_edit with
-        | Drop_candidate ->
+       (match row_edit, runtime_lane_candidate_write_refusal state with
+        | (Drop_candidate | Move_candidate _), Some notice ->
+          Refuse_lane_edit notice
+        | Drop_candidate, None ->
           (* Dropping the lane's last row leaves the cursor on the row that
              will be the lane's new last one, not on whatever follows it. *)
           let cursor_after =
@@ -8332,11 +8350,7 @@ let plan_runtime_lane_edit (state : state) = function
             (Write_lane_order
                (List.filter (fun id -> not (String.equal id runtime_id)) order))
             ~cursor_after
-        | Move_candidate _ when runtime_lane_write_busy state ->
-          (* The order on screen is the one before the write that is out, so
-             it cannot say where the candidate stands now. *)
-          Refuse_lane_edit Lane_write_pending
-        | Move_candidate move ->
+        | Move_candidate move, None ->
           let by, edge =
             match move with
             | Move_down -> 1, "last"
@@ -8349,7 +8363,7 @@ let plan_runtime_lane_edit (state : state) = function
                   (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
-        | Remove_lane ->
+        | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->
              (* The lane's rows leave the list; the cursor goes to the row

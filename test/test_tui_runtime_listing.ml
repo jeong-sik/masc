@@ -189,14 +189,17 @@ let test_a_refused_write_opens_edits_at_once () =
   Alcotest.(check string) "the refusal is drawn" "refuse: HTTP 400: no"
     (notice_text state.runtime_lane_notice)
 
-let test_a_failed_reread_opens_edits_with_a_line () =
+let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
   state.runtime_lane_write <- Lane_write_posting;
   settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
     (Error "HTTP 503: down");
-  expect_plan "edits are open" state down "write primary [b; a], cursor 1";
+  expect_plan "move is refused" state down
+    "refuse: the lane list may be stale; reload it before changing candidates";
+  expect_plan "drop is refused" state drop
+    "refuse: the lane list may be stale; reload it before changing candidates";
   Alcotest.(check string) "the list is said to be stale"
     "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
     (stale_text state);
@@ -230,9 +233,8 @@ let test_a_stale_line_holds_until_its_list_loads () =
 
 (* The review's case. A drop's read-back fails, so the list on screen still
    shows the dropped candidate. A refused key then says something of its own
-   and a view change dismisses that: the stale line has to outlive both,
-   because the next write is built from the stale list. With one notice slot
-   the refusal replaced the stale line and the dismissal cleared it. *)
+   and a view change dismisses that. The stale line outlives both, and the
+   stale order is never sent as a second write. *)
 let test_a_refusal_and_a_dismissal_leave_the_stale_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
@@ -243,14 +245,16 @@ let test_a_refusal_and_a_dismissal_leave_the_stale_line () =
   (match plan_runtime_lane_edit state up with
    | Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
    | plan -> Alcotest.failf "K on the head: %s" (plan_text plan));
-  Alcotest.(check string) "the refusal is drawn" "refuse: a is already first in primary"
+  Alcotest.(check string) "the refusal is drawn"
+    "refuse: the lane list may be stale; reload it before changing candidates"
     (notice_text state.runtime_lane_notice);
   Alcotest.(check string) "beside the stale line" stale_after_503 (stale_text state);
   dismiss_runtime_lane_notice state;
   Alcotest.(check string) "the dismissal ended the refusal" "no line"
     (notice_text state.runtime_lane_notice);
   state.runtime_cursor <- 1;
-  expect_plan "x still writes from the stale list" state drop "write primary [a], cursor 0";
+  expect_plan "x cannot write from the stale list" state drop
+    "refuse: the lane list may be stale; reload it before changing candidates";
   Alcotest.(check string) "and the stale line is still drawn" stale_after_503
     (stale_text state)
 
@@ -334,7 +338,7 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
       Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
       Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;
-      Alcotest.test_case "a failed re-read opens edits with a line" `Quick test_a_failed_reread_opens_edits_with_a_line;
+      Alcotest.test_case "a failed re-read refuses candidate edits with a line" `Quick test_a_failed_reread_refuses_candidate_edits_with_a_line;
       Alcotest.test_case "a stale line holds until its list loads" `Quick test_a_stale_line_holds_until_its_list_loads;
       Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;
       Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;

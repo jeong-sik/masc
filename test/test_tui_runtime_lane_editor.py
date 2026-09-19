@@ -149,6 +149,19 @@ class LaneStore:
             self.held = (arrived, release)
         return arrived, release
 
+    def replace_lane_from_another_client(
+        self, lane_id: str, runtime_ids: list[str]
+    ) -> None:
+        """Apply a dashboard write after the TUI's last readable snapshot."""
+        with self.lock:
+            lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
+            lane["runtime_ids"] = list(runtime_ids)
+
+    def lane_candidates(self, lane_id: str) -> list[str]:
+        with self.lock:
+            lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
+            return list(lane["runtime_ids"])
+
     def route(self, raw: bytes) -> h.HttpResponse:
         with self.lock:
             held, self.held = self.held, None
@@ -317,9 +330,16 @@ def run(executable: str) -> None:
         h.send_and_wait(
             process, fd, output, b"J", b"the lane list could not be re-read",
         )
-        # K is sent, not refused. It is built from that stale list, where
-        # runtime-b is still second, and the read-back after it lands.
-        h.send_and_wait(process, fd, output, b"K", b"1/2 runtime-b")
+        # Another client now removes runtime-a. The TUI still shows the old
+        # [runtime-a; runtime-b] order, where runtime-b is second. K used to
+        # post that whole stale order and restore runtime-a. The unread list
+        # now refuses the key without posting, so the authoritative removal
+        # stays in place.
+        store.replace_lane_from_another_client("primary", ["runtime-b"])
+        h.send_and_wait(
+            process, fd, output, b"K",
+            b"lane write refused: the lane list may be stale",
+        )
 
         # The request log is appended after the response goes out, so the
         # last post can trail the frame it produced.
@@ -331,7 +351,6 @@ def run(executable: str) -> None:
             {"lane": NEW_LANE, "action": "remove"},
             {"lane": "primary", "action": "remove"},
             {"lane": "primary", "runtime_ids": ["runtime-b", "runtime-a"]},
-            {"lane": "primary", "runtime_ids": ["runtime-b", "runtime-a"]},
         ]
         deadline = time.monotonic() + 3.0
         while True:
@@ -341,6 +360,11 @@ def run(executable: str) -> None:
             time.sleep(0.05)
         if posted != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
+        primary = store.lane_candidates("primary")
+        if primary != ["runtime-b"]:
+            raise AssertionError(
+                f"the stale TUI restored another client's removal: {primary!r}"
+            )
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

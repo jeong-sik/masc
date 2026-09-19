@@ -4334,6 +4334,8 @@ let () =
             (fun () -> test_server_refusal_advances_once_to_successor 500)
         ; test_case "HTTP 503 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 503)
+        ; test_case "HTTP 520 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 520)
         ; test_case "HTTP 529 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 529)
         ; test_case

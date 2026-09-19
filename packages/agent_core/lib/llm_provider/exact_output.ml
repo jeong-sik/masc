@@ -1737,13 +1737,15 @@ let execution_failure_may_advance (error : execution_error) =
        until the refusal kind survived classification the lane could not reach
        it — a 429 arrived here as [Completion_failed] and ended the flow. *)
     receipt_dispatch_count error.receipt = 1
-  | Provider_response_refused { refusal = Overloaded | Server_error; _ }, Response_received ->
+  | Provider_response_refused
+      { http_status; refusal = Overloaded | Server_error }, Response_received ->
     (* The provider returned a complete failure response. Exact requests have
        no tools and this failure has not entered the domain validator, so the
        declared successor may serve the same input. Keep the failed dispatch
        and response as evidence; an interrupted/unknown dispatch is not this
        case, and neither is a status whose refusal body was not received. *)
-    receipt_dispatch_count error.receipt = 1
+    http_status >= 500 && http_status <= 599
+    && receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The response arrived and terminated, but this binding routed the whole

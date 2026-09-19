@@ -891,9 +891,11 @@ let run_turn
   Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ())
   @@ fun () ->
   let runtime_id_string = runtime_id in
+  let direct_resume_checkpoint = Option.bind direct_resume direct_checkpoint in
+  let ( let* ) = Result.bind in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
-  let ctx =
+  let* ctx =
     Keeper_run_context.prepare_run_context
       ~config
       ~meta
@@ -902,9 +904,21 @@ let run_turn
       ~runtime_id
       ?temperature
       ?shared_context
+      ?checkpoint:direct_resume_checkpoint
       ()
+    |> Result.map_error (fun error ->
+      Agent_core.Error.Io
+        (FileOpFailed
+          { op = "load checkpoint"
+          ; path =
+              Keeper_checkpoint_store.agent_core_checkpoint_path
+                ~session_dir:(Filename.concat base_dir
+                  (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ; detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error
+          }))
   in
-  let ctx = match Option.bind direct_resume direct_checkpoint with
+  let ctx = match direct_resume_checkpoint with
     | None -> ctx
     | Some checkpoint ->
       { ctx with Keeper_run_context.ctx_work =
@@ -969,7 +983,7 @@ let run_turn
   in
   (* RFC librarian-lifecycle 4.6: a restart line must not be ahead of the
      restart. A turn that knows the saved history holds no atom says so now; a
-     turn whose checkpoint could not be loaded says so after the first stage
+     turn whose checkpoint version was superseded says so after the first stage
      save the store accepts ([checkpoint_sink] below). *)
   let restart_notice_after_first_save =
     match Turn_helpers.restart_notice history_at_start ctx.saved_history with

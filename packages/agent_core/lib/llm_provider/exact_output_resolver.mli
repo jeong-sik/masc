@@ -19,7 +19,7 @@ type catalog_document =
   ; contents : string
   }
 
-(** One exact-output slot: which binding it names, and the deadlines that
+(** One exact-output slot: which binding it names, and the request controls and deadlines that
     binding runs under. The caller already holds these as typed values -- a
     deployment's runtime bindings -- so they arrive as values rather than as a
     TOML document to re-parse. [target_ref] is the slot id the lane
@@ -29,6 +29,8 @@ type declared_target =
   ; provider_ref : string
   ; model_id : string
   ; enable_thinking : bool option
+  ; reasoning_effort : Reasoning_effort.t option
+      (** The binding's explicit effort. [None] leaves the request unspecified. *)
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   ; api_key_env : string option

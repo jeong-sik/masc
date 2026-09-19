@@ -75,7 +75,6 @@ type t =
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
   ; cache_extended_ttl : bool
-  ; supports_tool_choice_override : bool option
   ; supports_structured_output_override : bool option
   ; model_capabilities_override : Capabilities.capabilities option
   ; keep_alive : string option
@@ -118,7 +117,6 @@ let make
       ?(response_format = Types.Off)
       ?(cache_system_prompt = false)
       ?(cache_extended_ttl = false)
-      ?supports_tool_choice_override
       ?supports_structured_output_override
       ?model_capabilities_override
       ?keep_alive
@@ -179,7 +177,6 @@ let make
   ; response_format
   ; cache_system_prompt
   ; cache_extended_ttl
-  ; supports_tool_choice_override
   ; supports_structured_output_override
   ; model_capabilities_override
   ; keep_alive
@@ -435,14 +432,7 @@ let tool_choice_capabilities_for_config (config : t) =
        | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini ->
          Capabilities.default_capabilities)
   in
-  match config.supports_tool_choice_override with
-  | Some supports_tool_choice ->
-    { caps with
-      Capabilities.supports_tool_choice
-    ; supports_required_tool_choice = supports_tool_choice
-    ; supports_named_tool_choice = supports_tool_choice
-    }
-  | None -> caps
+  caps
 ;;
 
 let validate_tool_choice_request_with_capabilities

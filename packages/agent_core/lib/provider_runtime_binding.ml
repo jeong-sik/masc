@@ -256,14 +256,7 @@ let capabilities_for_provider_config (cfg : PConfig.t) =
        | Some model_caps -> model_caps
        | None -> caps)
   in
-  match cfg.supports_tool_choice_override with
-  | Some supports_tool_choice ->
-    { caps with
-      supports_tool_choice
-    ; supports_required_tool_choice = supports_tool_choice
-    ; supports_named_tool_choice = supports_tool_choice
-    }
-  | None -> caps
+  caps
 ;;
 
 let resolve_model binding ~requested_model =

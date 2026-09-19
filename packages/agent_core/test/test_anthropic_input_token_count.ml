@@ -74,7 +74,6 @@ let config
     ~cache_system_prompt:true
     ~tool_choice:Any
     ~disable_parallel_tool_use:true
-    ~supports_tool_choice_override:true
     ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
     ?max_concurrent_requests
     ?model_capabilities_override

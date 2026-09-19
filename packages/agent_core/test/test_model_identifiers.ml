@@ -1,10 +1,10 @@
-(* [Id_prefix.starts_with] gate regression — critic round c-ffbfc4c6
-   (p-5d6ad8f6, 2026-09-18): committing prefix matching on [Id_prefix.t]
-   must live inside the opaque boundary with the same normalization as
-   [equal] (ASCII case-fold + trim), not as a [to_string] escape at the
-   call site where normalization diverges from [equal].  Case-different
-   prefixes must stop leaking the same way [equal] no longer lets them
-   through. *)
+(* [Id_prefix] opaque boundary — regression suite.  Legacy round c-ffbfc4c6
+   (p-5d6ad8f6, 2026-09-18): prefix matching must live inside the opaque
+   boundary with the same semantics as [equal].  Since the #37022 functor
+   round, that semantics is byte equality on the normalized (lowercased)
+   form: normalization happens in [of_string], so [equal] and
+   [starts_with] are plain byte comparisons over [t] values that are
+   normalized by construction. *)
 let prefix_of entry = Llm_provider.Model_identifiers.Id_prefix.of_string_exn entry
 
 let starts_with ~prefix raw =
@@ -27,10 +27,10 @@ let test_starts_with_normalization () =
     (starts_with ~prefix:"CLAUDE-" "claude-opus-5");
   Alcotest.(check bool) "case-different value matches" true
     (starts_with ~prefix:"claude-" "CLAUDE-opus-5");
-  Alcotest.(check bool) "of_string stores unchanged bytes" true
-    (String.length
-       (Llm_provider.Model_identifiers.Id_prefix.to_string
-          (prefix_of "claude-")) = 7)
+  Alcotest.(check bool) "of_string returns normalized form" true
+    (String.equal
+       (Llm_provider.Model_identifiers.Id_prefix.to_string (prefix_of "GLM-5.3"))
+       "glm-5.3")
 ;;
 
 let test_starts_with_not_suffix () =

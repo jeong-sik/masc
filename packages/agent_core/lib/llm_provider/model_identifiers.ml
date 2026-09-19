@@ -2,163 +2,83 @@
    historically shared one slot (board note p-565b55be, task-1618; the
    #37009 class of slot mix-ups).  The types are mutually incompatible on
    purpose: passing an [Api_name.t] where a [Model_id.t] is expected fails
-   at compile time.
+   at compile time.  That incompatibility is imposed by the .mli — each
+   module exports an abstract [t] — exactly as in the first round; the
+   functor below owns the shared rule so the three hand-copied bodies
+   cannot drift apart.  The functor result is deliberately left concrete
+   ([t = string] stays visible inside this file) because [Id_prefix] has
+   to define [starts_with] on those bytes; sealing the result at a
+   signature would abstract [t] here too and no prefix rule could be
+   written.  Callers never see the concrete form.
 
    [of_string] enforces the same invariants the TOML loaders enforce
-   (non-empty, no leading or trailing whitespace) and returns the unchanged
-   bytes.  [equal] applies the historical comparison-time normalization
-   (ASCII case-fold + trim) and never rewrites stored bytes — the original
-   string is preserved for display.  [to_string] is the boundary escape
-   hatch (TUI rows, JSON/TOML wire, logs). *)
+   (non-empty, no leading or trailing whitespace) and returns the
+   normalized form (ASCII lowercase).  Normalization lives at
+   construction, not at comparison: every [t] is already normalized, so
+   [equal] and [starts_with] are plain byte comparisons and a [t] works
+   as a [Hashtbl] key with no separate key function.  The bytes a row or
+   a provider wrote are not preserved — display that needs the original
+   spelling must source it from the row itself, not from the identifier.
+   [to_string] is the boundary escape hatch (TUI rows, JSON/TOML wire,
+   logs) and returns the normalized bytes. *)
 
-(* Representations live here (plain strings); opacity is imposed by the
-   .mli, so the three types stay mutually incompatible for callers. *)
-type id_prefix = string
+module type LABELS = sig
+  val empty : string
+  val padded : string
+  val label : string
+end
 
-type api_name = string
-
-type model_id = string
-
-module Id_prefix : sig
-  type t = id_prefix
-
-  val of_string : string -> (t, string) result
-  (** [Error message] mirrors the model-catalog loader messages byte for
-      byte: [model entry field "id_prefix" must not be empty] and
-      [model entry field "id_prefix" must not have leading or trailing
-      whitespace]. *)
-
-  val of_string_exn : string -> t
-  (** Same invariants as {!of_string}; raises [Invalid_argument] on
-      violation (programmer error in test builders and fixtures). *)
-
-  val equal : t -> t -> bool
-  (** Comparison-time normalization (ASCII case-fold + trim); stored bytes
-      are never rewritten. *)
-
-  val starts_with : prefix:t -> t -> bool
-  (** Prefix matching with the same comparison-time normalization as
-      [equal] (ASCII case-fold + trim on both sides); the only sanctioned
-      prefix comparison on [t]. *)
-
-  val to_string : t -> string
-  (** The original, unnormalized bytes. *)
-end = struct
-  type t = id_prefix
+(* One rule, three instances.  The abstract [t] each caller sees comes
+   from the .mli, not from here. *)
+module Make (L : LABELS) = struct
+  type t = string
 
   let of_string raw =
     let trimmed = String.trim raw in
-    if trimmed = ""
-    then Error "model entry field \"id_prefix\" must not be empty"
-    else if raw <> trimmed
-    then
-      Error "model entry field \"id_prefix\" must not have leading or trailing whitespace"
-    else Ok raw
+    if String.equal trimmed "" then Error L.empty
+    else if not (String.equal raw trimmed) then Error L.padded
+    else Ok (String.lowercase_ascii raw)
   ;;
 
   let of_string_exn raw =
     match of_string raw with
     | Ok value -> value
-    | Error message -> invalid_arg ("Model_identifiers.Id_prefix: " ^ message)
+    | Error message -> invalid_arg (L.label ^ ": " ^ message)
   ;;
 
-  let equal a b =
-    String.equal
-      (String.lowercase_ascii (String.trim a))
-      (String.lowercase_ascii (String.trim b))
-  ;;
-
-  let starts_with ~prefix t =
-    String.starts_with
-      ~prefix:(String.lowercase_ascii (String.trim prefix))
-      (String.lowercase_ascii (String.trim t))
-  ;;
+  let equal = String.equal
 
   let to_string t = t
 end
 
-module Api_name : sig
-  type t = api_name
+module Id_prefix = struct
+  include
+    Make (struct
+        let empty = "model entry field \"id_prefix\" must not be empty"
 
-  val of_string : string -> (t, string) result
-  (** Same invariants as {!Id_prefix.of_string}; messages are neutral
-      ([api_name must not be empty] / [api_name must not have leading or
-      trailing whitespace]) until a loader moves its validation here. *)
+        let padded =
+          "model entry field \"id_prefix\" must not have leading or trailing whitespace"
 
-  val of_string_exn : string -> t
-  (** Same invariants as {!of_string}; raises [Invalid_argument] on
-      violation (programmer error in test builders and fixtures). *)
+        let label = "Model_identifiers.Id_prefix"
+      end)
 
-  val equal : t -> t -> bool
-  (** Comparison-time normalization (ASCII case-fold + trim). *)
-
-  val to_string : t -> string
-end = struct
-  type t = api_name
-
-  let of_string raw =
-    let trimmed = String.trim raw in
-    if trimmed = ""
-    then Error "api_name must not be empty"
-    else if raw <> trimmed
-    then Error "api_name must not have leading or trailing whitespace"
-    else Ok raw
-  ;;
-
-  let of_string_exn raw =
-    match of_string raw with
-    | Ok value -> value
-    | Error message -> invalid_arg ("Model_identifiers.Api_name: " ^ message)
-  ;;
-
-  let equal a b =
-    String.equal
-      (String.lowercase_ascii (String.trim a))
-      (String.lowercase_ascii (String.trim b))
-  ;;
-
-  let to_string t = t
+  let starts_with ~prefix t = String.starts_with ~prefix t
 end
 
-module Model_id : sig
-  type t = model_id
+module Api_name =
+  Make (struct
+      let empty = "api_name must not be empty"
 
-  val of_string : string -> (t, string) result
-  (** Same invariants as {!Id_prefix.of_string}; messages are neutral
-      ([model_id must not be empty] / [model_id must not have leading or
-      trailing whitespace]) until a loader moves its validation here. *)
+      let padded = "api_name must not have leading or trailing whitespace"
 
-  val of_string_exn : string -> t
-  (** Same invariants as {!of_string}; raises [Invalid_argument] on
-      violation (programmer error in test builders and fixtures). *)
+      let label = "Model_identifiers.Api_name"
+    end)
 
-  val equal : t -> t -> bool
-  (** Comparison-time normalization (ASCII case-fold + trim). *)
+module Model_id =
+  Make (struct
+      let empty = "model_id must not be empty"
 
-  val to_string : t -> string
-end = struct
-  type t = model_id
+      let padded = "model_id must not have leading or trailing whitespace"
 
-  let of_string raw =
-    let trimmed = String.trim raw in
-    if trimmed = ""
-    then Error "model_id must not be empty"
-    else if raw <> trimmed
-    then Error "model_id must not have leading or trailing whitespace"
-    else Ok raw
-  ;;
-
-  let of_string_exn raw =
-    match of_string raw with
-    | Ok value -> value
-    | Error message -> invalid_arg ("Model_identifiers.Model_id: " ^ message)
-  ;;
-
-  let equal a b =
-    String.equal
-      (String.lowercase_ascii (String.trim a))
-      (String.lowercase_ascii (String.trim b))
-  ;;
-
-  let to_string t = t
-end
+      let label = "Model_identifiers.Model_id"
+    end)

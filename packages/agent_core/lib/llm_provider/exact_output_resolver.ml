@@ -259,9 +259,14 @@ let parse_target_declaration ~source toml =
     Binding.target_string_field ~target_label:id ~field:"provider_ref" toml
     |> target_result source
   in
-  let* model_id =
+  let* raw =
     Binding.target_string_field ~target_label:id ~field:"model_id" toml
     |> target_result source
+  in
+  let* model_id =
+    match Model_identifiers.Model_id.of_string raw with
+    | Ok model_id -> Ok (Model_identifiers.Model_id.to_string model_id)
+    | Error message -> target_result source (Error message)
   in
   let* enable_thinking =
     Binding.target_bool_field ~target_label:id ~field:"enable_thinking" toml
@@ -709,10 +714,24 @@ let load_resolver_snapshot
       in
       let* () = timeout "connect_timeout_s" declared.connect_timeout_s in
       let* () = timeout "body_timeout_s" declared.body_timeout_s in
+      let* model_id =
+        match Model_identifiers.Model_id.of_string declared.model_id with
+        | Ok model_id -> Ok (Model_identifiers.Model_id.to_string model_id)
+        | Error message ->
+          Error
+            (Target_catalog_invalid
+               { source = Embedded_catalog
+               ; detail =
+                 Printf.sprintf
+                   "declared target %S has invalid model_id: %s"
+                   declared.target_ref
+                   message
+               })
+      in
       Ok
         { target_ref
         ; provider_ref = declared.provider_ref
-        ; model_id = declared.model_id
+        ; model_id
         ; enable_thinking = declared.enable_thinking
         ; connect_timeout_s = declared.connect_timeout_s
         ; body_timeout_s = declared.body_timeout_s

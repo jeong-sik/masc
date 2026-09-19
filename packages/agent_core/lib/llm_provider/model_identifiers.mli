@@ -5,85 +5,87 @@
    at compile time.
 
    [of_string] enforces the same invariants the TOML loaders enforce
-   (non-empty, no leading or trailing whitespace) and returns the unchanged
-   bytes.  [equal] applies the historical comparison-time normalization
-   (ASCII case-fold + trim) and never rewrites stored bytes — the original
-   string is preserved for display.  [to_string] is the boundary escape
-   hatch (TUI rows, JSON/TOML wire, logs). *)
-
-type id_prefix (** Catalog row prefix — TOML [models.*] [id_prefix]. *)
-
-type api_name (**
-   Runtime model name — [runtime.toml] [models.NAME] [api-name]. *)
-
-type model_id (**
-   Exact-output resolve target — the [model_id] argument of
-   {!Exact_output_catalog_binding.resolve_exact}. *)
+   (non-empty, no leading or trailing whitespace) and returns the
+   normalized form (ASCII lowercase).  Normalization happens at
+   construction, so comparison is plain byte equality: [equal] and
+   [starts_with] do no trim or case-fold of their own, [t] works as a
+   [Hashtbl] key without a separate key function, and the original
+   spelling is not preserved — display that needs the original bytes
+   sources them from the row itself, not from the identifier.
+   [to_string] is the boundary escape hatch (TUI rows, JSON/TOML wire,
+   logs) and returns the normalized bytes. *)
 
 module Id_prefix : sig
-  type t = id_prefix
-  (** The catalog row [id_prefix]. *)
+  type t
+  (** The catalog row [id_prefix] — normalized bytes (ASCII lowercase). *)
 
   val of_string : string -> (t, string) result
   (** [Error message] mirrors the model-catalog loader messages byte for
       byte: [model entry field "id_prefix" must not be empty] and
       [model entry field "id_prefix" must not have leading or trailing
-      whitespace]. *)
+      whitespace].  Success returns the normalized form (ASCII
+      lowercase). *)
 
   val of_string_exn : string -> t
   (** Same invariants as {!of_string}; raises [Invalid_argument] on
       violation (programmer error in test builders and fixtures). *)
 
   val equal : t -> t -> bool
-  (** Comparison-time normalization (ASCII case-fold + trim); stored bytes
-      are never rewritten. *)
+  (** Plain byte equality — normalization already happened in
+      {!of_string}. *)
 
   val starts_with : prefix:t -> t -> bool
   (** Prefix matching for catalog rows, e.g. wizard client gating on
-      [claude-] / [gpt-].  Same comparison-time normalization as
-      {!equal} (ASCII case-fold + trim on both sides); raw bytes are
-      never rewritten.  This is the only sanctioned prefix comparison on
-      [t]: escaping through {!to_string} to run [String.starts_with]
-      bypasses the shared normalization and is a review flag. *)
+      [claude-] / [gpt-].  Plain [String.starts_with] on the normalized
+      bytes.  This is the only sanctioned prefix comparison on [t]:
+      escaping through {!to_string} to run [String.starts_with] is a
+      review flag. *)
 
   val to_string : t -> string
-  (** The original, unnormalized bytes. *)
+  (** The normalized bytes. *)
 end
 
 module Api_name : sig
-  type t = api_name
-  (** The runtime [api-name]. *)
+  type t
+  (** The runtime [api-name] — normalized bytes (ASCII lowercase). *)
 
   val of_string : string -> (t, string) result
   (** Same invariants as {!Id_prefix.of_string}; messages are neutral
       ([api_name must not be empty] / [api_name must not have leading or
-      trailing whitespace]) until a loader moves its validation here. *)
+      trailing whitespace]) until a loader moves its validation here.
+      Success returns the normalized form (ASCII lowercase). *)
 
   val of_string_exn : string -> t
   (** Same invariants as {!of_string}; raises [Invalid_argument] on
       violation (programmer error in test builders and fixtures). *)
 
   val equal : t -> t -> bool
-  (** Comparison-time normalization (ASCII case-fold + trim). *)
+  (** Plain byte equality — normalization already happened in
+      {!of_string}. *)
 
   val to_string : t -> string
+  (** The normalized bytes. *)
 end
 
 module Model_id : sig
-  type t = model_id
-  (** The exact-output resolve target [model_id]. *)
+  type t
+  (** The exact-output resolve target [model_id] — normalized bytes
+      (ASCII lowercase). *)
 
   val of_string : string -> (t, string) result
   (** Same invariants as {!Id_prefix.of_string}; messages are neutral
       ([model_id must not be empty] / [model_id must not have leading or
-      trailing whitespace]) until a loader moves its validation here. *)
+      trailing whitespace]) until a loader moves its validation here.
+      Success returns the normalized form (ASCII lowercase). *)
 
   val of_string_exn : string -> t
   (** Same invariants as {!of_string}; raises [Invalid_argument] on
       violation (programmer error in test builders and fixtures). *)
 
   val equal : t -> t -> bool
-  (** Comparison-time normalization (ASCII case-fold + trim). *)
+  (** Plain byte equality — normalization already happened in
+      {!of_string}. *)
 
   val to_string : t -> string
+  (** The normalized bytes. *)
 end

@@ -508,7 +508,7 @@ let describe_outcome = function
     Printf.sprintf "cleared %d messages, line not written: %s" cleared_message_count detail
   | Clear.Superseded { incoming_turn_count; known_turn_count } ->
     Printf.sprintf "superseded: held %d, store has %d" incoming_turn_count known_turn_count
-  | Clear.Not_saved { detail } -> "not saved: " ^ detail
+  | Clear.Save_unconfirmed { detail } -> "save unconfirmed: " ^ detail
 ;;
 
 let test_a_clear_empties_the_history_and_then_says_so () =
@@ -520,7 +520,7 @@ let test_a_clear_empties_the_history_and_then_says_so () =
    | Clear.Cleared { cleared_message_count; marker = Ok () } ->
      check int "every conversation message was removed" (List.length before - pinned)
        cleared_message_count
-   | (Clear.Cleared { marker = Error _; _ } | Clear.Superseded _ | Clear.Not_saved _) as
+   | (Clear.Cleared { marker = Error _; _ } | Clear.Superseded _ | Clear.Save_unconfirmed _) as
      other -> failf "expected a cleared history: %s" (describe_outcome other));
   let after = saved_messages ~base_dir in
   check int "the pinned messages are kept" pinned (List.length after);
@@ -546,7 +546,7 @@ let test_a_superseded_clear_writes_nothing () =
    | Clear.Superseded { incoming_turn_count; known_turn_count } ->
      check int "the clear held the older checkpoint" 3 incoming_turn_count;
      check int "the store holds the newer one" 5 known_turn_count
-   | (Clear.Cleared _ | Clear.Not_saved _) as other ->
+   | (Clear.Cleared _ | Clear.Save_unconfirmed _) as other ->
      failf "expected a superseded clear: %s" (describe_outcome other));
   check int "the history on disk is untouched" (List.length before)
     (List.length (saved_messages ~base_dir));
@@ -564,7 +564,7 @@ let test_a_clear_whose_line_is_refused_says_so () =
   plant_torn_tail ~keepers_dir;
   (match clear ~keepers_dir ~session context with
    | Clear.Cleared { cleared_message_count = _; marker = Error _ } -> ()
-   | (Clear.Cleared { marker = Ok (); _ } | Clear.Superseded _ | Clear.Not_saved _) as
+   | (Clear.Cleared { marker = Ok (); _ } | Clear.Superseded _ | Clear.Save_unconfirmed _) as
      other -> failf "expected a cleared history with no line: %s" (describe_outcome other));
   check bool "the history was emptied" true
     (List.for_all is_system (saved_messages ~base_dir))

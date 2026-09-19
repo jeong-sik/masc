@@ -76,11 +76,11 @@ let execution_boundary_of_turn_failure error =
   match Keeper_internal_error.classify_masc_internal_error error with
   | Some
       ( Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Official_client_recovery_required _
       | Keeper_internal_error.Gate_replay_repair_required _ ) ->
-    (* Both failures are produced by MASC — the first over the transcript MASC
-       persisted, the second after host replay and before provider dispatch.
-       The shared [Agent_core.Error.Internal] carrier must not misattribute
-       either local boundary to AGENT_CORE. *)
+    (* These failures are produced by MASC before provider dispatch: transcript
+       validation, a durable session claim, or host replay. The shared carrier
+       must not attribute these local boundaries to AGENT_CORE. *)
     Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _

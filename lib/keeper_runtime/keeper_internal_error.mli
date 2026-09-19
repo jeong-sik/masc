@@ -25,6 +25,22 @@ val accept_rejected_kind : string
     returned no typed receipt for what it did. *)
 val terminal_effect_failed_kind : string
 
+(** Why the durable official-client session refuses a new local claim.
+    This is distinct from the effect disposition of a provider attempt. *)
+type official_client_input_rejection =
+  | Bootstrap_floor_exceeded
+  | Effect_fenced
+
+type official_client_recovery = {
+  runtime_id : string;
+  recovery_id : string;
+  reason : official_client_input_rejection;
+}
+
+val official_client_input_rejection_to_string : official_client_input_rejection -> string
+val official_client_input_rejection_of_string : string -> official_client_input_rejection option
+val official_client_recovery_summary : official_client_recovery -> string
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -131,6 +147,7 @@ type fenced_cause =
   | Fenced_core of Keeper_request_failure_core.t
 
 and masc_internal_error =
+  | Official_client_recovery_required of official_client_recovery
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
@@ -256,6 +273,7 @@ val summary_of_masc_internal_error : masc_internal_error -> string option
     compile obligation at every consumer, which is what
     [Keeper_turn_terminal_code] already promises for the layer above. *)
 type wire_kind =
+  | Wire_official_client_recovery_required
   | Wire_runtime_exhausted
   | Wire_capacity_backpressure
   | Wire_resumable_cli_session

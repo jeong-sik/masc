@@ -15,10 +15,11 @@ type settlement =
   ; turn_id : string
   }
 
-(* The provider rejected the bootstrap input itself as over capacity. Not
-   auto-superseded by [plan_claim]; reopened only by [resolve_recovery].
-   See the RFC comment on the implementation for the reason split. *)
-type input_rejection_reason =
+(* Why input-capacity recovery remains held for the same client/runtime:
+   the minimum bootstrap input was rejected, or observed response/tool
+   activity prevented a retry. [Effect_fenced] does not imply a floor
+   rejection. [resolve_recovery] explicitly reopens the same identity. *)
+type input_rejection_reason = Keeper_internal_error.official_client_input_rejection =
   | Bootstrap_floor_exceeded
   | Effect_fenced
 
@@ -143,6 +144,14 @@ type claim_plan =
   ; required_tool_surface_sha256 : string option
   }
 
+type claim_error =
+  | Invalid_runtime_id
+  | Input_recovery_required of Keeper_internal_error.official_client_recovery
+  | Turn_count_exhausted
+  | Start_incomplete
+  | Active_unsettled
+  | Turn_already_inflight
+
 val process_epoch : unit -> string
 (** One UUID for the current MASC process. A durable incomplete claim owned by
     another epoch is a restart ambiguity, not an active same-process turn. *)
@@ -162,11 +171,16 @@ val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
 
+val claim_error_to_string : claim_error -> string
+val core_error_of_claim_error : claim_error -> Agent_core.Error.t
+(** Preserve an operator-held input rejection as a typed MASC recovery cause.
+    Other claim refusals retain the official-client claim configuration error. *)
+
 val plan_claim :
   expected:t option ->
   client_kind:client_kind ->
   runtime_id:string ->
-  (claim_plan, string) result
+  (claim_plan, claim_error) result
 (** Pure claim planning shared by every official-client adapter. The plan is
     the SSOT for fresh versus resumed execution, the next turn ordinal, and
     whether the prepared tool surface must match a settled session. *)
@@ -224,8 +238,9 @@ val claim :
     declared client kind or runtime id changes. Resuming the same settled
     client/runtime requires an identical tool surface. A same-process Start,
     Active, or Turn_inflight phase rejects a concurrent claim. A completed
-    failure observation is superseded atomically by a fresh-session claim and
-    never requires operator resolution before execution. *)
+    failure observation other than [Input_rejected] may be superseded atomically
+    by a fresh-session claim. Same-identity [Input_rejected] remains held for
+    explicit recovery resolution. *)
 
 val mark_active :
   base_path:string ->

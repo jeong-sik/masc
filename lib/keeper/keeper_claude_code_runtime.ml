@@ -361,9 +361,9 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Context_window_exceeded
       { tool_effect_attempted; response_emitted; _ } ->
     (* Same activity axis as [context_overflow_retry_safe] above: an
-       observation-free overflow exhausted the in-run shrink floor, any other
-       was fenced without a retry. Both prove the bootstrap input itself is
-       over capacity, so the recovery must not be auto-superseded next cycle
+       observation-free overflow exhausted the in-run shrink floor; observed
+       response/tool activity instead fenced the retry. Both retain recovery
+       on the same identity, but only the former establishes floor rejection
        (RFC claude-code-context-overflow-bounded-restart §6). *)
     Session_store.Input_rejected
       (if tool_effect_attempted || response_emitted
@@ -506,8 +506,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           ~runtime_id
       with
       | Ok plan -> Ok plan
-      | Error detail ->
-        Error (config_error ~field:"official_client_session.claim" detail)
+      | Error error -> Error (Session_store.core_error_of_claim_error error)
     in
     let* native_posture =
       Host.resolve_native_posture

@@ -29,13 +29,6 @@ module Keeper_librarian_range = Masc.Keeper_librarian_range
 module Keeper_librarian_progress = Masc.Keeper_librarian_progress
 module Keeper_checkpoint_store = Masc.Keeper_checkpoint_store
 
-let boundary_suffix =
-  (* Asked of the module that writes the file instead of spelled out here, so
-     renaming the artifact cannot leave this tool scanning for the old name. *)
-  Filename.basename
-    (Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir:"." ~keeper_id:"")
-;;
-
 let usage =
   "usage: masc-librarian-replay [--base-path DIR] [--keeper NAME]... [--extent \
    all|cut-points]\n\
@@ -82,8 +75,8 @@ type outcome =
       }
   | Skipped of string
 
-(** Boundary logs may be shared through [MASC_CONFIG_DIR]. The selected
-    cluster's typed metadata owns its current trace. This reader neither
+(** The selected cluster's typed metadata owns its current trace, including
+    when its boundary log contains earlier generations. This reader neither
     creates directories nor repairs metadata, and opens no storage backend. *)
 let trace_of_metadata ~runtime_root keeper_id =
   let path =
@@ -320,10 +313,17 @@ let keepers_with_a_log keepers_dir =
   | entries ->
     Array.to_list entries
     |> List.filter_map (fun entry ->
-      let suffix_at = String.length entry - String.length boundary_suffix in
-      if suffix_at > 0 && String.sub entry suffix_at (String.length boundary_suffix) = boundary_suffix
-      then Some (String.sub entry 0 suffix_at)
-      else None)
+      match Keeper_id.Keeper_name.of_string entry with
+      | Error _ -> None
+      | Ok name ->
+        let keeper_id = Keeper_id.Keeper_name.to_string name in
+        let path = Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
+        (match Unix.lstat path with
+         | _ -> Some keeper_id
+         | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
+         | exception Unix.Unix_error (error, fn, arg) ->
+           prerr_endline (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error));
+           exit 2))
     |> List.sort compare
 ;;
 
@@ -363,11 +363,9 @@ let () =
       | Some dir -> dir
       | None -> Config_dir_resolver.base_path_or_cwd ()
     in
-    let keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path ~base_path
-    in
     (* Use the writer's cluster resolution without opening a storage backend. *)
     let runtime_root = (Masc.Workspace.backend_config_for base_path).base_path in
+    let keepers_dir = Filename.concat runtime_root Common.keepers_runtime_dirname in
     let keepers =
       match List.rev !wanted with
       | [] -> keepers_with_a_log keepers_dir

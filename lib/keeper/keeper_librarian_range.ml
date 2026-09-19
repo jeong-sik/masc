@@ -41,8 +41,8 @@ type selection =
 
 (* Row 2c. The fragment a torn append leaves has no newline and is not a line:
    it is neither counted nor a reason to stop. *)
-let first_unreadable lines =
-  List.find_map
+let unreadable_lines lines =
+  List.filter_map
     (fun (line, read) ->
        match read with
        | Error ((B.Not_json _ | B.Malformed _) as error) -> Some (line, error)
@@ -130,12 +130,19 @@ let dead_line ~own line =
   List.exists (fun (later, written) -> later > line && is_restart written) own
 ;;
 
+(* The question is not whether the first refused line still matters but whether
+   any of them does, and the answer differs per line: a restart settles only
+   the refused lines before it. Asking it of the first one alone lets a later
+   one through unread, which is the one direction row 2c must not fail in. *)
+let first_blocking ~own lines =
+  List.find_opt (fun (line, _) -> not (dead_line ~own line)) (unreadable_lines lines)
+;;
+
 let select ~trace_id ~lines ~progress ~messages extent =
   let own = lines_of_trace ~trace_id lines in
-  match first_unreadable lines with
-  | Some (line, error) when not (dead_line ~own line) ->
-    Stop (Unreadable_line { line; error })
-  | Some _ | None ->
+  match first_blocking ~own lines with
+  | Some (line, error) -> Stop (Unreadable_line { line; error })
+  | None ->
     let other_trace =
       match progress with
       | Some { P.position; boundary_lines_seen = _ } ->

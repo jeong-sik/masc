@@ -87,11 +87,24 @@ FirstRefused(lines) ==
 RefusedIsDead(lines, at) ==
     \E i \in (at + 1)..Len(lines) : IsRestart(lines[i])
 
+\* A restart settles the refused lines before it and no others, so the question
+\* is asked of each of them, not of the first alone.
+FirstBlockingRefused(lines) ==
+    LET blocking == { i \in 1..Len(lines) :
+                        lines[i].kind = "BAD" /\ ~RefusedIsDead(lines, i) }
+    IN IF blocking = {} THEN 0 ELSE Min(blocking)
+
 \* keeper_librarian_range.select. [kind, start, end]; start is exclusive of what
 \* is read and end is inclusive, so a round reads atoms start+1 .. end.
-Choose(lines, ck, prog, honourRefused, restartFirst) ==
-    LET bad == FirstRefused(lines)
-    IN IF honourRefused /\ bad # 0 /\ ~RefusedIsDead(lines, bad)
+\* refusedMode: "block" asks of every refused line, "first" asks only of the
+\* first one and lets a later live one through, "drop" ignores them all.
+Choose(lines, ck, prog, refusedMode, restartFirst) ==
+    LET first == FirstRefused(lines)
+        bad == CASE refusedMode = "block" -> FirstBlockingRefused(lines)
+                 [] refusedMode = "first" ->
+                      IF first # 0 /\ ~RefusedIsDead(lines, first) THEN first ELSE 0
+                 [] OTHER -> 0
+    IN IF bad # 0
        THEN [kind |-> "stop", start |-> 0, end |-> 0]
        ELSE LET seen  == IF prog = NoProgress THEN 0 ELSE prog.seen
                 cuts  == CutsOf(lines, ck)
@@ -135,8 +148,16 @@ TypeOK ==
 \* their text is gone (4.6), and they are no longer in the history. A history
 \* that restarts later erases these atoms rather than delivering them, so a
 \* line that has not been written yet cannot save them.
+\* It judges only states where the reader is level with the log. A line no
+\* round has counted yet means the round has not had its say: it may be about
+\* to stop on a refused line, or to go back to atom zero on a restart. A stop
+\* writes no progress, so `seen` stays behind and the state stays excused for
+\* as long as the stop lasts -- which is what 4.10 describes, an operator-
+\* visible halt rather than a loss. What this invariant forbids is a round
+\* that had every line in front of it and moved past an atom anyway.
 NoAtomPassedUnread ==
     \/ progress = NoProgress
+    \/ Len(log) > progress.seen
     \/ \E j \in (progress.seen + 1)..Len(log) : IsRestart(log[j])
     \/ \A i \in 1..Min({progress.end, Len(hist)}) : hist[i] \in readIds
 
@@ -193,6 +214,28 @@ TurnSave ==
           /\ log' = IF first THEN Append(log, RestartLine) ELSE log
     /\ nextId' = nextId + 1
     /\ UNCHANGED << progress, readIds, budget, clearHalf, snap >>
+
+\* The same save with its restart line landing as bytes the decoder refuses.
+\* This is the append that matters most: it is the only line saying the history
+\* on disk was replaced, so a round that does not stop on it reads the new
+\* history from an old position.
+TurnSaveRefusedRestart ==
+    /\ turn # NoTurn
+    /\ turn.saves < MaxSaves
+    /\ turn.blind
+    /\ ~turn.accepted
+    /\ budget.bad > 0
+    /\ LET mine == Append(turn.mine, nextId)
+           tc   == turn.tc + 1
+       IN /\ tc >= ckTurns
+          /\ hist' = turn.loaded \o mine
+          /\ ckTurns' = tc
+          /\ turn' = [turn EXCEPT !.mine = mine, !.tc = tc,
+                                  !.accepted = TRUE, !.saves = @ + 1]
+          /\ log' = Append(log, RefusedLine)
+    /\ budget' = [budget EXCEPT !.bad = @ - 1]
+    /\ nextId' = nextId + 1
+    /\ UNCHANGED << progress, readIds, clearHalf, snap >>
 
 EndLine(t) ==
     LET taken == t.loaded \o t.mine
@@ -251,10 +294,10 @@ RoundSnap ==
     /\ UNCHANGED << hist, ckTurns, log, turn, progress, readIds,
                     nextId, budget, clearHalf >>
 
-Apply(honourRefused, restartFirst) ==
+Apply(refusedMode, restartFirst) ==
     /\ snap >= 0
     /\ LET lines == SubSeq(log, 1, Min({snap, Len(log)}))
-           sel == Choose(lines, hist, progress, honourRefused, restartFirst)
+           sel == Choose(lines, hist, progress, refusedMode, restartFirst)
            read == IF sel.kind = "read"
                    THEN { hist[i] : i \in (sel.start + 1)..sel.end }
                    ELSE {}
@@ -264,7 +307,7 @@ Apply(honourRefused, restartFirst) ==
     /\ snap' = -1
     /\ UNCHANGED << hist, ckTurns, log, turn, nextId, budget, clearHalf >>
 
-RoundApply == Apply(TRUE, TRUE)
+RoundApply == Apply("block", TRUE)
 
 \* A round that failed: it delivered nothing, so it moves nothing.
 RoundFailed ==
@@ -289,7 +332,7 @@ Init ==
 
 Next ==
     \/ TurnStart \/ TurnStartRefused \/ TurnStartContinued \/ TurnStartBlind
-    \/ TurnSave \/ TurnEnd \/ TurnEndRefused \/ TurnDie
+    \/ TurnSave \/ TurnSaveRefusedRestart \/ TurnEnd \/ TurnEndRefused \/ TurnDie
     \/ ClearSave \/ ClearLine
     \/ RoundSnap \/ RoundApply \/ RoundFailed
 
@@ -298,7 +341,7 @@ Spec == Init /\ [][Next]_vars
 \* Bug witness 1: a round drops the line the decoder refused instead of standing
 \* on it. The refused line may have been the one saying the history restarted,
 \* and then the round takes an older line as its baseline and never goes back.
-RoundApplyDroppingRefused == Apply(FALSE, TRUE)
+RoundApplyDroppingRefused == Apply("drop", TRUE)
 
 NextBuggy ==
     \/ Next
@@ -421,10 +464,24 @@ NextPurgeSplit ==
 
 SpecPurgeSplit == Init /\ [][NextPurgeSplit]_vars
 
+\* Bug witness 7: the round asks whether the FIRST refused line still matters
+\* and, when a restart settles that one, goes on without looking at the rest.
+\* A later refused line with no restart after it is then never seen, and it
+\* may have been the restart line for the history now on disk. Found in review
+\* of the shipped code, which had exactly this shape; the model could not have
+\* found it while only one line was ever refused.
+RoundApplyFirstRefusedOnly == Apply("first", TRUE)
+
+NextFirstRefusedOnly ==
+    \/ Next
+    \/ RoundApplyFirstRefusedOnly
+
+SpecFirstRefusedOnly == Init /\ [][NextFirstRefusedOnly]_vars
+
 \* Bug witness 2: a round takes a read position that matches the checkpoint over
 \* a restart line it has not counted. The position matches because the digest of
 \* the atom at that place is the same, which a replaced history can reproduce.
-RoundApplyPositionFirst == Apply(TRUE, FALSE)
+RoundApplyPositionFirst == Apply("block", FALSE)
 
 NextPositionFirst ==
     \/ Next

@@ -261,6 +261,19 @@ let test_a_restart_after_an_unreadable_line_lets_the_rounds_go_on () =
          ; 2, Error (Boundaries.Not_json "{")
          ; 3, Ok (turn_ended ~fresh:true saved)
          ]
+       saved);
+  (* A restart settles the refused lines before it and no others. Asking only
+     of the first one lets a later one through unread. *)
+  check string "a second refused line with no restart after it still stops"
+    "stop: line 4 unreadable"
+    (select
+       ~progress:(progress_at ~seen:3 saved 2)
+       ~lines:
+         [ 1, Ok (restarted ())
+         ; 2, Error (Boundaries.Not_json "{")
+         ; 3, Ok (turn_ended ~fresh:true saved)
+         ; 4, Error (Boundaries.Not_json "{")
+         ]
        saved)
 ;;
 

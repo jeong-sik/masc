@@ -11,16 +11,17 @@
    signature would abstract [t] here too and no prefix rule could be
    written.  Callers never see the concrete form.
 
-   [of_string] enforces the same invariants the TOML loaders enforce
-   (non-empty, no leading or trailing whitespace) and returns the
-   normalized form (ASCII lowercase).  Normalization lives at
-   construction, not at comparison: every [t] is already normalized, so
-   [equal] and [starts_with] are plain byte comparisons and a [t] works
-   as a [Hashtbl] key with no separate key function.  The bytes a row or
-   a provider wrote are not preserved — display that needs the original
-   spelling must source it from the row itself, not from the identifier.
-   [to_string] is the boundary escape hatch (TUI rows, JSON/TOML wire,
-   logs) and returns the normalized bytes. *)
+   A [t] stores the producer's bytes verbatim: [of_string] enforces the
+   same invariants the TOML loaders enforce (non-empty, no leading or
+   trailing whitespace) and returns the input unchanged.  The spelling
+   is a contract with the outside system (models.toml:2870 is a
+   HuggingFace path whose mixed case is the name ollama knows), so
+   normalizing at storage would be irreversible.  Case-insensitive
+   matching lives at the comparison edge: [equal] and [starts_with]
+   fold ASCII case.  No trim there — [of_string] already rejects padded
+   input.  [to_string] is the boundary escape hatch (TUI rows, JSON/TOML
+   wire, logs) and returns the original bytes, so
+   [to_string (of_string x) = x]. *)
 
 module type LABELS = sig
   val empty : string
@@ -37,7 +38,7 @@ module Make (L : LABELS) = struct
     let trimmed = String.trim raw in
     if String.equal trimmed "" then Error L.empty
     else if not (String.equal raw trimmed) then Error L.padded
-    else Ok (String.lowercase_ascii raw)
+    else Ok raw
   ;;
 
   let of_string_exn raw =
@@ -46,7 +47,9 @@ module Make (L : LABELS) = struct
     | Error message -> invalid_arg (L.label ^ ": " ^ message)
   ;;
 
-  let equal = String.equal
+  let equal a b =
+    String.equal (String.lowercase_ascii a) (String.lowercase_ascii b)
+  ;;
 
   let to_string t = t
 end
@@ -62,7 +65,11 @@ module Id_prefix = struct
         let label = "Model_identifiers.Id_prefix"
       end)
 
-  let starts_with ~prefix t = String.starts_with ~prefix t
+  let starts_with ~prefix t =
+    String.starts_with
+      ~prefix:(String.lowercase_ascii prefix)
+      (String.lowercase_ascii t)
+  ;;
 end
 
 module Api_name =

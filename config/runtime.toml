@@ -152,6 +152,10 @@ connect-timeout-s = 600.0
 # Omission remains None; no value is inferred from the connect deadline. A
 # connect-only declaration still leaves an Exact response body unbounded.
 # Bootstrap applies it to AGENT_CORE targets derived from these bindings.
+# The deployment operator owns the value in the resolved runtime.toml's
+# [providers.<id>] table. Saving that file does not rebuild existing Exact
+# targets: the value takes effect when server bootstrap rebuilds the registry.
+# This seed intentionally supplies no numeric body deadline.
 # AGENT_CORE_MODEL_CATALOG replacements keep their own target body_timeout_s;
 # this key does not set an official-client CLI timeout.
 

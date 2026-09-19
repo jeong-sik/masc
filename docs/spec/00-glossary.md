@@ -253,6 +253,7 @@ status: reference
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
+  Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
@@ -297,3 +298,4 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
+  History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.

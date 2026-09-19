@@ -14,8 +14,13 @@
     state boxes, initial and terminal [[*]] pseudo-states, [-->] transitions
     and their labels, state descriptions, [<<choice>>] states drawn as a
     diamond, and composite states drawn as titled boxes around their members.
-    A [[*]] inside a composite state is that state's own start or end.
-    [<<fork>>] and [<<join>>] states are drawn as plain boxes. A state id is
+    A [[*]] inside a composite state is that state's own start or end. A
+    composite state may open on an id the source named before, and the box
+    is then that state; a state named inside several composite states is
+    drawn in the last of them, which is where Mermaid places it. A
+    composite state that this would put inside itself is refused.
+    [<<fork>>] and [<<join>>] states are drawn as a thick bar across the
+    flow, without their id, as Mermaid draws them. A state id is
     one token of letters, digits, [_] or non-ASCII text. A [note left of] or
     [note right of] a state, on one line or running to [end note], is read
     and its text is not drawn.
@@ -43,6 +48,7 @@ type shape =
   | Rect  (** [id[label]], [id[[label]]], [id>label]] *)
   | Round  (** [id(label)], [id([label])], [id[(label)]], [id((label))] *)
   | Diamond  (** [id{label}], [id{{label}}]; drawn as a box whose label wears ⟨ ⟩ *)
+  | Bar  (** a state diagram's [<<fork>>] or [<<join>>]; a thick line across the flow *)
 
 (** Where a state diagram's [[*]] was written: at the top of the diagram, or
     inside the composite state of that id. Each has a start and an end of

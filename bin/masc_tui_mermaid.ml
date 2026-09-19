@@ -10,6 +10,7 @@ type shape =
   | Rect
   | Round
   | Diamond
+  | Bar
 
 (* Where a state diagram's [[*]] was written: at the top of the diagram, or
    inside the composite state of that id. Each has a start and an end of
@@ -690,7 +691,7 @@ let pseudo_state_close = ">>"
 let pseudo_state_shape tag =
   match String.lowercase_ascii tag with
   | "choice" -> Some Diamond
-  | "fork" | "join" -> Some Rect
+  | "fork" | "join" -> Some Bar
   | _ -> None
 
 (* [state X {] and [state "Title" as X {]: a composite state, whose
@@ -701,6 +702,7 @@ let composite_header statement =
   let length = String.length rest in
   if String.equal word "state" && length > 0 && rest.[length - 1] = '{' then Some rest else None
 
+(* The id, and the title when the header gives one. *)
 let parse_composite_state_header header =
   let rest = String.trim (String.sub header 0 (String.length header - 1)) in
   let id_before_brace id =
@@ -714,10 +716,35 @@ let parse_composite_state_header header =
         let desc = String.sub rest 1 (close - 1) in
         let after = String.trim (String.sub rest (close + 1) (String.length rest - close - 1)) in
         match first_word after with
-        | "as", id -> Result.map (fun id -> (id, desc)) (id_before_brace id)
+        | "as", id -> Result.map (fun id -> (id, Some desc)) (id_before_brace id)
         | _ -> Error "expected 'as <id>' after state description")
     | None -> Error "unclosed quote in state description"
-  else Result.map (fun id -> (id, id)) (id_before_brace rest)
+  else Result.map (fun id -> (id, None)) (id_before_brace rest)
+
+(* A composite state, [state X {] … [}]. Mermaid keeps one state per id
+   (stateDb.ts, dataFetcher.ts), so a block may open on an id the source
+   already named, and one that opens again adds to the same box. Where the
+   box is drawn is decided once the whole source is read. *)
+type composite = {
+  cs_id : string;
+  mutable cs_title : string option;  (* from [state "Title" as X {] *)
+  mutable cs_direction : direction option;
+}
+
+(* A state named inside a composite state is drawn in it. Named in several,
+   it is drawn in the last one, and naming it at the top level moves
+   nothing: Mermaid sets a node's parent each time a composite names it and
+   never clears it (dataFetcher.ts, [insertOrUpdateNode]). A [[*]] belongs
+   to the scope it was written in, which its id already says. *)
+let place stack homes id =
+  match (id, stack) with
+  | Named name, composite :: _ -> Hashtbl.replace homes name composite.cs_id
+  | Named _, [] | (Initial _ | Final _), _ -> ()
+
+let home_of homes = function
+  | Named name -> Hashtbl.find_opt homes name
+  | Initial Top_level | Final Top_level -> None
+  | Initial (Inside id) | Final (Inside id) -> Some id
 
 let is_digit = function
   | '0' .. '9' -> true
@@ -729,27 +756,19 @@ type state_step =
   | Read
   | Note_opened
 
-let parse_state_statement stack line current_dir declared edges =
+let parse_state_statement stack homes line current_dir declared edges =
   let scope =
     match !stack with
     | [] -> Top_level
-    | frame :: _ -> Inside frame.f_id
-  in
-  (* A state named inside a composite state is one of its members. *)
-  let track id =
-    match !stack with
-    | [] -> ()
-    | frame :: _ ->
-        if not (List.exists (node_id_equal id) frame.f_nodes) then
-          frame.f_nodes <- id :: frame.f_nodes
+    | composite :: _ -> Inside composite.cs_id
   in
   let described id ~label ~shape =
     declare declared id ~label ~shape ~explicit:true;
-    track id
+    place !stack homes id
   in
   let mentioned id =
     declare_state declared id;
-    track id
+    place !stack homes id
   in
   let word, rest = first_word line in
   match word with
@@ -758,7 +777,7 @@ let parse_state_statement stack line current_dir declared edges =
       | Some d ->
           (match !stack with
            | [] -> current_dir := d
-           | frame :: _ -> frame.f_direction <- Some d);
+           | composite :: _ -> composite.cs_direction <- Some d);
           Ok Read
       | None -> Error ("unknown direction: " ^ rest))
   (* Styling names what it styles first: [class A,B name], [classDef name …],
@@ -888,9 +907,14 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
   let declared = { order = []; table = Hashtbl.create 16 } in
   let edges = ref [] in
   let current_dir = ref initial_dir in
+  (* Every composite state by id, and the same records in the order each
+     first opened, newest first. *)
+  let composites = Hashtbl.create 8 in
+  let opening_order = ref [] in
+  (* The composite state each state id was last named in. *)
+  let homes = Hashtbl.create 16 in
   (* The composite states opened and not yet closed, innermost first. *)
   let stack = ref [] in
-  let top_groups = ref [] in
   let rec go reading = function
     | [] -> (
         match reading with
@@ -906,40 +930,31 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
             | Some header -> (
                 match parse_composite_state_header header with
                 | Error what -> fail what
-                | Ok (id, label) ->
-                    if Hashtbl.mem declared.table (Named id) then
-                      fail ("state " ^ id ^ " has the name of an existing node")
-                    else if List.exists (fun (f : frame) -> String.equal f.f_id id) !stack then
+                | Ok (id, title) ->
+                    if List.exists (fun composite -> String.equal composite.cs_id id) !stack then
                       fail ("state " ^ id ^ " is already open")
-                    else (
-                      stack :=
-                        { f_id = id
-                        ; f_label = label
-                        ; f_direction = None
-                        ; f_nodes = []
-                        ; f_children = []
-                        }
-                        :: !stack;
-                      go Statements more))
+                    else
+                      let composite =
+                        match Hashtbl.find_opt composites id with
+                        | Some composite -> composite
+                        | None ->
+                            let composite = { cs_id = id; cs_title = None; cs_direction = None } in
+                            Hashtbl.replace composites id composite;
+                            opening_order := composite :: !opening_order;
+                            composite
+                      in
+                      Option.iter (fun title -> composite.cs_title <- Some title) title;
+                      place !stack homes (Named id);
+                      stack := composite :: !stack;
+                      go Statements more)
             | None when String.equal statement "}" -> (
                 match !stack with
                 | [] -> fail "} with no matching state block"
-                | frame :: rest ->
-                    let group =
-                      { group_id = frame.f_id
-                      ; group_label = frame.f_label
-                      ; group_direction = frame.f_direction
-                      ; group_nodes = List.rev frame.f_nodes
-                      ; group_children = List.rev frame.f_children
-                      }
-                    in
+                | _ :: rest ->
                     stack := rest;
-                    (match rest with
-                     | parent :: _ -> parent.f_children <- group :: parent.f_children
-                     | [] -> top_groups := group :: !top_groups);
                     go Statements more)
             | None -> (
-                match parse_state_statement stack statement current_dir declared edges with
+                match parse_state_statement stack homes statement current_dir declared edges with
                 | Ok Read -> go Statements more
                 | Ok Note_opened -> go (Note_text number) more
                 | Error what -> fail what)))
@@ -948,17 +963,62 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
   let* () =
     match !stack with
     | [] -> Ok ()
-    | frame :: _ -> Error (Unsupported ("state " ^ frame.f_id ^ " with no }"))
+    | composite :: _ -> Error (Unsupported ("state " ^ composite.cs_id ^ " with no }"))
   in
-  let nodes =
-    List.rev declared.order |> List.map (fun id -> Hashtbl.find declared.table id)
+  let composites_in_order = List.rev !opening_order in
+  (* A composite state takes over its id: the box is the state, and no node
+     of that id is drawn beside it. *)
+  let states =
+    List.rev declared.order
+    |> List.filter (function
+         | Named name -> not (Hashtbl.mem composites name)
+         | Initial _ | Final _ -> true)
   in
-  Ok
-    { direction = !current_dir
-    ; nodes
-    ; edges = List.rev !edges
-    ; groups = List.rev !top_groups
+  let placed_in here id = Option.equal String.equal (home_of homes id) here in
+  (* Its title is the header's, else the description the state was given on
+     a line of its own, as Mermaid labels a group with its one description. *)
+  let rec group_of composite =
+    let here = Some composite.cs_id in
+    { group_id = composite.cs_id
+    ; group_label =
+        (match (composite.cs_title, Hashtbl.find_opt declared.table (Named composite.cs_id)) with
+         | Some title, _ -> title
+         | None, Some node -> node.label
+         | None, None -> composite.cs_id)
+    ; group_direction = composite.cs_direction
+    ; group_nodes = List.filter (placed_in here) states
+    ; group_children =
+        List.filter_map
+          (fun child -> if placed_in here (Named child.cs_id) then Some (group_of child) else None)
+          composites_in_order
     }
+  in
+  (* A composite state named inside one of its own members has nowhere to be
+     drawn: following where each one is placed comes back to it. *)
+  let rec reaches_top seen id =
+    match Hashtbl.find_opt homes id with
+    | None -> true
+    | Some parent ->
+        (not (List.exists (String.equal parent) seen)) && reaches_top (parent :: seen) parent
+  in
+  match
+    List.find_opt
+      (fun composite -> not (reaches_top [ composite.cs_id ] composite.cs_id))
+      composites_in_order
+  with
+  | Some composite ->
+      Error (Unsupported ("state " ^ composite.cs_id ^ " would be drawn inside itself"))
+  | None ->
+      Ok
+        { direction = !current_dir
+        ; nodes = List.filter_map (Hashtbl.find_opt declared.table) states
+        ; edges = List.rev !edges
+        ; groups =
+            List.filter_map
+              (fun composite ->
+                if placed_in None (Named composite.cs_id) then Some (group_of composite) else None)
+              composites_in_order
+        }
 
 let parse text =
   match source_lines text with
@@ -1227,10 +1287,17 @@ let box_pad = 2 (* one border and one space each side *)
 let item_gap = 3 (* cells between two boxes of one layer *)
 let ordering_sweeps = 4
 
+(* A fork or a join is a bar across the flow. Mermaid draws it 70 by 10
+   pixels with its label cleared (forkJoin.ts): one cell thick here, so
+   seven cells long, in whichever axis crosses the flow. *)
+let bar_length = 7
+let bar_thickness = 1
+
 let shown_label node =
   match node.shape with
   | Diamond -> "\xe2\x9f\xa8" ^ node.label ^ "\xe2\x9f\xa9"
   | Rect | Round -> node.label
+  | Bar -> ""
 
 let box_width node = Layout.display_width (shown_label node) + (2 * box_pad)
 
@@ -1459,13 +1526,17 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
       done;
       let flow_axis = along_flow direction in
       let extents item =
-        let cross, flow =
-          match item with
-          | Real node -> (box_width node, box_height)
-          | Cluster c -> (cluster_width c, cluster_height c)
-          | Dummy -> (1, 0)
+        let across_and_along (width, height) =
+          match flow_axis with `Rows -> (width, height) | `Cols -> (height, width)
         in
-        match flow_axis with `Rows -> (cross, flow) | `Cols -> (flow, cross)
+        match item with
+        | Real node -> (
+            match node.shape with
+            (* Across the flow whichever way the flow runs. *)
+            | Bar -> (bar_length, bar_thickness)
+            | Rect | Round | Diamond -> across_and_along (box_width node, box_height))
+        | Cluster c -> across_and_along (cluster_width c, cluster_height c)
+        | Dummy -> across_and_along (1, 0)
       in
       let items = ref [] in
       let item_count = ref 0 in
@@ -1663,25 +1734,32 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
           (fun p ->
             match p.item with
             | Dummy -> ()
-            | Real node ->
+            | Real node -> (
                 let r0, c0 = rc (p.flow_start, p.cross_start) in
                 let r1, c1 = rc (p.flow_start + p.flow_extent - 1, p.cross_start + p.cross_extent - 1) in
                 let top = min r0 r1 and bottom = max r0 r1 and lft = min c0 c1 and rgt = max c0 c1 in
-                let round = node.shape = Round in
-                let line = Solid in
-                add_bits canvas top lft ~style:line ~round (down lor right);
-                add_bits canvas top rgt ~style:line ~round (down lor left);
-                add_bits canvas bottom lft ~style:line ~round (up lor right);
-                add_bits canvas bottom rgt ~style:line ~round (up lor left);
-                for c = lft + 1 to rgt - 1 do
-                  add_bits canvas top c ~style:line ~round:false (left lor right);
-                  add_bits canvas bottom c ~style:line ~round:false (left lor right)
-                done;
-                for r = top + 1 to bottom - 1 do
-                  add_bits canvas r lft ~style:line ~round:false (up lor down);
-                  add_bits canvas r rgt ~style:line ~round:false (up lor down)
-                done;
-                put_text canvas (top + 1) (lft + 2) (shown_label node)
+                let box ~round =
+                  let line = Solid in
+                  add_bits canvas top lft ~style:line ~round (down lor right);
+                  add_bits canvas top rgt ~style:line ~round (down lor left);
+                  add_bits canvas bottom lft ~style:line ~round (up lor right);
+                  add_bits canvas bottom rgt ~style:line ~round (up lor left);
+                  for c = lft + 1 to rgt - 1 do
+                    add_bits canvas top c ~style:line ~round:false (left lor right);
+                    add_bits canvas bottom c ~style:line ~round:false (left lor right)
+                  done;
+                  for r = top + 1 to bottom - 1 do
+                    add_bits canvas r lft ~style:line ~round:false (up lor down);
+                    add_bits canvas r rgt ~style:line ~round:false (up lor down)
+                  done;
+                  put_text canvas (top + 1) (lft + 2) (shown_label node)
+                in
+                match node.shape with
+                (* One thick run, one cell deep; the edges meet it as they
+                   meet a border. *)
+                | Bar -> draw_line canvas ~style:Thick (r0, c0) (r1, c1)
+                | Round -> box ~round:true
+                | Rect | Diamond -> box ~round:false)
             | Cluster c ->
                 let r0, c0 = rc (p.flow_start, p.cross_start) in
                 let r1, c1 =

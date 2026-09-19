@@ -503,6 +503,7 @@ let post_checkpoint_history state ~keeper_name snapshot_ids =
 
 let test_history_delete_preserves_session_files () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   with_temp_dir @@ fun dir ->
   let module Store = Keeper_checkpoint_store in
   let state = Mcp_server.For_testing.create_state ~base_path:dir in

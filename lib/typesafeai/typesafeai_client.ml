@@ -3,7 +3,7 @@ let ( let* ) = Result.bind
 let evaluate
       ?(endpoint = Typesafeai_config.endpoint ())
       ?(model = Typesafeai_config.model ())
-      ?(timeout_sec = 15.0)
+      ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
       ?clock
       ~api_key
       ~state

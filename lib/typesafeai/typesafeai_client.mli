@@ -11,3 +11,6 @@ val evaluate :
   questions:(string * Typesafeai_types.question) list ->
   unit ->
   (Typesafeai_types.eval_response, string) result
+(** [timeout_sec] bounds the whole request/response exchange and defaults to
+    {!Masc_http_client.default_request_timeout_sec}, the deadline the other
+    outbound clients share. *)

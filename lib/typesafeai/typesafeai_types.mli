@@ -70,3 +70,27 @@ val request_to_yojson :
 
 val answer_of_yojson : Yojson.Safe.t -> (answer, string) result
 val eval_response_of_yojson : Yojson.Safe.t -> (eval_response, string) result
+
+(** The closed option set of one [Choice] question. The request's criteria and
+    the decoding of its answer are both built from this one value, so they
+    cannot name different options. *)
+type 'option choice_set =
+  { options : 'option list
+  ; label : 'option -> string
+      (** The key the request sends for this option and the answer returns. *)
+  ; describe : 'option -> string option
+  }
+
+val choice_of_set : instructions:string -> 'option choice_set -> question
+(** A [Choice] question whose criteria are the set's [options], in order. *)
+
+type 'option decoded_choice =
+  { choice : 'option
+  ; probabilities : ('option * float) list
+  ; confidence : float
+  }
+
+val decode_choice :
+  'option choice_set -> answer -> ('option decoded_choice, string) result
+(** [Error] when [answer] is not a choice answer, or when its choice or any of
+    its probability keys is not the label of an option in the set. *)

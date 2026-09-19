@@ -96,6 +96,65 @@ let test_response_decoding () =
      | None -> Alcotest.fail "expected usage")
 ;;
 
+type team =
+  | Frontend
+  | Backend
+
+let teams : team T.choice_set =
+  { T.options = [ Frontend; Backend ]
+  ; label =
+      (function
+        | Frontend -> "frontend"
+        | Backend -> "backend")
+  ; describe =
+      (function
+        | Frontend -> Some "React / UI changes"
+        | Backend -> Some "OCaml / database changes")
+  }
+;;
+
+let choice_answer ~choice ~probabilities =
+  T.Choice_answer { choice; probabilities; confidence = 0.9 }
+;;
+
+let test_choice_set_builds_request_and_decodes_answer () =
+  (match T.question_to_yojson (T.choice_of_set ~instructions:"Which team?" teams) with
+   | `Assoc fields ->
+     (match List.assoc_opt "criteria" fields with
+      | Some (`Assoc criteria) ->
+        Alcotest.(check (list string))
+          "the request offers the set's labels, in order"
+          [ "frontend"; "backend" ]
+          (List.map fst criteria)
+      | _ -> Alcotest.fail "a choice question must carry a criteria map")
+   | _ -> Alcotest.fail "question must be an assoc");
+  match
+    T.decode_choice
+      teams
+      (choice_answer ~choice:"backend" ~probabilities:[ "frontend", 0.05; "backend", 0.95 ])
+  with
+  | Ok { T.choice = Backend; probabilities = [ (Frontend, _); (Backend, _) ]; _ } -> ()
+  | Ok _ -> Alcotest.fail "the answer decoded to the wrong options"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_answer_outside_the_set_is_an_error () =
+  let check_error label answer =
+    match T.decode_choice teams answer with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s decoded to an option" label
+  in
+  check_error
+    "a choice the question did not offer"
+    (choice_answer ~choice:"infra" ~probabilities:[ "frontend", 0.5; "backend", 0.5 ]);
+  check_error
+    "a probability key the question did not offer"
+    (choice_answer ~choice:"backend" ~probabilities:[ "backend", 0.9; "infra", 0.1 ]);
+  check_error
+    "a score answer"
+    (T.Score_answer { score = 1.0; probabilities = []; confidence = 0.9 })
+;;
+
 let test_config_defaults () =
   Alcotest.(check string) "default endpoint"
     "https://api.typesafe.ai/v1/systemone" C.default_endpoint;
@@ -107,6 +166,14 @@ let () =
     [ ( "codecs"
       , [ Alcotest.test_case "request_encoding" `Quick test_request_encoding
         ; Alcotest.test_case "response_decoding" `Quick test_response_decoding
+        ; Alcotest.test_case
+            "choice set builds the request and decodes the answer"
+            `Quick
+            test_choice_set_builds_request_and_decodes_answer
+        ; Alcotest.test_case
+            "an answer outside the choice set is an error"
+            `Quick
+            test_answer_outside_the_set_is_an_error
         ] )
     ; "config", [ Alcotest.test_case "defaults" `Quick test_config_defaults ]
     ]

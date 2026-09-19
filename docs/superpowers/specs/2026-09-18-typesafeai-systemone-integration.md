@@ -36,9 +36,11 @@ the variable alone cannot turn it on.
 
 ### 2.2 Transparent Fallback
 When opted in:
-1. MASC attempts the TypeSafe AI Jev evaluation first.
-2. If the API returns success with a confident decision (`confidence >= 0.5`), the verdict is immediately returned. The durable judgment records `source = Vendor_system_one { model }`, where `model` is the model the System One response says answered; no catalog slot or AGENT_CORE receipt is claimed.
-3. If the API call fails, times out, or reports low confidence (`confidence < 0.5`), MASC logs `board_attention_typesafeai_fallback` and falls back seamlessly to the standard exact-output execution pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek).
+1. MASC attempts the TypeSafe AI Jev evaluation first. The request is bounded by `Masc_http_client.default_request_timeout_sec`, the deadline the other outbound clients share.
+2. The kind of decision Jev picks decides what happens next. No confidence value is compared against a number; the confidence and probabilities Jev reported are written into the verdict's rationale for the record.
+   - `Relevant`: the verdict is returned. The durable judgment records `source = Vendor_system_one { model }`, where `model` is the model the System One response says answered; no catalog slot or AGENT_CORE receipt is claimed.
+   - `Not_relevant`: MASC logs `board_attention_typesafeai_not_relevant_rejudged` with Jev's rationale and runs the standard exact-output pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek) for the same candidate. A not-relevant verdict drops the post for that keeper, so it is the one Jev does not settle alone.
+3. If the API call fails, times out, or the answer does not decode (including a choice the question did not offer), MASC logs `board_attention_typesafeai_fallback` and runs the same exact-output pipeline.
 
 ---
 
@@ -53,6 +55,6 @@ When opted in:
 
 ## 4. Operational Invariants
 
-1. **Closed Sum Types**: All verdicts map directly to OCaml variants (`Relevant | Not_relevant`). No raw string matching is exposed to callers.
+1. **Closed Sum Types**: The relevance question offers the `Keeper_board_attention_judgment.decision` variant (`Relevant | Not_relevant`) through one `Typesafeai_types.choice_set`. The request's criteria and the decoding of the answer are both built from that set, and a choice or probability key outside it decodes to `Error`.
 2. **Deterministic Fallback**: Failure of the external TypeSafe AI endpoint never crashes the worker; it logs a fallback event and proceeds with the configured exact catalog slots.
 3. **Zero Blast Radius**: Existing tests and pipelines without `TYPESAFEAI_API_KEY` continue to run completely unaffected.

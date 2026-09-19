@@ -231,3 +231,43 @@ let eval_response_of_yojson json =
     Ok { model; answers; usage }
   | _ -> Error "typesafeai: response must be a JSON object"
 ;;
+
+type 'option choice_set =
+  { options : 'option list
+  ; label : 'option -> string
+  ; describe : 'option -> string option
+  }
+
+let choice_of_set ~instructions set =
+  Choice
+    { instructions
+    ; criteria = List.map (fun option -> set.label option, set.describe option) set.options
+    }
+;;
+
+type 'option decoded_choice =
+  { choice : 'option
+  ; probabilities : ('option * float) list
+  ; confidence : float
+  }
+
+let option_of_label set label =
+  match List.find_opt (fun option -> String.equal (set.label option) label) set.options with
+  | Some option -> Ok option
+  | None -> Error (Printf.sprintf "typesafeai: %S is not one of the question's options" label)
+;;
+
+let decode_choice set = function
+  | Choice_answer { choice; probabilities; confidence } ->
+    let* choice = option_of_label set choice in
+    let rec decode_probabilities acc = function
+      | [] -> Ok (List.rev acc)
+      | (label, probability) :: rest ->
+        let* option = option_of_label set label in
+        decode_probabilities ((option, probability) :: acc) rest
+    in
+    let* probabilities = decode_probabilities [] probabilities in
+    Ok ({ choice; probabilities; confidence } : _ decoded_choice)
+  | Score_answer _ -> Error "typesafeai: expected a choice answer, got a score answer"
+  | Noul_answer _ -> Error "typesafeai: expected a choice answer, got a noul answer"
+;;

@@ -771,6 +771,117 @@ let test_cli_tail_rejects_a_verdict_for_another_candidate () =
         Alcotest.fail "a verdict naming another candidate must not become this judgment")))
 ;;
 
+(* Jev goes out through the pooled client, which needs a pool on this domain;
+   the exact-output lane dials its own connections and does not. *)
+let run_eio_with_http_pool f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+    f ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env))
+;;
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:"")) f
+;;
+
+(* A System One answer to the adapter's one question, [relevance]. *)
+let jev_response ~choice =
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "model", `String "jev-latest"
+        ; ( "answers"
+          , `Assoc
+              [ ( "relevance"
+                , `Assoc
+                    [ "type", `String "choice"
+                    ; "choice", `String choice
+                    ; ( "probabilities"
+                      , `Assoc [ "relevant", `Float 0.2; "not_relevant", `Float 0.8 ] )
+                    ; "confidence", `Float 0.6
+                    ] )
+              ] )
+        ])
+;;
+
+(* Runs the exact flow with Jev switched on and answering [jev_choice], in
+   front of one LLM slot that answers relevant. Returns the flow's result and
+   how many requests each of the two servers received. *)
+let execute_behind_jev ~name ~jev_choice =
+  with_prompt_registry (fun () ->
+    run_eio_with_http_pool (fun ~sw ~net ~clock ->
+      let candidate = candidate name in
+      let jev =
+        Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:jev_choice))
+      in
+      let llm =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane [ target (name ^ "-llm") llm.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the Jev fixture candidate was not admitted"
+      in
+      with_env "TYPESAFEAI_API_KEY" "test-typesafeai-key" (fun () ->
+        with_env "MASC_TYPESAFEAI_ENDPOINT" jev.base_url (fun () ->
+          let result =
+            Exact_flow.execute
+              ~clock
+              ~before_dispatch:(fun _ -> Ok ())
+              ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+              prepared
+          in
+          result, Fixture.post_count jev, Fixture.post_count llm))))
+;;
+
+let test_jev_relevant_is_kept () =
+  match execute_behind_jev ~name:"board-attention-jev-relevant" ~jev_choice:"relevant" with
+  | Ok judgment, jev_posts, llm_posts ->
+    Alcotest.(check int) "Jev asked once" 1 jev_posts;
+    Alcotest.(check int) "the LLM lane is not asked" 0 llm_posts;
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one { model } ->
+       Alcotest.(check string) "the model Jev's response named" "jev-latest" model
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "a relevant Jev answer must be recorded as Jev's")
+  | Error _, _, _ -> Alcotest.fail "a relevant Jev answer did not complete the flow"
+;;
+
+let check_judged_again_by_the_llm_lane label = function
+  | Ok judgment, jev_posts, llm_posts ->
+    Alcotest.(check int) (label ^ ": Jev asked once") 1 jev_posts;
+    Alcotest.(check int) (label ^ ": the LLM lane judges it again") 1 llm_posts;
+    (match judgment.Candidate.source with
+     | Candidate.Exact_attempt _ -> ()
+     | Candidate.Vendor_system_one _ | Candidate.Cli_lane_slot ->
+       Alcotest.failf "%s: the judgment must come from the LLM lane" label);
+    (match judgment.Candidate.verdict.Judgment.decision with
+     | Judgment.Relevant -> ()
+     | Judgment.Not_relevant ->
+       Alcotest.failf "%s: the LLM lane's relevant verdict was not the one kept" label)
+  | Error _, _, _ -> Alcotest.failf "%s: the LLM lane did not complete the flow" label
+;;
+
+let test_jev_not_relevant_is_judged_again () =
+  execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant"
+  |> check_judged_again_by_the_llm_lane "not_relevant"
+;;
+
+let test_jev_choice_outside_the_question_is_judged_again () =
+  execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe"
+  |> check_judged_again_by_the_llm_lane "unknown choice"
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
@@ -814,6 +925,20 @@ let () =
             "a verdict naming another candidate is rejected"
             `Quick
             test_cli_tail_rejects_a_verdict_for_another_candidate
+        ] )
+    ; ( "jev first"
+      , [ Alcotest.test_case
+            "a relevant Jev answer is kept"
+            `Quick
+            test_jev_relevant_is_kept
+        ; Alcotest.test_case
+            "a not-relevant Jev answer is judged again by the LLM lane"
+            `Quick
+            test_jev_not_relevant_is_judged_again
+        ; Alcotest.test_case
+            "a Jev choice the question did not offer goes to the LLM lane"
+            `Quick
+            test_jev_choice_outside_the_question_is_judged_again
         ] )
     ]
 ;;

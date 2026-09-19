@@ -576,24 +576,39 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
                       ()
                   with
                   | Ok { Typesafeai_board_attention.verdict; model } ->
-                    (* The lane's clock, never the wall: both entries into this
-                       flow hold one, so a judgment's time comes from the same
-                       source the rest of the turn is measured against. *)
-                    let now = Eio.Time.now clock in
-                    let judgment =
-                      { Keeper_board_attention_candidate.verdict
-                      ; slot_id = model
-                      ; source =
-                          Keeper_board_attention_candidate.Vendor_system_one
-                            { model }
-                      ; judged_at = now
-                      }
-                    in
-                    Log.Keeper.info
-                      "board_attention_typesafeai_jev_judged keeper=%s candidate=%s"
-                      prepared.candidate.keeper_name
-                      prepared.candidate.candidate_id;
-                    Some judgment
+                    (match verdict.Keeper_board_attention_judgment.decision with
+                     | Keeper_board_attention_judgment.Relevant ->
+                       (* The lane's clock, never the wall: both entries into
+                          this flow hold one, so a judgment's time comes from
+                          the same source the rest of the turn is measured
+                          against. *)
+                       let now = Eio.Time.now clock in
+                       let judgment =
+                         { Keeper_board_attention_candidate.verdict
+                         ; slot_id = model
+                         ; source =
+                             Keeper_board_attention_candidate.Vendor_system_one
+                               { model }
+                         ; judged_at = now
+                         }
+                       in
+                       Log.Keeper.info
+                         "board_attention_typesafeai_jev_judged keeper=%s candidate=%s"
+                         prepared.candidate.keeper_name
+                         prepared.candidate.candidate_id;
+                       Some judgment
+                     | Keeper_board_attention_judgment.Not_relevant ->
+                       (* A not-relevant verdict drops the post for this
+                          keeper, so Jev's is not the last word on it: the
+                          LLM lane below judges the candidate again. Jev's
+                          answer is kept in this line only. *)
+                       Log.Keeper.info
+                         "board_attention_typesafeai_not_relevant_rejudged keeper=%s candidate=%s model=%s rationale=%s"
+                         prepared.candidate.keeper_name
+                         prepared.candidate.candidate_id
+                         model
+                         verdict.Keeper_board_attention_judgment.rationale;
+                       None)
                   | Error reason ->
                     Log.Keeper.info
                       "board_attention_typesafeai_fallback keeper=%s candidate=%s reason=%s"

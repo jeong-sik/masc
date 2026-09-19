@@ -24,8 +24,8 @@
     line this grammar cannot read, comes back as a {!failure} naming the
     kind or the line, and the caller shows the source under that name. Nothing is guessed. [subgraph] blocks are
     drawn as titled bounding boxes around their members (RFC-0429 §3.3);
-    [classDef], [class], [style], [linkStyle] and [click] statements are
-    accepted and change nothing on a text canvas.
+    [classDef], [class], [style] and [click] statements, and [linkStyle] in
+    a flowchart, are accepted and change nothing on a text canvas.
 
     Layout is layered: back edges are turned around so the rest is a DAG,
     layers come from the longest path, an edge across several layers gets a

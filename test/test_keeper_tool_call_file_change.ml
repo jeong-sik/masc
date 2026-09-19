@@ -59,7 +59,7 @@ let test_edit_carries_both_sides () =
       check string "before" "let x = 1" before;
       check string "after" "let x = 2" after;
       check bool "replace_all defaults to one occurrence" false replace_all
-  | Change.Written _ | Change.Inserted _ -> fail "expected Edited"
+  | Change.Written _ | Change.Inserted _ | Change.Materialized _ -> fail "expected Edited"
 ;;
 
 let test_edit_reads_replace_all () =
@@ -68,7 +68,7 @@ let test_edit_reads_replace_all () =
   in
   match change.Change.kind with
   | Change.Edited { replace_all; _ } -> check bool "replace_all" true replace_all
-  | Change.Written _ | Change.Inserted _ -> fail "expected Edited"
+  | Change.Written _ | Change.Inserted _ | Change.Materialized _ -> fail "expected Edited"
 ;;
 
 let test_write_carries_content () =
@@ -79,7 +79,7 @@ let test_write_carries_content () =
   in
   match change.Change.kind with
   | Change.Written { content } -> check string "content" "whole body" content
-  | Change.Edited _ | Change.Inserted _ -> fail "expected Written"
+  | Change.Edited _ | Change.Inserted _ | Change.Materialized _ -> fail "expected Written"
 ;;
 
 let test_edit_carries_producer_line_evidence_through_redaction () =
@@ -502,7 +502,7 @@ let test_folding_in_batches_equals_reading_at_once () =
       (fun (c : Change.t) ->
         match c.Change.kind with
         | Change.Edited { before; _ } -> before
-        | Change.Written _ | Change.Inserted _ -> "")
+        | Change.Written _ | Change.Inserted _ | Change.Materialized _ -> "")
       tally.Change.changes
   in
   check (list string) "same changes in the same order"
@@ -535,7 +535,7 @@ let test_classify_all_preserves_order () =
       (fun (c : Change.t) ->
         match c.Change.kind with
         | Change.Edited { before; _ } -> before
-        | Change.Written _ | Change.Inserted _ -> "")
+        | Change.Written _ | Change.Inserted _ | Change.Materialized _ -> "")
       changes
   in
   check (list string) "order" [ "first"; "second" ] befores
@@ -599,7 +599,76 @@ let test_a_memo_projects_as_the_comment_line_the_file_received () =
   | Change.Inserted { line; text } ->
       check int "the line it went above" 3 line;
       check string "the comment as written" "(* masc(alpha) question: why three *)" text
-  | Change.Edited _ | Change.Written _ -> fail "expected Inserted"
+  | Change.Edited _ | Change.Written _ | Change.Materialized _ -> fail "expected Inserted"
+;;
+
+(* [keeper_artifact_transfer] is one handler with two actions. [materialize]
+   writes a blob's bytes into a file; [export] reads a file into the blob
+   store. The action is a field of the call's input, so the handler alone
+   cannot tell them apart, and the projection reads the action. *)
+let materialize_input ?(sha256 = String.make 64 'a') ?(bytes = 4096) () =
+  `Assoc
+    [ ("action", `String "materialize")
+    ; ("path", `String "out/poster.png")
+    ; ( "artifact"
+      , `Assoc
+          [ ( "blob"
+            , `Assoc
+                [ ( "_blob"
+                  , `Assoc
+                      [ ("sha256", `String sha256)
+                      ; ("bytes", `Int bytes)
+                      ; ("preview", `String "PNG")
+                      ; ("mime", `String "image/png")
+                      ] )
+                ] )
+          ; ("filename", `String "poster.png")
+          ; ("purpose", `String "Use in booklet")
+          ] )
+    ]
+;;
+
+let test_materialize_is_a_file_change () =
+  let change =
+    change_of
+      (row ~descriptor_id:"keeper.artifact.transfer" ~target_path:"out/poster.png"
+         (materialize_input ()))
+  in
+  match change.Change.kind with
+  | Change.Materialized { sha256; bytes } ->
+      check string "blob sha256" (String.make 64 'a') sha256;
+      check int "blob bytes" 4096 bytes
+  | Change.Edited _ | Change.Written _ | Change.Inserted _ -> fail "expected Materialized"
+;;
+
+let test_export_is_not_a_file_change () =
+  match
+    classify
+      (row ~descriptor_id:"keeper.artifact.transfer"
+         (`Assoc
+            [ ("action", `String "export")
+            ; ("path", `String "src.ml")
+            ; ("purpose", `String "review")
+            ]))
+  with
+  | Change.Not_a_file_change -> ()
+  | Change.File_change _ -> fail "export reads a file into the blob store; it writes none"
+  | Change.Unreadable _ -> fail "export is a readable call that is not a change"
+;;
+
+let test_materialize_unknown_action_is_unreadable () =
+  match
+    classify
+      (row ~descriptor_id:"keeper.artifact.transfer"
+         (`Assoc [ ("action", `String "teleport"); ("path", `String "x") ]))
+  with
+  | Change.Unreadable (Change.Malformed detail) ->
+      check bool "the unknown action is named" true
+        (String_util.contains_substring detail "teleport")
+  | Change.Unreadable Change.Input_exceeded_log_budget ->
+      fail "an unknown action is not a budget problem"
+  | Change.File_change _ -> fail "an unknown action cannot be read as a change"
+  | Change.Not_a_file_change -> fail "an unknown action is not known to be a read"
 ;;
 
 let () =
@@ -659,6 +728,14 @@ let () =
     ; ( "memo"
       , [ test_case "a memo projects as the comment line the file received" `Quick
             test_a_memo_projects_as_the_comment_line_the_file_received
+        ] )
+    ; ( "peer artifact"
+      , [ test_case "materialize is a file change" `Quick
+            test_materialize_is_a_file_change
+        ; test_case "export is not a file change" `Quick
+            test_export_is_not_a_file_change
+        ; test_case "unknown action is unreadable" `Quick
+            test_materialize_unknown_action_is_unreadable
         ] )
     ]
 ;;

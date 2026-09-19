@@ -9621,6 +9621,8 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
     | Masc.Tui_decode.Fc_inserted { text; _ } -> Terminal_text.preview_line text
     | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
+    | Masc.Tui_decode.Fc_materialized { bytes; _ } ->
+      Printf.sprintf "(materialized %d bytes)" bytes
   in
   match file_change_evidence_label change.fc_line_evidence with
   | None -> content
@@ -9633,6 +9635,8 @@ let change_kind_badge (change : Masc.Tui_decode.file_change) =
   | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_2, "EDIT"
   | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_2, "MEMO"
   | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
+  | Masc.Tui_decode.Fc_materialized _ ->
+    (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
   if change.Masc.Tui_decode.fc_succeeded then Theme.ok (), "APPLIED"
@@ -9678,6 +9682,7 @@ let change_diff_halves (change : Masc.Tui_decode.file_change) =
   | Masc.Tui_decode.Fc_edited { before; after; _ } -> (before, after)
   | Masc.Tui_decode.Fc_inserted { text; _ } -> ("", text)
   | Masc.Tui_decode.Fc_written { content } -> ("", content)
+  | Masc.Tui_decode.Fc_materialized _ -> ("", "")
 
 let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let terminal_rows, cols = get_terminal_size () in
@@ -9715,6 +9720,11 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
     | Masc.Tui_decode.Fc_inserted _
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
+    | Masc.Tui_decode.Fc_materialized _ ->
+        (* The call names the blob, not its bytes, so the log has no text to
+           show. Saying so is the difference between an empty diff and a
+           change that wrote nothing. *)
+        [ turn; "  the log holds the blob's coordinates, not its bytes" ]
   in
   let notes =
     match file_change_evidence_label change.fc_line_evidence with
@@ -12284,6 +12294,7 @@ let render_code (state : state) =
                    | Fc_edited _ -> "EDIT"
                    | Fc_inserted _ -> "MEMO"
                    | Fc_written _ -> "WRITE"
+                   | Fc_materialized _ -> "WRITE"
                  in
                  let result_style, result =
                    if change.fc_succeeded

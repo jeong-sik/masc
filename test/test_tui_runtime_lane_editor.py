@@ -304,6 +304,11 @@ def run(executable: str) -> None:
             process, fd, output, b"D",
             b"lane write refused: HTTP 400: " + in_use_refusal("primary", ["sangsu"]).encode(),
         )
+        # The refusal is about the row the key acted on: moving the cursor
+        # ends it. The cursor comes back to primary's head for the next key.
+        press(process, fd, output, b"j")
+        screen_lacks(process, fd, output, b"lane write refused: HTTP 400", timeout=3.0)
+        press(process, fd, output, b"k")
 
         # A refused write ends at once: J posts. Its read-back fails, and that
         # ends it too, with a line saying the list may be stale -- the screen

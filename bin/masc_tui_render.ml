@@ -4678,11 +4678,12 @@ let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
    clipping. Keep those facts in a wrapped selected-row block underneath the
    four-row matrix. The order is the execution contract: admitted catalog
    slots first, official-client runtimes only after catalog exhaustion. *)
-(* A refusal is bad news about the key pressed; a pending write and an unread
-   list are warnings about what the screen shows. *)
+(* A refusal is bad news about the key pressed; a pending write is a warning
+   about what the screen shows, as is a list that may be stale
+   ([Masc_tui_types.runtime_lane_stale_lines], drawn in warn). *)
 let runtime_lane_notice_style = function
   | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
-  | Masc_tui_types.Lane_write_pending | Masc_tui_types.Lane_list_unread _ -> Theme.warn ()
+  | Masc_tui_types.Lane_write_pending -> Theme.warn ()
 
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
@@ -4986,6 +4987,7 @@ let render_lanes_overview (state : state) =
        let action_error_rows =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
+         + List.length (Masc_tui_types.runtime_lane_stale_lines state)
        in
        let available =
          max 0
@@ -5024,6 +5026,11 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
          ("  " ^ Keeper_chat.terminal_safe_text
                    (Masc_tui_types.runtime_lane_notice_text notice)));
+  List.iter
+    (fun line ->
+       box_line_styled buf cols ~style:(Theme.warn ())
+         ("  " ^ Keeper_chat.terminal_safe_text line))
+    (Masc_tui_types.runtime_lane_stale_lines state);
   (* The failover-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
@@ -10834,6 +10841,17 @@ let render_runtime (state : state) =
        c.push_styled ~style:(runtime_lane_notice_style notice)
          ("  " ^ Keeper_chat.terminal_safe_text
                    (Masc_tui_types.runtime_lane_notice_text notice));
+       c.push_divider ());
+  (* Counted in [runtime_surface_listing_chrome] as one row each and a
+     divider. *)
+  (match Masc_tui_types.runtime_lane_stale_lines state with
+   | [] -> ()
+   | lines ->
+       List.iter
+         (fun line ->
+            c.push_styled ~style:(Theme.warn ())
+              ("  " ^ Keeper_chat.terminal_safe_text line))
+         lines;
        c.push_divider ());
   (* Counted in [runtime_surface_listing_chrome] as two rows, like the refusal
      above, so the footer keeps its row while the prompt is up. *)

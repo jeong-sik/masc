@@ -6166,7 +6166,10 @@ let row_list (state : state) : row_list option =
        | Lanes_overview ->
            of_counted (fun count ->
                windowed ~count ~cursor:state.lanes_standalone_cursor
-                 (fun index -> state.lanes_standalone_cursor <- index)))
+                 (fun index ->
+                   if index <> state.lanes_standalone_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
+                   state.lanes_standalone_cursor <- index)))
   | Clients ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.clients_surface_cursor
@@ -6213,7 +6216,11 @@ let row_list (state : state) : row_list option =
       of_counted (fun count ->
           scrolling ~count ~cursor:state.runtime_cursor
             ~scroll:state.runtime_surface_scroll
-            ~set_cursor:(fun i -> state.runtime_cursor <- i)
+            ~set_cursor:(fun i ->
+              (* The lane editor's line is about the row the key acted on. *)
+              if i <> state.runtime_cursor then
+                Masc_tui_types.dismiss_runtime_lane_notice state;
+              state.runtime_cursor <- i)
             ~set_scroll:(fun s -> state.runtime_surface_scroll <- s))
   | System_logs ->
       of_counted (fun count ->
@@ -21745,6 +21752,8 @@ and is loaded on demand through keeper_skill.
                        ~cursor:state.runtime_cursor
                        ~scroll:state.runtime_surface_scroll
                    in
+                   if cursor <> state.runtime_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
             | Tools -> state.tools_scroll <-
@@ -22107,6 +22116,8 @@ and is loaded on demand through keeper_skill.
                        ~cursor:state.runtime_cursor
                        ~scroll:state.runtime_surface_scroll
                    in
+                   if cursor <> state.runtime_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
             | Tools ->
@@ -23260,6 +23271,7 @@ and is loaded on demand through keeper_skill.
             | Masc_tui_types.Runtime_lanes ->
                 state.runtime_mode <- Masc_tui_types.Runtime_all;
                 (* Selection and scroll belong to the same list. *)
+                Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.runtime_cursor <- 0;
                 state.runtime_surface_scroll <- 0
             | Masc_tui_types.Runtime_all ->

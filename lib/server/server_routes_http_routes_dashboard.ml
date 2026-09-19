@@ -580,16 +580,21 @@ type runtime_route_body =
   | Runtime_route_runtime_ids of runtime_route_lane * string list
   | Runtime_route_lane_created of string * string list
   | Runtime_route_lane_removed of string
+  | Runtime_route_exact_slot_appended of string * string
 
 (* What a routing body asks of a lane. [set], the action a body without one
    names, replaces the order of a lane or route the resolver already knows.
    [create] declares a lane under a name nothing resolves yet, which [set]
    refuses so that a typo cannot become a lane. [remove] deletes a declared
-   lane. *)
+   lane. [append] adds one slot to the end of an exact-output lane as the file
+   declares it, read under the write lock: a caller that sent the whole order
+   could only send the slots the registry admitted, and a [set] of those
+   would delete every declared slot the registry dropped. *)
 type runtime_lane_action =
   | Lane_set
   | Lane_create
   | Lane_remove
+  | Lane_append
 
 let parse_runtime_lane_action json =
   match Json_util.assoc_member_opt "action" json with
@@ -597,8 +602,12 @@ let parse_runtime_lane_action json =
   | Some (`String "set") -> Ok Lane_set
   | Some (`String "create") -> Ok Lane_create
   | Some (`String "remove") -> Ok Lane_remove
+  | Some (`String "append") -> Ok Lane_append
   | Some (`String other) ->
-    Error (Printf.sprintf "unknown lane action: %s (expected set, create or remove)" other)
+    Error
+      (Printf.sprintf
+         "unknown lane action: %s (expected set, create, remove or append)"
+         other)
   | Some _ -> Error "action must be a string"
 
 let required_string_field json name =
@@ -668,6 +677,16 @@ let parse_remove_route_body lane =
     Error (Printf.sprintf "%S names another route, not a lane" lane)
   | Error _ as err -> err
 
+let parse_append_route_body json lane =
+  match parse_runtime_route_lane lane with
+  | Ok (Runtime_exact_lane lane_name) ->
+    (match required_string_field json "runtime_id" with
+     | Error _ as err -> err
+     | Ok runtime_id -> Ok (Runtime_route_exact_slot_appended (lane_name, runtime_id)))
+  | Ok (Runtime_default | Runtime_media_failover | Runtime_named_lane _) ->
+    Error (Printf.sprintf "%S is not an exact-output lane; append adds a slot to exact/<name>" lane)
+  | Error _ as err -> err
+
 let parse_runtime_route_body body_str =
   try
     match Yojson.Safe.from_string body_str with
@@ -677,7 +696,8 @@ let parse_runtime_route_body body_str =
        | Ok _, (Error _ as err) -> err
        | Ok lane, Ok Lane_set -> parse_set_route_body json lane
        | Ok lane, Ok Lane_create -> parse_create_route_body json lane
-       | Ok lane, Ok Lane_remove -> parse_remove_route_body lane)
+       | Ok lane, Ok Lane_remove -> parse_remove_route_body lane
+       | Ok lane, Ok Lane_append -> parse_append_route_body json lane)
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -714,6 +734,7 @@ type runtime_config_write_operation =
   | Runtime_config_routing_list of runtime_route_lane * string list
   | Runtime_config_lane_created of string * string list
   | Runtime_config_lane_removed of string
+  | Runtime_config_exact_slot_appended of string * string
   | Runtime_config_assignment of string * string option
 
 let runtime_config_write_operation_details = function
@@ -749,6 +770,12 @@ let runtime_config_write_operation_details = function
     ; ("lane", `String lane_id)
     ; ("action", `String "remove")
     ]
+  | Runtime_config_exact_slot_appended (lane_name, runtime_id) ->
+    [ ("operation", `String "routing")
+    ; ("lane", `String (runtime_route_lane_to_string (Runtime_exact_lane lane_name)))
+    ; ("action", `String "append")
+    ; ("runtime_id", `String runtime_id)
+    ]
   | Runtime_config_assignment (keeper_name, runtime_id) ->
     [ ("operation", `String "assignment")
     ; ("keeper_name", `String keeper_name)
@@ -766,7 +793,8 @@ let runtime_config_write_operation_details = function
 let runtime_config_write_operation_label = function
   | Runtime_config_raw_save -> "raw_save"
   | Runtime_config_routing _ | Runtime_config_routing_list _
-  | Runtime_config_lane_created _ | Runtime_config_lane_removed _ -> "routing"
+  | Runtime_config_lane_created _ | Runtime_config_lane_removed _
+  | Runtime_config_exact_slot_appended _ -> "routing"
   | Runtime_config_assignment _ -> "assignment"
 ;;
 
@@ -1090,6 +1118,15 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+  | Ok (Runtime_route_exact_slot_appended (lane_name, runtime_id)) ->
+    let operation = Runtime_config_exact_slot_appended (lane_name, runtime_id) in
+    (match Runtime.append_exact_output_lane_slot ~lane_name ~slot:runtime_id () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
 
 type gate_mode_recovery =
   | Recovery_completed of Keeper_gate.operator_recovery_report
@@ -1156,6 +1193,8 @@ module For_testing = struct
     | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
         Ok (lane_id, "create", runtime_ids)
     | Ok (Runtime_route_lane_removed lane_id) -> Ok (lane_id, "remove", [])
+    | Ok (Runtime_route_exact_slot_appended (lane_name, runtime_id)) ->
+        Ok ("exact/" ^ lane_name, "append", [ runtime_id ])
   type nonrec gate_mode_recovery = gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report
     | Recovery_failed of string

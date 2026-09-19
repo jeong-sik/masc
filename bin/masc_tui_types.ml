@@ -8146,9 +8146,12 @@ let swap_candidates order i j =
     Some (List.mapi (fun k id -> if k = i then at_j else if k = j then at_i else id) order)
 
 (* The picker serves both lane kinds. A conversation lane reads its current
-   order from the runtime surface's resolved lanes; an exact-output lane reads
-   its walk order from the standalone-lane observation, which carries the
-   admitted slots. A lane being created has no candidates yet. *)
+   order from the runtime surface's resolved lanes, and a pick writes that
+   order back with the new candidate on the end. An exact-output lane shows
+   the slots the standalone-lane observation says the registry admitted; a
+   declared slot the registry dropped is not among them, so its pick is an
+   append the server applies to the declared order, never a write of this
+   list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
   | Pick_exact_lane name ->
     (match state.standalone_lanes with

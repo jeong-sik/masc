@@ -1495,6 +1495,20 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
     ]
 
+(** POST /api/v1/runtime/config/routing with [action = "append"]: add
+    [runtime_id] to the end of the standalone lane [name] as runtime.toml
+    declares it. The server reads the declared slots under its write lock, so
+    a declared slot the registry did not admit stays, and a slot another
+    writer added in between is kept. The server refuses an id the lane already
+    declares. *)
+let append_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "append"
+    ; "runtime_id", `String runtime_id
+    ]
+
 (** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the
     declared lane [lane]. The server refuses while a keeper still routes
     through it -- an assignment, or [\[runtime\].default] for every keeper

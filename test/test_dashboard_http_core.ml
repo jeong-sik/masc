@@ -5001,10 +5001,11 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
 
-(* The routing handler's create and remove branches. A created lane lands in
-   runtime.toml; a lane under a runtime id, and a lane the default walks, are
-   refused with 400 and the writer's own sentence; a removed lane leaves the
-   file. *)
+(* The routing handler's create, remove and append branches. A created lane
+   lands in runtime.toml; a lane under a runtime id, and a lane the default
+   walks, are refused with 400 and the writer's own sentence; a removed lane
+   leaves the file; an exact-lane append adds its slot once and refuses it the
+   second time. *)
 let test_runtime_routing_creates_and_removes_a_lane () =
   with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -5048,7 +5049,16 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     {|lane "test_provider.test_model" is in use by [runtime].default, which every keeper without an assignment walks|}
     (refusal
        (post "remove the default's lane" 400
-          {|{"lane":"test_provider.test_model","action":"remove"}|}))
+          {|{"lane":"test_provider.test_model","action":"remove"}|}));
+  let append =
+    {|{"lane":"exact/board_attention_exact","action":"append","runtime_id":"test_provider.test_model"}|}
+  in
+  ignore (post "append to an exact lane" 200 append);
+  check bool "the exact lane is in the file" true
+    (in_file "[runtime.exact_output_lanes.board_attention_exact]");
+  check string "a declared slot is refused"
+    "test_provider.test_model is already a slot of board_attention_exact"
+    (refusal (post "append a declared slot" 400 append))
 
 let test_direct_assignment_intervening_write_fences_keeper_config_post () =
   with_direct_assignment_model_catalog @@ fun () ->

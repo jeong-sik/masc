@@ -913,6 +913,19 @@ val set_exact_output_lane_slots :
     fail-closed without one, so a lane that resolves to nothing is not the
     edit an operator is making. *)
 
+val append_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane_name:string ->
+  slot:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Add [slot] to the end of [\[runtime.exact_output_lanes."<lane_name>"\]].slots
+    as the file declares them, read under the runtime.toml write lock, and
+    commit the result like {!set_exact_output_lane_slots}. Declared slots the
+    exact-output registry did not admit stay in place. Refused when [slot] is
+    already declared on the lane. Creates the lane table when the name has
+    none. *)
+
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and
     workspace readiness are managed independently by server bootstrap. *)

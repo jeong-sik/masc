@@ -1288,6 +1288,48 @@ let test_exact_lane_slots_writer () =
         (string_contains msg "at least one slot"))
 ;;
 
+(* The slots the file declares for an exact lane, read by the parser the
+   server loads it with. *)
+let exact_lane_slots path lane =
+  match Runtime_toml.parse_string (Fs_compat.load_file path) with
+  | Error _ -> Alcotest.failf "the written %s does not parse" path
+  | Ok config ->
+    (match
+       List.find_opt
+         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal decl.id lane)
+         config.Runtime_schema.exact_output_lane_decls
+     with
+     | Some decl -> decl.slot_ids
+     | None -> Alcotest.failf "the file declares no exact lane %s" lane)
+;;
+
+(* An exact lane lists only the slots the registry admitted, so a pick that
+   rewrote the whole order from that list deleted every declared slot the
+   registry dropped. [append] reads the declaration under the write lock and
+   adds to its end. *)
+let test_an_exact_slot_append_keeps_the_declared_order () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane_name:"board_attention_exact" ~slots:[ "catalog.only"; "openai.gpt" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane_name:"board_attention_exact" ~slot:"runpod_mtp.qwen" ()
+    |> lane_write_ok "append a slot";
+    Alcotest.(check (list string)) "the declared slots stay in front, in order"
+      [ "catalog.only"; "openai.gpt"; "runpod_mtp.qwen" ]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "append a declared slot" ~path
+      ~names:[ "runpod_mtp.qwen is already a slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane_name:"board_attention_exact" ~slot:"runpod_mtp.qwen" ());
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane_name:"hitl_auto_judge" ~slot:"openai.gpt" ()
+    |> lane_write_ok "append to an undeclared lane";
+    Alcotest.(check (list string)) "an undeclared lane starts with the slot"
+      [ "openai.gpt" ] (exact_lane_slots path "hitl_auto_judge"))
+;;
+
 let test_lane_candidates_reject_an_empty_ladder () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
@@ -3078,6 +3120,10 @@ let () =
             "a verifier slot naming a lane is refused"
             `Quick
             test_a_verifier_slot_naming_a_lane_is_refused
+        ; Alcotest.test_case
+            "an exact slot append keeps the declared order"
+            `Quick
+            test_an_exact_slot_append_keeps_the_declared_order
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

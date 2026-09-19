@@ -7343,8 +7343,9 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
         Masc_tui_types.Runtime_surface_list
   in
   if Masc_tui_types.runtime_lane_write_busy state then
-    (* [existing] is the order the list last read; appending to it before
-       the previous write is read back would undo that write. *)
+    (* A conversation lane's write is [existing] plus the pick, and
+       [existing] is the order the list last read; writing it before the
+       previous write is read back would undo that write. *)
     state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
   else if List.exists (String.equal runtime_id) existing then
     state.runtime_lane_notice <-
@@ -7358,9 +7359,9 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
           Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
             ~runtime_ids:(existing @ [ runtime_id ])
       | Masc_tui_types.Pick_exact_lane name ->
-          Masc_tui_http.set_runtime_lane_slots ~host ~port
-            ~lane:(Masc_tui_http.exact_lane_route name)
-            ~runtime_ids:(existing @ [ runtime_id ])
+          (* [existing] is the admitted view; the server appends to the
+             declared order so a slot the registry dropped is not lost. *)
+          Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
       | Masc_tui_types.Pick_new_lane lane ->
           Masc_tui_http.create_runtime_lane ~host ~port ~lane
             ~runtime_ids:[ runtime_id ])

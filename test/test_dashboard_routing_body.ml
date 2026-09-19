@@ -164,7 +164,22 @@ let () =
         ; Alcotest.test_case "an unknown action is refused" `Quick
             (fun () ->
               expect_error "unknown-action"
-                ~message:"unknown lane action: rename (expected set, create or remove)"
+                ~message:"unknown lane action: rename (expected set, create, remove or append)"
                 {|{"lane":"runpod_mtp.qwen","action":"rename","runtime_ids":[]}|})
+        ; Alcotest.test_case "append adds one slot to an exact lane" `Quick
+            (fun () ->
+              check_case "append"
+                {|{"lane":"exact/board_attention_exact","action":"append","runtime_id":"runpod_mtp.qwen"}|}
+                "exact/board_attention_exact" "append" [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "append refuses a conversation lane" `Quick
+            (fun () ->
+              expect_error "append-named"
+                ~message:
+                  {|"runpod_mtp.qwen" is not an exact-output lane; append adds a slot to exact/<name>|}
+                {|{"lane":"runpod_mtp.qwen","action":"append","runtime_id":"openai.gpt"}|})
+        ; Alcotest.test_case "append needs the slot it adds" `Quick
+            (fun () ->
+              expect_error "append-no-id" ~message:"runtime_id required"
+                {|{"lane":"exact/board_attention_exact","action":"append"}|})
         ] )
     ]

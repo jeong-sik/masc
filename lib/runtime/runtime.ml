@@ -3224,3 +3224,43 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane_name ~slots () =
     let* receipt = locked.value in
     Ok (attach_lock_warnings locked.warnings receipt))
 ;;
+
+(* The order an operator extends is the one the file declares. The standalone
+   lane projection shows the slots the registry admitted, which leaves out a
+   declared slot the catalog rejected; a whole order rebuilt from that view and
+   written with [set_exact_output_lane_slots] deleted every such slot. Reading
+   the declaration under the write lock keeps it, and a second writer's slot
+   written in between is read too. *)
+let append_exact_output_lane_slot ?runtime_config_path ~lane_name ~slot () =
+  let lane_name = String.trim lane_name in
+  let slot = String.trim slot in
+  if String.equal lane_name ""
+  then Error "exact-output lane name must not be empty"
+  else if contains_newline lane_name
+  then Error "exact-output lane name must not contain newlines"
+  else if String.equal slot ""
+  then Error "slot must not be empty"
+  else if contains_newline slot
+  then Error "slot must not contain newlines"
+  else
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let declared =
+        match
+          List.find_opt
+            (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+               String.equal lane.id lane_name)
+            config.exact_output_lane_decls
+        with
+        | Some lane -> lane.slot_ids
+        | None -> []
+      in
+      if List.exists (String.equal slot) declared
+      then Error (Printf.sprintf "%s is already a slot of %s" slot lane_name)
+      else
+        Ok
+          (Toml_line_editor.edit_table_multiline_array
+             content
+             ~path:(exact_lane_table_path lane_name)
+             ~key:"slots"
+             ~values:(declared @ [ slot ])))
+;;

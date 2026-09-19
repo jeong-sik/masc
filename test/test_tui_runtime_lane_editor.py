@@ -77,9 +77,12 @@ class LaneStore:
     returns, the way a committed write reaches that read on the server:
 
     - create declares the lane with the candidates it was given;
-    - set replaces a lane's candidates with the list it was given, and an
-      "exact/<name>" set replaces that standalone lane's admitted slots
-      (Runtime.set_exact_output_lane_slots);
+    - set replaces a lane's candidates with the list it was given;
+    - an "exact/<name>" append adds one slot to the end of that standalone
+      lane's declared slots and refuses one already declared
+      (Runtime.append_exact_output_lane_slot). The declared slots include one
+      the registry dropped, which the standalone lanes read never lists, as
+      the server's registry would;
     - remove drops the lane, and is refused while [runtime.assignments]
       names it, with the server's sentence.
 
@@ -100,6 +103,12 @@ class LaneStore:
         _status, standalone = h.standalone_lanes_response()
         self.standalone = standalone
         self.standalone_held: tuple[threading.Event, threading.Event] | None = None
+        exact = self.exact_lane(EXACT_LANE)
+        exact["dropped_slots"] = [DROPPED_SLOT]
+        self.exact_declared = {EXACT_LANE: [DROPPED_SLOT, *exact["admitted_slots"]]}
+
+    def exact_lane(self, name: str) -> dict:
+        return next(lane for lane in self.standalone["lanes"] if lane["lane_id"] == name)
 
     def resolved(self) -> h.HttpResponse:
         with self.lock:
@@ -153,10 +162,18 @@ class LaneStore:
         action = request.get("action", "set")
         with self.lock:
             if lane_id.startswith("exact/"):
+                if action != "append":
+                    raise AssertionError(f"the TUI posted {action!r} to a standalone lane")
                 name = lane_id[len("exact/"):]
-                for lane in self.standalone["lanes"]:
-                    if lane["lane_id"] == name:
-                        lane["admitted_slots"] = list(request["runtime_ids"])
+                slot = request["runtime_id"]
+                declared = self.exact_declared[name]
+                if slot in declared:
+                    return 400, {"error": f"{slot} is already a slot of {name}"}
+                declared.append(slot)
+                lane = self.exact_lane(name)
+                lane["admitted_slots"] = [
+                    s for s in declared if s not in lane["dropped_slots"]
+                ]
                 return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
@@ -331,6 +348,9 @@ def run(executable: str) -> None:
 
 
 EXACT_LANE = "board_attention_exact"
+# Declared on the lane and dropped by the registry: the standalone lanes read
+# lists it under dropped_slots, never among the admitted slots the picker sees.
+DROPPED_SLOT = "retired-catalog.slot"
 
 
 def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
@@ -347,8 +367,9 @@ def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
 def run_exact(executable: str) -> None:
     """A standalone lane's slots are read back from the standalone lanes list.
     A load of that list already out when the write answers may have left
-    before it, so the read-back is queued behind it; the next pick is built
-    from what the queued read returns."""
+    before it, so the read-back is queued behind it; the next picker offers
+    what the queued read returns. Each pick posts only the slot it adds, so
+    the declared slot the registry dropped survives both."""
     store = LaneStore()
     fixtures = h.overview_event_http_fixtures()
     fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
@@ -393,20 +414,24 @@ def run_exact(executable: str) -> None:
         # lands first, with slots that do not name runtime-a, and the picker
         # that did is closed.
         h.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
-        # The second pick is built from that list, so runtime-a stays.
+        # The second picker is built from that list, so runtime-a is no
+        # longer offered and the cursor opens on runtime-b.
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a", picker)
         h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
+        # A pick sends only the slot it adds. A whole order built from the
+        # admitted slots would have left out the dropped one and deleted it.
         expected = [
-            {"lane": f"exact/{EXACT_LANE}",
-             "runtime_ids": ["glm-coding.glm-5-turbo", "runtime-a"]},
-            {"lane": f"exact/{EXACT_LANE}",
-             "runtime_ids": ["glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]},
+            {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-a"},
+            {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-b"},
         ]
         if posted != expected:
             raise AssertionError(f"exact posts: {posted!r}, expected {expected!r}")
+        declared = store.exact_declared[EXACT_LANE]
+        if declared != [DROPPED_SLOT, "glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]:
+            raise AssertionError(f"declared slots after the picks: {declared!r}")
         screen_lacks(process, fd, output, picker, timeout=5.0)
         os.write(fd, b"q")
 

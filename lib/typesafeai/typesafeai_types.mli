@@ -37,8 +37,7 @@ type choice_answer =
 
 type score_answer =
   { score : float
-  ; probabilities : (string * float) list
-      (** Level-number keys from the response; list position is not the level. *)
+  ; probabilities : (int * float) list
   ; confidence : float
   }
 

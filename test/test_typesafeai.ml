@@ -82,16 +82,18 @@ let test_response_decoding () =
      | Some (T.Choice_answer { choice; confidence; probabilities }) ->
        Alcotest.(check string) "choice is backend" "backend" choice;
        Alcotest.(check (float 0.001)) "confidence is 0.92" 0.92 confidence;
-       Alcotest.(check int) "2 probabilities" 2 (List.length probabilities)
+       Alcotest.(check (list (pair string (float 0.001))))
+         "choice probabilities retain named options"
+         [ "frontend", 0.05; "backend", 0.95 ] probabilities
      | _ -> Alcotest.fail "expected choice answer");
     (match List.assoc_opt "urgency" res.answers with
      | Some (T.Score_answer { score; confidence; probabilities }) ->
        Alcotest.(check (float 0.001)) "score is 1.25" 1.25 score;
        Alcotest.(check (float 0.001)) "confidence is 0.5" 0.5 confidence;
        Alcotest.(check int) "all score levels are retained" 3 (List.length probabilities);
-       Alcotest.(check (list (pair string (float 0.001))))
-         "score probabilities retain their keys in response order"
-         [ "2", 0.25; "0", 0.0; "1", 0.75 ]
+       Alcotest.(check (list (pair int (float 0.001))))
+         "score probabilities retain level indices in response order"
+         [ 2, 0.25; 0, 0.0; 1, 0.75 ]
          probabilities
      | _ -> Alcotest.fail "expected score answer");
     (match res.usage with
@@ -128,7 +130,22 @@ let test_score_response_rejects_invalid_probabilities () =
     ; "an empty map", [ "probabilities", `Assoc [] ]
     ; "a nonnumeric probability",
       [ "probabilities", `Assoc [ "0", `Float 0.5; "1", `String "0.5" ] ]
+    ; "a nonnumeric level", [ "probabilities", `Assoc [ "high", `Float 1.0 ] ]
+    ; "a fractional level", [ "probabilities", `Assoc [ "1.5", `Float 1.0 ] ]
+    ; "a negative level", [ "probabilities", `Assoc [ "-1", `Float 1.0 ] ]
     ]
+;;
+
+let test_choice_response_rejects_empty_probabilities () =
+  let response =
+    Yojson.Safe.from_string
+      {|{"model":"jev-latest","answers":{"team":{
+        "type":"choice","choice":"backend","confidence":0.9,"probabilities":{}
+      }}}|}
+  in
+  match T.eval_response_of_yojson response with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "choice response accepted empty probabilities"
 ;;
 
 type team =
@@ -220,6 +237,10 @@ let () =
             "score response rejects invalid probabilities"
             `Quick
             test_score_response_rejects_invalid_probabilities
+        ; Alcotest.test_case
+            "choice response rejects empty probabilities"
+            `Quick
+            test_choice_response_rejects_empty_probabilities
         ; Alcotest.test_case
             "choice set builds the request and decodes the answer"
             `Quick

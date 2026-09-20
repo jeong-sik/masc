@@ -10,12 +10,16 @@ open Alcotest
 
 (* The digest a record written by a turn whose front was atom [atom] carries;
    the records below are never checked against a history. *)
-let recorded_digest atom = Printf.sprintf "front-%d" atom
+let recorded_digest atom =
+  Digestif.SHA256.digest_string (Printf.sprintf "front-%d" atom)
+  |> Digestif.SHA256.to_hex
 
 let record
       ?(runtime = "glm")
       ?(wire_runtime = None)
       ?(finish = Some "completed")
+      ?(response_observed = true)
+      ?response_runtime
       ?(trace = "trace-1")
       ~turn
       window
@@ -52,6 +56,20 @@ let record
            ; front_atom_digest = recorded_digest (total_atoms - transmitted_atoms)
            })
         window
+  ; response_observed_model_input =
+      (match response_observed, window with
+       | true, Some (transmitted_atoms, total_atoms) ->
+         Some
+           { runtime_profile = Option.value response_runtime ~default:runtime
+           ; window =
+               { Turn_record.transmitted_atoms
+               ; total_atoms
+               ; measurement = Turn_record.Wire_shape
+               ; front_atom_digest =
+                   recorded_digest (total_atoms - transmitted_atoms)
+               }
+           }
+       | true, None | false, _ -> None)
   ; raw_trace_run_ref = None
   ; sampling = { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
   ; usage =
@@ -129,39 +147,88 @@ let test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not () 
   check source "turn 13" (Front.Turn_record { turn = 13 }) src
 ;;
 
-(* A turn that never finished still measured what it sent, and that range is
-   a position in the same history. Skipping it is what kept five keepers
-   sending the whole history every turn on 2026-09-18, because the halving a
-   refusal forces lived only inside the attempt. It is read, named apart from
-   a completed seed so a reader can tell which turn reached that position. *)
-let test_an_unfinished_record_is_read_and_named_apart () =
-  let records = [ record ~turn:10 (Some (30, 100)); record ~turn:12 ~finish:None (Some (5, 110)) ] in
+(* The newest attempted range received no response. It must not replace the
+   older response-observed range after the process loses its warm ledger. *)
+let test_an_unanswered_record_does_not_seed_the_front () =
+  let records =
+    [ record ~turn:10 (Some (30, 100))
+    ; record ~turn:12 ~finish:None ~response_observed:false (Some (5, 110))
+    ]
+  in
   let first_atom, src = seed (of_records records) in
-  check int "total minus transmitted of turn 12" 105 first_atom;
-  check source "named apart from a completed seed" (Front.Unfinished_turn { turn = 12 }) src
+  check int "the last response-observed front survives" 70 first_atom;
+  check source "turn 10 supplied the response" (Front.Turn_record { turn = 10 }) src
 ;;
 
-(* Acceptance is the newer evidence: a completed turn after an unfinished one
-   says that range served, so it names the front and the older one does not. *)
-let test_a_completed_record_after_an_unfinished_one_seeds_the_front () =
-  let records = [ record ~turn:12 ~finish:None (Some (5, 110)); record ~turn:13 (Some (40, 115)) ] in
+let test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response () =
+  let attempted = record ~turn:12 ~finish:None (Some (5, 110)) in
+  let record =
+    { attempted with
+      Turn_record.response_observed_model_input =
+        Some
+          { runtime_profile = "deepseek"
+          ; window =
+              { transmitted_atoms = 30
+              ; total_atoms = 100
+              ; measurement = Wire_shape
+              ; front_atom_digest = recorded_digest 70
+              }
+          }
+    }
+  in
+  let first_atom, src = seed (of_records [ record ]) in
+  check int "the answered request starts at atom 70" 70 first_atom;
+  check source "the response belongs to this failed turn"
+    (Front.Turn_record { turn = 12 }) src
+;;
+
+let test_restart_rows_restore_only_a_response_observed_front () =
+  let rows =
+    [ Turn_record.to_json (record ~turn:10 (Some (30, 100)))
+    ; Turn_record.to_json
+        (record
+           ~turn:12
+           ~finish:None
+           ~response_observed:false
+           (Some (5, 110)))
+    ]
+  in
+  let read = Front.seed_read_of_rows ~composer ~trace_id:"trace-1" rows in
+  let first_atom, src = seed read.Front.seed in
+  check int "restart restores the answered range" 70 first_atom;
+  check source "the refused latest row is skipped"
+    (Front.Turn_record { turn = 10 }) src;
+  check bool "both current rows decoded" true
+    (Option.is_none read.Front.unreadable)
+;;
+
+(* A response-observed range remains valid even when the whole turn later
+   failed and therefore wrote no finish reason. *)
+let test_a_response_observed_failed_turn_seeds_the_front () =
+  let records =
+    [ record ~turn:12 (Some (40, 110))
+    ; record ~turn:13 ~finish:None (Some (40, 115))
+    ]
+  in
   let _, src = seed (of_records records) in
-  check source "turn 13 completed" (Front.Turn_record { turn = 13 }) src
+  check source "turn 13 received a response" (Front.Turn_record { turn = 13 }) src
 ;;
 
 (* The record's runtime names the runtime that was asked; the wire
    observation names the one that measured. The history question is put to
    the latter. *)
-let test_the_wire_observation_names_the_runtime_when_present () =
+let test_the_joined_observation_names_the_runtime () =
   let records =
-    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "gone") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "deepseek")
+        ~response_runtime:"gone" (Some (30, 100)) ]
   in
-  check bool "measured by a runtime the catalog lost: skipped" true
+  check bool "response runtime left the catalog: skipped" true
     (Option.is_none (of_records records));
   let records =
-    [ record ~turn:10 ~runtime:"gone" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"gone" ~wire_runtime:(Some "gone")
+        ~response_runtime:"deepseek" (Some (30, 100)) ]
   in
-  check int "measured by deepseek: read" 70 (fst (seed (of_records records)))
+  check int "deepseek answered: read" 70 (fst (seed (of_records records)))
 ;;
 
 let test_no_record_means_no_seed () =
@@ -361,8 +428,6 @@ let test_origin_json_names_its_kind () =
   in
   check string "ledger" "ledger" (kind (Front.Carried Front.Ledger));
   check string "turn record" "turn_record" (kind (Front.Carried (Front.Turn_record { turn = 3 })));
-  check string "unfinished turn" "unfinished_turn"
-    (kind (Front.Carried (Front.Unfinished_turn { turn = 7 })));
   check string "halved" "halved_after_refusal"
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
   check string "evicted" "evicted_after_refusal"
@@ -378,12 +443,17 @@ let () =
             test_the_newest_completed_record_on_the_trace_seeds_the_front
         ; test_case "an official client is read, an unmaterialized runtime is not" `Quick
             test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not
-        ; test_case "an unfinished record is read and named apart" `Quick
-            test_an_unfinished_record_is_read_and_named_apart
-        ; test_case "a completed record after an unfinished one seeds" `Quick
-            test_a_completed_record_after_an_unfinished_one_seeds_the_front
-        ; test_case "wire observation names the runtime" `Quick
-            test_the_wire_observation_names_the_runtime_when_present
+        ; test_case "an unanswered record does not seed" `Quick
+            test_an_unanswered_record_does_not_seed_the_front
+        ; test_case "same-turn unanswered attempt does not replace response"
+            `Quick
+            test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response
+        ; test_case "restart rows restore only response-observed front" `Quick
+            test_restart_rows_restore_only_a_response_observed_front
+        ; test_case "a response-observed failed turn seeds" `Quick
+            test_a_response_observed_failed_turn_seeds_the_front
+        ; test_case "joined observation names the runtime" `Quick
+            test_the_joined_observation_names_the_runtime
         ; test_case "no record" `Quick test_no_record_means_no_seed
         ; test_case "another session" `Quick test_another_sessions_record_is_another_history
         ; test_case "composer from the execution kind" `Quick

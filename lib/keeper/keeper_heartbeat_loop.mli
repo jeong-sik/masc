@@ -12,6 +12,7 @@ val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
 
 val sync_keeper_presence :
   ctx:'a context ->
+  registry_entry:Keeper_registry.registry_entry ->
   meta_current:keeper_meta ->
   consecutive_failures:int ref ->
   keeper_meta
@@ -169,13 +170,14 @@ type keepalive_turn_outcome = {
     [Keeper_unified_turn_failure]), bumps the CycleExceptions counter
     and logs at ERROR. Does not raise. *)
 val record_crashed_cycle_failure :
-  base_path:string -> keeper_name:string -> exn -> unit
+  registry_entry:Keeper_registry.registry_entry -> exn -> unit
 
 (** Convert an exception escaping one autonomous cycle into its accounting
     outcome. Operator interrupts are expected cancellation and do not mutate
     the turn-failure counter; every other exception is recorded as a crash. *)
 val handle_cycle_exception :
-  base_path:string -> meta:keeper_meta -> exn -> keepalive_turn_outcome
+  registry_entry:Keeper_registry.registry_entry ->
+  meta:keeper_meta -> exn -> keepalive_turn_outcome
 
 type batch_disposition =
   | Batch_ack_completed
@@ -228,9 +230,18 @@ val failure_reason_after_turn_status :
   turn_fail_count:int ->
   Keeper_registry.failure_reason option ->
   Keeper_registry.failure_reason option
-(** Preserve a typed configuration root cause when the post-turn heartbeat
-    records its generic consecutive-failure observation. Other failures keep
-    the existing consecutive-count projection. *)
+(** Preserve the current failure cause when the post-turn heartbeat records
+    its status. Refresh a turn-failure count only when that is the current
+    reason or no reason exists. Preserve a heartbeat-failure count from
+    the current workspace I/O failure. Failure producers replace the reason
+    when a new failure occurs. *)
+
+val refresh_failure_reason_after_turn :
+  registry_entry:Keeper_registry.registry_entry -> turn_fail_count:int -> unit
+(** Refresh the registry cause after the loop dispatches turn status.
+    The exact originating lane is updated from its latest immutable entry, so
+    a concurrent cause is preserved and a same-name replacement is untouched.
+    A nonpositive turn-failure count does not write a reason. *)
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
     The caller classifies lifecycle state and fd/disk pressure
@@ -240,6 +251,7 @@ val failure_reason_after_turn_status :
 val run_keepalive_unified_turn :
   wake:Keeper_world_observation.cycle_wake ->
   ctx:'a context ->
+  registry_entry:Keeper_registry.registry_entry ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
@@ -292,7 +304,8 @@ val record_keepalive_stage_timing :
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
+  proactive_warmup_sec:int -> registry_entry:Keeper_registry.registry_entry ->
+  'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig

@@ -1,7 +1,5 @@
 (** Failure-path post-processing for [Keeper_unified_turn]. *)
 
-module EC = Keeper_error_classify
-
 (* RFC turn-failure-visible-stop (#32105): every turn failure advances the
    durable crash-accounting streak. There is no exemption class and no
    per-class budget. The historical exemption design kept a persistent
@@ -13,6 +11,7 @@ module EC = Keeper_error_classify
 let record_failure_observation
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~terminal_reason
       ~err
       ~error_text
   =
@@ -23,12 +22,15 @@ let record_failure_observation
   Health.record_failure
     ~agent_name:meta.name
     ~reason:(Keeper_types_profile.short_preview error_text);
-  if EC.is_runtime_exhausted_error err && count > 0
-  then
-    Keeper_registry.set_failure_reason
-      ~base_path:config.base_path
-      meta.name
-      (Some (Keeper_registry.Turn_consecutive_failures count));
+  let reason =
+    match
+      Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+        ~core_error:err terminal_reason ~raw_error:error_text
+    with
+    | Some typed_cause -> typed_cause
+    | None -> Keeper_registry.Turn_consecutive_failures count
+  in
+  Keeper_registry.set_failure_reason ~base_path meta.name (Some reason);
   Log.Keeper.warn
     "%s: turn failure observed (consecutive=%d); Keeper lifecycle remains active: %s"
     meta.name

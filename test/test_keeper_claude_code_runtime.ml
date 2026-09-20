@@ -2014,7 +2014,6 @@ let completed_record ~messages ~transmitted : Turn_record.t =
 let seed_read_of records =
   { Keeper_carried_front.seed =
       Keeper_carried_front.of_records
-        ~composer:(fun _ -> Keeper_carried_front.Composes_from_the_history)
         ~trace_id:"trace-1"
         records
   ; unreadable = None

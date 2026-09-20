@@ -350,7 +350,7 @@ let test_a_removed_runtimes_response_names_the_current_history () =
         Turn_record.response_observed_model_input =
           Some
             { observation with
-              window = { observation.window with front_atom_digest }
+              window = { observation.window with front_atom_digest = front_digest }
             }
       }
   in

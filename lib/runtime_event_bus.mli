@@ -35,8 +35,9 @@ val drain_reporting_drops : handle -> batch
 (** [drain], plus whether events were lost to the overflow policy. The drop
     counter is read after the drain, so every drop it reports belongs to an
     event published before this call returned, and a consumer that reacts to
-    [Dropped] after this call covers it. One consumer per handle: the last
-    reported count lives in the handle. *)
+    [Dropped] after this call covers it. The last reported count lives in the
+    handle and is claimed with a compare-and-set, so concurrent drains of one
+    handle split the drops between them and no drop is reported twice. *)
 
 val unsubscribe : Agent_core.Event_bus.t -> handle -> unit
 val publish : Agent_core.Event_bus.t -> Agent_core.Event_bus.event -> unit

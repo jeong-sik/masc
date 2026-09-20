@@ -1109,7 +1109,8 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 
                   The listener ([Server_bootstrap_loops]) refreshes each
                   event on its own. When its subscription reports events
-                  dropped past its capacity, or this handler raises, it drops
+                  dropped past its capacity, or a refresh raises or reports a
+                  prefix it could not drop, it drops
                   the same caches for every Keeper
                   ([Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces]),
                   the cached surface included, so the row clears as it would
@@ -1118,7 +1119,15 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
                   On a cold start the cached surface can still be the
                   initializing placeholder. It has no keepers row, so the
                   patch has nothing to invalidate in it; the handler's cache
-                  drops above are what clear a pre-boot render. *)
+                  drops above are what clear a pre-boot render.
+
+                  Two paths remain that no invalidation covers: the listener
+                  fiber itself dying ([fork_logged_fiber ~on_error]), and a
+                  publish that lands between [Event_bus_slots.set_masc] and
+                  the listener's own [subscribe]. Either leaves this row until
+                  a render reads a snapshot taken after the boot, which is one
+                  or two refresh-loop turns and at most about 220s at the
+                  default TTLs. *)
                acc)
           rows
           running

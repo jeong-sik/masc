@@ -3749,7 +3749,13 @@ let test_keeper_lifecycle_refresh_invalidates_projection_snapshot () =
 
 (* The lifecycle listener's batch, fed by the real publisher through a
    subscription shaped like the listener's. [refresh] and [invalidate_all]
-   record what the batch asks for instead of touching dashboard caches. *)
+   record what the batch asks for instead of touching dashboard caches.
+
+   [Event_bus_slots.set_masc] is process-wide with no unset, so after these
+   cases the slot holds this bus, unsubscribed, instead of [None]. Every case
+   that publishes below runs inside this helper, and no case in this binary
+   asserts the empty slot. Reaching for an unset would mean adding a
+   test-only backdoor to a production module. *)
 let with_lifecycle_subscription ~capacity f =
   Eio_main.run @@ fun _env ->
   let bus = Agent_core.Event_bus.create () in

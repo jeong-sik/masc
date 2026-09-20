@@ -1135,11 +1135,33 @@ let () =
     | _ -> None)
 ;;
 
+exception Keeper_lifecycle_surfaces_partly_dropped of string list
+
+let () =
+  Printexc.register_printer (function
+    | Keeper_lifecycle_surfaces_partly_dropped prefixes ->
+      Some
+        (Printf.sprintf
+           "keeper lifecycle refresh left these caches undropped: %s"
+           (String.concat ", " prefixes))
+    | _ -> None)
+;;
+
+(* A refresh that could not drop one of its prefixes leaves entries this event
+   was meant to remove, and it reports the prefixes rather than only warning.
+   The batch below counts that as a failed refresh, so the whole
+   keeper-dependent cache is invalidated instead of the surface keeping a row
+   the event already changed (#37175). *)
 let refresh_dashboard_for_keeper_lifecycle ~config ~keeper_name event =
-  Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces
-    ~config
-    ~name:keeper_name
-    event
+  match
+    Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces
+      ~config
+      ~name:keeper_name
+      event
+  with
+  | Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_refreshed -> ()
+  | Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_partly_dropped prefixes ->
+    raise (Keeper_lifecycle_surfaces_partly_dropped prefixes)
 ;;
 
 (* What the lifecycle listener did with one event it took off its
@@ -1156,8 +1178,31 @@ type keeper_lifecycle_refresh =
       ; event : Keeper_lifecycle_events.lifecycle_event
       ; error : exn
       }
+  | Lifecycle_handling_failed of exn
+  (** A raise outside the refresh itself — decoding the payload, the malformed
+      counter, a log call. What the event should have changed is unknown. *)
 
-let refresh_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
+let refresh_decoded_keeper_lifecycle ~refresh ~keeper_name event =
+  (* Lifecycle events also arrive from MCP and shutdown completion, not only
+     the dashboard POST handlers. Drop their source snapshot and parameterized
+     caches before patching the current execution row, so a purged Keeper
+     cannot be rebuilt from the five-second snapshot that still names its
+     removed meta. *)
+  match refresh ~keeper_name event with
+  | () -> Lifecycle_refreshed
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Dashboard.error
+      "keeper lifecycle refresh failed keeper=%s event=%s: %s\n%s"
+      keeper_name
+      (Keeper_lifecycle_events.lifecycle_event_to_string event)
+      (Printexc.to_string error)
+      (Printexc.raw_backtrace_to_string backtrace);
+    Lifecycle_refresh_failed { keeper_name; event; error }
+;;
+
+let handle_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
   match evt.payload with
   | Agent_core.Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
     (match
@@ -1170,24 +1215,7 @@ let refresh_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
             ~event
             ~phase:(Safe_ops.json_string_opt "phase" payload)
         with
-        | Some event ->
-          (* Lifecycle events also arrive from MCP and shutdown completion,
-             not only the dashboard POST handlers. Drop their source snapshot
-             and parameterized caches before patching the current execution
-             row, so a purged Keeper cannot be rebuilt from the five-second
-             snapshot that still names its removed meta. *)
-          (match refresh ~keeper_name event with
-           | () -> Lifecycle_refreshed
-           | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-           | exception error ->
-             let backtrace = Printexc.get_raw_backtrace () in
-             Log.Dashboard.error
-               "keeper lifecycle refresh failed keeper=%s event=%s: %s\n%s"
-               keeper_name
-               (Keeper_lifecycle_events.lifecycle_event_to_string event)
-               (Printexc.to_string error)
-               (Printexc.raw_backtrace_to_string backtrace);
-             Lifecycle_refresh_failed { keeper_name; event; error })
+        | Some event -> refresh_decoded_keeper_lifecycle ~refresh ~keeper_name event
         | None ->
           Otel_metric_store.inc_counter
             Otel_metric_store.metric_keeper_lifecycle_malformed
@@ -1206,11 +1234,45 @@ let refresh_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
     Lifecycle_ignored
 ;;
 
+(* Everything one event costs stays inside this guard, not just the refresh:
+   a raise while decoding the payload, bumping the malformed counter or
+   logging would otherwise end the batch and take the events after it. *)
+let refresh_keeper_lifecycle_event ~refresh evt =
+  match handle_keeper_lifecycle_event ~refresh evt with
+  | result -> result
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Dashboard.error
+      "keeper lifecycle event handling failed: %s\n%s"
+      (Printexc.to_string error)
+      (Printexc.raw_backtrace_to_string backtrace);
+    Lifecycle_handling_failed error
+;;
+
+(* The recovery drops the same caches a refresh drops, so it can fail the same
+   way the refresh that called for it just did. Keep that failure inside the
+   batch: the caller still gets its results and still broadcasts, and the next
+   batch or the 60s execution refresh is what recovers. *)
+let invalidate_keeper_dependent_caches ~invalidate_all =
+  match invalidate_all () with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Dashboard.error
+      "keeper lifecycle listener could not invalidate the keeper-dependent \
+       dashboard caches: %s\n%s"
+      (Printexc.to_string error)
+      (Printexc.raw_backtrace_to_string backtrace)
+;;
+
 (* One drained batch of the lifecycle listener. Each event is refreshed on
    its own, so an event whose refresh raises costs only its own patch and
    the events after it are still refreshed. A failed refresh leaves the
-   cached surfaces in an unknown state for that Keeper, and an overflow drop
-   loses events nobody can name. Either way [invalidate_all] drops every
+   cached surfaces in an unknown state for that Keeper, an undecodable
+   payload does not name the Keeper it changed, and an overflow drop loses
+   events nobody can name. In each case [invalidate_all] drops every
    Keeper-dependent dashboard cache once the batch is through, and the next
    read rebuilds them from current state. Returns one result per event, in
    order. *)
@@ -1219,41 +1281,67 @@ let handle_keeper_lifecycle_batch
       ~invalidate_all
       (drained : Runtime_event_bus.batch)
   =
+  (* [fold_left], not [List.map]: the stdlib leaves [map]'s application order
+     unspecified, and two events for one Keeper in one batch (Started, then
+     Stopped) patch the same cached row. *)
   let results =
-    List.map (refresh_keeper_lifecycle_event ~refresh) drained.Runtime_event_bus.events
+    List.rev
+      (List.fold_left
+         (fun refreshed evt -> refresh_keeper_lifecycle_event ~refresh evt :: refreshed)
+         []
+         drained.Runtime_event_bus.events)
   in
-  let failures, undecodable_count =
+  let undecodable, refresh_failures, handling_failures =
     List.fold_left
-      (fun (failures, undecodable_count) -> function
-         | Lifecycle_refresh_failed _ as failure -> failure :: failures, undecodable_count
-         | Lifecycle_undecodable -> failures, undecodable_count + 1
-         | Lifecycle_refreshed | Lifecycle_ignored -> failures, undecodable_count)
-      ([], 0)
+      (fun (undecodable, refresh_failures, handling_failures) -> function
+         | Lifecycle_refreshed | Lifecycle_ignored ->
+           undecodable, refresh_failures, handling_failures
+         | Lifecycle_undecodable ->
+           undecodable + 1, refresh_failures, handling_failures
+         | Lifecycle_refresh_failed _ ->
+           undecodable, refresh_failures + 1, handling_failures
+         | Lifecycle_handling_failed _ ->
+           undecodable, refresh_failures, handling_failures + 1)
+      (0, 0, 0)
       results
   in
   (match results with
    | [] -> ()
    | _ :: _ ->
      Log.Dashboard.info
-       "patched keeper-dependent dashboard caches (%d lifecycle event(s), %d \
-        refresh failure(s))"
-       (List.length results)
-       (List.length failures));
-  let dropped_count =
+       "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
+       (List.length results));
+  let dropped =
     match drained.Runtime_event_bus.overflow_loss with
     | Runtime_event_bus.Nothing_dropped -> 0
     | Runtime_event_bus.Dropped count -> count
   in
-  (match dropped_count, undecodable_count, failures with
-   | 0, 0, [] -> ()
-   | dropped_count, undecodable_count, failures ->
+  (match dropped, undecodable, refresh_failures, handling_failures with
+   | 0, 0, 0, 0 -> ()
+   | dropped, undecodable, refresh_failures, handling_failures ->
      Log.Dashboard.warn
        "keeper lifecycle listener lost updates: dropped=%d undecodable=%d \
-        refresh_failures=%d; invalidating every keeper-dependent dashboard cache"
-       dropped_count
-       undecodable_count
-       (List.length failures);
-     invalidate_all ());
+        refresh_failures=%d handling_failures=%d; invalidating every \
+        keeper-dependent dashboard cache"
+       dropped
+       undecodable
+       refresh_failures
+       handling_failures;
+     invalidate_keeper_dependent_caches ~invalidate_all);
+  results
+;;
+
+(* One turn of the lifecycle listener: drain the subscription, refresh the
+   batch, and broadcast namespace truth when the batch carried events or lost
+   some. Separate from the fiber so a test can run a turn against a real
+   subscription. *)
+let refresh_keeper_lifecycle_once ~subscription ~refresh ~invalidate_all ~broadcast =
+  let drained = Runtime_event_bus.drain_reporting_drops subscription in
+  let results = handle_keeper_lifecycle_batch ~refresh ~invalidate_all drained in
+  (match drained.Runtime_event_bus.events, drained.overflow_loss with
+   | [], Runtime_event_bus.Nothing_dropped -> ()
+   | _ :: _, (Runtime_event_bus.Nothing_dropped | Runtime_event_bus.Dropped _)
+   | [], Runtime_event_bus.Dropped _ -> broadcast ());
   results
 ;;
 
@@ -1540,18 +1628,15 @@ let start_keeper_loops_owned
     in
     let rec loop () =
       (try
-         let drained = Runtime_event_bus.drain_reporting_drops keeper_lifecycle_sub in
          let (_ : keeper_lifecycle_refresh list) =
-           handle_keeper_lifecycle_batch
+           refresh_keeper_lifecycle_once
+             ~subscription:keeper_lifecycle_sub
              ~refresh:(refresh_dashboard_for_keeper_lifecycle ~config)
              ~invalidate_all:invalidate_keeper_execution_surfaces
-             drained
+             ~broadcast:(fun () ->
+               Server_dashboard_http.broadcast_namespace_truth_snapshot state)
          in
-         match drained.Runtime_event_bus.events, drained.overflow_loss with
-         | [], Runtime_event_bus.Nothing_dropped -> ()
-         | _ :: _, (Runtime_event_bus.Nothing_dropped | Runtime_event_bus.Dropped _)
-         | [], Runtime_event_bus.Dropped _ ->
-           Server_dashboard_http.broadcast_namespace_truth_snapshot state
+         ()
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
@@ -2126,6 +2211,7 @@ module For_testing = struct
   let refresh_dashboard_for_keeper_lifecycle =
     refresh_dashboard_for_keeper_lifecycle
   let handle_keeper_lifecycle_batch = handle_keeper_lifecycle_batch
+  let refresh_keeper_lifecycle_once = refresh_keeper_lifecycle_once
 end
 
 

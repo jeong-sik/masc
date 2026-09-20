@@ -154,6 +154,9 @@ type keeper_lifecycle_refresh =
       ; event : Keeper_lifecycle_events.lifecycle_event
       ; error : exn
       }
+  | Lifecycle_handling_failed of exn
+  (** A raise outside the refresh itself — decoding the payload, the malformed
+      counter, a log call. What the event should have changed is unknown. *)
 
 module For_testing : sig
   type keeper_loops_start_ownership
@@ -212,6 +215,16 @@ module For_testing : sig
   (** One drained batch of the lifecycle listener: each event is refreshed on
       its own, and an undecodable lifecycle event, refresh failure, or overflow drop calls
       [invalidate_all] once after the batch. *)
+
+  val refresh_keeper_lifecycle_once :
+    subscription:Runtime_event_bus.handle ->
+    refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->
+    invalidate_all:(unit -> unit) ->
+    broadcast:(unit -> unit) ->
+    keeper_lifecycle_refresh list
+  (** One turn of the lifecycle listener fiber: drain [subscription], refresh
+      the batch, and [broadcast] when the batch carried events or lost some.
+      This is what the fiber runs between sleeps. *)
 end
 
 val start_background_maintenance :

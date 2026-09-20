@@ -56,6 +56,19 @@ type t =
   ; change : change
   }
 
+(** Identity of one selected durable completed-turn range. Boundary row
+    identities distinguish restarted histories that reuse atom numbers and
+    checkpoint digests. *)
+type durable_range_id =
+  { trace_id : string
+  ; history_start_boundary_line : int
+  ; start_atom : int
+  ; end_atom : int
+  ; last_atom_digest : string
+  ; end_boundary_line : int
+  ; boundary_lines_seen : int
+  }
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -118,8 +131,8 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> string
-(** Transaction receipt that joins one durable completed-turn range to the
-    exact Memory snapshot bytes produced from it. *)
+(** WAL sidecar joining one typed durable completed-turn range identity to the
+    exact Memory snapshot revision and bytes produced from it. *)
 
 (** Record a librarian pass that produced no snapshot. The commit path already
     journals its own line, so this is the failure counterpart and never runs
@@ -164,21 +177,20 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
 
-val durable_range_was_committed
+val committed_durable_range
   :  keepers_dir:string
   -> keeper_id:string
-  -> Keeper_librarian_progress.t
-  -> (bool, string) result
-(** Check the transaction receipt for an exact completed-turn range. A
-    prepared receipt is reconciled against the SHA-256 of the atomic Memory
-    snapshot before answering. Every later Memory writer performs the same
-    reconciliation before replacing that snapshot, so a committed range
-    remains provable after unrelated Memory writes and process restarts. *)
+  -> (durable_range_id option, string) result
+(** Return the last completed-turn range whose receipt is still proved by the
+    current Memory snapshot. A prepared receipt requires its exact snapshot
+    revision and SHA-256. A committed receipt accepts that same snapshot or a
+    higher parsed revision written later under the same store lock. Missing,
+    lower, or same-revision/different-byte snapshots invalidate the receipt. *)
 
 val apply_disposition
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
-  -> ?durable_range_progress:Keeper_librarian_progress.t
+  -> ?durable_range_id:durable_range_id
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> keepers_dir:string
   -> keeper_id:string
@@ -204,8 +216,8 @@ val apply_disposition
     even if the keeper re-observed it during the pass: the judgment was about
     the claim, and a re-observation does not answer it.
 
-    [durable_range_progress] joins this disposition to the completed-turn
-    range that produced it. The store writes a prepared transaction receipt
+    [durable_range_id] joins this disposition to the completed-turn range that
+    produced it. The store writes a prepared transaction receipt
     before replacing the snapshot and marks it committed afterwards. Recovery
     compares a prepared receipt with the exact snapshot SHA-256, so neither
     side of a process interruption is guessed.

@@ -30,7 +30,7 @@ module For_testing : sig
     -> keeper_name:string
     -> commit:
          (expected_revision:int option
-          -> progress:Keeper_librarian_progress.t
+          -> range_id:Keeper_memory_os_current.durable_range_id
           -> Keeper_librarian.input
           -> bool)
     -> unit

@@ -1,6 +1,7 @@
 module B = Keeper_turn_boundaries
 module P = Keeper_librarian_progress
 module R = Keeper_librarian_range
+module Window = Runtime_model_input_tail_window
 module Canonical_tool = Agent_core.Canonical_tool
 module String_map = Map.Make (String)
 
@@ -123,7 +124,82 @@ let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest li
   in
   match latest with
   | None -> None
-  | Some (_line, recorded_at, turn_ref) -> Some (recorded_at, turn_ref)
+  | Some (line, recorded_at, turn_ref) -> Some (line, recorded_at, turn_ref)
+;;
+
+let range_id_for_selection
+      ~trace_id
+      ~(range : R.range)
+      ~end_boundary_line
+      ~boundary_lines_seen
+  : Keeper_memory_os_current.durable_range_id
+  =
+  { trace_id
+  ; history_start_boundary_line = range.history_start_boundary_line
+  ; start_atom = range.start_atom
+  ; end_atom = range.end_atom
+  ; last_atom_digest = range.last_atom_digest
+  ; end_boundary_line
+  ; boundary_lines_seen
+  }
+;;
+
+let progress_of_range_id (range_id : Keeper_memory_os_current.durable_range_id) : P.t =
+  { position =
+      { trace_id = range_id.trace_id
+      ; end_atom = range_id.end_atom
+      ; last_atom_digest = range_id.last_atom_digest
+      }
+  ; boundary_lines_seen = range_id.boundary_lines_seen
+  }
+;;
+
+let endpoint_is_present range_id ~messages lines =
+  let checkpoint_matches =
+    match Window.atom_opening_digest messages (range_id.end_atom - 1) with
+    | Some digest -> String.equal digest range_id.last_atom_digest
+    | None -> false
+  in
+  checkpoint_matches
+  && List.exists
+       (fun (line, decoded) ->
+          Int.equal line range_id.end_boundary_line
+          &&
+          match decoded with
+          | Ok
+              ({ B.event =
+                   B.Turn_ended
+                     { turn_ref
+                     ; history_at_start = _
+                     ; position = B.Atom_history boundary
+                     }
+               ; _
+               } : B.record) ->
+            String.equal (Ids.Turn_ref.trace_id turn_ref) range_id.trace_id
+            && Int.equal boundary.end_atom range_id.end_atom
+            && String.equal boundary.last_atom_digest range_id.last_atom_digest
+          | Ok _ | Error _ -> false)
+       lines
+;;
+
+let is_committed_prefix
+      committed
+      ~trace_id
+      ~(selected : R.range)
+      ~selected_end_boundary_line
+      ~selected_boundary_lines_seen
+      ~messages
+      lines
+  =
+  String.equal committed.Keeper_memory_os_current.trace_id trace_id
+  && Int.equal
+       committed.history_start_boundary_line
+       selected.history_start_boundary_line
+  && Int.equal committed.start_atom selected.start_atom
+  && committed.end_atom <= selected.end_atom
+  && committed.end_boundary_line <= selected_end_boundary_line
+  && committed.boundary_lines_seen <= selected_boundary_lines_seen
+  && endpoint_is_present committed ~messages lines
 ;;
 
 let tool_observations messages =
@@ -178,10 +254,10 @@ let current_memory ~keepers_dir ~keeper_name =
     Ok (input, expected_revision)
 ;;
 
-let write_progress ~keepers_dir ~keeper_name progress outcome =
+let write_progress ~write ~keepers_dir ~keeper_name progress outcome =
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      P.write ~keepers_dir ~keeper_id:keeper_name progress)
+      write ~keepers_dir ~keeper_id:keeper_name progress)
   with
   | Ok () -> Ok (outcome progress)
   | Error error -> Error (Progress_write_failed error)
@@ -206,7 +282,7 @@ let clear_failed key =
   Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.remove failed_ranges key)
 ;;
 
-let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
+let consume_one_with_extent ~write_progress_store ~extent ~config ~keeper_name ~commit =
   let ( let* ) = Result.bind in
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let memory_keepers_dir =
@@ -256,32 +332,13 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
      | None -> Ok Nothing_to_read
      | Some next ->
        write_progress
+         ~write:write_progress_store
          ~keepers_dir:runtime_keepers_dir
          ~keeper_name
          next
          (fun progress -> Baseline_advanced progress))
-  | R.Read { range; boundary_lines_seen = _ } ->
-    let* next =
-      match R.progress_after ~trace_id selection with
-      | Some next -> Ok next
-      | None -> Error (Range_end_boundary_missing range)
-    in
-    let* already_committed =
-      Keeper_memory_os_current.durable_range_was_committed
-        ~keepers_dir:memory_keepers_dir
-        ~keeper_id:keeper_name
-        next
-      |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
-    in
-    if already_committed
-    then
-      write_progress
-        ~keepers_dir:runtime_keepers_dir
-        ~keeper_name
-        next
-        (fun progress -> Progress_advanced progress)
-    else
-    let* ended_at, turn_ref =
+  | R.Read { range; boundary_lines_seen } ->
+    let* end_boundary_line, ended_at, turn_ref =
       match
         turn_boundary_for_position
           ~trace_id
@@ -292,6 +349,37 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
       | Some boundary -> Ok boundary
       | None -> Error (Range_end_boundary_missing range)
     in
+    let selected_range_id =
+      range_id_for_selection
+        ~trace_id
+        ~range
+        ~end_boundary_line
+        ~boundary_lines_seen
+    in
+    let* committed_range =
+      Keeper_memory_os_current.committed_durable_range
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+      |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
+    in
+    (match committed_range with
+     | Some committed
+       when is_committed_prefix
+              committed
+              ~trace_id
+              ~selected:range
+              ~selected_end_boundary_line:end_boundary_line
+              ~selected_boundary_lines_seen:boundary_lines_seen
+              ~messages
+              lines ->
+      let next = progress_of_range_id committed in
+      write_progress
+        ~write:write_progress_store
+        ~keepers_dir:runtime_keepers_dir
+        ~keeper_name
+        next
+        (fun progress -> Progress_advanced progress)
+     | Some _ | None ->
     let* after =
       match progress with
       | None -> Ok None
@@ -304,7 +392,7 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
              ~last_atom_digest:position.last_atom_digest
              lines
          with
-         | Some (recorded_at, _) -> Ok (Some recorded_at)
+         | Some (_, recorded_at, _) -> Ok (Some recorded_at)
          | None -> Error (Progress_boundary_missing position))
     in
     let selected_messages = R.slice messages range in
@@ -343,17 +431,18 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
       ; counterpart_observations
       }
     in
-    if not (commit ~expected_revision ~progress:next input)
+    if not (commit ~expected_revision ~range_id:selected_range_id input)
     then Ok Memory_not_committed
     else
       write_progress
+        ~write:write_progress_store
         ~keepers_dir:runtime_keepers_dir
         ~keeper_name
-        next
-        (fun progress -> Progress_advanced progress)
+        (progress_of_range_id selected_range_id)
+        (fun progress -> Progress_advanced progress))
 ;;
 
-let consume_one ~config ~keeper_name ~commit =
+let consume_one_with_progress_writer ~write_progress_store ~config ~keeper_name ~commit =
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let key = range_key ~runtime_keepers_dir ~keeper_name in
   let extent = if failed_before key then R.To_first_cut_point else R.All_unread in
@@ -362,7 +451,14 @@ let consume_one ~config ~keeper_name ~commit =
      backlog is empty. Clearing after the first small success would alternate
      large failures with small successes while the backlog keeps growing. *)
   mark_failed key;
-  let result = consume_one_with_extent ~extent ~config ~keeper_name ~commit in
+  let result =
+    consume_one_with_extent
+      ~write_progress_store
+      ~extent
+      ~config
+      ~keeper_name
+      ~commit
+  in
   (match result, extent with
    | Ok (Nothing_to_read | Baseline_advanced _), _
    | Ok (Progress_advanced _), R.All_unread -> clear_failed key
@@ -372,12 +468,20 @@ let consume_one ~config ~keeper_name ~commit =
   result
 ;;
 
+let consume_one ~config ~keeper_name ~commit =
+  consume_one_with_progress_writer
+    ~write_progress_store:P.write
+    ~config
+    ~keeper_name
+    ~commit
+;;
+
 let commit_with_runtime
       ~base_path
       ~keepers_dir
       ~keeper_id
       ~expected_revision
-      ~progress
+      ~range_id
       input
   =
   let committed = ref false in
@@ -385,7 +489,7 @@ let commit_with_runtime
     ~trigger:Keeper_librarian_runtime.Durable_range
     ~input_projection:Keeper_librarian_runtime.Already_selected_range
     ~on_memory_committed:(fun () -> committed := true)
-    ~durable_range_progress:progress
+    ~durable_range_id:range_id
     ~base_path
     ~keepers_dir
     ~keeper_id
@@ -395,6 +499,8 @@ let commit_with_runtime
 ;;
 
 module For_testing = struct
+  let consume_one_with_progress_writer = consume_one_with_progress_writer
+
   let reset_process_state () =
     Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.clear failed_ranges)
   ;;

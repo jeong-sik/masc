@@ -37,7 +37,7 @@ val consume_one
   -> keeper_name:string
   -> commit:
        (expected_revision:int option
-        -> progress:Keeper_librarian_progress.t
+        -> range_id:Keeper_memory_os_current.durable_range_id
         -> Keeper_librarian.input
         -> bool)
   -> (outcome, error) result
@@ -62,11 +62,11 @@ val consume_one
     after an advance; repeated successful passes exhaust their cut points.
     New boundary appends can extend a drain while it is running.
 
-    The Memory snapshot stores the exact [progress] passed to a successful
-    [commit]. If the separate progress write then fails, the next pass matches
-    that durable receipt and advances progress without calling [commit] again.
-    Later Memory writers preserve the receipt until a newer durable range
-    replaces it. *)
+    The Memory WAL sidecar stores the exact [range_id] passed to a successful
+    [commit]. If the separate progress write then fails, the next pass first
+    recovers a committed prefix and advances only to its endpoint without
+    calling [commit] again. Later Memory writers preserve the receipt until a
+    newer durable range replaces it. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)
@@ -75,10 +75,25 @@ val commit_with_runtime
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
-  -> progress:Keeper_librarian_progress.t
+  -> range_id:Keeper_memory_os_current.durable_range_id
   -> Keeper_librarian.input
   -> bool
 
 module For_testing : sig
+  val consume_one_with_progress_writer
+    :  write_progress_store:
+         (keepers_dir:string
+          -> keeper_id:string
+          -> Keeper_librarian_progress.t
+          -> (unit, Keeper_librarian_progress.write_error) result)
+    -> config:Workspace.config
+    -> keeper_name:string
+    -> commit:
+         (expected_revision:int option
+          -> range_id:Keeper_memory_os_current.durable_range_id
+          -> Keeper_librarian.input
+          -> bool)
+    -> (outcome, error) result
+
   val reset_process_state : unit -> unit
 end

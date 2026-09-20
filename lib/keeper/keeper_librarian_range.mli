@@ -14,7 +14,9 @@
     the Keeper Owner runs one child turn at a time. *)
 
 type range =
-  { start_atom : int
+  { history_start_boundary_line : int
+      (** First boundary row in the selected history generation. *)
+  ; start_atom : int
   ; end_atom : int  (** Exclusive. Greater than [start_atom]. *)
   ; last_atom_digest : string
       (** Of atom [end_atom - 1], as the line that is the cut point states it

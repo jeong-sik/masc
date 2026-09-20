@@ -461,7 +461,11 @@ let test_slice_returns_the_atoms_of_the_range () =
     [ message ~role:Types.System "pinned"; user "u0"; assistant "a1"; tool; user "u2" ]
   in
   let range : Range.range =
-    { Range.start_atom = 1; end_atom = 3; last_atom_digest = digest_of saved 2 }
+    { Range.history_start_boundary_line = 1
+    ; start_atom = 1
+    ; end_atom = 3
+    ; last_atom_digest = digest_of saved 2
+    }
   in
   check int "the assistant, its tool result, and the next user message" 3
     (List.length (Range.slice saved range));
@@ -486,7 +490,11 @@ let test_slice_trusts_the_caller_to_pass_the_same_history () =
     [ message ~role:Types.System "pinned"; user "x0"; assistant "x1"; tool; user "x2" ]
   in
   let range : Range.range =
-    { Range.start_atom = 1; end_atom = 3; last_atom_digest = digest_of saved 2 }
+    { Range.history_start_boundary_line = 1
+    ; start_atom = 1
+    ; end_atom = 3
+    ; last_atom_digest = digest_of saved 2
+    }
   in
   check bool "the two histories differ at the atom the range ends on" true
     (not (String.equal (digest_of other 2) range.Range.last_atom_digest));

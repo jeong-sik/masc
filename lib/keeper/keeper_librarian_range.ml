@@ -6,7 +6,8 @@ module P = Keeper_librarian_progress
 module Window = Runtime_model_input_tail_window
 
 type range =
-  { start_atom : int
+  { history_start_boundary_line : int
+  ; start_atom : int
   ; end_atom : int
   ; last_atom_digest : string
   }
@@ -190,8 +191,14 @@ let select ~trace_id ~lines ~progress ~messages extent =
        let boundary_lines_seen = complete_line_count lines in
        let _labelled, atom_count = Window.annotate messages in
        let digest_at = Window.atom_opening_digest messages in
+       let current_history = current_history_lines own in
+       let history_start_boundary_line =
+         match current_history with
+         | (line, _) :: _ -> Some line
+         | [] -> None
+       in
        let cuts =
-         current_history_lines own
+         current_history
          |> List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written)
        in
        (* Row 3c: a restart line beyond the count the progress file holds was
@@ -242,7 +249,18 @@ let select ~trace_id ~lines ~progress ~messages extent =
           (match chosen with
            | None -> Nothing_to_read
            | Some (end_atom, last_atom_digest) ->
-             Read { range = { start_atom; end_atom; last_atom_digest }; boundary_lines_seen })))
+             (match history_start_boundary_line with
+              | None -> Nothing_to_read
+              | Some history_start_boundary_line ->
+                Read
+                  { range =
+                      { history_start_boundary_line
+                      ; start_atom
+                      ; end_atom
+                      ; last_atom_digest
+                      }
+                  ; boundary_lines_seen
+                  }))))
 ;;
 
 let progress_after ~trace_id = function

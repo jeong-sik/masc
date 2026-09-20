@@ -213,7 +213,8 @@ let test_agent_core_handoff_retains_pending_official_evidence () =
     ~trace_id
     (fun ~meta:_ _trigger ->
       incr attempts;
-      if !attempts = 1 then raise Exit);
+      if !attempts = 1 then raise Exit;
+      Queue_refresh.Entered);
   Queue_refresh.forget_turn
     ~base_path:config.Workspace.base_path
     ~keeper_name;

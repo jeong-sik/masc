@@ -12,11 +12,13 @@ type attempt_state =
   | Pending_retire_after_attempt
   | Attempted of policy
 
+type runtime_entry = Not_entered | Entered
+
 type remembered =
   { trace_id : string
   ; identity : unit ref
   ; attempt_state : attempt_state
-  ; process : meta:Keeper_meta_contract.keeper_meta -> Keeper_librarian_runtime.trigger -> unit
+  ; process : meta:Keeper_meta_contract.keeper_meta -> Keeper_librarian_runtime.trigger -> runtime_entry
   }
 
 let remembered : (string * remembered) list Atomic.t = Atomic.make []
@@ -49,21 +51,23 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
     (match evidence.attempt_state, sources_changed with
      | Attempted policy, false when policy_equal policy (policy_of_meta meta) -> ()
      | Pending, _ | Pending_retire_after_attempt, _ | Attempted _, _ ->
-       evidence.process ~meta trigger;
-       (* Unit return only proves an attempt. In particular run_best_effort can
-          return without committing. Exceptions, including cancellation, leave
-          evidence pending; a newer turn arriving during this call stays dirty. *)
-       Stdlib.Mutex.protect mu (fun () ->
-         match List.assoc_opt key (Atomic.get remembered) with
-         | Some latest when latest.identity == evidence.identity ->
-           (match latest.attempt_state with
-            | Pending_retire_after_attempt ->
-              Atomic.set remembered (List.remove_assoc key (Atomic.get remembered))
-            | Pending | Attempted _ ->
-              Atomic.set remembered
-                ( (key, { latest with attempt_state = Attempted (policy_of_meta meta) })
-                :: List.remove_assoc key (Atomic.get remembered) ))
-         | Some _ | None -> ()));
+       (match evidence.process ~meta trigger with
+        | Not_entered -> ()
+        | Entered ->
+          (* Runtime entry records an attempt, not extraction or commit success.
+             Pre-entry refusal and exceptions keep handoff evidence pending;
+             an in-flight replacement remains owned by its newer identity. *)
+          Stdlib.Mutex.protect mu (fun () ->
+            match List.assoc_opt key (Atomic.get remembered) with
+            | Some latest when latest.identity == evidence.identity ->
+              (match latest.attempt_state with
+               | Pending_retire_after_attempt ->
+                 Atomic.set remembered (List.remove_assoc key (Atomic.get remembered))
+               | Pending | Attempted _ ->
+                 Atomic.set remembered
+                   ((key, { latest with attempt_state = Attempted (policy_of_meta meta) }) ::
+                    List.remove_assoc key (Atomic.get remembered)))
+            | Some _ | None -> ())));
     true
   | Some _ | None -> false
 

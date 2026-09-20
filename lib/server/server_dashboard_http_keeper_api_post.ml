@@ -915,8 +915,9 @@ let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event 
     (Printf.sprintf "dashboard:fleet-composite:%s" config.base_path);
   match runtime_event with
   | Some event ->
-      (* The caller only re-reads the keeper; a prefix left undropped shows up
-         in the refresh warning, and the next read rebuilds it. *)
+      (* See #37175: this response reports the keeper, not the caches. A prefix
+         the refresh could not drop is warned about there and rebuilt by the next
+         read; the lifecycle listener is the caller that has to act on it. *)
       ignore
         (refresh_keeper_execution_surfaces ~config ~name event
           : Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh)
@@ -1641,6 +1642,9 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             directive;
           (match plain_directive with
            | Plain_pause ->
+             (* See #37175: this response reports the keeper, not the caches. A prefix
+                the refresh could not drop is warned about there and rebuilt by the next
+                read; the lifecycle listener is the caller that has to act on it. *)
              ignore
                (refresh_keeper_execution_surfaces
                   ~config

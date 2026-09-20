@@ -392,13 +392,15 @@ let candidate
   =
   let runtime = Runtime.get_runtime_by_id runtime_id in
   let lane = lane_for ~runtime_id runtime in
+  let marks = Runtime.context_marks_of_runtime_id runtime_id in
   let parts = select_parts ~runtime_id ~records_read readings in
   let carried =
     match lane with
     | Error _ -> None
     | Ok () ->
-      (* The same front the turn driver composes from: the pair's ledger
-         while this history holds its positions, else the seed the newest
+      (* Apply the driver's boundary policy to a local value; the Table
+         remains the observation the next real turn will read. If this
+         history no longer holds its positions, use the seed the newest
          completed Agent Core record on the trace gives every candidate alike.
          The forecast only reads: a ledger that does not hold is passed over
          here and dropped by the turn driver's next composition. *)
@@ -407,7 +409,18 @@ let candidate
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
         | Some ledger when Keeper_model_input_ledger.holds ~digest_at ledger ->
-          Keeper_carried_front.of_ledger ledger, ledger.Keeper_model_input_ledger.total_tokens
+          let projected =
+            match marks with
+            | None -> ledger
+            | Some marks ->
+              (match Keeper_carried_range.at_turn_boundary ~marks ledger with
+               | Keeper_carried_range.Unchanged _ -> ledger
+               | Keeper_carried_range.Evicted { first_atom; front_digest; _ } ->
+                 (match Keeper_model_input_ledger.move_front ledger ~first_atom ~front_digest with
+                  | Some projected -> projected
+                  | None -> ledger))
+          in
+          Keeper_carried_front.of_ledger projected, ledger.Keeper_model_input_ledger.total_tokens
         | Some _ | None -> seed, None
       in
       Some
@@ -424,7 +437,7 @@ let candidate
   in
   { runtime_id
   ; lane
-  ; marks = Runtime.context_marks_of_runtime_id runtime_id
+  ; marks
   ; parts
   ; history_atoms
   ; carried

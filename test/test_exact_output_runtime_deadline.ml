@@ -51,7 +51,8 @@ let ready target =
 let expected_plan ~connect ~body =
   let target : EO.declared_target =
     { target_ref = "openai-responses.probe"; provider_ref = "openai-responses"; model_id = "gpt-5.6-luna"
-    ; enable_thinking = None; connect_timeout_s = connect; body_timeout_s = body
+    ; enable_thinking = None; reasoning_effort = None
+    ; connect_timeout_s = connect; body_timeout_s = body
     ; api_key_env = Some "OPENAI_API_KEY" }
   in
   let snapshot =

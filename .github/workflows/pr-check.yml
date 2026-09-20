@@ -26,6 +26,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tla:
+    name: TLA model check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect spec changes
+        id: specs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --quiet "${BASE_SHA}" "${HEAD_SHA}" -- specs; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "No specs/** changes; TLC has nothing new to check."
+          else
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Run TLC for changed specs
+        if: steps.specs.outputs.changed == 'true'
+        run: bash scripts/tla-check.sh
+
   # The lint suite is one job on purpose. It used to be ~30 GitHub Actions
   # jobs, each paying its own checkout and apt setup, which queued whole PRs
   # for tens of minutes; scripts/ci/run-lint-suite.sh was written to collapse

@@ -2,6 +2,7 @@ type t =
   | Per_request
   | Conversation_cumulative
   | Usage_scope_unavailable
+[@@deriving enumerate]
 
 let to_string = function
   | Per_request -> "per_request"

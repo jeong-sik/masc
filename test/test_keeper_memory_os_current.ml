@@ -104,6 +104,144 @@ let require_some = function
   | None -> fail "expected current snapshot"
 ;;
 
+let memory_snapshot_readers =
+  [ "ordinary", (fun keepers_dir ->
+      Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+      |> Result.map (Option.map (fun (snapshot : Current.t) -> snapshot.revision)))
+  ; "source-bound", (fun keepers_dir ->
+      Masc.Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+      |> Result.map (Option.map (fun (snapshot : Masc.Keeper_memory_source_current.t) ->
+        snapshot.revision)))
+  ]
+;;
+
+let check_snapshot_revisions ~keepers_dir expected =
+  List.iter (fun (store, read) ->
+    match read keepers_dir with
+    | Ok revision -> check (option int) store expected revision
+    | Error detail -> failf "%s: %s" store detail) memory_snapshot_readers
+;;
+
+let check_snapshot_read_errors ~keepers_dir =
+  List.iter (fun (store, read) ->
+    check bool (store ^ " preserves the read failure") true
+      (Result.is_error (read keepers_dir))) memory_snapshot_readers
+;;
+
+let with_readable_memory_stores f =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  let module Source = Masc.Keeper_memory_source_current in
+  let source : Source.t =
+    { revision = 1; updated_at = 200.; trace_id = "trace"; facts = []; invalidations = [] }
+  in
+  Out_channel.with_open_bin (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper")
+    (fun channel -> output_string channel (Yojson.Safe.to_string (Source.to_json source)));
+  check_snapshot_revisions ~keepers_dir (Some 1);
+  f keepers_dir
+;;
+
+let test_snapshot_reads_preserve_missing_directories () =
+  with_temp_keepers @@ fun parent ->
+  check_snapshot_revisions ~keepers_dir:(Filename.concat parent "fresh/keepers") None
+;;
+
+let test_snapshot_reads_preserve_missing_files () =
+  with_temp_keepers @@ fun keepers_dir ->
+  check_snapshot_revisions ~keepers_dir None
+;;
+
+let test_snapshot_reads_follow_the_writer_directory_alias () =
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let alias = Filename.concat keepers_dir "directory-alias" in
+  Unix.symlink keepers_dir alias;
+  Fun.protect ~finally:(fun () -> Sys.remove alias) (fun () ->
+    check_snapshot_revisions ~keepers_dir:alias (Some 1))
+;;
+
+let test_snapshot_reads_preserve_file_aliases () =
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let paths =
+    [ Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ; Masc.Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ]
+  in
+  List.iter (fun path ->
+    let target = path ^ ".target" in
+    Unix.rename path target;
+    Unix.symlink target path) paths;
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let test_snapshot_reads_reject_non_directory_parents () =
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let file = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  check_snapshot_read_errors ~keepers_dir:file;
+  check_snapshot_read_errors ~keepers_dir:(Filename.concat file "child");
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let with_denied_mode path mode f =
+  let previous = (Unix.stat path).Unix.st_perm in
+  Unix.chmod path mode;
+  Fun.protect ~finally:(fun () -> Unix.chmod path previous) f
+;;
+
+let test_snapshot_reads_preserve_parent_permission_failure () =
+  (* Root bypasses this OS permission check; do not count it as exercised. *)
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  with_denied_mode keepers_dir 0o600 (fun () ->
+    (match Unix.stat path with
+     | exception Unix.Unix_error (Unix.EACCES, _, _) -> ()
+     | _ -> fail "fixture must deny parent-directory search");
+    check_snapshot_read_errors ~keepers_dir);
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let test_snapshot_reads_preserve_leaf_permission_failure () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let ordinary = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let source =
+    Masc.Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  with_denied_mode ordinary 0o000 (fun () ->
+    with_denied_mode source 0o000 (fun () ->
+      check_snapshot_read_errors ~keepers_dir));
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let with_memory_read_fs fs test () =
+  let previous = Fs_compat.get_fs_opt () in
+  let install = function
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  install fs;
+  Fun.protect ~finally:(fun () -> install previous) (fun () ->
+    check bool "requested filesystem branch is active"
+      (Option.is_some fs) (Fs_compat.has_fs ());
+    test ())
+;;
+
+let in_memory_read_eio test () =
+  Eio_main.run (fun env ->
+    with_memory_read_fs (Some (Eio.Stdenv.fs env)) test ())
+;;
+
+let snapshot_read_cases =
+  [ "fresh directories are absent", test_snapshot_reads_preserve_missing_directories
+  ; "missing files are absent", test_snapshot_reads_preserve_missing_files
+  ; "directory aliases remain readable", test_snapshot_reads_follow_the_writer_directory_alias
+  ; "file aliases remain readable", test_snapshot_reads_preserve_file_aliases
+  ; "non-directory parents are errors", test_snapshot_reads_reject_non_directory_parents
+  ; "parent permission failure is an error", test_snapshot_reads_preserve_parent_permission_failure
+  ; "leaf permission failure remains an error", test_snapshot_reads_preserve_leaf_permission_failure
+  ]
+;;
+
 let fact_ids facts =
   List.map Types.memory_id facts
 ;;
@@ -1964,6 +2102,12 @@ let () =
       , [ test_case "a commit parses and prints on the pool" `Quick
             test_a_commit_parses_and_prints_on_the_pool
         ] )
+    ; ( "snapshot read failures"
+      , List.map (fun (name, test) -> test_case name `Quick (with_memory_read_fs None test))
+          snapshot_read_cases )
+    ; ( "snapshot read failures Eio"
+      , List.map (fun (name, test) -> test_case name `Quick (in_memory_read_eio test))
+          snapshot_read_cases )
     ; ( "commit notification"
       , [ test_case "all writers notify outside locks" `Quick test_commit_notifications_follow_all_writers_outside_locks
         ; test_case "snapshot authority independent of journal" `Quick test_commit_notifications_do_not_depend_on_journal

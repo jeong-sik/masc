@@ -20,6 +20,22 @@ template_variables: [working_context, current_memory, conversation_history, coun
 지금 막힌 일과 관련이 적다는 이유만으로 상시 책임이나 유용한 교훈을 버리지
 마세요. 목표 항목 수는 없습니다. 선택한 기억은 이후 턴에 그대로 전달됩니다.
 
+## 기존 기억의 출처와 근거
+
+`origin.kind`의 `authored`는 Keeper의 명시적 기억 쓰기, `injected`는 Librarian
+추출을 뜻합니다. `basis.kind`가 `observed`이면 관측한 기억이며,
+`basis.board`는 Board 글·댓글 출처, `board`가 없으면 대화 출처입니다.
+작성 경로와 출처 참조는 내용의 진위나 원본의 현재 유효성을 보증하지 않습니다.
+`derived`의 `derivations`는 전제 ID 목록들을 담습니다. 각 목록은 독립된 근거
+경로이며, 그 안의 모든 전제가 현재 기억에 있을 때 그 경로가 뒷받침합니다.
+참조는 같은 입력의 짧은 ID(m1 등)입니다.
+`null`은 그 전제가 현재 기억에 없다는 뜻이며, ID를 지어내거나 빈자리를 무시하지 마세요.
+다른 경로가 살아 있으면 일부 전제가 없는 경로도 설명을 위해 남아 있을 수 있습니다.
+기억을 삭제·흡수할 때 남은 사실의 유일한 근거를 함께 없애는지 살피세요.
+`origin`·`basis` 객체를 `new_claims`에 복사하지 않습니다. 새 claim도 해당 Board
+글·댓글을 근거로 삼으면 그 출처 ID를 기존 출력 필드 `board_post_id`·
+`board_comment_id`에 적을 수 있습니다. 묶는다는 이유만으로 출처를 물려주지 마세요.
+
 ## 유지·삭제·교정
 
 - **바뀌는 것만 적습니다.** 삭제할 기억과 새로 쓸 claim만 출력하세요.

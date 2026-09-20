@@ -1501,6 +1501,7 @@ let rec start_keepalive
           (fun () ->
              run_heartbeat_loop
                ~proactive_warmup_sec
+               ~registry_entry:reg
                ctx
                live_meta
                stop

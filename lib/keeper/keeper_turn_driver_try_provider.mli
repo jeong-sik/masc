@@ -147,6 +147,11 @@ type try_provider_ctx =
             summary of it. Never invoked when the projection refuses: the turn
             carries a typed budget error instead, and reporting a cut that was
             never dispatched would fabricate evidence. *)
+  ; on_response_observed_model_input :
+      (Turn_record.response_observed_model_input -> unit) option
+        (** Called only when [AfterTurn] joins a typed provider response to the
+            exact Agent Core request range that produced it. Later unanswered
+            attempts do not replace this fact. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

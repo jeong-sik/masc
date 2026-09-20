@@ -177,6 +177,8 @@ type try_provider_ctx =
        -> Runtime_model_input_tail_window.window_observation
        -> unit)
         option
+  ; on_response_observed_model_input :
+      (Turn_record.response_observed_model_input -> unit) option
   ; (* Event bus *)
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -729,10 +731,10 @@ let compose_carried_model_input
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
-      (* A persisted seed is evidence for the range it names. Composition
-         consumes that evidence; it does not reinterpret the prior outcome as
-         a size refusal. The next refusal is answered by the in-turn ladder,
-         which owns any further move toward the newest atom. *)
+      (* A response-observed persisted seed is evidence for the range it names.
+         Composition consumes that evidence; it does not reinterpret the prior
+         outcome as a size refusal. The next refusal is answered by the in-turn
+         ladder, which owns any further move toward the newest atom. *)
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -1289,6 +1291,23 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
               | Agent_core.Hooks.AfterTurn { response; _ } ->
                 (match !last_request with
                  | Some { request; digest_at } ->
+                   (match request.Keeper_model_input_ledger.ends with
+                    | Keeper_model_input_ledger.Carried_atoms
+                        { front_digest; _ } ->
+                      Option.iter
+                        (fun observe ->
+                           observe
+                             { Turn_record.runtime_profile = ctx.runtime_id
+                             ; window =
+                                 { transmitted_atoms =
+                                     request.atom_count - request.first_atom
+                                 ; total_atoms = request.atom_count
+                                 ; measurement = Turn_record.Wire_shape
+                                 ; front_atom_digest = front_digest
+                                 }
+                             })
+                        ctx.on_response_observed_model_input
+                    | Keeper_model_input_ledger.No_atom_carried -> ());
                    let usage =
                      Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->
@@ -2043,15 +2062,16 @@ let evict_at_turn_boundary ~keeper_name ~runtime_id ~context_marks ledger =
     (match !ledger with
      | None -> ()
      | Some current ->
-       (match Keeper_carried_range.at_turn_boundary ~marks current with
+       let projected, step = Keeper_carried_range.apply_turn_boundary ~marks current in
+       ledger := Some projected;
+       (match step with
         | Keeper_carried_range.Unchanged _ -> ()
-        | Keeper_carried_range.Evicted { first_atom; front_digest; _ } as step ->
-          if move_ledger_front ledger ~first_atom ~front_digest then
-             Log.Keeper.info
-               ~keeper_name
-               "model input carried range evicted runtime=%s %s"
-               runtime_id
-               (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
+        | Keeper_carried_range.Evicted _ ->
+          Log.Keeper.info
+            ~keeper_name
+            "model input carried range evicted runtime=%s %s"
+            runtime_id
+            (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
 ;;
 
 let run_try_provider_with_carried_range_eviction

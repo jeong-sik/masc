@@ -506,25 +506,30 @@ let candidate_provenance (provenance : Partition.exact_provenance) :
   }
 ;;
 
-let attempt_provenance_of_reason = function
-  | Partition.Exact_execution_quarantined (Partition.Bound provenance) ->
+let attempt_provenance_of_progress = function
+  | Partition.Bound provenance ->
     Some (candidate_provenance provenance)
-  | Partition.Exact_execution_quarantined
-      (Partition.Advancing
-         { execution_anchor = Some failed; last_from = _; next = _ }) ->
+  | Partition.Advancing
+      { execution_anchor = Some failed; last_from = _; next = _ } ->
     Some (candidate_provenance failed)
-  | Partition.Exact_execution_quarantined
-      (Partition.Advancing
-         { execution_anchor = None; last_from = _; next = _ }) ->
+  | Partition.Advancing
+      { execution_anchor = None; last_from = _; next = _ } ->
     None
-  | Partition.Exact_execution_quarantined Partition.Unbound
+  | Partition.Unbound -> None
+;;
+
+let attempt_provenance_of_reason = function
+  | Partition.Exact_execution_quarantined progress
+  | Partition.Domain_output_invalid { progress = Some progress; _ }
+  | Partition.Execution_provenance_mismatch { progress = Some progress; _ } ->
+    attempt_provenance_of_progress progress
   | Partition.Candidate_membership_conflict _
   | Partition.Durable_partition_invariant _
   | Partition.Exact_setup_unavailable _
   | Partition.Exact_flow_replayed
   | Partition.Exact_execution_terminal
-  | Partition.Domain_output_invalid _
-  | Partition.Execution_provenance_mismatch _
+  | Partition.Domain_output_invalid { progress = None; _ }
+  | Partition.Execution_provenance_mismatch { progress = None; _ }
   | Partition.Unexpected_worker_failure _ -> None
 ;;
 
@@ -632,6 +637,12 @@ let preserve_durable_progress partition fallback =
   | Some ((Partition.Bound _ | Partition.Advancing _) as progress) ->
     Partition.Exact_execution_quarantined progress
   | Some Partition.Unbound | None -> fallback
+;;
+
+let classified_progress partition =
+  match running_progress partition with
+  | Some ((Partition.Bound _ | Partition.Advancing _) as progress) -> Some progress
+  | Some Partition.Unbound | None -> None
 ;;
 
 type completion_projection =
@@ -857,19 +868,33 @@ let execution_disposition partition = function
       { cause; failed; next; evidence = _ } ->
     Execution_blocked
       (before_advance_failure_reason partition ~cause ~failed ~next)
-  | Exact_flow.Exact_execution_failed _ ->
+  | Exact_flow.Cli_slots_exhausted
+      { prior_error = Some (Exact_flow.Domain_output_invalid detail)
+      ; failures = _
+      } ->
+    Execution_blocked
+      (Partition.Domain_output_invalid
+         { detail; progress = classified_progress partition })
+  | Exact_flow.Cli_slots_exhausted
+      { prior_error = Some (Exact_flow.Provenance_mismatch detail)
+      ; failures = _
+      } ->
+    Execution_blocked
+      (Partition.Execution_provenance_mismatch
+         { detail; progress = classified_progress partition })
+  | Exact_flow.Providers_exhausted _
+  | Exact_flow.Cli_slots_exhausted _
+  | Exact_flow.Flow_bookkeeping_failed _ ->
     Execution_blocked
       (preserve_durable_progress partition Partition.Exact_execution_terminal)
   | Exact_flow.Provenance_mismatch detail ->
     Execution_blocked
-      (preserve_durable_progress
-         partition
-         (Partition.Execution_provenance_mismatch detail))
+      (Partition.Execution_provenance_mismatch
+         { detail; progress = classified_progress partition })
   | Exact_flow.Domain_output_invalid detail ->
     Execution_blocked
-      (preserve_durable_progress
-         partition
-         (Partition.Domain_output_invalid detail))
+      (Partition.Domain_output_invalid
+         { detail; progress = classified_progress partition })
 ;;
 
 let confirm_exact_transition latest_partition operation = function

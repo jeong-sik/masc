@@ -1239,6 +1239,12 @@ let run_blocks_internal
   with
   | Error _ as err -> err
   | Ok () ->
+  (* A progress observer cannot enable SSE when the resolved model declares it unsupported. *)
+  let on_event =
+    if (provider_caps_of_config config.provider_cfg).supports_native_streaming
+    then on_event
+    else None
+  in
   let config = match config.recovery_view with
     | None -> config
     | Some view -> {config with model_input_projection=Some

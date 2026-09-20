@@ -166,7 +166,7 @@ val refresh_keeper_execution_surfaces :
   config:Workspace_utils.config ->
   name:String.t ->
   Keeper_lifecycle_events.lifecycle_event ->
-  unit
+  Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh
 (** Re-read the keeper meta for [name] and update derived caches. *)
 
 (** {1 Action handlers} *)

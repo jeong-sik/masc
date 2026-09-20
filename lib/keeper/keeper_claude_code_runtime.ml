@@ -399,8 +399,7 @@ let recovery_failure_of_client_error = function
 ;;
 
 (* The CLI frame carries Anthropic exclusive counts; the shared constructor
-   produces the canonical inclusive api_usage. One mapping for the result
-   frame's total and for the sum a host stop carries. *)
+   produces the canonical inclusive api_usage without changing its scope. *)
 let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
   Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
     ~input_tokens:usage.input_tokens
@@ -1118,12 +1117,20 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            let latency_ms =
              Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)
            in
+           let usage, usage_scope =
+             match turn.usage with
+             | Some (Runtime_claude_code.Latest_request usage) ->
+               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Per_request
+             | Some (Runtime_claude_code.Turn_total usage) ->
+               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Turn_total
+             | None -> None, Runtime_usage_scope.Usage_scope_unavailable
+           in
            let response =
              { Agent_core.Types.id = turn.turn_id
              ; model = turn.model
              ; stop_reason = EndTurn
              ; content = [ Text turn.text ]
-             ; usage = Option.map api_usage_of_turn_usage turn.usage
+             ; usage
              ; telemetry =
                  Some
                    { Agent_core.Types.default_inference_telemetry with
@@ -1175,10 +1182,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                ~capture
                ~attempt_details_source:"claude_code"
                ~agent_core_internal_runtime_allowed:false
-               ~usage_scope:
-                 (if Option.is_some turn.usage
-                  then Runtime_usage_scope.Per_request
-                  else Runtime_usage_scope.Usage_scope_unavailable)
+               ~usage_scope
                ()
            in
            Ok

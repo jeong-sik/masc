@@ -15,6 +15,7 @@ from render_configs import (  # noqa: E402
     composition_skill_names,
     instruction_skill_names,
     keeper_toml,
+    provider_parallel_suppression_contract,
     render_arm,
 )
 
@@ -82,7 +83,7 @@ def test_arm_b_skills_off():
     assert "[keeper]" in keeper and "skills.names = []" in keeper
     rt = (out / "runtime.toml").read_text()
     assert '[fusion]' in rt and "enabled = false" in rt
-    assert 'default = "anthropic.claude-fable-5"' in rt
+    assert 'default = "claude.claude-fable-5"' in rt
     assert "[exec.ssh.endpoints.local]" in rt
     assert 'reasoning-effort = "high"' in rt
 
@@ -166,7 +167,7 @@ def test_absent_task_skills_keep_the_existing_render(tmp_path):
 def test_parallel_arm_sets_request_policy_without_changing_model_facts(arm):
     root = render_arm(arm, runtime_id="anthropic.claude-fable-5", effort="high")
     config = tomllib.loads((root / "runtime.toml").read_text())
-    binding = config["anthropic"]["claude-fable-5"]
+    binding = config["claude"]["claude-fable-5"]
     assert binding["disable-parallel-tool-use"] is (not ARMS[arm]["parallel"])
     capabilities = config["models"]["claude-fable-5"]["capabilities"]
     assert "supports-parallel-tool-calls" not in capabilities
@@ -275,13 +276,35 @@ def openrouter_lists(monkeypatch):
     return asked
 
 
+def test_nonparallel_openrouter_arm_is_refused_before_remote_limit_lookup(
+        monkeypatch, tmp_path):
+    import render_configs
+
+    def unexpected_lookup(_model):
+        raise AssertionError("invalid provider policy reached the network lookup")
+
+    monkeypatch.setattr(render_configs, "openrouter_limits", unexpected_lookup)
+    assert provider_parallel_suppression_contract("openrouter") is False
+    with pytest.raises(ValueError, match="no catalog-declared suppression contract"):
+        render_arm("b", runtime_id="openrouter.deepseek/deepseek-v4.1-flash",
+                   effort="low", out_root=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_absent_provider_catalog_row_does_not_admit_parallel_suppression():
+    assert provider_parallel_suppression_contract("not-in-the-catalog") is False
+    assert provider_parallel_suppression_contract("anthropic") is False
+    assert provider_parallel_suppression_contract("claude") is True
+    assert provider_parallel_suppression_contract("openai-responses") is True
+
+
 def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_lists):
     # runtime_toml.ml refuses a model id outside [A-Za-z0-9._-]+, and the
     # OpenRouter wire id carries a vendor slash. Rendering it verbatim made
     # the whole config fail to load ("model id must match"), which surfaced
     # as masc_keeper_up answering "no valid initialized runtime" — measured
     # 2026-09-12 against release 0.35.8.
-    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
+    out = render_arm("e", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
     rt = (out / "runtime.toml").read_text()
     assert 'default = "openrouter.z-ai-glm-4.7-flash"' in rt
     assert '[models."z-ai-glm-4.7-flash"]' in rt
@@ -297,7 +320,7 @@ def test_the_router_lane_inherits_its_ladder_instead_of_declaring_one(
     # benchmark makes up about someone else's API. The router publishes one
     # contract for everything it serves, so the catalog carries it
     # (Capabilities.openrouter_capabilities) and this lane inherits it.
-    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
+    out = render_arm("e", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
     rt = (out / "runtime.toml").read_text()
     # Pin the capability block present first: a render that dropped it would
     # satisfy the absences below without inheriting anything.
@@ -325,7 +348,7 @@ def test_no_lane_writes_a_ladder_of_its_own():
     for runtime_id, model_alias in (
             ("anthropic.claude-fable-5", "claude-fable-5"),
             ("openai.gpt-6-astra", "gpt-6-astra")):
-        provider = runtime_id.split(".", 1)[0]
+        provider = effective_runtime_id(runtime_id).split(".", 1)[0]
         out = render_arm("b", runtime_id=runtime_id, effort="high")
         rt = (out / "runtime.toml").read_text()
         assert f'[{provider}."{model_alias}"]' in rt, runtime_id
@@ -339,9 +362,13 @@ def test_effective_runtime_id_is_what_masc_resolves():
     assert effective_runtime_id("openrouter.z-ai/glm-4.7-flash") == (
         "openrouter.z-ai-glm-4.7-flash"
     )
-    # A model with no slash is untouched, so the existing lanes keep their ids.
+    # CLI-facing aliases are normalized to the catalog provider that MASC
+    # actually resolves; the binding id remains unchanged.
     assert effective_runtime_id("anthropic.claude-sonnet-5") == (
-        "anthropic.claude-sonnet-5"
+        "claude.claude-sonnet-5"
+    )
+    assert effective_runtime_id("openai.gpt-6-astra") == (
+        "openai-responses.gpt-6-astra"
     )
     for bad in ("no-dot", ".leading", "trailing."):
         try:
@@ -351,12 +378,37 @@ def test_effective_runtime_id_is_what_masc_resolves():
         raise AssertionError(f"{bad!r} should be rejected, not guessed at")
 
 
+@pytest.mark.parametrize(
+    ("input_id", "runtime_provider", "protocol", "endpoint", "key_env"),
+    (
+        ("anthropic.claude-fable-5", "claude", "messages-http",
+         "https://api.anthropic.com", "ANTHROPIC_API_KEY"),
+        ("openai.gpt-6-astra", "openai-responses", "openai-compatible-http",
+         "https://api.openai.com", "OPENAI_API_KEY"),
+    ),
+)
+def test_provider_alias_renders_the_catalog_runtime_identity(
+        input_id, runtime_provider, protocol, endpoint, key_env):
+    config = tomllib.loads(
+        (render_arm("b", input_id, "high") / "runtime.toml").read_text())
+    assert config["runtime"]["default"].startswith(f"{runtime_provider}.")
+    assert config["providers"] == {
+        runtime_provider: {
+            "display-name": "Bench provider",
+            "protocol": protocol,
+            "endpoint": endpoint,
+            "credentials": {"type": "env", "key": key_env},
+        },
+    }
+
+
 def test_http_lanes_declare_tool_calling():
     # `masc runtime-verify` refuses a binding without tools-support, so the
     # offline readiness check answered tools_not_declared for lanes that do
     # deliver tools (the Agent_core arm reads the catalog capability instead).
-    for runtime_id in ("anthropic.claude-sonnet-5", "openrouter.z-ai/glm-4.7-flash"):
-        rt = (render_arm("b", runtime_id=runtime_id, effort="high") / "runtime.toml")
+    for arm, runtime_id in (("b", "anthropic.claude-sonnet-5"),
+                            ("e", "openrouter.z-ai/glm-4.7-flash")):
+        rt = (render_arm(arm, runtime_id=runtime_id, effort="high") / "runtime.toml")
         assert "tools-support = true" in rt.read_text(), runtime_id
 
 
@@ -377,7 +429,7 @@ def test_an_openrouter_lane_declares_the_window_and_output_budget(openrouter_lis
     # the catalog: masc_keeper_up answered "Model setup required" (2026-09-17).
     import tomllib
 
-    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high",
+    out = render_arm("e", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high",
                      out_root=tmp_path)
     runtime = tomllib.loads((out / "runtime.toml").read_text())
     model = runtime["models"]["z-ai-glm-4.7-flash"]

@@ -59,7 +59,7 @@ The provider row says native. Twenty model rows under it say `/v1`.
 ### 1.2 The repair loop
 
 The same one-line declaration has been edited five times in five weeks:
-2026-07-20 (four overlay rows), 2026-08-04 (a tagged row), 2026-08-15 (base
+2026-07-20 (four rows), 2026-08-04 (a tagged row), 2026-08-15 (base
 catalog `deepseek-v4-flash`, #28748/#28749), 2026-08-17 (back to
 `ollama_think`), 2026-08-27 (to `reasoning_effort`, plus three more bindings).
 
@@ -188,14 +188,7 @@ of the two in code and the smaller one in configuration. It is preferred
 because the contradiction is in the catalog, and that is where it should be
 resolved.
 
-## 8. Deployment cleanup
-
-Older deployments declare the `/v1` truth per binding in
-`agent-core-models-overlay.toml`. Once a binary containing this catalog is
-deployed, those `thinking_control_format` overrides are redundant and should
-be removed; the provider row and resolved wire are then the only authority.
-
-## 9. Implementation summary
+## 8. Implementation summary
 
 Landed in #30974 and the change alongside this closeout.
 
@@ -222,9 +215,6 @@ Verification, against §6:
    `success`. The same lane had produced 54 zero-text turns before this.
 4. Native-path pins unchanged — `test_thinking_control_dialects` green without
    edits, including the glm-5.2 native `think` body assertion.
-
-The deployment cleanup in §8 is done for this deployment: the overlay no
-longer declares a thinking control for any row.
 
 One thing this does not close. The provider entry still declares
 `kind = "ollama"` and `request_path = "/api/chat"` while carrying an

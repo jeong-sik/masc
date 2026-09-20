@@ -379,6 +379,41 @@ function ExactPayload({ side, availability, value }: {
   `
 }
 
+function exactAnswerSource(run: ExactLaneRunRecord) {
+  const source = run.answerSource
+  if (source?.kind === 'vendor_system_one') {
+    return html` · 답변 출처 <code>Vendor System One · ${source.model}</code> · exact-flow receipt 없음`
+  }
+  if (source?.kind === 'cli_lane_slot') {
+    return html` · 답변 출처 <code>CLI · ${source.slotId}</code>`
+  }
+  if (source?.kind === 'exact_attempt') {
+    return html` · 답변 출처 <code>Exact · ${source.slotId}</code>`
+  }
+  if (
+    run.lane === 'board_attention_exact'
+    && (run.status === 'succeeded' || run.intendedStatus === 'succeeded')
+  ) {
+    return html` · 답변 출처 <code>원문 사용 불가</code>`
+  }
+  return run.selectedSlot === undefined
+    ? null
+    : html` · 선택 slot <code>${run.selectedSlot ?? '없음'}</code>`
+}
+
+function exactRunContractNote(lane: ExactLaneRunRecord['lane']) {
+  switch (lane) {
+    case 'workspace_curator_exact':
+      return '이 실행은 기록된 workspace inventory와 curator prompt를 사용합니다. 의미 검증이나 Keeper 기억 승격을 수행하지 않습니다.'
+    case 'librarian_exact':
+      return '이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.'
+    case 'hitl_auto_judge':
+      return '이 exact 실행은 기록된 HITL 요청만 판단하며 도구를 호출하지 않습니다.'
+    case 'board_attention_exact':
+      return '이 exact 실행은 기록된 Board 후보만 판단하며 도구를 호출하지 않습니다.'
+  }
+}
+
 // The listing carries no payloads, so opening a row is what fetches them. The
 // alternative — shipping every run's input and output with the list — is what
 // made this panel download 246 MB before it could draw a single line.
@@ -428,14 +463,16 @@ function ExactRunDetail({ runId }: { runId: string }) {
         <div class="ia-evi">
           <div class="ia-k"><${EvidenceBadge} kind="typed" /> Exact-output registry metadata</div>
           <p class="ia-note">
-            Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음
-            ${run.selectedSlot === undefined
-              ? null
-              : html` · 선택 slot <code>${run.selectedSlot ?? '미기록'}</code>`}
+            Admin-only 실제 typed 값
+            ${run.lane === 'librarian_exact' ? ' · Librarian exact에는 research RAW 입력 없음' : null}
+            ${exactAnswerSource(run)}
              ${run.lane === 'workspace_curator_exact'
                ? html` · Workspace <code>${run.actor}</code> · model-proposed; semantic verification not performed`
                : html` · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>`}
           </p>
+          ${run.code === undefined
+            ? null
+            : html`<p class="ia-err"><code>${run.code}</code>: ${run.detail}</p>`}
         </div>
         <div class="ia-tool-io">
           <${ExactPayload} side="input" availability=${run.payloadAvailability.input} value=${run.input.payload} />
@@ -465,9 +502,7 @@ function ExactRunDetail({ runId }: { runId: string }) {
         ${run.persistenceError === undefined
           ? null
           : html`<p class="ia-err">완료 의도 <code>${run.intendedStatus}</code> · persistence <code>${run.persistenceState}</code>: ${run.persistenceError}${run.intendedCode ? ` · ${run.intendedCode}: ${run.intendedDetail}` : ''}</p>`}
-        <p class="ia-note"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>${run.lane === 'workspace_curator_exact'
-          ? '이 실행은 기록된 workspace inventory와 curator prompt를 사용합니다. 의미 검증이나 Keeper 기억 승격을 수행하지 않습니다.'
-          : '이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.'}</p>
+        <p class="ia-note"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>${exactRunContractNote(run.lane)}</p>
         ${memoryEvidence === null
           ? null
           : html`<div class="ia-evi">
@@ -692,7 +727,7 @@ export function InternalAgentsMonitor() {
             <div class="ai-tablewrap">
               <table class="ai-table" data-testid="standalone-lane-matrix">
                 <thead>
-                  <tr><th>Lane</th><th>State</th><th>Admitted slots</th><th class="r">Running</th><th class="r">Retained</th><th class="r">Last terminal</th><th class="r">p50</th><th>Observed slots</th></tr>
+                  <tr><th>Lane</th><th>State</th><th>Admitted slots</th><th class="r">Running</th><th class="r">Retained</th><th class="r">Last terminal</th><th class="r">p50</th><th>Observed selected slots</th></tr>
                 </thead>
                 <tbody>
                   ${laneMatrix.lanes.map(lane => {

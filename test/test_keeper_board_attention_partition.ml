@@ -917,8 +917,14 @@ let test_provider_neutral_blocked_reason_codec () =
     [ "setup", P.Exact_setup_unavailable "lane admission unavailable"
     ; "replay", P.Exact_flow_replayed
     ; "terminal", P.Exact_execution_terminal
-    ; "domain", P.Domain_output_invalid "judgment schema rejected"
-    ; "provenance", P.Execution_provenance_mismatch "opaque identity mismatch"
+    ; ( "domain"
+      , P.Domain_output_invalid
+          { detail = "judgment schema rejected"; progress = None } )
+    ; ( "provenance"
+      , P.Execution_provenance_mismatch
+          { detail = "opaque identity mismatch"
+          ; progress = Some (P.Bound (provenance ()))
+          } )
     ; "worker", P.Unexpected_worker_failure "worker terminated unexpectedly"
     ]
   in

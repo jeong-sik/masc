@@ -191,6 +191,14 @@ require_not_contains docs/DASHBOARD-INTEGRATION.md '- `intervene`: mutating oper
 require_contains docs/spec/01-system-overview.md 'MASC의 현재 canonical front door는 3가지다.'
 require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator Read Visibility'
 
+# Glossary evidence and heartbeat names are semantic boundaries, not broad
+# synonyms: narrative notes are accepted evidence, while the Workspace write
+# is distinct from Keeper/transport liveness signals.
+require_contains docs/spec/00-glossary.md '**Workspace Heartbeat**'
+require_contains docs/spec/00-glossary.md '`keeper_heartbeat` SSE나 MCP·transport activity'
+require_contains docs/spec/00-glossary.md '`note:<text>`는 허용된 서술형 근거'
+require_not_contains docs/spec/00-glossary.md '설명 문장만으로 근거를 대신하지 않는다.'
+
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 0'
@@ -272,4 +280,3 @@ check_translation_shape README.md README.ko.md
 check_translation_shape docs/INSTALL.md docs/INSTALL.ko.md
 
 printf 'Doc truth OK: front-door docs and key specs are aligned with current repo truth\n'
-

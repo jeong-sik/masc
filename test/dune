@@ -14,6 +14,25 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_keeper_librarian_absorb_gate)
+ (modules test_keeper_librarian_absorb_gate)
+ (deps fixtures/librarian_statements_golden.json)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+; The reference cut (scripts/librarian/statements.py, the scorer of issue
+; #37079) must still write the golden the OCaml test above reads.
+(rule
+ (alias runtest-librarian-statements-golden)
+ (deps ../scripts/librarian/statements.py fixtures/librarian_statements_golden.json)
+ (action
+  (run python3 %{dep:../scripts/librarian/statements.py} --check
+   %{dep:fixtures/librarian_statements_golden.json})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-librarian-statements-golden)))
+
+(test
  (name test_librarian_continuity_report)
  (modules test_librarian_continuity_report)
  (libraries alcotest masc yojson digestif))
@@ -5254,6 +5273,7 @@
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
+(include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
 (include stanzas/test_tui_mermaid.inc)

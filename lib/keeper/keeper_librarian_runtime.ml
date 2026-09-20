@@ -594,12 +594,10 @@ let execute_exact_output_classified
     Ok (success.accepted, selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
     let terminal () = Error (Exact_execution_failed (exact_execution_error cause)) in
-    (* Only provider exhaustion may fall back to the cli walk; the
-       infrastructure causes keep their terminal (RFC
-       cli-runtimes-as-lane-slots, same split as the other lanes). *)
-    (match cause with
-     | Exact_output.Flow_candidates_exhausted _
-     | Exact_output.Flow_exact_execution_failed _ ->
+    (* The CLI tail follows the same advancement rule as HTTP successors;
+       input-specific and infrastructure failures keep their terminal. *)
+    (match Exact_output.flow_execution_terminal_kind cause with
+     | Exact_output.Advanceable_candidates_exhausted ->
        (match
           try_cli_slots
             ~keeper_id
@@ -616,13 +614,7 @@ let execute_exact_output_classified
             (with_cli_failure
                (Exact_execution_failed (exact_execution_error cause))
                cli_failure))
-     | Exact_output.Flow_attempt_already_started _
-     | Exact_output.Flow_attempt_start_failed _
-     | Exact_output.Flow_measurement_start_failed _
-     | Exact_output.Flow_before_measurement_dispatch_callback_failed _
-     | Exact_output.Flow_measurement_terminal_callback_failed _
-     | Exact_output.Flow_before_dispatch_callback_failed _
-     | Exact_output.Flow_before_advance_callback_failed _ -> terminal ())
+     | Exact_output.Non_advanceable_terminal -> terminal ())
   | Error
       (Exact_output.Flow_semantic_candidates_exhausted
          { rejections; _ }) ->
@@ -912,12 +904,27 @@ let run_best_effort
                 one fact of its own in that window ended the pass (masc
                 #32859). The decision itself has no such requirement: a fact it
                 never mentions is one it never saw. *)
+             (* An absorption the merged claim does not convey is not applied:
+                that memory stays current (RFC-librarian-absorb-gate). The
+                gate only narrows the list; without a key or an answer it is
+                the answer's list. *)
+             let absorbed =
+               Keeper_librarian_absorb_gate.run
+                 ~clock
+                 ~keeper_id
+                 ~facts:(match prompt_input.current with
+                   | None -> []
+                   | Some current -> current.facts)
+                 ~new_claims:selection.new_claims
+                 ~absorbed:selection.absorbed
+                 ()
+             in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
                  ~clock
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
-                 ~absorbed:selection.absorbed
+                 ~absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())

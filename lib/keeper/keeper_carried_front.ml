@@ -53,6 +53,23 @@ let composer_to_string = function
    official-client records resent 13 MB per candidate on Agent Core turn 4059,
    after 20 claude_code turns. Preserve that response evidence, subject to the
    same history-position check. *)
+(* A turn that carried its whole history names no front. Its opening atom is
+   the oldest one because nothing was skipped, not because a later turn may
+   start there, so reading it as a seed sends the next start back to the
+   beginning. [Runtime_execution.Codex_app_server] hands its list over whole
+   on every turn, so without this one Codex turn in a lane undoes the carried
+   front for every official-client start after it (#37350). A history short
+   enough to go whole loses nothing: seeding its oldest atom and seeding
+   nothing both carry everything. *)
+let carried_front_of_window (window : Turn_record.model_input_window) =
+  if window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
+  then None
+  else
+    Some
+      ( window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
+      , window.Turn_record.front_atom_digest )
+;;
+
 let of_records ~trace_id (records : Turn_record.t list) =
   List.fold_left
     (fun newest (record : Turn_record.t) ->
@@ -65,14 +82,10 @@ let of_records ~trace_id (records : Turn_record.t list) =
          (match newest with
           | Some (newest_turn, _) when newest_turn > turn -> newest
           | Some _ | None ->
-            let window = observed.Turn_record.window in
-            Some
-              ( turn
-              , { first_atom =
-                    window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
-                ; front_digest = window.Turn_record.front_atom_digest
-                ; source = Turn_record { turn }
-                } ))
+            (match carried_front_of_window observed.Turn_record.window with
+             | None -> newest
+             | Some (first_atom, front_digest) ->
+               Some (turn, { first_atom; front_digest; source = Turn_record { turn } })))
        | Some _ | None -> newest)
     None
     records

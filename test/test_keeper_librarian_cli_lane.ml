@@ -393,12 +393,153 @@ let test_cli_prompt_drift_is_not_reported_as_no_cli_declaration () =
          (Runtime.For_testing.classified_error_detail error))
 ;;
 
+(* A declared total deadline may end a successful response before its body
+   completes. The next API candidate must run before an optional CLI tail. *)
+let test_body_timeout_reaches_http_successor ~with_cli () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Prompt_registry.set_markdown_dir
+    (Masc_test_deps.source_path "config/prompts");
+  let keeper_id = if with_cli then "timeout-with-cli" else "timeout-without-cli" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let initial =
+    match Current.replace ~clock ~keepers_dir ~keeper_id ~expected_revision:None
+      ~now:1_000_000.
+      ~source:{ Current.kind = Current.Explicit_write; trace_id = "seed" }
+      ~facts:[current_a; current_b] () with
+    | Ok snapshot -> snapshot
+    | Error detail -> fail detail
+  in
+  let read_snapshot () =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> fail "the seeded Memory snapshot disappeared"
+    | Error detail -> fail detail
+  in
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let initial_bytes = Fs_compat.load_file snapshot_path in
+  let snapshot_at_successor = ref None in
+  let first = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Incomplete_reply {|{"choices":[|}) in
+  let second = Fixture.start_server ~sw ~net ~clock
+    ~on_request_before_reply:(fun () ->
+      let snapshot = read_snapshot () in
+      snapshot_at_successor := Some (Fs_compat.load_file snapshot_path, snapshot.revision))
+    (Fixture.Reply (Fixture.openai_response valid_selection_json)) in
+  let first_id = "librarian-body-timeout" in
+  let second_id = "librarian-http-successor" in
+  ignore (Fixture.publish_registry
+    ~cli_slot_ids:(if with_cli then [Fixture.cli_primary_runtime] else [])
+    ~lane_id:"librarian_exact" ~slot_ids:[first_id; second_id]
+    (Fixture.resolver_snapshot ~source:"librarian body-timeout successor"
+       ~body_timeouts:[first_id, 1.0]
+       [{ Fixture.id = first_id; base_url = first.base_url };
+        { Fixture.id = second_id; base_url = second.base_url }])
+    : Runtime_exact_output_registry.t);
+  let cli_calls = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    cli_calls := runtime_id :: !cli_calls;
+    Ok (Yojson.Safe.to_string valid_selection_json)
+  in
+  Runtime.run_best_effort ~trigger:Runtime.Queue_changed ~cli_runner:runner
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision)
+    (input ());
+  check int "the incomplete HTTP response was requested once" 1
+    (Fixture.post_count first);
+  check int "the next configured HTTP candidate was requested once" 1
+    (Fixture.post_count second);
+  check (list string) "HTTP successor answers before CLI" [] !cli_calls;
+  (match !snapshot_at_successor with
+   | Some (bytes, revision) ->
+     check string "no Memory write before successor response" initial_bytes bytes;
+     check int "no premature Memory revision" initial.revision revision
+   | None -> fail "the HTTP successor did not observe the pre-commit state");
+  let snapshot = read_snapshot () in
+  check int "one Memory commit after accepted HTTP successor output"
+    (initial.revision + 1) snapshot.revision;
+  check (list string) "accepted HTTP disposition was committed"
+    [current_a.claim]
+    (List.map (fun (fact : Memory.fact) -> fact.claim) snapshot.facts);
+  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+   | [Ok (Current.Journal_committed _);
+      Ok (Current.Journal_committed { source = { kind = Current.Librarian; _ }; _ })] -> ()
+   | _ -> fail "expected seed and one Librarian commit in the Memory journal");
+  Printf.printf
+    "BODY_DEADLINE_ADVANCE with_cli=%b api1=%d api2=%d cli=%d memory_revision=%d->%d\n%!"
+    with_cli (Fixture.post_count first) (Fixture.post_count second)
+    (List.length !cli_calls) initial.revision snapshot.revision
+;;
+
+let test_complete_domain_rejection_reaches_http_successor () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  let first = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response (`Assoc []))) in
+  let second = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response valid_selection_json)) in
+  ignore (Fixture.publish_registry
+    ~cli_slot_ids:[Fixture.cli_primary_runtime] ~lane_id:"librarian_exact"
+    ~slot_ids:["librarian-domain-rejection"; "librarian-http-successor"]
+    (Fixture.resolver_snapshot ~source:"librarian HTTP successor control"
+       ~body_timeouts:["librarian-domain-rejection", 1.0]
+       [{ Fixture.id = "librarian-domain-rejection"; base_url = first.base_url };
+        { Fixture.id = "librarian-http-successor"; base_url = second.base_url }])
+    : Runtime_exact_output_registry.t);
+  let cli_calls = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr cli_calls;
+    Ok (Yojson.Safe.to_string valid_selection_json)
+  in
+  let result = execute ~net ~clock ~base_path ~runner in
+  check int "control API1 returned a complete invalid domain answer" 1
+    (Fixture.post_count first);
+  check int "control API2 actually received the successor request" 1
+    (Fixture.post_count second);
+  check int "control accepted HTTP output before CLI" 0 !cli_calls;
+  match result with
+  | Ok ((_selection, output), slot) ->
+    check string "control selected the second HTTP candidate"
+      "librarian-http-successor" slot;
+    check bool "control HTTP answer passed the Librarian domain validator"
+      true (Yojson.Safe.equal output valid_selection_json);
+    Printf.printf "HTTP_SUCCESSOR_CONTROL api1=1 api2=1 cli=0 selected=%s\n%!" slot
+  | Error error -> fail (Runtime.For_testing.classified_error_detail error)
+;;
+
+(* Separate transport control before Exact projects the named deadline cause.
+   The Memory journal does not persist the typed HTTP status/timeout fields. *)
+let test_incomplete_reply_exposes_typed_body_deadline () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  let first = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Incomplete_reply {|{"choices":[|}) in
+  let module Http = Agent_core.Llm_provider.Http_client in
+  let result = Http.post_sync_once_with_evidence ~net ~clock
+    ~connect_timeout_s:Fixture.fixture_post_connect_timeout_seconds
+    ~body_timeout_s:1.0
+    ~url:(first.base_url ^ "/v1/chat/completions")
+    ~headers:["content-type", "application/json"] ~body:"{}" () in
+  check int "typed transport control sent one POST" 1 (Fixture.post_count first);
+  match result with
+  | Error (Http.Response_received_error
+             { status = 200; error = Http.TimeoutError { phase = Http.Wall_clock; _ } }) ->
+    Printf.printf "BODY_DEADLINE_CONTROL phase=response_received http_status=200 timeout_phase=wall_clock posts=1\n%!"
+  | Ok _ | Error _ -> fail "expected HTTP200 headers followed by typed total body deadline"
+;;
+
 let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
       , [ test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
           (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())
+      ; test_case "body deadline reaches HTTP successor and commits Memory" `Quick
+          (test_body_timeout_reaches_http_successor ~with_cli:false)
+      ; test_case "body deadline reaches HTTP successor before CLI" `Quick
+          (test_body_timeout_reaches_http_successor ~with_cli:true)
+      ; test_case "complete domain rejection reaches the same HTTP successor" `Quick
+          test_complete_domain_rejection_reaches_http_successor
+      ; test_case "incomplete HTTP reply exposes a typed body deadline" `Quick
+          test_incomplete_reply_exposes_typed_body_deadline
       ; test_case
             "API projection refusal advances through CLI slots"
             `Quick test_projection_refusal_tries_cli_slots

@@ -101,7 +101,13 @@ equivalent explicitly on every node that has one.
 - **Dashboard, Skills:** **Skill Studio** → **+ New Skill**, choose a writable source,
   the kind, a name, a description and a body, then **Create + publish**. Expand a row
   and use **Edit source** to change it.
-- Creating never overwrites an existing package. Saving an edit checks that the file
+- **Keeper draft:** write a proposed `SKILL.md` in the sandbox with `Write`, export
+  it with `keeper_artifact_transfer` (`action="export"`), then pass the returned
+  `artifact` object and proposed directory name `package_id` to `keeper_skill_validate`.
+  This checks document and composition-plan rules; it does not execute or publish.
+  Writing the draft does not update the catalog. Publication still uses the existing
+  administrator editor path (`CanAdmin`).
+- Editor creation never overwrites an existing package. Saving an edit checks that the file
   still holds the revision you loaded, validates the document and the composition
   plan, writes it, and republishes the workspace snapshot. `saved_but_unpublished`
   means the file changed but the snapshot did not; reload after publication recovers.

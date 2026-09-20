@@ -1013,6 +1013,194 @@ let test_invalid_write_is_proven_pre_effect () =
      = Tool_result.Proven_pre_effect)
 ;;
 
+let with_history_search ?(additional_traces = []) ~checkpoint_texts ~current_texts ~previous_texts check =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "history-search" in
+  let previous_trace = "trace-history-search-previous" in
+  let meta =
+    { meta with runtime =
+        { meta.runtime with trace_history = previous_trace :: List.map fst additional_traces } }
+  in
+  let user text =
+    Agent_core.Types.make_message ~role:Agent_core.Types.User [ Agent_core.Types.Text text ]
+  in
+  let persist trace texts =
+    let session =
+      Masc.Keeper_context_runtime.create_session
+        ~session_id:trace
+        ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config)
+    in
+    List.iter
+      (fun text ->
+         Masc.Keeper_context_runtime.persist_message session (user text);
+         Masc.Keeper_context_runtime.persist_message session
+           (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+              [ Agent_core.Types.Text "Recorded." ]))
+      texts;
+    if texts <> [] then
+      Alcotest.(check int) "all fixture messages remain in History"
+        (2 * List.length texts)
+        (In_channel.with_open_bin
+           (Masc.Keeper_types_support.keeper_history_path config trace)
+           (fun input -> List.length (In_channel.input_lines input)))
+  in
+  persist (Keeper_id.Trace_id.to_string meta.runtime.trace_id) current_texts;
+  persist previous_trace previous_texts;
+  List.iter (fun (trace, texts) -> persist trace texts) additional_traces;
+  let ctx_work =
+    List.fold_left
+      (fun context text -> Masc.Keeper_context_runtime.append context (user text))
+      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      checkpoint_texts
+  in
+  let search ?(limit = 10) query =
+    let result =
+      Runtime.keeper_memory_search_json
+        ~config ~meta ~ctx_work
+        ~args:(`Assoc [ "source", `String "history"; "query", `String query; "limit", `Int limit ])
+      |> Yojson.Safe.from_string
+    in
+    Alcotest.(check bool) "a clean search has no read-error warning"
+      true (Yojson.Safe.Util.member "history_read_errors" result = `Null);
+    string_list_field "matches" result
+  in
+  check search
+;;
+
+let history_search_prefix =
+  "The warehouse migration checklist records the database, region, approval, and rollback prerequisites before the final endpoint setting: "
+;;
+
+let test_history_search_preserves_distinct_message_endings () =
+  let checkpoint_text = history_search_prefix ^ "checkpoint-east" in
+  let current_text = history_search_prefix ^ "current-west" in
+  let previous_text = history_search_prefix ^ "previous-north" in
+  with_history_search ~checkpoint_texts:[ checkpoint_text ]
+    ~current_texts:[ current_text ] ~previous_texts:[ previous_text ]
+  @@ fun search ->
+  Alcotest.(check (list string))
+    "different messages from all three stores survive a shared prefix"
+    (List.sort String.compare [ checkpoint_text; current_text; previous_text ])
+    (List.sort String.compare (search "warehouse"));
+  Alcotest.(check (list string))
+    "current history remains searchable by its distinct ending"
+    [ current_text ] (search "current-west");
+  Alcotest.(check (list string))
+    "previous trace remains searchable by its distinct ending"
+    [ previous_text ] (search "previous-north")
+;;
+
+let test_history_search_deduplicates_identical_messages () =
+  let text = history_search_prefix ^ "shared-endpoint" in
+  with_history_search ~checkpoint_texts:[ text ] ~current_texts:[ text ]
+    ~previous_texts:[ text ]
+  @@ fun search ->
+  Alcotest.(check (list string))
+    "the same complete message appears once across stores"
+    [ text ] (search "shared-endpoint")
+;;
+
+let history_search_noise count =
+  List.init count (fun index -> Printf.sprintf "Routine deployment note %d" index)
+;;
+
+let check_retained_history_match ~checkpoint_texts ~current_texts ~previous_texts () =
+  with_history_search ~checkpoint_texts ~current_texts ~previous_texts
+  @@ fun search ->
+  Alcotest.(check (list string)) "the retained matching message is searchable"
+    [ "Migration prerequisite: amber database" ]
+    (search ~limit:1 "amber");
+  Alcotest.(check (list string)) "an absent query has no matches"
+    [] (search "absent-query")
+;;
+
+let test_history_search_limits_distinct_matches () =
+  with_history_search ~checkpoint_texts:[] ~previous_texts:[]
+    ~current_texts:
+      ([ "amber database"; "amber cluster" ] @ List.init 12 (fun _ -> "amber database"))
+  @@ fun search ->
+  Alcotest.(check (list string)) "duplicate messages do not fill the result limit"
+    [ "amber cluster"; "amber database" ]
+    (List.sort String.compare (search ~limit:2 "amber"))
+;;
+
+let test_history_search_order () =
+  with_history_search
+    ~checkpoint_texts:[ "amber checkpoint older"; "amber checkpoint newer" ]
+    ~current_texts:[ "amber current older"; "amber current newer"; "amber checkpoint newer" ]
+    ~previous_texts:[ "amber previous older"; "amber previous newer"; "amber current newer" ]
+    ~additional_traces:
+      [ "trace-a-recorded-second",
+        [ "amber second trace older"; "amber second trace newer"; "amber previous newer" ] ]
+  @@ fun search ->
+  Alcotest.(check (list string)) "each source is newest-first, with exact cross-source duplicates removed"
+    [ "amber checkpoint newer"; "amber checkpoint older"
+    ; "amber current newer"; "amber current older"
+    ; "amber previous newer"; "amber previous older"
+    ; "amber second trace newer"; "amber second trace older"
+    ]
+    (search ~limit:8 "amber");
+  Alcotest.(check (list string)) "the caller limit applies to the selected result order"
+    [ "amber checkpoint newer"; "amber checkpoint older"; "amber current newer" ]
+    (search ~limit:3 "amber")
+;;
+
+let test_history_search_reports_read_errors ~malformed () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "history-read-errors" in
+  let previous_trace = "trace-history-read-errors-previous" in
+  let meta = { meta with runtime = { meta.runtime with trace_history = [ previous_trace ] } } in
+  let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  List.iter
+    (fun trace ->
+       let session = Masc.Keeper_context_runtime.create_session
+           ~session_id:trace ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config) in
+       Masc.Keeper_context_runtime.persist_message session
+         (Agent_core.Types.make_message ~role:Agent_core.Types.User
+            [ Agent_core.Types.Text "amber database" ]))
+    [ current_trace; previous_trace ];
+  let path = Masc.Keeper_types_support.keeper_history_path config current_trace in
+  if malformed then
+    Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600 path
+      (fun output -> output_string output "{invalid JSON}\n")
+  else (Sys.remove path; Unix.mkdir path 0o700);
+  let ctx_work = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"" in
+  List.iter
+    (fun source ->
+       List.iter
+         (fun query ->
+            let result = Runtime.keeper_memory_search_json ~config ~meta ~ctx_work
+                ~args:(`Assoc [ "source", `String source; "query", `String query ])
+                |> Yojson.Safe.from_string in
+            let open Yojson.Safe.Util in
+            Alcotest.(check int) "readable matches survive an incomplete search"
+              (if query = "amber" then 1 else 0)
+              (member "match_count" result |> to_int);
+            Alcotest.(check bool) "an incomplete empty search is not no_match"
+              true (member "no_match" result = `Null);
+            let errors = member "history_read_errors" result in
+            Alcotest.(check int) "visited undecodable rows are reported"
+              (if malformed then 1 else 0)
+              (member "unreadable_rows" errors |> to_int);
+            let unavailable = member "unavailable_traces" errors |> to_list in
+            Alcotest.(check int) "unreadable files are reported by trace"
+              (if malformed then 0 else 1) (List.length unavailable);
+            if not malformed then
+              match unavailable with
+              | [ error ] ->
+                Alcotest.(check string) "the failed trace is named" current_trace
+                  (member "trace_id" error |> to_string);
+                Alcotest.(check string) "the failure has a bounded error class" "io_error"
+                  (member "error_kind" error |> to_string)
+              | _ -> Alcotest.fail "missing failed trace")
+         [ "absent-query"; "amber" ])
+    [ "history"; "all" ]
+;;
+
 let test_search_filters_exact_substring_without_ranking () =
   with_temp_dir
   @@ fun base_path ->
@@ -1302,6 +1490,136 @@ let test_a_torn_tail_does_not_stop_the_next_absorb () =
       lines)
 ;;
 
+let test_absorbed_search_preserves_board_basis source =
+  let module Memory = Masc.Keeper_memory_os_types in
+  let module Librarian = Masc.Keeper_librarian in
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-board-basis" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let post_id = "p-0123456789abcdef0123456789abcdef" in
+  let comment_id = "c-0123456789abcdef0123456789abcdef" in
+  let cases =
+    [ "original-source post observation", []
+    ; "original-source comment observation", [ "comment_id", `String comment_id ]
+    ]
+  in
+  let expected_basis comment_fields =
+    `Assoc
+      [ "kind", `String "observed"
+      ; "board", `Assoc (("post_id", `String post_id) :: comment_fields)
+      ]
+  in
+  List.iter
+    (fun (content, comment_fields) ->
+       let args =
+         `Assoc
+           ([ "content", `String content; "board_post_id", `String post_id ]
+            @ List.map (fun (_, value) -> "board_comment_id", value) comment_fields)
+       in
+       let written =
+         Runtime.keeper_memory_write_with_outcome ~config ~meta ~args
+         |> fun execution -> Yojson.Safe.from_string execution.raw_output
+       in
+       Alcotest.(check bool) "public writer succeeded" true (json_field "ok" written = `Bool true);
+       Alcotest.(check bool) "writer reports the original Board source" true
+         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" written)))
+    cases;
+  let original = current_facts ~keepers_dir ~keeper_id:meta.name in
+  Alcotest.(check int) "both original facts were stored" 2 (List.length original);
+  List.iter
+    (fun (fact : Memory.fact) ->
+       Alcotest.(check bool) "the Keeper authored each original" true
+         (fact.origin.kind = Memory.Authored);
+       Alcotest.(check bool) "the snapshot stores the original Board source" true
+         (Yojson.Safe.equal
+            (expected_basis (List.assoc fact.claim cases))
+            (Memory.basis_to_json fact.basis)))
+    original;
+  let input : Librarian.input =
+    { turn_ref = Ids.Turn_ref.make ~trace_id:"absorb-board-sources" ~absolute_turn:8
+    ; goal_context = Librarian.No_task
+    ; keeper_instructions = "Preserve useful observations."
+    ; current = Some { Librarian.facts = original }
+    ; working_context = Masc.Keeper_librarian_context.empty
+    ; messages = []
+    ; tool_observations = []
+    ; counterpart_observations = []
+    }
+  in
+  let selection =
+    match
+      Librarian.selection_of_json_result
+        ~now:(Time_compat.now ()) input
+        (`Assoc
+           [ "working_contexts", `List []
+           ; "dropped", `List []
+           ; "new_claims",
+             `List
+               [ `Assoc
+                   [ "claim", `String "Combined observations"
+                   ; "category", `String "fact"
+                   ; "absorbs", `List [ `String "m1"; `String "m2" ]
+                   ]
+               ]
+           ])
+    with
+    | Ok selection -> selection
+    | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
+  in
+  (match
+     Current.apply_disposition
+       ~keepers_dir ~keeper_id:meta.name ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "absorb-board-sources" }
+       ~new_claims:selection.new_claims ~dropped_statements:selection.dropped
+       ~absorbed:selection.absorbed ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match current_facts ~keepers_dir ~keeper_id:meta.name with
+   | [ merged ] ->
+     Alcotest.(check bool) "the new claim does not inherit the original Board sources" true
+       (merged.basis = Memory.Observed Memory.Transcript)
+   | _ -> Alcotest.fail "expected only the merged claim in current memory");
+  (match Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id:meta.name with
+   | Error detail -> Alcotest.fail detail
+   | Ok rows ->
+     Alcotest.(check int) "both original facts were archived" 2 (List.length rows);
+     List.iter
+       (function
+         | _, Error error ->
+           Alcotest.fail (Masc.Keeper_memory_absorbed.read_error_to_string error)
+         | _, Ok (row : Masc.Keeper_memory_absorbed.record) ->
+           Alcotest.(check bool) "the archive preserves the complete original fact" true
+             (List.exists (fun fact -> fact = row.fact) original))
+       rows);
+  let response =
+    Runtime.keeper_memory_search_json ~config ~meta ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc
+           [ "query", `String "original-source"
+           ; "source", `String source
+           ; "limit", `Int 10
+           ])
+    |> Yojson.Safe.from_string
+  in
+  let matches = Yojson.Safe.Util.to_list (json_field "matches" response) in
+  Alcotest.(check int) "both original texts are returned" 2 (List.length matches);
+  List.iter
+    (fun (content, comment_fields) ->
+       let matched =
+         match List.find_opt (fun row -> String.equal content (string_field "text" row)) matches with
+         | Some row -> row
+         | None -> Alcotest.failf "missing original text: %s" content
+       in
+       Alcotest.(check string) "result names the absorbed store" "absorbed_memory"
+         (string_field "store" matched);
+       Alcotest.(check bool) "search exposes the original Board source" true
+         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" matched)))
+    cases
+;;
+
 (* RFC-0456 §4.2: a fact a librarian pass absorbed is found through
    source=absorbed and source=all, named with the claim that now says it. Rows a
    pass wrote before a replace that failed are recognised: a row for a fact
@@ -1567,15 +1885,17 @@ let test_unreadable_source_path_is_the_callers_to_fix () =
 module Events = Masc.Keeper_memory_os_events
 
 let events_for ~keepers_dir ~keeper_id =
-  Events.read ~keepers_dir ~keeper_id
-  |> List.map (fun (index, row) ->
-    match row with
-    | Ok event -> event
-    | Error error ->
-      Alcotest.failf
-        "events line %d unreadable: %s"
-        index
-        (Events.read_error_to_string error))
+  match Events.read ~keepers_dir ~keeper_id with
+  | Error error -> Alcotest.fail (Events.file_read_error_to_string error)
+  | Ok rows ->
+    List.map (fun (index, row) ->
+      match row with
+      | Ok event -> event
+      | Error error ->
+        Alcotest.failf
+          "events line %d unreadable: %s"
+          index
+          (Events.read_error_to_string error)) rows
 ;;
 
 let string_list_field key json =
@@ -1627,7 +1947,7 @@ let test_search_records_a_retrieval_per_ordinary_match () =
        (match e.kind with
         | Events.Retrieved { query } ->
           Alcotest.(check string) "the query is recorded" "alpha beta" query
-        | Events.Cited _ | Events.Revised _ ->
+        | Events.Retracted | Events.Revised _ ->
           Alcotest.fail "a search records retrievals only");
        Alcotest.(check string)
          "the turn is recorded"
@@ -1656,10 +1976,9 @@ let test_search_records_a_retrieval_per_ordinary_match () =
   | _ -> Alcotest.fail "expected one decision-log line per search"
 ;;
 
-(* RFC-0418: a retract names the fact by id and the store found it, so the id
-   was cited; the event outlives the fact. A retract of an id no fact has
-   records nothing. *)
-let test_retract_records_a_citation () =
+(* A successful retract records removal; the event outlives the fact.
+   A retract of an id no fact has records nothing. *)
+let test_retract_records_a_retraction () =
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
@@ -1667,12 +1986,13 @@ let test_retract_records_a_citation () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  let written =
+  let write () =
     Runtime.keeper_memory_write_with_outcome
       ~config
       ~meta
       ~args:(make_args ~title:"" ~content:"the deploy needs assets")
   in
+  let written = write () in
   let written_id =
     string_field
       "memory_id"
@@ -1690,17 +2010,33 @@ let test_retract_records_a_citation () =
   Alcotest.(check bool) "retraction succeeds" true (json_field "ok" response = `Bool true);
   (match events_for ~keepers_dir ~keeper_id:meta.name with
    | [ e ] ->
-     Alcotest.(check string) "the retracted id is the cited one" written_id e.memory_id;
+     Alcotest.(check string) "the event names the retracted id" written_id e.memory_id;
      (match e.kind with
-      | Events.Cited { tool } ->
-        Alcotest.(check string) "cited through the retract tool" "keeper_memory_retract" tool
-      | Events.Retrieved _ | Events.Revised _ -> Alcotest.fail "a retract records a citation")
+      | Events.Retracted -> ()
+      | Events.Retrieved _ | Events.Revised _ -> Alcotest.fail "a retract records removal")
    | events -> Alcotest.failf "expected one event, got %d" (List.length events));
   ignore (retract (memory_id 'f'));
   Alcotest.(check int)
     "a retract of an unknown id records nothing"
     1
-    (List.length (events_for ~keepers_dir ~keeper_id:meta.name))
+    (List.length (events_for ~keepers_dir ~keeper_id:meta.name));
+  Alcotest.(check int) "the retracted fact is no longer current" 0
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
+  let rewritten = (write ()).Masc.Keeper_tool_execution.raw_output
+      |> Yojson.Safe.from_string in
+  Alcotest.(check bool) "the same claim can be stored again" true
+    (json_field "ok" rewritten = `Bool true);
+  Alcotest.(check string) "the same claim has the original identity" written_id
+    (string_field "memory_id" rewritten);
+  (match current_facts ~keepers_dir ~keeper_id:meta.name with
+   | [ current ] ->
+       let current_id = Masc.Keeper_memory_os_types.memory_id current in
+       Alcotest.(check string) "the current fact reuses that identity" written_id current_id;
+       let history = Events.summary_for ~memory_id:current_id
+           (events_for ~keepers_dir ~keeper_id:meta.name) in
+       Alcotest.(check int) "current fact retains the previous retraction" 1 history.retracted_count;
+       Alcotest.(check int) "re-adding is not a retrieval" 0 history.retrieved_count
+   | _ -> Alcotest.fail "expected only the re-added fact")
 ;;
 
 let test_source_snapshot_commit_notifications () =
@@ -1839,6 +2175,37 @@ let () =
             `Quick
             test_tools_isolate_workspace_base_path_from_ambient_decoy
         ; Alcotest.test_case
+            "history search preserves distinct message endings"
+            `Quick
+            test_history_search_preserves_distinct_message_endings
+        ; Alcotest.test_case
+            "history search deduplicates identical messages"
+            `Quick
+            test_history_search_deduplicates_identical_messages
+        ; Alcotest.test_case "history search reaches retained current messages" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~previous_texts:[]
+               ~current_texts:("Migration prerequisite: amber database" :: history_search_noise 75))
+        ; Alcotest.test_case "history search reaches retained previous messages" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~current_texts:[]
+               ~previous_texts:("Migration prerequisite: amber database" :: history_search_noise 30))
+        ; Alcotest.test_case "history search includes the newest current message" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~previous_texts:[]
+               ~current_texts:(history_search_noise 50 @ [ "Migration prerequisite: amber database" ]))
+        ; Alcotest.test_case "history search includes the newest previous message" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~current_texts:[]
+               ~previous_texts:(history_search_noise 20 @ [ "Migration prerequisite: amber database" ]))
+        ; Alcotest.test_case "history search reaches all working-context messages" `Quick
+            (check_retained_history_match ~current_texts:[] ~previous_texts:[]
+               ~checkpoint_texts:("Migration prerequisite: amber database" :: history_search_noise 100))
+        ; Alcotest.test_case "history search limits distinct matches" `Quick
+            test_history_search_limits_distinct_matches
+        ; Alcotest.test_case "history search orders selected messages" `Quick
+            test_history_search_order
+        ; Alcotest.test_case "history search reports malformed rows" `Quick
+            (test_history_search_reports_read_errors ~malformed:true)
+        ; Alcotest.test_case "history search reports unreadable files" `Quick
+            (test_history_search_reports_read_errors ~malformed:false)
+        ; Alcotest.test_case
             "search filters exact substring without ranking"
             `Quick
             test_search_filters_exact_substring_without_ranking
@@ -1847,13 +2214,21 @@ let () =
             `Quick
             test_search_records_a_retrieval_per_ordinary_match
         ; Alcotest.test_case
-            "retract records a citation"
+            "retract records removal and survives re-adding the claim"
             `Quick
-            test_retract_records_a_citation
+            test_retract_records_a_retraction
         ; Alcotest.test_case
             "source parser accepts every supported value"
             `Quick
             test_source_parser_accepts_every_supported_value
+        ; Alcotest.test_case
+            "absorbed search preserves the original Board basis"
+            `Quick
+            (fun () -> test_absorbed_search_preserves_board_basis "absorbed")
+        ; Alcotest.test_case
+            "all search preserves the original Board basis"
+            `Quick
+            (fun () -> test_absorbed_search_preserves_board_basis "all")
         ; Alcotest.test_case
             "source parser rejects unknown value"
             `Quick

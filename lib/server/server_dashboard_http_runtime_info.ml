@@ -1731,23 +1731,23 @@ let runtime_declared_model_capabilities_json
     `Assoc
       [ "source", `String runtime_inventory_source
       ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
-      ; "supports_tool_choice", `Bool caps.supports_tool_choice
-      ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
-      ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
-      ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
+      ; "supports_tool_choice", Json_util.bool_opt_to_json caps.supports_tool_choice
+      ; "supports_required_tool_choice", Json_util.bool_opt_to_json caps.supports_required_tool_choice
+      ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
+      ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
       ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
-      ; "supports_image_input", `Bool caps.supports_image_input
-      ; "supports_audio_input", `Bool caps.supports_audio_input
-      ; "supports_video_input", `Bool caps.supports_video_input
-      ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
-      ; "supports_response_format_json", `Bool caps.supports_response_format_json
-      ; "supports_structured_output", `Bool caps.supports_structured_output
-      ; "supports_system_prompt", `Bool caps.supports_system_prompt
-      ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-      ; "supports_top_k", `Bool caps.supports_top_k
-      ; "supports_min_p", `Bool caps.supports_min_p
-      ; "supports_seed", `Bool caps.supports_seed
-      ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+      ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+      ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
+      ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
+      ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
+      ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
+      ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
+      ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+      ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
+      ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
+      ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p
+      ; "supports_seed", Json_util.bool_opt_to_json caps.supports_seed
+      ; "emits_usage_tokens", Json_util.bool_opt_to_json caps.emits_usage_tokens
       ]
 ;;
 
@@ -1848,10 +1848,10 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "max_context_tokens", Json_util.int_opt_to_json caps.max_context_tokens
       ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
       ; "supports_tools", `Bool caps.supports_tools
-      ; "supports_tool_choice", `Bool caps.supports_tool_choice
-      ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
-      ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
-      ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
+      ; "supports_tool_choice", Json_util.bool_opt_to_json caps.supports_tool_choice
+      ; "supports_required_tool_choice", Json_util.bool_opt_to_json caps.supports_required_tool_choice
+      ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
+      ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
       ; ( "assistant_tool_content_format"
         , `String (assistant_tool_content_format_wire caps.assistant_tool_content_format) )
       ; "supports_reasoning", `Bool caps.supports_reasoning
@@ -1863,25 +1863,25 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "reasoning_output_format", `String (reasoning_output_format_wire caps.reasoning_output_format)
       ; "reasoning_streaming_format", reasoning_streaming_format_json caps.reasoning_streaming_format
       ; "reasoning_replay_override", `String (reasoning_replay_override_wire caps.reasoning_replay_override)
-      ; "supports_response_format_json", `Bool caps.supports_response_format_json
-      ; "supports_structured_output", `Bool caps.supports_structured_output
-      ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
-      ; "supports_image_input", `Bool caps.supports_image_input
-      ; "supports_audio_input", `Bool caps.supports_audio_input
-      ; "supports_video_input", `Bool caps.supports_video_input
+      ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
+      ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
+      ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
+      ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+      ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
+      ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
       ; "modality_priority", `String (modality_priority_wire caps.modality_priority)
       ; "task", task_json caps.task
       ; "supports_native_streaming", `Bool caps.supports_native_streaming
-      ; "supports_system_prompt", `Bool caps.supports_system_prompt
-      ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-      ; "supports_top_k", `Bool caps.supports_top_k
-      ; "supports_min_p", `Bool caps.supports_min_p
-      ; "supports_seed", `Bool caps.supports_seed
+      ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+      ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
+      ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
+      ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p
+      ; "supports_seed", Json_util.bool_opt_to_json caps.supports_seed
       ; ( "ignored_sampling_parameters"
         , caps.ignored_sampling_parameters
           |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
           |> Json_util.json_string_list )
-      ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+      ; "emits_usage_tokens", Json_util.bool_opt_to_json caps.emits_usage_tokens
       ; "supported_models", supported_models
       ])
 ;;
@@ -1992,23 +1992,23 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
          being mistaken for provider/model inference. *)
     ; "capabilities_declared", `Bool capabilities_declared
     ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
-    ; "supports_tool_choice", `Bool caps.supports_tool_choice
-    ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
-    ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
-    ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
-    ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
-    ; "supports_image_input", `Bool caps.supports_image_input
-    ; "supports_audio_input", `Bool caps.supports_audio_input
-    ; "supports_video_input", `Bool caps.supports_video_input
+    ; "supports_tool_choice", Json_util.bool_opt_to_json caps.supports_tool_choice
+    ; "supports_required_tool_choice", Json_util.bool_opt_to_json caps.supports_required_tool_choice
+    ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
+    ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
+    ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
+    ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+    ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
+    ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
-    ; "supports_response_format_json", `Bool caps.supports_response_format_json
-    ; "supports_structured_output", `Bool caps.supports_structured_output
-    ; "supports_system_prompt", `Bool caps.supports_system_prompt
-    ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-    ; "supports_top_k", `Bool caps.supports_top_k
-    ; "supports_min_p", `Bool caps.supports_min_p
-    ; "supports_seed", `Bool caps.supports_seed
-    ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+    ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
+    ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
+    ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+    ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
+    ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
+    ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p
+    ; "supports_seed", Json_util.bool_opt_to_json caps.supports_seed
+    ; "emits_usage_tokens", Json_util.bool_opt_to_json caps.emits_usage_tokens
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt

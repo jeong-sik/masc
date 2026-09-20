@@ -563,7 +563,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       <${TurnInspectorDrawer}
         keeperName="albini"
         subtitle=${`${entry.label} · ${entry.timestamp}`}
-        initialTurnRef=${entry.turnRef}
+        anchor=${{ kind: 'unreferenced' }}
         open=${true}
         onClose=${() => {}}
         testId="fresh-message"
@@ -581,13 +581,38 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
   })
 
+  it('keeps generic browsing unlinked and preserves manual selection across equivalent anchors', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    const drawer = () => html`<${TurnInspectorDrawer}
+      keeperName="albini"
+      anchor=${{ kind: 'no-origin' }}
+      open=${true}
+      onClose=${() => {}}
+      testId="generic-turns"
+    />`
+    const { container, rerender } = render(drawer())
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+    expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeNull()
+    fireEvent.click(container.querySelectorAll('.ti-turn-summary')[0]!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+        .toContain('trace-active#42')
+    })
+    rerender(drawer())
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+      .toContain('trace-active#42')
+  })
+
   it('opens the detail drawer for an exact retained turn reference', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`
       <${KeeperTurnInspector}
         keeperName="albini"
-        initialTurnRef="trace-active#42"
+        anchor=${{ kind: 'ref', value: 'trace-active#42' }}
       />
     `)
 
@@ -606,7 +631,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     const { container } = render(html`
       <${KeeperTurnInspector}
         keeperName="albini"
-        initialTurnRef="trace-other#42"
+        anchor=${{ kind: 'ref', value: 'trace-other#42' }}
       />
     `)
 

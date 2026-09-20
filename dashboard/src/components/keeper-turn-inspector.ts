@@ -1140,14 +1140,17 @@ function TurnRow({
   `
 }
 
+export type TurnAnchor =
+  | { kind: 'no-origin' }
+  | { kind: 'unreferenced' }
+  | { kind: 'ref'; value: string }
+
 export function KeeperTurnInspector({
   keeperName,
-  initialTurnRef,
+  anchor = { kind: 'no-origin' },
 }: {
   keeperName: string
-  // Exact origin reference. Null means the inspected source has no reference;
-  // undefined opens the list without an originating message or post.
-  initialTurnRef?: string | null
+  anchor?: TurnAnchor
 }) {
   const resource = useManagedAsyncResource<TurnInspectorData | null>(null)
   const [selectedRow, setSelectedRow] = useState<TurnRecordRow | null>(null)
@@ -1176,6 +1179,7 @@ export function KeeperTurnInspector({
   const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
   // Server returns oldest-first; show newest first.
   const sorted = useMemo(() => [...rows].reverse(), [rows])
+  const initialTurnRef = anchor.kind === 'ref' ? anchor.value : null
   const initialMatchedRow = useMemo(
     () => initialTurnRowForTurnRef(rows, initialTurnRef),
     [rows, initialTurnRef],
@@ -1185,11 +1189,11 @@ export function KeeperTurnInspector({
     appliedInitialTurnKey.current = null
     setInitialMatchState('idle')
     setSelectedRow(null)
-  }, [keeperName, initialTurnRef])
+  }, [keeperName, anchor.kind, initialTurnRef])
 
   useEffect(() => {
     if (
-      initialTurnRef == null
+      anchor.kind !== 'ref'
       || rows.length === 0
       || appliedInitialTurnKey.current === initialTurnRef
     ) {
@@ -1199,7 +1203,7 @@ export function KeeperTurnInspector({
     setSelectedRow(initialMatchedRow)
     setInitialMatchState(initialMatchedRow ? 'matched' : 'missed')
     appliedInitialTurnKey.current = initialTurnRef
-  }, [initialTurnRef, initialMatchedRow, rows.length])
+  }, [anchor.kind, initialTurnRef, initialMatchedRow, rows.length])
 
   if (resource.state.value.loading) {
     return html`<${LoadingState}>턴 레코드 불러오는 중...<//>`
@@ -1213,13 +1217,13 @@ export function KeeperTurnInspector({
     ? html`<${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${rows} />`
     : null
 
-  const anchorNotice = initialTurnRef === null || initialMatchState === 'missed'
+  const anchorNotice = anchor.kind === 'unreferenced' || initialMatchState === 'missed'
     ? html`
       <div
         class="rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row"
         data-testid="turn-linked-empty"
       >
-        ${initialTurnRef === null
+        ${anchor.kind === 'unreferenced'
           ? '턴 연결 정보 없음. 리스트에서 직접 선택하세요.'
           : '연결된 turn record를 찾지 못했습니다. 리스트에서 직접 선택하세요.'}
       </div>

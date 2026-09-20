@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { TurnAnchor } from '../keeper-turn-inspector'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
@@ -109,16 +110,16 @@ async function loadChat() {
   vi.doMock('../keeper-turn-inspector', () => ({
     KeeperTurnInspector: ({
       keeperName,
-      initialTurnRef,
+      anchor,
     }: {
       keeperName: string
-      initialTurnRef?: string | null
+      anchor: TurnAnchor
     }) =>
       html`
         <div
           data-testid="kw-turn-inspector"
           data-keeper=${keeperName}
-          data-missing-reference=${String(initialTurnRef === null)}
+          data-missing-reference=${String(anchor.kind === 'unreferenced')}
         >TurnInspector</div>
       `,
   }))

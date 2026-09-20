@@ -1758,21 +1758,13 @@ let execution_failure_may_advance (error : execution_error) =
        it — a 429 arrived here as [Completion_failed] and ended the flow. *)
     receipt_dispatch_count error.receipt = 1
   | Provider_response_refused
-      { http_status; refusal = Overloaded | Server_error }, Response_received ->
+      { refusal = Overloaded | Server_error; _ }, Response_received ->
     (* The provider returned a complete failure response. Exact requests have
        no tools and this failure has not entered the domain validator, so the
        declared successor may serve the same input. Keep the failed dispatch
        and response as evidence; an interrupted/unknown dispatch is not this
        case, and neither is a status whose refusal body was not received. *)
-    let refusal_matches_status =
-      match Retry.server_status_class_of_code http_status, error.cause with
-      | Some Retry.Overloaded_status,
-        Provider_response_refused { refusal = Overloaded; _ }
-      | Some Retry.Server_error_status,
-        Provider_response_refused { refusal = Server_error; _ } -> true
-      | (Some Retry.Overloaded_status | Some Retry.Server_error_status | None), _ -> false
-    in
-    refusal_matches_status && receipt_dispatch_count error.receipt = 1
+    receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The response arrived and terminated, but this binding routed the whole

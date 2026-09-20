@@ -518,9 +518,7 @@ type validated_sync_request
 type sync_transport_receipt =
   { response : raw_sync_response
   ; body_receipt : refusal_body
-      (** Whether the full body was received inside the caller's window.
-          [response.body] remains the text projection for compatibility; a
-          decision about a refusal reads this variant. *)
+      (** Whether the full body was received inside the caller's window. *)
   ; response_header_evidence : response_header_evidence
   }
 

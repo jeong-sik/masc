@@ -30,6 +30,12 @@ module Retained_view = Masc_tui_retained_view
 module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
+val runtime_assignment_label : runtime_assignment -> string
+(** The assignment shown in the runtime picker and Runtime Stats value. *)
+
+val runtime_assignment_targets : runtime_assignment -> string -> bool
+(** Whether an assignment resolves to the named lane or runtime. *)
+
 type planning_tab =
   Render_schedule.planning_tab =
     Planning_goals

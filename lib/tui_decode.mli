@@ -1820,15 +1820,33 @@ val decode_keeper_turns :
     registered keeper. Unknown schema, status, or lane is an error, not a
     silently defaulted row. *)
 
-(** Where one keeper points today. [ra_source] is the server's word:
-    ["default"] rides the fleet default, ["explicit"] was assigned. *)
-type runtime_assignment = {
-  ra_keeper : string;
-  ra_source : string;
-  ra_target_id : string option;
-  ra_unavailable_reason : string option;
-      (** Resolved lane id, or [None] when the assignment is missing. *)
-}
+type runtime_assignment_source =
+  | Default_runtime
+  | Explicit_runtime
+(** Whether the keeper rides the fleet default or has an explicit assignment. *)
+
+type runtime_unavailable_reason =
+  | Missing_catalog_model of
+      { provider_label : string
+      ; model_id : string
+      }
+(** The server's closed [reason.kind] sum for an unavailable assignment. *)
+
+type runtime_assignment_resolution =
+  | Runtime_assignment_lane of string
+  | Runtime_assignment_missing
+  | Runtime_assignment_unavailable of
+      { runtime_id : string
+      ; reason : runtime_unavailable_reason
+      }
+(** The server's closed [resolved.kind] sum. Consumers match this value directly;
+    membership in a separately projected lane catalogue does not reclassify it. *)
+
+type runtime_assignment =
+  { ra_keeper : string
+  ; ra_source : runtime_assignment_source
+  ; ra_resolution : runtime_assignment_resolution
+  }
 
 val decode_runtime_resolved_full :
   Yojson.Safe.t ->

@@ -356,11 +356,9 @@ let () =
   | Ok () ->
     let base_path =
       (match !base_path with
-       | Some dir ->
-         Masc.Workspace.Explicit (Config_dir_resolver.absolute_path dir)
-       | None ->
-         Masc.Workspace.Ambient (Config_dir_resolver.base_path_or_cwd ()))
-      |> Masc.Workspace.runtime_base_path
+       | Some dir -> Config_dir_resolver.absolute_path dir
+       | None -> Config_dir_resolver.base_path_or_cwd ())
+      |> fun selected -> Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit selected)
     in
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path

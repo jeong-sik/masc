@@ -67,6 +67,7 @@ interface VqGateRow {
 
 interface VqQueueItem {
   task: Task
+  isCancel: boolean
   goalId: string | null
   goalTitle: string | null
   gateRows: VqGateRow[]
@@ -109,6 +110,7 @@ function buildQueueItem(
   const submitActor = request?.submitted_by?.trim() || task.assignee || null
   return {
     task,
+    isCancel: task.verification_intent === 'cancel',
     goalId: task.goal_id ?? null,
     goalTitle,
     gateRows: rows,
@@ -135,21 +137,10 @@ function vqGateStats(item: VqQueueItem, checks: VqChecks) {
   return { total, confirmed, allConfirmed: total > 0 && confirmed === total }
 }
 
-// A stop is judged on the sentence the producer gave, not on the completion
-// contract: the gate checklist is about finishing, so it must not hold a stop
-// shut. The reliable signal is the task status's verification intent
-// ("cancel"), which every awaiting task carries (types_core.ml) — including a
-// stop submitted before the request record kept its sentence
-// (cancellation_reason, #36513, 2026-09-15). That request field stays as a
-// second signal: a record carrying it is a stop, reason or none.
-function vqIsCancel(item: VqQueueItem): boolean {
-  return item.task.verification_intent === 'cancel' || item.cancellationReason != null
-}
-
-// The sentence the operator judges, when the record kept it. A stop submitted
-// before the record kept a copy has the intent but no sentence.
-function vqStopSentence(item: VqQueueItem): string {
-  return item.cancellationReason ?? '중단 요청 · 사유 미기록(제출 시점이 사유 보존 이전)'
+// The task status is the authority for whether this is a stop. The request
+// copy is display text only and cannot open an approval gate.
+function vqStopSentence(item: VqQueueItem): string | null {
+  return item.cancellationReason
 }
 
 // ── gate checklist ────────────────────────────────────────────
@@ -230,7 +221,7 @@ function VqActions({
   const [reason, setReason] = useState('')
   const [reasonError, setReasonError] = useState<string | null>(null)
   const st = vqGateStats(item, checks)
-  const isCancel = vqIsCancel(item)
+  const isCancel = item.isCancel
   // The gate is about finishing; a stop is approvable without it.
   const canApprove = isCancel || st.allConfirmed
   const doReject = () => {
@@ -334,12 +325,13 @@ function VqReview(props: {
   const { item } = props
   const task = item.task
   const handoff = task.handoff_context
+  const stopSentence = vqStopSentence(item)
   return html`
     ${task.predecessor_task_id
       ? html`<div class="vq-note rerun">↻ 재실행 제출 · predecessor <b>${task.predecessor_task_id}</b> — 반려 후 재검증</div>`
       : null}
-    ${vqIsCancel(item)
-      ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${vqStopSentence(item)}</div>`
+    ${item.isCancel
+      ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다${stopSentence ? ` — ${stopSentence}` : ''}</div>`
       : null}
     <${VqGate} item=${item} checks=${props.checks} onToggleGate=${props.onToggleGate} />
     ${handoff && handoff.summary
@@ -376,7 +368,7 @@ function VqStack(props: VqBodyProps) {
       ${props.queue.map(item => {
         const st = vqGateStats(item, props.checks)
         return html`
-          <article key=${item.task.id} class="vq-card ${vqIsCancel(item) || st.allConfirmed ? 'pinned' : ''}">
+          <article key=${item.task.id} class="vq-card ${item.isCancel || st.allConfirmed ? 'pinned' : ''}">
             <div class="vq-card-top">
               <div class="grow">
                 <div class="vq-req-id mono">${item.task.id}${item.task.priority != null ? ` · P${item.task.priority}` : ''}</div>
@@ -469,6 +461,8 @@ function VqTriage(props: VqBodyProps) {
     <div class="vq-grid">
       ${props.queue.map(item => {
         const st = vqGateStats(item, props.checks)
+        const isCancel = item.isCancel
+        const stopSentence = vqStopSentence(item)
         const actor = item.submitActor
         const open = st.total - st.confirmed
         const expanded = expandId === item.task.id
@@ -497,15 +491,15 @@ function VqTriage(props: VqBodyProps) {
               <div class="vq-tri-actions">
                 <button
                   class="vq-act approve mini"
-                  disabled=${!(vqIsCancel(item) || st.allConfirmed) || props.pendingFor(item.task.id)}
+                  disabled=${!(isCancel || st.allConfirmed) || props.pendingFor(item.task.id)}
                   onClick=${() => props.onResolve(item, 'approve', null)}
-                >${vqIsCancel(item) ? '✓ 중단' : '✓ 통과'}</button>
+                >${isCancel ? '✓ 중단' : '✓ 통과'}</button>
                 <button class="vq-act reject mini" onClick=${() => setExpand(item.task.id)}>✕ 반려</button>
               </div>
               <button class="vq-tri-more" onClick=${() => setExpand(item.task.id)}>게이트 증거 검토 →</button>
             ` : html`
-              ${vqIsCancel(item)
-                ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${vqStopSentence(item)}</div>`
+              ${isCancel
+                ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다${stopSentence ? ` — ${stopSentence}` : ''}</div>`
                 : null}
               <${VqGate} item=${item} checks=${props.checks} onToggleGate=${props.onToggleGate} />
               <${VqActions}
@@ -545,7 +539,7 @@ const VQ_VERDICT_META: Record<VerificationVerdictDecision, { cls: string; mark: 
 
 function VqVerdictRow({ verdict }: { verdict: VqSessionVerdict }) {
   const m = VQ_VERDICT_META[verdict.decision]
-  const cancelled = verdict.decision === 'approve' && vqIsCancel(verdict.item)
+  const cancelled = verdict.decision === 'approve' && verdict.item.isCancel
   const lbl = cancelled ? '중단 승인' : m.lbl
   const tail = cancelled ? 'task → cancelled' : m.tail
   return html`
@@ -635,7 +629,7 @@ export function VerifyQueue() {
 
   // A stop needs the operator's one click too, so it is ready the moment it is
   // a cancellation — not only when a completion gate is fully confirmed.
-  const ready = queue.filter(i => vqIsCancel(i) || vqGateStats(i, checks).allConfirmed).length
+  const ready = queue.filter(i => i.isCancel || vqGateStats(i, checks).allConfirmed).length
   const bad = queue.filter(i => i.projectionError != null).length
 
   const bodyProps: VqBodyProps = {

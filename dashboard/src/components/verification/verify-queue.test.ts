@@ -261,11 +261,10 @@ describe('VerifyQueue', () => {
     expect(submitted.some(t => t?.includes('제출'))).toBe(true)
   })
 
-  // The operator judging a stop reads the producer's sentence and nothing
-  // else. Until the record kept a copy of it, that sentence existed only in
-  // the body of an unlisted Board post and never reached this screen.
+  // The status decides that this is a stop. The request contributes only the
+  // sentence the operator reads.
   it('names a stop and shows the reason the producer gave', () => {
-    tasks.value = [makeTask()]
+    tasks.value = [makeTask({ verification_intent: 'cancel' })]
     mockState.value = {
       loading: false,
       error: null,
@@ -278,6 +277,45 @@ describe('VerifyQueue', () => {
     const notes = [...container.querySelectorAll('.vq-note')].map(n => n.textContent ?? '')
     expect(notes.some(t => t.includes('중단 요청'))).toBe(true)
     expect(notes.some(t => t.includes('상류에서 닫혔다'))).toBe(true)
+  })
+
+  it('does not let a request reason override a completion intent', () => {
+    tasks.value = [makeTask({
+      contract: { completion_contract: [] },
+      verification_intent: 'complete',
+    })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{
+        cancellation_reason: 'stale request copy',
+      }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 승인 · 통과') as HTMLButtonElement
+    expect(approve.disabled).toBe(true)
+    expect(container.querySelector('.vq-card.pinned')).toBeFalsy()
+    const notes = [...container.querySelectorAll('.vq-note')].map(n => n.textContent ?? '')
+    expect(notes.some(t => t.includes('중단 요청'))).toBe(false)
+  })
+
+  it('fails closed when intent is unknown even if a request reason exists', () => {
+    tasks.value = [makeTask({
+      contract: { completion_contract: [] },
+      verification_intent: null,
+    })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{
+        cancellation_reason: 'untrusted request copy',
+      }]),
+    }
+    render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 승인 · 통과') as HTMLButtonElement
+    expect(approve.disabled).toBe(true)
   })
 
   // Null is not "a completion": a stop submitted before the record kept the
@@ -305,7 +343,10 @@ describe('VerifyQueue', () => {
 
     const approve = screen.getByText('✓ 중단 승인') as HTMLButtonElement
     expect(approve.disabled).toBe(false)
-    expect(container.querySelector('.vq-note.rerun')?.textContent).toContain('중단 요청')
+    const stopNote = container.querySelector('.vq-note.rerun')?.textContent ?? ''
+    expect(stopNote).toContain('중단 요청')
+    expect(stopNote).not.toContain('사유 미기록')
+    expect(stopNote).not.toContain('제출 시점')
     // a stop is decidable, so the card is pinned and the bar counts it ready —
     // an empty completion gate must not hide it from the operator
     expect(container.querySelector('.vq-card.pinned')).toBeTruthy()

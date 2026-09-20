@@ -2747,6 +2747,40 @@ let test_failed_attempts_demote_until_the_candidate_answers () =
         (backpressure_order ids)))
 ;;
 
+(* An attributed empty completion is still an answer from the candidate. It
+   must clear stale failure and undated-quota evidence even though the turn
+   itself remains an error because it produced no usable assistant content. *)
+let test_an_empty_completion_clears_stale_unavailability_evidence () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let id = "shared_a.test_model" in
+      let runtime = Option.get (Runtime.get_runtime_by_id id) in
+      Runtime_candidate_backpressure.note_failed_attempt
+        ~candidate:runtime.candidate_backpressure
+        ~failure:Runtime_candidate_backpressure.Provider_timeout;
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:runtime.candidate_backpressure ~retry_after:None;
+      let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
+      Runtime_quota_window.note_observed_exhausted ~scope;
+      let error =
+        Agent_core.Error.Provider
+          (Llm_provider.Error.EmptyCompletion
+             { provider = "openrouter"
+             ; stop_reason = Llm_provider.Types.MaxTokens
+             ; detail = "empty assistant turn"
+             })
+      in
+      let result = walk_once (fun _ -> Error error) [ id ] in
+      (match result with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail "an empty completion unexpectedly succeeded");
+      Alcotest.(check bool) "the stale candidate evidence is cleared" true
+        (Option.is_none (observed_candidate id));
+      Alcotest.(check bool) "the undated quota observation is cleared" false
+        (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()))))
+;;
+
 (* The evidence follows the failure route. A closed runtime connection is
    routed as a server error, so it is evidence; MASC's own capacity, a
    candidate that answered badly, and a failure of the turn's input are not
@@ -4242,6 +4276,15 @@ let bad_gateway =
     (Agent_core.Retry.ServerError { status = 502; message = "bad gateway" })
 ;;
 
+let attributed_empty_completion stop_reason =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.EmptyCompletion
+       { provider = "openrouter"
+       ; stop_reason
+       ; detail = "empty assistant turn"
+       })
+;;
+
 let same_path_manifest_rows events =
   List.filter_map
     (function
@@ -4332,6 +4375,36 @@ let test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results ()
   in
   Alcotest.(check (list string)) "the end of a lane defers to that candidate only"
     [ "lane.chat: last -> [last]" ] (List.map describe_hint hints)
+;;
+
+(* An attributed empty answer still proves that the provider saw the request,
+   but a direct operation must not discard tool results it already saved. The
+   next attempt can resume once; without another saved tool result the progress
+   guard withholds a second hint. *)
+let test_a_chat_operation_resumes_after_attributed_empty_completion () =
+  List.iter
+    (fun stop_reason ->
+       let result, hints, rows =
+         same_path_walk ~continuation:resume_chat_operation [ "only" ]
+           (fun ~save _candidate ->
+              save Agent_core.Agent.After_tool_results_appended Wrote;
+              attributed_empty_completion stop_reason)
+       in
+       Alcotest.(check (list string))
+         (Llm_provider.Types.stop_reason_to_metric_label stop_reason)
+         [ "lane.chat: only -> [only]" ]
+         (List.map describe_hint hints);
+       Alcotest.(check (list string)) "the decision is recorded" [ "only" ] rows;
+       match result with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "an empty completion unexpectedly succeeded")
+    [ Llm_provider.Types.EndTurn
+    ; Llm_provider.Types.MaxTokens
+    ; Llm_provider.Types.StopSequence
+    ; Llm_provider.Types.Refusal
+    ; Llm_provider.Types.ContentFilter
+    ; Llm_provider.Types.RepetitionTruncation
+    ]
 ;;
 
 (* §3.1–§3.5: each condition alone withholds the same-path hint. *)
@@ -4877,6 +4950,10 @@ let () =
             test_rate_limit_order_never_excludes_and_success_clears;
           Alcotest.test_case "failed attempts demote until the candidate answers" `Quick
             test_failed_attempts_demote_until_the_candidate_answers;
+          Alcotest.test_case
+            "an empty completion clears stale unavailability evidence"
+            `Quick
+            test_an_empty_completion_clears_stale_unavailability_evidence;
           Alcotest.test_case "only the candidate's own failures are evidence" `Quick
             test_only_the_candidates_own_failures_are_evidence;
           Alcotest.test_case "a yield before the first token clears no evidence" `Quick
@@ -5001,6 +5078,10 @@ let () =
             "a chat operation resumes its last candidate after saved tool results"
             `Quick
             test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results;
+          Alcotest.test_case
+            "a chat operation resumes after an attributed empty completion"
+            `Quick
+            test_a_chat_operation_resumes_after_attributed_empty_completion;
           Alcotest.test_case
             "no same-path hint unless every condition holds"
             `Quick

@@ -539,11 +539,17 @@ let route_resumes_on_same_path = function
         operation. *)
      | Capacity_backpressure
      (* the provider's or MASC's own slot was full for the moment. *)
-     | Empty_completion { stop_reason = Llm_provider.Types.EndTurn }
-     (* A natural end with no content is the one empty answer that may make
-        progress when the saved operation is retried. Every other reason
-        below requires a different recovery action or repeats a deterministic
-        terminal decision. *)
+     | Empty_completion
+         { stop_reason =
+             ( Llm_provider.Types.EndTurn | Llm_provider.Types.MaxTokens
+             | Llm_provider.Types.StopSequence | Llm_provider.Types.Refusal
+             | Llm_provider.Types.ContentFilter
+             | Llm_provider.Types.RepetitionTruncation )
+         }
+     (* A direct operation that saved tool results resumes once from that
+        checkpoint rather than discarding the work. If the empty answer
+        repeats before another tool result is saved, the progress condition
+        withholds a second resume. *)
      | Server_error
      (* 5xx or provider unavailable. *)
      | Network_transient
@@ -553,11 +559,8 @@ let route_resumes_on_same_path = function
        true
      | Empty_completion
          { stop_reason =
-             ( Llm_provider.Types.StopToolUse | Llm_provider.Types.MaxTokens
-             | Llm_provider.Types.StopSequence | Llm_provider.Types.Refusal
-             | Llm_provider.Types.ContentFilter
-             | Llm_provider.Types.RepetitionTruncation
-             | Llm_provider.Types.PauseTurn | Llm_provider.Types.Compaction
+             ( Llm_provider.Types.StopToolUse | Llm_provider.Types.PauseTurn
+             | Llm_provider.Types.Compaction
              | Llm_provider.Types.ContextWindowExceeded
              | Llm_provider.Types.UnmatchedToolCalls | Llm_provider.Types.Unknown _ )
          } ->

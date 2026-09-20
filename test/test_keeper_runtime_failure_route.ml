@@ -615,6 +615,12 @@ let test_route_resumes_on_same_path_per_class () =
     ; "with a hint", retry ~retry_after:30.0 KFR.Rate_limited
     ; "", retry KFR.Capacity_backpressure
     ; "end turn", retry (empty_completion Agent_core.Types.EndTurn)
+    ; "max tokens", retry (empty_completion Agent_core.Types.MaxTokens)
+    ; "stop sequence", retry (empty_completion Agent_core.Types.StopSequence)
+    ; "refusal", retry (empty_completion Agent_core.Types.Refusal)
+    ; "content filter", retry (empty_completion Agent_core.Types.ContentFilter)
+    ; ( "repetition truncation"
+      , retry (empty_completion Agent_core.Types.RepetitionTruncation) )
     ; "", retry KFR.Server_error
     ; "", retry KFR.Network_transient
     ; "", retry KFR.Provider_timeout
@@ -624,12 +630,6 @@ let test_route_resumes_on_same_path_per_class () =
     (check_resumes false)
     [ "without a reset", retry KFR.Hard_quota
     ; "tool use", retry (empty_completion Agent_core.Types.StopToolUse)
-    ; "max tokens", retry (empty_completion Agent_core.Types.MaxTokens)
-    ; "stop sequence", retry (empty_completion Agent_core.Types.StopSequence)
-    ; "refusal", retry (empty_completion Agent_core.Types.Refusal)
-    ; "content filter", retry (empty_completion Agent_core.Types.ContentFilter)
-    ; ( "repetition truncation"
-      , retry (empty_completion Agent_core.Types.RepetitionTruncation) )
     ; "pause turn", retry (empty_completion Agent_core.Types.PauseTurn)
     ; "compaction", retry (empty_completion Agent_core.Types.Compaction)
     ; ( "context window exceeded"

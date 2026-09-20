@@ -2,15 +2,14 @@ name = "keeper_memory_search"
 description = """
 Search durable Memory OS facts or raw conversation history, case-insensitively. \
 Complete-query substrings rank first. Fallback requires every ASCII-whitespace \
-fragment to appear as a substring, in any order. source='all' uses both tiers \
-across stores. Each tier preserves source order and each store's order. History \
-requires a non-empty query. Fact \
-results name their store and original basis; current facts include exact \
-memory_id and category. Use a memory_id as \
-a derived conclusion's premise_id only for store='current_memory_snapshot'. \
-source='absorbed' finds facts merged into a newer claim: into names that claim, \
-and into_current=false means it is not current. source='history' searches raw \
-user messages; source='all' searches every store."""
+fragment to appear as a substring, in any order. Both tiers run across \
+stores; each tier keeps store order. The default reads current facts and \
+absorbed originals; source='all' adds history. History requires a non-empty \
+query. Fact results name their store and original basis; current facts \
+include exact memory_id and category. Use a memory_id as a derived \
+conclusion's premise_id only for store='current_memory_snapshot'. \
+source='absorbed' finds facts merged into a newer claim: into names that \
+claim, and into_current=false means it is not current."""
 additional_properties = false
 
 [[params]]
@@ -31,5 +30,5 @@ name = "source"
 type = "string"
 enum = ["memory", "absorbed", "history", "all"]
 description = """
-Search scope: memory (default, durable facts), absorbed (facts merged into a \
-newer claim), history (raw messages), or all"""
+Search scope: memory (default, current and absorbed facts), absorbed (facts \
+merged into a newer claim), history (raw messages), or all"""

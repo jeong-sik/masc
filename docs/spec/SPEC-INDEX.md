@@ -96,7 +96,7 @@ graph TB
 
 ### Invariant Naming
 
-`INV-{SUBSYSTEM}-{NNN}` 형식을 사용한다. 접두어는 각 spec 파일이 실제로 쓰는
+이 `docs/spec/` 목록은 `INV-{SUBSYSTEM}-{NNN}` 형식을 사용한다. 접두어는 각 spec 파일이 실제로 쓰는
 것을 따르며, 아래 표가 그 목록이다.
 
 | Prefix | Subsystem | Declared in |
@@ -114,6 +114,10 @@ graph TB
 `11-board.md`, `12-memory-systems.md`, `13-agent-core.md`는 아직 `INV-` 불변식을
 선언하지 않는다. 새 접두어는 해당 spec 파일이 실제로 불변식을 선언할 때 이 표에
 더한다.
+
+`docs/design/`의 RFC는 자신의 식별자를 자체 소유한다. 예를 들어
+`checkpoint-truth-and-replay-rfc.md`는 `INV-AC-CHK-001`–`005`를 선언한다. 이 표는
+`docs/spec/`의 접두어만 다루며, 설계 문서의 식별자는 해당 문서에서 찾는다.
 
 ### Cross-Reference Format
 

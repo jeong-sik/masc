@@ -387,7 +387,7 @@ type TurnDetail = {
   traceId: string
   tokIn: number | null
   tokOut: number | null
-  // Unknown when usage is not per-request or the required facts are absent.
+  // RFC-0233 §8: unknown when usage is not per-request or required facts are absent.
   ctxPct: number | null
   contextWindow: number | null
   cost: number | null
@@ -508,7 +508,7 @@ function buildTurnDetail(
   const traceId = record.turn_ref
   const tokIn = record.input_tokens ?? null
   const tokOut = record.output_tokens ?? null
-  // Only per-request usage can describe this request's context fill and cost.
+  // RFC-0233 §8: only per-request usage can describe this request's context fill and cost.
   // Preserve cumulative/unknown-scope counts without reinterpreting them.
   const perRequest = record.usage_scope === 'per_request'
   const ctxPct =
@@ -984,7 +984,7 @@ function TurnDetailDrawer({
         <div class="ti-tok" data-testid="turn-token-bar">
           <div class="ti-tok-top">
             <span class="lbl">토큰 사용량 · ${USAGE_SCOPE_LABELS[row.record.usage_scope]}</span>
-            <span class="ctxpct">컨텍스트 ${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'} / ${formatCtxWindowK(t.contextWindow)}</span>
+            <span class="ctxpct">컨텍스트 ${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'}${t.contextWindow != null ? ` / ${formatCtxWindowK(t.contextWindow)}` : ''}</span>
           </div>
           <div class="ti-tok-bar">
             ${tokenCounts != null && tokenCounts.total > 0

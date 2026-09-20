@@ -933,6 +933,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     const record = response.entries[1]!.record
     delete record.input_tokens
     delete record.output_tokens
+    delete record.context_window
     fetchKeeperTurnRecordsMock.mockResolvedValue(response)
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -956,6 +957,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(tokenBar?.textContent).toContain('측정 없음')
     expect(tokenBar?.textContent).toContain('입력 미상')
     expect(tokenBar?.textContent).toContain('출력 미상')
+    expect(tokenBar?.querySelector('.ctxpct')?.textContent).toBe('컨텍스트 미상')
     expect(tokenBar?.querySelector('.seg-in')).toBeNull()
     expect(tokenBar?.querySelector('.seg-out')).toBeNull()
   })

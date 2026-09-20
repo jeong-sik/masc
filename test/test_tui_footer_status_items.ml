@@ -26,6 +26,97 @@ let check_one_line label text =
   in
   Alcotest.(check int) label 1 newlines
 
+let action_message =
+  "skill \"reviewed-skill\": composition name \"new-skill\" must equal the skill name"
+
+let action_state view =
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- view;
+  state.last_action <- Some (action_message, Unix.gettimeofday ());
+  state
+
+let render_action state width =
+  Masc_tui_render_prim.footer_line state ~max_cells:width
+    ~hints:(Masc_tui_keys.footer_hints state.Masc_tui_types.view)
+  |> Masc_tui_theme.strip_sgr
+
+let test_action_text_is_not_dropped_as_a_key () =
+  List.iter (fun view ->
+    let state = action_state view in
+    let row = render_action state 98 in
+    check_bool "the complete action survives the 100-column surface footer" true
+      (contains ~needle:action_message row);
+    check_at_most_cells "the action respects the existing cell budget" 98 (String.trim row);
+    check_one_line "action footer stays one line" row;
+    let narrow = render_action state 60 in
+    check_bool "a narrower row retains the start of the actual action" true
+      (contains ~needle:"skill \"reviewed-skill\":" narrow);
+    check_bool "a narrower row marks the cut" true (contains ~needle:"…" narrow);
+    check_at_most_cells "narrow action footer remains bounded" 60 (String.trim narrow))
+    [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
+
+let test_action_text_preserves_the_search_prefix () =
+  let state = action_state Masc_tui_types.Tools in
+  state.search_last <- "deploy  note";
+  let row = render_action state 140 in
+  check_bool "the search text keeps its internal spaces" true
+    (contains ~needle:"/deploy  note" row);
+  check_bool "the action remains beside the search text" true
+    (contains ~needle:action_message row);
+  check_bool "the quit hint remains when it fits" true (contains ~needle:"q:quit" row);
+  check_at_most_cells "search and action remain bounded" 140 (String.trim row)
+
+let test_expired_action_leaves_the_original_footer () =
+  let state = action_state Masc_tui_types.Tools in
+  state.last_action <- Some (action_message, 0.);
+  let expired = render_action state 98 in
+  state.last_action <- None;
+  check_string "expired action adds no status or hint changes" (render_action state 98) expired
+
+let test_action_text_preserves_existing_conflict_priority () =
+  let armed = Masc_tui_footer.Keeper_action_armed
+      { key = "d"; action = "stop"; keeper = "k" } in
+  let workspace = Masc_tui_footer.Workspace_mismatch "/other workspace" in
+  let build = Masc_tui_footer.Tui_build_mismatch
+      { tui = "old"; server = "new"; older = `Tui } in
+  let notices =
+    [ "press d again to stop k"
+    ; "MISMATCH local /other workspace (r:retry)"
+    ; "TUI old ≠ server new (restart masc)" ] in
+  List.iter (fun status ->
+    let state = action_state (Masc_tui_types.Keepers Masc_tui_types.Keeper_list) in
+    let render () =
+      Masc_tui_render_prim.footer_line ~status state ~max_cells:98
+        ~hints:"j/k:move  Esc:back  q:quit" |> Masc_tui_theme.strip_sgr in
+    state.search_last <- "k";
+    state.last_action <- None;
+    let before = render () in
+    state.last_action <- Some (action_message, Unix.gettimeofday ());
+    let after = render () in
+    List.iter (fun notice ->
+      if contains ~needle:notice before then
+        check_bool ("action preserves " ^ notice) true (contains ~needle:notice after)) notices;
+    check_bool "search remains beside the warning" true (contains ~needle:"/k" after);
+    check_bool "quit stays available beside the warning" true (contains ~needle:"q:quit" after);
+    check_bool "omitted action or hints are marked" true (contains ~needle:"…" after);
+    check_at_most_cells "warning and action remain bounded" 98 (String.trim after))
+    [ [ armed ]; [ workspace ]; [ build ]; [ armed; workspace; build ] ]
+
+let test_action_with_no_remaining_cells_marks_the_omission () =
+  let state = action_state Masc_tui_types.Tools in
+  let status = [ Masc_tui_footer.Keeper_action_armed
+      { key = "d"; action = "stop"; keeper = "k" } ] in
+  List.iter (fun (width, marker_fits) ->
+    let row = Masc_tui_render_prim.footer_line ~status state ~max_cells:width
+        ~hints:"q:quit" |> Masc_tui_theme.strip_sgr in
+    check_bool "the whole confirmation is kept" true
+      (contains ~needle:"press d again to stop k" row);
+    check_bool "the exit remains" true (contains ~needle:"q:quit" row);
+    check_bool "an omission marker never displaces the warning or exit" marker_fits
+      (contains ~needle:"…?" row);
+    check_at_most_cells "zero-room footer remains bounded" width (String.trim row))
+    [ 37, true; 36, false ]
+
 let test_literal_search_status_survives_hint_fitting () =
   let prefix = "/  deploy note   (2) n/N" in
   let hints = "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close  q:quit" in
@@ -1032,7 +1123,17 @@ let test_a_conflict_notice_leads_the_search_marker () =
 
 let tests =
   [ ( "tui-footer-status-items"
-    , [ Alcotest.test_case "literal search status survives hint fitting" `Quick
+    , [ Alcotest.test_case "action text is not dropped as a key" `Quick
+          test_action_text_is_not_dropped_as_a_key
+      ; Alcotest.test_case "action text preserves the search prefix" `Quick
+          test_action_text_preserves_the_search_prefix
+      ; Alcotest.test_case "expired action leaves the original footer" `Quick
+          test_expired_action_leaves_the_original_footer
+      ; Alcotest.test_case "action preserves existing conflict priority" `Quick
+          test_action_text_preserves_existing_conflict_priority
+      ; Alcotest.test_case "action with no remaining cells marks its omission" `Quick
+          test_action_with_no_remaining_cells_marks_the_omission
+      ; Alcotest.test_case "literal search status survives hint fitting" `Quick
           test_literal_search_status_survives_hint_fitting
       ; Alcotest.test_case "a conflict notice leads the search marker" `Quick
           test_a_conflict_notice_leads_the_search_marker

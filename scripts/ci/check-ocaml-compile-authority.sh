@@ -37,12 +37,17 @@ fail() {
 # 37 did not -- and an unreachable value in one of those 37 produced no signal
 # at all. Removing it from the root returns the tree to that state silently.
 #
-# The filter keys on "(:standard -" rather than on any particular flag: the
-# (dirs …) stanza at the top of the file also opens with (:standard, but with
-# nothing after it, while every flag list continues with a flag. Keying on one
-# of the required flags instead would report "0 flag lists" when that same flag
-# is the one missing, which is the case this exists to diagnose.
-flag_lines="$(grep -F -- '(:standard -' "${dune_root}" || true)"
+# Read only the top-level env stanza. Nested subdir env stanzas may intentionally
+# override warnings for external sources and do not own the repository-wide
+# compile policy asserted here. Within that stanza, key on "(:standard -" rather
+# than on a required flag so a missing flag still reaches the diagnostic below.
+flag_lines="$(
+  awk '
+    /^\(env$/ { in_root_env = 1; next }
+    in_root_env && /^\(/ { exit }
+    in_root_env && index($0, "(:standard -") { print }
+  ' "${dune_root}"
+)"
 flag_line_count="$(grep -c . <<<"${flag_lines}" || true)"
 [ "${flag_line_count}" -eq 2 ] \
   || fail "root dune env must have exactly 2 (:standard …) flag lists (dev, release), found ${flag_line_count}"

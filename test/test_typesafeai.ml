@@ -231,7 +231,8 @@ let test_config_defaults () =
 let with_jev_config ~api_key ~enabled ~model f =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" api_key (fun () ->
     Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" enabled (fun () ->
-      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" model f))
+      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" model (fun () ->
+        Masc_test_deps.with_process_env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None f)))
 ;;
 
 let test_config_readiness_is_typed_and_credential_free () =
@@ -294,6 +295,9 @@ let test_each_gate_has_its_own_switch () =
             (true, false) (gates ())));
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" (Some "false") (fun () ->
         env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
+          (match C.readiness () with
+           | C.Off -> ()
+           | C.Configured _ -> Alcotest.fail "a disabled Board gate reported JEV configured");
           Alcotest.(check (pair bool bool)) "each switch reaches only its own gate"
             (false, true) (gates ())));
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->

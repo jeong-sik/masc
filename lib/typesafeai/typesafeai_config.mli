@@ -12,9 +12,9 @@ type readiness =
   | Configured of { model : string }
 
 val readiness : unit -> readiness
-(** Credential-free readiness for operator projections. [Off] covers an
-    explicit disable and a missing key; [Configured] carries only the configured
-    model, never the API key. *)
+(** Credential-free Board attention readiness for operator projections. [Off]
+    covers a disabled Board gate or lane and a missing key; [Configured] carries
+    only the configured model, never the API key. *)
 
 val is_enabled : unit -> bool
 (** [true] when [TYPESAFEAI_API_KEY] holds a non-blank value and

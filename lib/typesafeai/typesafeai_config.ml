@@ -57,5 +57,5 @@ type readiness =
   | Configured of { model : string }
 
 let readiness () =
-  if is_enabled () then Configured { model = model () } else Off
+  if is_board_attention_enabled () then Configured { model = model () } else Off
 ;;

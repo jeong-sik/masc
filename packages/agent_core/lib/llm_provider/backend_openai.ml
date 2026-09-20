@@ -962,13 +962,21 @@ let%test "openai_content_parts_of_blocks tool_result filtered" =
 ;;
 
 let%test "build_request includes tool_choice for model with supports_tool_choice=true" =
+  (* No catalog row names this model, so the deployment declares what it can
+     do. Built on the wire's preset rather than the bare defaults: the preset
+     carries the OpenAI-compatible request shape this snapshot depends on. *)
   let config =
     Provider_config.make
       ~kind:OpenAI_compat
       ~model_id:"gpt"
       ~base_url:"http://localhost"
       ~tool_choice:Any
-      ~supports_tool_choice_override:true
+      ~model_capabilities_override:
+        { (Capabilities.capabilities_of_kind OpenAI_compat) with
+          supports_tools = true
+        ; supports_tool_choice = true
+        ; supports_required_tool_choice = true
+        }
       ()
   in
   let body = build_request ~config ~messages:[] () in
@@ -1139,16 +1147,16 @@ let%test "explicit json_schema response_format overrides json mode compatibility
   body |> member "response_format" |> member "type" |> to_string = "json_schema"
 ;;
 
-let%test "supports_tool_choice_override=Some false rejects forced tool_choice" =
-  (* Unknown model_id defaults to supports_tool_choice=false. Override false
-     keeps the fail-closed behavior explicit. *)
+let%test "a forced tool_choice on a model with no tool-choice capability is rejected" =
+  (* An unknown model_id resolves to supports_tool_choice=false, and a forced
+     choice on it fails closed rather than reaching a wire that would drop it
+     silently. *)
   let config =
     Provider_config.make
       ~kind:OpenAI_compat
       ~model_id:"mystery-xyz-v1"
       ~base_url:"http://localhost"
       ~tool_choice:Any
-      ~supports_tool_choice_override:false
       ()
   in
   match build_request ~config ~messages:[] () with
@@ -1157,26 +1165,6 @@ let%test "supports_tool_choice_override=Some false rejects forced tool_choice" =
       ~prefix:"Backend_openai_request.effective_tool_choice: openai_compat model"
       msg
   | _ -> false
-;;
-
-let%test
-    "supports_tool_choice_override=Some true forces tool_choice on capability-false model"
-  =
-  (* Use an unknown model whose capability record defaults to
-     supports_tool_choice=false, then force-enable it via override. *)
-  let config =
-    Provider_config.make
-      ~kind:OpenAI_compat
-      ~model_id:"mystery-xyz-v1"
-      ~base_url:"http://localhost"
-      ~tool_choice:Any
-      ~supports_tool_choice_override:true
-      ()
-  in
-  let body = build_request ~config ~messages:[] () in
-  let json = Yojson.Safe.from_string body in
-  let open Yojson.Safe.Util in
-  json |> member "tool_choice" |> to_string = "required"
 ;;
 
 let%test "build_request serializes thinking object for deepseek-v4-flash" =

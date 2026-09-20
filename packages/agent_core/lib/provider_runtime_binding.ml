@@ -239,31 +239,21 @@ let registry_capabilities_for_provider_config (cfg : PConfig.t) =
 
 let capabilities_for_provider_config (cfg : PConfig.t) =
   let caps = registry_capabilities_for_provider_config cfg in
-  let caps =
-    match PConfig.capabilities_for_config_model cfg with
-    | Some model_caps -> model_caps
-    | None ->
-      (match
-         (* Same config, so the same wire: this fallback differs from
-            [capabilities_for_config_model] only in the label it qualifies
-            with, not in which of the provider's wires it resolved to. *)
-         Llm_provider.Capabilities.for_provider_model_id
-           ~wire:(Some cfg.kind)
-           ~allow_bare_fallback:false
-           ~provider_label:(provider_id_of_provider_config cfg)
-           ~model_id:cfg.model_id
-       with
-       | Some model_caps -> model_caps
-       | None -> caps)
-  in
-  match cfg.supports_tool_choice_override with
-  | Some supports_tool_choice ->
-    { caps with
-      supports_tool_choice
-    ; supports_required_tool_choice = supports_tool_choice
-    ; supports_named_tool_choice = supports_tool_choice
-    }
-  | None -> caps
+  match PConfig.capabilities_for_config_model cfg with
+  | Some model_caps -> model_caps
+  | None ->
+    (match
+       (* Same config, so the same wire: this fallback differs from
+          [capabilities_for_config_model] only in the label it qualifies
+          with, not in which of the provider's wires it resolved to. *)
+       Llm_provider.Capabilities.for_provider_model_id
+         ~wire:(Some cfg.kind)
+         ~allow_bare_fallback:false
+         ~provider_label:(provider_id_of_provider_config cfg)
+         ~model_id:cfg.model_id
+     with
+     | Some model_caps -> model_caps
+     | None -> caps)
 ;;
 
 let resolve_model binding ~requested_model =

@@ -67,6 +67,7 @@ let cursor_of_json content =
 let read_cursor () =
   let path = cursor_path () in
   match Fs_compat.load_file_opt path with
+  | exception Sys_error detail -> Error detail
   | None -> Ok 0
   | Some content -> cursor_of_json content
 ;;
@@ -171,6 +172,7 @@ let disposition_of_outcome = function
 module For_testing = struct
   let cursor_to_json = cursor_to_json
   let cursor_of_json = cursor_of_json
+  let read_cursor = read_cursor
   let conversation_id = conversation_id
   let inbound_message_of_row = inbound_message_of_row
   let disposition_of_outcome = disposition_of_outcome

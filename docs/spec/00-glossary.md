@@ -49,12 +49,25 @@ status: reference
 : 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
   레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
+**Checkpoint Load**
+: 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
+  새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
+  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
   단계. Keeper turn과 동일한 단위가 아니다.
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Parallel Tool Calls**
+: 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의
+  `supports_parallel_tool_calls`, 실행별 억제는 runtime binding의
+  `disable-parallel-tool-use`가 정한다. 억제 요청을 받아들이는 provider 계약은
+  provider catalog의 `supports_parallel_tool_suppression`이며, 미선언이면 억제를
+  요청할 수 없다. 이 요청 정책은 도구를 실행할 때의 동시성이나
+  spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
 ## Collaboration State
 
@@ -66,8 +79,10 @@ status: reference
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
 
 **Goal**
-: 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Blocked`,
-  `Paused`, `Completed`, `Dropped`다.
+: 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
+  `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
+  `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
+  `Completed`가 된다(`lib/goal/goal_phase.mli`).
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 현재 동작은 create, list, get,
@@ -79,6 +94,38 @@ status: reference
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
+
+## Skills
+
+**Skill**
+: 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
+  Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
+  생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
+
+**Instruction Skill**
+: Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
+  본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
+
+**Composition Skill**
+: 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
+  검증된 계획이 `keeper_compose_<name>` 도구가 된다. 실행기는 선언된 입력과
+  의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
+  도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
+
+**Skill Reference**
+: source, package, name으로 이뤄진 신원과 content revision의 조합
+  (`Skill_reference.t`). 이름 하나가 아닌 이 참조로 읽을 내용을 지정한다.
+
+**Skill Snapshot**
+: `Skill_catalog_snapshot_service`가 발행한 source 관측과 원문 bytes의 불변 묶음.
+  Keeper는 턴 경계에서 고정한 snapshot으로 Skill을 선택한다. 원문이 바뀌어도
+  이미 시작한 턴의 참조를 새 내용으로 바꾸지 않는다.
+
+**Skill Activation**
+: 정확한 Skill 참조의 본문·리소스 읽기 또는 합성 호출을 기록한 사건.
+  `Keeper_skill_activation_ledger`는 결과 전달(`delivery`)과 이후 모델이 고른
+  도구 호출(`actions`)을 별도로 붙인다. 이후 호출이 있다는 사실만으로 Skill이
+  그 행동의 원인이었거나 작업을 성공시켰다고 판정하지 않는다.
 
 ## Repository Execution
 
@@ -110,6 +157,8 @@ status: reference
 : Checkpoint의 `messages`. 그 trace에서 오간 message가 시간순으로 쌓인 목록이다.
   Keeper turn은 이 목록 끝에 message를 덧붙인다. 목록 안에는 어느 message가 어느
   Keeper turn의 것인지 표시가 없다.
+  운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
+  진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
 
 **Message**
 : History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content
@@ -122,28 +171,38 @@ status: reference
   갈라지면 provider가 요청을 거절하므로 자르는 자리는 Atom 경계에만 온다. Atom의
   크기는 고르지 않아서 Atom 개수는 위치를 말할 뿐 요청 크기를 말하지 않는다.
 
+**Carried Front (실어 보낼 이력의 시작 위치)**
+: 요청에 실리는 가장 오래된 Atom의 번호와 그 Atom을 여는 Message의 digest.
+  후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
+  그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
+  다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+
+**Model Input Ledger (모델 입력 원장)**
+: Keeper·runtime·trace별로 공급자 usage와 실린 Atom 범위를 기록한 프로세스 내 원장.
+  원장이 아직 세지 않은 위치까지 거절이 앞을 옮길 수 있다. 이때 다음 요청은 턴이
+  보관한 Carried Front를 쓰고, 공급자 응답이 온 뒤 원장을 갱신한다.
+
 **Turn Boundary**
 : 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
   (`fresh`/`continued`)도 같이 적는다. Checkpoint 파일이 있었는지가 아니라 Atom이
-  있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 파일에
-  쌓인 순서는 turn 순서가 아닐 수 있어서 읽는 쪽은 Atom 수로 줄을 세운다.
-  같은 파일에 `history_empty` 줄도 쌓인다. "이 trace의 History에 지금 Atom이
-  없다"를 말하는 줄이고, Atom이 없는 History를 손에 든 쪽이 쓴다. Atom이 없는
-  History에서 시작하는 turn은 시작할 때 쓴다. 그 turn이 저장만 하고 끝을 못 내도
-  줄은 남는다. Checkpoint를 못 읽어서 빈 History로 시작한 turn도 이 줄을 쓰는데,
-  그때는 저장된 History에 Atom이 남아 있을 수 있다.
-  `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. `fresh` 줄과
-  `history_empty` 줄은 둘 다 "이 trace의 Atom 번호가 0에서 다시 시작했다"를
-  말한다.
+  있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
+  줄이 파일에 쌓인 순서가 아니라 Atom 수로 줄을 세운다.
+  같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터
+  0에서 다시 시작한다"를 말하는 줄이고, History를 다시 시작하게 만든 쪽이 쓴다.
+  `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. Atom이 없는 History에서
+  시작하는 turn은, 저장된 History에 Atom이 없는 것을 알면 시작할 때 쓰고,
+  Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
+  보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
+  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
 
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`<keeper>.librarian-progress.json`).
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
-  읽은 Atom을 여는 Message의 digest. 파일에 쌓인 순서가 turn 순서가 아니라서 줄
-  번호로는 이것을 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
+  읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
+  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
 

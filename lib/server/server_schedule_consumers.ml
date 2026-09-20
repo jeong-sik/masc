@@ -1463,7 +1463,7 @@ let cancel_keeper_schedules config ~keeper_name =
    signal), so it does not depend on the reaction-ledger ack transition. A queue
    read failure is fail-open (fire as before) so a transient read never starves
    the schedule. *)
-let defer_wake config (request : Schedule_domain.schedule_request) =
+let defer_wake config ~occurrence_id (request : Schedule_domain.schedule_request) =
   match request.Schedule_domain.recurrence with
   | Schedule_domain.Interval _ ->
     (match Schedule_payload_projection.result_delivery request with
@@ -1482,6 +1482,12 @@ let defer_wake config (request : Schedule_domain.schedule_request) =
                     String.equal
                       wake.Keeper_event_queue.schedule_instance_id
                       request.Schedule_domain.schedule_instance_id
+                    (* Enqueue can commit before activation or the schedule's
+                       acceptance fails. Retrying that exact occurrence repairs
+                       the remaining work; only an earlier occurrence holds a
+                       new wake back. *)
+                    && not (String.equal wake.occurrence_id
+                              (Schedule_occurrence_id.to_string occurrence_id))
                   | Keeper_event_queue.Board_signal _
                   | Keeper_event_queue.Board_attention _
                   | Keeper_event_queue.Bootstrap

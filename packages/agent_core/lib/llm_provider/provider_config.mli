@@ -95,24 +95,6 @@ type t =
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
   ; cache_extended_ttl : bool
-  ; supports_tool_choice_override : bool option
-    (** Override the registry default for [supports_tool_choice].
-      [None] = use the per-kind default from {!Capabilities}.
-      [Some b] = force [b].
-
-      Kept on this low-level config so downstream callers (e.g. declaring
-      per-entry capability facts in their own config file) can inject
-      a verified model-side support flag without agent core matching on
-      [model_id]. Agent Core stays model-agnostic; the consumer declares.
-
-      Design principle: declaration-over-probing. Agent Core does not run
-      any capability probe against the provider endpoint (Ollama's
-      [/api/show] exposes no authoritative tool_choice flag; LiteLLM
-      encodes this in a static JSON table and has the same blind spot).
-      Instead of guessing from model_id substrings, the consumer owns
-      the policy and declares it.
-
-      @since 0.150.0 *)
   ; supports_structured_output_override : bool option
     (** Override whether this concrete OpenAI-compatible endpoint supports
         provider-native JSON-schema output requests. This is intentionally an
@@ -250,7 +232,6 @@ val make
   -> ?response_format:Types.response_format
   -> ?cache_system_prompt:bool
   -> ?cache_extended_ttl:bool
-  -> ?supports_tool_choice_override:bool
   -> ?supports_structured_output_override:bool
   -> ?model_capabilities_override:Capabilities.capabilities
   -> ?keep_alive:string

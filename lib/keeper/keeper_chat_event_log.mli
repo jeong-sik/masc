@@ -95,8 +95,8 @@ val read_journal_path_result : string -> (journaled_event list, read_failure) re
     called from an Eio fiber. The writer's framing rule is applied on the
     way out: a final fragment with no trailing newline is the remains of an
     append that never completed, not a row — it is logged, the complete rows
-    before it are returned, and the writer refuses to append after it, so
-    those rows are the journal's final content. A bad complete row is
+    before it are returned, and the next append cuts it before writing, so
+    any later row follows exactly those rows. A bad complete row is
     [Journal_corrupt]. Never raises except [Eio.Cancel.Cancelled]. *)
 
 val read_journal : journal -> (journaled_event list, read_failure) result

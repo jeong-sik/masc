@@ -230,11 +230,20 @@ export function KeeperCheckpointPanel({
         const result = await deleteKeeperHistorySnapshots(keeperName, selectedIds)
         setInventory(result.inventory)
         setSelectedIds([])
-        const missingSuffix =
+        const outcomes = [
           result.missing_snapshot_ids.length > 0
-            ? ` (누락 ${result.missing_snapshot_ids.length})`
-            : ''
-        showToast(`${result.deleted_snapshot_ids.length}개 snapshot 삭제${missingSuffix}`, 'success')
+            ? `없음 ${result.missing_snapshot_ids.length}`
+            : null,
+          result.refused_snapshot_ids.length > 0
+            ? `거절 ${result.refused_snapshot_ids.length}`
+            : null,
+          result.failed_snapshot_ids.length > 0
+            ? `삭제 실패 ${result.failed_snapshot_ids.length}`
+            : null,
+        ].filter((outcome): outcome is string => outcome !== null)
+        const outcomeSuffix = outcomes.length > 0 ? ` (${outcomes.join(', ')})` : ''
+        const tone = result.failed_snapshot_ids.length > 0 ? 'error' : 'success'
+        showToast(`${result.deleted_snapshot_ids.length}개 snapshot 삭제${outcomeSuffix}`, tone)
       } catch (err) {
         showToast(err instanceof Error ? err.message : 'snapshot 삭제 실패', 'error')
       } finally {

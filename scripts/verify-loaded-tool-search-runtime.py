@@ -91,32 +91,7 @@ def main():
     fixtures = Path(__file__).parent / 'fixtures/release-evidence'
     runtime = (fixtures / 'runtime.toml').read_text()
     runtime += f'\n[providers.search_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "search-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[search_fixture.proof]\n'
-    overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
-    overlay += f'''
-[[providers]]
-id = "search_fixture"
-kind = "openai_compat"
-base_url = "http://127.0.0.1:{provider.server_port}/v1"
-request_path = "/chat/completions"
-api_key_env = ""
-capabilities_base = "openai_chat"
-[[models]]
-id_prefix = "search-fixture"
-provider_name = "search_fixture"
-base = "openai_chat"
-max_context_tokens = 131072
-max_output_tokens = 1024
-supports_tools = true
-supports_tool_choice = true
-supports_response_format_json = true
-supports_native_streaming = true
-[[targets]]
-id = "search_fixture.proof"
-provider_ref = "search_fixture"
-model_id = "search-fixture"
-'''
     (config / 'runtime.toml').write_text(runtime)
-    (config / 'agent-core-models-overlay.toml').write_text(overlay)
     env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'USER', 'SHELL']}
     env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='false')
     with socket.socket() as probe:

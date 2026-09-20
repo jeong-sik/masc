@@ -220,20 +220,16 @@ let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
   check bool "retired runtime.json absent" false (Sys.file_exists path)
 
+(* Every binding this repo's runtime.toml names has to be answered by the
+   embedded catalog, because nothing else answers. *)
 let with_deployment_agent_core_model_catalog f =
-  let overlay_path = Filename.concat (repo_root ()) "config/agent-core-models-overlay.toml" in
-  check bool "deployment catalog overlay present" true (Sys.file_exists overlay_path);
-  match Llm_provider.Model_catalog.load_file overlay_path with
-  | Error msg -> failf "deployment catalog overlay should load: %s" msg
-  | Ok overlay ->
-    Fun.protect
-      ~finally:Llm_provider.Model_catalog.clear_global
-      (fun () ->
-         Llm_provider.Model_catalog.clear_global ();
-         Llm_provider.Model_catalog.set_global_overlay overlay;
-         match Llm_provider.Model_catalog.global () with
-         | None -> fail "embedded plus deployment overlay catalog should load"
-         | Some catalog -> f catalog)
+  Fun.protect
+    ~finally:Llm_provider.Model_catalog.clear_global
+    (fun () ->
+       Llm_provider.Model_catalog.clear_global ();
+       match Llm_provider.Model_catalog.global () with
+       | None -> fail "embedded catalog should load"
+       | Some catalog -> f catalog)
 
 let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
@@ -323,7 +319,9 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
   List.iter
     (fun (entry : Llm_provider.Model_catalog.model_entry) ->
        let provider_label = Option.value entry.provider_name ~default:"" in
-       let model_id = entry.id_prefix in
+       let model_id =
+         Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+       in
        let label = provider_label ^ "/" ^ model_id in
        match
          Llm_provider.Capabilities.for_provider_model_id
@@ -635,7 +633,8 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
    with
    | None -> fail "expected exact Ollama Cloud deepseek-v4-pro catalog row"
    | Some entry ->
-     check string "deepseek pro exact model" "deepseek-v4-pro" entry.id_prefix;
+     check string "deepseek pro exact model" "deepseek-v4-pro"
+       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix);
      check (option string) "deepseek pro exact provider" (Some "ollama_cloud")
        entry.provider_name;
      check (option int) "deepseek pro context" (Some 1048576)
@@ -763,32 +762,62 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
     ["", None; "false", Some false; "true", Some true]
 ;;
 
-(* `runtime-default-set --setup-lanes` writes the runtime the install wizard
-   picked into the exact-output lanes' `slots`, and those admit against the
-   AGENT_CORE catalog, not against runtime.toml. A wizard choice with no target
-   row there leaves the mandatory lanes empty and the server refuses to boot,
-   which is what a fresh v0.35.2 install did on its own default (#35022). The
-   installer's own setup path already writes both halves together
-   (install-runtime-setup.py `render`); this holds the seed to the same pair. *)
-let seed_overlay_target_ids () =
-  let path =
-    Filename.concat (repo_root ()) "config/agent-core-models-overlay.toml"
-  in
-  match Otoml.Parser.from_file_result path with
-  | Error msg -> failf "seed overlay should parse: %s" msg
-  | Ok toml ->
-    (match Otoml.find_opt toml (Otoml.get_array Fun.id) [ "targets" ] with
-     | None | Some [] -> fail "seed overlay should declare [[targets]]"
-     | Some targets ->
-       List.filter_map (fun target -> Otoml.find_opt target Otoml.get_string [ "id" ]) targets)
+(* A lane slot names a runtime binding, so the slots a config declares are its
+   bindings -- the same derivation the server does at boot. *)
+let declared_targets_of_config (config : Runtime_schema.config) =
+  List.filter_map
+    (fun (binding : Runtime_schema.binding) ->
+       match
+         ( List.find_opt
+             (fun (provider : Runtime_schema.provider) ->
+                String.equal provider.id binding.provider_id)
+             config.providers
+         , List.find_opt
+             (fun (model : Runtime_schema.model_spec) ->
+                String.equal model.id binding.model_id)
+             config.models )
+       with
+       | Some provider, Some model ->
+         Some
+           ({ target_ref = Runtime_schema.binding_key binding
+            ; provider_ref = provider.id
+            ; model_id = model.api_name
+            ; enable_thinking = model.thinking_support
+            ; connect_timeout_s = provider.connect_timeout_s
+            ; body_timeout_s = None
+            ; api_key_env =
+                (match provider.credentials with
+                 | Some (Runtime_schema.Env name) -> Some name
+                 | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
+            }
+            : Exact_output.declared_target)
+       | Some _, None | None, Some _ | None, None -> None)
+    config.bindings
 ;;
 
+let snapshot_of_config ~io ~label (config : Runtime_schema.config) =
+  match
+    Exact_output.load_resolver_snapshot
+      ~io
+      ~target_binding_policy:Exact_output.Exclude_unbound_targets
+      ~catalog:(Exact_output.Embedded_with_targets (declared_targets_of_config config))
+      ()
+  with
+  | Ok snapshot -> snapshot
+  | Error _ -> failf "%s: embedded catalog plus runtime bindings should load" label
+;;
+
+(* `runtime-default-set --setup-lanes` writes the runtime the install wizard
+   picked into the exact-output lanes' `slots`. A slot admits against the
+   AGENT_CORE catalog, so a wizard choice the catalog has no row for leaves the
+   mandatory lanes empty and the server refuses to boot -- what a fresh v0.35.2
+   install did on its own default (#35022). *)
 let test_repo_seed_wizard_choices_have_an_exact_output_target () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime_toml.parse_file path with
   | Error errors -> failf "repo runtime.toml should parse: %d error(s)" (List.length errors)
   | Ok (cfg : Runtime_schema.config) ->
-    let target_ids = seed_overlay_target_ids () in
+    let snapshot = snapshot_of_config ~io:{ getenv = (fun _ -> Ok None) } ~label:"seed wizard" cfg in
     let offered =
       List.filter_map
         (fun (provider : Runtime_schema.provider) ->
@@ -810,9 +839,14 @@ let test_repo_seed_wizard_choices_have_an_exact_output_target () =
     check bool "the seed offers the wizard at least one HTTP runtime" true (offered <> []);
     check
       (list string)
-      "every runtime the wizard can pick has a seed overlay [[targets]] row"
+      "every runtime the wizard can pick has a catalog row"
       []
-      (List.filter (fun runtime_id -> not (List.mem runtime_id target_ids)) offered)
+      (List.filter
+         (fun runtime_id ->
+            match Exact_output.admit_target_ref snapshot runtime_id with
+            | Ok (_ : Exact_output.admitted_target) -> false
+            | Error _ -> true)
+         offered)
 ;;
 
 let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
@@ -830,6 +864,9 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
        | None -> ()
        | Some raw ->
          let expected =
+           let id_prefix =
+             Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+           in
            match String.lowercase_ascii (String.trim raw) with
            | "visual_first" | "visual-first" -> Llm_provider.Modality.Visual_first
            | "preserve_input_order" | "preserve-input-order" | "preserve" ->
@@ -839,28 +876,31 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
                "unsupported modality_priority %S (normalized %S) in %s"
                raw
                normalized
-               entry.id_prefix
+               id_prefix
          in
          let capabilities =
            match entry.provider_name with
            | None ->
-             Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
+             Llm_provider.Capabilities.for_model_id_catalog
+               (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
            | Some provider_label ->
              Llm_provider.Capabilities.for_provider_model_id
                ~wire:None
                ~allow_bare_fallback:false
                ~provider_label
-               ~model_id:entry.id_prefix
+               ~model_id:
+                 (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
          in
          (match capabilities with
           | None ->
             failf
               "modality_priority row %s must resolve through deployment AGENT_CORE catalog"
-              entry.id_prefix
+              (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
           | Some caps ->
             check
               bool
-              (entry.id_prefix ^ " modality_priority resolves")
+              (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+               ^ " modality_priority resolves")
               true
               (caps.modality_priority = expected)))
     rows
@@ -1463,15 +1503,15 @@ let test_official_client_declarations_load () =
    models and all 36 came back carrying thinking while nothing declared it, so
    every one logged Thinking_returned_but_declared_unsupported (#28457). Two of
    those three models have since left the catalog entirely; this is the one
-   that remains, and the declaration is what stops the drift from returning
-   the moment a runtime binds it again. *)
+   that remains, and the declaration is what stops the drift from returning.
+   The label is the one runtime.toml binds. *)
 let test_kimi_for_coding_declares_the_reasoning_it_returns () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~wire:None
       ~allow_bare_fallback:false
-      ~provider_label:"kimi_code"
+      ~provider_label:"kimi_coding"
       ~model_id:"kimi-for-coding"
   with
   | None -> fail "kimi-for-coding missing from the deployment catalog"
@@ -1709,25 +1749,7 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
    grows an api_key_env fails this test instead of failing a push to main. *)
 let test_release_evidence_fixture_lanes_resolve_without_credentials () =
   let fixture_dir = release_evidence_fixture_dir () in
-  let overlay_path = Filename.concat fixture_dir "agent-core-models-overlay.toml" in
-  let overlay_contents =
-    try In_channel.with_open_bin overlay_path In_channel.input_all with
-    | Sys_error detail ->
-      failf "release-evidence smoke overlay cannot be read: %s" detail
-  in
   let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
-  let snapshot =
-    match
-      Exact_output.load_resolver_snapshot
-        ~io
-        ~catalog:
-          (Exact_output.Embedded_with_overlay
-             { source = overlay_path; contents = overlay_contents })
-        ()
-    with
-    | Ok snapshot -> snapshot
-    | Error _ -> fail "release-evidence smoke overlay should load"
-  in
   match
     Runtime_toml.parse_file (Filename.concat fixture_dir "runtime.toml")
   with
@@ -1736,6 +1758,7 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
       "release-evidence smoke runtime.toml should load: %s"
       (render_runtime_toml_errors errors)
   | Ok (config : Runtime_schema.config) ->
+    let snapshot = snapshot_of_config ~io ~label:"release-evidence smoke" config in
     let default_runtime_id =
       match config.default_runtime_id with
       | Some runtime_id -> runtime_id
@@ -1777,7 +1800,7 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
                 | Error _ ->
                   failf
                     "release-evidence smoke lane %s target %s must exist in the \
-                     overlaid catalog"
+                     frozen catalog"
                     lane_id
                     target_ref
                 | Ok admitted_target ->
@@ -1796,12 +1819,6 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let root = repo_root () in
   let runtime_path = Filename.concat root "config/runtime.toml" in
-  let overlay_path = Filename.concat root "config/agent-core-models-overlay.toml" in
-  let overlay_contents =
-    try In_channel.with_open_bin overlay_path In_channel.input_all with
-    | Sys_error detail ->
-      failf "deployment exact-output catalog cannot be read: %s" detail
-  in
   let io : Exact_output.resolver_io =
     { getenv =
         (function
@@ -1811,38 +1828,11 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
           | _ -> Ok None)
     }
   in
-  let snapshot =
-    match
-      Exact_output.load_resolver_snapshot
-        ~io
-        ~catalog:
-          (Exact_output.Embedded_with_overlay
-             { source = overlay_path; contents = overlay_contents })
-        ()
-    with
-    | Ok snapshot -> snapshot
-    | Error _ -> fail "deployment exact-output catalog should load"
-  in
   let single_key_io : Exact_output.resolver_io =
     { getenv = (function
         | "ZAI_API_KEY" -> Ok (Some "first-install-glm-key")
         | _ -> Ok None) }
   in
-  let single_key_snapshot =
-    match Exact_output.load_resolver_snapshot ~io:single_key_io
-      ~catalog:(Exact_output.Embedded_with_overlay
-        { source = overlay_path; contents = overlay_contents }) () with
-    | Ok snapshot -> snapshot
-    | Error _ -> fail "single-key GLM exact catalog must load"
-  in
-  List.iter (fun id ->
-    match Exact_output.admit_target_ref single_key_snapshot id with
-    | Error _ -> failf "GLM target %s must admit with the public key" id
-    | Ok admitted ->
-      (match Exact_output.resolve_target admitted with
-       | Ok _ -> ()
-       | Error _ -> failf "GLM target %s must require only ZAI_API_KEY" id))
-    [ "glm-coding.glm-5-3" ];
   let output_requirement =
     Exact_output.make_output_requirement
       ~schema:
@@ -1862,6 +1852,24 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   match Runtime_toml.parse_file runtime_path with
   | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
   | Ok config ->
+    let snapshot = snapshot_of_config ~io ~label:"deployment seed" config in
+    (* Every GLM binding the seed declares has to come up on the public key
+       alone; a first install has no coding-plan key. *)
+    let single_key_snapshot =
+      snapshot_of_config ~io:single_key_io ~label:"single-key GLM" config
+    in
+    List.iter
+      (fun (binding : Runtime_schema.binding) ->
+         if String.equal binding.provider_id "glm-coding"
+         then (
+           let id = Runtime_schema.binding_key binding in
+           match Exact_output.admit_target_ref single_key_snapshot id with
+           | Error _ -> failf "GLM target %s must admit with the public key" id
+           | Ok admitted ->
+             (match Exact_output.resolve_target admitted with
+              | Ok _ -> ()
+              | Error _ -> failf "GLM target %s must require only ZAI_API_KEY" id)))
+      config.bindings;
     List.iter
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
          List.iter
@@ -3174,10 +3182,11 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
 ;;
 
 (* verifier_exact slots are read twice: the exact registry admits them against
-   the AGENT_CORE catalog, and completion-authority judgement dispatches them
-   through resolve_assignment, which knows only configured runtimes and lanes.
-   A slot that satisfies the catalog and names no configured route used to
-   load, then fail at every judgement — 113 of them on 2026-09-02. *)
+   the AGENT_CORE catalog, and completion-authority judgement admits each one
+   as a configured direct runtime (Runtime.verifier_exact_slot_admission) and
+   dispatches that id alone. A slot that satisfies the catalog and names no
+   configured runtime used to load, then fail at every judgement — 113 of them
+   on 2026-09-02. *)
 let exact_lane_runtime_toml ~lane ~slot =
   Printf.sprintf
     "[providers.local]\n\
@@ -3372,6 +3381,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; is_default = false
     ; wizard_default = false
     ; max_concurrent = None
+    ; disable_parallel_tool_use = false
     ; context_marks = None
     ; max_tokens = None
     ; price_input = None
@@ -3582,11 +3592,11 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
             [provider_name] to add instead of the generic "openai_compat". *)
          check string "provider label" "custom" missing.provider_label;
          check string "model id" "missing-family-123" missing.model_id;
-         check bool "diagnostic names AGENT_CORE catalog file" true
+         check bool "diagnostic names where a row is written" true
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
                  (Runtime.Missing_catalog_models report))
-              "agent-core-models-overlay.toml");
+              "AGENT_CORE embedded catalog");
          check bool "diagnostic reports provider label" true
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string

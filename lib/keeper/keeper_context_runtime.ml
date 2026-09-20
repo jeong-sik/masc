@@ -33,6 +33,14 @@ let context_of_agent_core_checkpoint = Keeper_context_core.context_of_agent_core
 let save_agent_core_checkpoint = Keeper_context_core.save_agent_core_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 
+type checkpoint_load = Keeper_context_core.checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
+
+let load_context_from_checkpoint_classified =
+  Keeper_context_core.load_context_from_checkpoint_classified
+
 (* ================================================================ *)
 
 

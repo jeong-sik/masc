@@ -82,9 +82,9 @@ type vision_backend =
   | Official_client
 
 let vision_runtime_candidates ~now =
-  (* Only explicitly declared media candidates qualify. Capability admission
-     and account ordering are shared with the Keeper media reroute. *)
-  Runtime_agent.media_candidates ~lane:[]
+  (* Only [runtime.media_failover] qualifies. Capability admission uses the
+     same predicate as the Keeper media reroute. *)
+  Runtime_agent.media_candidates ()
   |> Runtime_quota_window.demote_order ~now ~quota_scope_of:(fun (rt : Runtime.t) ->
        Some (Runtime.quota_scope_of_runtime rt))
   |> List.filter_map (fun (rt : Runtime.t) ->

@@ -88,7 +88,7 @@ let test_detail_names_the_use_record () =
         { mfe_retrieved_count = 4
         ; mfe_retrieved_distinct_days = 2
         ; mfe_last_retrieved_at = Some (Unix.gettimeofday () -. 7200.0)
-        ; mfe_cited_count = 1
+        ; mfe_retracted_count = 1
         ; mfe_revised_from = [ "mem-0" ]
         }
     }
@@ -97,12 +97,13 @@ let test_detail_names_the_use_record () =
     Render_memory.memory_fact_detail_lines ~cols:120 (Types.Memory_row_fact fact)
     |> List.map Masc_tui_theme.strip_sgr
   in
-  match List.find_opt (fun line -> contains "Use:" line) lines with
-  | None -> fail "the detail has no Use line"
+  match List.find_opt (fun line -> contains "History:" line) lines with
+  | None -> fail "the detail has no History line"
   | Some line ->
     check bool "retrieval count and days" true (contains "Retrieved 4 · 2 days" line);
     check bool "last retrieval as an age" true (contains "last 2h" line);
-    check bool "citations and predecessors" true (contains "Cited 1 · Revised from 1" line)
+    check bool "past retractions and predecessors" true
+      (contains "Retracted 1 · Revised from 1" line)
 ;;
 
 let test_detail_lines () =
@@ -122,7 +123,12 @@ let test_detail_lines () =
   List.iter
     (fun line ->
       check bool "detail line bounded" true (Layout.display_width line <= 80))
-    lines
+    lines;
+  let history = String.concat " " (List.map String.trim lines) in
+  check bool "narrow history keeps the retraction count" true
+    (contains "Retracted 0" history);
+  check bool "narrow history keeps the predecessor count" true
+    (contains "Revised from 0" history)
 ;;
 
 let test_detail_lines_source_and_invalidation () =

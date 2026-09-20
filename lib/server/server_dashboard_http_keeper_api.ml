@@ -1353,7 +1353,7 @@ let handle_keeper_get_subroutes state req request reqd =
     else (
       let config = Mcp_server.workspace_config state in
       let keepers_dir = memory_os_keepers_dir config in
-      (* What the keeper did with each fact (RFC-0418): retrievals, citations
+      (* What happened to each fact (RFC-0418): retrievals, retractions
          and revisions, projected from the events sidecar at read time and
          stored nowhere. A line the reader could not decode is counted, not
          dropped. *)

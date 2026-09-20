@@ -1,7 +1,6 @@
-(** Memory use events (RFC-0418).
+(** Memory history events (RFC-0418).
 
-    A memory strengthens when it is used, not when the same bytes are seen
-    again. This module records the three uses masc can observe as typed events
+    This module records retrieval, retraction and revision as typed events
     in a per-keeper append-only sidecar, [<keeper>.memory-events.jsonl], and
     projects them at read time. It stores no strength, score, or threshold;
     every number a consumer shows is computed from the events it reads.
@@ -12,15 +11,15 @@
     outlive the fact they name; a dropped fact keeps its events and a reader
     attaches them only to facts that still exist. *)
 
-(** What happened to the memory. A closed set: a new kind of use is a new
+(** What happened to the memory. A closed set: a new kind of event is a new
     constructor, and the compiler names every consumer that has to learn it. *)
 type event_kind =
   | Retrieved of { query : string }
   (** The fact was among the results [keeper_memory_search] returned for
       [query]. *)
-  | Cited of { tool : string }
-  (** The fact's [memory_id] was a typed argument of a tool call to [tool].
-      Ids found by scanning free text do not count. *)
+  | Retracted
+  (** [keeper_memory_retract] successfully removed the fact identified by its
+      [memory_id]. This records removal, not a judgment of the fact's quality. *)
   | Revised of { superseded_by : string }
   (** The librarian wrote a new claim that continues this fact and dropped this
       one; [superseded_by] is the new fact's [memory_id]. The producer is
@@ -39,10 +38,10 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 (** {1 Codec}
 
     One JSON object per line. [recorded_at], [memory_id], [trace_id], [kind]
-    and exactly one payload field named by the kind ([query], [tool] or
-    [superseded_by]); nothing else. The decoder rejects a missing, extra or
+    and the kind's payload ([query] or [superseded_by]); [Retracted] has none.
+    The decoder rejects a missing, extra or
     duplicate field, an unknown kind token, a non-finite time, a string that is
-    not a memory id where one is required, and a blank [query] or [tool]. *)
+    not a memory id where one is required, and a blank [query]. *)
 
 val event_to_json : event -> Yojson.Safe.t
 val event_of_json : Yojson.Safe.t -> (event, Keeper_memory_os_types.wire_error) result
@@ -89,7 +88,7 @@ type summary =
   (** Distinct UTC calendar days on which the fact was retrieved. Spacing is
       shown as a count of days, not turned into a score. *)
   ; last_retrieved_at : float option
-  ; cited_count : int
+  ; retracted_count : int
   ; revised_from : string list
   (** Memory ids of facts whose [Revised] event names this fact as their
       successor, sorted, without repeats. *)

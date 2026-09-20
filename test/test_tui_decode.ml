@@ -3760,13 +3760,13 @@ let memory_fact_snapshot_json ~ordinary ~source_bound =
     ; "source_bound", source_bound
     ]
 
-let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(cited = 0)
+let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(retracted = 0)
     ?(revised_from = []) () =
   `Assoc
     [ "retrieved_count", `Int retrieved
     ; "retrieved_distinct_days", `Int days
     ; "last_retrieved_at", last
-    ; "cited_count", `Int cited
+    ; "retracted_count", `Int retracted
     ; "revised_from", `List (List.map (fun id -> `String id) revised_from)
     ]
 
@@ -3818,14 +3818,14 @@ let test_decode_memory_fact_reads_the_use_record () =
       (snapshot_with
          ~events:
            (memory_fact_events_json ~retrieved:4 ~days:2
-              ~last:(`Float 1_775_000_040.0) ~cited:1 ~revised_from:[ "mem-0" ] ())
+              ~last:(`Float 1_775_000_040.0) ~retracted:1 ~revised_from:[ "mem-0" ] ())
          ())
   in
   Alcotest.(check int) "retrieved" 4 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count;
   Alcotest.(check int) "days" 2 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_distinct_days;
   Alcotest.(check (option (float 0.0))) "last" (Some 1_775_000_040.0)
     fact.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
-  Alcotest.(check int) "cited" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_cited_count;
+  Alcotest.(check int) "retracted" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_retracted_count;
   Alcotest.(check (list string)) "revised from" [ "mem-0" ]
     fact.Tui_decode.mf_events.Tui_decode.mfe_revised_from;
   let unused = only_fact (snapshot_with ~events:(memory_fact_events_json ()) ()) in

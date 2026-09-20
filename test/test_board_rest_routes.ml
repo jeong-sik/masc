@@ -23,6 +23,42 @@ module Http = Masc.Http_server_eio
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "board_rest_routes_runtime_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       Out_channel.with_open_bin path (fun channel ->
+         output_string channel runtime_toml);
+       match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error detail -> failf "Runtime.init_default failed: %s" detail)
+;;
+
 let with_reaction_auth_base f =
   let base_path = Filename.temp_dir "board-reaction-auth-" "" in
   Auth.save_auth_config
@@ -165,7 +201,7 @@ let loopback_request_authority () =
   | Error `Malformed -> fail "failed to construct loopback request authority"
 ;;
 
-let dispatch_schedule_cancel ~router ~token ~schedule_id =
+let dispatch_json ?token ~router ~path ~extra_headers ~body () =
   Server_request_authority.with_current
     (loopback_request_authority ())
     (fun () ->
@@ -174,27 +210,30 @@ let dispatch_schedule_cancel ~router ~token ~schedule_id =
          Httpun.Server_connection.create (fun reqd ->
            Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
        in
-       let body =
-         `Assoc
-           [ "schedule_id", `String schedule_id
-           ; "cancelled_by_id", `String "forged-body-actor"
-           ; "cancelled_by_kind", `String "system"
-           ; "reason", `String "duplicate"
-           ]
-         |> Yojson.Safe.to_string
+       let extra_headers =
+         extra_headers
+         |> List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n")
+         |> String.concat ""
+       in
+       let authorization =
+         Option.fold
+           ~none:""
+           ~some:(fun token -> "Authorization: Bearer " ^ token ^ "\r\n")
+           token
        in
        let raw_request =
          Printf.sprintf
-           "POST /api/v1/tools/masc_schedule_cancel HTTP/1.1\r\n\
+           "POST %s HTTP/1.1\r\n\
             Host: 127.0.0.1:8935\r\n\
             Origin: http://127.0.0.1:8935\r\n\
-            Authorization: Bearer %s\r\n\
-            X-Masc-Agent: forged-header-actor\r\n\
+            %s%s\
             Content-Type: application/json\r\n\
             Content-Length: %d\r\n\
             \r\n\
-            %s"
-           token
+           %s"
+           path
+           authorization
+           extra_headers
            (String.length body)
            body
        in
@@ -236,8 +275,8 @@ let dispatch_schedule_cancel ~router ~token ~schedule_id =
            (String.sub raw offset (String.length raw - offset)) ))
 ;;
 
-let test_schedule_cancel_actor_is_stamped_from_auth () =
-  let base_path = Filename.temp_dir "schedule-cancel-http-actor-" "" in
+let with_authenticated_activity_router ~prefix ~agent_name f =
+  let base_path = Filename.temp_dir prefix "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
     ~finally:(fun () ->
@@ -260,32 +299,11 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
          };
        let token =
          match
-           Auth.create_token base_path ~agent_name:"credential-owner"
+           Auth.create_token base_path ~agent_name
              ~role:Masc_domain.Admin
-         with
+       with
          | Ok (token, _) -> token
          | Error error -> fail (Masc_domain.masc_error_to_string error)
-       in
-       let actor : Schedule_domain.actor =
-         { id = "test"
-         ; kind = Schedule_domain.Human_operator
-         ; display_name = None
-         }
-       in
-       let schedule =
-         match
-           Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
-             ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
-             ~due_at:200.0
-             ~payload:
-               (`Assoc
-                  [ "kind", `String "consumer.note"
-                  ; "body", `Assoc [ "text", `String "cancel me" ]
-                  ])
-             ~source:Schedule_domain.Operator_request ()
-         with
-         | Ok schedule -> schedule
-         | Error error -> fail (Schedule_service.service_error_to_string error)
        in
        let clock = Eio.Stdenv.clock env in
        let router =
@@ -294,17 +312,241 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
            ~clock
            (Http.Router.create ())
        in
-       let status, response =
-         dispatch_schedule_cancel ~router ~token ~schedule_id:schedule.schedule_id
-       in
+       f ~base_path ~config ~state ~sw ~clock ~router ~token)
+;;
+
+let test_schedule_cancel_actor_is_stamped_from_auth () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-cancel-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let actor : Schedule_domain.actor =
+    { id = "test"
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let schedule =
+    match
+      Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
+        ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+             [ "kind", `String "consumer.note"
+             ; "body", `Assoc [ "text", `String "cancel me" ]
+             ])
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok schedule -> schedule
+    | Error error -> fail (Schedule_service.service_error_to_string error)
+  in
+  let body =
+    `Assoc
+      [ "schedule_id", `String schedule.schedule_id
+      ; "cancelled_by_id", `String "forged-body-actor"
+      ; "cancelled_by_kind", `String "system"
+      ; "reason", `String "duplicate"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
+  in
        let open Yojson.Safe.Util in
        check int "cancel accepted" 200 status;
        check string "credential owner is the canceller" "credential-owner"
          (response |> member "data" |> member "cancelled_by" |> member "id"
           |> to_string);
        check string "terminal bridge uses typed human operator" "human_operator"
-         (response |> member "data" |> member "cancelled_by" |> member "kind"
-          |> to_string))
+    (response |> member "data" |> member "cancelled_by" |> member "kind"
+     |> to_string)
+;;
+
+let test_board_context_inference_uses_current_owner_contract_and_actor () =
+  init_runtime_default_for_tests ();
+  with_authenticated_activity_router
+    ~prefix:"board-context-inference-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config ~state ~sw ~clock ~router ~token ->
+  Fun.protect ~finally:Masc.Board.reset_global_for_test
+  @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
+  @@ fun () ->
+  Fun.protect ~finally:Masc.Board_dispatch.reset_for_test
+  @@ fun () ->
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ();
+  Masc.Board_dispatch.init_jsonl ();
+  let keeper_name = "context-inference-target" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"inherit\"\ninstructions = \"Test context inference.\"\n";
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String keeper_name
+           ; "trace_id", `String "trace-context-inference-target"
+           ; "activation_mode", `String "manual"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error error -> fail error);
+  ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+  Eio.Switch.on_release sw (fun () ->
+    Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name);
+  (match
+     Masc.Keeper_owner_registry.install_from_store
+       ~sw
+       ~operation_runner:None
+       ~on_turn_slot_released:None
+       config
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Masc.Keeper_owner_registry.install_error_to_string error));
+  let post =
+    match
+      Masc.Board_dispatch.create_post
+        ~author:keeper_name
+        ~content:"Infer this post through the registered Keeper"
+        ~post_kind:Masc.Board.Automation_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> fail (Board_tool.board_error_to_string error)
+  in
+  let submit () =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/board/context-inference"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "post_id", `String (Masc.Board.Post_id.to_string post.id)
+              ; "target_keeper", `String keeper_name
+              ]))
+      ()
+  in
+  let status, response = submit () in
+  let repeated_status, repeated_response = submit () in
+  let queued =
+    match Masc.Keeper_owner_registry.list_queued_operations
+            ~base_path ~keeper_name ~after_sequence:None ~limit:10 with
+    | Ok operations -> operations
+    | Error error -> fail (Masc.Keeper_owner_registry.command_error_to_string error)
+  in
+  check int "each explicit request is durably admitted once" 2 (List.length queued);
+  let open Yojson.Safe.Util in
+  if status <> 202 || repeated_status <> 202
+  then
+    failf
+      "context inference statuses %d/%d after %d durable admissions; submitters=%s; responses=%s / %s"
+      status repeated_status (List.length queued)
+      (String.concat "," (List.map (fun (operation : Keeper_chat_operation.t) ->
+           operation.source |> member "submitted_by" |> to_string) queued))
+      (Yojson.Safe.to_string response) (Yojson.Safe.to_string repeated_response);
+  let repeated_id = repeated_response |> member "operation_id" |> to_string in
+  check bool "separate requests have separate operation receipts" false
+    (String.equal repeated_id (response |> member "operation_id" |> to_string));
+  List.iter (fun (operation : Keeper_chat_operation.t) ->
+    check string "both operations record the credential owner" "credential-owner"
+      (operation.source |> member "submitted_by" |> to_string)) queued;
+  check bool "repeated receipt identifies an actual queued operation" true
+    (List.exists (fun (operation : Keeper_chat_operation.t) ->
+       String.equal repeated_id (Keeper_chat_operation.Operation_id.to_string operation.operation_id)) queued);
+  check string "resolved target keeper" keeper_name
+    (response |> member "keeper_name" |> to_string);
+  check string "current Owner state is projected" "queued"
+    (response |> member "state" |> to_string);
+  check bool "response uses only the operation id name" false
+    (List.mem_assoc "request_id" (to_assoc response));
+  check bool "response uses the operation state name" false
+    (List.mem_assoc "status" (to_assoc response));
+  let operation_id_raw = response |> member "operation_id" |> to_string in
+  let operation_id =
+    match Keeper_chat_operation.Operation_id.of_string operation_id_raw with
+    | Ok operation_id -> operation_id
+    | Error error -> fail error
+  in
+  let operation =
+    match
+      Masc.Keeper_owner_registry.exact_operation
+        ~base_path
+        ~keeper_name
+        operation_id
+    with
+    | Ok (Some operation) -> operation
+    | Ok None -> fail "context inference operation was not queued"
+    | Error error ->
+      fail (Masc.Keeper_owner_registry.command_error_to_string error)
+  in
+  check string "credential owner is the durable submitter" "credential-owner"
+    (operation.source |> member "submitted_by" |> to_string);
+  let keeper_ctx : _ Masc.Keeper_tool_surface.context =
+    { config
+    ; agent_name = "credential-owner"
+    ; sw
+    ; clock
+    ; proc_mgr = state.Masc.Mcp_server.proc_mgr
+    ; net = state.Masc.Mcp_server.net
+    ; publication_recovery_provider =
+        Masc.Mcp_server.publication_recovery_availability_provider state
+    }
+  in
+  let message =
+    match
+      Masc.Keeper_invocation_contract.direct_message
+        ~keeper_name ~prompt:"Shared submission contract" ~direct_reply:true
+        ~channel:"" ~user_blocks:[] ~attachments:[] ()
+    with
+    | Ok message -> message
+    | Error error -> fail (Masc.Keeper_invocation_contract.request_error_to_string error)
+  in
+  let submissions =
+    [ "MCP message", 3, (fun () ->
+        match Masc.Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg"
+                ~args:(`Assoc [ "name", `String keeper_name; "message", `String "MCP submission" ]) with
+        | Some result -> result
+        | None -> fail "masc_keeper_msg was not dispatched")
+    ; "lane evidence adapter", 4, (fun () ->
+        Masc.Keeper_tool_surface.dispatch_keeper_msg
+          ~submitted_by:"credential-owner" keeper_ctx ~message)
+    ]
+  in
+  List.iter
+    (fun (label, queued_count, submit) ->
+       let result = submit () in
+       check bool (label ^ " accepted") true (Tool_result.is_success result);
+       let data = Tool_result.data result in
+       check string (label ^ " state") "queued" (data |> member "state" |> to_string);
+       check int (label ^ " queued count") queued_count
+         (data |> member "queued_count" |> to_int);
+       check bool (label ^ " is a new operation") false (data |> member "existing" |> to_bool);
+       let id =
+         match Keeper_chat_operation.Operation_id.of_string
+                 (data |> member "operation_id" |> to_string) with
+         | Ok id -> id
+         | Error error -> fail error
+       in
+       match Masc.Keeper_owner_registry.exact_operation ~base_path ~keeper_name id with
+       | Ok (Some stored) ->
+         check string (label ^ " durable submitter") "credential-owner"
+           (stored.source |> member "submitted_by" |> to_string)
+       | Ok None -> fail (label ^ " did not persist its operation")
+       | Error error -> fail (Masc.Keeper_owner_registry.command_error_to_string error))
+    submissions
 ;;
 
 let test_dashboard_board_reaction_routes_registered () =
@@ -530,6 +772,8 @@ let () =
             test_schedule_write_actor_is_stamped_from_auth
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_stamped_from_auth
+        ; test_case "context inference uses typed Owner receipt and authenticated actor" `Quick
+            test_board_context_inference_uses_current_owner_contract_and_actor
         ; test_case
             "dashboard board reaction routes registered"
             `Quick

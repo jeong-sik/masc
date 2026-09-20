@@ -9,13 +9,14 @@ import base64
 import errno
 import fcntl
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import re
 import select
 import signal
+import socket
 import struct
 import zlib
 import subprocess
@@ -172,6 +173,36 @@ class GatedHttpResponse:
             self.completed.set()
 
 
+# Same test-only allowance as the harness's ordinary response waits.
+FIXTURE_HANDLER_CLEANUP_TIMEOUT_S = 3.0
+
+
+class FixtureHTTPServer(ThreadingHTTPServer):
+    def __init__(self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler]) -> None:
+        self.handlers: list[threading.Thread] = []
+        super().__init__(address, handler)
+
+    def process_request(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]
+    ) -> None:
+        thread = threading.Thread(
+            target=self.process_request_thread,
+            args=(request, client_address),
+            daemon=True,
+        )
+        self.handlers.append(thread)
+        thread.start()
+
+    def server_close(self) -> None:
+        HTTPServer.server_close(self)
+        deadline = time.monotonic() + FIXTURE_HANDLER_CLEANUP_TIMEOUT_S
+        for handler in self.handlers:
+            handler.join(max(0.0, deadline - time.monotonic()))
+        pending = [handler.name for handler in self.handlers if handler.is_alive()]
+        if pending:
+            raise AssertionError("HTTP fixture handlers did not stop: " + ", ".join(pending))
+
+
 @contextmanager
 def test_http_endpoint(
     fixtures: HttpFixtures | None,
@@ -272,9 +303,7 @@ def test_http_endpoint(
         def log_message(self, format: str, *args: object) -> None:
             del format, args
 
-    with ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler) as server:
-        # server_close must join handlers before Python starts shutting down.
-        server.daemon_threads = False
+    with FixtureHTTPServer(("127.0.0.1", 0), FixtureHandler) as server:
         thread: threading.Thread | None = None
 
         def start_endpoint() -> None:
@@ -7455,10 +7484,12 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
                         "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        "response_observed_model_input": None,
                         "raw_trace_run_ref": None,
                         "selected_model": "claude-opus-5",
                         "context_window": 200000,
                         "input_tokens": 50000,
+                        "usage_scope": "per_request",
                         "output_tokens": 1200,
                         "cache_read_input_tokens": 32000,
                         "ts": 1787600000.0,

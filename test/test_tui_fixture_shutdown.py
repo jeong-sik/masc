@@ -13,6 +13,70 @@ SOURCE_MODULES = ("test/test_tui_keyboard_input.py",)
 
 
 class FixtureShutdown(unittest.TestCase):
+    def test_context_exit_names_handler_at_cleanup_deadline(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        handler: threading.Thread | None = None
+        client: http.client.HTTPConnection | None = None
+        original_join = threading.Thread.join
+
+        def response() -> h.HttpResponse:
+            nonlocal handler
+            handler = threading.current_thread()
+            entered.set()
+            release.wait()
+            return 200, {"finished": True}
+
+        def join(thread: threading.Thread, timeout: float | None = None) -> None:
+            # Rescue the unbounded baseline so it fails this assertion rather
+            # than hanging the test process. A bounded join keeps the gate held.
+            if thread is handler and timeout is None:
+                release.set()
+            original_join(thread, timeout)
+
+        try:
+            with (
+                patch.object(h, "FIXTURE_HANDLER_CLEANUP_TIMEOUT_S", 0.0, create=True),
+                patch.object(threading.Thread, "join", join),
+                self.assertRaisesRegex(
+                    AssertionError, "HTTP fixture handlers did not stop"
+                ) as error,
+            ):
+                with h.test_http_endpoint({"/held": response}, None) as (
+                    port,
+                    start,
+                    _,
+                ):
+                    start()
+                    try:
+                        client = http.client.HTTPConnection(
+                            "127.0.0.1", port, timeout=3.0
+                        )
+                        client.request("GET", "/held")
+                        self.assertTrue(
+                            entered.wait(timeout=3.0), "HTTP handler did not enter"
+                        )
+                    except BaseException:
+                        release.set()
+                        if client is not None:
+                            client.close()
+                        raise
+            assert handler is not None
+            self.assertIn(handler.name, str(error.exception))
+            self.assertTrue(
+                handler.is_alive(), "fixture must report the still-held handler"
+            )
+        finally:
+            release.set()
+            if handler is not None:
+                original_join(handler, timeout=3.0)
+            if client is not None:
+                client.close()
+            if handler is not None:
+                self.assertFalse(
+                    handler.is_alive(), f"test cleanup left {handler.name} alive"
+                )
+
     def test_context_exit_joins_inflight_response(self) -> None:
         entered = threading.Event()
         release = threading.Event()
@@ -66,9 +130,13 @@ class FixtureShutdown(unittest.TestCase):
         finally:
             release.set()
             if handler is not None:
-                original_join(handler)
+                original_join(handler, timeout=3.0)
             if client is not None:
                 client.close()
+            if handler is not None:
+                self.assertFalse(
+                    handler.is_alive(), f"test cleanup left {handler.name} alive"
+                )
 
 
 if __name__ == "__main__":

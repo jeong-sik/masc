@@ -77,6 +77,13 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Usage Scope**
+: Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
+  요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
+  `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
+  합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
+  않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
+
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)

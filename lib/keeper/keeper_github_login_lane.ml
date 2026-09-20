@@ -125,29 +125,38 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
      write is the bootstrap's job, and this step names it rather than letting
      gh fail later with a directory message. *)
   let* () = bootstrap_control_root ~redaction endpoint in
+  Keeper_sandbox_remote.invalidate_preflight endpoint;
   let* () = Keeper_sandbox_remote.check_workspace_preflight endpoint in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "mkdir"; "-p"; gh_dir ] in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
   let lane : Keeper_github_identity.login_lane =
     { run_login =
         (fun ~on_stdout_chunk ~on_stderr_chunk ->
-          Masc_exec.Sandbox_target.status_tuple
-            (run_remote
-               endpoint
-               ~timeout_sec:Keeper_github_identity.login_timeout_sec
-               ~on_stdout_chunk:(Some on_stdout_chunk)
-               ~on_stderr_chunk:(Some on_stderr_chunk)
-               ~argv:(Keeper_github_identity.login_argv ~hostname)))
+          let result =
+            Masc_exec.Sandbox_target.status_tuple
+              (run_remote
+                 endpoint
+                 ~timeout_sec:Keeper_github_identity.login_timeout_sec
+                 ~on_stdout_chunk:(Some on_stdout_chunk)
+                 ~on_stderr_chunk:(Some on_stderr_chunk)
+                 ~argv:(Keeper_github_identity.login_argv ~hostname))
+          in
+          Keeper_sandbox_remote.invalidate_preflight endpoint;
+          result)
     ; run_login_with_token =
         (fun ~token ->
-          Masc_exec.Sandbox_target.status_tuple
-            (run_remote
-               endpoint
-               ~timeout_sec:step_timeout_sec
-               ~on_stdout_chunk:None
-               ~on_stderr_chunk:None
-               ~stdin_content:(Some token)
-               ~argv:(Keeper_github_identity.login_with_token_argv ~hostname)))
+          let result =
+            Masc_exec.Sandbox_target.status_tuple
+              (run_remote
+                 endpoint
+                 ~timeout_sec:step_timeout_sec
+                 ~on_stdout_chunk:None
+                 ~on_stderr_chunk:None
+                 ~stdin_content:(Some token)
+                 ~argv:(Keeper_github_identity.login_with_token_argv ~hostname))
+          in
+          Keeper_sandbox_remote.invalidate_preflight endpoint;
+          result)
     ; secure_after_login = (fun () -> secure_config_files ~redaction endpoint ~gh_dir)
     ; observe_after_login =
         (fun () ->
@@ -179,7 +188,13 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
             ; checked_at_unix = Time_compat.now ()
             }
           in
-          Ok observation)
+          if result.Keeper_github_identity.authenticated
+          then (
+            let* () = Keeper_sandbox_remote.check_preflight ~force:true endpoint in
+            Ok observation)
+          else (
+            Keeper_sandbox_remote.invalidate_preflight endpoint;
+            Ok observation))
     }
   in
   Ok lane

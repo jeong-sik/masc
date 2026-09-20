@@ -909,6 +909,11 @@ let store_preflight ~now t result =
       { checked_at = now; result })
 ;;
 
+let invalidate_preflight t =
+  Stdlib.Mutex.protect preflight_cache_mu (fun () ->
+    Hashtbl.remove preflight_cache (preflight_cache_key t))
+;;
+
 (* Whether this endpoint's shim can build the box (RFC-0422). The shim says
    so itself through the probe's [capabilities], so the answer is the
    binary's rather than a guess from the profile; a guest whose shim

@@ -62,6 +62,7 @@ let observed_path ~dir = Filename.concat dir "device-code-observed"
    which contract broke instead of "exit 1". *)
 let exit_code_never_streamed = 7
 let exit_code_unexpected_argv = 64
+let exit_code_preflight_order = 65
 
 let stub_main () =
   let dir = Sys.argv.(2) in
@@ -146,9 +147,23 @@ let stub_main () =
          "Filesystem 1024-blocks Used Available Capacity Mounted on\n\
           /dev/test 100000000 1 99999999 1% /srv/masc/playground\n";
        write_all Unix.stderr (trailer 0)
+     | [ "test"; "-s"; path ] when String.equal path (expected_gh_dir ^ "/hosts.yml") ->
+       record "preflight-identity-file";
+       let login_ran = Sys.file_exists (frame_path ~dir "login") in
+       write_all Unix.stderr (trailer (if login_ran then 0 else 1))
+     | [ "env"; gh_config; "gh"; "auth"; "status" ]
+       when String.equal gh_config ("GH_CONFIG_DIR=" ^ expected_gh_dir) ->
+       record "preflight-identity";
+       write_all Unix.stderr (trailer 0)
      | [ "mkdir"; "-p"; path ] ->
        record (if String.equal path expected_gh_dir then "mkdir" else "mkdir-root");
-       write_all Unix.stderr (trailer 0)
+       let endpoint_ready =
+         String.equal path expected_gh_dir
+         || (Sys.file_exists (Filename.concat dir "endpoint-probed")
+            && Sys.file_exists (frame_path ~dir "preflight-endpoint-root"))
+       in
+       write_all Unix.stderr
+         (trailer (if endpoint_ready then 0 else exit_code_preflight_order))
      | "chmod" :: mode :: _ ->
        record ("chmod-" ^ mode);
        write_all Unix.stderr (trailer 0)
@@ -174,6 +189,17 @@ let temp_dir () =
   Sys.remove path;
   Unix.mkdir path 0o700;
   path
+;;
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv key value
+      | None -> Unix.putenv key "")
+    f
 ;;
 
 let install_stub ~dir =
@@ -332,6 +358,8 @@ let test_profile_picks_the_lane () =
 let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with_eio
   @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "60"
+  @@ fun () ->
   let base_path = temp_dir () in
   let dir = temp_dir () in
   write_runtime_toml ~base_path;
@@ -339,6 +367,22 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with_stub_ssh ~dir
   @@ fun () ->
   let config = workspace ~base_path in
+  let endpoint =
+    match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name with
+    | Error error -> failf "remote endpoint did not resolve: %s" error
+    | Ok endpoint ->
+      (match Keeper_sandbox_ssh.create ~base_path ~keeper_name ~endpoint () with
+       | Error error -> failf "remote endpoint was not built: %s" error
+       | Ok endpoint -> endpoint)
+  in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  (match Keeper_sandbox_remote.check_preflight endpoint with
+   | Ok () -> fail "the absent Keeper workspace unexpectedly passed preflight"
+   | Error error ->
+     check bool "the initial failure is the absent Keeper workspace" true
+       (contains "remote_ssh_keeper_root_missing:" error));
+  Sys.remove (Filename.concat dir "endpoint-probed");
+  Sys.remove (frame_path ~dir "preflight-endpoint-root");
   match
     Keeper_github_login_lane.for_keeper
       ~config
@@ -467,9 +511,16 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
          string
          "the probe is explicitly endpoint-scoped"
          "endpoint_process_only"
-         (match observation.Keeper_github_identity.effective_probe_scope with
+       (match observation.Keeper_github_identity.effective_probe_scope with
           | `Host_process_credential_only -> "host_process_credential_only"
-          | `Endpoint_process_only -> "endpoint_process_only"))
+          | `Endpoint_process_only -> "endpoint_process_only"));
+    let identity_check = decoded_request (frame_path ~dir "preflight-identity") in
+    check string "successful login refreshes the full preflight"
+      "/srv/masc/playground/gh-lane-keeper"
+      identity_check.remote_root;
+    (match Keeper_sandbox_remote.check_preflight endpoint with
+     | Ok () -> ()
+     | Error error -> failf "stale preflight survived successful login: %s" error)
 ;;
 
 let () =

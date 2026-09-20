@@ -375,9 +375,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
            Keeper_keepalive.process_directive
              ~agent_name:entry.name
              Keeper_directive.Wakeup;
-           (* See #37175: this response reports the keeper, not the caches. A prefix
-              the refresh could not drop is warned about there and rebuilt by the next
-              read; the lifecycle listener is the caller that has to act on it. *)
+           (* See #37175: only the lifecycle listener acts on a partial refresh. *)
            ignore
              (refresh_keeper_execution_surfaces
                 ~config
@@ -410,14 +408,9 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    && (String.equal action "boot" || String.equal action "clear") ->
               let body = Tool_result.message result in
               let post_action_result =
-                (* The response reports the keeper, not the caches. A prefix this refresh
-                   could not drop is warned about there and the next read rebuilds it;
-                   the listener is the caller that cannot let it pass. See #37175. *)
                 if String.equal action "boot"
                 then (
-                  (* See #37175: this response reports the keeper, not the caches. A prefix
-                     the refresh could not drop is warned about there and rebuilt by the next
-                     read; the lifecycle listener is the caller that has to act on it. *)
+                  (* See #37175: only the lifecycle listener acts on a partial refresh. *)
                   ignore
                     (refresh_keeper_execution_surfaces
                        ~config
@@ -458,17 +451,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                       ])
                    reqd)
             | Some result when Tool_result.is_success result ->
-              (* The response reports the keeper, not the caches. A prefix this refresh
-                 could not drop is warned about there and the next read rebuilds it;
-                 the listener is the caller that cannot let it pass. See #37175. *)
               let post_action_result =
                 match action with
                 | "shutdown" ->
                   if persist_keeper_pause ()
                   then (
-                    (* See #37175: this response reports the keeper, not the caches. A prefix
-                       the refresh could not drop is warned about there and rebuilt by the next
-                       read; the lifecycle listener is the caller that has to act on it. *)
+                    (* See #37175: only the lifecycle listener acts on a partial refresh. *)
                     ignore
                       (refresh_keeper_execution_surfaces
                          ~config

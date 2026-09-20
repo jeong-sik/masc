@@ -125,6 +125,12 @@ ${sources}
 CANDIDATES
   sources=$( { printf '%s\n' "${runnable}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+  # Keep the suites this pull request edits as their own execution class.
+  # Source-derived guards can expand one test edit into hundreds of suites;
+  # if all names are sorted together, the test carrying the changed assertion
+  # may receive only the tail of the step budget. Selection stays complete,
+  # but [run_selected] executes this class before attributed suites.
+  direct_sources="${sources}"
 
   # A guard can protect an input that is not itself a test, and then no pull
   # request that breaks it ever edits it.
@@ -569,11 +575,32 @@ run_selected() {
   ran=0
   skipped=0
   failed=""
-  # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
-  # "${a[@]}" as unbound under nounset.
-  local linked_ids=() linked_deps=() linked_envs=() linked_count=0
-  local python_sources=() python_count=0
-  local source dir name verdict stanza_deps stanza_env
+  local direct_group="" attributed_group="" source
+
+  # A directly edited suite is the closest executable claim about the changed
+  # assertion. Run that finite class first, then every suite attributed from
+  # source, stanza, guard, or reference analysis. This changes only execution
+  # order: no selected suite is dropped or treated as passing without running.
+  while IFS= read -r source; do
+    [ -n "${source}" ] || continue
+    if printf '%s\n' "${direct_sources:-}" | grep -Fxq "${source}"
+    then direct_group=$(printf '%s\n%s\n' "${direct_group}" "${source}")
+    else attributed_group=$(printf '%s\n%s\n' "${attributed_group}" "${source}")
+    fi
+  done <<EOF
+${sources}
+EOF
+
+  local group_sources
+  for group_sources in "${direct_group}" "${attributed_group}"; do
+    if ! printf '%s\n' "${group_sources}" | grep -q '[^[:space:]]'; then
+      continue
+    fi
+    # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
+    # "${a[@]}" as unbound under nounset.
+    local linked_ids=() linked_deps=() linked_envs=() linked_count=0
+    local python_sources=() python_count=0
+    local dir name verdict stanza_deps stanza_env
 
   while IFS= read -r source; do
     [ -n "${source}" ] || continue
@@ -626,15 +653,15 @@ run_selected() {
     linked_deps[linked_count]="${stanza_deps}"
     linked_envs[linked_count]="${stanza_env}"
     linked_count=$((linked_count + 1))
-  done <<EOF
-${sources}
+    done <<EOF
+${group_sources}
 EOF
 
-  local i id target left limit status binary
-  local targets=() target_count=0 build_status=0 build_ran_out=false
-  local linked_built=()
-  i=0
-  while [ "${i}" -lt "${linked_count}" ]; do
+    local i id target left limit status binary
+    local targets=() target_count=0 build_status=0 build_ran_out=false
+    local linked_built=()
+    i=0
+    while [ "${i}" -lt "${linked_count}" ]; do
     targets[target_count]="${linked_ids[i]}.exe"
     target_count=$((target_count + 1))
     while IFS= read -r target; do
@@ -646,8 +673,8 @@ ${linked_deps[i]}
 DEPS
     linked_built[i]=true
     i=$((i + 1))
-  done
-  if [ "${linked_count}" -gt 0 ]; then
+    done
+    if [ "${linked_count}" -gt 0 ]; then
     left=$(budget_left)
     if [ "${left}" -le 0 ]; then
       build_ran_out=true
@@ -656,12 +683,12 @@ DEPS
       timeout "${left}" dune build "${targets[@]}" < /dev/null || build_status=$?
       [ "${build_status}" -ne 124 ] || build_ran_out=true
     fi
-  fi
+    fi
   # A failed invocation says something failed, not which suite. An absent
   # executable is that suite's. A present one whose stanza also declares
   # deps may still have lost a dep, so those are asked again one at a time;
   # dune answers at once for what is already built.
-  if [ "${build_status}" -ne 0 ] && [ "${build_ran_out}" = false ]; then
+    if [ "${build_status}" -ne 0 ] && [ "${build_ran_out}" = false ]; then
     i=0
     while [ "${i}" -lt "${linked_count}" ]; do
       id=${linked_ids[i]}
@@ -683,10 +710,10 @@ DEPS
       fi
       i=$((i + 1))
     done
-  fi
+    fi
 
-  i=0
-  while [ "${i}" -lt "${linked_count}" ]; do
+    i=0
+    while [ "${i}" -lt "${linked_count}" ]; do
     id=${linked_ids[i]}
     dir=${id%/*}
     name=${id##*/}
@@ -734,7 +761,7 @@ ENVS
     else
       failed="${failed}${id} (run)\n"
     fi
-  done
+    done
 
   # A .py suite has no executable to build and run, so dune runs it: the rule
   # supplies the deps and the environment its action declares. Asked for by
@@ -743,8 +770,8 @@ ENVS
   # Measured 2026-09-13: the alias exits 0 on a pass and 1 on a planted
   # failure, both forms, so this is a verdict and not a build line that
   # always reports success.
-  i=0
-  while [ "${i}" -lt "${python_count}" ]; do
+    i=0
+    while [ "${i}" -lt "${python_count}" ]; do
     source=${python_sources[i]}
     i=$((i + 1))
     dir=$(dirname "${source}")
@@ -766,6 +793,7 @@ ENVS
     else
       failed="${failed}${dir}/${name} (run)\n"
     fi
+    done
   done
 }
 
@@ -1058,6 +1086,7 @@ FAKE
   # globals run_selected reads.
   runner_failures() {
     local build_seconds="$1" budget="$2"
+    local fixture_source source_path
     shift 2
     work=$(mktemp -d)
     trap 'rm -rf "${work}"' EXIT
@@ -1071,7 +1100,15 @@ FAKE
     stanza_reader="${work}/reader.py"
     repo_root="${work}/root"
     cd "${repo_root}"
-    sources=$(printf 'test/%s.ml\n' "$@")
+    sources=""
+    for fixture_source in "$@"; do
+      case "${fixture_source}" in
+        */*.ml | */*.py) source_path="${fixture_source}" ;;
+        *) source_path="test/${fixture_source}.ml" ;;
+      esac
+      sources=$(printf '%s\n%s\n' "${sources}" "${source_path}")
+    done
+    direct_sources="${RUNNER_DIRECT_SOURCES:-}"
     budget_seconds="${budget}"
     SECONDS=0
     run_selected > /dev/null 2>&1
@@ -1097,6 +1134,14 @@ FAKE
   runner_check "the budget stops a slow suite and names the suites after it" \
     "test/test_broken (build);test/test_failing (run);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
     0 3 test_ok test_broken test_failing test_slow test_zz_after
+  RUNNER_DIRECT_SOURCES="test/test_zz_direct.ml" \
+    runner_check "a directly edited suite runs before attributed suites spend the budget" \
+      "test/test_aa_slow (stopped at the step budget);" \
+      0 3 test_aa_slow test_zz_direct
+  RUNNER_DIRECT_SOURCES="test/test_zz_direct.py" \
+    runner_check "a directly edited Python rule runs before attributed linked suites" \
+      "test/test_aa_slow (stopped at the step budget);" \
+      0 3 test_aa_slow test/test_zz_direct.py
   # The build starts with budget left and outlasts it, so the timeout on the
   # build is what ends it. With a one-second budget the budget was already
   # spent before the build began, and that case passed without the timeout.

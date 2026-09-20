@@ -729,6 +729,8 @@ type runtime_option = {
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
+  ro_declared_reasoning_effort : Llm_provider.Reasoning_effort.t option;
+      (** The effort a request on this runtime carries; [None] is unset. *)
   ro_is_local : bool;
   ro_is_default : bool;
   ro_quota_exhausted : bool;
@@ -1125,6 +1127,8 @@ type keeper_runtime = {
   kr_runtime_id : string;
   kr_phase : keeper_phase;
   kr_sandbox_profile : string;
+  kr_runtime_blocker_summary : string option;
+  (** Current registry failure; [None] means the roster observed no blocker. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.
@@ -2900,6 +2904,7 @@ type skill_evidence =
 val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
 
 val runtime_context_source_label : runtime_context_source -> string
+val runtime_reasoning_effort_label : Llm_provider.Reasoning_effort.t -> string
 val runtime_probe_for_id : runtime_surface_snapshot -> runtime_id:string -> runtime_provider_probe option
 
 (** Decoded durable async inventory. Malformed counters are errors, never zero.

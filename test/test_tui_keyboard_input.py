@@ -1279,6 +1279,7 @@ def keeper_runtime_http_fixtures(
                     "keepalive_running": True,
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
+                    "runtime_blocker_summary": None,
                 },
                 {
                     "runtime_class": "keeper",
@@ -1291,6 +1292,7 @@ def keeper_runtime_http_fixtures(
                     "keepalive_running": True,
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
+                    "runtime_blocker_summary": None,
                 },
             ],
         },
@@ -11811,6 +11813,7 @@ def runtime_resolved_runtime(
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,
+        "declared_reasoning_effort": None,
         "is_local": False,
         # This binding flag is independent of the fleet's top-level default.
         "is_default": False,

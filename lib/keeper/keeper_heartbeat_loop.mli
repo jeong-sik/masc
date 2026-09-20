@@ -137,7 +137,9 @@ val owner_turn_rejection_cycle_status :
     belongs to the path that received the rate limit or quota answer; the
     keeper waits only while the path it would send next rests.
     [Continue_on_deferred_lane] names the walk head of the deferred suffix,
-    which is not resting; a pending input runs on it without a sleep.
+    which is not resting; a pending input runs on it without a sleep. The
+    failed lane is removed before the suffix is recorded, so consecutive
+    immediate cycles walk a finite candidate set and end when it is empty.
     [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
     runtime or assignment whose release that is. A rate limit or quota wait is
     [Serve_wakeup_after_duration] (#34653), a capacity wait
@@ -312,6 +314,35 @@ module For_testing : sig
     assignment_id:string ->
     Keeper_unified_turn.turn_failure ->
     after_failure option
+
+  (** Whether the loop starts another cycle without sleeping. A serving
+      deferred suffix is itself unfinished input and starts immediately;
+      ordinary cadence and path-release outcomes retain the existing
+      acknowledged-pending-stimulus rule. *)
+  val next_cycle_starts_now :
+    after_failure:after_failure option ->
+    stimuli_acked:bool ->
+    pending_stimulus:(unit -> bool) ->
+    bool
+
+  (** Scheduling authority chosen from the loop's exact state. A deferred
+      runtime suffix takes precedence over cadence because it is unfinished
+      input, rather than a fabricated periodic tick. When both are present,
+      the label is deferred while {!periodic_cadence_after_cycle} consumes
+      the due cadence boundary independently in the same cycle. *)
+  val cycle_wake :
+    periodic_due:bool ->
+    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    Keeper_world_observation.cycle_wake
+
+  val periodic_cadence_after_cycle :
+    periodic_due:bool ->
+    now:float ->
+    Keeper_keepalive_signal.periodic_cadence ->
+    Keeper_keepalive_signal.periodic_cadence
+  (** Advance a due cadence boundary after the cycle even when another wake
+      label, including {!Keeper_world_observation.Deferred_runtime_lane},
+      authorized the turn. *)
 
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and

@@ -11,6 +11,21 @@ masc 의 스킬은 파일 하나로 선언되는 능력이다. `runtime.toml`의
 
 런타임에서 **어떻게 도는가**(순서도 + 코드 경로)는 `docs/SKILLS-FLOW.md`.
 
+### Memory에서 Skill을 만드는 경로의 현재 상태
+
+Librarian이 남기는 `validated_approach`·`lesson`과 `absorbs`는 Memory OS의 Fact를
+바꾼다. SKILL.md나 composition을 발행하지 않는다. 현재 Skill은 선언된 source의
+파일을 읽어 발행하며, TUI·Dashboard의 생성·저장은 `CanAdmin` 편집기 API를 쓴다
+(`Server_skill_editor`, `Server_routes_http_routes_dashboard`).
+
+Keeper가 직접 발행하는 `keeper_skill_publish`와 `keeper_compose_save`는 각각
+[self-authored-skills](rfc/RFC-keeper-self-authored-skills.md)와
+[writes-own-compositions](rfc/RFC-keeper-writes-own-compositions.md)의 제안이다.
+현재 도구가 아니다. 실행 기록에서 후보를 찾고 검증해 발행하는
+[Tool Librarian 제안](https://github.com/jeong-sik/masc/pull/36925)도 구현된 자동
+생산 경로로 취급하지 않는다. 발행된 Skill의 사용 기록은 그 Skill이 자동으로
+생성됐거나 작업을 성공시켰다는 증거와 구분한다.
+
 ## 1. 파일 규칙
 
 ```markdown
@@ -37,9 +52,11 @@ description: Walk the release checklist before shipping.
   effective surface, immutable snapshot entry 어디에도 값이 남지 않는다. 실행 권한의
   권위는 MASC 승인 정책이다. 이식 가능한 원본 `SKILL.md`와 편집기 source round-trip은
   원문을 그대로 보여 주지만 정책 상태로 해석하지 않는다.
-- 잘못된 스킬 하나는 그 스킬만 Keeper 표면에서 제외한다. 다른 Keeper 턴은 계속 열리며,
-  제외된 exact reference를 task가 지명한 경우에만 admission이 typed 오류를 반환한다.
-  정확한 파싱 오류는 `/api/v1/skills`의 `rejections`와 exact surface diagnostic에 남는다.
+- frontmatter가 잘못된 스킬은 snapshot에서 거부된다. Task가 해소할 수 없는 exact
+  reference를 지명하면 admission이 typed 오류를 반환한다. source에서 읽은 문서의
+  frontmatter는 유효하고 composition만 잘못됐으면, 합성 도구 없이 frozen Instruction과
+  typed projection diagnostic으로 남는다(`Keeper_skill_catalog.of_snapshot`).
+  편집기의 생성·저장·preview는 `parse_skill`로 composition까지 검사해 후보를 거절한다.
 - 본문은 frozen snapshot bytes로 보존된다. Keeper는 `keeper_skill`에 canonical exact
   reference를 전달해 본문을 받는다.
 

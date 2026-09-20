@@ -18,12 +18,11 @@ val statements : string -> string list
     then sentence ends ([. ! ?] before whitespace, [다.], [;] before
     whitespace, and [ — ]); markup ([**] and backticks) dropped; a piece
     shorter than {!min_statement_chars} characters carried into the next;
-    at most {!max_statements_per_memory} kept, spread evenly over the memory.
-    The same cut the scorer in issue #37079 used, so its calibration of the
-    question applies. Whitespace is ASCII whitespace. *)
+    every resulting statement is kept. Sentence boundaries match the scorer
+    in issue #37079; the gate evaluates the full memory rather than a sample.
+    Whitespace is ASCII whitespace. *)
 
 val min_statement_chars : int
-val max_statements_per_memory : int
 
 (** {1 Judgment} *)
 
@@ -76,8 +75,8 @@ val judge
   -> new_claims:Keeper_memory_os_types.fact list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> outcome
-(** [facts] are the current memories the pass read (the answer's
-    projection); [new_claims] the claims the answer adds; [absorbed] the
+(** [facts] are the current memories the pass read, before the answer removes
+    absorbed memories; [new_claims] the claims the answer adds; [absorbed] the
     absorptions it states. One request per absorbing claim, chunked by
     {!questions_per_request}. *)
 

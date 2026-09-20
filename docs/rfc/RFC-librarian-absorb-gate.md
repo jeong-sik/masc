@@ -36,8 +36,8 @@ Librarian 답을 받아들이기 전에, 묶이는 원문마다 **묶은 claim �
 한 바퀴:
 
 1. `execute_exact_output_classified` 가 `selection` 을 돌려준다(`new_claims`, `absorbed : {absorbed; into}`, `facts`).
-2. `absorbed` 를 `into` 별로 묶는다. `into` 의 claim 본문은 `new_claims` 에서, 원문 본문은 `selection.facts` 에서 id 로 찾는다.
-3. 원문마다 문장으로 자른다(줄바꿈 → 문장 끝 `. ! ? 다.` `;` ` — `, 마크업 제거, 20자 미만 조각은 다음 조각에 붙임, 원문당 최대 16문장을 고르게 표집). 이 규칙은 #37079 의 채점기와 같아서 그 보정값을 그대로 쓴다.
+2. `absorbed` 를 `into` 별로 묶는다. `into` 의 claim 본문은 `new_claims` 에서, 원문 본문은 해당 회차가 읽은 입력 스냅숏의 `current.facts` 에서 id 로 찾는다. `selection.facts` 는 이미 흡수될 원문을 뺀 결과이므로 검사 재료로 쓰지 않는다.
+3. 원문마다 문장으로 자른다(줄바꿈 → 문장 끝 `. ! ? 다.` `;` ` — `, 마크업 제거, 20자 미만 조각은 다음 조각에 붙임). 문장 경계는 #37079 의 채점기와 같고, 표집 없이 모든 문장을 검사한다. 요청은 64개 질문씩 나눈다.
 4. `into` 하나당 Jev 요청 하나: `state` = 묶은 claim, `questions` = 그 `into` 에 묶이는 모든 원문의 모든 문장, 각각 `noul`
    "The claim under review conveys this statement, in any wording." + criteria(true: 읽는 이가 claim 만으로 그 문장을 알 수 있다 / false: claim 이 말하지 않거나 더 막연하게만 말한다).
    질문은 한 요청 안에서 병렬로 평가되므로 문장 수는 지연에 거의 영향이 없다(fan-out).
@@ -83,8 +83,7 @@ RFC 에서는 그 답으로 원문을 남긴다. 그 목록을 Librarian 에게 
 
 ## 5. 비용과 지연
 
-- 운영 규모(09-20 저녁): 흡수 시간당 28~77건, 원문 3~5개 묶음이 대부분, 원문당 문장 최대 16. `into` 당 요청 하나, 입력 토큰은 claim + 문장들 ≈ 1~4k.
-  하루 1,000건이면 ≈ 3M 토큰 ≈ **$0.13/일**.
+- 운영 규모(09-20 저녁): 흡수 시간당 28~77건, 원문 3~5개 묶음이 대부분. 원문의 모든 문장을 검사하므로 `into` 하나도 64개 질문마다 요청을 나눈다. 전체 문장을 검사하는 입력 토큰과 일일 비용은 다시 측정한다.
 - 지연: 이 세션 실측 0.59초(질문 2개), Every 사례 777판정 0.7초. Librarian 회차(수십 초~분)에 1초를 더한다.
 - 문장 자르기·거르기는 Librarian 회차 안 fiber 에서 돈다. 다른 keeper 는 안 기다린다(Board 관문과 같은 자리).
 

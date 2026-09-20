@@ -4,7 +4,6 @@
 (* --- Statements --- *)
 
 let min_statement_chars = 20
-let max_statements_per_memory = 16
 
 let is_ascii_space c =
   c = ' ' || c = '\t' || c = '\n' || c = '\r' || c = '\012' || c = '\011'
@@ -121,21 +120,10 @@ let statements text =
       ([], "")
       pieces
   in
-  let out =
-    match out, carry with
-    | out, "" -> List.rev out
-    | last :: rest, tail -> List.rev ((last ^ " " ^ tail) :: rest)
-    | [], tail -> [ tail ]
-  in
-  let n = List.length out in
-  if n <= max_statements_per_memory
-  then out
-  else (
-    (* Keep the spread, not just the head. *)
-    let arr = Array.of_list out in
-    let step = float_of_int n /. float_of_int max_statements_per_memory in
-    List.init max_statements_per_memory (fun i ->
-      arr.(int_of_float (float_of_int i *. step))))
+  match out, carry with
+  | out, "" -> List.rev out
+  | last :: rest, tail -> List.rev ((last ^ " " ^ tail) :: rest)
+  | [], tail -> [ tail ]
 ;;
 
 (* --- Judgment --- *)

@@ -852,7 +852,9 @@ let run_best_effort
                Keeper_librarian_absorb_gate.run
                  ~clock
                  ~keeper_id
-                 ~facts:selection.facts
+                 ~facts:(match prompt_input.current with
+                   | None -> []
+                   | Some current -> current.facts)
                  ~new_claims:selection.new_claims
                  ~absorbed:selection.absorbed
                  ()

@@ -41,11 +41,11 @@ let test_statements_match_the_scorer () =
     "다.다.다.\n\n" ^ String.concat " " (List.init 24 (fun i -> sentence (i + 1)))
   in
   Alcotest.(check (list string))
-    "다. cuts without whitespace; more than the maximum is sampled evenly, not cut at the head"
+    "다. cuts without whitespace; every long-memory statement remains"
     ([ "다. 다. 다. " ^ sentence 1 ]
-     @ List.map sentence [ 2; 4; 5; 7; 8; 10; 11; 13; 14; 16; 17; 19; 20; 22; 23 ])
+     @ List.init 23 (fun i -> sentence (i + 2)))
     (Gate.statements long);
-  Alcotest.(check int) "at most the maximum" Gate.max_statements_per_memory
+  Alcotest.(check int) "all statements, including the final one" 24
     (List.length (Gate.statements long));
   Alcotest.(check (list string)) "an empty memory has no statements" [] (Gate.statements "")
 ;;
@@ -191,11 +191,131 @@ let test_statements_are_asked_in_bounded_requests () =
   let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   let statements = List.length !asked in
   Alcotest.(check int) "every memory's statements were asked"
-    (5 * Gate.max_statements_per_memory) statements;
+    (List.fold_left (fun n (source : Types.fact) ->
+       n + List.length (Gate.statements source.claim)) 0 facts) statements;
   Alcotest.(check int) "in requests of at most the bound"
     ((statements + Gate.questions_per_request - 1) / Gate.questions_per_request)
     !requests;
   Alcotest.(check int) "all absorbed" 5 (List.length j.absorbed)
+;;
+
+let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
+  let prefix =
+    List.init 16 (fun i ->
+      Printf.sprintf "The service numbered %d deploys every Tuesday morning." i)
+  in
+  let exception_statement = "Emergency releases require the operator's explicit approval." in
+  let source = fact (String.concat " " (prefix @ [ exception_statement ])) in
+  let claim = fact (String.concat " " prefix) in
+  let evaluate, _, asked =
+    table ~noul_of:(fun statement ->
+      if String.equal statement exception_statement then 0.0 else 1.0)
+  in
+  let j =
+    judged
+      (Gate.judge ~evaluate ~facts:[ source ] ~new_claims:[ claim ]
+         ~absorbed:(absorbed_into claim [ source ]))
+  in
+  Alcotest.(check int) "all seventeen statements were judged" 17 (List.length !asked);
+  Alcotest.(check int) "the original is not absorbed" 0 (List.length j.absorbed);
+  Alcotest.(check (list string)) "the complete original remains current"
+    [ id source ] (List.map (fun (v : Gate.source_verdict) -> v.memory_id) j.left)
+;;
+
+let test_selection_gate_and_store_keep_the_unconveyed_original () =
+  let module Librarian = Masc.Keeper_librarian in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Absorbed = Masc.Keeper_memory_absorbed in
+  let module Fixture = Exact_output_fixture in
+  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "librarian-absorb-gate-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let a = fact (List.nth sources 0) in
+  let b = fact (List.nth sources 1) in
+  let untouched = fact "The unrelated service retains its own deployment instructions." in
+  let keeper_id = "absorb-gate-fixture" in
+  let source : Current.source = { kind = Current.Librarian; trace_id = "fixture" } in
+  let seeded =
+    Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+      ~now:100. ~source ~facts:[ a; b; untouched ] () |> require
+  in
+  let input : Librarian.input =
+    { turn_ref = Ids.Turn_ref.make ~trace_id:"fixture" ~absolute_turn:1
+    ; goal_context = Librarian.No_task
+    ; keeper_instructions = "Keep the service deployment instructions."
+    ; current = Some { Librarian.facts = seeded.facts }
+    ; working_context = Masc.Keeper_librarian_context.empty
+    ; messages = []; tool_observations = []; counterpart_observations = []
+    }
+  in
+  let tokens = List.mapi (fun i f -> id f, Printf.sprintf "m%d" (i + 1)) seeded.facts in
+  let claim = "The alpha service deploys every Tuesday at nine in the morning." in
+  let answer =
+    `Assoc
+      [ "new_claims", `List
+          [ `Assoc [ "claim", `String claim; "category", `String "fact"
+                   ; "absorbs", `List [ `String (List.assoc (id a) tokens)
+                                       ; `String (List.assoc (id b) tokens) ] ] ]
+      ; "dropped", `List []; "working_contexts", `List []
+      ]
+  in
+  let selection =
+    match Librarian.selection_of_json_result ~now:200. input answer with
+    | Ok selection -> selection
+    | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
+  in
+  Alcotest.(check bool) "the answer projection already removed the originals" false
+    (List.exists (fun f -> String.equal (id f) (id a) || String.equal (id f) (id b))
+       selection.facts);
+  let root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root | None -> Sys.getcwd () in
+  Masc.Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Masc.Prompt_defaults.init ();
+  let librarian = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response answer)) in
+  let jev_response = Yojson.Safe.to_string
+    (`Assoc [ "model", `String "jev-fixture"
+            ; "answers", `Assoc
+                [ "s0_0", `Assoc [ "type", `String "noul"; "noul", `Float 1.0 ]
+                ; "s1_0", `Assoc [ "type", `String "noul"; "noul", `Float 0.0 ] ] ]) in
+  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply jev_response) in
+  let resolver = Fixture.resolver_snapshot ~source:"absorb-gate-fixture"
+    [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
+  (match Masc.Runtime_exact_output_registry.publish
+    ~lanes:[ { Masc.Runtime_schema.id = "librarian_exact"
+             ; slot_ids = [ "librarian-absorb-fixture" ]; cli_slot_ids = [] } ] resolver with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail
+       (Masc.Runtime_exact_output_registry.publication_error_to_string error));
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") (fun () ->
+    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" (Some "true") (fun () ->
+      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some jev.base_url) (fun () ->
+        Masc.Keeper_librarian_runtime.run_best_effort
+          ~trigger:Masc.Keeper_librarian_runtime.Queue_changed
+          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input)));
+  Alcotest.(check int) "the runtime obtained a real selection" 1 (Fixture.post_count librarian);
+  Alcotest.(check int) "the runtime sent the originals to Jev" 1 (Fixture.post_count jev);
+  let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some snapshot -> snapshot
+    | None -> Alcotest.fail "committed current snapshot is missing"
+  in
+  Alcotest.(check (list string)) "only the conveyed original leaves current"
+    (List.sort String.compare (List.map id (b :: untouched :: selection.new_claims)))
+    (List.sort String.compare (List.map id stored.facts));
+  let records = Absorbed.read ~keepers_dir ~keeper_id |> require in
+  let records = List.map (fun (_, result) -> match result with
+    | Ok record -> record
+    | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
+  Alcotest.(check (list string)) "only the conveyed original is archived"
+    [ a.claim ] (List.map (fun (r : Absorbed.record) -> r.fact.claim) records)
 ;;
 
 let () =
@@ -215,6 +335,10 @@ let () =
             test_an_absorption_the_pass_cannot_place_goes_through_unjudged
         ; Alcotest.test_case "statements are asked in bounded requests" `Quick
             test_statements_are_asked_in_bounded_requests
+        ; Alcotest.test_case "a missing seventeenth statement keeps the original" `Quick
+            test_a_missing_seventeenth_statement_keeps_the_whole_memory
+        ; Alcotest.test_case "selection gate and store preserve the original" `Quick
+            test_selection_gate_and_store_keep_the_unconveyed_original
         ] )
     ]
 ;;

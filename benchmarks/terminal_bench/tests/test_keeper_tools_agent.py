@@ -1,5 +1,7 @@
 import asyncio
+import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -12,9 +14,12 @@ from harbor.models.agent.context import AgentContext  # noqa: E402
 
 
 class FakeEnv:
-    def __init__(self):
+    def __init__(self, remote_dirs=None, skill_catalog=None):
         self.commands = []
         self.uploads = []
+        self.downloads = []
+        self.remote_dirs = remote_dirs or {}
+        self.skill_catalog = skill_catalog
         self.default_user = None
 
     async def upload_file(self, src, dst):
@@ -23,19 +28,33 @@ class FakeEnv:
     async def upload_dir(self, src, dst):
         self.uploads.append(("dir", str(src), dst))
 
+    async def download_dir(self, src, dst):
+        self.downloads.append((src, str(dst)))
+        shutil.copytree(self.remote_dirs[src], dst)
+
+    async def is_dir(self, path, user=None):
+        return path in self.remote_dirs
+
     async def exec(self, command, **kw):
         self.commands.append(command)
 
+        stdout = (
+            json.dumps(self.skill_catalog)
+            if "/api/v1/skills" in command and self.skill_catalog is not None
+            else ("bash: warning: setlocale: LC_ALL: cannot change locale\n"
+                  "MASC_UNAME_M=x86_64\n" if "uname -m" in command else "")
+        )
+
         class R:
             # The container architecture masc_dist.container_binaries reads.
-            stdout = (
-                "bash: warning: setlocale: LC_ALL: cannot change locale\n"
-                "MASC_UNAME_M=x86_64\n" if "uname -m" in command else "")
+            pass
             stderr = ""
             returncode = 0
             return_code = 0
 
-        return R()
+        result = R()
+        result.stdout = stdout
+        return result
 
 
 @pytest.fixture(autouse=True)
@@ -181,6 +200,47 @@ def test_install_adds_masc_on_top_of_claude_code(tmp_path, monkeypatch):
     assert not any("run_episode.sh" in c for c in env.commands)
 
 
+def test_arm_k_gives_task_skills_to_the_keeper_pool(tmp_path, monkeypatch):
+    async def fake_super_install(self, environment):
+        pass
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.claude_code.ClaudeCode.install", fake_super_install)
+    import masc_dist
+    import masc_sidecar
+
+    fake_root = tmp_path / "bench-root"
+    (fake_root / "dist" / "linux-x64").mkdir(parents=True)
+    (fake_root / "driver").mkdir()
+    for name in ("masc", "masc-exec-shim"):
+        (fake_root / "dist" / "linux-x64" / name).write_bytes(b"")
+    (fake_root / "dist" / ".version").write_text(masc_dist.MIN_VERSION_FILE.read_text())
+    monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
+
+    remote = tmp_path / "remote-skills" / "task-guide"
+    remote.mkdir(parents=True)
+    (remote / "SKILL.md").write_text(
+        "---\nname: task-guide\ndescription: Task guide.\n---\nBody\n")
+    identity = {"source_id": "terminal-bench-task", "package_id": "task-guide",
+                "name": "task-guide"}
+    catalog = {"state": "ready", "snapshot": {
+        "sources": [{"id": "terminal-bench-task", "access": "read-only",
+                     "observation": {"kind": "ready"}}],
+        "skills": [{"identity": identity}], "effective_skills": [identity],
+        "shadows": [], "rejections": []}}
+
+    async def go():
+        agent = make_agent(tmp_path / "logs", skills_dir="/task/skills")
+        env = FakeEnv(remote_dirs={"/task/skills": remote.parent},
+                      skill_catalog=catalog)
+        await agent.install(env)
+        return env
+
+    env = asyncio.run(go())
+    assert env.downloads[0][0] == "/task/skills"
+    assert any("/api/v1/skills" in command for command in env.commands)
+
+
 def test_registration_refuses_an_empty_token(tmp_path):
     # An unreadable token used to yield `Authorization: Bearer ` and exit 0.
     # Claude Code would then start with an MCP server that 401s, the model
@@ -259,4 +319,3 @@ def test_the_run_adds_keeper_spend_and_the_left_out_record(tmp_path, monkeypatch
     assert context.metadata["keeper_usage"]["rows"] == 1
     assert context.metadata["endpoint_env_left_out"] == [
         {"name": "GH_TOKEN", "reason": "refused_by_shim"}]
-

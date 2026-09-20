@@ -50,8 +50,15 @@ let with_lock f =
 
     Nothing under this wrapper suspends today — [metric_key] is string work and
     [with_lock] is [Stdlib.Mutex] plus [Hashtbl] — so [Cancelled] has no way to
-    originate here and no call site changes behaviour. The guard is what keeps
-    that true if an Eio write or an OTLP export ever moves under the lock. *)
+    originate here and no call site changes behaviour.
+
+    The guard covers what runs under [best_effort] but outside [with_lock].
+    Work moved under the lock sits behind [Fun.protect ~finally:unlock]: a body
+    that raises [Cancelled] together with an unlock that then raises (the
+    [Sys_error] path above) loses the [Cancelled] to [Fun.Finally_raised],
+    which this wrapper treats as an ordinary failure. No re-raise here can
+    recover what [Fun.protect] already dropped, so putting a suspending call
+    under the lock needs [with_lock] settled first. *)
 let best_effort f =
   Cancel_safe.observe
     ~on_exn:(fun exn ->

@@ -36,8 +36,8 @@ val configure_agent_core_model_catalog_env :
     discovered. *)
 
 val config_load_failure_diagnostic : detail:string -> string
-(** Operator-facing diagnostic for configuration load failures (catalog overlay,
-    runtime.toml): attributes the failure to configuration — explicitly not a
+(** Operator-facing diagnostic for runtime configuration load failures:
+    attributes the failure to configuration — explicitly not a
     model connection problem — carries the underlying detail (which already
     names the file) verbatim, and states the next action. Pure formatting; no
     I/O, no exit-code decision. *)

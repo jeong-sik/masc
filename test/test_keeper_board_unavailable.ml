@@ -415,16 +415,14 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
     (Keeper_event_queue.length settled)
 ;;
 
-(* (4) A transiently unavailable entry must not hold the cycle for the entries
-   behind it. The test above seeds one stimulus, so withdrawal has nothing to
-   fall through to and the blocked-dispatch contract is unchanged. This one
-   seeds two: the head read fails transiently, and the cycle must still render
-   and consume the entry behind it.
-
-   Against the pre-fix intake this fails at the first assertion — a transient
-   head returned [consumed_stimuli = []] and every entry behind it waited for
-   the head to become readable, for as long as that took. *)
-let test_transient_head_does_not_block_the_entry_behind_it () =
+(* Actual Board and durable queue stores, with only transient reads controlled.
+   The configured admission limit bounds the sources carried by one turn. Explicit
+   ACKs below settle the selected source between ticks; these cases do not run
+   a provider or claim that a full Keeper turn completed. *)
+let with_intake_sources ~max_events f =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+    (Some (string_of_int max_events))
+  @@ fun () ->
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -456,72 +454,148 @@ let test_transient_head_does_not_block_the_entry_behind_it () =
   ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
   let create_source label =
     match
-      Board_dispatch.create_post
-        ~author:"external-author"
-        ~content:label
-        ~post_kind:Board.Human_post
-        ~visibility:Board.Internal
-        ()
+      Board_dispatch.create_post ~author:"external-author" ~content:label
+        ~post_kind:Board.Human_post ~visibility:Board.Internal ()
     with
     | Ok post -> Board.Post_id.to_string post.id
-    | Error error ->
-      failf "failed to create Board source: %s" (Board.show_board_error error)
+    | Error error -> failf "failed to create Board source: %s" (Board.show_board_error error)
   in
-  let head_post_id = create_source "head source, read fails transiently" in
-  let trailing_post_id = create_source "trailing source, read succeeds" in
-  let seed post_id =
-    match
-      Keeper_registry_event_queue.enqueue_durable_result
-        ~base_path
-        meta.name
-        { (poison_board_signal_stimulus ()) with post_id }
-    with
+  let seed stimulus =
+    match Keeper_registry_event_queue.enqueue_durable_result ~base_path meta.name stimulus with
     | Ok () -> ()
     | Error message -> failf "failed to seed durable stimulus: %s" message
   in
-  seed head_post_id;
-  seed trailing_post_id;
-  (* Exactly one forced transient read: the head. The entry behind it reads
-     normally, so any consumption observed below came from the fall-through
-     and not from the forcing hook running out. *)
-  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
-  let intake =
+  let seed_board label =
+    let post_id = create_source label in
+    seed { (poison_board_signal_stimulus ()) with post_id };
+    post_id
+  in
+  let intake () =
     Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
-      ~ctx
-      ~meta_after_triage:meta
-      ~pending_board_events:[]
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[]
   in
-  check int "the entry behind the transient head is consumed" 1
-    (Keeper_heartbeat_source_batch.count intake.source_batch);
-  (match (Keeper_heartbeat_source_batch.stimuli intake.source_batch) with
-   | [ consumed ] ->
-     check string "the consumed entry is the trailing one, not the head"
-       trailing_post_id consumed.Keeper_event_queue.post_id
-   | other ->
-     failf "expected exactly one consumed stimulus, got %d" (List.length other));
-  (match intake.event_queue_intake_error with
-   | Some (Keeper_heartbeat_stimulus_intake.Transient_board_read unavailable) ->
-     check string "the retained error still names the transient head"
-       head_post_id unavailable.post_id
-   | Some error ->
-     failf "expected transient Board retry, got %s"
-       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_to_string error)
-   | None -> fail "the transient head error disappeared after trailing admission");
-  check
-    bool
-    "provider dispatch proceeds on the entry that could be rendered"
-    true
-    (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-       ~scheduled:true
-       ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count intake.source_batch)
-       ~event_queue_intake_error:intake.event_queue_intake_error);
-  let queued =
-    match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
-    | Ok queue -> queue
-    | Error message -> failf "failed to reload durable queue: %s" message
+  let pending () =
+    match Keeper_registry_event_queue.pending_selections_result ~base_path meta.name with
+    | Ok selections -> selections
+    | Error message -> failf "failed to reload durable selections: %s" message
   in
-  check int "withdrawal drops nothing: both entries are still durable" 2
-    (Keeper_event_queue.length queued)
+  let ack selection =
+    match Keeper_registry_event_queue.ack_pending_result ~base_path meta.name ~selection with
+    | Ok () -> ()
+    | Error message -> failf "failed to acknowledge selected source: %s" message
+  in
+  f ~seed ~seed_board ~intake ~pending ~ack
+;;
+
+let admitted_ids intake =
+  Keeper_heartbeat_source_batch.stimuli intake.Keeper_heartbeat_stimulus_intake.source_batch
+  |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+;;
+
+let check_withdrawn_head expected intake =
+  match intake.Keeper_heartbeat_stimulus_intake.event_queue_intake_error with
+  | Some (Keeper_heartbeat_stimulus_intake.Transient_board_read unavailable) ->
+    check string "the first transient source stays diagnostic" expected unavailable.post_id
+  | Some error ->
+    failf "expected transient Board retry, got %s"
+      (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_to_string error)
+  | None -> fail "the transient head error disappeared"
+;;
+
+let test_transient_head_does_not_block_the_entry_behind_it () =
+  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack ->
+  let head = seed_board "head source, read fails transiently" in
+  let second = seed_board "second source, read succeeds" in
+  let third = seed_board "third source waits for the next admission" in
+  let read_behind_head expected =
+    Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
+    let selected = intake () in
+    check (list string) "only the next readable source is admitted under limit1"
+      [ expected ] (admitted_ids selected);
+    check (list string) "unadmitted sources are not projected"
+      [ expected ]
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
+         selected.pending_board_events);
+    check_withdrawn_head head selected;
+    check bool "the readable source permits provider dispatch" true
+      (Keeper_heartbeat_loop.should_run_turn_after_event_intake ~scheduled:true
+         ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count selected.source_batch)
+         ~event_queue_intake_error:selected.event_queue_intake_error);
+    selected
+  in
+  let first_tick = read_behind_head second in
+  check int "intake leaves every source durable" 3 (List.length (pending ()));
+  List.iter ack (Keeper_heartbeat_source_batch.selections first_tick.source_batch);
+  let second_tick = read_behind_head third in
+  check int "only the explicit first ACK removed a source" 2 (List.length (pending ()));
+  List.iter ack (Keeper_heartbeat_source_batch.selections second_tick.source_batch);
+  let third_tick = intake () in
+  check (list string) "the recovered head is still available on the next tick"
+    [ head ] (admitted_ids third_tick);
+  check bool "recovery clears the diagnostic" true
+    (Option.is_none third_tick.event_queue_intake_error)
+;;
+
+let test_all_transient_reads_finish_without_changing_pending () =
+  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
+  let first = seed_board "first unavailable source" in
+  let (_ : string) = seed_board "second unavailable source" in
+  let (_ : string) = seed_board "third unavailable source" in
+  let before = pending () in
+  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 3;
+  let failed = intake () in
+  check (list string) "all unavailable sources return without admission" [] (admitted_ids failed);
+  check_withdrawn_head first failed;
+  check bool "every exact pending selection is unchanged" true (before = pending ());
+  (* All three forced failures were consumed by one finite snapshot walk.
+     The next call can render the first source, without resetting the hook. *)
+  let recovered = intake () in
+  check (list string) "a later tick starts again at the retained head"
+    [ first ] (admitted_ids recovered);
+  check bool "the later tick has no remaining forced failure" true
+    (Option.is_none recovered.event_queue_intake_error)
+;;
+
+let test_transient_sources_do_not_spend_the_admission_limit () =
+  with_intake_sources ~max_events:2 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
+  let first = seed_board "first source unavailable" in
+  let second = seed_board "second source readable" in
+  let third = seed_board "third source readable" in
+  let (_ : string) = seed_board "fourth source waits for the next admission" in
+  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
+  let selected = intake () in
+  check (list string) "readable sources fill the existing admission limit"
+    [ second; third ] (admitted_ids selected);
+  check (list string) "only admitted sources are projected"
+    [ second; third ]
+    (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
+       selected.pending_board_events);
+  check_withdrawn_head first selected;
+  check int "all four sources remain pending until their own ACK" 4 (List.length (pending ()))
+;;
+
+let test_empty_observation_source_still_spends_an_admission_slot () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending:_ ~ack:_ ->
+  let bootstrap =
+    { (poison_board_signal_stimulus ()) with
+      post_id = "bootstrap-limit"; payload = Keeper_event_queue.Bootstrap }
+  in
+  seed bootstrap;
+  let (_ : string) = seed_board "must not join the Bootstrap turn at limit1" in
+  let selected = intake () in
+  check (list string) "Bootstrap is admitted despite producing no Board observation"
+    [ bootstrap.post_id ] (admitted_ids selected);
+  check int "the later source was not rendered" 0 (List.length selected.pending_board_events)
+;;
+
+let test_permanent_absence_does_not_spend_an_admission_slot () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  seed (poison_board_signal_stimulus ());
+  let readable = seed_board "readable source after permanently absent post" in
+  let selected = intake () in
+  check (list string) "a retired poison does not block a readable source"
+    [ readable ] (admitted_ids selected);
+  check int "only permanent absence is ACKed during intake" 1 (List.length (pending ()))
 ;;
 
 (* Comments are ordered by [created_at], and by random id when two share it,
@@ -721,6 +795,14 @@ let () =
             "a transient head does not block the entry behind it"
             `Quick
             test_transient_head_does_not_block_the_entry_behind_it
+        ; test_case "all transient reads finish and retain exact pending sources" `Quick
+            test_all_transient_reads_finish_without_changing_pending
+        ; test_case "transient sources do not spend the admission limit" `Quick
+            test_transient_sources_do_not_spend_the_admission_limit
+        ; test_case "an empty-observation source still spends an admission slot" `Quick
+            test_empty_observation_source_still_spends_an_admission_slot
+        ; test_case "permanent absence does not spend an admission slot" `Quick
+            test_permanent_absence_does_not_spend_an_admission_slot
         ] )
     ; ( "replies after own comment"
       , [ test_case

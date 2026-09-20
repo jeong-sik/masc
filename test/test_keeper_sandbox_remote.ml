@@ -259,7 +259,7 @@ let test_transport_and_probe_argv () =
     (Keeper_sandbox_remote.probe_argv state);
   check string "endpoint name is the guest" guest_name (Keeper_sandbox_remote.name state);
   check string "keeper root on the volume" "/masc-work/keeper-a"
-    (Keeper_sandbox_remote.remote_keeper_root state);
+    (Keeper_sandbox_remote.workspace_root state);
   check string "lane prefix" "microvm_remote"
     (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport state))
 ;;
@@ -297,6 +297,12 @@ let test_openssh_probe_stays_one_word () =
   match Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a" ~endpoint () with
   | Error error -> fail error
   | Ok state ->
+    check string "endpoint root" "/srv/masc/playground"
+      (Keeper_sandbox_remote.endpoint_root state);
+    check string "workspace root" "/srv/masc/playground/keeper-a"
+      (Keeper_sandbox_remote.workspace_root state);
+    check string "Keeper control root" "/srv/masc/playground/keeper-a"
+      (Keeper_sandbox_remote.keeper_control_root state);
     (match List.rev (Keeper_sandbox_remote.probe_argv state) with
      | last :: _ -> check string "probe word" "masc-exec-shim --probe" last
      | [] -> fail "empty probe argv");
@@ -377,6 +383,20 @@ let test_default_cwd_is_the_request_root () =
      | Ok (request, _) ->
        check string "Docker cwd stays at its resolved root" remote_root request.cwd;
        check string "Docker request root" request.cwd request.remote_root)
+;;
+
+let test_docker_relative_cwd_is_rejected () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"exit3" in
+  let runner =
+    Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe ~timeout_sec:2.0
+      (make_docker_state ~base_path ~cli)
+  in
+  let status, _, stderr = run_request runner ~cwd:(Some "relative/path") () in
+  check status_testable "request refused before dispatch" (Unix.WEXITED 1) status;
+  check bool "names absolute-cwd contract" true
+    (contains "docker_observe_cwd_requires_guest_absolute_path" stderr)
 ;;
 
 (* ── the box (RFC-0422) ─────────────────────────────────────────────── *)
@@ -693,6 +713,8 @@ let () =
               test_frame_exit_and_injected_env
           ; test_case "default cwd is the request root" `Quick
               test_default_cwd_is_the_request_root
+          ; test_case "Docker rejects relative cwd" `Quick
+              test_docker_relative_cwd_is_rejected
           ; test_case "the requested mode travels in the frame" `Quick
               test_the_requested_mode_travels_in_the_frame
           ; test_case "observe support is what the shim advertises" `Quick

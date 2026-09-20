@@ -117,7 +117,7 @@ let verify_readback ~endpoint ~config ~meta ~file_name ~expected_bytes =
   match
     Keeper_remote_path.host_to_remote
       ~base_path:config.Workspace.base_path
-      ~remote_root:(Keeper_sandbox_remote.remote_root endpoint)
+      ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
       ~keeper:meta.Keeper_meta_contract.name
       file_name
   with

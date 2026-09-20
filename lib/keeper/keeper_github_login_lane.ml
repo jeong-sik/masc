@@ -68,9 +68,11 @@ let step ~redaction endpoint ~argv =
   |> step_result ~redaction endpoint ~argv
 ;;
 
-let bootstrap_workspace ~redaction endpoint =
-  let argv = [ "mkdir"; "-p"; Keeper_sandbox_remote.remote_keeper_root endpoint ] in
-  Keeper_sandbox_remote.bootstrap_keeper_workspace
+let bootstrap_control_root ~redaction endpoint =
+  let argv =
+    [ "mkdir"; "-p"; Keeper_sandbox_remote.keeper_control_root endpoint ]
+  in
+  Keeper_sandbox_remote.bootstrap_keeper_control_root
     ~timeout_sec:step_timeout_sec endpoint
   |> step_result ~redaction endpoint ~argv
   |> Result.map (fun _ -> ())
@@ -121,7 +123,7 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
   (* The endpoint may never have held this Keeper. A root the ssh user cannot
      write is the bootstrap's job, and this step names it rather than letting
      gh fail later with a directory message. *)
-  let* () = bootstrap_workspace ~redaction endpoint in
+    let* () = bootstrap_control_root ~redaction endpoint in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "mkdir"; "-p"; gh_dir ] in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
   let lane : Keeper_github_identity.login_lane =

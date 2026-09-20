@@ -259,16 +259,14 @@ open Alcotest
    required. No headroom. *)
 (* 2026-09-20: the read-only keeper_skill_validate caller adds artifact document
    validation. The production renderer measures 119,546 bytes / 136 tools. *)
-(* 2026-09-21: main holds 119,646 bytes / 136 tools. #37270 rewrote the
-   keeper_memory_search description (what it bought: the matcher's real
-   contract in the model's view -- complete-query substrings first, then
-   ASCII-whitespace fragments, review P2 of that PR) and landed after the line
-   above was measured on a tree without it; its own check ran against a
-   ceiling without keeper_skill_validate. Each was under its ceiling and main
-   was over by 100 -- the race the golden's note below describes. The figure
-   is #37360's measurement of 119,620 on a tree whose description is 26 bytes
-   shorter than main's. *)
-let ceiling_bytes = 119_646
+(* 2026-09-21: the DOS lane gains its mouse. The production renderer measures
+   121,200 bytes / 137 tools on a base of main's 119,646 (which already
+   carries #37270's keeper_memory_search description rewrite). masc_dos_click
+   declares x/y/buttons/steps so a keeper can drive mouse-polled games:
+   Sangokushi III boots on a click and never reads INT 16h (it polls the BDA
+   ring), so press and type alone cannot start it. 1,554 bytes over the
+   previous ceiling. *)
+let ceiling_bytes = 121_200
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -427,6 +425,7 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_dos_click"
   ; "masc_dos_eject"
   ; "masc_dos_load"
   ; "masc_dos_peek"

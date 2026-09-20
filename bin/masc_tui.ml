@@ -16365,20 +16365,6 @@ Write the durable procedure here. The body stays out of the eager tool context
 and is loaded on demand through keeper_skill.
 |}
   in
-  let skill_name_from_source source_text =
-    source_text
-    |> String.split_on_char '\n'
-    |> List.find_map (fun line ->
-      let prefix = "name:" in
-      if String.starts_with ~prefix line
-      then
-        let value =
-          String.sub line (String.length prefix) (String.length line - String.length prefix)
-          |> String.trim
-        in
-        if String.equal value "" then None else Some value
-      else None)
-  in
   let handle_skill_create ~composition () =
     let host = server_peer_host in
     let port = state.port in
@@ -16399,11 +16385,15 @@ and is loaded on demand through keeper_skill.
           | Error abort ->
             report_editor_abort state ~action:"Skill creation" abort
           | Ok source_text ->
-            (match skill_name_from_source source_text with
-             | None -> report_action state "error" "Skill template has no name frontmatter"
-             | Some "new-skill" ->
+            (match Agent_core.Skill_document.decode_authored source_text with
+             | Agent_core.Skill_document.Unloadable diagnostics ->
+               report_action state "error"
+                 (String.concat "; "
+                    (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics))
+             | Agent_core.Skill_document.Loaded { name = "new-skill"; _ } ->
                report_action state "error" "change new-skill to a real unique name before creating"
-             | Some package_id ->
+             | Agent_core.Skill_document.Loaded document ->
+               let package_id = document.name in
                (match
                   Masc_tui_http.post_skill_editor_create
                     ~host

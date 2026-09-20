@@ -236,6 +236,49 @@ let test_invalid_name_projection_is_payload_bearing_and_not_duplicated () =
      | _ -> Alcotest.fail "invalid-name diagnostic count changed")
 ;;
 
+let test_authored_name_and_directory_binding () =
+  List.iter
+    (fun frontmatter ->
+      let contents = "---\n" ^ frontmatter ^ "\n---\nKeep this body.\n" in
+      let document = Skill_document.decode_authored contents |> document_exn in
+      Alcotest.(check string) "authored package name" "reviewed-skill" document.name;
+      Alcotest.(check string) "authored body" "Keep this body.\n" document.body;
+      let published =
+        Skill_document.decode ~directory_name:document.name contents |> document_exn
+      in
+      Alcotest.(check string) "published name" document.name published.name;
+      expect_rejection
+        ~label:"publication still binds the directory"
+        ~directory_name:"another-skill"
+        ~contents
+        (function
+          | Skill_document.Name_mismatch
+              { declared = "reviewed-skill"; directory = "another-skill" } -> true
+          | _ -> false))
+    [ "name: \"reviewed-skill\"\ndescription: Reuse the reviewed procedure."
+    ; "name: reviewed-skill # operator note\ndescription: Reuse the reviewed procedure."
+    ; "{name: reviewed-skill, description: Reuse the reviewed procedure.}"
+    ]
+;;
+
+let test_authored_keeps_document_validation () =
+  List.iter
+    (fun contents ->
+      match Skill_document.decode_authored contents,
+            Skill_document.decode ~directory_name:"reviewed-skill" contents with
+      | Skill_document.Unloadable authored, Skill_document.Unloadable bound ->
+        Alcotest.(check (list string))
+          "same typed document diagnostics"
+          (List.map Skill_document.diagnostic_to_string bound)
+          (List.map Skill_document.diagnostic_to_string authored)
+      | _ -> Alcotest.fail "invalid authored document was admitted")
+    [ "---\ndescription: Missing name.\n---\nBody"
+    ; "---\nname: reviewed-skill\ndescription: Reject unknown field.\nextra: value\n---\nBody"
+    ; "---\nname: reviewed-skill\nname: reviewed-skill\ndescription: Reject duplicate field.\n---\nBody"
+    ; "---\nname: reviewed-skill\ndescription: [wrong type]\n---\nBody"
+    ]
+;;
+
 let () =
   Alcotest.run
     "skill_document"
@@ -261,5 +304,13 @@ let () =
             "invalid-name typed projection"
             `Quick
             test_invalid_name_projection_is_payload_bearing_and_not_duplicated
+        ; Alcotest.test_case
+            "authored name and directory binding"
+            `Quick
+            test_authored_name_and_directory_binding
+        ; Alcotest.test_case
+            "authored keeps document validation"
+            `Quick
+            test_authored_keeps_document_validation
         ] ) ]
 ;;

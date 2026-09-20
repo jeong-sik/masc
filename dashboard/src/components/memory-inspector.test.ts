@@ -46,7 +46,7 @@ const memoryId = (digit: string) => `sha256:${digit.repeat(64)}`
 
 // The same unchanged actual writer output is checked by the OCaml codec suite.
 const writerRows: Record<string, unknown>[] = readFileSync(
-  resolve(__dirname, '../api/fixtures/turn-record-writer-main.jsonl'),
+  resolve(__dirname, '../api/fixtures/turn-record-writer.jsonl'),
   'utf8',
 ).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
 

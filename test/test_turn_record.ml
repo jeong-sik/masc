@@ -272,7 +272,7 @@ let test_historical_row_without_usage_scope_is_unavailable () =
 let test_dashboard_writer_fixture_roundtrip () =
   let lines =
     In_channel.with_open_text
-      "../dashboard/src/api/fixtures/turn-record-writer-main.jsonl"
+      "../dashboard/src/api/fixtures/turn-record-writer.jsonl"
       In_channel.input_lines
   in
   let scopes =

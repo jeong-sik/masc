@@ -621,7 +621,17 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
 
    **(다)를 문안대로 하면 안 된다**(09-19 확인). 두 파일은 덧붙이기만 하는 것이 맞다. 그런데 **레인으로 갈리지 않는다.** `persist_message` 를 부르는 곳은 둘이고(`keeper_run_prompt.ml`, `keeper_agent_run_finalize_response.ml`), 그 가드는 `user_turn_record` 와 `is_retry` 뿐이다. 런타임 종류를 묻지 않는다. 즉 **agent core 턴의 메시지도 이 파일에 쌓인다.** 그러면 줄 수를 `No_atom_history` 줄에만 달 경우, 두 레인을 섞어 쓰는 Keeper 에서 회차가 같은 메시지를 atom 으로 한 번, 파일로 또 한 번 읽는다.
 
-   고쳐 쓴 (다)는 이렇다: **`Turn_ended` 의 모든 줄이 그 턴이 끝났을 때의 파일 위치를 싣는다.** 그러면 줄 사이 구간이 그 턴이 더한 것과 정확히 일치하므로, 턴의 종류대로 atom 에서 읽을지 파일에서 읽을지 고르면 된다. 자는 줄 수보다 **바이트 오프셋**이 낫다 — 줄 수는 턴마다 파일 전체를 세야 하고, 오프셋은 `stat` 두 번이다. 덧붙이기만 하는 파일에서 자르는 자리로서의 성질은 같다.
+   **모든 `Turn_ended`에 누적 파일 위치를 실어도, 두 끝 줄 사이가 한 턴의 내용이라는 보장은 없다**(09-20, main `f8bf4b2ba5`). `keeper_agent_run_finalize_response.ml`의 `record_turn_boundary`는 끝 줄 쓰기가 실패해도 턴을 마무리한다. 다음 끝 줄까지의 파일 구간에는 앞선 턴의 내용도 들어간다. 같은 trace에서 purge·clear 없이도 다음 반례가 생긴다. 처음 checkpoint와 읽은 atom 위치를 C0이라 두자.
+
+   | 턴 | 실제 저장 | 제안한 위치만 보고 읽으면 |
+   |---|---|---|
+   | T1: Agent Core | 사용자·최종 응답을 history에 쓰고 atom을 C1에 저장. 끝 줄 쓰기만 실패 | 읽은 atom 위치는 C0에 남음 |
+   | T2: 공식 클라이언트 | history에 쓰고 `No_atom_history` 끝 줄을 남김. checkpoint는 C1 그대로 | 직전 끝 줄 이후의 파일 구간에는 T1과 T2가 함께 있음 |
+   | T3: Agent Core | C1을 불러 T3를 더해 C3 저장 | C0 이후 atom을 읽으면 T1을 다시 읽음 |
+
+   따라서 누적 offset과 직후 끝 줄의 종류만으로는 **끝 줄 없는 조각을 어느 턴·실행 방식이 만들었는지, 그 내용이 checkpoint의 atom 범위와 어디서 겹치는지**를 알 수 없다. 반대 순서로, 끝 줄 없는 공식 클라이언트 조각 뒤 Agent Core 끝 줄에서 파일 위치만 전진시키고 checkpoint만 읽으면 그 조각을 건너뛸 수도 있다. 고칠 자리는 소비자가 아니라 생산자다. (가) 끝 줄을 턴 커밋에 넣어 "두 끝 줄 사이 = 한 턴"을 참으로 만들거나, (나) 끝 줄 실패를 계속 허용하되 각 history 조각이 자기 turn/execution 정체성을 싣게 해야 한다. 어느 쪽인지 정하기 전에 `turn boundary not recorded` 로그의 실제 발생 빈도를 잰다. 상세 반례와 생산 코드 근거는 [#37102의 계약 검토](https://github.com/jeong-sik/masc/issues/37102#issuecomment-5742771287)에 있다.
+
+   현재 production에는 이 혼합 history의 위치를 소비하는 루프가 없다(#37104, 후속 #37192). 위 표는 현재 서버의 중복 읽기를 실측한 결과가 아니라 제안된 소비자의 반례다. `LibrarianRead` 모델의 `hist/progress/readIds`는 checkpoint atom을 다룬다. 두 history 파일과 atom 사이의 내용 겹침은 그 모델 밖이므로, 이 반례는 기존 atom 검증 결과를 부정하지 않는다.
 
    **turn record 는 본문 출처가 될 수 없다.** 그 레코드의 `blocks` 는 digest 와 바이트 수뿐이고 assistant 텍스트가 없다. 가리키는 raw trace 도 `keeper_raw_trace_retention.ml` 의 `history_limit = 200` 에 걸려 최신 200개가 참조하는 동안만 남는다. 회차가 그보다 뒤처지면 영구 소실이다.
 

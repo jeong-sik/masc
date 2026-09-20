@@ -1,10 +1,11 @@
-(** Keeper_unified_turn — Single entry point for keeper cycles via Agent_core.Agent.run().
+(** MASC orchestration of a Keeper turn.
 
-    Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
-    observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
-    The model decides what to do; code only enforces safety and observes results.
+    Observes current state, prepares the turn prompt and calls
+    [Keeper_agent_run.run_turn] through [Keeper_unified_turn_execution].
+    [Keeper_turn_driver] dispatches each runtime attempt to AGENT_CORE or an
+    official client according to [Runtime_execution.t].
 
-    @since Unified Keeper Loop *)
+    Error classification predicates are in [Keeper_error_classify]. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -1015,7 +1016,18 @@ let run_keeper_cycle
            [protect] cannot park the caller.
 
            [Cancelled] is counted and logged like any other failure. A silent
-           arm here is why a skipped cleanup left no evidence at all. *)
+           arm here is why a skipped cleanup left no evidence at all.
+
+           The two [Otel_metric_store.inc_counter] bumps below are the tail of
+           each handler arm, outside [Eio.Cancel.protect]. Neither can raise
+           today: the store swallows every failure of its own and re-raises
+           only [Cancelled], which cannot originate under it (#37349). That
+           matters because a raise out of [cleanup ()] skips the
+           [Printexc.raise_with_backtrace] that carries the turn's own
+           exception, and the turn would then report the cleanup's failure
+           instead of its own. If the store ever gains a suspending call, wrap
+           these two bumps the way [Keeper_vision_tool] wraps its cancelled
+           observation. *)
                  let cleanup () =
                    (try Eio.Cancel.protect unsubscribe_event_bus with
                     | e ->

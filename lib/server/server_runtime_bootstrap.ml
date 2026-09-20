@@ -314,6 +314,38 @@ let warn_rejected_exact_output_slots registry =
           | Runtime_exact_output_registry.Configured_runtime_only _ -> false)))
 ;;
 
+(* Publication carries [verifier_exact] cli ids verbatim, because only
+   [Runtime] holds the runtime table that answers whether an official client
+   can judge. A slot that cannot leaves the lane shorter than its declaration
+   instead of failing it (#37179), so the boot report has to name it or the
+   lane reads as configured. *)
+let report_verifier_exact_lane_admission () =
+  match Runtime.verifier_exact_lane_resolution () with
+  | Error detail ->
+    (* [verifier_exact] is not a mandatory lane, so an unconfigured one is a
+       supported shape; completion review reports the same sentence when it
+       refuses admission. *)
+    Log.Server.info
+      "exact_output: lane %S cannot judge: %s"
+      Runtime.verifier_exact_lane_id
+      detail
+  | Ok (lane : Runtime.verifier_exact_lane_slots) ->
+    List.iter
+      (fun (rejection : Runtime.verifier_cli_slot_rejection) ->
+         Log.Server.warn
+           "exact_output: lane %S %s; the lane runs its remaining slots without it"
+           Runtime.verifier_exact_lane_id
+           (Runtime.verifier_cli_slot_rejection_to_string rejection))
+      lane.Runtime.cli_slot_rejections;
+    (match lane.Runtime.catalog_slot_ids, lane.Runtime.admitted_cli_slot_ids with
+     | [], [] ->
+       Log.Server.error
+         "exact_output: lane %S can judge through none of its %d declared cli slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
+         Runtime.verifier_exact_lane_id
+         (List.length lane.Runtime.cli_slot_rejections)
+     | [], _ :: _ | _ :: _, _ -> ())
+;;
+
 (* Retracted (2026-08-28, hours after #31445): the classifier reuses
    Exact_output.admit_target_ref, whose authority is exact-output LANE
    admission. Keeper turn assignments resolve through a different path —
@@ -445,6 +477,7 @@ let configure_exact_output_registry ?config_root () =
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
        warn_rejected_exact_output_slots registry;
+       report_verifier_exact_lane_admission ();
        warn_catalog_absent_keeper_assignments resolver_snapshot;
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry published%s"
@@ -1528,7 +1561,29 @@ let resume_model_configuration () =
           Runtime_startup_state.set Available;
           Server_routes_http_runtime.invalidate_full_health_snapshot ();
           let authority_available =
-            registry_published && Result.is_ok (Runtime.verifier_exact_lane_readiness ())
+            registry_published
+            && (match Runtime.verifier_exact_lane_readiness () with
+                | Ok [] -> true
+                | Ok (_ :: _ as rejections) ->
+                  (* The authority starts, but on fewer slots than runtime.toml
+                     declares. Say so where the decision is made, not only in
+                     the publication report. *)
+                  Log.Server.warn
+                    "exact_output: completion authority starts on a short lane %S: %s"
+                    Runtime.verifier_exact_lane_id
+                    (String.concat
+                       "; "
+                       (List.map
+                          Runtime.verifier_cli_slot_rejection_to_string
+                          rejections));
+                  true
+                | Error detail ->
+                  Log.Server.warn
+                    "exact_output: completion authority stays off because lane %S \
+                     has no dispatchable slot: %s"
+                    Runtime.verifier_exact_lane_id
+                    detail;
+                  false)
           in
           Ok authority_available)
     in

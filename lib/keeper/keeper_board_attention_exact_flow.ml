@@ -517,7 +517,8 @@ let terminal_outcome = function
    Jev said and what the lane then decided are read from one entry. *)
 type jev_first =
   | Jev_off
-      (** No [TYPESAFEAI_API_KEY], or [MASC_TYPESAFEAI_ENABLED=false]. *)
+      (** No [TYPESAFEAI_API_KEY], [MASC_TYPESAFEAI_ENABLED=false], or this
+          gate's own [MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED=false]. *)
   | Jev_cli_only
       (** Jev is on, but the lane declares no HTTP slot. Jev is asked only in
           front of the HTTP lane. *)
@@ -536,7 +537,7 @@ type jev_first =
   | Jev_failed of { reason : string }
 
 let ask_jev ~clock prepared =
-  if not (Typesafeai_config.is_enabled ())
+  if not (Typesafeai_config.is_board_attention_enabled ())
   then Jev_off
   else (
     match Typesafeai_config.api_key () with

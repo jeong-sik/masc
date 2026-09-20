@@ -1239,7 +1239,10 @@ let handle_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
 
 (* Everything one event costs stays inside this guard, not just the refresh:
    a raise while decoding the payload, bumping the malformed counter or
-   logging would otherwise end the batch and take the events after it. *)
+   logging would otherwise end the batch and take the events after it.
+   The Cancelled arm speaks for the counter bump too only since #37349 — until
+   then the metric store caught every exception under [inc_counter], so its
+   catch-all stood between the malformed branch and this match. *)
 let refresh_keeper_lifecycle_event ~refresh evt =
   match handle_keeper_lifecycle_event ~refresh evt with
   | result -> result

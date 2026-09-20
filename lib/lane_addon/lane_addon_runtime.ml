@@ -390,7 +390,13 @@ let run ~sw backend m e =
         release_detached m e; raise exn)
 let backend ~store () = match !override with
   | Some backend -> backend
-  | None -> {
+  | None ->
+    let clock = Eio_context.get_clock_opt () in
+    (* Docker create/inspect/list/remove are the same short host-control class
+       as connector sidecar housekeeping. Reuse its operator knob rather than
+       adding a second timeout with the same meaning. *)
+    let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
+    {
       start = (fun ~sw ~instance_id ~package ~on_created ->
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
@@ -400,14 +406,22 @@ let backend ~store () = match !override with
           observe = (fun ~binding ~sources -> Lane_addon_worker.observe worker ~binding ~sources
             |> Result.map_error Lane_addon_worker.error_to_string);
           stop = (fun () -> Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.error_to_string) } in
-        Lane_addon_worker.start ~sw ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package
-          ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ()
-        |> Result.map wrap |> Result.map_error Lane_addon_worker.error_to_string);
+        match clock with
+        | None -> Error "Lane Add-on Docker control requires the server Eio clock"
+        | Some clock ->
+            Lane_addon_worker.start ~sw ~clock ~control_timeout_sec
+              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package
+              ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ()
+            |> Result.map wrap |> Result.map_error Lane_addon_worker.error_to_string);
       acquire = Lane_addon_sources.acquire;
       recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes ->
-        Lane_addon_worker.recover_stop ~mgr:Posix_spawn_process_mgr.mgr
-          ~instance_id ~container_id ~max_reply_bytes ()
-        |> Result.map_error Lane_addon_worker.error_to_string) }
+        match clock with
+        | None -> Error "Lane Add-on Docker control requires the server Eio clock"
+        | Some clock ->
+            Lane_addon_worker.recover_stop ~clock ~control_timeout_sec
+              ~mgr:Posix_spawn_process_mgr.mgr
+              ~instance_id ~container_id ~max_reply_bytes ()
+            |> Result.map_error Lane_addon_worker.error_to_string) }
 let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with

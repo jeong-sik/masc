@@ -2,6 +2,7 @@ open Alcotest
 
 module Workspace = Masc.Workspace
 module Consumer = Masc.Keeper_librarian_durable_consumer
+module Queue_refresh = Masc.Keeper_librarian_queue_refresh
 module Boundaries = Masc.Keeper_turn_boundaries
 module Progress = Masc.Keeper_librarian_progress
 module Store = Masc.Keeper_checkpoint_store
@@ -117,7 +118,7 @@ let save_checkpoint config ~trace_id messages turn_count =
   | Error detail -> failf "save checkpoint: %s" detail
 ;;
 
-let append_boundary config ~trace_id ~turn ~recorded_at messages =
+let append_boundary ?history_at_start config ~trace_id ~turn ~recorded_at messages =
   let position =
     match Boundaries.position_of_messages messages with
     | Ok position -> position
@@ -129,9 +130,12 @@ let append_boundary config ~trace_id ~turn ~recorded_at messages =
         Boundaries.Turn_ended
           { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
           ; history_at_start =
-              (if turn = 1
-               then Boundaries.Fresh_history
-               else Boundaries.Continued_history)
+              (match history_at_start with
+               | Some history_at_start -> history_at_start
+               | None ->
+                 if turn = 1
+                 then Boundaries.Fresh_history
+                 else Boundaries.Continued_history)
           ; position
           }
     }
@@ -247,6 +251,118 @@ let test_failed_commit_and_restart_retry_the_same_range () =
    | Consumer.Baseline_advanced _
    | Consumer.Memory_not_committed -> fail "restart did not retry unread range");
   check (list string) "restart reads identical range" !first !after_restart
+;;
+
+let prepare_three_unread_turns config ~trace_id =
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let first_three = first_two @ [ message "turn-3" ] in
+  let first_four = first_three @ [ message "turn-4" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 first_three;
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 first_four;
+  save_checkpoint config ~trace_id first_four 4
+;;
+
+let check_progress_end config expected =
+  match read_progress config with
+  | Some progress -> check int "durable progress end" expected progress.position.end_atom
+  | None -> fail "durable progress is missing"
+;;
+
+(* These cases call the production wake body with only its Memory commit
+   result controlled. Boundaries, checkpoint, selection and progress use the
+   real stores; no provider or Memory snapshot write is simulated as proof.
+   Empty working-context sources rule out a separate queue signal continuing
+   the drain on the production loop's behalf. *)
+let markers_without_working_sources (input : Masc.Keeper_librarian.input) =
+  check int "no working-context source can schedule another wake" 0
+    (List.length input.working_context.sources);
+  text_markers input
+;;
+
+let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  prepare_three_unread_turns config ~trace_id:"trace-wake-retry";
+  let failed_calls = ref [] in
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun ~expected_revision:_ input ->
+      failed_calls := markers_without_working_sources input :: !failed_calls;
+      false);
+  check (list (list string)) "a refused commit ends this wake after one attempt"
+    [ [ "turn-2"; "turn-3"; "turn-4" ] ] (List.rev !failed_calls);
+  check_progress_end config 1;
+  let committed_calls = ref [] in
+  let commit ~expected_revision:_ input =
+    committed_calls := markers_without_working_sources input :: !committed_calls;
+    true
+  in
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  check (list (list string)) "one later wake drains all successful small cuts"
+    [ [ "turn-2" ]; [ "turn-3" ]; [ "turn-4" ] ] (List.rev !committed_calls);
+  check_progress_end config 4;
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  check int "an empty backlog is not committed again" 3 (List.length !committed_calls)
+;;
+
+let test_one_wake_continues_after_an_initial_baseline () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-wake-baseline" in
+  write_meta config trace_id;
+  let first = [ message "recorded-1" ] in
+  let first_two = first @ [ message "recorded-2" ] in
+  let all = first_two @ [ message "recorded-3" ] in
+  append_boundary ~history_at_start:Boundaries.Continued_history config
+    ~trace_id ~turn:1 ~recorded_at:1.0 first;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 all;
+  save_checkpoint config ~trace_id all 3;
+  check bool "this Keeper has no read position yet" true
+    (Option.is_none (read_progress config));
+  let calls = ref [] in
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun ~expected_revision:_ input ->
+      calls := markers_without_working_sources input :: !calls;
+      true);
+  check (list (list string)) "baseline is skipped and the same wake commits unread turns"
+    [ [ "recorded-2"; "recorded-3" ] ] (List.rev !calls);
+  check_progress_end config 3
+;;
+
+let test_disabling_between_cuts_stops_until_a_new_enabled_wake () =
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  Masc_test_deps.with_process_env env_key (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  prepare_three_unread_turns config ~trace_id:"trace-wake-disable";
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun ~expected_revision:_ input ->
+      ignore (markers_without_working_sources input : string list);
+      false);
+  check_progress_end config 1;
+  let before_disable = ref [] in
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun ~expected_revision:_ input ->
+      before_disable := markers_without_working_sources input :: !before_disable;
+      Unix.putenv env_key "false";
+      true);
+  check (list (list string)) "turning off prevents the next cut in the same wake"
+    [ [ "turn-2" ] ] (List.rev !before_disable);
+  check_progress_end config 2;
+  Unix.putenv env_key "true";
+  let after_enable = ref [] in
+  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun ~expected_revision:_ input ->
+      after_enable := markers_without_working_sources input :: !after_enable;
+      true);
+  check (list (list string)) "a separate enabled wake drains the remaining cuts"
+    [ [ "turn-3" ]; [ "turn-4" ] ] (List.rev !after_enable);
+  check_progress_end config 4
 ;;
 
 let test_unchanged_boundaries_do_not_require_checkpoint () =
@@ -622,6 +738,14 @@ let () =
             test_counterpart_range_reads_beyond_recent_windows
         ; test_case "counterpart range includes upper boundary once" `Quick
             test_counterpart_range_includes_upper_boundary_once
+        ] )
+    ; ( "production wake"
+      , [ test_case "failure stops and a later wake drains successful cuts" `Quick
+            test_one_wake_stops_on_failure_then_drains_successful_cuts
+        ; test_case "one wake continues after an initial baseline" `Quick
+            test_one_wake_continues_after_an_initial_baseline
+        ; test_case "disable between cuts waits for a new enabled wake" `Quick
+            test_disabling_between_cuts_stops_until_a_new_enabled_wake
         ] )
     ]
 ;;

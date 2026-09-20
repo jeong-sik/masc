@@ -53,29 +53,24 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
     true
   | Some _ | None -> false
 
-let run_durable ~base_path ~keeper_name =
+let rec run_durable_with_commit ~config ~keeper_name ~commit =
   match Env_config.KeeperMemoryOs.librarian_config_state () with
   | Disabled | Invalid -> ()
   | Enabled ->
-    let config = Workspace.default_config base_path in
-    let memory_keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path ~base_path
-    in
     (match
        Keeper_librarian_durable_consumer.consume_one
          ~config
          ~keeper_name
-         ~commit:
-           (Keeper_librarian_durable_consumer.commit_with_runtime
-              ~base_path
-              ~keepers_dir:memory_keepers_dir
-              ~keeper_id:keeper_name)
+         ~commit
      with
      | Ok
          (Keeper_librarian_durable_consumer.Nothing_to_read
-         | Baseline_advanced _
-         | Memory_not_committed
-         | Progress_advanced _) -> ()
+         | Memory_not_committed) -> ()
+     | Ok (Baseline_advanced _ | Progress_advanced _) ->
+       (* A stored advance can leave unread cuts, including after the first
+          baseline or a successful small retry. Continue on that evidence;
+          failures wait for another wake, and every pass rechecks the toggle. *)
+       run_durable_with_commit ~config ~keeper_name ~commit
      | Error Keeper_librarian_durable_consumer.Keeper_meta_absent -> ()
      | Error
          (Keeper_librarian_durable_consumer.Checkpoint_unreadable
@@ -89,6 +84,24 @@ let run_durable ~base_path ~keeper_name =
          ~keeper_name
          "durable Librarian range not consumed: %s"
          (Keeper_librarian_durable_consumer.error_to_string error))
+;;
+
+let run_durable ~base_path ~keeper_name =
+  match Env_config.KeeperMemoryOs.librarian_config_state () with
+  | Disabled | Invalid -> ()
+  | Enabled ->
+    let config = Workspace.default_config base_path in
+    let memory_keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path ~base_path
+    in
+    run_durable_with_commit
+      ~config
+      ~keeper_name
+      ~commit:
+        (Keeper_librarian_durable_consumer.commit_with_runtime
+           ~base_path
+           ~keepers_dir:memory_keepers_dir
+           ~keeper_id:keeper_name)
 ;;
 
 let run ~trigger ~base_path ~keeper_name =
@@ -164,4 +177,5 @@ let submit_durable ~base_path ~keeper_name =
 
 module For_testing = struct
   let attempt_remembered = attempt_remembered
+  let run_durable_with_commit = run_durable_with_commit
 end

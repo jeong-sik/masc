@@ -13,16 +13,25 @@ val install : unit -> unit
     this extraction; source selection happens when the latest unit runs. *)
 
 val submit_durable : base_path:string -> keeper_name:string -> unit
-(** Submit one disk-selected pass after this Keeper's Librarian lifecycle has
-    opened. Launch admission owns restart catch-up; there is no pre-admission
-    fleet scan and no process-local remembered closure participates. *)
+(** Submit disk-selected catch-up after this Keeper's Librarian lifecycle has
+    opened. Each stored progress advance continues to the next unread range;
+    an empty backlog, failure, or disabled/invalid setting ends this wake.
+    Launch admission owns restart catch-up; there is no pre-admission fleet
+    scan and no process-local remembered closure participates. *)
 
 val run_completed_turn : base_path:string -> keeper_name:string -> unit
-(** Run the durable Agent-Core consumer, then attempt an official-client
+(** Drain successful durable Agent-Core ranges, then attempt an official-client
     closure when one exists. Normal return records an attempt, not extraction
     or commit success. *)
 
 module For_testing : sig
+  val run_durable_with_commit
+    :  config:Workspace.config
+    -> keeper_name:string
+    -> commit:(expected_revision:int option -> Keeper_librarian.input -> bool)
+    -> unit
+  (** The production durable reader with a controlled Memory commit edge. *)
+
   val attempt_remembered : base_path:string -> keeper_name:string ->
     trace_id:string -> meta:Keeper_meta_contract.keeper_meta -> sources_changed:bool ->
     trigger:Keeper_librarian_runtime.trigger -> bool

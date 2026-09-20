@@ -6493,3 +6493,5 @@
  (libraries alcotest masc_tui_fork_guard eio eio_main))
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
+
+(include stanzas/test_exact_output_runtime_reasoning.inc)

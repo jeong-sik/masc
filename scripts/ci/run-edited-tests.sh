@@ -1134,14 +1134,14 @@ FAKE
   runner_check "the budget stops a slow suite and names the suites after it" \
     "test/test_broken (build);test/test_failing (run);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
     0 3 test_ok test_broken test_failing test_slow test_zz_after
-  RUNNER_DIRECT_SOURCES="test/test_zz_direct.ml" \
+  RUNNER_DIRECT_SOURCES="test/test_zz_direct_failing.ml" \
     runner_check "a directly edited suite runs before attributed suites spend the budget" \
-      "test/test_aa_slow (stopped at the step budget);" \
-      0 3 test_aa_slow test_zz_direct
-  RUNNER_DIRECT_SOURCES="test/test_zz_direct.py" \
+      "test/test_zz_direct_failing (run);test/test_aa_slow (stopped at the step budget);" \
+      0 3 test_aa_slow test_zz_direct_failing
+  RUNNER_DIRECT_SOURCES="test/test_zz_direct_broken.py" \
     runner_check "a directly edited Python rule runs before attributed linked suites" \
-      "test/test_aa_slow (stopped at the step budget);" \
-      0 3 test_aa_slow test/test_zz_direct.py
+      "test/test_zz_direct_broken (run);test/test_aa_slow (stopped at the step budget);" \
+      0 3 test_aa_slow test/test_zz_direct_broken.py
   # The build starts with budget left and outlasts it, so the timeout on the
   # build is what ends it. With a one-second budget the budget was already
   # spent before the build began, and that case passed without the timeout.

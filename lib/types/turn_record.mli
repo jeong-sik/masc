@@ -118,6 +118,15 @@ type model_input_window =
     present or all null. A record without the [front_atom_digest] key does not
     decode. *)
 
+type accepted_model_input_window =
+  { runtime_profile : string
+  ; window : model_input_window
+  }
+(** A response observed for this runtime and this same request's window.
+    The runtime is paired with the window because a later candidate can fail
+    after an earlier response. This fact does not require reported usage or
+    successful completion of the whole Keeper turn. *)
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -225,9 +234,16 @@ type t =
        not_recorded until a provider reports it natively. *)
   ; request_wire_observation : request_wire_observation option
   ; model_input_window : model_input_window option
-    (* [None] is an explicit observation that no model-input projection ran for
-       this turn — a runtime that assembles its own input, or a turn that ended
-       before any cut was selected. It is not a zero-length history. *)
+    (* Latest attempted projection. [None] means no model-input window was
+       observed for this turn, not a zero-length history. A selected range
+       alone does not establish that the runtime produced a response. *)
+  ; accepted_model_input_window : accepted_model_input_window option
+    (* Latest request window for which the runtime produced response evidence.
+       A later attempted projection does not replace it. [None] means no such
+       paired observation was recorded. Missing usage alone does not remove
+       an observation. Agent Core's response hook supplies this fact; a native
+       client's prepared or session-held input is not inferred to be accepted.
+       The JSON key is required and explicitly null when absent. *)
   ; raw_trace_run_ref : raw_trace_run_ref option
     (* Exact AGENT_CORE run selected by this turn's completed provider dispatch.
        [None] is an explicit observation that the raw-trace sink degraded or

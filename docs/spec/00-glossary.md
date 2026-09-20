@@ -114,6 +114,11 @@ status: reference
   원장이 아직 세지 않은 위치까지 거절이 앞을 옮길 수 있다. 이때 다음 요청은 턴이
   보관한 Carried Front를 쓴다.
 
+  Agent Core가 응답한 범위와 runtime은 턴이 나중에 실패해도 TurnRecord의
+  `accepted_model_input_window`에 함께 남는다. 사용량이 없어도 응답 관측은 남기며,
+  최신 시도 범위인 `model_input_window`와 구분한다. Native 클라이언트가 준비한
+  목록이나 보유한 세션을 이 응답 관측으로 추정하지 않는다.
+
 **Turn Boundary**
 : 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.

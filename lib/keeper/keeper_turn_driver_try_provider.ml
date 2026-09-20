@@ -177,6 +177,12 @@ type try_provider_ctx =
        -> Runtime_model_input_tail_window.window_observation
        -> unit)
         option
+  ; on_model_input_window_accepted :
+      (runtime_id:string
+       -> measurement:Turn_record.model_input_measurement
+       -> Runtime_model_input_tail_window.window_observation
+       -> unit)
+        option
   ; (* Event bus *)
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -1141,8 +1147,8 @@ let bounded_model_input_projection
                  composed.projection))
          ctx.on_model_input_window_observation
      | Error _ -> ());
-    (* What this request carried, for the ledger the after-turn hook writes
-       once the provider reports its count, and for the front a refusal
+    (* What this request carried, for the accepted window and ledger the
+       after-turn hook writes when the provider responds, and for the front a refusal
        moves: the carried atom range and the bytes of the per-request tail
        (the pinned messages), so a difference between two requests can be
        attributed to the atoms appended between them, and whether it carried
@@ -1266,9 +1272,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
            | Some hooks ->
              Agent_core.Hooks.compose ~outer:gate_hooks ~inner:hooks)
     in
-    (* Usage observation (RFC keeper-context-window-in-tokens): the
-       provider's inclusive prompt total for the request the composition just
-       built. The ledger records the request's carried range against the
+    (* Response observation (RFC keeper-context-window-in-tokens): the
+       response confirms the request's carried range even without usage.
+       When available, the provider's inclusive prompt total lets the ledger
+       record the request's carried range against the
        count, one line per provider call, so block sizes, front moves and
        tail changes are read from the provider's numbers. The marks are not
        judged here: a front moved after a response would change the prefix of
@@ -1283,6 +1290,20 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
               | Agent_core.Hooks.AfterTurn { response; _ } ->
                 (match !last_request with
                  | Some { request; digest_at } ->
+                   (match request.Keeper_model_input_ledger.ends with
+                    | Keeper_model_input_ledger.No_atom_carried -> ()
+                    | Keeper_model_input_ledger.Carried_atoms { front_digest; _ } ->
+                      let window : Runtime_model_input_tail_window.window_observation =
+                        { transmitted_atoms = request.atom_count - request.first_atom
+                        ; total_atoms = request.atom_count
+                        ; front_atom_digest = front_digest
+                        }
+                      in
+                      Option.iter
+                        (fun observe ->
+                           observe ~runtime_id:ctx.runtime_id
+                             ~measurement:Turn_record.Wire_shape window)
+                        ctx.on_model_input_window_accepted);
                    let usage =
                      Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->

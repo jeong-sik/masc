@@ -90,6 +90,7 @@ streaming = false
    | Error detail -> fail detail);
   let observations = ref [] in
   let model_input_windows = ref 0 in
+  let accepted_windows = ref [] in
   let attempt_errors = ref [] in
   let run ?(runtime_id = "fixture.sample") goal =
     Keeper_turn_driver.run_named
@@ -100,6 +101,8 @@ streaming = false
         attempt_errors := (runtime_id, error) :: !attempt_errors)
       ~on_model_input_window_observation:(fun ~measurement:_ _ ->
         incr model_input_windows)
+      ~on_model_input_window_accepted:(fun ~runtime_id ~measurement window ->
+        accepted_windows := (runtime_id, measurement, window) :: !accepted_windows)
       ~on_request_wire_observation:(fun ~runtime_id:_ ~body_bytes ~serialized ->
         observations := (body_bytes, Option.is_some serialized) :: !observations)
       ()
@@ -118,6 +121,7 @@ streaming = false
   check (option (pair int bool)) "the exact wire observation is the sent body"
     (Some (String.length large_body, true)) (List.nth_opt !observations 0);
   check int "the composition observed its window once" 1 !model_input_windows;
+  check int "the real response confirms one carried window" 1 (List.length !accepted_windows);
   succeed "short";
   check int "a short request reaches the peer too" 2 (Exact_output_fixture.post_count server);
   let refused_url, refused_requests = start_context_refusal_server ~sw ~net:env#net in
@@ -139,7 +143,13 @@ candidates = ["overflow.sample", "fixture.sample"]
   check int "the peer's context refusal is attempted once, without an invented shrink seed" 1
     (Atomic.get refused_requests);
   check int "the next candidate completes the same lane turn" 3
-    (Exact_output_fixture.post_count server)
+    (Exact_output_fixture.post_count server);
+  check int "the refused response adds no accepted window" 3 (List.length !accepted_windows);
+  check bool "accepted windows retain the answering runtime and wire measurement" true
+    (List.for_all
+       (fun (runtime_id, measurement, _) ->
+         runtime_id = "fixture.sample" && measurement = Turn_record.Wire_shape)
+       !accepted_windows)
 
 let test_the_runtime_demotes_historical_tool_results () =
   Eio_main.run @@ fun env ->
@@ -289,6 +299,110 @@ streaming = false
         failf "failed to fetch stored blob: %s" (Tool_blob_store.fetch_error_to_string err))
    | _ -> fail "expected decoded artifact reference for historical tool message")
 
+let test_accepted_window_survives_later_error usage () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  Keeper_model_input_ledger.Table.For_testing.reset ();
+  let base_path = Filename.temp_dir "keeper-accepted-window-" "" in
+  Eio.Switch.on_release sw (fun () ->
+    Keeper_model_input_ledger.Table.For_testing.reset ();
+    Runtime.For_testing.restore runtime_snapshot;
+    (match catalog_snapshot with
+     | None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    remove base_path);
+  (* Synthetic protocol replies exercise the actual AfterTurn producer.
+     The second response cannot decode, so the overall run fails after one
+     accepted tool round. Neither reply is evidence of a live model call. *)
+  let first_fields =
+    Yojson.Safe.from_string
+      {|{"id":"accepted-tool","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"accepted-call","type":"function","function":{"name":"fixture_tool","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}|}
+    |> Yojson.Safe.Util.to_assoc
+  in
+  let first_reply =
+    Yojson.Safe.to_string
+      (`Assoc (first_fields @ Option.fold ~none:[] ~some:(fun value -> ["usage", value]) usage))
+  in
+  let server = Exact_output_fixture.start_server
+    ~sw ~net:env#net ~clock:env#clock
+    (Exact_output_fixture.Replies [first_reply; "{"]) in
+  let model_id = "accepted-window" in
+  let catalog_path = Filename.concat base_path "models.toml" in
+  write catalog_path (Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+    model_id);
+  (match Llm_provider.Model_catalog.load_file catalog_path with
+   | Error detail -> fail detail
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let config_path = Filename.concat base_path "runtime.toml" in
+  write config_path (Printf.sprintf {|[runtime]
+default = "fixture.sample"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = %S
+[models.sample]
+api-name = %S
+max-context = 1048576
+streaming = false
+[fixture.sample]
+|} server.base_url model_id);
+  (match Runtime.init_default_degraded_report ~config_path with
+   | Ok Runtime.Initialized -> ()
+   | Ok (Runtime.Initialized_degraded _) -> fail "fixture catalog unexpectedly unavailable"
+   | Error error -> fail (Runtime.strict_init_error_to_string error));
+  let tool = Agent_core.Tool.create
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~name:"fixture_tool" ~description:"Synthetic no-effect tool." ~parameters:[]
+    (fun _ -> Ok { Agent_core.Types.content = "synthetic result"; content_blocks = None; _meta = None })
+  in
+  let attempted = ref [] in
+  let accepted = ref [] in
+  let response_usage = ref [] in
+  let hooks = { Agent_core.Hooks.empty with
+    after_turn = Some (function
+      | Agent_core.Hooks.AfterTurn { response; _ } ->
+        response_usage := response.Agent_core.Types.usage :: !response_usage;
+        Agent_core.Hooks.Continue
+      | Agent_core.Hooks.BeforeTurn _
+      | Agent_core.Hooks.BeforeTurnParams _
+      | Agent_core.Hooks.PreToolUse _
+      | Agent_core.Hooks.PostToolUse _
+      | Agent_core.Hooks.PostToolUseFailure _
+      | Agent_core.Hooks.OnStop _
+      | Agent_core.Hooks.OnError _
+      | Agent_core.Hooks.OnToolError _ -> Agent_core.Hooks.Continue) }
+  in
+  let result = Keeper_turn_driver.run_named
+    ~system_prompt:"Accepted window fixture."
+    ~runtime_id:"fixture.sample" ~keeper_name:"accepted-window-proof" ~base_path
+    ~tools:[tool] ~agent_core_tools:[tool] ~hooks
+    ~goal:"Call fixture_tool once, then answer."
+    ~on_model_input_window_observation:(fun ~measurement window ->
+      attempted := (measurement, window) :: !attempted)
+    ~on_model_input_window_accepted:(fun ~runtime_id ~measurement window ->
+      accepted := (runtime_id, measurement, window) :: !accepted)
+    ~sw ~net:env#net ()
+  in
+  check bool "later protocol failure fails the overall run" true (Result.is_error result);
+  check int "both requests reached the HTTP peer" 2 (Exact_output_fixture.post_count server);
+  check int "both attempted ranges remain observable" 2 (List.length !attempted);
+  (match List.rev !attempted, !accepted with
+   | (measurement, window) :: _, [(runtime_id, accepted_measurement, accepted_window)] ->
+     check string "accepted callback owns the answering runtime" "fixture.sample" runtime_id;
+     check bool "accepted callback keeps the exact first request range and digest" true
+       (measurement = Turn_record.Wire_shape
+        && accepted_measurement = measurement && accepted_window = window)
+   | _ -> fail "expected only the first of two attempted windows to be accepted");
+  (match usage, !response_usage with
+   | None, [None] -> ()
+   | Some _, [Some observed] ->
+     check int "zero prompt usage is still an accepted response" 0 observed.input_tokens;
+     check int "zero completion usage is preserved" 0 observed.output_tokens
+   | _ -> fail "the actual AfterTurn usage differed from the synthetic response")
+
 let () =
   Alcotest.run "keeper_no_request_body_gate"
     [ "actual-dispatch",
@@ -296,5 +410,10 @@ let () =
           test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane
       ; test_case "the runtime demotes historical tool results" `Quick
           test_the_runtime_demotes_historical_tool_results
+      ; test_case "accepted window without usage survives a later error" `Quick
+          (test_accepted_window_survives_later_error None)
+      ; test_case "accepted window with zero usage survives a later error" `Quick
+          (test_accepted_window_survives_later_error
+             (Some (`Assoc ["prompt_tokens", `Int 0; "completion_tokens", `Int 0; "total_tokens", `Int 0])))
       ]
     ]

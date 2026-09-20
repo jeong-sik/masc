@@ -1277,6 +1277,17 @@ let run_turn
        refused at the wire has a real cut and no wire observation. Sharing one
        cell would let the missing half erase the half that was measured. *)
     let model_input_window_ref = ref None in
+    let accepted_model_input_window_ref = ref None in
+    let window_record ~measurement
+          (observation : Runtime_model_input_tail_window.window_observation)
+      : Turn_record.model_input_window
+      =
+      { transmitted_atoms = observation.transmitted_atoms
+      ; total_atoms = observation.total_atoms
+      ; measurement
+      ; front_atom_digest = observation.front_atom_digest
+      }
+    in
     let current_request_provider_content_ref :
       ( Agent_core.Types.message list
       , Keeper_agent_prompt_metrics.provenance_failure )
@@ -1664,7 +1675,14 @@ let run_turn
                       ~on_model_input_window_observation:
                         (fun ~measurement observation ->
                            model_input_window_ref :=
-                             Some (measurement, observation))
+                             Some (window_record ~measurement observation))
+                      ~on_model_input_window_accepted:
+                        (fun ~runtime_id ~measurement observation ->
+                           accepted_model_input_window_ref :=
+                             Some
+                               { Turn_record.runtime_profile = runtime_id
+                               ; window = window_record ~measurement observation
+                               })
                       ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
@@ -2252,23 +2270,8 @@ let run_turn
                (fun (evidence : request_wire_evidence) ->
                 evidence.wire_observation)
                !request_wire_evidence_ref)
-          ~model_input_window:
-            (Option.map
-               (fun
-                 ( (measurement : Turn_record.model_input_measurement)
-                 , (observation :
-                     Runtime_model_input_tail_window.window_observation) )
-               ->
-                  { Turn_record.transmitted_atoms =
-                      observation
-                        .Runtime_model_input_tail_window.transmitted_atoms
-                  ; total_atoms =
-                      observation.Runtime_model_input_tail_window.total_atoms
-                  ; measurement
-                  ; front_atom_digest =
-                      observation.Runtime_model_input_tail_window.front_atom_digest
-                  })
-               !model_input_window_ref)
+          ~model_input_window:!model_input_window_ref
+          ~accepted_model_input_window:!accepted_model_input_window_ref
           ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature

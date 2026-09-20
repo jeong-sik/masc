@@ -1484,6 +1484,7 @@ let run_named
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
+    ?on_model_input_window_accepted
     ?carried_front_seed
     ?runtime_manifest_context
     ?runtime_manifest_append
@@ -2454,6 +2455,7 @@ let run_named
             ; on_runtime_observation
             ; on_request_wire_observation
             ; on_model_input_window_observation
+            ; on_model_input_window_accepted
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append

@@ -20,6 +20,7 @@ let write
       ~ttfrc_ms
       ~request_wire_observation
       ~model_input_window
+      ~accepted_model_input_window
       ~raw_trace_run_ref
       ~sampling
       ~usage
@@ -50,6 +51,7 @@ let write
     ; ttfrc_ms
     ; request_wire_observation
     ; model_input_window
+    ; accepted_model_input_window
     ; raw_trace_run_ref
     ; sampling
     ; usage

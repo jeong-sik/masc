@@ -52,6 +52,7 @@ let record
            ; front_atom_digest = recorded_digest (total_atoms - transmitted_atoms)
            })
         window
+  ; accepted_model_input_window = None
   ; raw_trace_run_ref = None
   ; sampling = { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
   ; usage =

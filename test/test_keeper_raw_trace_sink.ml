@@ -105,7 +105,8 @@ let materialize_turn ~(meta : Keeper_meta_contract.keeper_meta) ~turn sink =
        ~final_text:(Some (Printf.sprintf "done-%d" turn))
        ~stop_reason:(Some "end_turn") ~error:None)
 
-let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
+let write_turn_record ?model_input_window ?accepted_model_input_window
+    ?(finish_reason = Some "completed") config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~raw_trace_path =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let raw_trace_run_ref : Turn_record.raw_trace_run_ref =
@@ -118,7 +119,8 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     }
   in
   Keeper_turn_record_writer.write
-    ~model_input_window:None
+    ~model_input_window
+    ~accepted_model_input_window
     ~config
     ~keeper_name:meta.name
     ~agent_name:meta.name
@@ -127,7 +129,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~absolute_turn:turn
     ~runtime_profile:"test-runtime"
     ~selected_model:(Some "test-model")
-    ~finish_reason:(Some "completed")
+    ~finish_reason
     ~context_window:None
     ~price_input_per_million:None
     ~price_output_per_million:None
@@ -153,6 +155,40 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~input_components:None
     ~tool_surface_ref:None
     ()
+
+let test_failed_turn_preserves_accepted_range_in_store () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
+  let accepted : Turn_record.accepted_model_input_window =
+    { runtime_profile = "answered-runtime"
+    ; window =
+        { transmitted_atoms = 8; total_atoms = 16; measurement = Wire_shape
+        ; front_atom_digest = String.make 64 'a' }
+    }
+  in
+  let attempted : Turn_record.model_input_window =
+    { transmitted_atoms = 1; total_atoms = 16; measurement = Wire_shape
+    ; front_atom_digest = String.make 64 'b' }
+  in
+  write_turn_record ~model_input_window:attempted
+    ~accepted_model_input_window:accepted ~finish_reason:None
+    config ~meta ~turn:1 ~raw_trace_path:"synthetic-unused-trace.jsonl";
+  let store = Keeper_types_support.keeper_turn_record_store config meta.name in
+  match Dated_jsonl.read_recent store 1 with
+  | [ row ] ->
+    (match Turn_record.of_json row with
+     | Error error -> Alcotest.fail error
+     | Ok record ->
+       Alcotest.(check bool) "writer stores the paired response window" true
+         (record.accepted_model_input_window = Some accepted);
+       Alcotest.(check bool) "writer also keeps the later attempted window" true
+         (record.model_input_window = Some attempted);
+       Alcotest.(check (option string)) "error turn has no completion reason" None
+         record.finish_reason;
+       Alcotest.(check (option int)) "missing usage is preserved" None
+         record.usage.input_tokens)
+  | _ -> Alcotest.fail "expected one durable turn record"
+;;
 
 (* Per-turn store lives under the keepers runtime dir — the SSOT shared
    with the metrics/receipt stores — and every call hands out a fresh
@@ -775,6 +811,8 @@ let () =
             test_traced_turn_yields_result_level_fields;
           Alcotest.test_case "failed turn keeps its trace through retention"
             `Quick test_failed_turn_keeps_its_trace_through_retention;
+          Alcotest.test_case "failed turn keeps the accepted range in its record"
+            `Quick test_failed_turn_preserves_accepted_range_in_store;
           Alcotest.test_case "untraced turn names no reference" `Quick
             test_untraced_turn_names_no_reference;
           Alcotest.test_case "dispatch passes ?raw_trace" `Quick

@@ -123,6 +123,7 @@ let sample_record () : Turn_record.t =
         ; measurement = Wire_shape
         ; front_atom_digest = String.make 64 'a'
         }
+  ; accepted_model_input_window = None
   ; raw_trace_run_ref =
       Some
         { worker_run_id = "worker-run-41"
@@ -854,6 +855,68 @@ let test_codec_rejects_unknown_fields () =
       (Astring.String.is_infix ~affix:"prompt block fields are not exact" message)
 ;;
 
+let test_accepted_window_survives_a_later_failed_attempt () =
+  let accepted : Turn_record.accepted_model_input_window =
+    { runtime_profile = "answered-runtime"
+    ; window =
+        { transmitted_atoms = 8; total_atoms = 16; measurement = Wire_shape
+        ; front_atom_digest = String.make 64 'b' }
+    }
+  in
+  let attempted : Turn_record.model_input_window =
+    { transmitted_atoms = 1; total_atoms = 20; measurement = Wire_shape
+    ; front_atom_digest = String.make 64 'c' }
+  in
+  let record =
+    { (sample_record ()) with
+      finish_reason = None
+    ; request_wire_observation = Some { runtime_profile = "failed-runtime"; body_bytes = 10 }
+    ; model_input_window = Some attempted
+    ; accepted_model_input_window = Some accepted
+    ; usage =
+        { input_tokens = None; output_tokens = None
+        ; cache_creation_input_tokens = None; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable }
+    }
+  in
+  match Turn_record.of_json (Turn_record.to_json record) with
+  | Error error -> fail error
+  | Ok decoded ->
+    check bool "the response keeps its runtime and its own range" true
+      (decoded.accepted_model_input_window = Some accepted);
+    check bool "the later failed attempt remains diagnostic evidence" true
+      (decoded.model_input_window = Some attempted);
+    check (option string) "the turn did not complete" None decoded.finish_reason;
+    check (option int) "acceptance does not invent usage" None decoded.usage.input_tokens
+;;
+
+let test_accepted_window_requires_explicit_presence_and_a_runtime () =
+  let fields =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> fields
+    | _ -> fail "record must be an object"
+  in
+  check bool "absence is explicit null" true
+    (List.assoc "accepted_model_input_window" fields = `Null);
+  check bool "omission is not silently treated as unobserved" true
+    (Result.is_error
+       (Turn_record.of_json (`Assoc (List.remove_assoc "accepted_model_input_window" fields))));
+  let range =
+    [ "transmitted_atoms", `Int 2; "total_atoms", `Int 4
+    ; "model_input_measurement", `String "wire_shape"
+    ; "front_atom_digest", `String (String.make 64 'd') ]
+  in
+  List.iter
+    (fun accepted ->
+       check bool "an accepted range requires its exact runtime" true
+         (Result.is_error
+            (Turn_record.of_json
+               (`Assoc (("accepted_model_input_window", accepted)
+                        :: List.remove_assoc "accepted_model_input_window" fields)))))
+    [ `Assoc range; `Assoc (("runtime_profile", `String "") :: range)
+    ; `Assoc (("runtime_profile", `Int 1) :: range) ]
+;;
+
 (* ── Block diff (RFC §5: exact added/removed set) ─────── *)
 
 let record_with_blocks blocks = { (sample_record ()) with blocks }
@@ -991,6 +1054,10 @@ let () =
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
+        ; test_case "accepted range survives a later failed attempt" `Quick
+            test_accepted_window_survives_a_later_failed_attempt
+        ; test_case "accepted range is required-nullable and paired with runtime" `Quick
+            test_accepted_window_requires_explicit_presence_and_a_runtime
         ; test_case "cache counts round-trip and stay optional" `Quick
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "historical row without usage scope is unavailable" `Quick

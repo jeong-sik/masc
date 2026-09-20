@@ -67,6 +67,11 @@ type model_input_window =
   ; front_atom_digest : string
   }
 
+type accepted_model_input_window =
+  { runtime_profile : string
+  ; window : model_input_window
+  }
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -101,6 +106,7 @@ type t =
   ; ttfrc_ms : float option
   ; request_wire_observation : request_wire_observation option
   ; model_input_window : model_input_window option
+  ; accepted_model_input_window : accepted_model_input_window option
   ; raw_trace_run_ref : raw_trace_run_ref option
   ; sampling : sampling
   ; usage : usage
@@ -198,21 +204,27 @@ let raw_trace_run_ref_to_json (run_ref : raw_trace_run_ref) : Yojson.Safe.t =
     ; "session_id", `String run_ref.session_id
     ]
 
+let model_input_window_fields = function
+  | Some (window : model_input_window) ->
+    [ "transmitted_atoms", `Int window.transmitted_atoms
+    ; "total_atoms", `Int window.total_atoms
+    ; "model_input_measurement", `String (model_input_measurement_to_string window.measurement)
+    ; "front_atom_digest", `String window.front_atom_digest
+    ]
+  | None ->
+    [ "transmitted_atoms", `Null
+    ; "total_atoms", `Null
+    ; "model_input_measurement", `Null
+    ; "front_atom_digest", `Null
+    ]
+;;
+
 let to_json (r : t) : Yojson.Safe.t =
   let request_runtime_profile, request_body_bytes =
     match r.request_wire_observation with
     | Some observation ->
       `String observation.runtime_profile, `Int observation.body_bytes
     | None -> `Null, `Null
-  in
-  let transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest =
-    match r.model_input_window with
-    | Some window ->
-      ( `Int window.transmitted_atoms
-      , `Int window.total_atoms
-      , `String (model_input_measurement_to_string window.measurement)
-      , `String window.front_atom_digest )
-    | None -> `Null, `Null, `Null, `Null
   in
   `Assoc
     ([ ( "execution_ids"
@@ -232,15 +244,19 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("runtime_profile", `String r.runtime_profile)
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
-     ; "transmitted_atoms", transmitted_atoms
-     ; "total_atoms", total_atoms
-     ; "model_input_measurement", model_input_measurement
-     ; "front_atom_digest", front_atom_digest
+     ; ( "accepted_model_input_window"
+       , match r.accepted_model_input_window with
+         | None -> `Null
+         | Some accepted ->
+           `Assoc
+             (("runtime_profile", `String accepted.runtime_profile)
+              :: model_input_window_fields (Some accepted.window)) )
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
          | None -> `Null )
      ]
+    @ model_input_window_fields r.model_input_window
     @ opt_field "selected_model" (fun v -> `String v) r.selected_model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "tool_surface_ref" (fun v -> `String v) r.tool_surface_ref
@@ -331,6 +347,45 @@ let nullable name fields decode =
   | value ->
       let* decoded = decode name value in
       Ok (Some decoded)
+
+let model_input_window_of_fields fields =
+  let* transmitted_atoms = nullable "transmitted_atoms" fields as_nonnegative_int in
+  let* total_atoms = nullable "total_atoms" fields as_nonnegative_int in
+  let* measurement =
+    nullable "model_input_measurement" fields (fun name json ->
+      let* raw = as_nonempty_string name json in
+      model_input_measurement_of_string raw)
+  in
+  let* front_atom_digest = nullable "front_atom_digest" fields as_nonempty_string in
+  match transmitted_atoms, total_atoms, measurement, front_atom_digest with
+  | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
+    if transmitted_atoms > total_atoms
+    then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
+    else Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
+  | None, None, None, None -> Ok None
+  | _ ->
+    Error
+      "turn_record: transmitted_atoms, total_atoms, model_input_measurement \
+       and front_atom_digest must all be present or all be null"
+;;
+
+let accepted_model_input_window_of_json = function
+  | `Assoc fields ->
+    let* () =
+      if fields_are_unique_known
+           [ "runtime_profile"; "transmitted_atoms"; "total_atoms"
+           ; "model_input_measurement"; "front_atom_digest" ] fields
+      then Ok ()
+      else Error "turn_record: accepted_model_input_window fields are not exact"
+    in
+    let* runtime_json = require "runtime_profile" fields in
+    let* runtime_profile = as_nonempty_string "runtime_profile" runtime_json in
+    let* window = model_input_window_of_fields fields in
+    (match window with
+     | Some window -> Ok { runtime_profile; window }
+     | None -> Error "turn_record: accepted_model_input_window requires a window")
+  | _ -> Error "turn_record: accepted_model_input_window is not an object"
+;;
 
 let as_bool name = function
   | `Bool b -> Ok b
@@ -505,6 +560,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "total_atoms"
             ; "model_input_measurement"
             ; "front_atom_digest"
+            ; "accepted_model_input_window"
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
@@ -598,31 +654,10 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             "turn_record: request_runtime_profile and request_body_bytes must \
              both be present or both be null"
       in
-      let* transmitted_atoms =
-        nullable "transmitted_atoms" fields as_nonnegative_int
-      in
-      let* total_atoms = nullable "total_atoms" fields as_nonnegative_int in
-      let* measurement =
-        nullable "model_input_measurement" fields (fun name json ->
-          let* raw = as_nonempty_string name json in
-          model_input_measurement_of_string raw)
-      in
-      let* front_atom_digest =
-        nullable "front_atom_digest" fields as_nonempty_string
-      in
-      let* model_input_window =
-        match transmitted_atoms, total_atoms, measurement, front_atom_digest with
-        | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
-          if transmitted_atoms > total_atoms
-          then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
-          else
-            Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
-        | None, None, None, None -> Ok None
-        | _ ->
-          Error
-            "turn_record: transmitted_atoms, total_atoms, \
-             model_input_measurement and front_atom_digest must all be present \
-             or all be null"
+      let* model_input_window = model_input_window_of_fields fields in
+      let* accepted_model_input_window =
+        nullable "accepted_model_input_window" fields
+          (fun _ json -> accepted_model_input_window_of_json json)
       in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =
@@ -692,6 +727,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; ttfrc_ms
         ; request_wire_observation
         ; model_input_window
+        ; accepted_model_input_window
         ; raw_trace_run_ref
         ; sampling = { temperature; top_p; max_tokens; enable_thinking }
         ; usage =

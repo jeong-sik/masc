@@ -147,6 +147,15 @@ type try_provider_ctx =
             summary of it. Never invoked when the projection refuses: the turn
             carries a typed budget error instead, and reporting a cut that was
             never dispatched would fabricate evidence. *)
+  ; on_model_input_window_accepted :
+      (runtime_id:string
+       -> measurement:Turn_record.model_input_measurement
+       -> Runtime_model_input_tail_window.window_observation
+       -> unit)
+        option
+        (** The carried range of the request paired with an [AfterTurn]
+            response. Usage may be absent or zero. No range is reported when
+            that request carried no conversation atom. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

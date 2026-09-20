@@ -738,6 +738,73 @@ let test_setup_never_writes_a_verifier_slot_that_cannot_judge () =
          lane.slot_ids)
 ;;
 
+(* [--setup-lanes] also runs against a copy of an operator's existing config
+   (Runtime_setup_batch), not only a fresh install. The live shape declares a
+   working Claude Code cli slot; selecting a Codex runtime must not delete it. *)
+let setup_config_with_declared_cli_slots =
+  mixed_client_config
+  ^ Printf.sprintf
+      "[runtime.exact_output_lanes.verifier_exact]\nslots = []\ncli_slots = [%S, %S]\n"
+      native_only_client
+      judging_client
+;;
+
+let test_setup_keeps_a_declared_cli_slot_that_can_judge () =
+  with_mixed_verifier_clients ~config:setup_config_with_declared_cli_slots
+  @@ fun path ->
+  (match
+     Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:native_only_client ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "first-run setup failed: %s" detail);
+  match Runtime_toml.parse_file path with
+  | Error _ -> Alcotest.fail "the config setup wrote must still parse"
+  | Ok (config : Runtime_schema.config) ->
+    (match
+       List.find_opt
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            String.equal lane.id Runtime.verifier_exact_lane_id)
+         config.exact_output_lane_decls
+     with
+     | None -> Alcotest.fail "setup erased a verifier lane that still had a judge"
+     | Some lane ->
+       Alcotest.(check (list string))
+         "the declared cli slot that can judge survives; the other does not"
+         [ judging_client ]
+         lane.cli_slot_ids;
+       Alcotest.(check (list string)) "no HTTP slot is invented" [] lane.slot_ids)
+;;
+
+(* The registry numbers cli slots after the DECLARED catalog slots, so a
+   catalog slot it rejected still occupies its position. A projection that
+   counted only the admitted ones would print a position that names a
+   different line of runtime.toml than the boot report does. *)
+let test_positions_count_catalog_slots_the_registry_rejected () =
+  with_mixed_verifier_clients
+  @@ fun _path ->
+  publish_verifier_lane
+    ~slot_ids:[ "verifier-a"; "verifier-missing" ]
+    ~cli_slot_ids:[ native_only_client; judging_client ];
+  (match Runtime.verifier_exact_lane_readiness () with
+   | Error detail -> Alcotest.failf "readiness refused a lane that still has a judge: %s" detail
+   | Ok [ rejection ] ->
+     Alcotest.(check string)
+       "readiness names the slot"
+       native_only_client
+       rejection.Runtime.slot_id;
+     Alcotest.(check int)
+       "the rejected catalog slot still holds its position"
+       3
+       rejection.Runtime.position
+   | Ok rejections ->
+     Alcotest.failf "expected one rejection, got %d" (List.length rejections));
+  let lane = verifier_lane_projection () in
+  Alcotest.(check (list string))
+    "both the catalog slot the registry dropped and the cli slot that cannot judge"
+    [ "verifier-missing"; native_only_client ]
+    (projected_strings lane "dropped_slots")
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -808,9 +875,17 @@ let () =
             `Quick
             test_lane_with_no_judge_refuses_before_dispatch
         ; Alcotest.test_case
+            "positions count catalog slots the registry rejected"
+            `Quick
+            test_positions_count_catalog_slots_the_registry_rejected
+        ; Alcotest.test_case
             "first-run setup never writes a verifier slot that cannot judge"
             `Quick
             test_setup_never_writes_a_verifier_slot_that_cannot_judge
+        ; Alcotest.test_case
+            "setup keeps a declared cli slot that can judge"
+            `Quick
+            test_setup_keeps_a_declared_cli_slot_that_can_judge
         ] )
     ]
 ;;

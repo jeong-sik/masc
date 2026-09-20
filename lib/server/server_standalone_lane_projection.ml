@@ -722,12 +722,21 @@ let live_lane_configuration registry lane_id =
        (#37179). Sibling lanes answer an unresolved cli id with a typed error
        at execution and walk on, so their declaration is what to show. *)
     let admitted_cli_slots, cli_slot_rejections =
-      if String.equal lane_id Runtime.verifier_exact_lane_id
-      then
+      match Runtime.exact_lane_of_id lane_id with
+      | Some Runtime.Verifier ->
         Runtime.verifier_cli_slots_admission
-          ~catalog_slot_count:(List.length selected_slots)
+          ~catalog_slot_count:
+            (Runtime.exact_lane_declared_catalog_slot_count
+               registry
+               ~lane_id
+               ~admitted_catalog_slots:(List.length selected_slots))
           cli_slots
-      else cli_slots, []
+      | Some
+          ( Runtime.Librarian
+          | Runtime.Hitl_auto_judge
+          | Runtime.Board_attention
+          | Runtime.Workspace_curator )
+      | None -> cli_slots, []
     in
     let dropped_slots =
       dropped_slots

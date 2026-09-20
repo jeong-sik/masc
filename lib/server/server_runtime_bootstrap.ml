@@ -1563,7 +1563,20 @@ let resume_model_configuration () =
           let authority_available =
             registry_published
             && (match Runtime.verifier_exact_lane_readiness () with
-                | Ok _ -> true
+                | Ok [] -> true
+                | Ok (_ :: _ as rejections) ->
+                  (* The authority starts, but on fewer slots than runtime.toml
+                     declares. Say so where the decision is made, not only in
+                     the publication report. *)
+                  Log.Server.warn
+                    "exact_output: completion authority starts on a short lane %S: %s"
+                    Runtime.verifier_exact_lane_id
+                    (String.concat
+                       "; "
+                       (List.map
+                          Runtime.verifier_cli_slot_rejection_to_string
+                          rejections));
+                  true
                 | Error detail ->
                   Log.Server.warn
                     "exact_output: completion authority stays off because lane %S \

@@ -853,11 +853,30 @@ require_lane_slots
             | Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
             | Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
                 (Registry.lane_resolution_error_to_string error))
-         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact"; "verifier_exact" ];
+         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact" ];
+       (* verifier_exact dispatches each slot as a judge. Codex cannot, and
+          this fixture declares no verifier_exact lane for setup to keep, so
+          the lane stays unwritten rather than carrying a slot that would
+          refuse every review (#37179). *)
+       (match protocol, Registry.resolve_lane registry ~lane_id:"verifier_exact" with
+        | "codex-app-server", Error (Registry.Exact_lane_unconfigured _) -> ()
+        | "codex-app-server", Ok _ ->
+          Alcotest.fail "setup provisioned a verifier lane Codex can never judge on"
+        | "codex-app-server", Error error ->
+          Alcotest.failf "unexpected verifier lane failure: %s"
+            (Registry.lane_resolution_error_to_string error)
+        | _, Ok { selected_slots = []; cli_slots } ->
+          Alcotest.(check (list string)) (protocol ^ " verifier_exact")
+            [ runtime_id ] cli_slots
+        | _, Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
+        | _, Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
+            (Registry.lane_resolution_error_to_string error));
        (match protocol, Runtime.verifier_exact_lane_slot_ids () with
         | "codex-app-server", Error detail ->
-          Alcotest.(check string) "Codex still requires native-tool suppression"
-            (runtime_id ^ ": completion verifier requires native-tool suppression, which this client does not support") detail
+          Alcotest.(check string) "an unwritten verifier lane reads as unconfigured"
+            (Registry.lane_resolution_error_to_string
+               (Registry.Exact_lane_unconfigured { lane_id = "verifier_exact" }))
+            detail
         | "codex-app-server", Ok _ -> Alcotest.fail "unsafe Codex verifier was admitted"
         | _, Error detail -> Alcotest.fail detail
         | _, Ok slots -> Alcotest.(check (list string))

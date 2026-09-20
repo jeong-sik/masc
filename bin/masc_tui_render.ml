@@ -399,6 +399,8 @@ let render_overview (state : state) =
             Option.is_none state.approval_snapshot
             || Option.is_some state.approvals_error
             || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_none state.asks_snapshot
+            || Option.is_some state.asks_error
             || Option.is_some state.gate_error
             || Option.is_some state.gate_queue_unavailable
           in

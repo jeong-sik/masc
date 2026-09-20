@@ -178,11 +178,13 @@ let test_the_overview_row_counts_every_approval_list () =
      the count unreliable. The gate poll was the one left out: a failed fetch
      fills gate_error and leaves the previous rows standing, so the row drew a
      bare number over a list the server no longer holds. *)
-  Alcotest.(check int) "every approval source can mark the count unreliable" 4
+  Alcotest.(check int) "every approval source can mark the count unreliable" 6
     (reads ~binding_name:"render_overview"
        ~fields:
          [ "approvals_error"
          ; "keeper_tool_approvals_error"
+         ; "asks_snapshot"
+         ; "asks_error"
          ; "gate_error"
          ; "gate_queue_unavailable"
          ])

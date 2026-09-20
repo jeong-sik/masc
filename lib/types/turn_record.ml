@@ -204,27 +204,21 @@ let raw_trace_run_ref_to_json (run_ref : raw_trace_run_ref) : Yojson.Safe.t =
     ; "session_id", `String run_ref.session_id
     ]
 
-let model_input_window_fields = function
-  | Some (window : model_input_window) ->
-    [ "transmitted_atoms", `Int window.transmitted_atoms
-    ; "total_atoms", `Int window.total_atoms
-    ; "model_input_measurement", `String (model_input_measurement_to_string window.measurement)
-    ; "front_atom_digest", `String window.front_atom_digest
-    ]
-  | None ->
-    [ "transmitted_atoms", `Null
-    ; "total_atoms", `Null
-    ; "model_input_measurement", `Null
-    ; "front_atom_digest", `Null
-    ]
-;;
-
 let to_json (r : t) : Yojson.Safe.t =
   let request_runtime_profile, request_body_bytes =
     match r.request_wire_observation with
     | Some observation ->
       `String observation.runtime_profile, `Int observation.body_bytes
     | None -> `Null, `Null
+  in
+  let transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest =
+    match r.model_input_window with
+    | Some window ->
+      ( `Int window.transmitted_atoms
+      , `Int window.total_atoms
+      , `String (model_input_measurement_to_string window.measurement)
+      , `String window.front_atom_digest )
+    | None -> `Null, `Null, `Null, `Null
   in
   `Assoc
     ([ ( "execution_ids"
@@ -244,19 +238,28 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("runtime_profile", `String r.runtime_profile)
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
+     ; "transmitted_atoms", transmitted_atoms
+     ; "total_atoms", total_atoms
+     ; "model_input_measurement", model_input_measurement
+     ; "front_atom_digest", front_atom_digest
      ; ( "accepted_model_input_window"
        , match r.accepted_model_input_window with
          | None -> `Null
          | Some accepted ->
            `Assoc
-             (("runtime_profile", `String accepted.runtime_profile)
-              :: model_input_window_fields (Some accepted.window)) )
+             [ "runtime_profile", `String accepted.runtime_profile
+             ; "transmitted_atoms", `Int accepted.window.transmitted_atoms
+             ; "total_atoms", `Int accepted.window.total_atoms
+             ; ( "model_input_measurement"
+               , `String
+                   (model_input_measurement_to_string accepted.window.measurement) )
+             ; "front_atom_digest", `String accepted.window.front_atom_digest
+             ] )
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
          | None -> `Null )
      ]
-    @ model_input_window_fields r.model_input_window
     @ opt_field "selected_model" (fun v -> `String v) r.selected_model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "tool_surface_ref" (fun v -> `String v) r.tool_surface_ref

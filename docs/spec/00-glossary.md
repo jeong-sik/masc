@@ -228,6 +228,8 @@ status: reference
 : 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
   Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
+  `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
+  뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
 
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.

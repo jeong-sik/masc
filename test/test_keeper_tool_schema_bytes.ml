@@ -259,7 +259,13 @@ open Alcotest
    required. No headroom. *)
 (* 2026-09-20: the read-only keeper_skill_validate caller adds artifact document
    validation. The production renderer measures 119,546 bytes / 136 tools. *)
-let ceiling_bytes = 119_546
+(* 2026-09-21: #37270 (memory search over several words) rewrote the
+   keeper_memory_search description and merged 51 minutes after the ceiling
+   above was measured on a tree that did not hold it; each pull request was
+   under its own ceiling and main was over by 100. #37360's head, which cuts
+   that description by 26 bytes, measured 119,620 bytes / 136 tools; main
+   without that cut is 119,646. *)
+let ceiling_bytes = 119_646
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

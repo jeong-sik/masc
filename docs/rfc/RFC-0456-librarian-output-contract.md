@@ -283,8 +283,11 @@ id 하나다. `translate_revisions` (`:448-466`) 도 1:1 로 매핑한다. 24개
 읽는다. 결과 한 건:
 
 ```
-{ text, category, memory_id, into, into_current, absorbed_at, store: "absorbed_memory" }
+{ text, category, memory_id, basis, into, into_current, absorbed_at, store: "absorbed_memory" }
 ```
+
+`basis`는 흡수 기록에 저장된 원래 사실의 근거다. Board 글·댓글 ID도 그대로 반환하므로
+원문 출처를 다시 열 수 있다. 새 claim에 그 근거를 자동 상속하는 것은 아니다.
 
 `into_current` 는 `into` 가 지금 현재 사실인지다. `into` 가 나중에 다시 흡수되거나 지워져도
 사슬을 따라가지 않는다. `into_current = false` 가 그 사실을 알린다. 흡수 기록을 찾은 검색은

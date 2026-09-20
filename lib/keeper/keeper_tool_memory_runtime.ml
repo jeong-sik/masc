@@ -274,6 +274,7 @@ let absorbed_match_to_json { row; into_current } : Yojson.Safe.t =
           (Keeper_memory_os_types.category_to_string
              row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.category) )
     ; "memory_id", `String row.Keeper_memory_absorbed.memory_id
+    ; "basis", Keeper_memory_os_types.basis_to_json row.fact.basis
     ; "into", `String row.Keeper_memory_absorbed.into
     ; "into_current", `Bool into_current
     ; "absorbed_at", `Float row.Keeper_memory_absorbed.recorded_at

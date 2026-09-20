@@ -1099,46 +1099,6 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
            | _ -> acc)
          0
   in
-  let stats_history =
-    let num_buckets = 12 in
-    match events with
-    | [] -> []
-    | _ ->
-        let min_ts = List.fold_left (fun m e -> min m e.ts_ms) max_int events in
-        let max_ts = List.fold_left (fun m e -> max m e.ts_ms) 0 events in
-        let range = max 1 (max_ts - min_ts) in
-        let bucket_width = max 1 (range / num_buckets) in
-        let buckets = Array.make num_buckets (0, (Hashtbl.create 4 : (string, bool) Hashtbl.t), 0) in
-        Array.iteri (fun i _ ->
-          buckets.(i) <- (0, Hashtbl.create 4, 0)
-        ) buckets;
-        List.iter (fun (e : event) ->
-          let idx = min (num_buckets - 1) ((e.ts_ms - min_ts) / bucket_width) in
-          let (count, agents_tbl, tasks_done) = buckets.(idx) in
-          let new_tasks_done =
-            tasks_done
-            + (if String.equal e.kind
-                 (Event_kind.Task.to_string Event_kind.Task.Done)
-               then 1 else 0)
-          in
-          (match e.actor with
-           | Some actor -> Hashtbl.replace agents_tbl actor.id true
-           | None -> ());
-          buckets.(idx) <- (count + 1, agents_tbl, new_tasks_done)
-        ) events;
-        Array.to_list (Array.mapi (fun i (count, agents_tbl, tasks_done) ->
-          let bucket_start = min_ts + (i * bucket_width) in
-          let bucket_end = if i = num_buckets - 1 then max_ts else bucket_start + bucket_width in
-          `Assoc [
-            ("bucket", `Int i);
-            ("start_ms", `Int bucket_start);
-            ("end_ms", `Int bucket_end);
-            ("events", `Int count);
-            ("active_agents", `Int (Hashtbl.length agents_tbl));
-            ("tasks_done", `Int tasks_done);
-          ]
-        ) buckets)
-  in
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
@@ -1158,7 +1118,6 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
             ("task_count", `Int (count_kind "task"));
             ("active_agents", `Int active_agents);
           ] );
-      ("stats_history", `List stats_history);
       ("kind_counts", kind_counts_json);
       ("heatmap", heatmap_json);
       ("nodes", `List nodes_json);

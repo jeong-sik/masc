@@ -34,8 +34,9 @@ type measurement_receipt_phase =
     The caller supplies an immutable AGENT_CORE resolver snapshot, one exact target
     reference, messages, a raw domain JSON schema, and the minimum guarantee. Provider
     config, wire response formats, schema envelopes, capability overrides,
-    tools, reasoning controls, token measurement, and retry/fallback are
-    deliberately absent from this interface. *)
+    tools, per-call reasoning overrides, token measurement, and retry/fallback are
+    deliberately absent from the request interface. Declared bindings retain
+    their explicit request controls in the resolver snapshot. *)
 
 type resolver_snapshot
 type admitted_target
@@ -60,7 +61,7 @@ type catalog_document =
   ; contents : string
   }
 
-(** One exact-output slot: which binding it names, and the deadlines that
+(** One exact-output slot: which binding it names, and the request controls and deadlines that
     binding runs under. A caller that already holds these as typed values --
     a deployment's runtime bindings -- passes them directly instead of
     rendering a TOML document for this module to parse back. [target_ref] is
@@ -71,6 +72,10 @@ type declared_target =
   ; provider_ref : string
   ; model_id : string
   ; enable_thinking : bool option
+  ; reasoning_effort : Reasoning_effort.t option
+      (** The binding's explicit effort. [None] leaves the request unspecified.
+          Runtime bindings supply this typed value. Target documents have no
+          effort field and leave it [None]. *)
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   ; api_key_env : string option

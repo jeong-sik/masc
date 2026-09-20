@@ -783,6 +783,7 @@ let declared_targets_of_config (config : Runtime_schema.config) =
             ; provider_ref = provider.id
             ; model_id = model.api_name
             ; enable_thinking = model.thinking_support
+            ; reasoning_effort = model.reasoning_effort
             ; connect_timeout_s = provider.connect_timeout_s
             ; body_timeout_s = None
             ; api_key_env =

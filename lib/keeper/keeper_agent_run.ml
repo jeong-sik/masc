@@ -1625,7 +1625,7 @@ let run_turn
                               finally answered, and the metrics row credits
                               one lane's bytes to another.
 
-                              All five attempt-local cells, not just the two the record is
+                              All four attempt-local cells, not just the two the record is
                               built from: the Agent Core wire handler reads
                               the provider-content and projected-message cells
                               to assemble its attribution, so leaving them set
@@ -1633,13 +1633,12 @@ let run_turn
                               the inputs it is assembled from. That the Agent
                               Core lane happens to overwrite both on every
                               request is a property of that lane, not of this
-                              invariant. The response-observed cell is
-                              turn-local instead: a later unanswered attempt
-                              must not erase the last request that actually
-                              received a response. *)
+                              invariant. The window and response-observed cells
+                              are turn-local: selecting a later candidate must
+                              not erase the last projection, nor the last
+                              request that actually received a response. *)
                            request_attribution_ref := None;
                            request_wire_evidence_ref := None;
-                           model_input_window_ref := None;
                            current_request_provider_content_ref := None;
                            current_request_projected_messages_ref := None;
                            s.Keeper_run_tools.on_runtime_attempt attempt)

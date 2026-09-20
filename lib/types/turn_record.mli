@@ -235,9 +235,10 @@ type t =
        not_recorded until a provider reports it natively. *)
   ; request_wire_observation : request_wire_observation option
   ; model_input_window : model_input_window option
-    (* [None] is an explicit observation that no model-input projection ran for
-       this turn — a runtime that assembles its own input, or a turn that ended
-       before any cut was selected. It is not a zero-length history. *)
+    (* Last model-input window observed during this turn. A later candidate
+       that reports no window leaves that observation intact. [None] means no
+       window was observed, including a projection with no history atom to
+       name its front. It is not a zero-length history. *)
   ; response_observed_model_input : response_observed_model_input option
     (* [None] means no request range was joined to a typed provider response.
        The JSON key is required and nullable; older rows without the fact do

@@ -2043,8 +2043,8 @@
 ; prepare / finalize) that #25969 left unreachable when it moved production to
 ; peek/ack, and that is now removed.
 
-; Process-isolated proof that exact-output bootstrap honors full catalog
-; replacement precedence over deployment overlays and AGENT_CORE embedded targets.
+; Process-isolated proof that exact-output bootstrap uses an explicit full
+; catalog replacement and runtime target declarations instead of embedded rows.
 (test
  (name test_exact_output_catalog_precedence)
  (modules
@@ -5122,6 +5122,7 @@
 (include stanzas/test_keeper_librarian_progress.inc)
 (include stanzas/test_keeper_librarian_store_scope.inc)
 (include stanzas/test_keeper_librarian_range.inc)
+(include stanzas/test_keeper_librarian_durable_consumer.inc)
 (include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)

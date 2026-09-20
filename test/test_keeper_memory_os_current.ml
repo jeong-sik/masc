@@ -66,12 +66,14 @@ let replace
 let apply_disposition
       ~keepers_dir
       ?dropped_statements
+      ?durable_range_id
       ?(absorbed = [])
       ?(new_claims = [])
       ()
   =
   Current.apply_disposition
     ?dropped_statements
+    ?durable_range_id
     ~absorbed
     ~keepers_dir
     ~keeper_id:"keeper"
@@ -1134,6 +1136,155 @@ let test_purge_plan_removes_memory_sidecars () =
     (contains Shutdown.Keeper_memory_journal_artifact);
   check bool "plan removes the absorbed memory rows" true
     (contains Shutdown.Keeper_memory_absorbed_artifact)
+;;
+
+let durable_range_id : Current.durable_range_id =
+  { receipt_scope = "runtime-cluster-a"
+  ; trace_id = "trace"
+  ; history_start_boundary_line = 1
+  ; start_atom = 1
+  ; end_atom = 2
+  ; last_atom_digest = String.make 64 'a'
+  ; end_boundary_line = 2
+  ; boundary_lines_seen = 2
+  }
+;;
+
+let require_no_committed_range ~keepers_dir label =
+  match
+    Current.committed_durable_range
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> fail label
+  | Error detail -> fail detail
+;;
+
+let require_committed_range ~keepers_dir label =
+  match
+    Current.committed_durable_range
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope
+  with
+  | Ok (Some range_id) -> range_id
+  | Ok None -> fail label
+  | Error detail -> fail detail
+;;
+
+let test_committed_range_receipt_rejects_absent_snapshot () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  Sys.remove (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper");
+  require_no_committed_range
+    ~keepers_dir
+    "receipt authorized a range without a Memory snapshot";
+  check bool "invalid receipt is removed" false
+    (Sys.file_exists (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"))
+;;
+
+let test_committed_range_receipt_rejects_snapshot_rollback () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact ~claim:"before" () ] () |> require_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let prior = Fs_compat.load_file snapshot_path in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  Fs_compat.save_file snapshot_path prior;
+  require_no_committed_range
+    ~keepers_dir
+    "receipt authorized a range after snapshot revision rollback"
+;;
+
+let test_committed_range_receipt_rejects_same_revision_different_snapshot () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let changed =
+    match Yojson.Safe.from_string (Fs_compat.load_file snapshot_path) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "updated_at" then name, `Float 201.0 else name, value)
+           fields)
+    | _ -> fail "Memory snapshot was not an object"
+  in
+  Fs_compat.save_file snapshot_path (Yojson.Safe.to_string changed);
+  require_no_committed_range
+    ~keepers_dir
+    "receipt authorized different snapshot bytes at the same revision"
+;;
+
+let test_committed_range_receipt_survives_retract_and_replace () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"target" () in
+  ignore
+    (apply_disposition
+       ~keepers_dir
+       ~durable_range_id
+       ~new_claims:[ target ]
+       ()
+     |> require_ok);
+  (match
+     Current.retract_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:201.0
+       ~source:(source Current.Explicit_retract)
+       ~memory_id:(Types.memory_id target)
+       ~reason:"test retraction"
+       ()
+   with
+   | Ok snapshot -> check int "retract revision" 2 snapshot.revision
+   | Error _ -> fail "retract failed");
+  ignore
+    (require_committed_range
+       ~keepers_dir
+       "explicit retract erased the committed range receipt");
+  ignore
+    (replace ~keepers_dir ~expected_revision:(Some 2) ~facts:[] () |> require_ok);
+  ignore
+    (require_committed_range
+       ~keepers_dir
+       "replace erased the committed range receipt")
+;;
+
+let test_committed_range_receipts_are_scoped_per_runtime_cluster () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let cluster_a = durable_range_id in
+  let cluster_b =
+    { durable_range_id with
+      receipt_scope = "runtime-cluster-b"
+    ; trace_id = "trace-b"
+    ; end_atom = 3
+    ; last_atom_digest = String.make 64 'b'
+    ; end_boundary_line = 3
+    ; boundary_lines_seen = 3
+    }
+  in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_a () |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_b () |> require_ok);
+  let read scope =
+    match
+      Current.committed_durable_range
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~receipt_scope:scope
+    with
+    | Ok (Some range_id) -> range_id
+    | Ok None -> failf "cluster receipt %s was replaced" scope
+    | Error detail -> fail detail
+  in
+  check string
+    "cluster A receipt survives cluster B commit"
+    cluster_a.trace_id
+    (read cluster_a.receipt_scope).trace_id;
+  check string
+    "cluster B has its own receipt"
+    cluster_b.trace_id
+    (read cluster_b.receipt_scope).trace_id
 ;;
 
 let test_stale_replace_rejects_concurrent_explicit_write () =
@@ -2236,6 +2387,26 @@ let () =
             "purge plan removes memory sidecars"
             `Quick
             test_purge_plan_removes_memory_sidecars
+        ; test_case
+            "range receipt rejects absent snapshot"
+            `Quick
+            test_committed_range_receipt_rejects_absent_snapshot
+        ; test_case
+            "range receipt rejects snapshot rollback"
+            `Quick
+            test_committed_range_receipt_rejects_snapshot_rollback
+        ; test_case
+            "range receipt rejects same revision different snapshot"
+            `Quick
+            test_committed_range_receipt_rejects_same_revision_different_snapshot
+        ; test_case
+            "range receipt survives retract and replace"
+            `Quick
+            test_committed_range_receipt_survives_retract_and_replace
+        ; test_case
+            "range receipts are scoped per runtime cluster"
+            `Quick
+            test_committed_range_receipts_are_scoped_per_runtime_cluster
         ; test_case
             "journal recreated after purge sequence"
             `Quick

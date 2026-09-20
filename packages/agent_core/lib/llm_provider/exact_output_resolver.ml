@@ -451,7 +451,7 @@ let option_price = function
 ;;
 
 (* Evidence is derived only from parsed, validated fields. Raw TOML bytes,
-   comments, unknown keys, overlay source labels, and credential values never
+   comments, unknown keys, source labels, and credential values never
    enter this projection. Pricing remains evidence-only. *)
 let canonical_catalog_evidence catalog model_entries target_declarations =
   let providers =

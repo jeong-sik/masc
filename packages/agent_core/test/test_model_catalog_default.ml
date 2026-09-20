@@ -700,11 +700,9 @@ let test_openrouter_rows_declare_their_measured_effort_ladder () =
 
    The catalog half pins the boundary that already refuses an empty value:
    [parse_entry] checks the raw string against [Capability_vocab.*_values]
-   before it is stored, so an overlay row with [tool_schema_conformance = ""]
-   is excluded with the key named, on the strict loader as an [Error] and on
-   the lenient loader as a [skipped_entry]. Together the two halves say that
-   an empty vocab value is unknown at every layer, not "the default" at one of
-   them. *)
+   before it is stored, so a catalog row with [tool_schema_conformance = ""]
+   fails closed with the key named. Together the two halves say that an empty
+   vocab value is unknown at every layer, not "the default" at one of them. *)
 let test_empty_capability_vocab_value_is_rejected () =
   let rejects name parse =
     check bool (name ^ " rejects \"\"") true (Option.is_none (parse ""));
@@ -725,23 +723,9 @@ let test_empty_capability_vocab_value_is_rejected () =
     "model entry \"vocab-model\" field \"tool_schema_conformance\" has unknown value \
      \"\" (canonical: rich, conformant)"
   in
-  (match Model_catalog.of_toml_string ~source:"empty vocab value" toml with
-   | Error message -> check string "strict loader names the key" expected_reason message
-   | Ok _ -> fail "strict loader accepted tool_schema_conformance = \"\"");
-  match Model_catalog.of_toml_string_lenient ~source:"empty vocab value" toml with
-  | Ok (catalog, [ { Model_catalog.entry_label; skip_reason } ]) ->
-    check
-      int
-      "lenient loader keeps no row for the rejected entry"
-      0
-      (List.length (Model_catalog.model_entries catalog));
-    check string "lenient loader labels the rejected entry" "vocab-model" entry_label;
-    check string "lenient loader names the key" expected_reason skip_reason
-  | Ok (_, skipped) ->
-    failf
-      "lenient loader should skip exactly one entry, skipped %d"
-      (List.length skipped)
-  | Error message -> failf "lenient loader failed the whole load: %s" message
+  match Model_catalog.of_toml_string ~source:"empty vocab value" toml with
+  | Error message -> check string "strict loader names the key" expected_reason message
+  | Ok _ -> fail "strict loader accepted tool_schema_conformance = \"\""
 ;;
 
 let () =

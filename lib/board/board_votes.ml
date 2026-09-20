@@ -1,5 +1,7 @@
 include Board_core
 
+let ( let* ) = Result.bind
+
 let vote_direction_to_string = function Up -> "up" | Down -> "down"
 
 (* Variant witness used to derive the schema enum from the canonical encoder. *)
@@ -138,6 +140,7 @@ let persisted_vote_row_of_yojson = function
    before the append either confirms or rolls it back. *)
 let record_vote_side_effect store ~target ~voter ~direction ~ts
     : (unit, board_error) Result.t =
+  let* () = require_persisted_snapshot_readable store.votes_load_result in
   with_persist_lock store (fun () -> append_vote_log ~target ~voter ~direction ~ts)
 
 let current_vote_for_post store ~voter ~post_id
@@ -360,13 +363,6 @@ let recalculate_reply_counts store =
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
   Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
 
-let vote_target_exists store vote =
-  let target_id = Board_vote_key.target_id vote in
-  match Board_vote_key.target_kind vote with
-  | Board_vote_key.Post -> Hashtbl.mem store.posts target_id
-  | Board_vote_key.Comment -> Hashtbl.mem store.comments target_id
-;;
-
 let recalculate_vote_counts store =
   Hashtbl.iter
     (fun key (post : post) ->
@@ -421,94 +417,116 @@ let recalculate_vote_counts store =
 
 let load_persisted_votes store =
   let path = Board_paths.store_file_path store Board_paths.Votes in
-  if not (Fs_compat.file_exists path)
-  then (
-    recalculate_vote_counts store;
-    Ok 0)
-  else begin
-    try
-      let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
-           match persisted_vote_row_of_yojson json with
-           | None -> ()
-           | Some (vote, direction, ts) when vote_target_exists store vote ->
-             Hashtbl.replace
-               store.vote_log
-               (Board_vote_key.to_string vote)
-               (direction, ts);
-             Stdlib.incr loaded
-           | Some _ -> ())
-        lines;
+  let result =
+    if not (Fs_compat.file_exists path)
+    then (
       recalculate_vote_counts store;
+      Ok 0)
+    else begin
+      try
+      let loaded = ref 0 in
+      let parsed =
+        Board_votes_json.load_source_rows
+          path
+          ~decode:persisted_vote_row_of_yojson
+          ~accept:(fun (vote, direction, ts) ->
+            (* A vote is kept whether or not its post or comment is loaded.
+               The snapshot writes [store.vote_log] back whole, so a vote
+               skipped here is gone from disk at the next flush. On
+               2026-09-19 the posts file had been renamed away, the board
+               loaded no posts, and all 225 votes were skipped and then
+               overwritten. Deleting a post already removes its votes
+               ([delete_post]); a vote whose target is absent at load is not
+               stale data but a sign the target failed to load, and
+               [recalculate_vote_counts] leaves it out of every count. *)
+            Hashtbl.replace
+              store.vote_log
+              (Board_vote_key.to_string vote)
+              (direction, ts);
+            Stdlib.incr loaded)
+      in
+      if Result.is_ok parsed then recalculate_vote_counts store;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
       else
         Log.BoardLog.debug "loaded 0 vote entries from %s" path;
-      Ok !loaded
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
-  end
+      Result.map (fun () -> !loaded) parsed
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (path, e)
+    end
+  in
+  Board_votes_json.record_load_result
+    (fun result -> store.votes_load_result <- result)
+    result
 
 let load_persisted_reactions store =
   let path = Board_paths.store_file_path store Board_paths.Reactions in
-  if not (Fs_compat.file_exists path) then Ok 0
-  else begin
-    try
+  let result =
+    if not (Fs_compat.file_exists path) then Ok 0
+    else begin
+      try
       let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
-           match reaction_of_yojson json with
-           | Some reaction ->
-               let user_id = Agent_id.to_string reaction.user_id in
-               let key =
-                 reaction_key ~target_type:reaction.target_type
-                   ~target_id:reaction.target_id ~user_id
-                   ~emoji:reaction.emoji
-               in
-               Hashtbl.replace store.reactions key reaction;
-               Stdlib.incr loaded
-           | None -> ())
-        lines;
+      let parsed =
+        Board_votes_json.load_source_rows
+          path
+          ~decode:reaction_of_yojson
+          ~accept:(fun reaction ->
+            let user_id = Agent_id.to_string reaction.user_id in
+            let key =
+              reaction_key
+                ~target_type:reaction.target_type
+                ~target_id:reaction.target_id
+                ~user_id
+                ~emoji:reaction.emoji
+            in
+            Hashtbl.replace store.reactions key reaction;
+            Stdlib.incr loaded)
+      in
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d reactions from %s" !loaded path
       else
         Log.BoardLog.debug "loaded 0 reactions from %s" path;
-      Ok !loaded
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
-  end
+      Result.map (fun () -> !loaded) parsed
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (path, e)
+    end
+  in
+  Board_votes_json.record_load_result
+    (fun result -> store.reactions_load_result <- result)
+    result
 
 let load_persisted_sub_boards store =
   let path = Board_paths.store_file_path store Board_paths.Sub_boards in
-  if not (Fs_compat.file_exists path) then Ok 0
-  else begin
-    try
+  let result =
+    if not (Fs_compat.file_exists path) then Ok 0
+    else begin
+      try
       let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
-           match sub_board_of_yojson json with
-           | Some sb ->
-               let id = Sub_board_id.to_string sb.id in
-               Hashtbl.replace store.sub_boards id sb;
-               Hashtbl.replace store.sub_boards_by_slug sb.slug id;
-               Stdlib.incr loaded
-           | None -> ())
-        lines;
+      let parsed =
+        Board_votes_json.load_source_rows
+          path
+          ~decode:sub_board_of_yojson
+          ~accept:(fun sb ->
+            let id = Sub_board_id.to_string sb.id in
+            Hashtbl.replace store.sub_boards id sb;
+            Hashtbl.replace store.sub_boards_by_slug sb.slug id;
+            Stdlib.incr loaded)
+      in
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d sub-boards from %s" !loaded path
       else
         Log.BoardLog.debug "loaded 0 sub-boards from %s" path;
-      Ok !loaded
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
-  end
+      Result.map (fun () -> !loaded) parsed
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (path, e)
+    end
+  in
+  Board_votes_json.record_load_result
+    (fun result -> store.sub_boards_load_result <- result)
+    result
 
 (** {1 Hearth (topic) operations} *)
 
@@ -639,6 +657,8 @@ let remark_all_comments_dirty store =
 ;;
 
 let delete_post store ~post_id : (unit, board_error) Result.t =
+  let* () = require_persisted_snapshot_readable store.votes_load_result in
+  let* () = require_persisted_snapshot_readable store.reactions_load_result in
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
@@ -798,7 +818,11 @@ let flush_dirty store =
       let comments_jsonl =
         if had_dirty then Some (comments_jsonl_snapshot store) else None
       in
-      let vote_log = if had_dirty then Some (vote_log_jsonl store) else None in
+      let vote_log =
+        if had_dirty && Result.is_ok store.votes_load_result
+        then Some (vote_log_jsonl store)
+        else None
+      in
       Hashtbl.clear store.dirty_post_ids;
       Hashtbl.clear store.dirty_comment_ids;
       store.dirty_posts <- false;

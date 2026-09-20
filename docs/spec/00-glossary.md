@@ -9,8 +9,8 @@ status: reference
 ## Core
 
 **MASC**
-: 다중 에이전트의 Board, Task, Goal, Schedule, Keeper와 도구 실행을 조율하는
-  OCaml/Eio 서버.
+: Multi-Agent Shared Context의 약어. 다중 에이전트의 Board, Task, Goal, Schedule,
+  Keeper와 도구 실행을 조율하는 OCaml/Eio 서버.
 
 **agent core**
 : `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를

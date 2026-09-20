@@ -6654,6 +6654,7 @@ let cancel_theme_preview state =
   | Some previous ->
     state.theme_before_preview <- None;
     (match previous with
+     (* See Masc_tui_theme_choice.apply: [previous] was applied successfully. *)
      | Some name -> ignore (Masc_tui_theme_choice.apply name : bool)
      | None -> Masc_tui_theme_choice.follow_terminal ());
     state.theme_choice <- previous;
@@ -6665,6 +6666,9 @@ let cancel_theme_preview state =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface state ~mailbox (destination : surface) =
+  (* The browser reader owns Connectors; refocusing it keeps the reader.
+     The transport-list palette hides it explicitly before arriving here.
+     Repository changes can overlay any surface, so every jump closes them. *)
   leave_browser_lane_for_surface state destination;
   if state.repository_changes_open then close_repository_changes state;
   (match state.view with
@@ -19978,7 +19982,6 @@ and is loaded on demand through keeper_skill.
        | Some ("s" | "S") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Resources
        | Some "9" when state.view = Config ->
-           cancel_theme_preview state;
            goto_surface state ~mailbox:async_messages Runtime
        | Some ("t" | "T") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Tools

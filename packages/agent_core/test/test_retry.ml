@@ -170,6 +170,29 @@ let test_classify_error_429_retry_after_finite_guard () =
   | None -> fail "expected retry_after Some 3.0 for a valid body"
 ;;
 
+(* JSON has one number grammar, so providers may encode whole-second retry
+   hints as integers. Both number representations are accepted; strings remain
+   outside the typed boundary even when their contents look numeric. *)
+let test_classify_error_429_retry_after_json_numbers () =
+  let retry_after_of body =
+    match Retry.classify_error ~retry_after_header:None ~status:429 ~body with
+    | Retry.RateLimited { retry_after; _ } -> retry_after
+    | _ -> fail "expected RateLimited for 429"
+  in
+  List.iter
+    (fun (label, body, expected) ->
+       match retry_after_of body with
+       | Some actual -> check (float 0.0) label expected actual
+       | None -> failf "%s: expected retry_after Some %f" label expected)
+    [ "integer retry_after", {|{"error":{"retry_after":7}}|}, 7.0
+    ; "float retry_after", {|{"error":{"retry_after":7.5}}|}, 7.5
+    ; "zero retry_after", {|{"error":{"retry_after":0}}|}, 0.0
+    ];
+  match retry_after_of {|{"error":{"retry_after":"7"}}|} with
+  | None -> ()
+  | Some bad -> failf "string retry_after: expected None, got Some %f" bad
+;;
+
 let test_is_retryable () =
   check
     bool
@@ -380,6 +403,10 @@ let () =
             "429 retry_after finite guard"
             `Quick
             test_classify_error_429_retry_after_finite_guard
+        ; test_case
+            "429 retry_after JSON numbers"
+            `Quick
+            test_classify_error_429_retry_after_json_numbers
         ] )
     ; ( "typed_projection"
       , [ test_case

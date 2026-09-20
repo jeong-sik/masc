@@ -1918,7 +1918,15 @@ let append_user_message_once
     Error detail
 ;;
 
-let parse_line ~file_path (line : string) : chat_message option =
+type strict_decode_error =
+  | Unknown_speaker_authority of string
+
+type parsed_line =
+  { message : chat_message option
+  ; strict_decode_error : strict_decode_error option
+  }
+
+let parse_line_decoded ~file_path (line : string) : parsed_line =
   try
     let json = Yojson.Safe.from_string line in
     let role_label =
@@ -1965,14 +1973,14 @@ let parse_line ~file_path (line : string) : chat_message option =
     let conversation_id = opt_string "conversation_id" in
     let external_message_id = opt_string "external_message_id" in
     let workspace_id = opt_string "workspace_id" in
-    let speaker =
+    let speaker, strict_decode_error =
       let speaker_id = opt_string "speaker_id" in
       let speaker_name = opt_string "speaker_name" in
       match opt_string "speaker_authority" with
       | Some label -> (
           match authority_of_label label with
           | Some speaker_authority ->
-              Some { speaker_id; speaker_name; speaker_authority }
+              Some { speaker_id; speaker_name; speaker_authority }, None
           | None ->
               (* Unknown authority label: surface it instead of guessing
                  a class; the row itself stays valid. *)
@@ -1981,7 +1989,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                 ~path:file_path
                 ~detail:
                   (Printf.sprintf "unknown speaker_authority %S" label);
-              None)
+              None, Some (Unknown_speaker_authority label))
       | None ->
           (match speaker_id, speaker_name with
            | None, None -> ()
@@ -1992,7 +2000,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                  ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"speaker_id/speaker_name without speaker_authority");
-          None
+          None, None
     in
     let audio =
       match Json_util.assoc_member_opt "audio" json with
@@ -2228,59 +2236,66 @@ let parse_line ~file_path (line : string) : chat_message option =
          effect on read. *)
       || Option.is_some approval_lifecycle
     in
-    if not delivery_execution_identity_valid then None
-    else if role_label = "" || (content = "" && not has_structured_payload) then (
-      report_persistence_read_drop
-        ~reason:Read_drop_reason.Invalid_payload
-        ~path:file_path
-        ~detail:"chat row missing role and readable text/structured payload";
-      None)
-    else
-      match Role.of_label role_label with
-      | None ->
-          (* RFC-0232 P1: an unknown role cannot participate in any lane
-             semantics (watermark, pending, rendering); surface it
-             instead of carrying an untyped row. *)
-          report_persistence_read_drop
-            ~reason:Read_drop_reason.Invalid_payload
-            ~path:file_path
-            ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
-          None
-      | Some Role.Tool when tool_call_name = None ->
-          report_persistence_read_drop
-            ~reason:Read_drop_reason.Invalid_payload
-            ~path:file_path
-            ~detail:"tool chat row missing non-empty tool_call_name";
-          None
-      | Some role ->
-          (match opt_string "id", ts with
-           | None, _ ->
-               report_persistence_read_drop
-                 ~reason:Read_drop_reason.Invalid_payload
-                 ~path:file_path
-                 ~detail:"chat row missing nonblank id";
-               None
-           | Some _, None ->
-               (* [encode_line] always writes a float [ts]; a row without one
-                  cannot be ordered, paged or joined, so it is dropped. *)
-               report_persistence_read_drop
-                 ~reason:Read_drop_reason.Invalid_payload
-                 ~path:file_path
-                 ~detail:"chat row missing float ts";
-               None
-           | Some id, Some ts ->
-               Some
-                 { id; role; content; ts; attachments; tool_call_id; execution_id;
-                   tool_call_name; surface; conversation_id;
-                   external_message_id; workspace_id; speaker; audio; blocks;
-                   mentions; kind; turn_ref; stream_lifecycle; approval_lifecycle;
-                   delivery_provenance })
+    let message =
+      if not delivery_execution_identity_valid then None
+      else if role_label = "" || (content = "" && not has_structured_payload) then (
+        report_persistence_read_drop
+          ~reason:Read_drop_reason.Invalid_payload
+          ~path:file_path
+          ~detail:"chat row missing role and readable text/structured payload";
+        None)
+      else
+        match Role.of_label role_label with
+        | None ->
+            (* RFC-0232 P1: an unknown role cannot participate in any lane
+               semantics (watermark, pending, rendering); surface it
+               instead of carrying an untyped row. *)
+            report_persistence_read_drop
+              ~reason:Read_drop_reason.Invalid_payload
+              ~path:file_path
+              ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
+            None
+        | Some Role.Tool when tool_call_name = None ->
+            report_persistence_read_drop
+              ~reason:Read_drop_reason.Invalid_payload
+              ~path:file_path
+              ~detail:"tool chat row missing non-empty tool_call_name";
+            None
+        | Some role ->
+            (match opt_string "id", ts with
+             | None, _ ->
+                 report_persistence_read_drop
+                   ~reason:Read_drop_reason.Invalid_payload
+                   ~path:file_path
+                   ~detail:"chat row missing nonblank id";
+                 None
+             | Some _, None ->
+                 (* [encode_line] always writes a float [ts]; a row without one
+                    cannot be ordered, paged or joined, so it is dropped. *)
+                 report_persistence_read_drop
+                   ~reason:Read_drop_reason.Invalid_payload
+                   ~path:file_path
+                   ~detail:"chat row missing float ts";
+                 None
+             | Some id, Some ts ->
+                 Some
+                   { id; role; content; ts; attachments; tool_call_id; execution_id;
+                     tool_call_name; surface; conversation_id;
+                     external_message_id; workspace_id; speaker; audio; blocks;
+                     mentions; kind; turn_ref; stream_lifecycle; approval_lifecycle;
+                     delivery_provenance })
+    in
+    { message; strict_decode_error }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Read_drop_reason.Json_syntax_error
       ~path:file_path
       ~detail;
-    None
+    { message = None; strict_decode_error = None }
+
+let parse_line ~file_path line =
+  (parse_line_decoded ~file_path line).message
+;;
 
 (* Window bounds for [load]. [max_history] counts user/assistant
    messages only, so tool lines never shrink the visible conversation
@@ -2547,9 +2562,18 @@ let parse_transcript_row ~path ~redaction ~line_no line =
   if String.equal trimmed ""
   then `Blank
   else
-    match parse_line ~file_path:path trimmed with
-    | Some message -> `Message (redact_message redaction message)
-    | None -> `Unreadable (Printf.sprintf "%s:%d unreadable chat row" path line_no)
+    match parse_line_decoded ~file_path:path trimmed with
+    | { strict_decode_error = Some (Unknown_speaker_authority label); _ } ->
+      `Unreadable
+        (Printf.sprintf
+           "%s:%d unknown speaker_authority %S"
+           path
+           line_no
+           label)
+    | { message = Some message; strict_decode_error = None } ->
+      `Message (redact_message redaction message)
+    | { message = None; strict_decode_error = None } ->
+      `Unreadable (Printf.sprintf "%s:%d unreadable chat row" path line_no)
 ;;
 
 let parse_transcript_rows ~path ~redaction rows =

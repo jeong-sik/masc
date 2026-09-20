@@ -525,6 +525,52 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
   | None -> fail "rejected interval removed progress"
 ;;
 
+let test_unknown_speaker_authority_does_not_advance_progress () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-unknown-speaker-authority" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let chat_path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname chat_path);
+  (match
+     Fs_compat.save_file_atomic_strict
+       chat_path
+       ({|{"id":"unknown-authority","role":"user","content":"do not lose me","ts":1.5,"speaker_authority":"admin"}|}
+        ^ "\n")
+   with
+   | Ok () -> ()
+   | Error detail -> failf "write chat fixture: %s" detail);
+  let commit_called = ref false in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ _ ->
+         commit_called := true;
+         true)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.Chat_store_unreadable _)) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "unknown speaker authority advanced as absent evidence");
+  check bool "memory commit is not attempted" false !commit_called;
+  match read_progress config with
+  | Some progress ->
+    check int
+      "cursor stays before the unreadable counterpart row"
+      1
+      progress.position.end_atom
+  | None -> fail "unreadable counterpart row removed progress"
+;;
+
 let test_same_name_clusters_keep_independent_ranges () =
   with_workspace @@ fun default ->
   let a = config_in_cluster default "Durable/A" in
@@ -730,6 +776,8 @@ let () =
             test_last_matching_boundary_wins_when_clock_moves_backward
         ; test_case "distinct backward clocks do not erase counterpart evidence" `Quick
             test_distinct_boundaries_reject_non_monotone_counterpart_interval
+        ; test_case "unknown speaker authority keeps durable progress" `Quick
+            test_unknown_speaker_authority_does_not_advance_progress
         ; test_case "same-name clusters isolate range progress" `Quick
             test_same_name_clusters_keep_independent_ranges
         ; test_case "selected range bypasses recent window" `Quick

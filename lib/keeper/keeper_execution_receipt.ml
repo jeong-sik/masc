@@ -81,6 +81,7 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  | Reason_official_client_recovery_required
   | Reason_provider_attempt_effect_fenced
   | Reason_tool_correction_lost
   | Reason_accept_rejected
@@ -101,6 +102,8 @@ let operator_disposition_reason_to_string = function
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
   | Reason_transcript_corruption -> "transcript_corruption"
+  | Reason_official_client_recovery_required ->
+    Keeper_internal_error.official_client_recovery_required_kind
   | Reason_provider_attempt_effect_fenced ->
     Keeper_internal_error.provider_attempt_effect_fenced_kind
   | Reason_tool_correction_lost -> Keeper_internal_error.tool_correction_lost_kind
@@ -155,6 +158,12 @@ let operator_disposition (receipt : t)
        alert with the typed reason rather than claiming a pause that no
        longer happens. *)
     Disp_unknown, Reason_transcript_corruption
+  | Keeper_terminal_reason.Official_client_recovery_required _ ->
+    (* The refusal happened while claiming the local durable session, before
+       provider dispatch. The same session remains held until an operator
+       resolves its recovery, so the receipt must not claim a runtime
+       continuation. *)
+    Disp_operator_action_required, Reason_official_client_recovery_required
   | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
     (* Same-turn replay stays forbidden, and the runtime lifecycle remains
        responsible for selecting a later turn. Keep the operator alert, but
@@ -245,6 +254,7 @@ let operator_disposition (receipt : t)
        | Config_or_auth _
        | Provider_runtime_failure _
        | Transcript_corruption _
+       | Official_client_recovery_required _
        | Provider_attempt_effect_fenced _
        | Tool_correction_lost _
        | Accept_rejected _
@@ -290,6 +300,7 @@ let operator_disposition (receipt : t)
               | Config_or_auth _
               | Provider_runtime_failure _
               | Transcript_corruption _
+              | Official_client_recovery_required _
               | Provider_attempt_effect_fenced _
               | Tool_correction_lost _
               | Terminal_effect_failed _

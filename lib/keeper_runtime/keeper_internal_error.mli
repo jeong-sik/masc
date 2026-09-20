@@ -25,6 +25,10 @@ val accept_rejected_kind : string
     returned no typed receipt for what it did. *)
 val terminal_effect_failed_kind : string
 
+(** Canonical wire kind for a durable official-client session that refuses a
+    local claim until its recovery is explicitly resolved. *)
+val official_client_recovery_required_kind : string
+
 (** Why the durable official-client session refuses a new local claim.
     This is distinct from the effect disposition of a provider attempt. *)
 type official_client_input_rejection =

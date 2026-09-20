@@ -29,11 +29,9 @@ let tool_correction_lost_kind = "tool_correction_lost"
 let accept_rejected_kind = "accept_rejected"
 let terminal_effect_failed_kind = "terminal_effect_failed"
 
-(* Not exported: the five above are, because [test_keeper_terminal_reason_typed]
-   names them in its wire corpus. These two are not in that corpus -- it is
-   checked against a frozen string-policy oracle that predates the typed
-   enumeration and would read a new wire as [Unknown] -- so exporting them
-   would be surface nothing reads. *)
+(* The official-client recovery kind also feeds the receipt's typed terminal
+   reason and operator reason, so those consumers share this producer-owned
+   spelling. The remaining two kinds have no such consumer policy yet. *)
 let official_client_recovery_required_kind = "official_client_recovery_required"
 let host_stopped_turn_kind = "host_stopped_turn"
 let runtime_connection_closed_kind = "runtime_connection_closed"

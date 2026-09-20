@@ -79,7 +79,16 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     (I.official_client_recovery_summary expected) terminal.summary;
   (match Route.route_of_error ~boundary:Route.Masc_execution error with
    | Route.Exhausted_visible_alive
-       { terminal = Route.Contract_violation; provenance = Route.Masc_internal_error; _ } -> ()
+       { terminal = Route.Session_claim_refused; provenance = Route.Masc_internal_error; _ }
+       as route ->
+     Alcotest.(check string)
+       "local claim refusal has its own route label"
+       "session_claim_refused"
+       (Route.route_class_label route);
+     Alcotest.(check bool)
+       "local claim refusal happened before a provider response"
+       false
+       (Route.response_observed route)
    | _ -> Alcotest.fail "local refusal must not rotate, retry or claim a remote effect");
   let reason = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
       ~core_error:error terminal ~raw_error in

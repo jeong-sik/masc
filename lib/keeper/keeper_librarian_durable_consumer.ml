@@ -154,7 +154,11 @@ let progress_of_range_id (range_id : Keeper_memory_os_current.durable_range_id) 
   }
 ;;
 
-let endpoint_is_present range_id ~messages lines =
+let endpoint_is_present
+      (range_id : Keeper_memory_os_current.durable_range_id)
+      ~messages
+      lines
+  =
   let checkpoint_matches =
     match Window.atom_opening_digest messages (range_id.end_atom - 1) with
     | Some digest -> String.equal digest range_id.last_atom_digest

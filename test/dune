@@ -5054,7 +5054,9 @@
 (test
  (name test_tui_footer_status_items)
  (modules test_tui_footer_status_items)
- (libraries alcotest str masc_tui_footer masc_tui_message_layout))
+ (libraries alcotest str unix
+  masc_tui_footer masc_tui_message_layout
+  masc_tui_keys masc_tui_render_prim masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_answering)

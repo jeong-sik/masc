@@ -16,6 +16,7 @@
 - 받은 값 일부는 카탈로그가 적은 값과 어긋난다. 카탈로그 파일만 읽어서는 그 값이 안 보인다.
 - 이 RFC 는 공급자·모델 사실을 카탈로그 한 곳에만 둔다. 아무도 적지 않은 사실은 코드 기본값이 아니라 `unknown` 이다. 경로·인증·wire 모양 같은 프로토콜은 코드에 남는다.
 - 작업은 일곱 단계로 나눈다. 단계마다 PR 하나다. 옛 형식을 읽는 호환 코드는 만들지 않는다.
+- 타입까지 적은 필드는 `supports_parallel_tool_calls` 하나다. 나머지 필드가 언제 `unknown` 이 되는지는 Q2 가 필드마다 정하고, 그때까지 값은 코드에서 온다 (3.c).
 
 ## 1. 문제
 
@@ -311,6 +312,8 @@ match caller_disabled, declared with
 | `supports_image_input` | `false` → 이미지를 이름표로 바꿈 (`backend_gemini.ml:651-666`) | Q2 |
 | `supports_tools`, `supports_*_tool_choice` | `false` → 도구 끔·forced 요청 거절 | Q2 |
 | `thinking_control_format` | `No_thinking_control` 이 "제어 없음" 과 "모름" 을 함께 뜻함 | Q2 |
+
+**어느 필드가 언제 옮겨지나.** 이 RFC 가 타입과 판단까지 적은 필드는 `supports_parallel_tool_calls` 하나다. `max_output_tokens` 와 `max_context_tokens` 는 이미 `option` 이라 바꿀 것이 없고, `emits_usage_tokens` 는 방향만 적었다. 표에 없는 필드와 "Q2" 로 남긴 세 줄은 unknown 이 wire 에서 무엇을 뜻하는지가 정해져야 옮길 수 있고, 그 결정은 필드마다 그 필드의 PR 에서 한다. 옮기기 전까지 그 필드의 값은 `default_capabilities` 에서 온다. 측정 기준 커밋에서 이 레코드에서만 오는 (행, 필드) 쌍이 4,134개다. 3.d 는 모든 필드가 옮겨진 뒤에 열리므로, 마지막 단계는 Q2 가 필드마다 답해질 때까지 열리지 않는다.
 
 **검증.** 변경 전후 요청 스냅샷에서 달라지는 행이 위 wire 변화 목록과 정확히 같다. match 에 `_` 를 쓰지 않아 variant 를 더하면 컴파일러가 빠진 자리를 알려 준다.
 

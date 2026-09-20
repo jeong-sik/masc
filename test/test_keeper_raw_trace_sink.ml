@@ -565,11 +565,18 @@ let test_prune_fails_open_on_malformed_json () =
   let orphan = Filename.concat dir "malformed-root.jsonl" in
   write_file orphan "{}\n";
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  let dated =
-    Jsonl_writer.dated_path_now ~base_dir:(Dated_jsonl.base_dir store)
+  Dated_jsonl.append store (`Assoc []);
+  let turn_record_file =
+    let base_dir = Dated_jsonl.base_dir store in
+    match Sys.readdir base_dir with
+    | [| month |] ->
+      let month_dir = Filename.concat base_dir month in
+      (match Sys.readdir month_dir with
+       | [| day |] -> Filename.concat month_dir day
+       | _ -> Alcotest.fail "expected exactly one TurnRecord day file")
+    | _ -> Alcotest.fail "expected exactly one TurnRecord month directory"
   in
-  Fs_compat.mkdir_p dated.month_dir;
-  write_file dated.path "{not-json\n";
+  write_file turn_record_file "{not-json\n";
   (match Keeper_raw_trace_retention.prune ~config ~keeper_name () with
    | Error (Keeper_raw_trace_retention.Malformed_turn_record _) -> ()
    | Error error ->

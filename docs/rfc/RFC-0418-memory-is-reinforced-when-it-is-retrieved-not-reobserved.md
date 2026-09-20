@@ -1,14 +1,18 @@
 ---
 rfc: "0418"
-title: "Memory OS: 기억은 다시 꺼내 쓸 때 굳는다 — reinforcement 카운터를 걷어내고 회수·인용·개정 사건을 기록한다"
+title: "Memory OS: reinforcement 카운터를 걷어내고 회수·철회·개정 사건을 기록한다"
 status: Draft
 created: 2026-09-05
-updated: 2026-09-05
+updated: 2026-09-19
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0247", "0251", "0402", "tui-operator-ia"]
 ---
+
+2026-09-19 개정(#37097): 성공한 철회는 인용이 아니다. 현재 사건을 `Retracted`로
+명명하고 `Cited`와 `tool` payload를 제거한다. 회수·철회 횟수는 관측 기록이며
+현재 Fact의 신뢰도나 강화 정도를 나타내지 않는다.
 
 ## 1. 문제
 
@@ -100,8 +104,8 @@ masc 에 대응시키면:
 |---|---|---|
 | 재노출 | recall block 이 매 턴 사실을 프롬프트에 싣는 것 | 강화 아님 |
 | 같은 문장 재관측 | librarian 재주입, `upsert_fact` 바이트 일치 | 강화 아님, dedup |
-| 회수 | `keeper_memory_search` 가 사실 m 을 결과로 돌려준 것 | **강화 사건** |
-| 인용 | keeper 의 tool call 인자에 `memory_id` 가 실린 것, 다른 keeper 나 Board 글이 그 id 를 든 것 | **강화 사건** |
+| 회수 | `keeper_memory_search` 가 사실 m 을 결과로 돌려준 것 | **조회 사건** |
+| 철회 | `keeper_memory_retract` 가 지정한 사실을 성공적으로 지운 것 | **제거 사건** |
 | 재저장(수정) | librarian 이 m_old 를 버리고 그것을 잇는 새 claim 을 쓴 것 | **개정 사건** |
 | 간격 | 위 사건들의 시각 분포 | 저장하지 않고 투영 |
 
@@ -109,7 +113,7 @@ masc 에 대응시키면:
 
 - 저장하는 것은 **사건**이다. 카운터, 강도, 신뢰 라벨은 저장하지 않는다. 사건은
   런타임이 실제로 일어난 자리에서 기록한다. 판단을 묻지 않는다.
-- 강도는 읽는 쪽이 사건 기록에서 계산하는 **투영**이다. "검색으로 4회 회수, 8일에
+- 횟수와 시각은 읽는 쪽이 사건 기록에서 계산하는 **투영**이다. "검색으로 4회 회수, 8일에
   걸쳐, 마지막은 2일 전" 처럼 기록 자체를 보여 준다. 임계값과 라벨은 없다.
 - 개정은 librarian 의 일이다. "같은 기억이 이렇게 바뀌었다" 는 의미 판단이고,
   librarian 은 이미 그 자리에 있다. `confirmed` 를 묻지 않고 `supersedes` 를 답하게
@@ -127,7 +131,7 @@ masc 에 대응시키면:
 (* keeper_memory_os_events *)
 type event_kind =
   | Retrieved of { query : string }          (* keeper_memory_search 결과에 들었다 *)
-  | Cited of { tool : string }               (* tool call 인자에 memory_id 로 실렸다 *)
+  | Retracted                               (* keeper_memory_retract 가 사실을 지웠다 *)
   | Revised of { superseded_by : string }    (* librarian 이 이 사실을 잇는 새 claim 을 썼다 *)
 
 type event =
@@ -148,9 +152,8 @@ type event =
   사실에 `Retrieved { query }` 를 기록한다. 이미 있는 decision-log 줄
   (`:377-388`, `event: memory_search`)은 그대로 두고, 그 줄에도 `matched_memory_ids`
   를 싣는다.
-- `keeper_memory_retract` 와 앞으로 `memory_id` 인자를 받는 모든 도구: 인자로 실린
-  id 에 `Cited { tool }`. 텍스트 안의 id 를 정규식으로 찾지 않는다. 타입 있는
-  인자만 센다.
+- `keeper_memory_retract`: 실제 철회가 성공한 id에 `Retracted`를 기록한다.
+  인자로 받은 id나 텍스트 안의 id만으로 사용·인용 사건을 추정하지 않는다.
 - librarian: `new_claims[]` 에 선택 필드 `supersedes` (짧은 기억 ID `m<N>`). 파서는
   `dropped` 에 같은 id 가 있어야 받고(개정은 옛 것을 버리는 것과 함께 온다), 없으면
   답 전체를 거부한다. 적용 시 새 사실의 identity 로 `Revised { superseded_by }` 를
@@ -172,7 +175,7 @@ journal(`<keeper>.memory-journal.jsonl`)은 "librarian pass 당 한 줄, 턴 경
 ### 4.4 투영과 소비자
 
 - keeper API 의 memory 행: `reinforcement` 대신 `events` 요약을 싣는다 —
-  `retrieved_count`, `retrieved_distinct_days`, `last_retrieved_at`, `cited_count`,
+  `retrieved_count`, `retrieved_distinct_days`, `last_retrieved_at`, `retracted_count`,
   `revised_from`(있으면 옛 id). 전부 사건 기록에서 계산한 값이고 저장하지 않는다.
 - TUI Memory 탭: `×N` 배지와 `(Confirmed)`/`(High Confidence)` 를 지운다. 행에는
   "회수 4 · 8일 · 2d ago" 처럼 기록을 그대로 쓴다. 정렬은 recency(기본), 마지막 회수,
@@ -217,12 +220,16 @@ producer → store → consumer → caller 순이고, 한 PR 이 한 단계씩 �
    스냅샷은 필드가 있어도 exact-fields 디코더가 거부하므로 배포 전에 15개 store 의
    필드를 지우는 일회성 작업이 필요하다. 호환 reader 는 만들지 않는다.
 3. `keeper_tool_memory_runtime`: 검색 결과에 `Retrieved` 기록, decision-log 줄에
-   `matched_memory_ids`, retract 에 `Cited`.
+   `matched_memory_ids`, retract 에 `Retracted`.
 4. `keeper_librarian` + `config/prompts/librarian.md`: `supersedes`, variant 둘,
    적용 시 `Revised` 기록.
 5. keeper API 행, 대시보드 디코더, TUI 표시·정렬, 그 테스트.
 6. RFC-0402 §3.2 의 "두 번째 관측은 reinforcement 로 센다" 를 이 RFC 를 가리키게
    고친다.
+
+2026-09-19 이벤트 이름 변경도 hard cut이다. 배포 전에 기존 sidecar 행을 정리한다면
+`kind: cited`를 `kind: retracted`로 바꾸고 `tool` 필드도 제거해야 한다.
+kind만 바꾸면 field-exact 코덱이 남은 payload를 거부한다. 호환 reader는 만들지 않는다.
 
 ## 8. 건드리지 않는 것
 

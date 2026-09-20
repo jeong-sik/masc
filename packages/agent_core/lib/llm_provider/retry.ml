@@ -47,6 +47,16 @@ type api_error =
       ; phase : Http_client.timeout_phase option
       }
 
+type server_status_class =
+  | Overloaded_status
+  | Server_error_status
+
+let server_status_class_of_code = function
+  | 529 -> Some Overloaded_status
+  | status when status >= 500 && status <= 599 -> Some Server_error_status
+  | _ -> None
+;;
+
 let network_error_kind_label = function
   | Http_client.Connection_refused -> "connection_refused"
   | Http_client.Dns_failure -> "dns_failure"
@@ -344,11 +354,11 @@ let classify_error ~retry_after_header ~status ~body : api_error =
     let retry_after = resolve_retry_after ~body ~header:retry_after_header in
     RateLimited { retry_after; message }
   | 404 -> NotFound { message }
-  | 529 -> Overloaded { message }
-  | s when s >= 500 -> ServerError { status = s; message }
-  | unhandled_status ->
-    let (_ : int) = unhandled_status in
-    InvalidRequest { message; reason = Unknown_invalid_request }
+  | status ->
+    (match server_status_class_of_code status with
+     | Some Overloaded_status -> Overloaded { message }
+     | Some Server_error_status -> ServerError { status; message }
+     | None -> InvalidRequest { message; reason = Unknown_invalid_request })
 ;;
 
 (* The refusal a transport reports, classified. A body that arrived is

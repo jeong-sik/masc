@@ -122,14 +122,9 @@ let acting_pane_columns (state : state) ~terminal_cols =
   then Masc_tui_acting_pane.pane_cols
   else 0
 
-let format_context_tokens tokens =
-  if tokens >= 1_000_000 then
-    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
-    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
-  else if tokens >= 1_000 then
-    Printf.sprintf "%dk" (tokens / 1_000)
-  else
-    Printf.sprintf "%d" tokens
+(* The runtime picker measures this string to decide its column widths, so the
+   format lives beside that arithmetic. *)
+let format_context_tokens = Masc_tui_types.format_context_tokens
 
 let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list =
   let default_target =
@@ -6120,6 +6115,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        else Ansi.dim ^ "no" ^ Ansi.reset);
     add_empty ();
 
+    (* The live roster owns this reading, including its absence after a
+       successful turn. Neither historical last_error nor the last outcome
+       can answer for the current failure. *)
+    add_section "Current failure";
+    let failure_tone, failure_text =
+      match (keeper_reading state k).Keeper_control.liveness with
+      | Keeper_control.Present runtime ->
+          (match runtime.kr_runtime_blocker_summary with
+           | Some summary -> Theme.bad (), summary
+           | None -> Ansi.dim, "none")
+      | Keeper_control.Unobserved -> Ansi.dim, "unread"
+      | Keeper_control.Absent -> Ansi.dim, "absent from live roster"
+      | Keeper_control.Invalid detail -> Theme.bad (), "config error: " ^ detail
+    in
+    let indent = "  " in
+    Message_layout.wrap_words
+      ~max_cells:(max 1 (inner - Message_layout.display_width indent))
+      (Terminal_text.single_line failure_text)
+    |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
+    add_empty ();
+
     (* Gate section. Two settings with similar names decide different things,
        so both are named rather than merged: YOLO is the in-memory stance that
        stops this chat asking and a restart clears, while the Gate mode is
@@ -11746,6 +11762,9 @@ let render_runtime_pick (state : state) =
   in
   let items = Masc_tui_types.runtime_picker_items state in
   let count = List.length items in
+  let target_width, route_width =
+    Masc_tui_types.runtime_pick_column_widths ~cols items
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -11763,11 +11782,15 @@ let render_runtime_pick (state : state) =
             c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
             1
         | None ->
+            (* The kind badge is 7 cells ("[LANE] ", "[MODEL]"), so the
+               first header cell spans badge and target, as the rows do. *)
             let header =
               Printf.sprintf "  %s  %s  %s"
-                (fit_width "KIND   TARGET" 33)
-                (fit_width "CONFIGURED ROUTE / MODEL" (max 24 (cols - 62)))
-                "PROPERTIES / FAILOVER"
+                (fit_width "KIND   TARGET" (7 + target_width))
+                (fit_width "CONFIGURED ROUTE / MODEL" route_width)
+                (fit_width "PROPERTIES / FAILOVER"
+                   (Masc_tui_types.runtime_pick_properties_room ~cols
+                      ~target:target_width ~route:route_width))
             in
             c.push (Ansi.dim ^ header ^ Ansi.reset);
             1
@@ -11782,42 +11805,43 @@ let render_runtime_pick (state : state) =
         (fun idx item ->
           if idx >= scroll_offset && idx < scroll_offset + height then begin
             let line =
-              match item with
-              | Masc_tui_types.Pick_lane lane ->
-                  let kind_badge = Ansi.cyan ^ "[LANE] " ^ Ansi.reset in
-                  let target = fit_width (Terminal_text.single_line lane.rrl_id) 24 in
-                  let chain =
-                    String.concat " \xe2\x86\x92 "
-                      (List.map
-                         (fun id ->
-                            match String.split_on_char '.' id with
-                            | [ _prov; model ] -> model
-                            | _ -> id)
-                         lane.rrl_runtime_ids)
-                  in
-                  let hops = Printf.sprintf "(%d hops)" (List.length lane.rrl_runtime_ids) in
-                  let route_col = fit_width (Terminal_text.single_line chain) (max 24 (cols - 62)) in
-                  Printf.sprintf "%s%s  %s  %s" kind_badge target route_col hops
-              | Masc_tui_types.Pick_model option ->
-                  let kind_badge = Ansi.dim ^ "[MODEL]" ^ Ansi.reset in
-                  let target = fit_width (Terminal_text.single_line option.ro_id) 24 in
-                  let model_desc =
-                    fit_width
-                      (Terminal_text.single_line
-                         (option.ro_provider ^ " / " ^ option.ro_model))
-                      (max 24 (cols - 62))
-                  in
-                  let ctx =
-                    Printf.sprintf "[%s ctx]"
-                      (format_context_tokens option.ro_effective_max_context)
-                  in
-                  let def = if option.ro_is_default then " [default]" else "" in
-                  let quota =
-                    if option.ro_quota_exhausted then " " ^ (Theme.warn ()) ^ "[quota exhausted]" ^ Ansi.reset
-                    else ""
-                  in
-                  Printf.sprintf "%s%s  %s  %s%s%s"
-                    kind_badge target model_desc ctx def quota
+              (* The target column draws ids, and an id tells its neighbours
+                 apart at both ends: [claude_code.claude-sonnet-5-low] and
+                 [-high] share everything but the last four cells, which a
+                 head-keeping cut drops. [fit_middle] keeps both ends, which
+                 is what it says it is for. *)
+              let badge, target, route_col =
+                match item with
+                | Masc_tui_types.Pick_lane lane ->
+                    let chain =
+                      String.concat " \xe2\x86\x92 "
+                        (List.map
+                           (fun id ->
+                              match String.split_on_char '.' id with
+                              | [ _prov; model ] -> model
+                              | _ -> id)
+                           lane.rrl_runtime_ids)
+                    in
+                    ( Ansi.cyan ^ "[LANE] " ^ Ansi.reset
+                    , Message_layout.fit_middle target_width (Terminal_text.single_line lane.rrl_id)
+                    , fit_width (Terminal_text.single_line chain) route_width )
+                | Masc_tui_types.Pick_model option ->
+                    ( Ansi.dim ^ "[MODEL]" ^ Ansi.reset
+                    , Message_layout.fit_middle target_width (Terminal_text.single_line option.ro_id)
+                    , fit_width
+                        (Terminal_text.single_line
+                           (option.ro_provider ^ " / " ^ option.ro_model))
+                        route_width )
+              in
+              let facts =
+                Masc_tui_types.runtime_pick_visible_facts ~cols item
+                |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
+                     if fact.rpf_warn
+                     then (Theme.warn ()) ^ fact.rpf_text ^ Ansi.reset
+                     else fact.rpf_text)
+                |> String.concat " "
+              in
+              Printf.sprintf "%s%s  %s  %s" badge target route_col facts
             in
             c.push
               (if idx = state.runtime_pick_cursor then

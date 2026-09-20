@@ -240,6 +240,10 @@ type provider_refusal =
   | Request_body_refused
       (** The provider refused this request's size. A smaller input may succeed
           and the frozen lane's successor may accept this one. *)
+  | Refusal_body_not_received
+      (** The status and headers arrived, but the refusal body did not finish
+          inside the caller's window. Its cause remains unknown and does not
+          authorize successor dispatch. *)
   | Rate_limited
       (** The provider's quota for this binding is spent. The request itself was
           acceptable, so a successor binding with its own quota may serve it. *)
@@ -260,10 +264,14 @@ type execution_error_cause =
   | Clock_required_for_timeout
   | Frozen_request_mismatch
   | Completion_failed
-      (** No response was received: the failure landed before dispatch, or the
-          transport produced no HTTP status to classify. A failure that DID
-          carry a status is {!Provider_response_refused} — folding the two
-          together discards the status and the refusal kind. *)
+      (** A failure without a more specific Exact cause. The receipt may
+          already contain response headers, for example when provider parsing
+          fails. This cause alone does not authorize a dispatched retry. *)
+  | Response_body_deadline_exceeded
+      (** Successful HTTP response headers arrived, but the explicitly declared
+          total deadline expired before its body completed. No complete body,
+          provider trace or accepted domain result exists. The one dispatch
+          remains recorded; remote cancellation or billing is not implied. *)
   | Provider_response_refused of
       { http_status : int
       ; refusal : provider_refusal
@@ -813,6 +821,22 @@ type ('callback_error, 'rejection) validated_flow_error =
       { rejections : 'rejection semantic_rejection_trace
       ; evidence : flow_evidence
       }
+
+type flow_execution_terminal_kind =
+  | Advanceable_candidates_exhausted
+      (** The final candidate failed in the same typed way that would have
+          advanced to another frozen candidate, or was rejected without a
+          measurement dispatch. The declared candidate sequence is exhausted. *)
+  | Non_advanceable_terminal
+      (** The failure must stop this flow: replay, bookkeeping callbacks, or
+          an execution failure that is specific to this input or attempt. *)
+
+val flow_execution_terminal_kind
+  :  'callback_error flow_execution_error
+  -> flow_execution_terminal_kind
+(** Classify why a terminal flow could not continue. This reuses the exact
+    typed advancement rule used between candidates; callers never recover the
+    distinction from an error string or receipt phase. *)
 
 (** Closed fact for the invocation returning the error: whether its one outward
     completion dispatch began. This does not claim provider acceptance, response

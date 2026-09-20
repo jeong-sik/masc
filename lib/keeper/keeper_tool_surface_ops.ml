@@ -225,10 +225,16 @@ let keeper_list_row_json ~runtime_class config name =
   | Ok None -> None
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in
-      (* One registry read for [phase], [health] and [keepalive_running], so
-         the row cannot pair a health from one moment with a phase from
-         another. *)
-      let registry_phase = Keeper_status_bridge.runtime_phase config meta in
+      (* Phase, health, liveness and the current failure share one registry
+         reading. The last recorded error is a different observation. *)
+      let registry_entry = Keeper_registry.get ~base_path:config.base_path meta.name in
+      let registry_phase = Option.map (fun entry -> entry.Keeper_registry.phase) registry_entry in
+      let runtime_blocker_summary =
+        Option.bind registry_entry (fun entry ->
+          Option.bind entry.Keeper_registry.last_failure_reason
+            Keeper_status_bridge.runtime_blocker_surface_of_failure_reason)
+        |> Option.map (fun blocker -> blocker.Keeper_status_bridge.summary)
+      in
       let keepalive_running =
         Keeper_status_runtime.keepalive_running_of_phase registry_phase
       in
@@ -280,6 +286,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("health", `String health);
             ("paused", `Bool meta.paused);
             ("next_action", next_action);
+            ("runtime_blocker_summary", Json_util.string_opt_to_json runtime_blocker_summary);
             ("keepalive_running", `Bool keepalive_running);
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));

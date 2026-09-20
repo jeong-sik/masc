@@ -5,6 +5,7 @@ type source =
   | Turn_record of { turn : int }
   | Unfinished_turn of { turn : int }
   | Halved_after_refusal of { retry : int }
+  | Evicted_after_refusal of { retry : int }
 
 type seed =
   { first_atom : int
@@ -172,6 +173,7 @@ let source_to_string = function
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
   | Unfinished_turn { turn } -> Printf.sprintf "unfinished_turn#%d" turn
   | Halved_after_refusal { retry } -> Printf.sprintf "halved_after_refusal#%d" retry
+  | Evicted_after_refusal { retry } -> Printf.sprintf "evicted_after_refusal#%d" retry
 ;;
 
 let seed_to_json (seed : seed) =
@@ -195,5 +197,7 @@ let origin_to_json = function
     `Assoc [ "kind", `String "unfinished_turn"; "turn", `Int turn ]
   | Carried (Halved_after_refusal { retry }) ->
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
+  | Carried (Evicted_after_refusal { retry }) ->
+    `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
   | Whole_history -> `Assoc [ "kind", `String "whole_history" ]
 ;;

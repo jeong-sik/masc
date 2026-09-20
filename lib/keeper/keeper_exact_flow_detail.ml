@@ -8,6 +8,8 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
   | Clock_required_for_timeout -> "clock required for timeout"
   | Frozen_request_mismatch -> "frozen request mismatch"
   | Completion_failed -> "completion failed"
+  | Response_body_deadline_exceeded ->
+    "total request deadline exceeded while reading response body"
   | Provider_response_refused { http_status; refusal } ->
     Printf.sprintf
       "provider refused (http_status=%d refusal=%s)"
@@ -30,9 +32,9 @@ let advance_failure_kind : Exact_output.flow_advance_failure_snapshot -> string 
   | Exact_output.Flow_advance_candidate_rejected rejection ->
     ( (Exact_output.candidate_rejection_identity rejection).candidate_id
     , "candidate_rejected cause=" ^ Exact_output.candidate_rejection_reason rejection )
-  (* [execution_error_cause] distinguishes eleven outcomes — a quota refusal,
+  (* [execution_error_cause] distinguishes outcomes — a quota refusal,
      an output budget spent before the answer, invalid JSON, an HTTP refusal
-     with its status. Rendering only "execution_failed" collapsed all eleven
+     with its status. Rendering only "execution_failed" collapsed them
      into one label, and this advance is the only place a losing slot is
      recorded: it left no other trace, so "why did the first slot lose the
      run" had no answer anywhere. Observed 2026-08-07: the librarian advanced

@@ -8,6 +8,9 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
+val wire_field_origin : string
+val wire_field_basis : string
+val wire_field_derivations : string
 
 (** On a librarian claim: the short id of the dropped memory this claim
     continues (RFC-0418). *)
@@ -188,13 +191,17 @@ type origin =
   }
 
 (** One independently sufficient proof of a derived fact. Every [premise_id]
-    is the exact {!memory_id} of another current fact. [rule_id] is an opaque
+    is the exact {!memory_id} of another fact. An inactive alternative may
+    reference facts that are no longer current. [rule_id] is an opaque
     producer-owned identity used for explanation and rule evolution; Memory OS
     never branches on its spelling. *)
 type derivation =
   { rule_id : string
   ; premise_ids : string list
   }
+
+(** Canonical premise ordering; this does not validate the proof. *)
+val normalize_derivation : derivation -> derivation
 
 (** Where an observed fact was read from. [Transcript] is the keeper's own
     turn history, which was the only source before Board provenance existed.

@@ -100,12 +100,12 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
     (Astring.String.is_infix ~affix:"301 bytes total" rendered)
 ;;
 
-(* The eleven distinct execution causes reach the advance line through
+(* The distinct execution causes reach the advance line through
    [execution_cause_detail]. The execution-failed branch of
    [advance_failure_kind] cannot be built here — [flow_attempt_snapshot] is a
    private agent-core type with no constructor — so this test pins that every
    cause the branch can receive still renders apart from every other. A
-   single shared label is what made the eleven indistinguishable in the log,
+   single shared label is what made them indistinguishable in the log,
    and this fails if any two collapse onto the same string. *)
 let test_every_execution_cause_renders_distinctly () =
   let causes : Exact_output.execution_error_cause list =
@@ -113,6 +113,7 @@ let test_every_execution_cause_renders_distinctly () =
     ; Clock_required_for_timeout
     ; Frozen_request_mismatch
     ; Completion_failed
+    ; Response_body_deadline_exceeded
     ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
     ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
     ; Provider_response_refused { http_status = 529; refusal = Overloaded }

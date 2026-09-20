@@ -47,7 +47,6 @@ let make_custom_config
   ?temperature
   ?max_tokens
   ?system_prompt
-  ?supports_tool_choice_override
   ?keep_alive
   ?num_ctx
   model_id
@@ -68,7 +67,6 @@ let make_custom_config
          ?temperature
          ?max_tokens
          ?system_prompt
-         ?supports_tool_choice_override
          ?keep_alive
          ?num_ctx
          ())
@@ -100,7 +98,6 @@ let make_registry_config
   ?max_tokens
   ?system_prompt
   ?(api_key_env_overrides = [])
-  ?supports_tool_choice_override
   ?keep_alive
   ?num_ctx
   ~provider_name
@@ -167,7 +164,6 @@ let make_registry_config
     ?max_tokens
     ?max_context
     ?system_prompt
-    ?supports_tool_choice_override
     ?keep_alive
     ?num_ctx
     ()
@@ -183,7 +179,6 @@ let parse_model_string
   ?max_tokens
   ?system_prompt
   ?(api_key_env_overrides = [])
-  ?supports_tool_choice_override
   ?keep_alive
   ?num_ctx
   (s : string)
@@ -196,7 +191,6 @@ let parse_model_string
       ?temperature
       ?max_tokens
       ?system_prompt
-      ?supports_tool_choice_override
       ?keep_alive
       ?num_ctx
       model_id
@@ -218,7 +212,6 @@ let parse_model_string
                  ?max_tokens
                  ?system_prompt
                  ~api_key_env_overrides
-                 ?supports_tool_choice_override
                  ?keep_alive
                  ?num_ctx
                  ~provider_name

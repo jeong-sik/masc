@@ -86,7 +86,7 @@ let run_control ~clock ~timeout_sec ~mgr ~docker_command ~max_bytes ~operation a
     | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
         Error (Docker_failed { operation; detail = Printexc.to_string exn })
   in
-  match Eio.Time.with_timeout clock timeout_sec run with
+  match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (run ())) with
   | Ok result -> result
   | Error `Timeout ->
       Error (Docker_failed { operation;

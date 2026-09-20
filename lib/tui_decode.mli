@@ -2186,6 +2186,11 @@ type lane_run_gate_judgment =
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
+type lane_run_failure =
+  { lrf_code : string
+  ; lrf_detail : string
+  }
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
@@ -2196,6 +2201,7 @@ type lane_run_summary =
   ; lrs_status : lane_run_status
   ; lrs_elapsed_s : float option
   ; lrs_selected_slot : string option
+  ; lrs_failure : lane_run_failure option
   }
 
 type lane_run_page =
@@ -2214,6 +2220,7 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_failure : lane_run_failure option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option

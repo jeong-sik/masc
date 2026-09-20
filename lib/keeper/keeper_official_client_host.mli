@@ -187,6 +187,61 @@ val measure_message_bytes : Agent_core.Types.message -> int
     canonical MASC encoding. At or above what any adapter's own rendering
     sends, so a budget checked with this cannot be exceeded downstream. *)
 
+(** Who named the front of a start seed. *)
+type carried_start_front =
+  | Carried_seed of Keeper_carried_front.source
+      (** The seed: the newest completed turn record on this history,
+          whichever runtime measured it, or the narrowest range an unfinished
+          turn reached. *)
+  | Lane_cut
+      (** The lane's own cut, passed as [own_first_atom], sits at or past the
+          seed's position. *)
+  | Whole_history
+      (** No seed held and the lane cut nothing, so the range starts at the
+          oldest atom and the provider judges it. *)
+
+type carried_start =
+  { messages : Agent_core.Types.message list
+        (** The carried range: the atoms from [first_atom], the pinned
+            messages in place, and the preamble when the range opens on a
+            non-[User] message. *)
+  ; projection : Runtime_model_input_tail_window.projection
+  ; history_atom_count : int
+  ; first_atom : int
+  ; transmitted_bytes : int
+  ; front : carried_start_front
+  }
+
+val carried_start_front_to_string : carried_start_front -> string
+
+val carried_start_range
+  :  keeper_name:string
+  -> runtime_id:string
+  -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
+  -> own_first_atom:int
+  -> Agent_core.Types.message list
+  -> carried_start
+(** Where an official client's start seed begins
+    (RFC keeper-context-window-in-tokens §10.4).
+
+    The front is a position in the keeper's checkpoint history and this lane
+    cuts from that same history, so a range an Agent Core turn measured names
+    the same atoms here, and a lane walking to this candidate starts where the
+    last completed turn ended instead of at the oldest atom.
+
+    These lanes hold no ledger — it is written from the usage of a request
+    this process composed, and an official client composes its own — so the
+    caller's seed is the whole answer. Without one the range is the whole
+    history, which the provider then judges: the same two outcomes the Agent
+    Core path has when no ledger answers.
+
+    [own_first_atom] is the front the lane already chose for its own reason
+    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).
+    The range starts at whichever position is later, so neither cut undoes the
+    other; a lane with no cut of its own passes 0. A seed whose index this
+    history does not open with the seed's message is dropped and reported, and
+    the range starts over as with no seed. *)
+
 val prepare_turn :
   runtime_label:string ->
   keeper_name:string ->

@@ -33,6 +33,7 @@ val run :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -59,15 +60,18 @@ module For_testing : sig
   val observed_history_projection
     :  ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
+    -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
+    -> keeper_name:string
+    -> runtime_id:string
     -> Agent_core.Agent.model_input_projection option
     -> Agent_core.Agent.model_input_projection
-  (** Runs the source projection (the production source appends a bounded
-      typed Gate replay reference) and hands the result over whole, reporting
-      what went as a window reading. Nothing is cut: agy states no prompt
-      size limit and carried a 2,078,915-byte prompt end to end, answering
-      from markers placed at every quarter of it (2026-09-18, agy 1.2.6). The
-      reading still has to be published, because a keeper's next turn starts
-      from the range its last one carried. *)
+  (** Composes the carried range from the seeded front
+      ({!Keeper_official_client_host.carried_start_range}), runs the source
+      projection over it (the production source appends a bounded typed Gate
+      replay reference), and reports what went as a window reading. This lane
+      declares no size of its own, so the front is the seed's or the oldest
+      atom. The reading still has to be published, because a keeper's next
+      turn starts from the range its last one carried. *)
 
   val start_prompt_bytes :
     system_prompt:string ->

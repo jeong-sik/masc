@@ -989,6 +989,8 @@ let test_the_window_reports_the_whole_history () =
   let project =
     Keeper_antigravity_runtime.For_testing.observed_history_projection
       ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"antigravity_subscription.gemini"
       None
   in
   match project messages with
@@ -1028,6 +1030,8 @@ let test_the_reading_counts_atoms_and_names_its_front () =
   let project =
     Keeper_antigravity_runtime.For_testing.observed_history_projection
       ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"antigravity_subscription.gemini"
       None
   in
   match project messages with
@@ -1046,15 +1050,20 @@ let test_the_reading_counts_atoms_and_names_its_front () =
 ;;
 
 (* The one production source appends a bounded typed Gate replay reference
-   (keeper_agent_run.ml). It runs first and what it appends ships, so the
-   reading has to count the appended list rather than the one handed in. *)
-let test_an_appending_source_projection_is_counted () =
+   (keeper_agent_run.ml). It runs over the carried range and what it appends
+   ships. The reading counts the checkpoint history instead, because that is
+   the vocabulary a front is a position in and the checkpoint never holds the
+   appended reference: counted here, every reading this lane wrote would name
+   an atom the next turn's history does not have. *)
+let test_an_appending_source_projection_ships_outside_the_reading () =
   let observed = ref None in
   let messages = List.init 10 (fun i -> plain_user_message (Printf.sprintf "m%02d" i)) in
   let appended = plain_user_message "gate replay reference" in
   let project =
     Keeper_antigravity_runtime.For_testing.observed_history_projection
       ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"antigravity_subscription.gemini"
       (Some (fun ms -> Ok (ms @ [ appended ])))
   in
   match project messages with
@@ -1064,8 +1073,187 @@ let test_an_appending_source_projection_is_counted () =
     (match !observed with
      | None -> fail "the projection reported no window"
      | Some observation ->
-       check int "and is counted" (List.length messages + 1)
+       check int "the reading counts the checkpoint history" (List.length messages)
          observation.Runtime_model_input_tail_window.total_atoms)
+;;
+
+(* A start seed begins where the last completed turn's range did, whichever
+   runtime measured it: an official client cuts from the keeper's checkpoint
+   history like every Agent Core candidate, so the same position names the
+   same atoms. Without this the lane handed over 11,447 atoms (45MB) on every
+   start while the same turn's Agent Core candidate carried 7, and the CLI
+   answered every one of them with "all steps in trajectory are cleared"
+   (#37123). The range is compared against the Agent Core composition itself,
+   not against a number, so the two cannot drift apart. *)
+let carried_front_history () =
+  let message role text : Agent_core.Types.message =
+    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  List.concat
+    (List.init 60 (fun i ->
+       [ message Agent_core.Types.User (Printf.sprintf "ask %02d" i)
+       ; message Agent_core.Types.Assistant (Printf.sprintf "answer %02d" i)
+       ]))
+;;
+
+(* A completed record of this history that carried [transmitted] atoms, as
+   [Keeper_carried_front.of_records] reads one. *)
+let completed_record ~messages ~transmitted : Turn_record.t =
+  let total_atoms = snd (Runtime_model_input_tail_window.annotate messages) in
+  let front_atom_digest =
+    match
+      Runtime_model_input_tail_window.atom_opening_digest
+        messages
+        (total_atoms - transmitted)
+    with
+    | Some digest -> digest
+    | None -> fail "the record's own history has that atom"
+  in
+  { execution_ids = []
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
+  ; turn_kind = Turn_record.Direct
+  ; trace_id = "trace-1"
+  ; absolute_turn = 1260
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1260
+  ; blocks = []
+  ; input_components = None
+  ; tool_surface_ref = None
+  ; runtime_profile = "kimi_coding.kimi-k3"
+  ; selected_model = None
+  ; finish_reason = Some "completed"
+  ; context_window = None
+  ; price_input_per_million = None
+  ; price_output_per_million = None
+  ; request_latency_ms = None
+  ; ttfrc_ms = None
+  ; request_wire_observation = None
+  ; model_input_window =
+      Some
+        { Turn_record.transmitted_atoms = transmitted
+        ; total_atoms
+        ; measurement = Turn_record.Wire_shape
+        ; front_atom_digest
+        }
+  ; raw_trace_run_ref = None
+  ; sampling =
+      { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+  ; usage =
+      { input_tokens = None
+      ; output_tokens = None
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Per_request
+      }
+  ; ts = 0.
+  }
+;;
+
+let seed_read_of records =
+  { Keeper_carried_front.seed =
+      Keeper_carried_front.of_records
+        ~composer:(fun _ -> Keeper_carried_front.Composes_from_the_history)
+        ~trace_id:"trace-1"
+        records
+  ; unreadable = None
+  }
+;;
+
+(* What the Agent Core path composes for the same front, so the assertion is
+   "the same range", not "this many atoms". *)
+let agent_core_range ~front messages =
+  (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
+     ~measure_message_bytes:(Keeper_context_core.message_measurer ())
+     ~front
+     ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+     ~last_resort:false
+     ~base_path:""
+     ~demote_before:0
+     messages)
+    .Keeper_turn_driver_try_provider.projection
+    .Runtime_model_input_tail_window.messages
+;;
+
+let test_a_start_carries_the_range_the_agent_core_path_would () =
+  let observed = ref None in
+  let messages = carried_front_history () in
+  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
+  let project =
+    Keeper_antigravity_runtime.For_testing.observed_history_projection
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~carried_front_seed:(fun () -> seed_read)
+      ~keeper_name:"alpha"
+      ~runtime_id:"antigravity_subscription.gemini"
+      None
+  in
+  match project messages with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check int "the seed is the record's front" 113
+      (match seed_read.Keeper_carried_front.seed with
+       | Some seed -> seed.Keeper_carried_front.first_atom
+       | None -> fail "the record names a front");
+    check (list string) "the same range the Agent Core path composes"
+      (List.map Keeper_official_client_host.encode_history_message (agent_core_range ~front:seed_read.Keeper_carried_front.seed messages))
+      (List.map Keeper_official_client_host.encode_history_message carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "the reading counts the whole history" 120
+         observation.Runtime_model_input_tail_window.total_atoms;
+       check int "and says seven atoms went" 7
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* Cold start: no record on this history names a front, so the range is the
+   whole history and the provider judges it — the same answer the Agent Core
+   path gives when neither a ledger nor a record answers
+   ([Keeper_carried_front.read_seed] returning no seed). *)
+let test_a_cold_start_carries_the_whole_history () =
+  let observed = ref None in
+  let messages = carried_front_history () in
+  let seed_read = seed_read_of [] in
+  let project =
+    Keeper_antigravity_runtime.For_testing.observed_history_projection
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~carried_front_seed:(fun () -> seed_read)
+      ~keeper_name:"alpha"
+      ~runtime_id:"antigravity_subscription.gemini"
+      None
+  in
+  match project messages with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (List.map Keeper_official_client_host.encode_history_message (agent_core_range ~front:None messages))
+      (List.map Keeper_official_client_host.encode_history_message carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "every atom went" 120
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* A front measured on another history names no atom of this one, so the
+   start begins over rather than carrying the newest atom alone from a
+   position that would never widen again. *)
+let test_a_front_this_history_does_not_open_is_dropped () =
+  let messages = carried_front_history () in
+  let elsewhere = List.init 200 (fun i -> plain_user_message (Printf.sprintf "other %03d" i)) in
+  let seed_read = seed_read_of [ completed_record ~messages:elsewhere ~transmitted:7 ] in
+  let project =
+    Keeper_antigravity_runtime.For_testing.observed_history_projection
+      ~carried_front_seed:(fun () -> seed_read)
+      ~keeper_name:"alpha"
+      ~runtime_id:"antigravity_subscription.gemini"
+      None
+  in
+  match project messages with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the whole history goes"
+      (List.map Keeper_official_client_host.encode_history_message (agent_core_range ~front:None messages))
+      (List.map Keeper_official_client_host.encode_history_message carried)
 ;;
 
 
@@ -1100,9 +1288,21 @@ let () =
               `Quick
               test_the_reading_counts_atoms_and_names_its_front
           ; test_case
-              "an appending source projection is counted"
+              "an appending source projection ships outside the reading"
               `Quick
-              test_an_appending_source_projection_is_counted
+              test_an_appending_source_projection_ships_outside_the_reading
+          ; test_case
+              "a start carries the range the Agent Core path would"
+              `Quick
+              test_a_start_carries_the_range_the_agent_core_path_would
+          ; test_case
+              "a cold start carries the whole history"
+              `Quick
+              test_a_cold_start_carries_the_whole_history
+          ; test_case
+              "a front this history does not open is dropped"
+              `Quick
+              test_a_front_this_history_does_not_open_is_dropped
         ] )
     ]
 ;;

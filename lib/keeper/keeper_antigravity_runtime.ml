@@ -102,54 +102,67 @@ let current_goal_label () =
 
 let prompt_section_separator = "\n\n"
 
-(* agy states no prompt size limit: it is in no flag of `agy --help` and in
-   no field of its stream. A 2,078,915-byte prompt went end to end and the
-   model answered from markers placed at 0, 25, 50, 75 and 100 percent of it
-   (2026-09-18, agy 1.2.6), so the history is handed over whole and the CLI
-   decides what to do with it. An earlier reading of agy 1.1.12 concluded the
-   opposite from a truncated payload (11,386,764 bytes offered, 185,751
-   recorded, 2026-08-14); that is the shape a stdin write which timed out
-   also leaves, and it does not reproduce here. *)
+(* masc declares no size for this lane and measures none before sending: agy
+   states no prompt size limit in any flag of `agy --help` or any field of its
+   stream, and a 2,078,915-byte prompt went end to end with the model
+   answering from markers placed at every quarter of it (2026-09-18, agy
+   1.2.6). It does have one it does not state: from 13.3MB up, every start
+   ended with `all steps in trajectory are cleared` before any model call,
+   647 of 647 over two days, while every start at or below 11.9MB ran
+   (#37123). That refusal is prose in the result event's [error], the shape a
+   quota refusal also takes, so nothing here reads it. What bounds the start
+   is the carried front below, the same position the Agent Core lanes carry
+   from. *)
 
-(* The source projection runs first: the one production source appends a
-   bounded typed Gate replay reference (keeper_agent_run.ml). The reading
-   counts what that produced, so the appended reference is in the numbers the
-   turn record carries. *)
-(* Everything offered goes to the CLI, and what went is reported. Carrying no
-   cut is still a reading — the range starts at the oldest atom — and the turn
-   record needs it: a keeper's next turn reads the range its last one carried
-   (RFC keeper-context-window-in-tokens §10.4), and a turn that reports
-   nothing leaves the next one composing the whole history from scratch. The
-   claude_code sibling states the same rule for its uncapped lane. *)
-let observed_history_projection ?on_model_input_window_observation source_projection
+(* The range is composed first, on the durable history, and the source
+   projection runs over the carried range — the order
+   [Keeper_turn_driver_try_provider.bounded_model_input_projection] keeps, and
+   the order RFC keeper-context-window-in-tokens §10.4 states: a position is
+   an atom of the checkpoint history, so a front another runtime measured
+   names the same atom here only while the vocabulary is that history's. The
+   one production source appends a bounded typed Gate replay reference
+   (keeper_agent_run.ml) which the checkpoint never holds.
+
+   The start seed begins at the carried front rather than at the oldest atom.
+   A start that hands over the whole history is what a keeper falls back to
+   when nothing measured a range before it, not what it does after a turn
+   completed: this lane carried 11,447 atoms (45MB) per start for a day while
+   the same turn's Agent Core candidate carried 7 (#37123). What went is
+   still reported, because a keeper's next turn reads the range its last one
+   carried and a turn that reports nothing leaves the next one composing the
+   whole history again. *)
+let observed_history_projection
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ~keeper_name
+      ~runtime_id
+      source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun messages ->
-  let* messages =
-    match source_projection with
-    | None -> Ok messages
-    | Some project -> project messages
+  let carried =
+    Host.carried_start_range
+      ~keeper_name
+      ~runtime_id
+      ~carried_front_seed
+      (* This lane cuts nothing of its own: agy declares no prompt size and
+         masc declares none for it, so the front is the seed's or the oldest
+         atom. *)
+      ~own_first_atom:0
+      messages
   in
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    (* Atoms, not messages: the window's front is named by the message that
-       opens atom [total_atoms - transmitted_atoms], so both counts have to
-       be the atoms [Runtime_model_input_tail_window.annotate] numbers. *)
-    let _labelled, history_atom_count =
-      Runtime_model_input_tail_window.annotate messages
-    in
-    Option.iter
-      (fun observe ->
-         Option.iter
-           observe
-           (Runtime_model_input_tail_window.observe
-              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-              ~history_atom_count
-              { Runtime_model_input_tail_window.messages
-              ; dropped_atoms = 0
-              ; atom_count = history_atom_count
-              }))
-      on_model_input_window_observation;
-    Ok messages)
+  Option.iter
+    (fun observe ->
+       Option.iter
+         observe
+         (Runtime_model_input_tail_window.observe
+            ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+            ~history_atom_count:carried.Host.history_atom_count
+            carried.Host.projection))
+    on_model_input_window_observation;
+  match source_projection with
+  | None -> Ok carried.Host.messages
+  | Some project -> project carried.Host.messages
 ;;
 
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -319,6 +332,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
+    ~carried_front_seed
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -425,6 +439,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       Some
         (observed_history_projection
            ?on_model_input_window_observation
+           ?carried_front_seed
+           ~keeper_name
+           ~runtime_id
            model_input_projection)
     in
     let* () = match official_task_reference with
@@ -1050,6 +1067,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?carried_front_seed
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
@@ -1069,6 +1087,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~runtime_id
         ~keeper_name
         ~on_model_input_window_observation
+        ~carried_front_seed
     ~pre_tool_rejects
         ~base_path
         ~goal

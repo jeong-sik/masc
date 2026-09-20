@@ -289,6 +289,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 
 ### 5.7 씨앗을 토큰으로 자르고, 매 턴 새 세션을 연다
 
+- 2026-09-20: 자리 씨앗은 먼저 들어갔다. Antigravity 와 Claude Code 의 새 세션 씨앗은 이제 RFC-keeper-context-window-in-tokens §10.4 의 앞머리에서 시작한다(`Keeper_official_client_host.carried_start_range`). 토큰으로 자르는 아래 설계는 그대로 남은 일이다.
 - 이력 용량은 `W` 에서 고정부를 뺀 값이다(RFC-keeper-context-window-in-tokens §10.3). 이 레인은 보내기 전에 토큰을 셀 수 없으므로, 보낸 뒤 공급자 수치로 다음 씨앗을 고친다. 관측이 없으면 가장 새 atom 만 보낸다.
 - 세션 정책
 

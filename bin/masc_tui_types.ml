@@ -8314,7 +8314,9 @@ let approval_items (state : state) =
    and alert colour must all count the same thing. One count here, not
    three copies that can drift: with zero approvals and one open question
    the entry still has to be reachable, or the question has nowhere to be
-   seen from. *)
+   seen from. The badge number is therefore the SUM of approval rows and open
+   questions, not an approval count: a badge of 3 may be three approvals,
+   three questions, or a mix. *)
 let approvals_surface_pending (state : state) =
   List.length (approval_items state)
   +

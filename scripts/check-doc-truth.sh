@@ -208,6 +208,16 @@ require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure i
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
 require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
 
+# Keep the spec-index invariant-prefix table synchronized with the prefixes
+# actually declared by the spec files. SPEC-INDEX is excluded from the census
+# so its table cannot validate itself; the testing file's INV-T1..INV-T5 short
+# form is intentionally outside the INV-SUBSYSTEM-NNN census and is documented
+# beside the table.
+declared_prefixes="$({ sed -nE 's/^\| `(INV-[A-Z]+)` \|.*$/\1/p' docs/spec/SPEC-INDEX.md; } | sort -u)"
+used_prefixes="$({ rg -o --no-filename 'INV-[A-Z]+-[0-9]+' docs/spec -g '*.md' -g '!SPEC-INDEX.md' | sed -E 's/-[0-9]+$//' | sort -u; } | sort -u)"
+[[ "$declared_prefixes" == "$used_prefixes" ]] || \
+  fail "SPEC-INDEX invariant-prefix table drifted from docs/spec usage"
+
 docs_to_scan=(
   README.md
   README.ko.md

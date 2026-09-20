@@ -131,10 +131,10 @@ let%test "timeout validation preserves the invalid value" =
 ;;
 
 (* Each [validate_timeout] accepts [None] on its own because either budget
-   alone bounds the request: on the non-streaming path the connect deadline
-   is the effective ceiling for headers and body together, and the body
-   deadline is a total ceiling. Both absent is the one combination that
-   leaves the wire with no deadline at all. *)
+   bounds its declared phase: on the non-streaming path the connect deadline
+   ends when the response headers arrive, while the body deadline is a total
+   request ceiling. Both absent is the one combination that leaves the wire
+   with no deadline at all. *)
 let validate_deadline_coverage
       ~connect_timeout_s
       ~body_timeout_s

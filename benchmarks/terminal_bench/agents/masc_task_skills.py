@@ -45,10 +45,11 @@ def validate_task_skill_catalog(catalog: object, expected_names: list[str]) -> N
         raise RuntimeError("task Skill source does not match its ready read-only path")
 
     rejections = snapshot.get("rejections")
+    if not isinstance(rejections, list):
+        raise RuntimeError("task Skill catalog rejections are not a list")
     task_rejections = [row for row in rejections
                        if isinstance(row, dict)
-                       and row.get("source_id") == TASK_SKILL_SOURCE_ID] \
-        if isinstance(rejections, list) else []
+                       and row.get("source_id") == TASK_SKILL_SOURCE_ID]
     if task_rejections:
         raise RuntimeError(f"task Skill catalog rejected packages: {task_rejections}")
 
@@ -56,11 +57,12 @@ def validate_task_skill_catalog(catalog: object, expected_names: list[str]) -> N
         return isinstance(value, dict) and value.get("source_id") == TASK_SKILL_SOURCE_ID
 
     shadows = snapshot.get("shadows")
+    if not isinstance(shadows, list):
+        raise RuntimeError("task Skill catalog shadows are not a list")
     task_shadows = [row for row in shadows
                     if isinstance(row, dict)
                     and (task_identity(row.get("winner"))
-                         or task_identity(row.get("shadowed")))] \
-        if isinstance(shadows, list) else []
+                         or task_identity(row.get("shadowed")))]
     if task_shadows:
         raise RuntimeError(f"task Skill catalog has name collisions: {task_shadows}")
 

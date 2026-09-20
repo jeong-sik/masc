@@ -225,6 +225,23 @@ def test_task_skill_catalog_failures_are_not_silent(failure):
         validate_task_skill_catalog(catalog, ["task-guide"])
 
 
+@pytest.mark.parametrize("field", ["rejections", "shadows"])
+def test_task_skill_catalog_requires_diagnostic_lists(field):
+    catalog = task_catalog()
+    del catalog["snapshot"][field]
+    with pytest.raises(RuntimeError, match=field):
+        validate_task_skill_catalog(catalog, ["task-guide"])
+
+
+@pytest.mark.parametrize("field", ["rejections", "shadows"])
+@pytest.mark.parametrize("value", [None, {}, "not-a-list"])
+def test_task_skill_catalog_refuses_non_list_diagnostics(field, value):
+    catalog = task_catalog()
+    catalog["snapshot"][field] = value
+    with pytest.raises(RuntimeError, match=field):
+        validate_task_skill_catalog(catalog, ["task-guide"])
+
+
 @pytest.mark.parametrize("failure", ["missing_schema", "wrong_schema", "wrong_anchor", "wrong_path"])
 def test_task_skill_catalog_refuses_a_different_public_contract(failure):
     catalog = task_catalog()

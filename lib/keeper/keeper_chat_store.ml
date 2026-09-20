@@ -2697,12 +2697,21 @@ let load_all_result ~base_dir ~keeper_name : (chat_message list, string) result 
   | Private_file_succeeded_with_cleanup_failure
       { value = Fs_compat.Private_jsonl_rows.Rows_missing; _ } -> Ok []
   | Private_file_succeeded
-      (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end = _; end_offset = _ })
+      (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset })
   | Private_file_succeeded_with_cleanup_failure
       { value =
-          Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end = _; end_offset = _ }
+          Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }
       ; _
-      } -> parse_transcript_rows_result ~path ~redaction rows
+      } ->
+    if rows_end < end_offset
+    then
+      Error
+        (Printf.sprintf
+           "%s incomplete chat tail: complete rows end at byte %d, file ends at byte %d"
+           path
+           rows_end
+           end_offset)
+    else parse_transcript_rows_result ~path ~redaction rows
   | Private_file_failed error
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
     Error (Fs_compat.Private_jsonl_rows.error_to_string error)

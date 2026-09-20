@@ -731,6 +731,90 @@ let test_torn_external_tail_retries_the_same_range_once () =
   check int "Memory commit runs exactly once" 1 !commits
 ;;
 
+let test_torn_chat_tail_retries_the_same_range_once () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-torn-chat-tail" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let complete_prefix =
+    {|{"id":"complete-prefix","role":"user","content":"complete-prefix","ts":0.5,"speaker_authority":"owner"}|}
+    ^ "\n"
+  in
+  let torn_row =
+    {|{"id":"torn-chat","role":"user","content":"recover-after-newline","ts":1.5,"speaker_authority":"owner"}|}
+  in
+  let write contents =
+    match Fs_compat.save_file_atomic_strict path contents with
+    | Ok () -> ()
+    | Error detail -> failf "write chat fixture: %s" detail
+  in
+  write (complete_prefix ^ torn_row);
+  (match Keeper_chat_store.load_all ~base_dir:config.Workspace.base_path ~keeper_name with
+   | [ prefix ] ->
+     check string "permissive reader keeps complete prefix" "complete-prefix" prefix.content
+   | rows -> failf "expected one complete permissive row, got %d" (List.length rows));
+  let commits = ref 0 in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ _ ->
+         incr commits;
+         true)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.Chat_store_unreadable _)) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "torn chat tail advanced as complete evidence");
+  check int "torn chat tail does not call Memory commit" 0 !commits;
+  check_progress_end config 1;
+  write (complete_prefix ^ torn_row ^ "\n");
+  let observations = ref [] in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ input ->
+         incr commits;
+         observations :=
+           List.map
+             (fun (observation : Keeper_counterpart_observation.t) ->
+                observation.content)
+             input.counterpart_observations;
+         true)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "repaired range advances once" 2 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "repaired chat row did not advance the same range");
+  check (list string)
+    "repaired row reaches the retried range"
+    [ "recover-after-newline" ]
+    !observations;
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ _ ->
+         incr commits;
+         true)
+   with
+   | Ok Consumer.Nothing_to_read -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "settled range was consumed more than once");
+  check int "Memory commit runs exactly once" 1 !commits
+;;
+
 let test_same_name_clusters_keep_independent_ranges () =
   with_workspace @@ fun default ->
   let a = config_in_cluster default "Durable/A" in
@@ -1016,6 +1100,8 @@ let () =
             test_unknown_speaker_authority_does_not_advance_progress
         ; test_case "torn external tail retries the same range once" `Quick
             test_torn_external_tail_retries_the_same_range_once
+        ; test_case "torn chat tail retries the same range once" `Quick
+            test_torn_chat_tail_retries_the_same_range_once
         ; test_case "same-name clusters isolate range progress" `Quick
             test_same_name_clusters_keep_independent_ranges
         ; test_case "selected range bypasses recent window" `Quick

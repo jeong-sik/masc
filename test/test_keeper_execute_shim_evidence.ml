@@ -115,8 +115,7 @@ let with_workspace ~response_kind f =
       ; port = default_port
       ; identity_file = default_identity_file ~name:"fixture"
       ; known_hosts_file = default_known_hosts_file ~name:"fixture"
-      ; remote_root = "/srv/masc/playground"; workspace_layout = Exec_ssh_endpoint.Per_keeper
-      ; connect_timeout_sec = 1
+      ; remote_root = "/srv/masc/playground"; connect_timeout_sec = 1
       ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []
       ; private_home = false });
   (match Keeper_approval_queue.install_persistence ~base_path with

@@ -17,7 +17,6 @@ allow = ["api.github.com"]
 host = "builder.local"
 user = "masc-exec"
 remote_root = "/srv/masc/playground"
-workspace_layout = "per_keeper"
 |}
 ;;
 
@@ -169,7 +168,6 @@ let two_keepers ~alder_header =
     ; {|host = "builder.local"|}
     ; {|user = "masc-exec"|}
     ; {|remote_root = "/srv/masc/playground"|}
-    ; {|workspace_layout = "per_keeper"|}
     ; ""
     ]
 ;;

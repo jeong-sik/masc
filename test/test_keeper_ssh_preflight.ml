@@ -169,7 +169,6 @@ let endpoint : Exec_ssh_endpoint.t =
   ; identity_file = ".masc/ssh/fixture.key"
   ; known_hosts_file = ".masc/ssh/known_hosts.d/fixture"
   ; remote_root = "/srv/masc/playground"
-  ; workspace_layout = Exec_ssh_endpoint.Per_keeper
   ; connect_timeout_sec = 1
   ; max_concurrent_sessions = 2
   ; env_allowlist = []

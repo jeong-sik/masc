@@ -3,7 +3,7 @@
    (port 22, connect_timeout_sec 10, max_concurrent_sessions 8,
    env_allowlist [], capabilities [], and name-derived base-relative
    identity_file / known_hosts_file paths), and fails closed on unknown keys,
-   missing required keys, invalid workspace layouts, and invalid endpoint names — an endpoint that did not
+   missing required keys, and invalid endpoint names — an endpoint that did not
    parse cleanly must never reach dispatch half-populated. *)
 
 open Alcotest
@@ -22,7 +22,6 @@ let endpoint_toml name extra =
 host = "builder.local"
 user = "masc-exec"
 remote_root = "/srv/masc/playground"
-workspace_layout = "per_keeper"
 %s
 |}
     name
@@ -56,9 +55,6 @@ let test_parse_minimal_endpoint () =
       endpoint.Exec_ssh_endpoint.known_hosts_file;
     check string "remote_root" "/srv/masc/playground"
       endpoint.Exec_ssh_endpoint.remote_root;
-    check bool "workspace layout" true
-      (Exec_ssh_endpoint.equal_workspace_layout
-         Exec_ssh_endpoint.Per_keeper endpoint.Exec_ssh_endpoint.workspace_layout);
     check int "connect_timeout_sec default" 10
       endpoint.Exec_ssh_endpoint.connect_timeout_sec;
     check int "max_concurrent_sessions default" 8
@@ -134,7 +130,6 @@ let test_roundtrip_full_fields () =
       ; identity_file = "/keys/dev.key"
       ; known_hosts_file = "/keys/dev.known_hosts"
       ; remote_root = "/srv/masc/playground"
-      ; workspace_layout = Exec_ssh_endpoint.Shared
       ; connect_timeout_sec = 3
       ; max_concurrent_sessions = 2
       ; env_allowlist = [ "PATH"; "HOME" ]
@@ -159,7 +154,6 @@ let test_roundtrip_defaults () =
       ; identity_file = default_identity_file ~name:"dev"
       ; known_hosts_file = default_known_hosts_file ~name:"dev"
       ; remote_root = "/srv/masc/playground"
-      ; workspace_layout = Exec_ssh_endpoint.Per_keeper
       ; connect_timeout_sec = default_connect_timeout_sec
       ; max_concurrent_sessions = default_max_concurrent_sessions
       ; env_allowlist = []
@@ -186,7 +180,6 @@ let test_roundtrip_no_stray_name_field () =
       ; identity_file = default_identity_file ~name:"dev"
       ; known_hosts_file = default_known_hosts_file ~name:"dev"
       ; remote_root = "/srv/masc/playground"
-      ; workspace_layout = Exec_ssh_endpoint.Per_keeper
       ; connect_timeout_sec = default_connect_timeout_sec
       ; max_concurrent_sessions = default_max_concurrent_sessions
       ; env_allowlist = []
@@ -214,7 +207,7 @@ let test_unknown_key_rejected () =
     check bool "names the key" true (contains "bogus_key" (render_errors errors))
 
 let test_missing_required_rejected () =
-  (* Only host: user, remote_root, and workspace_layout are required, so all must be
+  (* Only host: both user and remote_root are required, so both must be
      reported. *)
   let toml =
     {|
@@ -227,30 +220,7 @@ host = "builder.local"
   | Error errors ->
     let rendered = render_errors errors in
     check bool "names user" true (contains "user" rendered);
-    check bool "names remote_root" true (contains "remote_root" rendered);
-    check bool "names workspace_layout" true (contains "workspace_layout" rendered)
-
-let test_workspace_layout_is_closed () =
-  let reject value expected =
-    let toml =
-      Printf.sprintf
-        {|
-[exec.ssh.endpoints.dev]
-host = "builder.local"
-user = "masc-exec"
-remote_root = "/srv/masc/playground"
-workspace_layout = %s
-|}
-        value
-    in
-    match parse_cfg toml with
-    | Ok _ -> failf "workspace layout %s must be rejected" value
-    | Error errors ->
-      check bool "names workspace_layout" true
-        (contains expected (render_errors errors))
-  in
-  reject {|"shared-ish"|} "must be exactly";
-  reject "1" "must be a string"
+    check bool "names remote_root" true (contains "remote_root" rendered)
 
 let test_endpoint_name_validation () =
   match parse_cfg (endpoint_toml "bad name!" "") with
@@ -319,7 +289,6 @@ let test_padded_host_rejected () =
 host = " builder.local "
 user = "masc-exec"
 remote_root = "/srv/masc/playground"
-workspace_layout = "per_keeper"
 |}
   in
   match parse_cfg toml with
@@ -339,7 +308,6 @@ let test_destination_option_injection_rejected () =
 host = %S
 user = %S
 remote_root = "/srv/masc/playground"
-workspace_layout = "per_keeper"
 |}
         host user
     in
@@ -362,7 +330,6 @@ let test_relative_remote_root_rejected () =
 host = "builder.local"
 user = "masc-exec"
 remote_root = "srv/masc"
-workspace_layout = "per_keeper"
 |}
   in
   match parse_cfg toml with
@@ -396,8 +363,6 @@ let () =
     ; ( "fail-closed"
       , [ test_case "unknown key rejected" `Quick test_unknown_key_rejected
         ; test_case "missing required rejected" `Quick test_missing_required_rejected
-        ; test_case "workspace layout is closed" `Quick
-            test_workspace_layout_is_closed
         ; test_case "endpoint name validation" `Quick test_endpoint_name_validation
         ; test_case "stray exec key rejected" `Quick test_stray_exec_key_rejected
         ; test_case "scalar endpoint rejected" `Quick test_scalar_endpoint_rejected

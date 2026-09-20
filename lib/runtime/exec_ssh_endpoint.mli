@@ -31,15 +31,6 @@ val default_max_concurrent_sessions : int
 (** [8] — sessions multiplex onto one ControlMaster connection; sshd
     [MaxSessions] defaults to 10, so the ceiling is explicit. *)
 
-type workspace_layout =
-  | Per_keeper
-  | Shared
-[@@deriving show, eq]
-
-val workspace_layout_to_string : workspace_layout -> string
-val workspace_layout_of_string : string -> workspace_layout option
-(** Exact TOML spellings for the closed workspace layout contract. *)
-
 val validate_destination : host:string -> user:string -> (unit, string) result
 (** Reject values that OpenSSH could parse as an option instead of the single
     [user@host] destination argument, plus whitespace/control bytes and extra
@@ -64,9 +55,6 @@ type t =
     (** Pinned host keys (public; may be committed). Default
         [<base>/.masc/ssh/known_hosts.d/<name>], stored base-relative. *)
   ; remote_root : string  (** Remote playground root (required). *)
-  ; workspace_layout : workspace_layout
-    (** [Per_keeper] maps a Keeper to [remote_root/<keeper>]. [Shared] uses
-        [remote_root] itself as the task workspace. *)
   ; connect_timeout_sec : int
     (** Maps to ssh [ConnectTimeout]. Default {!default_connect_timeout_sec}. *)
   ; max_concurrent_sessions : int

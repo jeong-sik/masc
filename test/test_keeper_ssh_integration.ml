@@ -30,7 +30,6 @@ let endpoint fixture : Exec_ssh_endpoint.t =
   ; identity_file = Filename.concat fixture.key_dir "id_ed25519"
   ; known_hosts_file = Filename.concat fixture.key_dir "known_hosts"
   ; remote_root = "/srv/masc/playground"
-  ; workspace_layout = Exec_ssh_endpoint.Per_keeper
   ; connect_timeout_sec = 2
   ; max_concurrent_sessions = 4
   ; env_allowlist = [ "FOO"; "PATH" ]

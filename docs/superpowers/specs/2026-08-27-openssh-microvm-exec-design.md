@@ -362,7 +362,6 @@ mid-session fails the tool call with a named error.
 | `identity_file` | `<base>/.masc/ssh/<name>.key` | dedicated key — a path *reference*; key material at 0600, `config/identity/` conventions |
 | `known_hosts_file` | `<base>/.masc/ssh/known_hosts.d/<name>` | pinned host keys (public; may be committed) |
 | `remote_root` | — (required) | remote playground root |
-| `workspace_layout` | — (required) | `per_keeper` uses `remote_root/<keeper>`; `shared` uses `remote_root` itself as the task workspace |
 | `connect_timeout_sec` | 10 | → `ConnectTimeout` |
 | `max_concurrent_sessions` | 8 | sessions multiplex onto one ControlMaster connection; sshd `MaxSessions` defaults to 10, so the ceiling must be explicit |
 | `env_allowlist` | `[]` | request env names allowed to cross the wire |

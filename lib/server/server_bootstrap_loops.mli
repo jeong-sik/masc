@@ -140,6 +140,30 @@ val start_keeper_loops :
     Synchronous startup failure is retained in the lifecycle and raised as
     [Keeper_persistence_start_failed]. *)
 
+exception Keeper_lifecycle_surfaces_partly_dropped of string list
+(** A keeper lifecycle refresh came back naming cache prefixes it could not
+    drop ({!Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh}).
+    The listener raises it so a partial refresh and a raising one reach the
+    batch the same way. *)
+
+(** What the Keeper lifecycle listener did with one event it took off its
+    subscription. *)
+type keeper_lifecycle_refresh =
+  | Lifecycle_refreshed
+  | Lifecycle_ignored
+  (** Not a lifecycle event. Nothing about a Keeper changed. *)
+  | Lifecycle_undecodable
+  (** A lifecycle event whose payload did not decode. Which Keeper changed is
+      unknown, so the caches cannot be patched precisely. *)
+  | Lifecycle_refresh_failed of
+      { keeper_name : string
+      ; event : Keeper_lifecycle_events.lifecycle_event
+      ; error : exn
+      }
+  | Lifecycle_handling_failed of exn
+  (** A raise outside the refresh itself — decoding the payload, the malformed
+      counter, a log call. What the event should have changed is unknown. *)
+
 module For_testing : sig
   type keeper_loops_start_ownership
 
@@ -188,6 +212,31 @@ module For_testing : sig
     keeper_name:string ->
     Keeper_lifecycle_events.lifecycle_event ->
     unit
+
+  val raise_if_surfaces_partly_dropped :
+    Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh -> unit
+  (** [()] for a refresh that dropped every cache it owns, and
+      {!Keeper_lifecycle_surfaces_partly_dropped} for one that did not. This is
+      the step that puts a partial refresh on the batch's failure path. *)
+
+  val handle_keeper_lifecycle_batch :
+    refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->
+    invalidate_all:(unit -> unit) ->
+    Runtime_event_bus.batch ->
+    keeper_lifecycle_refresh list
+  (** One drained batch of the lifecycle listener: each event is refreshed on
+      its own, and an undecodable lifecycle event, refresh failure, or overflow drop calls
+      [invalidate_all] once after the batch. *)
+
+  val refresh_keeper_lifecycle_once :
+    subscription:Runtime_event_bus.handle ->
+    refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->
+    invalidate_all:(unit -> unit) ->
+    broadcast:(unit -> unit) ->
+    keeper_lifecycle_refresh list
+  (** One turn of the lifecycle listener fiber: drain [subscription], refresh
+      the batch, and [broadcast] when the batch carried events or lost some.
+      This is what the fiber runs between sleeps. *)
 end
 
 val start_background_maintenance :

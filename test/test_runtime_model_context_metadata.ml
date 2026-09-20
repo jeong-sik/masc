@@ -3,7 +3,7 @@ let test_provider_window () =
   let seed=List.hd (Llm_provider.Model_catalog.model_entries catalog) in
   let binding=List.hd (Agent_core.Provider_runtime_binding.all ()) in
   let row provider context = {seed with Llm_provider.Model_catalog.provider_name=provider;
-    id_prefix="exact-model";supported_models=None;max_context_tokens=Some context} in
+    id_prefix=Llm_provider.Model_identifiers.Id_prefix.of_string_exn "exact-model";supported_models=None;max_context_tokens=Some context} in
   let find rows=Runtime_model_context_metadata.find ~provider_id:binding.id ~model:"exact-model" rows in
   Alcotest.check (Alcotest.option Alcotest.int) "generic architectural window never substitutes for provider" None
     (find [row None 1000000]);

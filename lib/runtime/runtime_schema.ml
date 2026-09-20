@@ -328,6 +328,7 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
+  ; disable_parallel_tool_use : bool
   ; context_marks : context_marks option
   ; max_tokens : int option
     (** Request-side output budget for this binding ([max_tokens] on Chat
@@ -400,12 +401,12 @@ type config =
         id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
   ; media_failover : string list
-    (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
-        when a turn's input modality (image/audio/document) exceeds the assigned
-        runtime's declared capabilities; the turn reroutes to the first that
-        admits it. [[]] = derive capable runtimes from declared
-        [\[models.*.capabilities\]] in declaration order. Each id must resolve to
-        a configured runtime (rejected at load like [\[runtime\].default]). *)
+    (** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids
+        the vision tool calls, including the image readings made for a runtime
+        that cannot take the image. A keeper turn never dispatches to them; its
+        image reroute stays inside its lane. [[]] = no vision fleet. Each id must
+        resolve to a configured runtime (rejected at load like
+        [\[runtime\].default]). *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

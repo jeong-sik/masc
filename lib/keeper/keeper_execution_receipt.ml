@@ -3,23 +3,6 @@
 include Keeper_execution_receipt_types
 
 
-let runtime_rotation_attempt_to_json attempt =
-  `Assoc
-    [ "from_runtime", `String (attempt.from_runtime)
-    ; "to_runtime", `String (attempt.to_runtime)
-    ; ( "reason"
-      , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
-    ; "outcome", `String (runtime_rotation_outcome_to_string attempt.outcome)
-    ; ( "productive_phase_elapsed_ms"
-      , Json_util.int_opt_to_json attempt.productive_phase_elapsed_ms )
-    ; ( "retry_phase_elapsed_ms"
-      , Json_util.int_opt_to_json attempt.retry_phase_elapsed_ms )
-    ; "error_kind", string_opt_json (Option.map error_kind_to_string attempt.error_kind)
-    ; "error_message", string_opt_json attempt.error_message
-    ; "recorded_at", `String attempt.recorded_at
-    ]
-;;
-
 let receipt_duration_ms receipt =
   match
     ( Masc_domain.parse_iso8601_opt receipt.started_at
@@ -443,11 +426,6 @@ let to_json_with_operator_disposition
               | Some value ->
                 `String (Keeper_error_classify.degraded_retry_reason_to_string value)
               | None -> `Null )
-          ; ( "rotation_attempts"
-            , `List
-                (List.map
-                   runtime_rotation_attempt_to_json
-                   receipt.runtime_rotation_attempts) )
           ] )
     ; ( "stop_reason"
       , match receipt.stop_reason with

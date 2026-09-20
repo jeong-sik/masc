@@ -83,7 +83,7 @@ val load_context_from_checkpoint
 type checkpoint_load = Keeper_context_core.checkpoint_load =
   | Checkpoint_loaded of working_context
   | Checkpoint_absent
-  | Checkpoint_unread
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
 
 val load_context_from_checkpoint_classified
   :  trace_id:string

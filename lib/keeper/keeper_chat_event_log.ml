@@ -635,8 +635,9 @@ let event_floats_are_finite = function
 (* Fail-open by contract: stage 1 dual-writes next to keeper_chat_store, which
    remains the durable record of record. A journal failure is logged, never
    raised into the live path. The umbrella is required: the Fs_compat result
-   type covers only write/fsync/rollback failures, while mkdir, openfile,
-   fchmod, fsync_parent_directory, and lockf raise raw [Unix.Unix_error]. *)
+   type covers only torn-tail cut/write/fsync/rollback failures, while mkdir,
+   openfile, fchmod, fsync_parent_directory, and lockf raise raw
+   [Unix.Unix_error]. *)
 let append journal ~seq ~ts event =
   try
     if (not (float_is_finite ts)) || not (event_floats_are_finite event)
@@ -719,8 +720,8 @@ let log_settlement_failure ~path cleanup_failure =
    out an append in progress, so the bytes are never a write in flight, and a
    fragment after the last '\n' — the rows an append left when the process
    died between its write and its rollback — is not a row. Such a fragment
-   is logged and the complete rows are served; the writer refuses to append
-   after it, so the journal is frozen at exactly those rows. The three
+   is logged and the complete rows are served; the next append cuts it before
+   writing, so any later row follows exactly those rows. The three
    failure shapes stay apart: a missing journal is the normal state of a
    queued operation, an unreadable one is an operator problem, a corrupt one
    is a codec problem. *)

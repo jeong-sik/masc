@@ -29,12 +29,25 @@ status: reference
 **Keeper Turn**
 : 하나의 Keeper 작업 시도를 위해 MASC가 agent core Agent run을 실행하는 단위.
 
+**Checkpoint Load**
+: 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
+  새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
+  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
   단계. Keeper turn과 동일한 단위가 아니다.
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Parallel Tool Calls**
+: 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의
+  `supports_parallel_tool_calls`, 실행별 억제는 runtime binding의
+  `disable-parallel-tool-use`가 정한다. 억제 요청을 받아들이는 provider 계약은
+  provider catalog의 `supports_parallel_tool_suppression`이며, 미선언이면 억제를
+  요청할 수 없다. 이 요청 정책은 도구를 실행할 때의 동시성이나
+  spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
 ## Collaboration State
 
@@ -46,8 +59,9 @@ status: reference
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
 
 **Goal**
-: 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Blocked`,
-  `Paused`, `Completed`, `Dropped`다.
+: 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
+  `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료 요청은 검증을 거쳐
+  사람의 최종 확인을 기다린다. 현재 상태와 전이는 `Goal_phase`가 정한다.
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 현재 동작은 create, list, get,
@@ -90,6 +104,8 @@ status: reference
 : Checkpoint의 `messages`. 그 trace에서 오간 message가 시간순으로 쌓인 목록이다.
   Keeper turn은 이 목록 끝에 message를 덧붙인다. 목록 안에는 어느 message가 어느
   Keeper turn의 것인지 표시가 없다.
+  운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
+  진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
 
 **Message**
 : History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content

@@ -142,7 +142,7 @@ let[@warning "-32"] test_catalog_entry
       ?cache_read
       id_prefix
   =
-  { Model_catalog.id_prefix
+  { Model_catalog.id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
   ; base_label = None
   ; provider_name
   ; max_context_tokens = None

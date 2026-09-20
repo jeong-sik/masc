@@ -1795,6 +1795,7 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "model_id", `String rt.binding.model_id
           ; "is_default", `Bool rt.binding.is_default
           ; "max_concurrent", Json_util.int_opt_to_json rt.binding.max_concurrent
+          ; "disable_parallel_tool_use", `Bool rt.binding.disable_parallel_tool_use
           ; "price_input", Json_util.float_opt_to_json rt.binding.price_input
           ; "price_output", Json_util.float_opt_to_json rt.binding.price_output
           ; "keep_alive", Json_util.string_opt_to_json rt.binding.keep_alive

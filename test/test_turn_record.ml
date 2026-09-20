@@ -287,7 +287,7 @@ let test_dashboard_writer_fixture_roundtrip () =
           Runtime_usage_scope.to_string record.usage.scope)
       lines
   in
-  check (list string) "fixture covers the current usage scopes"
+  check (list string) "fixture holds one row per usage scope, in variant order"
     (List.map Runtime_usage_scope.to_string
        Runtime_usage_scope.all)
     scopes

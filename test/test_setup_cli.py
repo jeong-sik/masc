@@ -203,7 +203,24 @@ class Setup(unittest.TestCase):
             runtime.write_text(runtime.read_text().replace('deepseek-v4-flash','setup-fixture-owned-model'))
             if missing_key:
                 runtime = config / 'runtime.toml'
-                runtime.write_text(runtime.read_text() + '\n[providers.setup_fixture.credentials]\ntype = "env"\nkey = "MASC_SETUP_TEST_KEY"\n')
+                # The shared fixture already declares one credentials table for
+                # this provider (#37316 made the loopback smoke hermetic with an
+                # inline value). Appending a second table for the same provider
+                # is a duplicate-table TOML error, and the command then exits
+                # before it can print its receipt -- which is what this test
+                # reads. Swap the declared block instead of adding one.
+                inline = ('[providers.setup_fixture.credentials]\n'
+                          'type = "inline"\n'
+                          'value = "release-evidence-loopback"\n')
+                env_block = ('[providers.setup_fixture.credentials]\n'
+                             'type = "env"\n'
+                             'key = "MASC_SETUP_TEST_KEY"\n')
+                text = runtime.read_text()
+                if inline in text:
+                    text = text.replace(inline, env_block)
+                else:
+                    text = text + '\n' + env_block
+                runtime.write_text(text)
             manifest = config / 'keepers/imp.toml'
             original = manifest.read_bytes()
             if stale_token:

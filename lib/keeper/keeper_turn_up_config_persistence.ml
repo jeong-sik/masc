@@ -689,7 +689,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
                   (error_to_string error)
               | Error _ | Ok _ -> ());
              Printexc.raise_with_backtrace exn backtrace
-           | exception exn -> (* cancel-guard-ok: the arm above this one matches Eio.Cancel.Cancelled and re-raises it after rollback, eleven lines up and past the guard's three-line context window. *)
+           | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. The arm above matches Eio.Cancel.Cancelled and re-throws it after rollback. The site is correct; the marker exists only because the guard reads three lines back. *)
              let backtrace = Printexc.get_raw_backtrace () in
              Error
                (Publication_exception

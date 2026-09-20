@@ -6190,7 +6190,10 @@ let row_list (state : state) : row_list option =
        | Lanes_overview ->
            of_counted (fun count ->
                windowed ~count ~cursor:state.lanes_standalone_cursor
-                 (fun index -> state.lanes_standalone_cursor <- index)))
+                 (fun index ->
+                   if index <> state.lanes_standalone_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
+                   state.lanes_standalone_cursor <- index)))
   | Clients ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.clients_surface_cursor
@@ -6237,7 +6240,11 @@ let row_list (state : state) : row_list option =
       of_counted (fun count ->
           scrolling ~count ~cursor:state.runtime_cursor
             ~scroll:state.runtime_surface_scroll
-            ~set_cursor:(fun i -> state.runtime_cursor <- i)
+            ~set_cursor:(fun i ->
+              (* The lane editor's line is about the row the key acted on. *)
+              if i <> state.runtime_cursor then
+                Masc_tui_types.dismiss_runtime_lane_notice state;
+              state.runtime_cursor <- i)
             ~set_scroll:(fun s -> state.runtime_surface_scroll <- s))
   | System_logs ->
       of_counted (fun count ->
@@ -6569,7 +6576,10 @@ let search_jump ?(backwards = false) state ~query ~after =
               else (after + step + total) mod total
             in
             if matches index then begin
-              if state.view = Lanes then state.lanes_action_error <- None;
+              if state.view = Lanes then begin
+                state.lanes_action_error <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state
+              end;
               place_row_cursor state index
             end
             else scan (step + 1)
@@ -6589,6 +6599,8 @@ let goto_surface state ~mailbox (destination : surface) =
     close_repository_changes state;
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
+  (* The lane editor's line belongs to the view that drew it. *)
+  if destination <> state.view then Masc_tui_types.dismiss_runtime_lane_notice state;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
    | Clients -> launch_clients_load state ~mailbox
@@ -7367,27 +7379,40 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
         Masc_tui_types.Runtime_surface_list
   in
   if Masc_tui_types.runtime_lane_write_busy state then
-    (* [existing] is the order the list last read; appending to it before
-       the previous write is read back would undo that write. *)
+    (* A conversation lane's write is [existing] plus the pick, and
+       [existing] is the order the list last read; writing it before the
+       previous write is read back would undo that write. *)
     state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
-  else if List.exists (String.equal runtime_id) existing then
-    state.runtime_lane_notice <-
-      Some
-        (Masc_tui_types.Lane_write_refused
-           (runtime_id ^ " is already a candidate on " ^ lane))
   else
-    launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
-      match pick with
-      | Masc_tui_types.Pick_conversation_lane lane ->
-          Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
-            ~runtime_ids:(existing @ [ runtime_id ])
-      | Masc_tui_types.Pick_exact_lane name ->
-          Masc_tui_http.set_runtime_lane_slots ~host ~port
-            ~lane:(Masc_tui_http.exact_lane_route name)
-            ~runtime_ids:(existing @ [ runtime_id ])
-      | Masc_tui_types.Pick_new_lane lane ->
-          Masc_tui_http.create_runtime_lane ~host ~port ~lane
-            ~runtime_ids:[ runtime_id ])
+    match pick, Masc_tui_types.runtime_lane_candidate_write_refusal state with
+    | Masc_tui_types.Pick_conversation_lane _, Some notice ->
+        state.runtime_lane_notice <- Some notice
+    | Masc_tui_types.Pick_conversation_lane _, None
+    | (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_new_lane _),
+      (None | Some _) ->
+        (* Exact lanes append one slot to the server's current order. A new
+           lane sends only the pick. Neither operation rewrites a stale list;
+           only the conversation-lane arm above sends [existing] in full. *)
+        if List.exists (String.equal runtime_id) existing then
+          state.runtime_lane_notice <-
+            Some
+              (Masc_tui_types.Lane_write_refused
+                 (runtime_id ^ " is already a candidate on " ^ lane))
+        else
+          launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
+            match pick with
+            | Masc_tui_types.Pick_conversation_lane lane ->
+                Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+                  ~runtime_ids:(existing @ [ runtime_id ])
+            | Masc_tui_types.Pick_exact_lane name ->
+                (* Only the one slot is sent: the server appends it to the order
+                   the file declares, so a declared slot the registry dropped is
+                   kept. [existing] is used above only to refuse an id the lane
+                   already names. *)
+                Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
+            | Masc_tui_types.Pick_new_lane lane ->
+                Masc_tui_http.create_runtime_lane ~host ~port ~lane
+                  ~runtime_ids:[ runtime_id ])
 ;;
 
 let launch_runtime_catalog_load state ~mailbox =
@@ -7418,11 +7443,11 @@ let handle_runtime_lane_edit state ~mailbox edit =
   match Masc_tui_types.plan_runtime_lane_edit state edit with
   | Masc_tui_types.Open_lane_name_field ->
       state.runtime_lane_name_draft <- Some "";
-      state.runtime_lane_notice <- None;
+      Masc_tui_types.dismiss_runtime_lane_notice state;
       launch_runtime_catalog_load state ~mailbox
   | Masc_tui_types.Arm_lane_removal lane ->
       state.runtime_lane_remove_armed <- Some lane;
-      state.runtime_lane_notice <- None
+      Masc_tui_types.dismiss_runtime_lane_notice state
   | Masc_tui_types.Send_lane_write { lane; request; cursor_after } ->
       (match request with
        | Masc_tui_types.Write_lane_removal -> state.runtime_lane_remove_armed <- None
@@ -10311,6 +10336,7 @@ let handle_lanes_overview_click state ~base_path:_ ~mailbox ~terminal_rows ~row 
       then open_lanes_standalone_selection state ~mailbox
       else begin
         state.lanes_action_error <- None;
+        Masc_tui_types.dismiss_runtime_lane_notice state;
         state.lanes_standalone_cursor <- index
       end
 
@@ -17808,7 +17834,7 @@ and is loaded on demand through keeper_skill.
                    state.runtime_lane_name_draft <- None;
                    state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
                    state.runtime_lane_pick_cursor <- 0;
-                   state.runtime_lane_notice <- None
+                   Masc_tui_types.dismiss_runtime_lane_notice state
                  end
                | "\127" | "\b" | "backspace" ->
                  let length = String.length draft in
@@ -18998,7 +19024,7 @@ and is loaded on demand through keeper_skill.
                          (Masc_tui_types.Pick_conversation_lane
                             row.Masc.Tui_decode.rcr_lane_id);
                      state.runtime_lane_pick_cursor <- 0;
-                     state.runtime_lane_notice <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
        | Some k
          when state.view = Runtime
@@ -19023,7 +19049,7 @@ and is loaded on demand through keeper_skill.
                 state.runtime_lane_pick <-
                   Some (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
                 state.runtime_lane_pick_cursor <- 0;
-                state.runtime_lane_notice <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)
         | Some ("T" | "t")
@@ -21746,6 +21772,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      let count = lanes_standalone_count state in
                      state.lanes_action_error <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      state.lanes_standalone_cursor <-
                        max 0
                          (min (count - 1)
@@ -21826,6 +21853,8 @@ and is loaded on demand through keeper_skill.
                        ~cursor:state.runtime_cursor
                        ~scroll:state.runtime_surface_scroll
                    in
+                   if cursor <> state.runtime_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
             | Tools -> state.tools_scroll <-
@@ -22108,6 +22137,7 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_scroll <- scroll)
                  | Lanes_overview ->
                      state.lanes_action_error <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      state.lanes_standalone_cursor <-
                        max 0 (state.lanes_standalone_cursor - 1))
             | Harness ->
@@ -22187,6 +22217,8 @@ and is loaded on demand through keeper_skill.
                        ~cursor:state.runtime_cursor
                        ~scroll:state.runtime_surface_scroll
                    in
+                   if cursor <> state.runtime_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
             | Tools ->
@@ -23342,6 +23374,7 @@ and is loaded on demand through keeper_skill.
             | Masc_tui_types.Runtime_lanes ->
                 state.runtime_mode <- Masc_tui_types.Runtime_all;
                 (* Selection and scroll belong to the same list. *)
+                Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.runtime_cursor <- 0;
                 state.runtime_surface_scroll <- 0
             | Masc_tui_types.Runtime_all ->

@@ -12,6 +12,25 @@ status: reference
 : 다중 에이전트의 Board, Task, Goal, Schedule, Keeper와 도구 실행을 조율하는
   OCaml/Eio 서버.
 
+**agent core**
+: `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를
+  참조하지 않아 MASC 없이도 쓸 수 있다. Agent 구성, tool turn, typed response와
+  실패의 타입은 모든 레인이 여기 것을 쓴다. Provider 요청을 실제로 보내는 것은
+  agent core 레인뿐이고, 공식 클라이언트 레인은 자기 프로세스가 보낸다.
+
+**Official Client Lane**
+: Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
+  provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
+
+**MCP**
+: Model Context Protocol의 약어. MASC는 양쪽으로 쓴다. 자기 도구와 협업 상태를
+  MCP 서버로 내보내고(`masc_*` 도구), Agent는 `mcp_clients`로 바깥 MCP 서버에
+  붙어 그쪽 도구를 가져온다.
+
+**HITL**
+: Human-in-the-Loop의 약어. Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로다.
+  대기 중인 HITL 판정은 다른 Keeper의 턴이나 서로 독립인 작업을 멈추지 않는다.
+
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
@@ -27,7 +46,8 @@ status: reference
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Keeper Turn**
-: 하나의 Keeper 작업 시도를 위해 MASC가 agent core Agent run을 실행하는 단위.
+: 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
+  레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
@@ -41,6 +61,61 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Tool**
+: 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
+  descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
+
+**Tool-host failure report**
+: 클라이언트가 관측한 도구 연결 실패 기록. HTTP 인증 결과의 보고자는 감사
+  이벤트의 `actor`가 된다. 본문의 `agent_name`은 실패가 보고된 Agent이며,
+  감사 상세의 `reported_agent`와 실패 envelope에 보존한다. 허용된 tokenless
+  요청의 보고자는 기존 로컬 attribution 정책을 따른다.
+
+**Provider**
+: 모델에 접속하는 protocol·transport·credential을 소유하는 설정 항목.
+  → [Runtime_schema.provider](../../lib/runtime/runtime_schema.mli)
+
+**Runtime**
+: Provider·Model·Binding을 해석해 얻은 실행 후보 하나.
+  → [Runtime.t](../../lib/runtime/runtime.mli)
+
+**Lane**
+: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
+  → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+
+**Runtime execution**
+: 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
+  → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
+
+**Exact-output route**
+: Librarian 같은 단독 모델 작업의 목적별 실행 경로. 해당 설정은 API slot과
+  후속 CLI 후보 순서를 선언한다. 코드 이름은 `exact_output_lane_decl`이다.
+  → [선언](../../lib/runtime/runtime_schema.mli),
+  [작업 기록](../../lib/exact_lane_run_registry.mli)
+
+**Memory queue**
+: Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
+  최신 대기 하나를 가진다. 코드 이름은 `Keeper_memory_lane`이다.
+  → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
+
+**Skill**
+: `SKILL.md`로 선언한 재사용 지시 또는 Tool 합성. 출처·패키지·이름·문서 revision으로
+  식별한다. → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
+  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
+
+**Composition**
+: Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
+  허용된 계획을 Tool로 노출한다. → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
+  [실행 계획](../../lib/keeper/keeper_tool_plan.mli)
+
+**Parallel Tool Calls**
+: 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의
+  `supports_parallel_tool_calls`, 실행별 억제는 runtime binding의
+  `disable-parallel-tool-use`가 정한다. 억제 요청을 받아들이는 provider 계약은
+  provider catalog의 `supports_parallel_tool_suppression`이며, 미선언이면 억제를
+  요청할 수 없다. 이 요청 정책은 도구를 실행할 때의 동시성이나
+  spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
+
 ## Collaboration State
 
 **Board**
@@ -49,11 +124,16 @@ status: reference
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
+  Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
+  `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
+  판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
+  구간의 소유자다.
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
-  `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료 요청은 검증을 거쳐
-  사람의 최종 확인을 기다린다. 현재 상태와 전이는 `Goal_phase`가 정한다.
+  `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
+  `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
+  `Completed`가 된다(`lib/goal/goal_phase.mli`).
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 현재 동작은 create, list, get,
@@ -65,6 +145,38 @@ status: reference
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
+
+## Skills
+
+**Skill**
+: 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
+  Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
+  생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
+
+**Instruction Skill**
+: Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
+  본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
+
+**Composition Skill**
+: 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
+  검증된 계획이 `keeper_compose_<name>` 도구가 된다. 실행기는 선언된 입력과
+  의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
+  도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
+
+**Skill Reference**
+: source, package, name으로 이뤄진 신원과 content revision의 조합
+  (`Skill_reference.t`). 이름 하나가 아닌 이 참조로 읽을 내용을 지정한다.
+
+**Skill Snapshot**
+: `Skill_catalog_snapshot_service`가 발행한 source 관측과 원문 bytes의 불변 묶음.
+  Keeper는 턴 경계에서 고정한 snapshot으로 Skill을 선택한다. 원문이 바뀌어도
+  이미 시작한 턴의 참조를 새 내용으로 바꾸지 않는다.
+
+**Skill Activation**
+: 정확한 Skill 참조의 본문·리소스 읽기 또는 합성 호출을 기록한 사건.
+  `Keeper_skill_activation_ledger`는 결과 전달(`delivery`)과 이후 모델이 고른
+  도구 호출(`actions`)을 별도로 붙인다. 이후 호출이 있다는 사실만으로 Skill이
+  그 행동의 원인이었거나 작업을 성공시켰다고 판정하지 않는다.
 
 ## Repository Execution
 
@@ -89,13 +201,22 @@ status: reference
 ## Continuity
 
 **Checkpoint**
-: agent core conversation과 Keeper working context의 durable 저장점. trace당 파일
-  하나(`<trace 디렉터리>/<trace id>.json`)다.
+: History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
+  (`<trace 디렉터리>/<trace id>.json`)다. 실행 중에는
+  `Keeper_types.working_context`가 이 checkpoint 하나를 감싼다.
+  → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
+
+**받은 일 정리**
+: 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
+  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다.
+  → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 
 **History**
 : Checkpoint의 `messages`. 그 trace에서 오간 message가 시간순으로 쌓인 목록이다.
   Keeper turn은 이 목록 끝에 message를 덧붙인다. 목록 안에는 어느 message가 어느
   Keeper turn의 것인지 표시가 없다.
+  `keeper_memory_search`가 여러 저장 위치의 사용자 본문을 합칠 때에는 추출한 본문
+  전체의 일치로 중복을 판정한다.
   운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
   진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
 
@@ -109,6 +230,17 @@ status: reference
   앞에서부터 세면 나온다(`Runtime_model_input_tail_window`). tool 호출과 결과가
   갈라지면 provider가 요청을 거절하므로 자르는 자리는 Atom 경계에만 온다. Atom의
   크기는 고르지 않아서 Atom 개수는 위치를 말할 뿐 요청 크기를 말하지 않는다.
+
+**Carried Front (실어 보낼 이력의 시작 위치)**
+: 요청에 실리는 가장 오래된 Atom의 번호와 그 Atom을 여는 Message의 digest.
+  후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
+  그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
+  다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+
+**Model Input Ledger (모델 입력 원장)**
+: Keeper·runtime·trace별로 공급자 usage와 실린 Atom 범위를 기록한 프로세스 내 원장.
+  원장이 아직 세지 않은 위치까지 거절이 앞을 옮길 수 있다. 이때 다음 요청은 턴이
+  보관한 Carried Front를 쓰고, 공급자 응답이 온 뒤 원장을 갱신한다.
 
 **Turn Boundary**
 : 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이
@@ -177,5 +309,5 @@ status: reference
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
-  호출에서 Keeper가 받은 요청을 묶어 working context로 정리한다. Keeper의 판단을
+  호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.

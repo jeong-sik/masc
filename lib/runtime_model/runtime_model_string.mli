@@ -8,7 +8,6 @@ val parse_model_string
   -> ?max_tokens:int
   -> ?system_prompt:string
   -> ?api_key_env_overrides:(string * string) list
-  -> ?supports_tool_choice_override:bool
   -> ?keep_alive:string
   -> ?num_ctx:int
   -> string

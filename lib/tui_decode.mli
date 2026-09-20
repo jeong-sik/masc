@@ -1126,6 +1126,8 @@ type keeper_runtime = {
   kr_runtime_id : string;
   kr_phase : keeper_phase;
   kr_sandbox_profile : string;
+  kr_runtime_blocker_summary : string option;
+  (** Current registry failure; [None] means the roster observed no blocker. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

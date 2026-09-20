@@ -45,13 +45,13 @@ lands as an equal-watermark re-save through the locked validated store.
    delta; a second dry-run after an apply must show all zeros (fixpoint).
 
    ```sh
-   masc-checkpoint-purge --trace <trace-id> --base <base-path>/.masc
+   masc-checkpoint-purge --trace <trace-id> --base <base-path>
    ```
 3. **Apply.** The tool writes a byte-exact backup before saving:
 
    ```sh
-   masc-checkpoint-purge --trace <trace-id> --base <base-path>/.masc --apply
-   # backup: {base}/backups-checkpoint-purge-<trace>-<ts>Z/<trace>.json
+   masc-checkpoint-purge --trace <trace-id> --base <base-path> --apply
+   # backup: {runtime-root}/backups-checkpoint-purge-<trace>-<ts>Z/<trace>.json
    ```
 4. **Verify fixpoint.** Re-run the dry-run; expect `+0.0%` and zero rule
    counts.

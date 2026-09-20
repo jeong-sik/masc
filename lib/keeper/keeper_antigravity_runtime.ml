@@ -102,26 +102,23 @@ let current_goal_label () =
 
 let prompt_section_separator = "\n\n"
 
-(* agy states no prompt size limit: it is in no flag of `agy --help` and in
-   no field of its stream. A 2,078,915-byte prompt went end to end and the
-   model answered from markers placed at 0, 25, 50, 75 and 100 percent of it
-   (2026-09-18, agy 1.2.6), so the history is handed over whole and the CLI
-   decides what to do with it. An earlier reading of agy 1.1.12 concluded the
-   opposite from a truncated payload (11,386,764 bytes offered, 185,751
-   recorded, 2026-08-14); that is the shape a stdin write which timed out
-   also leaves, and it does not reproduce here. *)
+let measure_model_input_message_bytes (message : Agent_core.Types.message) =
+  String.length (history_role_label message.role)
+  + String.length (Host.encode_history_message message)
+  + String.length prompt_section_separator
+;;
+
+let prompt_section_framing_reserved_bytes () =
+  String.length (system_instructions_label ())
+  + String.length (current_goal_label ())
+  + (2 * String.length prompt_section_separator)
+;;
 
 (* The source projection runs first: the one production source appends a
-   bounded typed Gate replay reference (keeper_agent_run.ml). The reading
-   counts what that produced, so the appended reference is in the numbers the
-   turn record carries. *)
-(* Everything offered goes to the CLI, and what went is reported. Carrying no
-   cut is still a reading — the range starts at the oldest atom — and the turn
-   record needs it: a keeper's next turn reads the range its last one carried
-   (RFC keeper-context-window-in-tokens §10.4), and a turn that reports
-   nothing leaves the next one composing the whole history from scratch. The
-   claude_code sibling states the same rule for its uncapped lane. *)
-let observed_history_projection ?on_model_input_window_observation source_projection
+   bounded Gate replay reference. The admission window therefore runs after
+   it and observes exactly the messages that can reach the CLI. *)
+let bounded_history_projection ~capacity_bytes ~reserved_bytes
+    ?on_model_input_window_observation source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun messages ->
@@ -137,19 +134,61 @@ let observed_history_projection ?on_model_input_window_observation source_projec
     let _labelled, history_atom_count =
       Runtime_model_input_tail_window.annotate messages
     in
-    Option.iter
-      (fun observe ->
-         Option.iter
-           observe
-           (Runtime_model_input_tail_window.observe
-              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-              ~history_atom_count
-              { Runtime_model_input_tail_window.messages
-              ; dropped_atoms = 0
-              ; atom_count = history_atom_count
-              }))
-      on_model_input_window_observation;
-    Ok messages)
+    match
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes:measure_model_input_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        messages
+    with
+    | Ok projection ->
+      Option.iter
+        (fun observe ->
+           Option.iter
+             observe
+             (Runtime_model_input_tail_window.observe
+                ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+                ~history_atom_count
+                projection))
+        on_model_input_window_observation;
+      Ok projection.messages
+    | Error error ->
+      Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
+;;
+
+let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
+    ~system_prompt ~goal ?on_model_input_window_observation source_projection
+  =
+  match declared_max_prompt_bytes with
+  | None ->
+    Error
+      (config_error
+         ~field:"max_prompt_bytes"
+         "Antigravity requires max-prompt-bytes because the CLI has no typed oversized-input refusal")
+  | Some capacity_bytes ->
+    let reserved_bytes =
+      String.length system_prompt
+      + String.length goal
+      + prompt_section_framing_reserved_bytes ()
+    in
+    if reserved_bytes >= capacity_bytes
+    then
+      Error
+        (config_error
+           ~field:"max_prompt_bytes"
+           (Printf.sprintf
+              "Antigravity fixed prompt sections measure %d bytes, at or above max-prompt-bytes %d"
+              reserved_bytes
+              capacity_bytes))
+    else
+      Ok
+        (Some
+           (bounded_history_projection
+              ~capacity_bytes
+              ~reserved_bytes
+              ?on_model_input_window_observation
+              source_projection))
 ;;
 
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -421,11 +460,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let model_input_projection =
-      Some
-        (observed_history_projection
-           ?on_model_input_window_observation
-           model_input_projection)
+    let declared_max_prompt_bytes =
+      Runtime_inference.resolve_max_prompt_bytes ~runtime_id
+    in
+    let* capacity_bytes =
+      match declared_max_prompt_bytes with
+      | Some capacity_bytes -> Ok capacity_bytes
+      | None ->
+        Error
+          (config_error
+             ~field:"max_prompt_bytes"
+             "Antigravity requires max-prompt-bytes because the CLI has no typed oversized-input refusal")
     in
     let* () = match official_task_reference with
       | None -> Ok ()
@@ -458,6 +503,33 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              ~field:"reasoning_effort"
              "Antigravity effort must be declared by its runtime provider")
     in
+    let* prepared =
+      if is_resume
+      then Ok prepared
+      else
+        let* capacity_projection =
+          capacity_bounded_model_input_projection
+            ~declared_max_prompt_bytes
+            ~system_prompt:prepared.system_prompt
+            ~goal
+            ?on_model_input_window_observation
+            None
+        in
+        let* messages =
+          match capacity_projection with
+          | None -> Ok prepared.messages
+          | Some project ->
+            (try project prepared.messages with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Error
+                 (Host.internal_error
+                    (runtime_label
+                     ^ " runtime model input projection raised: "
+                     ^ Printexc.to_string exn)))
+        in
+        Ok { prepared with messages }
+    in
     (* [prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
@@ -470,18 +542,31 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          else Host.Whole_input_transmitted prepared.messages)
     in
     let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    let* () =
+      if String.length prompt <= capacity_bytes
+      then Ok ()
+      else
+        Error
+          (config_error
+             ~field:"max_prompt_bytes"
+             (Printf.sprintf
+                "Antigravity final prompt measures %d bytes, above max-prompt-bytes %d"
+                (String.length prompt)
+                capacity_bytes))
+    in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
        the client's own log showed promptLength=11,386,764 (2026-08-14). *)
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
-       goal_bytes=%d"
+       goal_bytes=%d declared_max_prompt_bytes=%s"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
-      (String.length goal);
+      (String.length goal)
+      (string_of_int capacity_bytes);
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
@@ -1093,13 +1178,21 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
 ;;
 
 module For_testing = struct
-  let observed_history_projection = observed_history_projection
+  let capacity_bounded_model_input_projection =
+    capacity_bounded_model_input_projection
+  ;;
 
   let start_prompt_bytes ~system_prompt ~goal messages =
     let prepared : Host.prepared_turn =
       { messages; system_prompt; tools = []; reasoning_effort = None }
     in
     Result.map String.length (prompt_for_turn ~is_resume:false ~goal prepared)
+  ;;
+
+  let reserved_prompt_bytes ~system_prompt ~goal =
+    String.length system_prompt
+    + String.length goal
+    + prompt_section_framing_reserved_bytes ()
   ;;
 
 end

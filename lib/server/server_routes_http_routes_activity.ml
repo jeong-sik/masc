@@ -1349,10 +1349,10 @@ let add_routes ~sw ~clock router =
                      respond_json_with_cors ~status request reqd body))
        ) request reqd)
 
-  (* Board write APIs — used by dashboard + Bevy Viewer. Actor auth binds a
-     bearer credential to its owner. An admitted token-less same-origin local
-     dashboard request keeps the actor attribution selected by that dashboard;
-     the routes consume the resolver's answer and never re-read the header. *)
+  (* The four Board post/comment/vote routes below consume the auth resolver's
+     actor. An ordinary bearer credential resolves to its owner; an admitted
+     token-less same-origin request keeps its supplied local attribution.
+     These routes do not re-read the identity headers. *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_vote"
          (fun _state agent_name _req reqd ->
@@ -1452,8 +1452,9 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
-  (* Comment vote — mirrors masc_board_vote. Server derives [voter] from the
-     authenticated actor so the client cannot forge the voting identity. *)
+  (* Comment vote — mirrors masc_board_vote. [voter] comes from the auth
+     resolver: the ordinary bearer credential's owner, or the attribution
+     supplied by an admitted token-less same-origin request. *)
   |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_comment_vote"
          (fun _state agent_name _req reqd ->

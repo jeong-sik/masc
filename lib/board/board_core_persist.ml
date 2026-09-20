@@ -226,54 +226,52 @@ let sweep store =
          Hashtbl.remove store.comments cid;
          mark_dirty_comment store cid)
       expired_comments;
-    (* Reclaim reactions and votes whose target post/comment no longer exists.
-       [sweep] removes posts/comments but historically left [store.reactions] and
-       [store.vote_log] resident: those two tables were pruned only by the
-       explicit [delete_post] path, not by the TTL lifecycle, so they grew for
-       the whole process lifetime and reloaded whole from disk on boot.  Pruning
-       by target existence reclaims new expirations AND boot-reloaded orphans
-       (whose targets are already gone, so a per-removal hook would never revisit
-       them).  Work is bounded per pass by [sweeper_batch_size] via [Seq.take],
-       so a large backlog drains across sweeps without a long lock hold; disk is
-       compacted by the next full snapshot flush, which dumps the pruned tables. *)
-    let orphan_reaction_keys =
-      match store.reactions_load_result with
-      | Error _ -> []
-      | Ok () ->
-        Hashtbl.to_seq store.reactions
-        |> Seq.filter_map (fun (key, (reaction : reaction)) ->
-          let target_present =
-            match reaction.target_type with
-            | Reaction_post -> Hashtbl.mem store.posts reaction.target_id
-            | Reaction_comment -> Hashtbl.mem store.comments reaction.target_id
-          in
-          if target_present then None else Some key)
-        |> Seq.take Limits.sweeper_batch_size
-        |> List.of_seq
+    (* Dependent rows die with their target, at the moment the target dies:
+       the expired ids are in hand right here. The previous pass instead
+       scanned for rows whose target is missing from the in-memory tables,
+       which cannot tell a deleted target from one that failed to load or
+       loaded empty; on 2026-09-19 a board that came up with no posts read
+       every vote as an orphan. A row whose target is absent is left alone —
+       [recalculate_vote_counts] never counts it, and the target may still
+       arrive on the next load. *)
+    let expired_targets = Hashtbl.create 16 in
+    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) expired_posts;
+    List.iter
+      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
+      expired_comments;
+    let removed_reactions, removed_votes =
+      if Hashtbl.length expired_targets = 0
+      then 0, 0
+      else begin
+        let expired_reaction_keys =
+          Hashtbl.fold
+            (fun key (reaction : reaction) acc ->
+               let target =
+                 match reaction.target_type with
+                 | Reaction_post -> `Post, reaction.target_id
+                 | Reaction_comment -> `Comment, reaction.target_id
+               in
+               if Hashtbl.mem expired_targets target then key :: acc else acc)
+            store.reactions
+            []
+        in
+        let expired_vote_keys =
+          Hashtbl.fold
+            (fun key _ acc ->
+               match vote_key_target key with
+               | Some target when Hashtbl.mem expired_targets target -> key :: acc
+               | Some _ | None -> acc)
+            store.vote_log
+            []
+        in
+        List.iter (Hashtbl.remove store.reactions) expired_reaction_keys;
+        List.iter (Hashtbl.remove store.vote_log) expired_vote_keys;
+        List.length expired_reaction_keys, List.length expired_vote_keys
+      end
     in
-    List.iter (Hashtbl.remove store.reactions) orphan_reaction_keys;
-    let orphan_vote_keys =
-      match store.votes_load_result with
-      | Error _ -> []
-      | Ok () ->
-        Hashtbl.to_seq store.vote_log
-        |> Seq.filter_map (fun (key, _) ->
-          match vote_key_target key with
-          | Some (`Post, target_id) when not (Hashtbl.mem store.posts target_id) ->
-            Some key
-          | Some (`Comment, target_id)
-            when not (Hashtbl.mem store.comments target_id) ->
-            Some key
-          | Some _ | None -> None)
-        |> Seq.take Limits.sweeper_batch_size
-        |> List.of_seq
-    in
-    List.iter (Hashtbl.remove store.vote_log) orphan_vote_keys;
-    let removed_reactions = List.length orphan_reaction_keys in
-    let removed_votes = List.length orphan_vote_keys in
     if removed_reactions > 0 || removed_votes > 0 then
       Log.BoardLog.debug
-        "sweep reclaimed %d orphaned reactions, %d orphaned votes"
+        "sweep removed %d reactions and %d votes of expired targets"
         removed_reactions
         removed_votes;
     (* The sorted post cache holds post records, so a changed [reply_count]

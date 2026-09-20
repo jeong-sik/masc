@@ -1016,7 +1016,11 @@
 (test
  (name test_keeper_checkpoint_purge)
  (modules test_keeper_checkpoint_purge)
- (libraries alcotest masc_test_deps))
+ (libraries alcotest masc_test_deps)
+ (deps ../bin/masc_checkpoint_purge.exe)
+ (action
+  (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
+   (run %{test}))))
 
 
 (test
@@ -5863,6 +5867,16 @@
  (deps (alias runtest-test_tui_tab_strip_pty)))
 
 (rule
+ (alias runtest-test_tui_approvals_ring_pty)
+ (deps test_tui_approvals_ring_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_approvals_ring_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_approvals_ring_pty)))
+
+(rule
  (alias runtest-test_tui_memory_fact_detail_pty)
  (deps test_tui_memory_fact_detail_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -6464,5 +6478,6 @@
  (name test_tui_fork_guard)
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
+(include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)

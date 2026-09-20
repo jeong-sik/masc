@@ -90,6 +90,8 @@ type keeper_runtime = {
      to", which is what a settings view is for; whether a given tool call
      actually ran there is a different reading and lives with the call. *)
   kr_sandbox_profile : string;
+  kr_runtime_blocker_summary : string option;
+  (** Current registry failure; [None] means the roster observed no blocker. *)
 }
 
 type keeper_lane_phase =
@@ -5632,6 +5634,9 @@ let decode_keeper_runtime json =
      update. *)
   let* row_meta = required_object_field json "meta" in
   let* kr_sandbox_profile = required_string_field row_meta "sandbox_profile" in
+  let* kr_runtime_blocker_summary =
+    required_nullable_string_field json "runtime_blocker_summary"
+  in
   let* raw_phase = required_string_field json "phase" in
   let* kr_phase =
     match keeper_phase_of_string raw_phase with
@@ -5651,6 +5656,7 @@ let decode_keeper_runtime json =
     ; kr_runtime_id
     ; kr_phase
     ; kr_sandbox_profile
+    ; kr_runtime_blocker_summary
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own
@@ -8358,6 +8364,11 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
       Ok Lane_run_gate_judgment_not_reached
 ;;
 
+type lane_run_failure =
+  { lrf_code : string
+  ; lrf_detail : string
+  }
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
@@ -8368,6 +8379,7 @@ type lane_run_summary =
   ; lrs_status : lane_run_status
   ; lrs_elapsed_s : float option
   ; lrs_selected_slot : string option
+  ; lrs_failure : lane_run_failure option
   }
 
 type lane_run_page =
@@ -8386,6 +8398,7 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_failure : lane_run_failure option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
@@ -8406,19 +8419,33 @@ let decode_lane_run_summary json =
   let* lrs_status = required_string_field json "status" in
   let* lrs_elapsed_s = optional_float_field json "elapsed_s" in
   let* lrs_selected_slot = optional_string_field json "selected_slot" in
+  let lrs_run_kind =
+    match lrs_run_kind with
+    | None -> Lane_run_exact_output
+    | Some kind -> lane_run_kind_of_string kind
+  in
+  let lrs_status = lane_run_status_of_string lrs_status in
+  let* lrs_failure =
+    match lrs_run_kind, lrs_status with
+    | Lane_run_exact_output, Lane_run_failed ->
+      let* code = required_string_field json "code" in
+      let* detail = required_string_field json "detail" in
+      Ok (Some { lrf_code = code; lrf_detail = detail })
+    | ( (Lane_run_task_verification | Lane_run_goal_verification
+        | Lane_run_kind_other _ | Lane_run_exact_output)
+      , _ ) -> Ok None
+  in
   Ok
     { lrs_run_id
-    ; lrs_run_kind =
-        (match lrs_run_kind with
-         | None -> Lane_run_exact_output
-         | Some kind -> lane_run_kind_of_string kind)
+    ; lrs_run_kind
     ; lrs_lane
     ; lrs_subject_id
     ; lrs_actor
     ; lrs_started_at
-    ; lrs_status = lane_run_status_of_string lrs_status
+    ; lrs_status
     ; lrs_elapsed_s
     ; lrs_selected_slot
+    ; lrs_failure
     }
 ;;
 
@@ -8520,6 +8547,7 @@ let decode_lane_run_detail json =
     ; lrd_status = summary.lrs_status
     ; lrd_elapsed_s = summary.lrs_elapsed_s
     ; lrd_selected_slot = summary.lrs_selected_slot
+    ; lrd_failure = summary.lrs_failure
     ; lrd_input_payload
     ; lrd_input_availability
     ; lrd_output_availability

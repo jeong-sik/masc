@@ -33,8 +33,7 @@ template_variables: [working_context, current_memory, conversation_history, coun
   다시 쓰세요. 같은 대상을 다룬 기억이 여러 개 모이면 중심이 되는 말을 정하고,
   그 대상에 대해 무엇이 중요한지를 정리합니다. 묶어서 쓴 기억을 `new_claims`에
   넣고, 재료가 된 기억의 짧은 ID는 모두 그 claim의 `absorbs`에 적습니다.
-  `absorbs`에 적은 기억은 현재 기억에서 빠지지만 원문은 검색으로 다시 찾을 수
-  있습니다. 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
+  `absorbs`에 적은 기억은 현재 기억에서 빠집니다. 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
   묶을 거리가 없으면 묶지 않습니다.
 - 교정할 때는 옛 ID를 `dropped`에 넣고 새 claim의 `supersedes`에 같은 ID를
   적습니다. `STALE`·`RESOLVED` 같은 표식을 붙여 낡은 사실을 남기지 마세요.
@@ -125,7 +124,7 @@ template_variables: [working_context, current_memory, conversation_history, coun
   "working_contexts": [],
   "new_claims": [
     {
-      "claim": "근거 있는 지식을 담은 한 문장.",
+      "claim": "근거 있는 지식. absorbs 가 비어 있으면 한 문장입니다. 재료를 묶은 claim 은 재료가 말한 조건·수치·교훈을 빠뜨리지 않도록 필요한 만큼의 문장으로 씁니다.",
       "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson",
       "board_post_id": "지식을 읽은 Board 글의 실제 post_id(p-…) 또는 null",
       "board_comment_id": "그 글의 댓글에서 읽었으면 실제 comment_id, 아니면 null",

@@ -249,10 +249,11 @@ let warn_rejected_exact_output_slots registry =
            slot.slot_id
        | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
          when String.equal slot.lane_id Runtime.verifier_exact_lane_id ->
-         (* verifier_exact admits slots here but dispatches them through
-            Runtime.resolve_assignment, so its ids must exist in both
-            registries; #32653 measured the catalog-id form failing at
-            dispatch 27 times on 2026-08-29. *)
+         (* verifier_exact admits slots here, and judgement then admits each
+            id as a configured direct runtime
+            (Runtime.verifier_exact_slot_admission) and dispatches that id
+            alone, so its ids must exist in both registries; #32653 measured
+            the catalog-id form failing at dispatch 27 times on 2026-08-29. *)
          Log.Server.warn
            "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
            slot.lane_id

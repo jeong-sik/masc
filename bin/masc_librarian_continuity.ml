@@ -71,7 +71,7 @@ let prepare_runtime options =
   (match outcome with
    | Runtime.Initialized -> ()
    | Runtime.Initialized_degraded degradation ->
-       prerr_endline
+       Log.Runtime.warn "librarian-continuity startup degradation: %s"
          (Yojson.Safe.to_string (Runtime.startup_degradation_to_yojson (Some degradation))));
   let* provider_cfg =
     match Runtime.get_runtime_by_id options.runtime_id with
@@ -278,4 +278,4 @@ let () =
   let result = let* options = parse_options () in run options in
   match result with
   | Ok code -> exit code
-  | Error detail -> prerr_endline ("librarian-continuity: " ^ detail); exit 2
+  | Error detail -> Log.Runtime.error "librarian-continuity: %s" detail; exit 2

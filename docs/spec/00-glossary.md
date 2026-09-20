@@ -43,9 +43,10 @@ status: reference
 
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
-  요청별, `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
-  누적 또는 범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
-  않는다. 요청별 사용량도 Keeper turn 전체 사용량을 뜻하지는 않는다.
+  요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
+  `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
+  합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
+  않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Parallel Tool Calls**
 : 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의

@@ -46,7 +46,7 @@ const memoryId = (digit: string) => `sha256:${digit.repeat(64)}`
 
 // The same unchanged actual writer output is checked by the OCaml codec suite.
 const writerRows: Record<string, unknown>[] = readFileSync(
-  resolve(__dirname, '../api/fixtures/turn-record-writer-main.jsonl'),
+  resolve(__dirname, '../api/fixtures/turn-record-writer.jsonl'),
   'utf8',
 ).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
 
@@ -208,7 +208,10 @@ describe('MemoryInspector current snapshot', () => {
     } else {
       expect(text).not.toContain('%')
       expect(text).toContain('점유율 미상')
-      expect(text).toContain(record.usage_scope === 'conversation_cumulative' ? '대화 누적' : '범위 미상')
+      const expectedLabel = record.usage_scope === 'turn_total'
+        ? '클라이언트 턴 합계'
+        : record.usage_scope === 'conversation_cumulative' ? '대화 누적' : '범위 미상'
+      expect(text).toContain(expectedLabel)
     }
   })
 

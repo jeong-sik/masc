@@ -398,6 +398,8 @@ let finalize
            | None, _ -> Keeper_usage_resolution.Unavailable
            | Some _, Some { usage_scope = Runtime_usage_scope.Per_request; _ } ->
              Keeper_usage_resolution.Per_request
+           | Some _, Some { usage_scope = Runtime_usage_scope.Turn_total; _ } ->
+             Keeper_usage_resolution.Turn_total
            | ( Some _
              , Some
                  { usage_scope = Runtime_usage_scope.Conversation_cumulative

@@ -895,6 +895,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
   it.each([
     { scope: 'per_request', label: '요청별', context: '25.0%', cost: '$0.070' },
+    { scope: 'turn_total', label: '클라이언트 턴 합계', context: '미상', cost: '미상' },
     { scope: 'conversation_cumulative', label: '대화 누적', context: '미상', cost: '미상' },
     { scope: 'unavailable', label: '범위 미상', context: '미상', cost: '미상' },
   ] as const)('shows $scope usage without changing its meaning', async ({ scope, label, context, cost }) => {

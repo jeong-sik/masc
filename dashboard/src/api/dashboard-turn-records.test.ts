@@ -76,7 +76,7 @@ function payload(...entries: { record: Record<string, unknown>; diff_vs_prev: nu
 // then read from its temporary Dated_jsonl store. Synthetic fixture only:
 // the marker is not evidence that a tool blob was stored or retrieved.
 const writerRows: Record<string, unknown>[] = readFileSync(
-  resolve(__dirname, 'fixtures/turn-record-writer-main.jsonl'),
+  resolve(__dirname, 'fixtures/turn-record-writer.jsonl'),
   'utf8',
 ).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
 

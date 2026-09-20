@@ -272,7 +272,7 @@ let test_historical_row_without_usage_scope_is_unavailable () =
 let test_dashboard_writer_fixture_roundtrip () =
   let lines =
     In_channel.with_open_text
-      "../dashboard/src/api/fixtures/turn-record-writer-main.jsonl"
+      "../dashboard/src/api/fixtures/turn-record-writer.jsonl"
       In_channel.input_lines
   in
   let scopes =
@@ -287,10 +287,22 @@ let test_dashboard_writer_fixture_roundtrip () =
           Runtime_usage_scope.to_string record.usage.scope)
       lines
   in
-  check (list string) "fixture covers the current usage scopes"
+  check (list string) "fixture holds one row per usage scope, in variant order"
     (List.map Runtime_usage_scope.to_string
        Runtime_usage_scope.all)
     scopes
+
+let test_client_turn_usage_roundtrip () =
+  let record = sample_record () in
+  let usage = { record.usage with scope = Runtime_usage_scope.Turn_total } in
+  let json = Turn_record.to_json { record with usage } in
+  check string "client-turn scope has its own wire token" "turn_total"
+    (Yojson.Safe.Util.(json |> member "usage_scope" |> to_string));
+  match Turn_record.of_json json with
+  | Error error -> failf "client-turn usage rejected: %s" error
+  | Ok decoded ->
+    check bool "all known counts and their scope survive" true (decoded.usage = usage)
+;;
 
 let test_codec_roundtrip () =
   let record = sample_record () in
@@ -1016,6 +1028,8 @@ let () =
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
+        ; test_case "client-turn usage keeps counts and scope" `Quick
+            test_client_turn_usage_roundtrip
         ; test_case "Dashboard writer fixture uses the current strict codec" `Quick
             test_dashboard_writer_fixture_roundtrip
         ; test_case "cache counts round-trip and stay optional" `Quick

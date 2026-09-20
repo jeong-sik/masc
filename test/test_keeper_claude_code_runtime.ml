@@ -43,6 +43,29 @@ let prompt_too_long_statusless_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
 ;;
 
+(* CLI 2.1.278 refuses to send when its count reaches the window minus 3000:
+   it emits a synthetic API-error assistant message and ends the loop with
+   [terminal_reason = "blocking_limit"] and no API status. Seen live on
+   2026-09-19 as "terminal subtype=success api_status=unknown
+   reason=blocking_limit: Prompt is too long". *)
+let blocking_limit_diagnostic =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-blocking-limit-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}|}
+;;
+
+let blocking_limit_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-blocking-limit-1","result":"Prompt is too long","terminal_reason":"blocking_limit"}|}
+;;
+
+(* The same CLI context_limit stop cause, with a different diagnostic. The
+   typed terminal reason, not either sentence, selects the shrink path. *)
+let rapid_refill_breaker_diagnostic =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-rapid-refill-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Autocompact is thrashing"}]}}|}
+;;
+
+let rapid_refill_breaker_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rapid-refill-1","result":"Autocompact is thrashing","terminal_reason":"rapid_refill_breaker"}|}
+;;
+
 let mcp_initialize =
   {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
@@ -939,7 +962,10 @@ let history_uses_current_schema history =
     history
 ;;
 
-let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=false) () =
+let test_keeper_shrinks_history_after_statusless_context_error
+    ?(native_gate=false)
+    ?(overflow_frames = [ prompt_too_long_statusless_result ])
+    () =
   let base_path = temp_workspace () in
   let first_system_marker = Filename.concat base_path "full-system.txt" in
   let second_system_marker = Filename.concat base_path "shrunk-system.txt" in
@@ -978,7 +1004,7 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
          ~first_system_marker ~second_system_marker
          ~first_prompt_marker
          ~second_prompt_marker
-         [ Emit prompt_too_long_statusless_result ]
+         (List.map (fun frame -> Emit frame) overflow_frames)
          [ Emit (assistant ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ; Emit (result ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ]
@@ -1671,6 +1697,31 @@ let repeated_tool () =
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
 ;;
 
+(* A context-limit refusal and an empty history leave no smaller view to try,
+   so the attempt ends on the overflow. No answer or tool activity was
+   observed, so the attempt must report no effect: that is what lets
+   the lane move to its next runtime instead of fencing the turn. *)
+let test_unshrinkable_context_limit_reports_no_effect ~overflow_frames () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture (List.map (fun frame -> Emit frame) overflow_frames)
+         (fun cli_path ->
+            let attempt =
+              run_direct_attempt ~base_path ~cli_path ~goal:"BLOCKED" ~tools:[] ()
+            in
+            (match attempt.result with
+             | Error (Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)) -> ()
+             | Error error -> fail (Agent_core.Error.to_string error)
+             | Ok _ -> fail "a context-limit refusal completed the attempt");
+            check
+              string
+              "a refusal without observed activity has no effect"
+              "no_effect_observed"
+              (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)))
+;;
+
 (* A blank composition must not reach [Runtime_claude_code.config.system_prompt]
    as [None]. [None] means "omit --system-prompt", which since #33072 hands the
    turn Claude Code's built-in coding-agent prompt while masc's tool set and
@@ -1882,6 +1933,220 @@ let test_a_closed_client_connection_is_typed () =
       (Agent_core.Error.to_string other)
 ;;
 
+(* A start seed begins where the last completed turn's range did, whichever
+   runtime measured it: this lane cuts from the keeper's checkpoint history
+   like every Agent Core candidate, so the same position names the same atoms
+   (RFC keeper-context-window-in-tokens §10.4). The declared ceiling keeps its
+   own cut and the later of the two positions wins, so a ceiling never widens
+   a seeded range and a seed never widens the ceiling's. *)
+let start_seed_history () =
+  let message role text : Agent_core.Types.message =
+    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  List.concat
+    (List.init 60 (fun i ->
+       [ message Agent_core.Types.User (Printf.sprintf "ask %02d" i)
+       ; message Agent_core.Types.Assistant (Printf.sprintf "answer %02d" i)
+       ]))
+;;
+
+let completed_record ~messages ~transmitted : Turn_record.t =
+  let total_atoms = snd (Runtime_model_input_tail_window.annotate messages) in
+  let front_atom_digest =
+    match
+      Runtime_model_input_tail_window.atom_opening_digest
+        messages
+        (total_atoms - transmitted)
+    with
+    | Some digest -> digest
+    | None -> fail "the record's own history has that atom"
+  in
+  { execution_ids = []
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
+  ; turn_kind = Turn_record.Direct
+  ; trace_id = "trace-1"
+  ; absolute_turn = 1260
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1260
+  ; blocks = []
+  ; input_components = None
+  ; tool_surface_ref = None
+  ; runtime_profile = "kimi_coding.kimi-k3"
+  ; selected_model = None
+  ; finish_reason = Some "completed"
+  ; context_window = None
+  ; price_input_per_million = None
+  ; price_output_per_million = None
+  ; request_latency_ms = None
+  ; ttfrc_ms = None
+  ; request_wire_observation = None
+  ; model_input_window =
+      Some
+        { Turn_record.transmitted_atoms = transmitted
+        ; total_atoms
+        ; measurement = Turn_record.Wire_shape
+        ; front_atom_digest
+        }
+  ; raw_trace_run_ref = None
+  ; sampling =
+      { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+  ; usage =
+      { input_tokens = None
+      ; output_tokens = None
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Per_request
+      }
+  ; ts = 0.
+  }
+;;
+
+let seed_read_of records =
+  { Keeper_carried_front.seed =
+      Keeper_carried_front.of_records
+        ~composer:(fun _ -> Keeper_carried_front.Composes_from_the_history)
+        ~trace_id:"trace-1"
+        records
+  ; unreadable = None
+  }
+;;
+
+(* What the Agent Core path composes for the same front, so the assertion is
+   "the same range", not "this many atoms". *)
+let agent_core_range ~front messages =
+  (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
+     ~measure_message_bytes:(Keeper_context_core.message_measurer ())
+     ~front
+     ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+     ~last_resort:false
+     ~base_path:""
+     ~demote_before:0
+     messages)
+    .Keeper_turn_driver_try_provider.projection
+    .Runtime_model_input_tail_window.messages
+;;
+
+let encoded = List.map Keeper_official_client_host.encode_history_message
+
+let test_a_start_seed_begins_at_the_carried_front () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read)
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~front:seed_read.Keeper_carried_front.seed messages))
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "the reading counts the whole history" 120
+         observation.Runtime_model_input_tail_window.total_atoms;
+       check int "and says seven atoms went" 7
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* The declared ceiling names a front of its own. When it is the later of the
+   two, it decides, so the shrink ladder that answers a typed overflow
+   (#37063) keeps narrowing a seeded start instead of being widened back by
+   the seed on the retry. *)
+let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
+  (* The zero-history floor is what the framing alone costs; two more
+     messages above it leaves the exact cut room for about two atoms, well
+     inside the seed's seven and far below the 60-atom quantum, so the cut is
+     exact rather than quantized. *)
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let newest_two =
+    match List.rev messages with
+    | newest :: before :: _ -> measure newest + measure before
+    | _ -> fail "the history has at least two messages"
+  in
+  let capacity_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        messages
+    with
+    | Some floor_bytes -> floor_bytes + newest_two
+    | None -> fail "a history this long has a framed floor"
+  in
+  let ceiling_only =
+    match
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        messages
+    with
+    | Ok projection -> projection
+    | Error error ->
+      fail (Runtime_model_input_tail_window.budget_error_to_string error)
+  in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read)
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check bool "the ceiling cuts deeper than the seed here" true
+      (ceiling_only.Runtime_model_input_tail_window.dropped_atoms > 113);
+    check bool "and still carries the turn" true
+      (ceiling_only.Runtime_model_input_tail_window.dropped_atoms < 120);
+    check (list string) "so the ceiling decides the range"
+      (encoded ceiling_only.Runtime_model_input_tail_window.messages)
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "and the reading is the ceiling's"
+         (120 - ceiling_only.Runtime_model_input_tail_window.dropped_atoms)
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* Cold start: no record on this history names a front, so the range is the
+   whole history and the provider judges it. *)
+let test_a_cold_start_seed_carries_the_whole_history () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read_of [])
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~front:None messages))
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "every atom went" 120
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
@@ -1898,6 +2163,16 @@ let () =
             (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:false)
         ; test_case "native Gate retains its session across overflow shrink" `Quick
             (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:true)
+        ; test_case
+            "shrinks history after the CLI's blocking_limit refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "shrinks history after the CLI's rapid_refill_breaker refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
         ; test_case
             "projects typed tool history and lifecycle"
             `Quick
@@ -1953,6 +2228,16 @@ let () =
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
         ; test_case
+            "unshrinkable blocking_limit reports no effect"
+            `Quick
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "unshrinkable rapid_refill_breaker without activity reports no effect"
+            `Quick
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
+        ; test_case
             "blank system prompt is refused not defaulted"
             `Quick
             test_blank_system_prompt_is_refused_not_defaulted
@@ -1972,6 +2257,20 @@ let () =
             "a closed client connection is typed"
             `Quick
             test_a_closed_client_connection_is_typed
+        ] )
+    ; ( "start seed"
+      , [ test_case
+            "a start seed begins at the carried front"
+            `Quick
+            test_a_start_seed_begins_at_the_carried_front
+        ; test_case
+            "the declared ceiling wins when it cuts deeper"
+            `Quick
+            test_the_declared_ceiling_wins_when_it_cuts_deeper
+        ; test_case
+            "a cold start seed carries the whole history"
+            `Quick
+            test_a_cold_start_seed_carries_the_whole_history
         ] )
     ]
 ;;

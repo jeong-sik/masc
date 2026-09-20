@@ -21,9 +21,10 @@ module For_testing : sig
     string ->
     (string * string * string list, string) result
   (** For_testing projection of the routing body parser: the lane string,
-      which field the body carried ("runtime_id" or "runtime_ids"), and
-      that field's string payload. Exposes the wire contract without
-      exporting the private body variant. *)
+      what the body asked for ("runtime_id" or "runtime_ids" for a set,
+      "create" or "remove" for a lane action), and the runtime ids it
+      carried. Exposes the wire contract without exporting the private body
+      variant. *)
   val exact_lane_run_permission : Masc_domain.permission
   val runtime_probe_read_permission : Masc_domain.permission
 
@@ -34,6 +35,16 @@ module For_testing : sig
     Httpun.Reqd.t ->
     string ->
     unit
+
+  val handle_runtime_routing_post :
+    Mcp_server.server_state ->
+    string ->
+    Httpun.Request.t ->
+    Httpun.Reqd.t ->
+    string ->
+    unit
+  (** The routing POST after authentication: parse the body, call the
+      Runtime writer it names, answer with the receipt or the refusal. *)
 
   val handle_runtime_assignment_post_with :
     set_assignment:

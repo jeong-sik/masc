@@ -58,7 +58,6 @@ let request_fingerprint
                      ; response_format
                      ; cache_system_prompt
                      ; cache_extended_ttl
-                     ; supports_tool_choice_override
                      ; supports_structured_output_override
                      ; model_capabilities_override
                      ; keep_alive
@@ -97,7 +96,6 @@ let request_fingerprint
   ignore return_progress;
   ignore tool_stream;
   ignore internal_model_rotation_count;
-  ignore supports_tool_choice_override;
   ignore supports_structured_output_override;
   ignore model_capabilities_override;
   ignore reasoning_uncontrolled;

@@ -104,11 +104,9 @@ val run_cli_tail :
 (** Walk [cli_slots] as one-shots and return the first slot whose answer judges
     this candidate, as [(slot_id, judgment)].
 
-    For an HTTP flow, call this only after {!execute} reported [Exact_execution_failed], which is
-    the provider-exhaustion arm. The persistence and provenance arms keep their
-    terminal: they say the durable record is in doubt, and a second transport
-    does not settle that (RFC cli-runtimes-as-lane-slots, the same split the
-    librarian and HITL lanes apply).
+    {!execute} performs this walk automatically after HTTP semantic exhaustion
+    or a typed advanceable final failure. The persistence, cancellation, and
+    non-advanceable execution arms keep their terminal.
 
     CLI-only flows call this directly. The judgment carries [Cli_lane_slot];
     completion is owned by the durable candidate claim, without fabricating
@@ -116,7 +114,7 @@ val run_cli_tail :
 
 val execute :
   ?cli_runner:Keeper_lane_cli_oneshot.runner ->
-  ?clock:_ Eio.Time.clock ->
+  clock:_ Eio.Time.clock ->
   before_dispatch:
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:
@@ -127,9 +125,10 @@ val execute :
   ( Keeper_board_attention_candidate.judgment
   , 'callback_error execution_error )
   result
-(** Execute the prepared affine flow exactly once. Domain identity and
-    provenance failures are terminal results and never request AGENT_CORE
-    advancement. Cancellation is not caught. The caller's durable callback
+(** Execute the prepared affine flow exactly once. After all HTTP candidates
+    are safely exhausted, walk the same frozen lane's declared CLI tail.
+    Domain identity and provenance failures are terminal results and never
+    request AGENT_CORE advancement. Cancellation is not caught. The caller's durable callback
     progress is the sole terminalization authority and must be quarantined
     under cancellation protection; no AGENT_CORE receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.

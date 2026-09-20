@@ -80,6 +80,10 @@ task 계약은 아래 나열된 항목 전부의 뒷받침을 요구합니다. �
 검사 가능한 증거는 `completion_notes` 안의 typed `submitted_evidence_access`
 스냅샷에만 존재합니다. 그 밖의 것을 여는 tool이 없으므로, 거기서 읽을 수
 없는 참조는 검증할 수 없는 참조입니다.
+
+<evidence_lookup_status>
+{"lookup_surface":"none","evidence_lookup_succeeded":false}
+</evidence_lookup_status>
 </no_lookup_surface>
 
 ### lookup.producer_tree (vars: lookup_tools, lookup_root_layout)
@@ -95,6 +99,15 @@ producer 자신의 tool을 producer의 sandbox 루트에 겨눈 채 가지고 �
 표시되어 있습니다:
 
 {{lookup_root_layout}}
+
+<evidence_lookup_status>
+{"lookup_surface":"producer_tree","evidence_lookup_succeeded":false}
+</evidence_lookup_status>
+
+위 상태는 검증 시작 시점의 값입니다. 조회가 성공하면 그 도구 결과는
+`evidence_lookup_succeeded: true`와 원래 결과인 `lookup_result`를 함께
+돌려줍니다. 실패하거나 미뤄진 조회는 성공으로 바뀌지 않습니다. 최종 판정
+전까지 받은 도구 결과를 기준으로 직접 확인에 성공했는지 판단하세요.
 
 목록이 비어 있거나 루트를 읽을 수 없다고 하면, 경로가 없다고 결론 내리기
 전에 lookup으로 구조부터 잡습니다. "파일이 없다"는 당신이 물은 경로에 대한

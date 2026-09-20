@@ -13,14 +13,11 @@
 
 (** {1 Tool-host failure report}
 
-    Concrete record because two consumers construct it field-by-field
-    (test fixtures + the future "synthetic report" injection paths).
-    The record is the operator's grep contract — every field name
-    appears verbatim in audit-log JSON / dashboard cards / telemetry
-    rows, so a future "let's rename agent_name to actor_name" change
-    must touch this contract explicitly. *)
+    The report describes the observed failure. Its subject [agent_name]
+    is separate from the reporting caller passed to [record]. *)
 type report = {
   agent_name : string;
+  (** Agent whose tool-host failure was observed. *)
   client_name : string;
   tool_name : string;
   transport : string;
@@ -62,12 +59,18 @@ val details_json : report -> Yojson.Safe.t
 val record :
   ?fs:'fs ->
   Workspace_utils.config ->
+  reported_by:string ->
   report ->
   unit
-(** [record ?fs config report] is the fan-out side-effect:
+(** [record ?fs config ~reported_by report] is the fan-out side-effect:
     1. [Log.client_tool_host_error] (file ring + stderr)
     2. [Audit_log.log_client_tool_host_failure] (durable JSONL)
     3. {!Telemetry_eio.track_error} when [fs] is provided
+
+    [reported_by] is the caller returned by the HTTP auth resolver. It becomes
+    the audit actor; [report.agent_name] remains the reported subject in audit
+    details and the failure envelope. Admitted tokenless requests retain the
+    resolver's local attribution policy.
 
     The [fs] parameter is the Eio filesystem capability;
     {!Telemetry_eio.track_error} is skipped when [fs = None] because

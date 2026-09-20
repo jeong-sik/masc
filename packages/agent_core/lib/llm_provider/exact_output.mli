@@ -73,15 +73,14 @@ type declared_target =
   ; enable_thinking : bool option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
+  ; api_key_env : string option
+      (** Which environment name holds this slot's credential. [None] keeps the
+          catalog row's name; a deployment that reads a different one says so
+          in its binding, and that is the authority. *)
   }
 
 type resolver_catalog_input =
   | Embedded_default
-  | Embedded_with_overlay of catalog_document
-      (** The embedded catalog with a second document merged over it. A
-          deployment supplies no such document: its provider and model facts
-          are catalog rows, and its slots arrive as {!Embedded_with_targets}.
-          The callers left are tests that assemble a synthetic catalog. *)
   | Embedded_with_targets of declared_target list
       (** The embedded catalog for provider and model facts, plus the slots the
           caller declares. The embedded catalog carries no [[targets]] rows of
@@ -96,15 +95,12 @@ type target_ref_error =
 type resolver_catalog_source =
   | Embedded_catalog
   | Full_replacement_catalog
-  | Overlay_catalog
 
 type resolver_collision =
   | Duplicate_provider_identity
   | Duplicate_model_identity
   | Duplicate_target_identity
   | Provider_alias_shadow
-  | Target_identity_shadow
-  | Model_identity_shadow
 
 type resolver_binding_component =
   | Target_provider
@@ -409,11 +405,9 @@ val snapshot_flow
   -> (flow_snapshot, flow_snapshot_error) result
 
 (** Parse exactly one typed catalog input and freeze a private immutable target
-    map. The default input is the embedded AGENT_CORE catalog. [Embedded_with_overlay]
-    applies the existing sparse exact-output overlay precedence to that
-    embedded base. A full replacement, supplied as owned bytes or a file path,
-    suppresses every embedded and overlay row; the input type provides no way
-    to combine a full replacement with an overlay.
+    map. The default input is the embedded AGENT_CORE catalog, whose rows are
+    the only place a provider or model fact is written. A full replacement,
+    supplied as owned bytes or a file path, suppresses every embedded row.
     [io.getenv] is observed exactly once per referenced environment name during
     this call and is never retained. Invalid paths, syntax, collisions,
     base-URL environment reads, and endpoint declarations fail closed.
@@ -814,6 +808,22 @@ type ('callback_error, 'rejection) validated_flow_error =
       { rejections : 'rejection semantic_rejection_trace
       ; evidence : flow_evidence
       }
+
+type flow_execution_terminal_kind =
+  | Advanceable_candidates_exhausted
+      (** The final candidate failed in the same typed way that would have
+          advanced to another frozen candidate, or was rejected without a
+          measurement dispatch. The declared candidate sequence is exhausted. *)
+  | Non_advanceable_terminal
+      (** The failure must stop this flow: replay, bookkeeping callbacks, or
+          an execution failure that is specific to this input or attempt. *)
+
+val flow_execution_terminal_kind
+  :  'callback_error flow_execution_error
+  -> flow_execution_terminal_kind
+(** Classify why a terminal flow could not continue. This reuses the exact
+    typed advancement rule used between candidates; callers never recover the
+    distinction from an error string or receipt phase. *)
 
 (** Closed fact for the invocation returning the error: whether its one outward
     completion dispatch began. This does not claim provider acceptance, response

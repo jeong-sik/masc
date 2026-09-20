@@ -72,8 +72,8 @@ val sniff_image_media_type : string -> (string, string) result
     can measure an attachment without this tool's dependency cone. *)
 
 val vision_runtime_ids : now:float -> string list
-(** Ordered image-capable runtime ids: [\[runtime\].media_failover] order
-    first, then declaration order, with every candidate whose quota scope has
+(** Ordered image-capable runtime ids: [\[runtime\].media_failover] order,
+    with every candidate whose quota scope has
     an active window at [now] ({!Runtime_quota_window}) moved behind the rest in
     the same relative order. The handler tries these candidates in order
     for timeout/provider failures and output-token truncation. Capacity and

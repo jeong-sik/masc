@@ -655,7 +655,7 @@ let surface_strip (state : state) ~cols =
   let badge surface =
     match (surface : surface) with
     | Approvals ->
-        (match List.length (Masc_tui_types.approval_items state) with
+        (match Masc_tui_types.approvals_surface_pending state with
          | 0 -> ""
          | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
@@ -715,7 +715,7 @@ let surface_strip (state : state) ~cols =
     let surface, _ = ring.(i) in
     let is_alert =
       match surface with
-      | Approvals -> List.length (Masc_tui_types.approval_items state) > 0
+      | Approvals -> Masc_tui_types.approvals_surface_pending state > 0
       | _ -> false
     in
     if i = active then
@@ -1912,8 +1912,8 @@ let planning_phase_label = function
    Actions and ARMED rows say it with. The Actions row called [c] "Complete"
    beside a Next line saying [c] submits the goal for verification, and the
    ARMED row called it "Request Completion": the key sends the goal to the
-   completion judge, and completing it is a confirmation this screen does not
-   offer. *)
+   completion judge. The separate operator confirmation reads and binds the
+   exact proof through the admin route. *)
 let planning_action_key = function
   | Goal_phase.Public_action.Request_complete -> "c"
   | Goal_phase.Public_action.Drop -> "x"

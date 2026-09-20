@@ -7,7 +7,8 @@ module Serving_constraint = Llm_provider.Serving_constraint
 let first_id_prefix ~suite catalog =
   match Model_catalog.model_entries catalog with
   | [] -> failf "%s: repo model catalog should not be empty" suite
-  | (entry : Model_catalog.model_entry) :: _ -> entry.id_prefix
+  | (entry : Model_catalog.model_entry) :: _ ->
+    Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
 ;;
 
 let with_clean_model_catalog_override f =
@@ -64,7 +65,7 @@ let test_subscription_models_resolve_their_own_rows () =
            string
            (Printf.sprintf "%s resolves to its own row" model_id)
            expected_prefix
-           entry.id_prefix)
+           (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix))
     subscription_model_rows
 ;;
 
@@ -177,7 +178,10 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
        let matches =
          List.filter
            (fun (entry : Model_catalog.model_entry) ->
-              entry.id_prefix = model_id && entry.provider_name = Some "ollama_cloud")
+              String.equal
+                (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+                model_id
+              && entry.provider_name = Some "ollama_cloud")
            entries
        in
        match matches with
@@ -265,7 +269,8 @@ let test_no_ollama_cloud_row_states_a_wire () =
         entry.supports_reasoning = Some true
         && Option.is_some entry.thinking_control_format
       | Some _ | None -> false)
-    |> List.map (fun (entry : Model_catalog.model_entry) -> entry.id_prefix)
+    |> List.map (fun (entry : Model_catalog.model_entry) ->
+           Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
     |> List.sort String.compare
   in
   check
@@ -481,7 +486,10 @@ let test_glm_vision_rows_agree () =
   in
   let rows =
     List.filter
-      (fun (entry : Model_catalog.model_entry) -> String.equal entry.id_prefix "glm-4.6v")
+      (fun (entry : Model_catalog.model_entry) ->
+         String.equal
+           (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+           "glm-4.6v")
       (Model_catalog.model_entries catalog)
   in
   check
@@ -535,7 +543,10 @@ let openrouter_entry entries model_id =
   match
     List.filter
       (fun (entry : Model_catalog.model_entry) ->
-         entry.id_prefix = model_id && entry.provider_name = Some "openrouter")
+         String.equal
+           (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+           model_id
+         && entry.provider_name = Some "openrouter")
       entries
   with
   | [ entry ] -> entry

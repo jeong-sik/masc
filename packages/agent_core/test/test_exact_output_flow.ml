@@ -154,7 +154,7 @@ let with_catalog ?(getenv = fun _ -> Ok None) entries f =
     }
   in
   let io : EO.resolver_io = { getenv } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay document) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement document) () with
   (* Naming the rejected field beats "should load". Discarding the error made a
      catalog that the resolver refuses indistinguishable from any other load
      failure, so a fixture drift showed up only as an assertion label. *)
@@ -3526,7 +3526,13 @@ let test_context_window_400_prose_remains_terminal () =
       true
       (failure.cause.cause
        = EO.Provider_response_refused
-           { http_status = 400; refusal = EO.Invalid_request })
+           { http_status = 400; refusal = EO.Invalid_request });
+    check
+      bool
+      "HTTP 400 prose is a non-advanceable terminal"
+      true
+      (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
+       = EO.Non_advanceable_terminal)
   | Ok _ | Error _ -> fail "HTTP 400 prose did not remain terminal"
 ;;
 
@@ -3587,17 +3593,22 @@ let test_generic_400_remains_terminal_without_advance () =
   check int "generic 400 leaves successor unprepared" 1 (List.length evidence.attempts);
   match result with
   | Error
-      (EO.Flow_exact_execution_failed
-         { candidate
-         ; cause =
-             { cause =
-                 EO.Provider_response_refused
-                   { http_status = 400; refusal = EO.Invalid_request }
-             ; _
-             }
-         ; _
-         }) ->
-    check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate)
+      ((EO.Flow_exact_execution_failed
+          { candidate
+          ; cause =
+              { cause =
+                  EO.Provider_response_refused
+                    { http_status = 400; refusal = EO.Invalid_request }
+              ; _
+              }
+          ; _
+          }) as terminal) ->
+    check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate);
+    check
+      bool
+      "generic 400 is a non-advanceable terminal"
+      true
+      (EO.flow_execution_terminal_kind terminal = EO.Non_advanceable_terminal)
   | Ok _ | Error _ -> fail "generic 400 did not remain a typed invalid request"
 ;;
 

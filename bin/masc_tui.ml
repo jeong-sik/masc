@@ -10,6 +10,13 @@ open Masc_tui_loader
    than this is reported rather than held. *)
 let gh_open_timeout_sec = 15.0
 
+(* [run_with_eio_context] owns the UI switch. An unavailable async context
+   must not turn an operator action into blocking HTTP on the key path. *)
+let with_async_switch state ~action start =
+  match Eio_context.get_switch_opt () with
+  | Some sw -> start sw
+  | None -> report_action state "error" (action ^ ": asynchronous runtime unavailable")
+
 (* One place decides how an aborted $EDITOR form reads. Only the cancel
    differs by caller, because only the action's own name belongs in it; an
    editor that never ran and a temp file that could not be read are the same
@@ -43,6 +50,8 @@ module Keeper_control = Masc_tui_keeper_control
 module Ask = Masc_tui_ask_projection
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
+module Goal_confirmation = Masc_tui_planning_detail
+module Goal_confirmation_read = Masc_tui_fetched
 module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
@@ -1958,7 +1967,8 @@ type async_msg =
   | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
   | Skills_catalog_loaded of int * (Masc.Tui_decode.skills_catalog, string) result
   | Tools_async_observation_loaded of int * (Tui_decode.async_request_observation, string) result
-  | Runtime_lane_slots_written of (unit, string) result
+  | Runtime_lane_slots_written of
+      Masc_tui_types.runtime_lane_list * (unit, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
@@ -2057,6 +2067,9 @@ type async_msg =
     }
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
+  | Goal_confirmation_submitted of (string, string) result
+  | Goal_confirmation_loaded of
+      string Goal_confirmation_read.request * (Goal_confirmation.confirmation, string) result
   | Schedules_loaded of Snapshot_read.request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
@@ -5202,11 +5215,13 @@ let launch_all_memory_facts_load state ~mailbox =
                      ; mss_facts = []
                      ; mss_invalidations = []
                      }
+               ; mfs_events_read_error = None
                } ))
     else
       let all_ord_facts = ref [] in
       let all_src_facts = ref [] in
       let all_invals = ref [] in
+      let all_event_read_errors = ref [] in
       List.iter
         (fun (k : Tui_decode.memory_keeper_health) ->
           let keeper_name = k.Tui_decode.mkh_keeper_id in
@@ -5216,6 +5231,12 @@ let launch_all_memory_facts_load state ~mailbox =
             | _ -> Error "failed"
           with
           | Ok snap ->
+              (match snap.Tui_decode.mfs_events_read_error with
+               | None -> ()
+               | Some detail ->
+                 all_event_read_errors :=
+                   Printf.sprintf "%s: %s" keeper_name detail
+                   :: !all_event_read_errors);
               (match snap.Tui_decode.mfs_ordinary with
                | Tui_decode.Memory_store_present store ->
                    let tagged =
@@ -5275,6 +5296,10 @@ let launch_all_memory_facts_load state ~mailbox =
               ; mss_facts = !all_src_facts
               ; mss_invalidations = !all_invals
               }
+        ; mfs_events_read_error =
+            (match List.rev !all_event_read_errors with
+             | [] -> None
+             | errors -> Some (String.concat "; " errors))
         }
       in
       enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))
@@ -5901,6 +5926,14 @@ let launch_lanes_load state ~mailbox =
              (standalone_generation, Error "Eio switch is unavailable"))
   end
 
+(* A re-read that has to happen: a write's read-back, or the operator's [r].
+   A load already out may have left before the change it has to show, so
+   one more is queued behind it instead of the request being dropped. *)
+let launch_lanes_reread state ~mailbox =
+  if state.standalone_lanes_inflight
+  then state.standalone_lanes_reread_pending <- true
+  else launch_lanes_load state ~mailbox
+
 let launch_clients_load state ~mailbox =
   if state.clients_surface_inflight then ()
   else begin
@@ -6157,7 +6190,10 @@ let row_list (state : state) : row_list option =
        | Lanes_overview ->
            of_counted (fun count ->
                windowed ~count ~cursor:state.lanes_standalone_cursor
-                 (fun index -> state.lanes_standalone_cursor <- index)))
+                 (fun index ->
+                   if index <> state.lanes_standalone_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
+                   state.lanes_standalone_cursor <- index)))
   | Clients ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.clients_surface_cursor
@@ -6204,7 +6240,11 @@ let row_list (state : state) : row_list option =
       of_counted (fun count ->
           scrolling ~count ~cursor:state.runtime_cursor
             ~scroll:state.runtime_surface_scroll
-            ~set_cursor:(fun i -> state.runtime_cursor <- i)
+            ~set_cursor:(fun i ->
+              (* The lane editor's line is about the row the key acted on. *)
+              if i <> state.runtime_cursor then
+                Masc_tui_types.dismiss_runtime_lane_notice state;
+              state.runtime_cursor <- i)
             ~set_scroll:(fun s -> state.runtime_surface_scroll <- s))
   | System_logs ->
       of_counted (fun count ->
@@ -6536,7 +6576,10 @@ let search_jump ?(backwards = false) state ~query ~after =
               else (after + step + total) mod total
             in
             if matches index then begin
-              if state.view = Lanes then state.lanes_action_error <- None;
+              if state.view = Lanes then begin
+                state.lanes_action_error <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state
+              end;
               place_row_cursor state index
             end
             else scan (step + 1)
@@ -6556,6 +6599,8 @@ let goto_surface state ~mailbox (destination : surface) =
     close_repository_changes state;
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
+  (* The lane editor's line belongs to the view that drew it. *)
+  if destination <> state.view then Masc_tui_types.dismiss_runtime_lane_notice state;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
    | Clients -> launch_clients_load state ~mailbox
@@ -7299,22 +7344,20 @@ let runtime_lane_picker_rows (state : state) =
           state.runtime_catalog )
 ;;
 
-let launch_runtime_lane_append state ~mailbox ~lane ~runtime_id ~existing =
+(* One lane write off the render loop. Every lane edit -- a pick, a removed
+   or moved candidate, a removed lane -- answers through the same message,
+   naming the list it changed so that list is the one re-read. *)
+let launch_runtime_lane_write state ~mailbox ~written write =
   let host = server_peer_host in
   let port = state.port in
+  state.runtime_lane_write <- Masc_tui_types.Lane_write_posting;
   let run () =
     let result =
-      if List.exists (String.equal runtime_id) existing then
-        Error (runtime_id ^ " is already a candidate on " ^ lane)
-      else
-        try
-          Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
-            ~runtime_ids:(existing @ [ runtime_id ])
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+      try write ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Runtime_lane_slots_written result)
+    enqueue_async mailbox (Runtime_lane_slots_written (written, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -7323,7 +7366,53 @@ let launch_runtime_lane_append state ~mailbox ~lane ~runtime_id ~existing =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Runtime_lane_slots_written (Error "Eio switch is unavailable"))
+        (Runtime_lane_slots_written (written, Error "Eio switch is unavailable"))
+;;
+
+let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane_pick)
+    ~runtime_id ~existing =
+  let lane = Masc_tui_types.runtime_lane_pick_name pick in
+  let written =
+    match pick with
+    | Masc_tui_types.Pick_exact_lane _ -> Masc_tui_types.Standalone_lanes_list
+    | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _ ->
+        Masc_tui_types.Runtime_surface_list
+  in
+  if Masc_tui_types.runtime_lane_write_busy state then
+    (* A conversation lane's write is [existing] plus the pick, and
+       [existing] is the order the list last read; writing it before the
+       previous write is read back would undo that write. *)
+    state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+  else
+    match pick, Masc_tui_types.runtime_lane_candidate_write_refusal state with
+    | Masc_tui_types.Pick_conversation_lane _, Some notice ->
+        state.runtime_lane_notice <- Some notice
+    | Masc_tui_types.Pick_conversation_lane _, None
+    | (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_new_lane _),
+      (None | Some _) ->
+        (* Exact lanes append one slot to the server's current order. A new
+           lane sends only the pick. Neither operation rewrites a stale list;
+           only the conversation-lane arm above sends [existing] in full. *)
+        if List.exists (String.equal runtime_id) existing then
+          state.runtime_lane_notice <-
+            Some
+              (Masc_tui_types.Lane_write_refused
+                 (runtime_id ^ " is already a candidate on " ^ lane))
+        else
+          launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
+            match pick with
+            | Masc_tui_types.Pick_conversation_lane lane ->
+                Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+                  ~runtime_ids:(existing @ [ runtime_id ])
+            | Masc_tui_types.Pick_exact_lane name ->
+                (* Only the one slot is sent: the server appends it to the order
+                   the file declares, so a declared slot the registry dropped is
+                   kept. [existing] is used above only to refuse an id the lane
+                   already names. *)
+                Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
+            | Masc_tui_types.Pick_new_lane lane ->
+                Masc_tui_http.create_runtime_lane ~host ~port ~lane
+                  ~runtime_ids:[ runtime_id ])
 ;;
 
 let launch_runtime_catalog_load state ~mailbox =
@@ -7345,6 +7434,33 @@ let launch_runtime_catalog_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
+
+(* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
+   what it does; each write sends the lane's whole order and the server decides
+   whether the result is a lane it can load -- an emptied lane or a lane still
+   in use is refused there, with the reason drawn on the refusal row. *)
+let handle_runtime_lane_edit state ~mailbox edit =
+  match Masc_tui_types.plan_runtime_lane_edit state edit with
+  | Masc_tui_types.Open_lane_name_field ->
+      state.runtime_lane_name_draft <- Some "";
+      Masc_tui_types.dismiss_runtime_lane_notice state;
+      launch_runtime_catalog_load state ~mailbox
+  | Masc_tui_types.Arm_lane_removal lane ->
+      state.runtime_lane_remove_armed <- Some lane;
+      Masc_tui_types.dismiss_runtime_lane_notice state
+  | Masc_tui_types.Send_lane_write { lane; request; cursor_after } ->
+      (match request with
+       | Masc_tui_types.Write_lane_removal -> state.runtime_lane_remove_armed <- None
+       | Masc_tui_types.Write_lane_order _ -> ());
+      state.runtime_lane_cursor_after_write <- cursor_after;
+      launch_runtime_lane_write state ~mailbox
+        ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+        match request with
+        | Masc_tui_types.Write_lane_order runtime_ids ->
+            Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane ~runtime_ids
+        | Masc_tui_types.Write_lane_removal ->
+            Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
+  | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
 
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let host = server_peer_host in
@@ -10220,6 +10336,7 @@ let handle_lanes_overview_click state ~base_path:_ ~mailbox ~terminal_rows ~row 
       then open_lanes_standalone_selection state ~mailbox
       else begin
         state.lanes_action_error <- None;
+        Masc_tui_types.dismiss_runtime_lane_notice state;
         state.lanes_standalone_cursor <- index
       end
 
@@ -11137,10 +11254,56 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
   | Some sw -> Eio.Fiber.fork ~sw run_transition
   | None -> run_transition ()
 
-(* The lifecycle keys on a goal detail. Arming is the pattern the keeper
-   lifecycle already uses: the first press names the action, the same press
-   again submits it, and any other key disarms. [Goal_phase.Public_action.t]
-   rides along so no string name of an action exists in this file. *)
+(* Confirmation uses the operator route and the exact proof read here, never
+   the public MCP action set or a proof obtained at the second keypress. *)
+let handle_goal_confirmation_key state ~mailbox =
+  match state.planning_mode with
+  | Planning_list -> ()
+  | Planning_detail goal_id ->
+      with_async_switch state ~action:"Goal confirmation" @@ fun sw ->
+      let host = server_peer_host and port = state.port in
+      state.goal_action_armed <- None;
+      (match state.goal_confirmation with
+       | Goal_confirmation.Submitting _ -> ()
+       | Goal_confirmation.Inspecting read ->
+      match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
+       | Ready confirmation ->
+           state.goal_confirmation <- Goal_confirmation.Submitting
+               (goal_id, Goal_confirmation_read.clear read);
+           Eio.Fiber.fork ~sw (fun () ->
+             let result =
+               let ( let* ) = Result.bind in
+               let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
+               let* confirmed = Goal_confirmation.decode_confirmation ~goal_id json in
+               match confirmed.phase with
+               | Goal_phase.Completed
+                 when Goal_confirmation.same_confirmation_binding confirmation confirmed ->
+                   Ok "completion confirmed"
+               | _ -> Error "goal confirmation: server did not confirm completion"
+             in
+             enqueue_async mailbox (Goal_confirmation_submitted result))
+       | Loading -> ()
+       | Absent | Failed _ ->
+           (match Goal_confirmation_read.start ~equal:String.equal
+                    read ~key:goal_id with
+            | Already_loading -> ()
+            | Started (loading, request) ->
+                state.goal_confirmation <- Goal_confirmation.Inspecting loading;
+                state.goal_action_error <- None;
+                state.planning_scroll <- 0;
+                Eio.Fiber.fork ~sw (fun () ->
+                  let result =
+                    let ( let* ) = Result.bind in
+                    let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
+                    let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
+                    match confirmation.phase with
+                    | Goal_phase.Awaiting_confirmation -> Ok confirmation
+                    | _ -> Error "goal is not awaiting confirmation"
+                  in
+                  enqueue_async mailbox (Goal_confirmation_loaded (request, result)))))
+
+(* The lifecycle keys on a goal detail. The first press names the action, the
+   same press again submits it, and any other key disarms. *)
 let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
     =
   match state.planning_mode with
@@ -12759,7 +12922,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.board_vote_armed <- None;
           add_event state "error" ("Board vote failed: " ^ err))
-  | Goal_transition_done result -> (
+  | (Goal_transition_done result | Goal_confirmation_submitted result) as message -> (
+      (match message, state.goal_confirmation with
+       | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
+           state.goal_confirmation <- Goal_confirmation.Inspecting read
+       | _ -> ());
       match result with
       | Ok message ->
           state.goal_action_armed <- None;
@@ -12776,6 +12943,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Goal_confirmation_loaded (request, result) ->
+      (match state.goal_confirmation with
+       | Goal_confirmation.Inspecting read ->
+           state.goal_confirmation <- Goal_confirmation.Inspecting
+             (Goal_confirmation_read.complete ~equal:String.equal read request result)
+       | Goal_confirmation.Submitting _ -> ())
   | Verification_evidence_loaded (task_id, result) ->
       (match verification_cursor_row state, state.verification_detail_request_id with
        | Some row, Some _ when String.equal row.Masc.Tui_decode.vr_task_id task_id ->
@@ -14247,29 +14420,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.tools_async_observation <- Some observation;
           state.tools_async_observation_error <- None
       | Error detail -> state.tools_async_observation_error <- Some detail)
-  | Runtime_lane_slots_written result ->
-      (* An "exact/<lane>" write redraws the standalone-lane matrix too; a
-         conversation-lane write leaves it alone. Re-read whichever surface
-         drew the order rather than patching the local snapshot: a
-         hand-applied edit and a rejected write look the same on screen. *)
-      let exact_write =
-        Option.map
-          (fun lane ->
-            String.length lane > 6 && String.equal (String.sub lane 0 6) "exact/")
-          state.runtime_lane_pick
-        |> Option.value ~default:false
-      in
+  | Runtime_lane_slots_written (written, result) ->
+      (* Re-read the list the write changed rather than patching the local
+         snapshot: a hand-applied edit and a rejected write look the same on
+         screen. Lane edits wait for that re-read
+         ([Masc_tui_types.settle_runtime_lane_write]). *)
+      let cursor_after = state.runtime_lane_cursor_after_write in
+      state.runtime_lane_cursor_after_write <- None;
+      Masc_tui_types.settle_runtime_lane_write state ~written result;
       (match result with
        | Ok () ->
-           state.runtime_lane_error <- None;
-           state.lanes_action_error <- None;
            state.runtime_lane_pick <- None;
            state.runtime_lane_pick_cursor <- 0;
-           launch_runtime_surface_load state ~mailbox ~force:true;
-           if exact_write then launch_lanes_load state ~mailbox
-       | Error detail ->
-           if state.view = Lanes then state.lanes_action_error <- Some detail
-           else state.runtime_lane_error <- Some detail)
+           Option.iter (fun row -> state.runtime_cursor <- row) cursor_after;
+           (match written with
+            | Masc_tui_types.Runtime_surface_list ->
+                launch_runtime_surface_load state ~mailbox ~force:true
+            | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
+       | Error _ -> ())
   | Runtime_catalog_loaded result -> (
       match result with
       | Ok (runtimes, lanes, assignments) ->
@@ -14435,12 +14603,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               with
               | Ok snapshot ->
                   state.runtime_surface <- Some snapshot;
-                  state.runtime_surface_error <- probe_error
-              | Error detail -> state.runtime_surface_error <- Some detail)
+                  state.runtime_surface_error <- probe_error;
+                  Masc_tui_types.runtime_lane_list_reread state
+                    ~list:Masc_tui_types.Runtime_surface_list ~generation (Ok ())
+              | Error detail ->
+                  state.runtime_surface_error <- Some detail;
+                  Masc_tui_types.runtime_lane_list_reread state
+                    ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail))
          | Error detail ->
              (* The last joined reading remains visible. An authority read or
                 decode failure is not an empty lane inventory. *)
-             state.runtime_surface_error <- Some detail);
+             state.runtime_surface_error <- Some detail;
+             Masc_tui_types.runtime_lane_list_reread state
+               ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail));
       if is_current && state.runtime_surface_force_pending then begin
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
@@ -14634,8 +14809,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.lanes_standalone_cursor <-
               max 0
                 (min state.lanes_standalone_cursor
-                   (List.length snapshot.Tui_decode.sls_lanes - 1))
-        | Error detail -> state.standalone_lanes_error <- Some detail)
+                   (List.length snapshot.Tui_decode.sls_lanes - 1));
+            Masc_tui_types.runtime_lane_list_reread state
+              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Ok ())
+        | Error detail ->
+            state.standalone_lanes_error <- Some detail;
+            Masc_tui_types.runtime_lane_list_reread state
+              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Error detail));
+      if state.standalone_lanes_reread_pending then begin
+        state.standalone_lanes_reread_pending <- false;
+        launch_lanes_load state ~mailbox
+      end
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
       if generation = state.clients_surface_generation then (
@@ -15814,9 +15998,8 @@ let main
       in
       enqueue_async async_messages (Harness_label_done result)
     in
-    match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork ~sw run
-    | None -> run ()
+    with_async_switch state ~action:"Harness label" (fun sw ->
+      Eio.Fiber.fork ~sw run)
   in
   let handle_harness_agree () =
     match harness_cursor_verdict () with
@@ -17064,6 +17247,10 @@ and is loaded on demand through keeper_skill.
                 state.preset_save_draft <-
                   Some
                     (Option.value state.preset_save_draft ~default:"" ^ text)
+            | Some Text_runtime_lane_name ->
+                state.runtime_lane_name_draft <-
+                  Some
+                    (Option.value state.runtime_lane_name_draft ~default:"" ^ text)
             (* The first paste replaces the selected current value; later
                pastes append, matching typed input. *)
             | Some Text_runtime_param ->
@@ -17286,7 +17473,17 @@ and is loaded on demand through keeper_skill.
        | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
        | Planning ->
            if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
-             state.goal_action_armed <- None
+             state.goal_action_armed <- None;
+           (* Scrolling reads the exact proof; leaving it invalidates pending
+              reads as well as an already displayed confirmation binding. *)
+           if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
+                          "pageup"; "pagedown"; "wheel-up"; "wheel-down" ] then
+             (match state.goal_confirmation with
+              | Goal_confirmation.Inspecting read ->
+                  state.goal_confirmation <- Goal_confirmation.Inspecting
+                    (Goal_confirmation_read.clear read)
+              (* Leaving the proof cancels a read, but cannot unsend a POST. *)
+              | Goal_confirmation.Submitting _ -> ())
        | Schedules ->
            if cancelled [ "x"; "X" ] then state.schedule_cancel_armed <- None
        | Verification ->
@@ -17296,9 +17493,11 @@ and is loaded on demand through keeper_skill.
            (* A restore rewrites three surfaces; its arm must not outlive the
               keypress that set it. *)
            if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
+       | Runtime ->
+           if cancelled [ "D" ] then state.runtime_lane_remove_armed <- None
        | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
        | Repositories
-       | Changes | Connectors | Runtime | Resources | Tools
+       | Changes | Connectors | Resources | Tools
        | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
          [u] presses. Any intervening action invalidates the ownership
@@ -17615,6 +17814,34 @@ and is loaded on demand through keeper_skill.
                    state.preset_save_draft <- Some (String.sub draft 0 (length - 1))
                | s when String.length s = 1 && Char.code s.[0] >= 32 ->
                  state.preset_save_draft <- Some (draft ^ s)
+               | _ -> ()))
+       (* Typing a new lane's name. Enter opens the failover picker on the
+          name, and the first runtime picked there declares the lane: a lane
+          is its candidates, so it comes to exist with one rather than empty.
+          Every printable key is the field's while it is open, so a name with
+          an x or a D in it does not fire the lane keys under it. *)
+       | Some k
+         when text_input_target state ~compact_viewport
+              = Some Text_runtime_lane_name ->
+           (match state.runtime_lane_name_draft with
+            | None -> ()
+            | Some draft ->
+              (match k with
+               | "esc" -> state.runtime_lane_name_draft <- None
+               | "\r" | "\n" | "enter" ->
+                 let name = String.trim draft in
+                 if not (String.equal name "") then begin
+                   state.runtime_lane_name_draft <- None;
+                   state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
+                   state.runtime_lane_pick_cursor <- 0;
+                   Masc_tui_types.dismiss_runtime_lane_notice state
+                 end
+               | "\127" | "\b" | "backspace" ->
+                 let length = String.length draft in
+                 if length > 0 then
+                   state.runtime_lane_name_draft <- Some (String.sub draft 0 (length - 1))
+               | s when String.length s = 1 && Char.code s.[0] >= 32 ->
+                 state.runtime_lane_name_draft <- Some (draft ^ s)
                | _ -> ()))
        | Some k
          when text_input_target state ~compact_viewport
@@ -18747,12 +18974,13 @@ and is loaded on demand through keeper_skill.
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                  set (current ^ s)
                | _ -> ()))
-       | Some "j" | Some "k" | Some "e" | Some "E" | Some "\r"
+       | Some "j" | Some "k" | Some "e" | Some "E" | Some "esc" | Some "\r"
          when (state.view = Runtime || state.view = Lanes)
               && Option.is_some state.runtime_lane_pick ->
-           (* The picker is open: j/k move it, Enter appends, e closes. The
-              Runtime surface opens it for a conversation lane, the Lanes
-              surface for a standalone lane's exact/ walk order. *)
+           (* The picker is open: j/k move it, Enter appends, e or Esc closes.
+              The Runtime surface opens it for a conversation lane or a lane
+              being created, the Lanes surface for a standalone lane's walk
+              order. *)
            let already, catalog = runtime_lane_picker_rows state in
            let count = List.length catalog in
            (match key with
@@ -18765,12 +18993,12 @@ and is loaded on demand through keeper_skill.
                    ( state.runtime_lane_pick
                    , List.nth_opt catalog state.runtime_lane_pick_cursor )
                  with
-                 | Some lane, Some runtime ->
-                     launch_runtime_lane_append state ~mailbox:async_messages
-                       ~lane ~runtime_id:runtime.Masc.Tui_decode.ro_id
+                 | Some pick, Some runtime ->
+                     launch_runtime_lane_pick state ~mailbox:async_messages
+                       ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
                        ~existing:already
                  | _ -> ())
-            | Some "e" | Some "E" ->
+            | Some "e" | Some "E" | Some "esc" ->
                 state.runtime_lane_pick <- None;
                 state.runtime_lane_pick_cursor <- 0
             | _ -> ())
@@ -18792,25 +19020,36 @@ and is loaded on demand through keeper_skill.
                  | None -> ()
                  | Some row ->
                      state.runtime_lane_pick <-
-                       Some row.Masc.Tui_decode.rcr_lane_id;
+                       Some
+                         (Masc_tui_types.Pick_conversation_lane
+                            row.Masc.Tui_decode.rcr_lane_id);
                      state.runtime_lane_pick_cursor <- 0;
-                     state.runtime_lane_error <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
+       | Some k
+         when state.view = Runtime
+              && state.runtime_mode = Masc_tui_types.Runtime_lanes
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_some (Masc_tui_types.runtime_lane_edit_of_key k) ->
+           Option.iter
+             (handle_runtime_lane_edit state ~mailbox:async_messages)
+             (Masc_tui_types.runtime_lane_edit_of_key k)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
               && Option.is_none state.runtime_lane_pick ->
            (* Append a failover candidate to the standalone lane under the
-              cursor. The pick names "exact/<lane>" so the routing write
-              resolves the walk-order table rather than the conversation
-              lane of the same-looking id. *)
+              cursor. The pick is typed as a standalone lane so the routing
+              write resolves the walk-order table rather than the
+              conversation lane of the same-looking id. *)
            (match Masc_tui_types.selected_standalone_lane state with
             | None -> ()
             | Some lane ->
                 state.runtime_lane_pick <-
-                  Some ("exact/" ^ lane.Masc.Tui_decode.sl_lane_id);
+                  Some (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
                 state.runtime_lane_pick_cursor <- 0;
-                state.runtime_lane_error <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)
         | Some ("T" | "t")
@@ -20853,7 +21092,7 @@ and is loaded on demand through keeper_skill.
              | Clients ->
                  launch_clients_load state ~mailbox:async_messages
              | Lanes ->
-                launch_lanes_load state ~mailbox:async_messages;
+                launch_lanes_reread state ~mailbox:async_messages;
                 (match state.lanes_mode with
                  | Lanes_run_list lane_id ->
                      launch_lane_runs_load state ~mailbox:async_messages
@@ -21533,6 +21772,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      let count = lanes_standalone_count state in
                      state.lanes_action_error <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      state.lanes_standalone_cursor <-
                        max 0
                          (min (count - 1)
@@ -21613,6 +21853,8 @@ and is loaded on demand through keeper_skill.
                        ~cursor:state.runtime_cursor
                        ~scroll:state.runtime_surface_scroll
                    in
+                   if cursor <> state.runtime_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
             | Tools -> state.tools_scroll <-
@@ -21895,6 +22137,7 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_scroll <- scroll)
                  | Lanes_overview ->
                      state.lanes_action_error <- None;
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                      state.lanes_standalone_cursor <-
                        max 0 (state.lanes_standalone_cursor - 1))
             | Harness ->
@@ -21974,6 +22217,8 @@ and is loaded on demand through keeper_skill.
                        ~cursor:state.runtime_cursor
                        ~scroll:state.runtime_surface_scroll
                    in
+                   if cursor <> state.runtime_cursor then
+                     Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.runtime_cursor <- cursor;
                    state.runtime_surface_scroll <- scroll)
             | Tools ->
@@ -22808,6 +23053,8 @@ and is loaded on demand through keeper_skill.
                           reenter_terminal ();
                           add_event state "system"
                             (Printf.sprintf "closed %s:%d" path line))))
+       | Some ("a" | "A") when state.view = Planning ->
+           handle_goal_confirmation_key state ~mailbox:async_messages
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
@@ -23127,6 +23374,7 @@ and is loaded on demand through keeper_skill.
             | Masc_tui_types.Runtime_lanes ->
                 state.runtime_mode <- Masc_tui_types.Runtime_all;
                 (* Selection and scroll belong to the same list. *)
+                Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.runtime_cursor <- 0;
                 state.runtime_surface_scroll <- 0
             | Masc_tui_types.Runtime_all ->

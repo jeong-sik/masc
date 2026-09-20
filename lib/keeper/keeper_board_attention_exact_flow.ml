@@ -365,9 +365,9 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
    boot-mandatory and its catalog slots share two quota pools, so without a
    tail an exhausted pool stops Board attention outright.
 
-   The walk is deliberately not part of [execute]: a caller must ask for it,
-   and the judgment it produces says [Cli_lane_slot] so the durable record
-   never claims an AGENT_CORE attempt that was not allocated. *)
+   [execute] owns the walk so its exact-run receipt closes only after the
+   whole lane finishes. The judgment it produces says [Cli_lane_slot], so the
+   durable record never claims an AGENT_CORE attempt that was not allocated. *)
 type cli_tail_error =
   | No_cli_slots
   | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
@@ -448,15 +448,140 @@ let terminal_outcome = function
   | Error (Domain_output_invalid _) -> Invalid_domain_output
 ;;
 
-let observe_terminal prepared result =
-  Log.Keeper.info
-    ~keeper_name:prepared.candidate.keeper_name
-    "board_attention exact_flow.execute terminal candidate_id=%s outcome=%s"
-    prepared.candidate.candidate_id
-    (result |> terminal_outcome |> terminal_outcome_to_string)
+(* What TypeSafe AI Jev answered for a candidate before any catalog slot ran.
+   Only [Jev_relevant] settles the candidate: a not-relevant verdict drops the
+   post for this keeper, so the LLM lane judges it again, and so does every arm
+   where Jev gave no answer. The terminal log line carries this value, so what
+   Jev said and what the lane then decided are read from one entry. *)
+type jev_first =
+  | Jev_off
+      (** No [TYPESAFEAI_API_KEY], or [MASC_TYPESAFEAI_ENABLED=false]. *)
+  | Jev_cli_only
+      (** Jev is on, but the lane declares no HTTP slot. Jev is asked only in
+          front of the HTTP lane. *)
+  | Jev_not_pending
+      (** Jev is on, but the candidate is not [Pending], so there is no
+          material to send. *)
+  | Jev_relevant of
+      { provenance : Keeper_board_attention_candidate.system_one_provenance
+      ; verdict : Keeper_board_attention_judgment.t
+      ; judged_at : float
+      }
+  | Jev_not_relevant of
+      { provenance : Keeper_board_attention_candidate.system_one_provenance
+      ; rationale : string
+      }
+  | Jev_failed of { reason : string }
+
+let ask_jev ~clock prepared =
+  if not (Typesafeai_config.is_enabled ())
+  then Jev_off
+  else (
+    match Typesafeai_config.api_key () with
+    | None -> Jev_off
+    | Some api_key ->
+      (match prepared.transport with
+       | Cli_only -> Jev_cli_only
+       | Http_flow _ ->
+         (match prepared.candidate.status with
+          | Keeper_board_attention_candidate.Judged _
+          | Keeper_board_attention_candidate.Consumed _
+          | Keeper_board_attention_candidate.Quarantine _ -> Jev_not_pending
+          | Keeper_board_attention_candidate.Pending { material; _ } ->
+            (* A direct-style Eio request on this keeper's board-attention
+               worker fiber: the wait suspends that fiber alone, as the
+               [Exact_output] request does, so it delays this candidate's
+               judgment and nothing else on the domain. *)
+            (match
+               Typesafeai_board_attention.judge_candidate
+                 ~clock
+                 ~api_key
+                 ~candidate:prepared.candidate
+                 ~material
+                 ()
+             with
+             | Error reason -> Jev_failed { reason }
+             | Ok { Typesafeai_board_attention.verdict; provenance } ->
+               (match verdict.Keeper_board_attention_judgment.decision with
+                | Keeper_board_attention_judgment.Relevant ->
+                  (* The lane's clock, never the wall: both entries into this
+                     flow hold one, so a judgment's time comes from the same
+                     source the rest of the turn is measured against. *)
+                  Jev_relevant
+                    { provenance; verdict; judged_at = Eio.Time.now clock }
+                | Keeper_board_attention_judgment.Not_relevant ->
+                  Jev_not_relevant
+                    { provenance
+                    ; rationale = verdict.Keeper_board_attention_judgment.rationale
+                    })))))
 ;;
 
-let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared =
+let jev_answer_label = function
+  | Jev_off -> "off"
+  | Jev_cli_only -> "cli_only"
+  | Jev_not_pending -> "not_pending"
+  | Jev_relevant _ ->
+    Keeper_board_attention_judgment.decision_to_string
+      Keeper_board_attention_judgment.Relevant
+  | Jev_not_relevant _ ->
+    Keeper_board_attention_judgment.decision_to_string
+      Keeper_board_attention_judgment.Not_relevant
+  | Jev_failed _ -> "failed"
+;;
+
+(* [rejudged] appears only after a not-relevant answer. It is the decision the
+   HTTP flow or its CLI tail then returned, or [null] when the complete lane
+   returned no judgment. *)
+let jev_first_to_yojson jev_first result =
+  let answer = "answer", `String (jev_answer_label jev_first) in
+  let with_provenance provenance fields =
+    `Assoc
+      (fields
+       @ [ ( "provenance"
+           , Keeper_board_attention_candidate.system_one_provenance_to_yojson
+               provenance ) ])
+  in
+  match jev_first with
+  | Jev_off | Jev_cli_only | Jev_not_pending -> `Assoc [ answer ]
+  | Jev_relevant { provenance; _ } ->
+    with_provenance provenance [ answer ]
+  | Jev_failed { reason } -> `Assoc [ answer; "reason", `String reason ]
+  | Jev_not_relevant { provenance; rationale } ->
+    let rejudged =
+      match result with
+      | Ok (judgment : Keeper_board_attention_candidate.judgment) ->
+        `String
+          (Keeper_board_attention_judgment.decision_to_string
+             judgment.Keeper_board_attention_candidate.verdict.Keeper_board_attention_judgment.decision)
+      | Error _ -> `Null
+    in
+    with_provenance
+      provenance
+      [ answer
+      ; "rationale", `String rationale
+      ; "rejudged", rejudged
+      ]
+;;
+
+let observe_terminal prepared ~jev_first result =
+  let outcome = result |> terminal_outcome |> terminal_outcome_to_string in
+  Log.Keeper.emit
+    Log.Info
+    ~keeper_name:prepared.candidate.keeper_name
+    ~details:
+      (`Assoc
+          [ "candidate_id", `String prepared.candidate.candidate_id
+          ; "outcome", `String outcome
+          ; "jev", jev_first_to_yojson jev_first result
+          ])
+    (Printf.sprintf
+       "board_attention exact_flow.execute terminal candidate_id=%s outcome=%s jev=%s"
+       prepared.candidate.candidate_id
+       outcome
+       (jev_answer_label jev_first))
+;;
+
+let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
   let registry = Exact_lane_run_registry.global () in
   let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
   let started_at = Time_compat.now () in
@@ -471,9 +596,10 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
   let cli_selected_slot = ref None in
   let complete outcome output =
     let selected_slot =
-      match !bound with
-      | Some (provenance : attempt_provenance) -> Some provenance.slot_id
-      | None -> !cli_selected_slot
+      match !cli_selected_slot, !bound with
+      | Some slot_id, _ -> Some slot_id
+      | None, Some (provenance : attempt_provenance) -> Some provenance.slot_id
+      | None, None -> None
     in
     match
       Exact_lane_run_registry.mark_completed
@@ -548,37 +674,76 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
     | Exact_output.Flow_exact_execution_failed { evidence; _ } ->
       Error (Exact_execution_failed (evidence_provenance evidence))
   in
-  let result =
+  let run_cli_after_http fallback =
+    match
+      run_cli_tail
+        ?runner:cli_runner
+        ~base_path:prepared.base_path
+        prepared
+    with
+    | Ok (slot_id, judgment) ->
+      Log.Keeper.info
+        "board_attention_cli_tail_judged keeper=%s slot=%s"
+        prepared.candidate.keeper_name
+        slot_id;
+      cli_selected_slot := Some slot_id;
+      Ok judgment
+    | Error No_cli_slots -> fallback
+    | Error (Cli_slots_exhausted _ as reason) ->
+      Log.Keeper.warn
+        "board_attention_cli_tail_failed keeper=%s reason=%s"
+        prepared.candidate.keeper_name
+        (cli_tail_error_to_string reason);
+      fallback
+  in
+  let jev_first, result =
     try
-      match prepared.transport with
-      | Cli_only ->
-        (match run_cli_tail ?runner:cli_runner ~base_path:prepared.base_path prepared with
-         | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
-         | Error _ -> Error (Exact_execution_failed []))
-      | Http_flow attempt ->
-      match
-        Exact_output.execute_flow_once
-          ~net:prepared.net
-          ?clock
-          ~before_measurement_dispatch:(fun _ -> Ok ())
-          ~on_measurement_terminal:(fun _ -> Ok ())
-          ~before_dispatch:agent_core_before_dispatch
-          ~before_advance:agent_core_before_advance
-          ~validate
-          attempt
-      with
-      | Ok success -> Ok success.accepted
-      | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-        terminal_error cause
-      | Error
-          (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
-        let rejection =
-          List.fold_left
-            (fun _ rejection -> rejection)
-            rejections.first
-            rejections.rest
-        in
-        Error rejection.rejection
+      let jev_first = ask_jev ~clock prepared in
+      let result =
+        match prepared.transport with
+        | Cli_only ->
+          (match run_cli_tail ?runner:cli_runner ~base_path:prepared.base_path prepared with
+           | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
+           | Error _ -> Error (Exact_execution_failed []))
+        | Http_flow attempt ->
+          (match jev_first with
+           | Jev_relevant { provenance; verdict; judged_at } ->
+             Ok
+               { Keeper_board_attention_candidate.verdict
+               ; slot_id = provenance.answering_model_id
+               ; source =
+                   Keeper_board_attention_candidate.Vendor_system_one provenance
+               ; judged_at
+               }
+           | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_failed _ ->
+             (match
+                Exact_output.execute_flow_once
+                  ~net:prepared.net
+                  ~clock
+                  ~before_measurement_dispatch:(fun _ -> Ok ())
+                  ~on_measurement_terminal:(fun _ -> Ok ())
+                  ~before_dispatch:agent_core_before_dispatch
+                  ~before_advance:agent_core_before_advance
+                  ~validate
+                  attempt
+              with
+              | Ok success -> Ok success.accepted
+              | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+                (match Exact_output.flow_execution_terminal_kind cause with
+                 | Exact_output.Advanceable_candidates_exhausted ->
+                   run_cli_after_http (terminal_error cause)
+                 | Exact_output.Non_advanceable_terminal -> terminal_error cause)
+              | Error
+                  (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
+                let rejection =
+                  List.fold_left
+                    (fun _ rejection -> rejection)
+                    rejections.first
+                    rejections.rest
+                in
+                run_cli_after_http (Error rejection.rejection)))
+      in
+      jev_first, result
     with
     | Eio.Cancel.Cancelled _ as exn ->
       complete Exact_lane_run_registry.Cancelled `Null;
@@ -600,10 +765,10 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
      complete
        (Exact_lane_run_registry.Failed { code; detail = code })
        (`Assoc [ "terminal_outcome", `String code ]));
-  observe_terminal prepared result;
+  observe_terminal prepared ~jev_first result;
   result
 ;;
 
-let execute ?cli_runner ?clock ~before_dispatch ~before_advance prepared =
-  execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
+let execute ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
+  execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
 ;;

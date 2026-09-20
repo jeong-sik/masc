@@ -447,7 +447,9 @@ let test_cli_slot_completion_uses_its_durable_claim () =
     (match persisted.judgment.source with
      | A.Cli_lane_slot -> ()
      | A.Exact_attempt _ ->
-       Alcotest.fail "a cli completion must not be recorded as an exact attempt")
+       Alcotest.fail "a cli completion must not be recorded as an exact attempt"
+     | A.Vendor_system_one _ ->
+       Alcotest.fail "a cli completion must not be recorded as a vendor answer")
   | _ -> Alcotest.fail "cli completion did not reach Completed"
 ;;
 

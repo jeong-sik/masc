@@ -62,6 +62,7 @@ type decode_error =
 
 val package_id_of_directory : string -> (package_id, package_id_error) result
 val package_id_to_string : package_id -> string
+val package_id_error_to_string : package_id_error -> string
 
 val validate_revision_string : string -> (unit, revision_error) result
 val content_revision_of_string : string -> (content_revision, revision_error) result

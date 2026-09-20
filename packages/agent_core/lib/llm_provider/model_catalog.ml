@@ -7,7 +7,7 @@ end
 open Result_syntax
 
 type model_entry =
-  { id_prefix : string
+  { id_prefix : Model_identifiers.Id_prefix.t
   ; base_label : string option
   ; provider_name : string option
   ; max_context_tokens : int option
@@ -72,6 +72,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
+  ; supports_parallel_tool_suppression : bool
   }
 
 type t =
@@ -380,129 +381,128 @@ let parse_entry entry_toml =
     | Error _ -> Error "model entry field \"id_prefix\" expected string"
     | Ok None -> Error "model entry missing required \"id_prefix\" field"
     | Ok (Some raw) ->
-      let trimmed = String.trim raw in
-      if trimmed = ""
-      then Error "model entry field \"id_prefix\" must not be empty"
-      else if raw <> trimmed
-      then
-        Error
-          "model entry field \"id_prefix\" must not have leading or trailing whitespace"
-      else Ok raw
+      let* id_prefix = Model_identifiers.Id_prefix.of_string raw in
+      let* () =
+        reject_unknown_entry_keys
+          ~entry_id:(Model_identifiers.Id_prefix.to_string id_prefix)
+          entry_toml
+      in
+      Ok id_prefix
   in
-  let* () = reject_unknown_entry_keys ~entry_id:id_prefix entry_toml in
+  let entry_id = Model_identifiers.Id_prefix.to_string id_prefix in
   let* base_label =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "base"
       ~allowed:Capability_vocab.base_label_values
       entry_toml
   in
   let* provider_name =
-    non_empty_string_field ~entry_id:id_prefix "provider_name" entry_toml
+    non_empty_string_field ~entry_id "provider_name" entry_toml
   in
   let* max_context_tokens =
-    int_field ~entry_id:id_prefix "max_context_tokens" entry_toml
+    int_field ~entry_id "max_context_tokens" entry_toml
   in
   let* serving_constraint =
-    Serving_constraint_catalog.parse ~entry_id:id_prefix entry_toml
+    Serving_constraint_catalog.parse ~entry_id entry_toml
   in
-  let* max_output_tokens = int_field ~entry_id:id_prefix "max_output_tokens" entry_toml in
-  let* supports_tools = bool_field ~entry_id:id_prefix "supports_tools" entry_toml in
+  let* max_output_tokens = int_field ~entry_id "max_output_tokens" entry_toml in
+  let* supports_tools = bool_field ~entry_id "supports_tools" entry_toml in
   let* supports_tool_choice =
-    bool_field ~entry_id:id_prefix "supports_tool_choice" entry_toml
+    bool_field ~entry_id "supports_tool_choice" entry_toml
   in
   let* supports_required_tool_choice =
-    bool_field ~entry_id:id_prefix "supports_required_tool_choice" entry_toml
+    bool_field ~entry_id "supports_required_tool_choice" entry_toml
   in
   let* supports_named_tool_choice =
-    bool_field ~entry_id:id_prefix "supports_named_tool_choice" entry_toml
+    bool_field ~entry_id "supports_named_tool_choice" entry_toml
   in
   let* supports_parallel_tool_calls =
-    bool_field ~entry_id:id_prefix "supports_parallel_tool_calls" entry_toml
+    bool_field ~entry_id "supports_parallel_tool_calls" entry_toml
   in
   let* assistant_tool_content_format =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "assistant_tool_content_format"
       ~allowed:Capability_vocab.assistant_tool_content_format_values
       entry_toml
   in
   let* chat_output_budget_field =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "chat_output_budget_field"
       ~allowed:Capability_vocab.chat_output_budget_field_values
       entry_toml
   in
   let* tool_schema_conformance =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "tool_schema_conformance"
       ~allowed:Capability_vocab.tool_schema_conformance_values
       entry_toml
   in
   let* supports_reasoning =
-    bool_field ~entry_id:id_prefix "supports_reasoning" entry_toml
+    bool_field ~entry_id "supports_reasoning" entry_toml
   in
   let* accepted_reasoning_efforts =
     canonical_string_list_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "accepted_reasoning_efforts"
       ~allowed:Reasoning_effort.all_wire_values
       entry_toml
   in
   let* supports_response_format_json =
-    bool_field ~entry_id:id_prefix "supports_response_format_json" entry_toml
+    bool_field ~entry_id "supports_response_format_json" entry_toml
   in
   let* supports_structured_output =
-    bool_field ~entry_id:id_prefix "supports_structured_output" entry_toml
+    bool_field ~entry_id "supports_structured_output" entry_toml
   in
   let* supports_multimodal_inputs =
-    bool_field ~entry_id:id_prefix "supports_multimodal_inputs" entry_toml
+    bool_field ~entry_id "supports_multimodal_inputs" entry_toml
   in
   let* supports_image_input =
-    bool_field ~entry_id:id_prefix "supports_image_input" entry_toml
+    bool_field ~entry_id "supports_image_input" entry_toml
   in
   let* supports_audio_input =
-    bool_field ~entry_id:id_prefix "supports_audio_input" entry_toml
+    bool_field ~entry_id "supports_audio_input" entry_toml
   in
   let* supports_video_input =
-    bool_field ~entry_id:id_prefix "supports_video_input" entry_toml
+    bool_field ~entry_id "supports_video_input" entry_toml
   in
   let* supports_document_input =
-    bool_field ~entry_id:id_prefix "supports_document_input" entry_toml
+    bool_field ~entry_id "supports_document_input" entry_toml
   in
   let* modality_priority =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "modality_priority"
       ~allowed:Capability_vocab.modality_priority_values
       entry_toml
   in
-  let* task = task_opt ~entry_id:id_prefix "task" entry_toml in
+  let* task = task_opt ~entry_id "task" entry_toml in
   let* supported_models =
-    exact_non_empty_string_list_opt ~entry_id:id_prefix "supported_models" entry_toml
+    exact_non_empty_string_list_opt ~entry_id "supported_models" entry_toml
   in
   let* supports_native_streaming =
-    bool_field ~entry_id:id_prefix "supports_native_streaming" entry_toml
+    bool_field ~entry_id "supports_native_streaming" entry_toml
   in
   let* supports_system_prompt =
-    bool_field ~entry_id:id_prefix "supports_system_prompt" entry_toml
+    bool_field ~entry_id "supports_system_prompt" entry_toml
   in
   let* supports_prompt_caching =
-    bool_field ~entry_id:id_prefix "supports_prompt_caching" entry_toml
+    bool_field ~entry_id "supports_prompt_caching" entry_toml
   in
-  let* supports_top_k = bool_field ~entry_id:id_prefix "supports_top_k" entry_toml in
-  let* supports_min_p = bool_field ~entry_id:id_prefix "supports_min_p" entry_toml in
-  let* supports_seed = bool_field ~entry_id:id_prefix "supports_seed" entry_toml in
+  let* supports_top_k = bool_field ~entry_id "supports_top_k" entry_toml in
+  let* supports_min_p = bool_field ~entry_id "supports_min_p" entry_toml in
+  let* supports_seed = bool_field ~entry_id "supports_seed" entry_toml in
   let* ignored_sampling_parameters =
-    sampling_parameters_opt ~entry_id:id_prefix "ignored_sampling_parameters" entry_toml
+    sampling_parameters_opt ~entry_id "ignored_sampling_parameters" entry_toml
   in
   let* thinking_control_format_raw =
-    find_string_field ~entry_id:id_prefix "thinking_control_format" entry_toml
+    find_string_field ~entry_id "thinking_control_format" entry_toml
   in
   let* thinking_control_token =
-    find_string_field ~entry_id:id_prefix "thinking_control_token" entry_toml
+    find_string_field ~entry_id "thinking_control_token" entry_toml
   in
   let* thinking_control_format =
     Capability_vocab.decode_optional_thinking_control_format
@@ -511,60 +511,60 @@ let parse_entry entry_toml =
     |> Result.map_error (fun error ->
       Printf.sprintf
         "model entry %S %s"
-        id_prefix
+        (Model_identifiers.Id_prefix.to_string id_prefix)
         (Capability_vocab.thinking_control_format_codec_error_to_string error))
   in
   let* anthropic_thinking_control =
     anthropic_thinking_control_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "anthropic_thinking_control"
       entry_toml
   in
   let* preserve_thinking_control_format =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "preserve_thinking_control_format"
       ~allowed:Capability_vocab.preserve_thinking_control_format_values
       entry_toml
   in
   let* content_inline_reasoning =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "content_inline_reasoning"
       ~allowed:Capability_vocab.content_inline_reasoning_values
       entry_toml
   in
   let* reasoning_output_format =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "reasoning_output_format"
       ~allowed:Capability_vocab.reasoning_output_format_values
       entry_toml
   in
   let* reasoning_streaming_format =
     reasoning_streaming_format_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "reasoning_streaming_format"
       entry_toml
   in
   let* reasoning_replay =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "reasoning_replay"
       ~allowed:Capability_vocab.reasoning_replay_values
       entry_toml
   in
   let* input_per_million =
-    float_field ~entry_id:id_prefix "input_per_million" entry_toml
+    float_field ~entry_id "input_per_million" entry_toml
   in
   let* output_per_million =
-    float_field ~entry_id:id_prefix "output_per_million" entry_toml
+    float_field ~entry_id "output_per_million" entry_toml
   in
   let* cache_write_multiplier =
-    float_field ~entry_id:id_prefix "cache_write_multiplier" entry_toml
+    float_field ~entry_id "cache_write_multiplier" entry_toml
   in
   let* cache_read_multiplier =
-    float_field ~entry_id:id_prefix "cache_read_multiplier" entry_toml
+    float_field ~entry_id "cache_read_multiplier" entry_toml
   in
   Ok
     { id_prefix
@@ -806,7 +806,8 @@ let parse_table_array_lenient ~kind ~id_key toml key parse =
 let normalize_label value = String.lowercase_ascii (String.trim value)
 
 let model_row_key (entry : model_entry) =
-  Option.map normalize_label entry.provider_name, normalize_label entry.id_prefix
+  Option.map normalize_label entry.provider_name,
+  normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)
 ;;
 
 let provider_entry_key (entry : provider_entry) = normalize_label entry.id
@@ -817,8 +818,15 @@ let provider_entry_key (entry : provider_entry) = normalize_label entry.id
    factor of 900 in price and nothing says which one is charging. *)
 let duplicate_model_label (entry : model_entry) =
   match entry.provider_name with
-  | None -> Printf.sprintf "model row %S" entry.id_prefix
-  | Some provider -> Printf.sprintf "model row %S for provider %S" entry.id_prefix provider
+  | None ->
+    Printf.sprintf
+      "model row %S"
+      (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+  | Some provider ->
+    Printf.sprintf
+      "model row %S for provider %S"
+      (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+      provider
 ;;
 
 let reject_duplicate_rows models providers =
@@ -911,18 +919,21 @@ let load_default () =
   of_toml_string ~source:"embedded default model catalog" Model_catalog_embedded.contents
 ;;
 
-let lookup_entries entries model_id =
-  let sorted_t =
-    List.fast_sort
-      (fun a b -> compare (String.length b.id_prefix) (String.length a.id_prefix))
-      entries
-  in
-  let model_id = String.lowercase_ascii (String.trim model_id) in
-  List.find_opt
-    (fun entry ->
-       let prefix = String.lowercase_ascii entry.id_prefix in
-       String.starts_with ~prefix model_id)
-    sorted_t
+let lookup_entries entries raw_model_id =
+  match Model_identifiers.Model_id.of_string raw_model_id with
+  | Error _ -> None
+  | Ok model_id ->
+    let sorted_t =
+      List.fast_sort
+        (fun a b ->
+           compare
+             (String.length (Model_identifiers.Id_prefix.to_string b.id_prefix))
+             (String.length (Model_identifiers.Id_prefix.to_string a.id_prefix)))
+        entries
+    in
+    List.find_opt
+      (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
+      sorted_t
 ;;
 
 let lookup t model_id =
@@ -1089,7 +1100,9 @@ let lookup_for_provider t ~provider_name ~model_id =
          | None -> false
          | Some declared ->
            String.equal label (normalize_label declared)
-           && String.equal model_id (normalize_label entry.id_prefix))
+           && String.equal
+                model_id
+                (normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)))
       t.models
   in
   let requested = normalize_label provider_name in
@@ -1174,30 +1187,10 @@ let load_embedded_once () =
 
 let runtime_override : t option Atomic.t = Atomic.make None
 
-(* Deployment overlay merged onto the embedded catalog by [global]. Kept
-   separate from [runtime_override] so a full replacement (tests, explicit
-   AGENT_CORE_MODEL_CATALOG-style callers) still wins outright, and so the merged
-   result can be cached and invalidated independently. *)
-let overlay_catalog : t option Atomic.t = Atomic.make None
-
-(* The cache pairs the merged result with the exact overlay value it was
-   derived from. Readers accept a hit only when the cached overlay is
-   physically the current one, so a racing writer that publishes a merge of a
-   just-replaced overlay can never pin stale capabilities: the identity check
-   fails and the next call recomputes from the fresh overlay. The worst case
-   under contention is a redundant pure merge, never a stale read. *)
-let merged_cache : (t * t) option Atomic.t = Atomic.make None
 let set_global t = Atomic.set runtime_override (Some t)
-
-let set_global_overlay t =
-  Atomic.set overlay_catalog (Some t);
-  Atomic.set merged_cache None
-;;
 
 let clear_global () =
   Atomic.set runtime_override None;
-  Atomic.set overlay_catalog None;
-  Atomic.set merged_cache None;
   Atomic.set embedded_catalog Unloaded
 ;;
 
@@ -1206,16 +1199,9 @@ let global () =
   | Some _ as o -> o
   | None ->
     let embedded_value = load_embedded_once () in
+    (* Re-read: [set_global] may have landed while the embedded catalog loaded,
+       and a full replacement wins over the embedded rows. *)
     (match Atomic.get runtime_override with
      | Some _ as o -> o
-     | None ->
-       (match Atomic.get overlay_catalog with
-        | None -> Some embedded_value
-        | Some overlay ->
-          (match Atomic.get merged_cache with
-           | Some (cached_overlay, merged) when cached_overlay == overlay -> Some merged
-           | Some _ | None ->
-             let merged = merge ~base:embedded_value ~overlay in
-             Atomic.set merged_cache (Some (overlay, merged));
-             Some merged)))
+     | None -> Some embedded_value)
 ;;

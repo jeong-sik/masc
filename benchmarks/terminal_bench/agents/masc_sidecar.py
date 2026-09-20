@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -55,6 +54,10 @@ from render_configs import (  # noqa: E402
     render_arm,
 )
 from masc_dist import container_binaries  # noqa: E402
+from masc_task_skills import (  # noqa: E402
+    preflight_task_skill_catalog,
+    task_skills_snapshot,
+)
 
 REMOTE = "/opt/masc-bench"
 TOKEN_PATH = f"{REMOTE}/token"
@@ -122,12 +125,14 @@ class MascSidecar:
     pool_names: list[str]
     keeper_runtime_id: str
     keeper_effort: str
+    skills_dir: str | None
 
     if TYPE_CHECKING:
         # Supplied by the harbor agent this is mixed into. Declared so the
         # mixin's requirement on its host is visible and type-checked rather
         # than discovered at run time.
         exec_as_root: Callable[..., Awaitable[Any]]
+        _get_env: Callable[..., str | None]
 
     def masc_container_env(self) -> dict[str, str]:
         provider = self.keeper_runtime_id.split(".", 1)[0]
@@ -135,9 +140,9 @@ class MascSidecar:
             raise ValueError(
                 f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
         key_env = PROVIDERS[provider]["api_key_env"]
-        key = os.environ.get(key_env)
+        key = self._get_env(key_env)
         if not key:
-            raise RuntimeError(f"{key_env} not set in harbor process env")
+            raise RuntimeError(f"{key_env} not set in Harbor agent environment")
         env = {
             key_env: key,
             # MASC resolves `<provider>.<binding id>`, and the binding id is a
@@ -161,29 +166,32 @@ class MascSidecar:
 
     async def install_masc(self, environment: BaseEnvironment) -> None:
         container_env = self.masc_container_env()
-        binaries = await container_binaries(
-            self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
-        # A lane may read provider limits over the network while rendering;
-        # harbor installs every trial in one event loop.
-        config_dir = await asyncio.to_thread(
-            render_arm, self.arm, self.keeper_runtime_id, self.keeper_effort)
-        await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
-        for binary in binaries:
-            await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
-        await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
-        try:
-            await environment.upload_dir(config_dir, f"{REMOTE}/config")
-        finally:
-            # render_arm hands back a directory of its own so that concurrent
-            # trials of one arm cannot delete each other's config mid-upload.
-            # Whoever asked for it removes it.
-            shutil.rmtree(config_dir, ignore_errors=True)
+        async with task_skills_snapshot(self, environment) as (task_skills_dir, task_skills):
+            binaries = await container_binaries(
+                self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
+            # A lane may read provider limits over the network while rendering;
+            # harbor installs every trial in one event loop.
+            config_dir = await asyncio.to_thread(
+                render_arm, self.arm, self.keeper_runtime_id, self.keeper_effort,
+                task_skills_dir=task_skills_dir)
+            await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
+            for binary in binaries:
+                await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
+            await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
+            try:
+                await environment.upload_dir(config_dir, f"{REMOTE}/config")
+            finally:
+                # render_arm hands back a directory of its own so that concurrent
+                # trials of one arm cannot delete each other's config mid-upload.
+                # Whoever asked for it removes it.
+                shutil.rmtree(config_dir, ignore_errors=True)
         await self.exec_as_root(
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
             env=container_env,
         )
+        await preflight_task_skill_catalog(self, environment, task_skills)
 
 
 async def merge_keeper_usage(

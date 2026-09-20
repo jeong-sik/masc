@@ -457,6 +457,7 @@ let memory_state_with_facts () =
                   }
                 ]
             }
+      ; mfs_events_read_error = None
       };
   state
 
@@ -728,7 +729,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -1231,6 +1232,44 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
+let test_visible_surface_ring_open_ask () =
+  (* A keeper's question is an approval of a different kind: it waits on the
+     same human, on the same surface. With zero approvals and one open ask
+     the Approvals entry must stay in the ring, or the question has nowhere
+     to be seen from. *)
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  state.asks_snapshot <-
+    Some
+      { Tui_decode.asn_keeper = Some "jazz-developer"
+      ; asn_open_count = 1
+      ; asn_rows =
+          [ { Tui_decode.ar_keeper = "jazz-developer"
+            ; ar_id = "ask1"
+            ; ar_asked_at = 0.0
+            ; ar_context = Some "where to post the measured comment"
+            ; ar_questions =
+                [ { Tui_decode.aq_id = "q1"
+                  ; aq_header = "post or wait"
+                  ; aq_prompt = "post the comment as is?"
+                  ; aq_mode = Tui_decode.Ask_single
+                  ; aq_free_text = Tui_decode.Ask_choices_only
+                  ; aq_choices =
+                      [ { Tui_decode.ac_id = "post_as_is"
+                        ; ac_label = "post as is"
+                        ; ac_description = None
+                        }
+                      ]
+                  }
+                ]
+            ; ar_resolution = Tui_decode.Ask_open
+            }
+          ]
+      };
+  let ring = visible_surface_ring state in
+  Alcotest.(check bool) "Approvals stays visible with zero approvals and one open ask"
+    true (List.exists (fun (s, _) -> s = Approvals) ring)
+
 (* The sheet is the only place the keeper marks are named where a reader
    can read all of them at once: the Keepers rows pair each glyph with its word
    but show only the states the fleet is in, and the 34-cell roster pane beside
@@ -1351,9 +1390,14 @@ let test_runtime_footer_is_the_tables () =
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
-    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh" ];
+    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh"
+    ; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
   Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
+  List.iter
+    (fun piece ->
+      Alcotest.(check bool) ("all runtimes offer no lane edit " ^ piece) false (has all piece))
+    [ "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "the refresh is not called live" false (has lanes "live refresh");
   (* The sheet reads the same table and names the whole walk once, because it
      is not drawn from either reading. *)
@@ -2651,6 +2695,8 @@ let () =
             test_browser_lanes_highlight_config
         ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
             test_visible_surface_ring_declutter
+        ; Alcotest.test_case "open ask keeps approvals in the ring" `Quick
+            test_visible_surface_ring_open_ask
         ; Alcotest.test_case "braille sparkline renders levels" `Quick
             test_braille_sparkline
         ; Alcotest.test_case "fleet total cost sums correctly" `Quick

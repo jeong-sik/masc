@@ -10,9 +10,8 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 ## 디렉터리 구조
 
 ```text
-.masc/config/                     # `masc init` 이 쓰는 파일 271개
+.masc/config/                     # `masc init` 이 쓰는 파일 270개
 ├── runtime.toml                  # provider 카탈로그, 모델 바인딩, [runtime].default, lane
-├── agent-core-models-overlay.toml
 ├── prompts/                      # 25 — 역할마다 주는 글
 ├── tools/                        # 146 — 도구 하나당 선언 하나
 ├── identity/                     # 89

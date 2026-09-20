@@ -10,9 +10,8 @@ file** rather than write one from scratch.
 ## Directory Structure
 
 ```text
-.masc/config/                     # 271 files, written by `masc init`
+.masc/config/                     # 270 files, written by `masc init`
 ├── runtime.toml                  # provider catalog, model bindings, [runtime].default, lanes
-├── agent-core-models-overlay.toml
 ├── prompts/                      # 25 — the text every role is given
 ├── tools/                        # 146 — one declaration per tool
 ├── identity/                     # 89

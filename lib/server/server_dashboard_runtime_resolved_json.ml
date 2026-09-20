@@ -45,6 +45,22 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
+      (* The effort this binding declares. Bindings of one model that differ
+         only in effort share provider, model and context, so without it the
+         picker draws them as identical rows. [null] is an unset effort, not
+         an unknown one.
+
+         Declared, not effective: an official-client turn puts the value
+         through the catalog clamp and then the CLI's own vocabulary
+         ([Keeper_official_client_host.effective_reasoning_effort],
+         [Runtime_claude_code.cli_admitted_reasoning_effort]), which today
+         changes only [minimal] on Claude Code and efforts outside a model's
+         accepted set. The key says which of the two it is; surfacing the
+         other belongs to the detail view, which has room to say both. *)
+    ; ( "declared_reasoning_effort"
+      , match Runtime.reasoning_effort_of_runtime_id rt.id with
+        | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)
+        | None -> `Null )
     ; "is_local", `Bool (Runtime.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default
     ; "quota_exhausted", `Bool quota_exhausted

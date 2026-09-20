@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -29,6 +28,10 @@ from render_configs import (  # noqa: E402
     render_arm,
 )
 from masc_dist import container_binaries  # noqa: E402
+from masc_task_skills import (  # noqa: E402
+    preflight_task_skill_catalog,
+    task_skills_snapshot,
+)
 
 REMOTE = "/opt/masc-bench"
 
@@ -70,9 +73,9 @@ class MascAgent(BaseInstalledAgent):
             raise ValueError(
                 f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
         key_env = PROVIDERS[provider]["api_key_env"]
-        key = os.environ.get(key_env)
+        key = self._get_env(key_env)
         if not key:
-            raise RuntimeError(f"{key_env} not set in harbor process env")
+            raise RuntimeError(f"{key_env} not set in Harbor agent environment")
         env = {
             key_env: key,
             # masc resolves `<provider>.<binding id>`, and the binding id is a
@@ -96,29 +99,32 @@ class MascAgent(BaseInstalledAgent):
 
     async def install(self, environment: BaseEnvironment) -> None:
         container_env = self._container_env()
-        binaries = await container_binaries(
-            self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
-        # A lane may read provider limits over the network while rendering;
-        # harbor installs every trial in one event loop.
-        config_dir = await asyncio.to_thread(
-            render_arm, self.arm, self.runtime_id, self.effort)
-        await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
-        for binary in binaries:
-            await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
-        await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
-        try:
-            await environment.upload_dir(config_dir, f"{REMOTE}/config")
-        finally:
-            # render_arm hands back a directory of its own so that
-            # concurrent trials of one arm cannot delete each other's
-            # config mid-upload. Whoever asked for it removes it.
-            shutil.rmtree(config_dir, ignore_errors=True)
+        async with task_skills_snapshot(self, environment) as (task_skills_dir, task_skills):
+            binaries = await container_binaries(
+                self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
+            # A lane may read provider limits over the network while rendering;
+            # harbor installs every trial in one event loop.
+            config_dir = await asyncio.to_thread(
+                render_arm, self.arm, self.runtime_id, self.effort,
+                task_skills_dir=task_skills_dir)
+            await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
+            for binary in binaries:
+                await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
+            await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
+            try:
+                await environment.upload_dir(config_dir, f"{REMOTE}/config")
+            finally:
+                # render_arm hands back a directory of its own so that
+                # concurrent trials of one arm cannot delete each other's
+                # config mid-upload. Whoever asked for it removes it.
+                shutil.rmtree(config_dir, ignore_errors=True)
         await self.exec_as_root(
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
             env=container_env,
         )
+        await preflight_task_skill_catalog(self, environment, task_skills)
 
     async def run(self, instruction: str, environment: BaseEnvironment,
                   context: AgentContext) -> None:

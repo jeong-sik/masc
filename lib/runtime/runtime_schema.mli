@@ -29,6 +29,25 @@ type credential =
   | Inline of string
 [@@deriving show, eq]
 
+(** Which vendor dialect an endpoint speaks. [protocol] names the request
+    shape; this names the dialect inside it, and the two do not determine each
+    other — [openai-compatible-http] is spoken both by plain OpenAI-compatible
+    servers and by GLM, [messages-http] both by Anthropic and by Kimi.
+
+    A provider the AGENT_CORE catalog knows states its dialect there, and
+    restating it here is refused at load. The key exists for an endpoint the
+    catalog has never seen: the install wizard builds its provider id from a
+    hash of the operator's answers, so no catalog row can ever match it. *)
+type provider_wire_kind =
+  Llm_provider.Provider_config.provider_kind =
+  | Anthropic
+  | Kimi
+  | OpenAI_compat
+  | Ollama
+  | Gemini
+  | Glm
+[@@deriving show, eq]
+
 (** {1 Layer 1: Provider} *)
 
 type capabilities =
@@ -65,6 +84,10 @@ type provider =
   ; display_name : string
   ; protocol : string
   ; api_format : api_format
+  ; wire_kind : provider_wire_kind option
+    (** The dialect this endpoint speaks, for an endpoint the AGENT_CORE
+        catalog does not know. [None] means the catalog answers, and a
+        provider that has a catalog row is refused if it states this. *)
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
@@ -200,6 +223,13 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
+  ; disable_parallel_tool_use : bool
+        (** Request policy for this binding. [true] asks the provider for at
+            most one tool call per response; [false] (the default) leaves
+            parallel calls permitted by the model's catalog capability.
+            This does not change that capability or serialize spawned agents.
+            Official-client, native Ollama and Gemini runtimes cannot carry
+            this policy and refuse [true]. *)
   ; context_marks : context_marks option
         (** [context-high-water-tokens] and [context-low-water-tokens] on the
             binding table, declared together or not at all. Absent means the
@@ -272,12 +302,12 @@ type config =
         assignment to an unknown id is rejected at load. The id is an opaque
         binding key (only the AGENT_CORE adapter parses it into provider/model/spec). *)
   ; media_failover : string list
-    (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
-        when a turn's input modality (image/audio/document) exceeds the assigned
-        runtime's declared capabilities; the turn reroutes to the first that
-        admits it. [[]] = derive capable runtimes from declared
-        [\[models.*.capabilities\]] in declaration order. Each id must resolve to
-        a configured runtime (rejected at load like [\[runtime\].default]). *)
+    (** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids
+        the vision tool calls, including the image readings made for a runtime
+        that cannot take the image. A keeper turn never dispatches to them; its
+        image reroute stays inside its lane. [[]] = no vision fleet. Each id must
+        resolve to a configured runtime (rejected at load like
+        [\[runtime\].default]). *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

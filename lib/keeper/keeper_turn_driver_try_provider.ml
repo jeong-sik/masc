@@ -625,18 +625,15 @@ type sent_request =
   }
 
 (* What one provider attempt carries between its requests and the retry
-   policy around it: the range the last request composed, whether the last
-   resort is armed for the next composition, and how to ask whether arming
-   it would change anything. *)
+   policy around it: its working ledger, the range the last request composed,
+   whether the last resort is armed for the next composition, and how to ask
+   whether arming it would change anything. *)
 type attempt_state =
   { last_request : sent_request option ref
+  ; ledger : Keeper_model_input_ledger.t option ref
   ; last_resort_armed : bool ref
   ; last_resort_probe : (unit -> bool) option ref
   }
-
-let new_attempt_state () =
-  { last_request = ref None; last_resort_armed = ref false; last_resort_probe = ref None }
-;;
 
 (* The ledger's session: the history the carried positions belong to. The
    turn's trace id on the keeper's own turns; an attempt without one has no
@@ -645,6 +642,33 @@ let ledger_session (ctx : try_provider_ctx) =
   match ctx.session_id with
   | Some session -> session
   | None -> "-"
+;;
+
+(* The candidate can narrow its requests without turning a refused range
+   into the next turn's starting point. AfterTurn records responses in the
+   table; its observation also replaces this candidate's working value. *)
+let new_attempt_state (ctx : try_provider_ctx) =
+  { last_request = ref None
+  ; ledger =
+      ref
+        (Keeper_model_input_ledger.Table.lookup
+           ~keeper_name:ctx.keeper_name
+           ~runtime_id:ctx.runtime_id
+           ~session_id:(ledger_session ctx))
+  ; last_resort_armed = ref false
+  ; last_resort_probe = ref None
+  }
+;;
+
+let move_ledger_front ledger ~first_atom ~front_digest =
+  match !ledger with
+  | None -> false
+  | Some current ->
+    (match Keeper_model_input_ledger.move_front current ~first_atom ~front_digest with
+     | None -> false
+     | Some moved ->
+       ledger := Some moved;
+       true)
 ;;
 
 (* An empty base path turns demotion off, so no atom is below the boundary. *)
@@ -799,15 +823,16 @@ let request_view
 ;;
 
 (* Where the next request's range starts (RFC keeper-context-window-in-tokens
-   §10.3, §10.4). The pair's ledger answers only while the history this
-   request composes from still opens its front and newest atom with the
+   §10.3, §10.4). The candidate's working ledger answers only while this
+   request's history still opens its front and newest atom with the
    messages it recorded; one that does not is dropped here, where the
-   mismatch is first seen, and is returned so the caller can say so. Kept
+   mismatch is first seen, and is returned so the caller can say so. The
+   observed table entry is checked independently before being removed. Kept
    instead, its front would be dropped by [Keeper_carried_front.for_history]
    on every request while its stale blocks and front still answered the
    refusal path, which then retried the whole history without end. The cold
    seed is read only when no ledger answers. *)
-let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal ~cold =
+let carried_front ~ledger ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal ~cold =
   let after_refusal =
     Option.bind after_refusal (fun seed ->
       match Keeper_carried_front.for_history ~digest_at seed with
@@ -823,22 +848,31 @@ let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal
   let without_ledger () =
     match after_refusal with Some _ as front -> front | None -> cold ()
   in
-  match
-    Keeper_model_input_ledger.Table.lookup_in_history
-      ~keeper_name
-      ~runtime_id
-      ~session_id
-      ~digest_at
-  with
-  | Keeper_model_input_ledger.Table.Holds ledger ->
-    let front = Keeper_carried_front.of_ledger ledger in
+  let dropped =
+    match !ledger with
+    | Some current when not (Keeper_model_input_ledger.holds ~digest_at current) ->
+      (* Validate the actual table entry before removing it: another response
+         may have replaced the snapshot this candidate started from. *)
+      ledger :=
+        (match
+           Keeper_model_input_ledger.Table.lookup_in_history
+             ~keeper_name ~runtime_id ~session_id ~digest_at
+         with
+         | Keeper_model_input_ledger.Table.Holds observed -> Some observed
+         | Keeper_model_input_ledger.Table.Dropped_stale _
+         | Keeper_model_input_ledger.Table.Absent -> None);
+      Some current
+    | Some _ | None -> None
+  in
+  match !ledger with
+  | Some current ->
+    let front = Keeper_carried_front.of_ledger current in
     (match after_refusal, front with
      | Some refused, Some carried when refused.first_atom > carried.first_atom ->
-       Some refused, None
-     | Some refused, None -> Some refused, None
-     | (Some _ | None), (Some _ | None) -> front, None)
-  | Keeper_model_input_ledger.Table.Dropped_stale stale -> without_ledger (), Some stale
-  | Keeper_model_input_ledger.Table.Absent -> without_ledger (), None
+       Some refused, dropped
+     | Some refused, None -> Some refused, dropped
+     | (Some _ | None), (Some _ | None) -> front, dropped)
+  | None -> without_ledger (), dropped
 ;;
 
 (* The carried range runs here rather than in the caller because its front
@@ -919,8 +953,7 @@ let bounded_model_input_projection
   let front_reported = ref false in
   let outlived_reported = ref false in
   (* The cold-start seed is read once per attempt and only when no ledger
-     answers; a ledger appears with the first counted usage and is read live
-     on every request after it. *)
+     answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
     (* [messages] is the durable history, the checkpoint's messages, in which
@@ -933,6 +966,7 @@ let bounded_model_input_projection
     in
     let front, dropped_ledger =
       carried_front
+        ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id
         ~session_id:(ledger_session ctx)
@@ -944,7 +978,7 @@ let bounded_model_input_projection
       (fun stale ->
          Log.Keeper.info
            ~keeper_name:ctx.keeper_name
-           "model input ledger dropped runtime=%s: the history this request composes \
+            "model input working ledger dropped runtime=%s: the history this request composes \
             from does not open the ledger's front or newest atom with the message it \
             recorded ledger=%s"
            ctx.runtime_id
@@ -1265,6 +1299,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        ~request
                        ~usage
                    in
+                   state.ledger := Some observation.Keeper_model_input_ledger.ledger;
                    let line =
                      Yojson.Safe.to_string
                        (Keeper_model_input_ledger.observation_to_json observation)
@@ -1971,7 +2006,7 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
   match Option.bind digest_at (fun digest_at -> digest_at first_atom) with
   | None -> false
   | Some front_digest ->
-    let (_ : Keeper_model_input_ledger.Table.move) = move_ledger ~first_atom ~front_digest in
+    let (_ : bool) = move_ledger ~first_atom ~front_digest in
     hold
       { Keeper_carried_front.first_atom
       ; front_digest
@@ -1993,37 +2028,22 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
    oldest blocks leave until the projected total is under the low-water mark,
    and every request of the turn composes from that one front. Without marks,
    only a refusal moves the front. *)
-let evict_at_turn_boundary (ctx : try_provider_ctx) =
-  match ctx.context_marks with
+let evict_at_turn_boundary ~keeper_name ~runtime_id ~context_marks ledger =
+  match context_marks with
   | None -> ()
   | Some marks ->
-    (match
-       Keeper_model_input_ledger.Table.lookup
-         ~keeper_name:ctx.keeper_name
-         ~runtime_id:ctx.runtime_id
-         ~session_id:(ledger_session ctx)
-     with
+    (match !ledger with
      | None -> ()
-     | Some ledger ->
-       (match Keeper_carried_range.at_turn_boundary ~marks ledger with
+     | Some current ->
+       (match Keeper_carried_range.at_turn_boundary ~marks current with
         | Keeper_carried_range.Unchanged _ -> ()
         | Keeper_carried_range.Evicted { first_atom; front_digest; _ } as step ->
-          (match
-             Keeper_model_input_ledger.Table.move_front
-               ~keeper_name:ctx.keeper_name
-               ~runtime_id:ctx.runtime_id
-               ~session_id:(ledger_session ctx)
-               ~first_atom
-               ~front_digest
-           with
-           | Keeper_model_input_ledger.Table.Moved ->
+          if move_ledger_front ledger ~first_atom ~front_digest then
              Log.Keeper.info
-               ~keeper_name:ctx.keeper_name
+               ~keeper_name
                "model input carried range evicted runtime=%s %s"
-               ctx.runtime_id
-               (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))
-           | Keeper_model_input_ledger.Table.Not_moved
-           | Keeper_model_input_ledger.Table.No_pair_ledger -> ())))
+               runtime_id
+               (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
 ;;
 
 let run_try_provider_with_carried_range_eviction
@@ -2031,13 +2051,16 @@ let run_try_provider_with_carried_range_eviction
       (ctx : try_provider_ctx)
       candidate
   =
-  evict_at_turn_boundary ctx;
+  let state = new_attempt_state ctx in
+  evict_at_turn_boundary
+    ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+    ~context_marks:ctx.context_marks state.ledger;
   match ctx.recovery_view with
   | Some _ ->
     (* The validated semantic view owns retained source obligations. Retrying
        the same view with a shorter range cannot recover it. Final serialized
        request admission still enforces the request-body cap. *)
-    run_try_provider_attempt ?continuation_checkpoint ~state:(new_attempt_state ()) ctx candidate
+    run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
   | None ->
     (* An uncapped runtime retries like any other. #36817 kept such a
        runtime out of the token halving because that walk invented a seed
@@ -2045,7 +2068,6 @@ let run_try_provider_with_carried_range_eviction
        position on the atom axis, stops at a single atom, and without it a
        history that outgrew the provider would be refused every turn with
        nothing declared to move the front. *)
-    let state = new_attempt_state () in
     let last_resort_used = ref false in
     let checkpoint_after = ref None in
     let success_sample = ref None in
@@ -2053,28 +2075,14 @@ let run_try_provider_with_carried_range_eviction
       carried_range_eviction_sequence
         ~same_run_retry_authorized:(fun () ->
           same_run_retry_allowed ctx.checkpoint_progress)
-        ~ledger:(fun () ->
-          Keeper_model_input_ledger.Table.lookup
-            ~keeper_name:ctx.keeper_name
-            ~runtime_id:ctx.runtime_id
-            ~session_id:(ledger_session ctx))
+        ~ledger:(fun () -> !(state.ledger))
         ~last_request:(fun () ->
           Option.map (fun (sent : sent_request) -> sent.request) !(state.last_request))
         ~marks:ctx.context_marks
         ~hold_front:ctx.hold_carried_front
         ~evict:(function
           | Keeper_carried_range.Evicted { first_atom; front_digest; _ } ->
-            (match
-               Keeper_model_input_ledger.Table.move_front
-                 ~keeper_name:ctx.keeper_name
-                 ~runtime_id:ctx.runtime_id
-                 ~session_id:(ledger_session ctx)
-                 ~first_atom
-                 ~front_digest
-             with
-             | Keeper_model_input_ledger.Table.Moved -> true
-             | Keeper_model_input_ledger.Table.Not_moved
-             | Keeper_model_input_ledger.Table.No_pair_ledger -> false)
+            move_ledger_front state.ledger ~first_atom ~front_digest
           | Keeper_carried_range.Unchanged _ -> false)
         ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
           (* With a ledger, the move cuts through its one block and the
@@ -2086,10 +2094,7 @@ let run_try_provider_with_carried_range_eviction
             ~digest_at:
               (Option.map (fun (sent : sent_request) -> sent.digest_at) !(state.last_request))
             ~move_ledger:
-              (Keeper_model_input_ledger.Table.move_front
-                 ~keeper_name:ctx.keeper_name
-                 ~runtime_id:ctx.runtime_id
-                 ~session_id:(ledger_session ctx))
+              (move_ledger_front state.ledger)
             ~hold:ctx.hold_carried_front
             ~first_atom
             ~retry)
@@ -2128,7 +2133,7 @@ let run_try_provider_with_carried_range_eviction
 ;;
 
 let run_try_provider ?continuation_checkpoint ctx candidate =
-  run_try_provider_attempt ?continuation_checkpoint ~state:(new_attempt_state ()) ctx candidate
+  run_try_provider_attempt ?continuation_checkpoint ~state:(new_attempt_state ctx) ctx candidate
 ;;
 
 let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t) =
@@ -2375,6 +2380,8 @@ module For_testing = struct
   let retry_without_thinking_admitted = retry_without_thinking_admitted
   let memoize_message_measurement = memoize_message_measurement
   let carried_front = carried_front
+  let move_ledger_front = move_ledger_front
+  let evict_at_turn_boundary = evict_at_turn_boundary
   let halve_front = halve_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input

@@ -5259,6 +5259,7 @@
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
+(include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
 (include stanzas/test_tui_mermaid.inc)

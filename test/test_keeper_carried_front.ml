@@ -431,6 +431,122 @@ let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
          (Front.seed_read_of_rows ~trace_id:"trace-1" [ current ]).Front.unreadable)
 ;;
 
+let with_turn_record_store f =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Masc.Workspace.default_config base_path in
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config "alpha" in
+  Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
+  f config store
+;;
+
+(* A retained response can be older than every row in the reader's former
+   200-row window. Exercise the production store reader, rather than passing
+   an already selected list to [seed_read_of_rows]. The observed front is
+   inside persisted history and still holds when the next turn appends input. *)
+let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
+  with_turn_record_store @@ fun config store ->
+  let persisted = exchanges 5 in
+  let _, total_atoms = Window.annotate persisted in
+  check int "ten persisted atoms" 10 total_atoms;
+  let window : Turn_record.model_input_window =
+    { transmitted_atoms = total_atoms - 8
+    ; total_atoms
+    ; measurement = Turn_record.Wire_shape
+    ; front_atom_digest = (seed_at persisted 8).front_digest
+    }
+  in
+  let observed =
+    { (record ~turn:1 None) with
+      model_input_window = Some window
+    ; response_observed_model_input = Some { runtime_profile = "glm"; window }
+    }
+  in
+  let observed_json = Turn_record.to_json observed in
+  Dated_jsonl.append store observed_json;
+  let unobserved_rows = 200 in
+  for index = 1 to unobserved_rows do
+    let unobserved =
+      { (record ~turn:(index + 1) ~finish:None ~response_observed:false None) with
+        model_input_window = Some window
+      }
+    in
+    Dated_jsonl.append store (Turn_record.to_json unobserved)
+  done;
+  let stored_rows = Dated_jsonl.read_recent store (unobserved_rows + 1) in
+  check int "all rows are still stored" (unobserved_rows + 1) (List.length stored_rows);
+  check bool "the observed row was not pruned" true
+    (List.exists (Yojson.Safe.equal observed_json) stored_rows);
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "every visited record decodes" true (Option.is_none read.Front.unreadable);
+  check (option int) "the retained response supplies front 8" (Some 8)
+    (Option.map (fun (front : Front.seed) -> front.first_atom) read.Front.seed);
+  let front = Option.get read.Front.seed in
+  check string "the front names the same persisted atom" window.front_atom_digest
+    front.front_digest;
+  check source "the observed turn supplies the seed" (Front.Turn_record { turn = 1 })
+    front.source;
+  let next_tick = persisted @ [ text_message Types.User "next tick" ] in
+  check kept_or_dropped "the front still holds on the next tick" (Ok front)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest next_tick) front);
+  let carried =
+    Masc.Keeper_next_request_forecast.carry
+      ~measure:(Masc.Keeper_context_core.message_measurer ())
+      ~front:read.Front.seed
+      ~counted_tokens:None
+      next_tick
+  in
+  check int "the next request retains the observed front" 8 carried.first_atom;
+  check int "two retained atoms plus the next tick" 3 carried.kept_atoms
+;;
+
+let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
+  with_turn_record_store @@ fun config store ->
+  let records =
+    [ record ~turn:10 ~finish:None (Some (30, 100))
+    ; record ~turn:10 (Some (15, 100))
+    ; record ~turn:10 ~finish:None ~response_observed:false (Some (5, 100))
+    ; record ~turn:11 ~trace:"another-trace" (Some (1, 100))
+    ]
+  in
+  List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check int "the latest response on this trace supplies front 85" 85
+    (fst (seed read.Front.seed));
+  check int "the chronological row reader resolves the same turn the same way" 85
+    (fst (seed (of_records records)))
+;;
+
+let test_read_seed_counts_only_unreadable_rows_visited_before_the_response () =
+  with_turn_record_store @@ fun config store ->
+  let current = Turn_record.to_json (record ~turn:10 (Some (30, 100))) in
+  let without key =
+    match current with
+    | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | other -> other
+  in
+  let older_refusal = without "front_atom_digest" in
+  List.iter (Dated_jsonl.append store)
+    [ `Null; current; older_refusal; without "keeper" ];
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check int "unreadable rows do not hide the response" 70
+    (fst (seed read.Front.seed));
+  match read.Front.unreadable, Turn_record.of_json older_refusal with
+  | Some unreadable, Error reason ->
+    check int "only the two newer unreadable rows were visited" 2 unreadable.count;
+    check string "the oldest visited decoder refusal is retained" reason
+      unreadable.first_reason
+  | _ -> fail "the two invalid records must be counted"
+;;
+
 let test_clamp_keeps_the_front_on_an_atom () =
   check int "below zero" 0 (Front.clamp ~atom_count:5 (-2));
   check int "past the newest" 4 (Front.clamp ~atom_count:5 9);
@@ -484,6 +600,12 @@ let () =
             test_the_composer_is_read_from_the_execution_kind
         ; test_case "undecodable rows counted with the first reason" `Quick
             test_rows_that_do_not_decode_are_counted_with_the_first_reason
+        ; test_case "stored response survives a window of unobserved rows" `Quick
+            test_read_seed_keeps_a_response_beyond_unobserved_rows
+        ; test_case "a retry reusing the turn keeps the latest stored response" `Quick
+            test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn
+        ; test_case "only visited unreadable rows are counted" `Quick
+            test_read_seed_counts_only_unreadable_rows_visited_before_the_response
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

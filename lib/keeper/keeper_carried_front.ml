@@ -63,7 +63,7 @@ let of_records ~trace_id (records : Turn_record.t list) =
          when String.equal record.Turn_record.trace_id trace_id ->
          let turn = record.Turn_record.absolute_turn in
          (match newest with
-          | Some (newest_turn, _) when newest_turn >= turn -> newest
+          | Some (newest_turn, _) when newest_turn > turn -> newest
           | Some _ | None ->
             let window = observed.Turn_record.window in
             Some
@@ -78,8 +78,6 @@ let of_records ~trace_id (records : Turn_record.t list) =
     records
   |> Option.map snd
 ;;
-
-let records_read = 200
 
 type unreadable_records =
   { count : int
@@ -117,9 +115,25 @@ let seed_read_of_rows ~trace_id rows =
 
 let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  seed_read_of_rows
-    ~trace_id
-    (Dated_jsonl.read_recent store records_read)
+  let unreadable = ref None in
+  (* Count observations, not intervening rows. A direct retry may reuse its
+     turn number, so the last stored response is the latest observation.
+     The callback runs newest first; keep the oldest visited refusal as
+     [seed_read_of_rows] does for a chronological input. *)
+  let seeds =
+    Dated_jsonl.collect_matching store 1 ~f:(fun json ->
+      match Turn_record.of_json json with
+      | Ok record -> of_records ~trace_id [ record ]
+      | Error first_reason ->
+        let count =
+          match !unreadable with
+          | None -> 1
+          | Some (seen : unreadable_records) -> seen.count + 1
+        in
+        unreadable := Some { count; first_reason };
+        None)
+  in
+  { seed = List.nth_opt seeds 0; unreadable = !unreadable }
 ;;
 
 type dropped_front =

@@ -36,6 +36,15 @@ let decide wake triggers =
   Keeper_heartbeat_loop.decide_keepalive_scheduling ~wake
     ~event_queue_triggers:triggers ~stop:(Atomic.make false) ~meta:(meta ()) base_obs
 
+let deferred_lane =
+  Keeper_turn_driver.For_testing.make_deferred_runtime_lane
+    ~assignment_id:"periodic"
+    ~failed_runtime_id:"lane-a"
+    ~next_runtime_id:"lane-b"
+    ~later_runtime_ids:[]
+    ~failure:(Agent_core.Error.Internal "test failure")
+;;
+
 let test_empty_hints_keep_periodic_boundary () =
   let cadence = Signal.consume_periodic ~now:0. in
   List.iter (fun now ->
@@ -58,6 +67,25 @@ let test_durable_attention_remains_immediate () =
     [ WO.Scheduled_automation_stimulus; WO.Workspace_message_stimulus
     ; WO.Hitl_resolved_stimulus; WO.Ask_answered_stimulus; WO.Bootstrap_stimulus ]
 
+let test_deferred_lane_authorizes_empty_intake () =
+  let wake =
+    Keeper_heartbeat_loop.For_testing.cycle_wake
+      ~periodic_due:false
+      ~deferred_runtime_lane:(Some deferred_lane)
+  in
+  let scheduling = decide wake [] in
+  check bool "the deferred suffix schedules a turn" true scheduling.should_run_turn;
+  check (list string) "the deferred suffix remains observable"
+    [ "deferred_runtime_lane_pending"; "scheduled_autonomous_turn"; "never_started" ]
+    scheduling.verdict_reasons;
+  check bool "empty Event Queue intake reaches the turn"
+    true
+    (Keeper_heartbeat_loop.should_run_turn_after_event_intake
+       ~scheduled:scheduling.should_run_turn
+       ~consumed_stimulus_count:0
+       ~event_queue_intake_error:None)
+;;
+
 let test_cadence_change_and_initial_warmup () =
   let cadence = Signal.consume_periodic ~now:0. in
   check (float 0.) "new interval uses previous periodic boundary" 480.
@@ -71,4 +99,5 @@ let () =
   run "keeper_periodic_wake"
     [ "authority", [ test_case "empty hints neither run nor starve" `Quick test_empty_hints_keep_periodic_boundary
     ; test_case "durable attention remains immediate" `Quick test_durable_attention_remains_immediate
+    ; test_case "deferred lane authorizes empty intake" `Quick test_deferred_lane_authorizes_empty_intake
     ; test_case "cadence updates and warmup" `Quick test_cadence_change_and_initial_warmup ] ]

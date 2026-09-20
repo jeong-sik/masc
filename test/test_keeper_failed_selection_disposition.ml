@@ -172,6 +172,17 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
          ; waiting_on = "lane-a"
          })
   in
+  let pending_calls = ref 0 in
+  check bool
+    "deferred unfinished input starts without acknowledging stimuli"
+    true
+    (Loop.For_testing.next_cycle_starts_now
+       ~after_failure:continued
+       ~stimuli_acked:false
+       ~pending_stimulus:(fun () ->
+         incr pending_calls;
+         false));
+  check int "the deferred path does not inspect the Event Queue" 0 !pending_calls;
   List.iter
     (fun (label, after_failure, stimuli_acked, pending_stimulus, expected) ->
        check bool

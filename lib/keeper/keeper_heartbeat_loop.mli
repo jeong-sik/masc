@@ -323,6 +323,14 @@ module For_testing : sig
     pending_stimulus:(unit -> bool) ->
     bool
 
+  (** Scheduling authority chosen from the loop's exact state. A deferred
+      runtime suffix takes precedence over cadence because it is unfinished
+      input, rather than a fabricated periodic tick. *)
+  val cycle_wake :
+    periodic_due:bool ->
+    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    Keeper_world_observation.cycle_wake
+
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and
       its live caller both remain, so the export stays too. *)

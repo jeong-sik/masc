@@ -546,6 +546,15 @@ let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
     stimuli_acked && pending_stimulus ()
 ;;
 
+let cycle_wake ~periodic_due ~deferred_runtime_lane =
+  match deferred_runtime_lane with
+  | Some _ -> Keeper_world_observation.Deferred_runtime_lane
+  | None ->
+    if periodic_due
+    then Keeper_world_observation.Periodic_tick
+    else Keeper_world_observation.Attention_wake
+;;
+
 let run_keepalive_unified_turn
       ~wake
       ~(ctx : _ context)
@@ -1352,8 +1361,8 @@ let run_heartbeat_loop
             ~now:(cadence_now ())
             ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
             !periodic_cadence in
-        let wake = if periodic_due then Keeper_world_observation.Periodic_tick
-          else Keeper_world_observation.Attention_wake in
+        let deferred_runtime_lane = !deferred_runtime_lane_ref in
+        let wake = cycle_wake ~periodic_due ~deferred_runtime_lane in
         let turn_outcome =
           if not admitted_turn
           then
@@ -1377,7 +1386,6 @@ let run_heartbeat_loop
               | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
                 false
             in
-            let deferred_runtime_lane = !deferred_runtime_lane_ref in
             let on_deferred_runtime_consumed () =
               Option.iter
                 (fun expected ->
@@ -1590,4 +1598,5 @@ module For_testing = struct
 
   let after_failure = after_failure
   let next_cycle_starts_now = next_cycle_starts_now
+  let cycle_wake = cycle_wake
 end

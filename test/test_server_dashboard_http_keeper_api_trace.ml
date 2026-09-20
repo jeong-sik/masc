@@ -459,6 +459,151 @@ let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
     }
 ;;
 
+(* Exercise the actual POST handler and its HTTP/JSON projection without a
+   listening server. The transport fixture follows the tool-lookup tests. *)
+let post_checkpoint_history state ~keeper_name snapshot_ids =
+  let body = Yojson.Safe.to_string
+      (`Assoc [ "action", `String "delete_history"
+              ; "snapshot_ids", `List (List.map (fun id -> `String id) snapshot_ids) ]) in
+  let output = Buffer.create 1024 in
+  let connection = Httpun.Server_connection.create (fun reqd ->
+    Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post
+      state (Httpun.Reqd.request reqd) reqd body) in
+  let wire = Printf.sprintf
+      "POST /api/v1/keepers/%s/checkpoints HTTP/1.1\r\nHost: localhost\r\nContent-Length: %d\r\n\r\n%s"
+      keeper_name (String.length body) body in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0
+            ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+        Buffer.add_string output
+          (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+        total + iov.len) 0 iovecs in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let lines = String.split_on_char '\n' (Buffer.contents output) in
+  let status = match lines with
+    | first :: _ ->
+      (match String.split_on_char ' ' first with
+       | _ :: code :: _ -> int_of_string code
+       | _ -> fail "invalid HTTP status line")
+    | [] -> fail "missing HTTP response" in
+  let rec response_body = function
+    | "\r" :: rest -> String.concat "\n" rest
+    | _ :: rest -> response_body rest
+    | [] -> fail "missing HTTP header boundary" in
+  status, Yojson.Safe.from_string (response_body lines)
+;;
+
+let test_history_delete_preserves_session_files () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  with_temp_dir @@ fun dir ->
+  let module Store = Keeper_checkpoint_store in
+  let state = Mcp_server.For_testing.create_state ~base_path:dir in
+  let config = Mcp_server.workspace_config state in
+  let keeper_name = "checkpoint-delete" in
+  let trace_id = Keeper_identity.generate_trace_id ~now:1.0 () in
+  Keeper_meta_store.replace_snapshot config
+    (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let checkpoint turn_count =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count
+         ~created_at:(float_of_int turn_count)) with
+      Agent_core.Checkpoint.messages =
+        [ Agent_core.Types.user_msg (Printf.sprintf "saved turn %d" turn_count) ] } in
+  let previous = checkpoint 1 and current = checkpoint 2 in
+  List.iter (fun checkpoint ->
+    match Store.save_agent_core_classified ~session_dir ~history_retained:2 checkpoint with
+    | Ok (Store.Saved _) -> ()
+    | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
+    | Error detail -> fail detail) [ previous; current ];
+  let previous_id = Store.agent_core_history_snapshot_id_of_checkpoint previous in
+  let selected_id = Store.agent_core_history_snapshot_id_of_checkpoint current in
+  let absent_id = Store.agent_core_history_snapshot_id_of_checkpoint (checkpoint 3) in
+  let failed_id = Store.agent_core_history_snapshot_id_of_checkpoint (checkpoint 4) in
+  let path id = Filename.concat session_dir id in
+  let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  check int "selected archive is a hardlink of current canonical"
+    (Unix.stat canonical).Unix.st_ino (Unix.stat (path selected_id)).Unix.st_ino;
+  let other_files = [ "history.jsonl"; "history.internal.jsonl"; "notes.json"
+                    ; "agent-core-snapshot-.json" ] in
+  List.iter (fun id -> Fs_compat.save_file (path id) ("retained " ^ id)) other_files;
+  let rejected = Filename.basename canonical :: other_files in
+  Fs_compat.mkdir_p (path failed_id);
+  let preserved = List.map (fun id -> id, Fs_compat.load_file (path id))
+      (previous_id :: rejected) in
+  let check_preserved () =
+    List.iter (fun (id, bytes) ->
+      check string (id ^ " retains its bytes") bytes (Fs_compat.load_file (path id)))
+      preserved;
+    check (list string)
+      "only the requested archive was removed"
+      [ failed_id; previous_id ]
+      (Store.list_agent_core_history_files ~session_dir) in
+  let status, json = post_checkpoint_history state ~keeper_name
+      (selected_id :: rejected @ [ absent_id; failed_id ]) in
+  let open Yojson.Safe.Util in
+  let ids field json = json |> member field |> to_list |> List.map to_string in
+  check int "mixed deletion HTTP status" 200 status;
+  check (list string) "HTTP reports only the archive as deleted" [ selected_id ]
+    (ids "deleted_snapshot_ids" json);
+  check (list string) "only the absent archive is missing"
+    [ absent_id ] (ids "missing_snapshot_ids" json);
+  check (list string) "non-archive names are refused"
+    rejected (ids "refused_snapshot_ids" json);
+  check (list string) "a valid archive that cannot be unlinked reports failure"
+    [ failed_id ] (ids "failed_snapshot_ids" json);
+  check bool "the failed removal remains present" true (Sys.is_directory (Filename.concat session_dir failed_id));
+  check string "canonical remains available in returned inventory" "available"
+    (json |> member "inventory" |> member "current_status" |> to_string);
+  check_preserved ();
+  let status, repeated = post_checkpoint_history state ~keeper_name [ selected_id ] in
+  check int "repeated deletion HTTP status" 200 status;
+  check (list string) "repeat deletes nothing" [] (ids "deleted_snapshot_ids" repeated);
+  check (list string) "repeat reports the absent archive" [ selected_id ]
+    (ids "missing_snapshot_ids" repeated);
+  check (list string) "repeat refuses nothing" [] (ids "refused_snapshot_ids" repeated);
+  check (list string) "repeat fails nothing" [] (ids "failed_snapshot_ids" repeated);
+  check_preserved ()
+;;
+
+let test_history_archive_identity_excludes_canonical_filename () =
+  with_temp_dir @@ fun dir ->
+  let module Store = Keeper_checkpoint_store in
+  let session_id = "agent-core-snapshot-0000000000001" in
+  let session_dir = Filename.concat dir session_id in
+  let checkpoint =
+    make_inventory_checkpoint ~session_id ~turn_count:1 ~created_at:2.0
+  in
+  (match Store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+   | Ok (Store.Saved _) -> ()
+   | Ok (Store.Stale_noop _) -> fail "fresh canonical checkpoint was stale"
+   | Error detail -> fail detail);
+  let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id in
+  check bool "canonical checkpoint exists" true (Sys.file_exists canonical);
+  check (list string)
+    "canonical name shaped like an archive is not listed"
+    []
+    (Store.list_agent_core_history_files ~session_dir);
+  (match
+     Store.delete_agent_core_history_files
+       ~session_dir
+       ~snapshot_ids:[ Filename.basename canonical ]
+   with
+   | [ Store.History_refused id ] ->
+     check string "canonical filename is the refused input" (Filename.basename canonical) id
+   | _ -> fail "archive-shaped canonical filename was not refused");
+  check bool "refused canonical remains" true (Sys.file_exists canonical)
+;;
+
 let check_checkpoint_error_projection error ~status ~kind ~detail =
   let open Yojson.Safe.Util in
   let json = Checkpoints.checkpoint_load_error_json error in
@@ -720,6 +865,14 @@ let () =
         ] )
     ; ( "checkpoint_inventory"
       , [ test_case
+            "history deletion preserves canonical and conversation files"
+            `Quick
+            test_history_delete_preserves_session_files
+        ; test_case
+            "archive-shaped canonical is never history"
+            `Quick
+            test_history_archive_identity_excludes_canonical_filename
+        ; test_case
             "projects every typed checkpoint load error"
             `Quick
             test_checkpoint_load_error_projection_is_total

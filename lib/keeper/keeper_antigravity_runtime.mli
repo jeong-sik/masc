@@ -51,23 +51,25 @@ val run :
     Antigravity turn's input attribution as zero (masc#32995).
 
     It reports [Whole_input_transmitted] only when the conversation starts,
-    because only then does the rendered prompt carry the whole list. A resumed
-    conversation reports [Held_by_client_session]: the CLI re-sends just the
-    new turn, so what the model reads is not this process's to measure. *)
+    because only then does the rendered prompt carry the whole list. The
+    admission window and its observation likewise apply only to that fresh
+    input. A resumed conversation reports [Held_by_client_session]: the CLI
+    re-sends just the new turn, so what the model reads is not this process's
+    to measure. *)
 
 module For_testing : sig
-  val observed_history_projection
-    :  ?on_model_input_window_observation:
+  val capacity_bounded_model_input_projection
+    :  declared_max_prompt_bytes:int option
+    -> system_prompt:string
+    -> goal:string
+    -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> Agent_core.Agent.model_input_projection option
-    -> Agent_core.Agent.model_input_projection
-  (** Runs the source projection (the production source appends a bounded
-      typed Gate replay reference) and hands the result over whole, reporting
-      what went as a window reading. Nothing is cut: agy states no prompt
-      size limit and carried a 2,078,915-byte prompt end to end, answering
-      from markers placed at every quarter of it (2026-09-18, agy 1.2.6). The
-      reading still has to be published, because a keeper's next turn starts
-      from the range its last one carried. *)
+    -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
+  (** Runs the source projection before applying the declared byte window, so
+      a Gate replay reference is counted in the provider-bound input. Refuses
+      an undeclared window: Antigravity has no typed overflow response from
+      which MASC could derive a safe retry capacity. *)
 
   val start_prompt_bytes :
     system_prompt:string ->
@@ -76,4 +78,6 @@ module For_testing : sig
     (int, string) result
   (** Render through the production start-turn formatter and return the exact
       transmitted prompt byte count. *)
+
+  val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
 end

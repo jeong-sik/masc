@@ -15,6 +15,10 @@ type entry =
     (** Wire-specific capability bases. Keys must also appear in
         [identity_kinds]; absent keys inherit [capabilities_base]. *)
   ; identity_hosts : string list
+  ; supports_parallel_tool_suppression : bool
+    (** The provider documents a request control that limits a response to at
+        most one tool call. Missing declarations are false; this is separate
+        from a model being able to generate parallel tool calls. *)
   }
 
 val parse_entry : Otoml.t -> (entry, string) result

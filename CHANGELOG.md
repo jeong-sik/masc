@@ -116,6 +116,7 @@
 - CLI: checkpoint purge keeps its working-directory fallback (#37215).
 - Librarian: a CLI fallback failure keeps its evidence (#37191).
 - Retry: a `retry-after` given as a JSON integer is read (#37384).
+- Exact output: a `[runtime.exact_output_lanes.verifier_exact].slots` entry that names no configured runtime is dropped with a warning naming it, as `cli_slots` entries already are, and the lane keeps the slots that can judge. Nothing checked those ids against the runtime table before: publication admits a slot through `Exact_output.admit_target_ref`, which answers whether the id is a catalog target, not whether a runtime is configured for it. An id in the catalog and absent from the runtime table therefore published and then failed every judgement it was given (#37395).
 - Observability: the metric store no longer swallows `Eio.Cancel.Cancelled`. `best_effort` caught it with `| exn ->`, so a counter incremented inside a cancelled fiber turned the cancellation into one warning line and the caller carried on, against the rule in RFC-0106 (#37371).
 
 ## [0.35.20] - 2026-09-17

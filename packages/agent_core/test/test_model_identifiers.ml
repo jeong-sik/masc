@@ -101,9 +101,9 @@ let test_three_modules_share_one_rule () =
 ;;
 
 (* Catalog lookup path: the row keeps its declared spelling; comparison folds
-   ASCII case. [lookup] rejects a padded query; [lookup_for_provider] trims
-   its query instead — a known divergence tracked in issue #37276, so only
-   [lookup]'s padding rule is pinned here. *)
+   ASCII case. Both lookup paths reject a padded model id at the opaque
+   constructor boundary; [lookup_for_provider] still normalizes its separate
+   provider-name input. *)
 let test_lookup_folds_case_and_rejects_padding () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog

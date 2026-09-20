@@ -148,10 +148,10 @@ val load_default : unit -> (t, string) result
     Empty or whitespace-padded model ids do not match. *)
 val lookup : t -> string -> model_entry option
 
-(** Exact normalized lookup across provider-scoped rows. Both
-    [provider_name] and the complete [model_id] must equal the row's declared
-    [provider_name] and [id_prefix], respectively, after ASCII case-folding and
-    trimming. There is no family/prefix match on the model identity. The
+(** Exact normalized lookup across provider-scoped rows. [provider_name] is
+    trimmed and ASCII case-folded. The complete [model_id] must have no leading
+    or trailing whitespace and equals the row's declared [id_prefix] after
+    ASCII case-folding. There is no family/prefix match on the model identity. The
     provider and model remain separate values; AGENT_CORE never synthesizes slash,
     colon, or dot-qualified model ids.
 

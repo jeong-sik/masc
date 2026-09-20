@@ -139,7 +139,10 @@ type judged =
   }
 
 type outcome =
-  | Open of string
+  | Open of
+      { reason : string
+      ; absorbed : Keeper_memory_os_types.absorbed_statement list
+      }
   | Judged of judged
 
 let conveyed_boundary = 0.5
@@ -217,7 +220,20 @@ let ask ~evaluate ~claim (numbered : (string * string) list) =
     (chunks ~budget numbered)
 ;;
 
-let judge ~evaluate ~facts ~new_claims ~absorbed =
+(* The answer's absorptions into one claim, classified before any request
+   is made: what has no claim or no source text passes through unjudged,
+   what does not fit a request ({!request_bytes_limit}) cannot be judged
+   and stays current, the rest is asked. Classifying first is what lets a
+   request that fails for another reason leave the unjudgeable alone. *)
+type group =
+  { into : string
+  ; claim : string option
+  ; unjudged : Keeper_memory_os_types.absorbed_statement list
+  ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
+  ; judgeable : (Keeper_memory_os_types.absorbed_statement * string list) list
+  }
+
+let classify ~facts ~new_claims ~absorbed =
   let claim_of id =
     List.find_map
       (fun (fact : Keeper_memory_os_types.fact) ->
@@ -225,7 +241,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
          then Some fact.claim
          else None)
   in
-  (* The answer's absorptions by absorbing claim, in the answer's order. *)
+  (* By absorbing claim, in the answer's order. *)
   let by_into =
     List.fold_left
       (fun groups (statement : Keeper_memory_os_types.absorbed_statement) ->
@@ -236,33 +252,50 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
       absorbed
     |> List.rev_map (fun (into, members) -> into, List.rev members)
   in
+  List.map
+    (fun (into, members) ->
+       match claim_of into new_claims with
+       | None -> { into; claim = None; unjudged = members; unjudgeable = []; judgeable = [] }
+       | Some claim when String.length claim >= request_bytes_limit ->
+         (* The claim alone fills a request: nothing it absorbs can be judged
+            against it, and nothing it absorbs is absorbed. *)
+         { into; claim = Some claim; unjudged = []; unjudgeable = members; judgeable = [] }
+       | Some claim ->
+         let judgeable, unjudged =
+           List.partition_map
+             (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+                match claim_of statement.absorbed facts with
+                | Some text -> Either.Left (statement, statements text)
+                | None -> Either.Right statement)
+             members
+         in
+         let budget = request_bytes_limit - String.length claim in
+         let judgeable, unjudgeable =
+           List.partition
+             (fun (_, sts) -> List.for_all (fun st -> String.length st <= budget) sts)
+             judgeable
+         in
+         { into; claim = Some claim; unjudged; unjudgeable = List.map fst unjudgeable; judgeable })
+    by_into
+;;
+
+let judge ~evaluate ~facts ~new_claims ~absorbed =
+  let groups = classify ~facts ~new_claims ~absorbed in
   let open Result.Syntax in
   let judged =
     List.fold_left
-      (fun acc (into, members) ->
+      (fun (acc : (judged, string) result) (group : group) ->
          let* acc = acc in
-         match claim_of into new_claims with
-         | None -> Ok { acc with unjudged = acc.unjudged @ members }
-         | Some claim when String.length claim >= request_bytes_limit ->
-           (* The claim alone fills a request: nothing it absorbs can be judged
-              against it, and nothing it absorbs is absorbed. *)
-           Ok { acc with unjudgeable = acc.unjudgeable @ members }
-         | Some claim ->
-           let judgeable, unjudged =
-             List.partition_map
-               (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
-                  match claim_of statement.absorbed facts with
-                  | Some text -> Either.Left (statement, statements text)
-                  | None -> Either.Right statement)
-               members
-           in
-           let budget = request_bytes_limit - String.length claim in
-           let judgeable, unjudgeable =
-             List.partition
-               (fun (_, sts) ->
-                  List.for_all (fun st -> String.length st <= budget) sts)
-               judgeable
-           in
+         let acc =
+           { acc with
+             absorbed = acc.absorbed @ group.unjudged
+           ; unjudged = acc.unjudged @ group.unjudged
+           ; unjudgeable = acc.unjudgeable @ group.unjudgeable
+           }
+         in
+         match group.claim, group.judgeable with
+         | None, _ | Some _, [] -> Ok acc
+         | Some claim, judgeable ->
            let numbered =
              List.concat
                (List.mapi
@@ -282,7 +315,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
                   in
                   ( statement
                   , { memory_id = statement.absorbed
-                    ; into
+                    ; into = group.into
                     ; statements = List.length sts
                     ; not_conveyed
                     } ))
@@ -292,11 +325,10 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
              List.partition (fun (_, verdict) -> verdict.not_conveyed = 0) verdicts
            in
            Ok
-             { absorbed = acc.absorbed @ List.map fst kept @ unjudged
+             { acc with
+               absorbed = acc.absorbed @ List.map fst kept
              ; left = acc.left @ List.map snd left
              ; conveyed = acc.conveyed @ List.map snd kept
-             ; unjudged = acc.unjudged @ unjudged
-             ; unjudgeable = acc.unjudgeable @ List.map fst unjudgeable
              ; requests = acc.requests + requests
              })
       (Ok
@@ -307,26 +339,37 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
          ; unjudgeable = []
          ; requests = 0
          })
-      by_into
+      groups
+  in
+  (* Back in the answer's order, so the store sees the answer's list minus
+     what the gate took out. *)
+  let in_answer_order through =
+    List.filter
+      (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+         List.exists
+           (fun (kept : Keeper_memory_os_types.absorbed_statement) ->
+              String.equal kept.absorbed statement.absorbed
+              && String.equal kept.into statement.into)
+           through)
+      absorbed
   in
   match judged with
-  | Ok judged ->
-    (* Back in the answer's order, so the store sees the answer's list minus
-       what the gate took out. *)
-    let through = judged.absorbed in
-    Judged
-      { judged with
-        absorbed =
+  | Ok judged -> Judged { judged with absorbed = in_answer_order judged.absorbed }
+  | Error reason ->
+    let unjudgeable = List.concat_map (fun (group : group) -> group.unjudgeable) groups in
+    Open
+      { reason
+      ; absorbed =
           List.filter
             (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
-               List.exists
-                 (fun (kept : Keeper_memory_os_types.absorbed_statement) ->
-                    String.equal kept.absorbed statement.absorbed
-                    && String.equal kept.into statement.into)
-                 through)
+               not
+                 (List.exists
+                    (fun (kept : Keeper_memory_os_types.absorbed_statement) ->
+                       String.equal kept.absorbed statement.absorbed
+                       && String.equal kept.into statement.into)
+                    unjudgeable))
             absorbed
       }
-  | Error reason -> Open reason
 ;;
 
 (* --- Entry point --- *)
@@ -347,18 +390,29 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
          (List.length absorbed);
        absorbed
      | Some api_key ->
+       (* The sha256 of each request body, as the client computed it, so the
+          log names exactly what was sent (the Board gate keeps the same
+          value as provenance). *)
+       let request_shas = ref [] in
        let evaluate ~state ~questions =
          Typesafeai_client.evaluate ?clock ~api_key ~state ~questions ()
-         |> Result.map (fun evaluated -> evaluated.Typesafeai_client.response)
+         |> Result.map (fun evaluated ->
+           request_shas := evaluated.Typesafeai_client.request_body_sha256 :: !request_shas;
+           evaluated.Typesafeai_client.response)
        in
+       let shas () = String.concat "," (List.rev !request_shas) in
        (match judge ~evaluate ~facts ~new_claims ~absorbed with
-        | Open reason ->
+        | Open { reason; absorbed = applied } ->
           Log.Keeper.warn
             ~keeper_name:keeper_id
-            "librarian absorb gate open: %s; %d absorption(s) applied as answered"
+            "librarian absorb gate open: %s; %d of %d absorption(s) applied as answered (%d too \
+             large to judge kept current); requests=%s"
             reason
-            (List.length absorbed);
-          absorbed
+            (List.length applied)
+            (List.length absorbed)
+            (List.length absorbed - List.length applied)
+            (shas ());
+          applied
         | Judged judged ->
           let not_conveyed =
             List.fold_left (fun n verdict -> n + verdict.not_conveyed) 0 judged.left
@@ -366,12 +420,13 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
           Log.Keeper.info
             ~keeper_name:keeper_id
             "librarian absorb gate: %d absorbed, %d kept current (%d statement(s) not \
-             conveyed), %d unjudged, %d too large to judge (kept current), %d request(s)"
+             conveyed), %d unjudged, %d too large to judge (kept current), %d request(s) %s"
             (List.length judged.conveyed)
             (List.length judged.left)
             not_conveyed
             (List.length judged.unjudged)
             (List.length judged.unjudgeable)
-            judged.requests;
+            judged.requests
+            (shas ());
           judged.absorbed))
 ;;

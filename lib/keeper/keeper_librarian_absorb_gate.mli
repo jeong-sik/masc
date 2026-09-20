@@ -8,8 +8,12 @@
     still applied. The rest are absorbed as the answer said.
 
     The gate only ever narrows [absorbed]. When the model cannot be asked --
-    no key, the lane turned off, a transport or decoding failure -- the
-    answer is applied as it came, which is what happened before the gate. *)
+    no key, the lane or the gate turned off -- the answer is applied as it
+    came, which is what happened before the gate. When it was asked and did
+    not answer -- a transport or decoding failure -- the answer is applied
+    except for what could not have been judged for its size
+    ({!request_bytes_limit}), which stays current: that part of the verdict
+    is the gate's own and does not depend on the model. *)
 
 (** {1 Statements} *)
 
@@ -59,9 +63,14 @@ type judged =
   }
 
 type outcome =
-  | Open of string
-      (** the model did not answer; [absorbed] is applied as it came. The
-          string says why, for the log. *)
+  | Open of
+      { reason : string
+      ; absorbed : Keeper_memory_os_types.absorbed_statement list
+      }
+      (** the model did not answer. [absorbed] is the answer's list minus
+          the memories that could not have been judged for their size
+          ({!request_bytes_limit}): those stay current whatever the model
+          did, the rest are applied as answered. [reason] is for the log. *)
   | Judged of judged
 
 val conveyed_boundary : float

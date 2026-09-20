@@ -93,7 +93,7 @@ let absorbed_into claim facts : Types.absorbed_statement list =
 
 let judged = function
   | Gate.Judged judged -> judged
-  | Gate.Open reason -> Alcotest.fail ("gate open: " ^ reason)
+  | Gate.Open { reason; _ } -> Alcotest.fail ("gate open: " ^ reason)
 ;;
 
 let test_every_statement_conveyed_absorbs_as_answered () =
@@ -145,12 +145,14 @@ let test_the_boundary_is_inclusive () =
   Alcotest.(check int) "exactly the boundary is conveyed" 1 (List.length j.absorbed)
 ;;
 
-let test_the_model_not_answering_leaves_the_answer_as_it_came () =
+let test_the_model_not_answering_applies_the_answer () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into merged facts in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
   (match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
-   | Gate.Open reason -> Alcotest.(check string) "the reason is carried" "HTTP 529" reason
+   | Gate.Open { reason; absorbed = applied } ->
+     Alcotest.(check string) "the reason is carried" "HTTP 529" reason;
+     Alcotest.(check int) "and every absorption is still applied" 2 (List.length applied)
    | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open");
   let missing ~state:_ ~questions:_ = Ok { T.model = "jev-test"; answers = []; usage = None } in
   match Gate.judge ~evaluate:missing ~facts ~new_claims:[ merged ] ~absorbed with
@@ -325,6 +327,21 @@ let test_a_noul_outside_the_unit_interval_opens_the_gate () =
   | Gate.Judged _ -> Alcotest.fail "2.0 is not a probability"
 ;;
 
+(* An oversized memory stays current even when the model fails on another
+   memory's request: what cannot be judged is decided before asking. *)
+let test_an_oversized_memory_stays_current_when_another_request_fails () =
+  let huge = fact (String.make (Gate.request_bytes_limit + 1) 'x') in
+  let small = fact (List.hd sources) in
+  let absorbed = absorbed_into merged [ huge; small ] in
+  let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
+  match Gate.judge ~evaluate ~facts:[ huge; small ] ~new_claims:[ merged ] ~absorbed with
+  | Gate.Open { absorbed = applied; _ } ->
+    Alcotest.(check (list string)) "only the small memory's absorption is applied"
+      [ id small ]
+      (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) applied)
+  | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open"
+;;
+
 (* A statement that does not fit a request cannot be judged; its memory
    stays current instead of being absorbed on a refusal the gate can predict. *)
 let test_a_statement_too_large_to_judge_keeps_its_memory_current () =
@@ -356,8 +373,8 @@ let () =
         ; Alcotest.test_case "a statement not conveyed keeps its memory current" `Quick
             test_a_statement_not_conveyed_keeps_its_memory_current
         ; Alcotest.test_case "the boundary is inclusive" `Quick test_the_boundary_is_inclusive
-        ; Alcotest.test_case "the model not answering leaves the answer as it came" `Quick
-            test_the_model_not_answering_leaves_the_answer_as_it_came
+        ; Alcotest.test_case "the model not answering applies the answer" `Quick
+            test_the_model_not_answering_applies_the_answer
         ; Alcotest.test_case "an absorption the pass cannot place goes through unjudged" `Quick
             test_an_absorption_the_pass_cannot_place_goes_through_unjudged
         ; Alcotest.test_case "statements are asked in bounded requests" `Quick
@@ -366,6 +383,8 @@ let () =
             test_a_noul_outside_the_unit_interval_opens_the_gate
         ; Alcotest.test_case "a statement too large to judge keeps its memory current" `Quick
             test_a_statement_too_large_to_judge_keeps_its_memory_current
+        ; Alcotest.test_case "an oversized memory stays current when another request fails" `Quick
+            test_an_oversized_memory_stays_current_when_another_request_fails
         ; Alcotest.test_case "a missing seventeenth statement keeps the original" `Quick
             test_a_missing_seventeenth_statement_keeps_the_whole_memory
         ; Alcotest.test_case "selection gate and store preserve the original" `Quick

@@ -627,6 +627,17 @@ let new_board_attention_run ~before =
   | None -> Alcotest.fail "board attention exact run was not recorded"
 ;;
 
+let new_board_attention_run_full ~before =
+  let summary = new_board_attention_run ~before in
+  match
+    Exact_lane_run_registry.get
+      (Exact_lane_run_registry.global ())
+      ~run_id:summary.run_id
+  with
+  | Some run -> run
+  | None -> Alcotest.fail "board attention exact run payload was not retained"
+;;
+
 let check_cli_run_selected ~before ~slot_id =
   match (new_board_attention_run ~before).Exact_lane_run_registry.status with
   | Exact_lane_run_registry.Completed
@@ -1252,7 +1263,7 @@ let execute_behind_jev ~name ~jev_choice =
             prepared
         in
         let exact_selected_slot, exact_output =
-          match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+          match (new_board_attention_run_full ~before).Exact_lane_run_registry.status with
           | Exact_lane_run_registry.Completed
               { outcome = Exact_lane_run_registry.Succeeded
               ; selected_slot

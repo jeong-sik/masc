@@ -5231,19 +5231,19 @@ let render_lane_run_list (state : state) ~lane_id =
    that fit stay complete; oversized fields share the space left after each
    field's minimum preview. If even those minima do not fit, preserve the
    original prefix and name the omitted suffix count. Stored bytes do not change. *)
-let lane_run_render_max_bytes = 65536
+let lane_run_preview_source_max_bytes = 65536
 
-type prepared_document =
+type lane_run_prepared_document =
   { full_text : string
   ; document : string
   ; notice : string
   }
 
-type prepared_field =
+type lane_run_prepared_field =
   { index : int
   ; heading : string
   ; heading_bytes : int
-  ; prepared : prepared_document
+  ; prepared : lane_run_prepared_document
   ; minimum_bytes : int
   ; full_bytes : int
   }
@@ -5301,7 +5301,7 @@ let lane_run_payload_lines ~width json =
       :: render_document ~budget:(budget - field.heading_bytes) field.prepared
     in
     let total = List.fold_left (fun n field -> n + field.full_bytes) 0 fields in
-    if total <= lane_run_render_max_bytes then
+    if total <= lane_run_preview_source_max_bytes then
       List.concat_map (fun field -> render_field field.full_bytes field) fields
     else begin
       let minimum_total fields =
@@ -5309,7 +5309,7 @@ let lane_run_payload_lines ~width json =
       in
       let notice_bytes = function None -> 0 | Some text -> String.length text + 1 in
       let fields, suffix_notice =
-        if minimum_total fields <= lane_run_render_max_bytes then fields, None
+        if minimum_total fields <= lane_run_preview_source_max_bytes then fields, None
         else
           let rec prefix used remaining notice acc = function
             | [] -> List.rev acc, None
@@ -5317,7 +5317,7 @@ let lane_run_payload_lines ~width json =
               let next_notice =
                 if List.is_empty rest then None else Some (omitted (remaining - 1))
               in
-              if used + field.minimum_bytes + notice_bytes next_notice <= lane_run_render_max_bytes then
+              if used + field.minimum_bytes + notice_bytes next_notice <= lane_run_preview_source_max_bytes then
                 prefix (used + field.minimum_bytes) (remaining - 1) next_notice (field :: acc) rest
               else List.rev acc, notice
           in
@@ -5332,7 +5332,7 @@ let lane_run_payload_lines ~width json =
           let added = min (needed field) (extra / remaining) in
           (field, field.minimum_bytes + added) :: allocate (extra - added) (remaining - 1) rest
       in
-      let extra = lane_run_render_max_bytes - notice_bytes suffix_notice - minimum_total fields in
+      let extra = lane_run_preview_source_max_bytes - notice_bytes suffix_notice - minimum_total fields in
       let allocated =
         allocate extra (List.length fields) ranked
         |> List.sort (fun (a, _) (b, _) -> Int.compare a.index b.index)
@@ -5341,7 +5341,7 @@ let lane_run_payload_lines ~width json =
       match suffix_notice with None -> lines | Some text -> lines @ [ Theme.warn (), text ]
     end
   | _ ->
-    render_document ~budget:lane_run_render_max_bytes (prepare_document json)
+    render_document ~budget:lane_run_preview_source_max_bytes (prepare_document json)
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_decision with

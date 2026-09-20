@@ -52,7 +52,8 @@ let endpoint_remote_root = "/srv/masc/playground"
 
 (* Pinned rather than read back off the endpoint value: this string is the
    contract the endpoint bootstrap installs and the preflight checks. *)
-let expected_gh_dir = "/srv/masc/playground/gh-lane-keeper/.config/gh"
+let expected_keeper_root = "/srv/masc/playground/gh-lane-keeper"
+let expected_gh_dir = expected_keeper_root ^ "/.config/gh"
 let device_code_line = "! First copy your one-time code: C3ED-117C\n"
 let probe_login = "octocat"
 let frame_path ~dir tag = Filename.concat dir ("frame-" ^ tag)
@@ -129,7 +130,7 @@ let stub_main () =
        record "preflight-endpoint-root";
        write_all Unix.stderr (trailer 0)
      | [ "test"; "-d"; path ]
-       when String.equal path (Filename.dirname expected_gh_dir) ->
+       when String.equal path expected_keeper_root ->
        record "preflight-keeper-root";
        let root_was_bootstrapped = Sys.file_exists (frame_path ~dir "mkdir-root") in
        write_all Unix.stderr (trailer (if root_was_bootstrapped then 0 else 70))
@@ -385,18 +386,18 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     check
       (list string)
       "the endpoint bootstrap creates only the Keeper workspace"
-      [ "mkdir"; "-p"; "/srv/masc/playground/gh-lane-keeper" ]
+      [ "mkdir"; "-p"; expected_keeper_root ]
       root.argv;
     check string "bootstrap request root" endpoint_remote_root root.remote_root;
     let keeper_check = decoded_request (frame_path ~dir "preflight-keeper-root") in
     check
       (list string)
       "the Keeper root is checked only after bootstrap"
-      [ "test"; "-d"; "/srv/masc/playground/gh-lane-keeper" ]
+      [ "test"; "-d"; expected_keeper_root ]
       keeper_check.argv;
     let git_check = decoded_request (frame_path ~dir "preflight-git") in
     check string "workspace preflight request root"
-      "/srv/masc/playground/gh-lane-keeper"
+      expected_keeper_root
       git_check.remote_root;
     let endpoint =
       match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name with
@@ -421,7 +422,7 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
       [ "mkdir"; "-p"; expected_gh_dir ]
       (decoded_request (frame_path ~dir "mkdir")).argv;
     let mkdir = decoded_request (frame_path ~dir "mkdir") in
-    check string "ordinary request root" "/srv/masc/playground/gh-lane-keeper"
+    check string "ordinary request root" expected_keeper_root
       mkdir.remote_root;
     check string "ordinary cwd" mkdir.remote_root mkdir.cwd;
     let streamed = Buffer.create 128 in

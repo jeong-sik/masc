@@ -540,9 +540,6 @@ let board_tool_agent_name_from_request request =
              the sibling board REST bridges already use this dashboard actor fallback. *)
           "dashboard")
 
-let board_tool_owner_from_request request =
-  board_tool_agent_name_from_request request |> board_actor_author_for_write
-
 let sub_board_owner_matches ~owner (sb : Board.sub_board) =
   String.equal (Board.Agent_id.to_string sb.Board.owner) owner
 
@@ -1177,8 +1174,8 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_sub_board_create"
-         (fun _state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_board_sub_board_create"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1192,7 +1189,7 @@ let add_routes ~sw ~clock router =
                Safe_ops.json_string_opt "description" args |> Option.value ~default:""
              in
              let members = Safe_ops.json_string_list "members" args in
-             let owner = board_tool_owner_from_request request in
+             let owner = board_actor_author_for_write agent_name in
              let access =
                match Safe_ops.json_string_opt "access" args with
                | Some s -> Board.sub_board_access_of_string_opt s
@@ -1229,8 +1226,8 @@ let add_routes ~sw ~clock router =
                    reqd)))
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_sub_board_delete"
-         (fun _state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_board_sub_board_delete"
+         (fun _state agent_name _req reqd ->
          let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
           | None ->
@@ -1238,7 +1235,7 @@ let add_routes ~sw ~clock router =
                 (`Assoc [("error", `String "sub_board_id is required")])
                 reqd
          | Some sub_board_id ->
-              let owner = board_tool_owner_from_request request in
+              let owner = board_actor_author_for_write agent_name in
               (match Board_dispatch.get_sub_board ~sub_board_id with
                | Error e ->
                    Http.Response.json_value ~status:`Not_found
@@ -1260,8 +1257,8 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_sub_board_update"
-         (fun _state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_board_sub_board_update"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1281,7 +1278,7 @@ let add_routes ~sw ~clock router =
                     (`Assoc [("error", `String "sub_board_id is required")])
                     reqd
               | Some sub_board_id ->
-                  let owner = board_tool_owner_from_request request in
+                  let owner = board_actor_author_for_write agent_name in
                   (match Board_dispatch.get_sub_board ~sub_board_id with
                    | Error e ->
                        Http.Response.json_value ~status:`Not_found
@@ -1349,13 +1346,13 @@ let add_routes ~sw ~clock router =
                      respond_json_with_cors ~status request reqd body))
        ) request reqd)
 
-  (* Board write APIs — used by dashboard + Bevy Viewer.
-     Uses with_tool_auth to allow same-origin or allowlisted local dev browser
-     requests without a bearer token. *)
+  (* The four Board post/comment/vote routes below consume the auth resolver's
+     actor. An ordinary bearer credential resolves to its owner; an admitted
+     token-less same-origin request keeps its supplied local attribution.
+     These routes do not re-read the identity headers. *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_vote"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+       with_tool_actor_auth ~tool_name:"masc_board_vote"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1384,9 +1381,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_post"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+       with_tool_actor_auth ~tool_name:"masc_board_post"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1424,9 +1420,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_comment"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+       with_tool_actor_auth ~tool_name:"masc_board_comment"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1454,12 +1449,12 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
-  (* Comment vote — mirrors masc_board_vote. Server re-derives [voter] from the
-     agent header so the client cannot forge the voting identity. *)
+  (* Comment vote — mirrors masc_board_vote. [voter] comes from the auth
+     resolver: the ordinary bearer credential's owner, or the attribution
+     supplied by an admitted token-less same-origin request. *)
   |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_comment_vote"
-         (fun _state _req reqd ->
-         let agent_name = board_tool_agent_name_from_request request in
+       with_tool_actor_auth ~tool_name:"masc_board_comment_vote"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =

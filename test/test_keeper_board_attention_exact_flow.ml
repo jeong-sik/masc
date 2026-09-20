@@ -1638,6 +1638,74 @@ let test_jev_not_relevant_is_judged_again () =
   check_terminal_provenance "not_relevant" run (expected_jev_provenance run)
 ;;
 
+let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio_with_http_pool (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-jev-cli-fallback" in
+      let jev =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (jev_response ~choice:"not_relevant"))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-jev-closed-http" "http://127.0.0.1:1" ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the Jev CLI fallback fixture did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let cli_calls = ref 0 in
+      let result, terminal_jev =
+        with_jev ~endpoint:jev.base_url (fun () ->
+          let since_seq = last_log_seq () in
+          let result =
+            Exact_flow.execute
+              ~cli_runner:(cli_success_runner candidate cli_calls)
+              ~clock
+              ~before_dispatch:(fun _ -> Ok ())
+              ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+              prepared
+          in
+          ( result
+          , terminal_jev_entries
+              ~since_seq
+              ~candidate_id:candidate.Candidate.candidate_id ))
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "the declared CLI slot supplies the final judgment"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id;
+         (match judgment.Candidate.source with
+          | Candidate.Cli_lane_slot -> ()
+          | Candidate.Exact_attempt _ | Candidate.Vendor_system_one _ ->
+            Alcotest.fail "the CLI fallback judgment lost its source")
+       | Error _ -> Alcotest.fail "the declared CLI fallback did not answer");
+      Alcotest.(check int) "Jev is asked once" 1 (Fixture.post_count jev);
+      Alcotest.(check int) "the CLI fallback is asked once" 1 !cli_calls;
+      (match terminal_jev with
+       | [ jev ] ->
+         Alcotest.(check (option string))
+           "the terminal entry keeps Jev's answer"
+           (Some "not_relevant")
+           (json_string_field "answer" jev);
+         Alcotest.(check (option string))
+           "the terminal entry includes the CLI fallback decision"
+           (Some "relevant")
+           (json_string_field "rejudged" jev)
+       | entries ->
+         Alcotest.failf
+           "expected one terminal Jev entry after the CLI fallback, found %d"
+           (List.length entries));
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
+;;
+
 let test_jev_choice_outside_the_question_is_judged_again () =
   let run = execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe" in
   check_judged_by_the_llm_lane "unknown choice" run;
@@ -1813,6 +1881,10 @@ let () =
             "a not-relevant Jev answer is judged again by the LLM lane"
             `Quick
             test_jev_not_relevant_is_judged_again
+        ; Alcotest.test_case
+            "a not-relevant Jev terminal entry includes the CLI fallback"
+            `Quick
+            test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry
         ; Alcotest.test_case
             "a Jev choice the question did not offer goes to the LLM lane"
             `Quick

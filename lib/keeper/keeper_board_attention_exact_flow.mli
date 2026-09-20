@@ -92,7 +92,7 @@ type prepared
 val lane_id : string
 
 val terminal_of_flow_error
-  :  'callback_error Exact_output.flow_execution_error
+  :  'callback_error Agent_core.Exact_output.flow_execution_error
   -> 'callback_error execution_error
 (** Classify every AGENT_CORE flow terminal before deciding whether a second
     transport may run. The closed input and output variants make a new flow

@@ -23,6 +23,7 @@ def main() -> None:
         root = args.artifacts or Path(temporary)
         root.mkdir(parents=True, exist_ok=True)
         output = root / "report.json"
+        active_output = output
         requests: list[dict[str, Any]] = []
         generation_texts = [
             "What is the cabinet code?",
@@ -45,7 +46,7 @@ def main() -> None:
                 nonlocal generation_count, judge_count
                 raw = self.rfile.read(int(self.headers["Content-Length"]))
                 payload = json.loads(raw)
-                report = json.loads(output.read_text())
+                report = json.loads(active_output.read_text())
                 requests.append(
                     {
                         "path": self.path,
@@ -257,6 +258,54 @@ def main() -> None:
             assert dataset.read_bytes() == input_bytes
             assert output.read_bytes() == report_bytes
             assert len(requests) == calls_before_refusals
+            refused_runs_model_calls = len(requests) - calls_before_refusals
+
+            # Publication is a view copy: its failure must retain a completed
+            # measurement, including a scored zero, in the authoritative file.
+            publication_input = root / "publication-input.json"
+            publication_input.write_text(
+                json.dumps({"provenance": ["Synthetic"], "cases": [cases[-1]]})
+            )
+            active_output = root / "publication-report.json"
+            invalid_store = root / "publication-not-a-directory"
+            invalid_store.write_text("A regular file cannot hold the artifact store.")
+            generation_texts.append("ORCHID-731")
+            publication_command = list(command)
+            for option, path in [
+                ("--input", publication_input),
+                ("--output", active_output),
+                ("--publish-base-path", invalid_store),
+            ]:
+                publication_command[publication_command.index(option) + 1] = str(path)
+            publication_run = subprocess.run(
+                publication_command,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            (root / "publication-stdout.log").write_text(publication_run.stdout)
+            (root / "publication-stderr.log").write_text(publication_run.stderr)
+            publication_receipt = json.loads(publication_run.stdout)
+            assert publication_run.returncode == 0, (
+                publication_run.returncode,
+                publication_run.stdout,
+                publication_run.stderr,
+            )
+            assert publication_receipt["all_cases_scored"] is True
+            assert publication_receipt["blob_sha256"] is None
+            assert publication_receipt["publication_error"]
+            publication_bytes = active_output.read_bytes()
+            assert (
+                publication_receipt["sha256"]
+                == hashlib.sha256(publication_bytes).hexdigest()
+            )
+            publication_progress = json.loads(publication_bytes)["samples"][0][
+                "progress"
+            ]
+            assert publication_progress[0] == "Scored"
+            assert publication_progress[1]["judgment"]["probability"] == 0.0
+            assert output.read_bytes() == report_bytes
         finally:
             server.shutdown()
             server.server_close()
@@ -277,7 +326,7 @@ def main() -> None:
             0.875,
             0.0,
         ]
-        assert generation_count == 8 and judge_count == 4
+        assert generation_count == 9 and judge_count == 5
         generations = [r for r in requests if r["path"] == "/v1/chat/completions"]
         absent_messages = generations[3]["body"]["messages"]
         assert "ORCHID-731" not in json.dumps(absent_messages), absent_messages
@@ -339,7 +388,8 @@ def main() -> None:
                     "provided_question_generation_skipped": True,
                     "existing_output_preserved": True,
                     "input_output_same_path_preserved": True,
-                    "refused_runs_model_calls": len(requests) - calls_before_refusals,
+                    "refused_runs_model_calls": refused_runs_model_calls,
+                    "publication_failure_keeps_completed_measurement": True,
                     "report_sha256": digest,
                     "report": str(output),
                 }

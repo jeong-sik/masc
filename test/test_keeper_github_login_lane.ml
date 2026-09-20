@@ -113,8 +113,8 @@ let stub_main () =
        record "probe";
        write_all Unix.stdout (probe_login ^ "\n");
        write_all Unix.stderr (trailer 0)
-     | "mkdir" :: _ ->
-       record "mkdir";
+     | [ "mkdir"; "-p"; path ] ->
+       record (if String.equal path expected_gh_dir then "mkdir" else "mkdir-root");
        write_all Unix.stderr (trailer 0)
      | "chmod" :: mode :: _ ->
        record ("chmod-" ^ mode);
@@ -314,11 +314,22 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with
   | Error error -> failf "remote lane was not built: %s" error
   | Ok lane ->
+    let root = decoded_request (frame_path ~dir "mkdir-root") in
+    check
+      (list string)
+      "the endpoint bootstrap creates only the Keeper workspace"
+      [ "mkdir"; "-p"; "/srv/masc/playground/gh-lane-keeper" ]
+      root.argv;
+    check string "bootstrap request root" endpoint_remote_root root.remote_root;
     check
       (list string)
       "the lane creates the endpoint's gh directory before logging in"
       [ "mkdir"; "-p"; expected_gh_dir ]
       (decoded_request (frame_path ~dir "mkdir")).argv;
+    let mkdir = decoded_request (frame_path ~dir "mkdir") in
+    check string "ordinary request root" "/srv/masc/playground/gh-lane-keeper"
+      mkdir.remote_root;
+    check string "ordinary cwd" mkdir.remote_root mkdir.cwd;
     let streamed = Buffer.create 128 in
     let status, _stdout, _stderr =
       lane.Keeper_github_identity.run_login

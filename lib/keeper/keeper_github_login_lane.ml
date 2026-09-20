@@ -36,7 +36,7 @@ let run_remote ?(stdin_content = None) endpoint ~timeout_sec ~on_stdout_chunk ~o
     ~stdin_content
     ~argv
     ~env:[||]
-    ~cwd:(Some (Keeper_sandbox_remote.remote_root endpoint))
+    ~cwd:None
 ;;
 
 (* The argv is a fixed shape built here -- mkdir, chmod, find, gh -- and carries
@@ -45,16 +45,8 @@ let run_remote ?(stdin_content = None) endpoint ~timeout_sec ~on_stdout_chunk ~o
    from another machine that reaches the operator through the SSE [error] event,
    so it goes through the same redaction every other identity failure does, and
    redaction runs before truncation so a cut cannot leave half a secret. *)
-let step ~redaction endpoint ~argv =
-  match
-    Masc_exec.Sandbox_target.status_tuple
-      (run_remote
-         endpoint
-         ~timeout_sec:step_timeout_sec
-         ~on_stdout_chunk:None
-         ~on_stderr_chunk:None
-         ~argv)
-  with
+let step_result ~redaction endpoint ~argv result =
+  match Masc_exec.Sandbox_target.status_tuple result with
   | Unix.WEXITED 0, stdout, _ -> Ok stdout
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, stderr ->
     Error
@@ -64,6 +56,24 @@ let step ~redaction endpoint ~argv =
          (String.concat " " argv)
          (Exec_policy.truncate_for_log
             (Keeper_secret_redaction.redact_text redaction (String.trim stderr))))
+;;
+
+let step ~redaction endpoint ~argv =
+  run_remote
+    endpoint
+    ~timeout_sec:step_timeout_sec
+    ~on_stdout_chunk:None
+    ~on_stderr_chunk:None
+    ~argv
+  |> step_result ~redaction endpoint ~argv
+;;
+
+let bootstrap_workspace ~redaction endpoint =
+  let argv = [ "mkdir"; "-p"; Keeper_sandbox_remote.remote_keeper_root endpoint ] in
+  Keeper_sandbox_remote.bootstrap_keeper_workspace
+    ~timeout_sec:step_timeout_sec endpoint
+  |> step_result ~redaction endpoint ~argv
+  |> Result.map (fun _ -> ())
 ;;
 
 (* The host lane secures exactly these two names, skips one that is absent and
@@ -111,6 +121,7 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
   (* The endpoint may never have held this Keeper. A root the ssh user cannot
      write is the bootstrap's job, and this step names it rather than letting
      gh fail later with a directory message. *)
+  let* () = bootstrap_workspace ~redaction endpoint in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "mkdir"; "-p"; gh_dir ] in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
   let lane : Keeper_github_identity.login_lane =

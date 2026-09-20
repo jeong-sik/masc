@@ -210,6 +210,12 @@ let make_state ~base_path ~cli =
     ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ())
 ;;
 
+let make_docker_state ~base_path ~cli =
+  Keeper_sandbox_remote.of_docker_exec ~base_path ~keeper_name:"keeper-a"
+    ~remote_root ~gh_config_dir ~injected_env:[] ~env_allowlist:[ "LANG" ]
+    ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ())
+;;
+
 let contains needle haystack =
   let n = String.length needle and h = String.length haystack in
   let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
@@ -340,12 +346,37 @@ let test_frame_exit_and_injected_env () =
     check (list string) "request argv" [ "/usr/bin/printf"; "hello" ] request.argv;
     check string "host bookkeeping cwd lands on the volume" "/masc-work/keeper-a/src"
       request.cwd;
-    check string "request root is the volume" remote_root request.remote_root;
+    check string "request root is the keeper workspace" "/masc-work/keeper-a"
+      request.remote_root;
     check string "raw stdin" "in" stdin;
     check (list (pair string string))
       "identity env names the mounted snapshot, then allowlisted caller env"
       [ "GH_CONFIG_DIR", gh_config_dir; "GIT_TERMINAL_PROMPT", "0"; "LANG", "C" ]
       request.env
+;;
+
+let test_default_cwd_is_the_request_root () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode:"exit3" in
+  let state = make_state ~base_path ~cli in
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec:2.0 state in
+  ignore (run_request runner ~cwd:None () : Unix.process_status * string * string);
+  match Exec_ssh_protocol.decode_request (read_file frame_path) with
+  | Error error -> fail error
+  | Ok (request, _) ->
+    check string "default cwd" "/masc-work/keeper-a" request.cwd;
+    check string "same request root" request.cwd request.remote_root;
+    let runner =
+      Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe ~timeout_sec:2.0
+        (make_docker_state ~base_path ~cli)
+    in
+    ignore (run_request runner ~cwd:None () : Unix.process_status * string * string);
+    (match Exec_ssh_protocol.decode_request (read_file frame_path) with
+     | Error error -> fail error
+     | Ok (request, _) ->
+       check string "Docker cwd stays at its resolved root" remote_root request.cwd;
+       check string "Docker request root" request.cwd request.remote_root)
 ;;
 
 (* ── the box (RFC-0422) ─────────────────────────────────────────────── *)
@@ -660,6 +691,8 @@ let () =
           ; test_case "binary transport retains complete raw bytes" `Quick test_binary_stdout_is_complete_and_not_rewritten
           ; test_case "frame, exit and injected env" `Quick
               test_frame_exit_and_injected_env
+          ; test_case "default cwd is the request root" `Quick
+              test_default_cwd_is_the_request_root
           ; test_case "the requested mode travels in the frame" `Quick
               test_the_requested_mode_travels_in_the_frame
           ; test_case "observe support is what the shim advertises" `Quick

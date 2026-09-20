@@ -193,12 +193,20 @@ val runner :
     to build, {!Exec_ssh_protocol.Effect} when omitted; a caller passes
     [Observe] or [Guest_local] only for an endpoint {!observe_supported}
     answered yes for. Docker accepts only [Observe], even when called without
-    an explicit mode. The local wall-clock budget includes the
+    an explicit mode. OpenSSH and guest requests use the Keeper workspace as
+    both request root and default cwd; Docker uses its already-resolved workdir.
+    The local wall-clock budget includes the
     endpoint connect timeout and a bounded drain grace in addition to the
     remote payload timeout.
 
     [on_receipt] receives only this runner call's response evidence. The caller
     owns its collection; endpoint-wide [last_dispatch] is never consulted. *)
+
+val bootstrap_keeper_workspace :
+  timeout_sec:float -> t -> Masc_exec.Sandbox_target.run_outcome
+(** Create an OpenSSH Keeper's workspace with one fixed [mkdir] request rooted
+    at the endpoint base. Ordinary payloads cannot select this wider root.
+    Other transports are already provisioned by their runtime and fail here. *)
 
 module For_testing : sig
   val clear_preflight_cache : unit -> unit

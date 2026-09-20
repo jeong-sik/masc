@@ -534,6 +534,18 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     false
 ;;
 
+(* A serving deferred suffix is the failed turn's unfinished input. It does
+   not need a second Event Queue row to authorize the next cycle. Path waits
+   and ordinary cadence keep the existing acknowledged-pending-stimulus rule;
+   in particular this does not let a wake cut short #34653's resting-path
+   wait. *)
+let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
+  match after_failure with
+  | Some (Continue_on_deferred_lane _) -> true
+  | Some (Wait_for_path_release _) | None ->
+    stimuli_acked && pending_stimulus ()
+;;
+
 let run_keepalive_unified_turn
       ~wake
       ~(ctx : _ context)
@@ -1547,12 +1559,11 @@ let run_heartbeat_loop
               !periodic_cadence
         in
         let next_cycle_now =
-          match turn_outcome.after_failure with
-          | Some (Continue_on_deferred_lane _) ->
-            pending_stimulus_remains ~ctx ~keeper_name:m.name
-          | Some (Wait_for_path_release _) | None ->
-            turn_outcome.stimuli_acked
-            && pending_stimulus_remains ~ctx ~keeper_name:m.name
+          next_cycle_starts_now
+            ~after_failure:turn_outcome.after_failure
+            ~stimuli_acked:turn_outcome.stimuli_acked
+            ~pending_stimulus:(fun () ->
+              pending_stimulus_remains ~ctx ~keeper_name:m.name)
         in
         last_wake_source :=
           (if next_cycle_now
@@ -1578,4 +1589,5 @@ module For_testing = struct
   ;;
 
   let after_failure = after_failure
+  let next_cycle_starts_now = next_cycle_starts_now
 end

@@ -156,6 +156,39 @@ let test_other_failures_without_a_suffix_keep_the_cadence () =
     ]
 ;;
 
+(* #36583: the deferred suffix is the unfinished turn. It starts the next
+   cycle even when no second Event Queue stimulus exists. Resting paths and
+   ordinary cadence retain the previous acknowledged-pending rule, so #34653
+   still prevents a queued wake from cutting a provider rest short. *)
+let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
+  let continued =
+    Some (Loop.Continue_on_deferred_lane { next_runtime_id = "lane-b" })
+  in
+  let waiting =
+    Some
+      (Loop.Wait_for_path_release
+         { release_at = now +. 60.0
+         ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
+         ; waiting_on = "lane-a"
+         })
+  in
+  List.iter
+    (fun (label, after_failure, stimuli_acked, pending_stimulus, expected) ->
+       check bool
+         label
+         expected
+         (Loop.For_testing.next_cycle_starts_now
+            ~after_failure
+            ~stimuli_acked
+            ~pending_stimulus:(fun () -> pending_stimulus)))
+    [ "deferred unfinished input starts without a stimulus", continued, false, false, true
+    ; "a resting path keeps sleeping", waiting, false, true, false
+    ; "an acknowledged pending stimulus retains the existing wake", waiting, true, true, true
+    ; "ordinary cadence keeps sleeping without a pending stimulus", None, true, false, false
+    ; "ordinary cadence retains the existing wake", None, true, true, true
+    ]
+;;
+
 let assert_no_queue_action label outcome =
   match Loop.batch_disposition_of_cycle_outcome (Some outcome) with
   | Loop.Batch_no_action -> ()
@@ -515,6 +548,10 @@ let () =
             "other failures without a suffix keep the cadence"
             `Quick
             test_other_failures_without_a_suffix_keep_the_cadence
+        ; test_case
+            "a serving deferred suffix starts without another stimulus"
+            `Quick
+            test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus
         ] )
     ]
 ;;

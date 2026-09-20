@@ -313,6 +313,16 @@ module For_testing : sig
     Keeper_unified_turn.turn_failure ->
     after_failure option
 
+  (** Whether the loop starts another cycle without sleeping. A serving
+      deferred suffix is itself unfinished input and starts immediately;
+      ordinary cadence and path-release outcomes retain the existing
+      acknowledged-pending-stimulus rule. *)
+  val next_cycle_starts_now :
+    after_failure:after_failure option ->
+    stimuli_acked:bool ->
+    pending_stimulus:(unit -> bool) ->
+    bool
+
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and
       its live caller both remain, so the export stays too. *)

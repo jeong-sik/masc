@@ -190,6 +190,7 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
     ; provider_ref = "openai-responses"
     ; model_id = "gpt-5.6-luna"
     ; enable_thinking = None
+    ; reasoning_effort = None
     ; connect_timeout_s = Some 1.0
     ; body_timeout_s = None
     ; api_key_env = Some "MISSING_FLOW_KEY"

@@ -5122,6 +5122,7 @@
 (include stanzas/test_keeper_librarian_progress.inc)
 (include stanzas/test_keeper_librarian_store_scope.inc)
 (include stanzas/test_keeper_librarian_range.inc)
+(include stanzas/test_keeper_librarian_durable_consumer.inc)
 (include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)

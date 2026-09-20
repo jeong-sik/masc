@@ -7,7 +7,10 @@ let policy_equal left right =
   String.equal left.instructions right.instructions
   && Option.equal Keeper_id.Task_id.equal left.task_id right.task_id
 
-type attempt_state = Pending | Attempted of policy
+type attempt_state =
+  | Pending
+  | Pending_retire_after_attempt
+  | Attempted of policy
 
 type remembered =
   { trace_id : string
@@ -26,13 +29,26 @@ let remember_turn ~base_path ~keeper_name ~trace_id process =
       ((key, {trace_id; identity = ref (); attempt_state = Pending; process}) ::
        List.remove_assoc key (Atomic.get remembered)))
 
+let forget_turn ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  Stdlib.Mutex.protect mu (fun () ->
+    match List.assoc_opt key (Atomic.get remembered) with
+    | Some ({ attempt_state = Pending; _ } as evidence) ->
+      Atomic.set remembered
+        ( (key, { evidence with attempt_state = Pending_retire_after_attempt })
+        :: List.remove_assoc key (Atomic.get remembered) )
+    | Some { attempt_state = Pending_retire_after_attempt; _ } -> ()
+    | Some { attempt_state = Attempted _; _ } | None ->
+      Atomic.set remembered (List.remove_assoc key (Atomic.get remembered)))
+;;
+
 let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed ~trigger =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   match List.assoc_opt key (Atomic.get remembered) with
   | Some evidence when String.equal evidence.trace_id trace_id ->
     (match evidence.attempt_state, sources_changed with
      | Attempted policy, false when policy_equal policy (policy_of_meta meta) -> ()
-     | Pending, _ | Attempted _, _ ->
+     | Pending, _ | Pending_retire_after_attempt, _ | Attempted _, _ ->
        evidence.process ~meta trigger;
        (* Unit return only proves an attempt. In particular run_best_effort can
           return without committing. Exceptions, including cancellation, leave
@@ -40,14 +56,70 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
        Stdlib.Mutex.protect mu (fun () ->
          match List.assoc_opt key (Atomic.get remembered) with
          | Some latest when latest.identity == evidence.identity ->
-           Atomic.set remembered
-             ((key, {latest with attempt_state = Attempted (policy_of_meta meta)}) ::
-              List.remove_assoc key (Atomic.get remembered))
+           (match latest.attempt_state with
+            | Pending_retire_after_attempt ->
+              Atomic.set remembered (List.remove_assoc key (Atomic.get remembered))
+            | Pending | Attempted _ ->
+              Atomic.set remembered
+                ( (key, { latest with attempt_state = Attempted (policy_of_meta meta) })
+                :: List.remove_assoc key (Atomic.get remembered) ))
          | Some _ | None -> ()));
     true
   | Some _ | None -> false
 
+let rec run_durable_with_commit ~config ~keeper_name ~commit =
+  match Env_config.KeeperMemoryOs.librarian_config_state () with
+  | Disabled | Invalid -> ()
+  | Enabled ->
+    (match
+       Keeper_librarian_durable_consumer.consume_one
+         ~config
+         ~keeper_name
+         ~commit
+     with
+     | Ok
+         (Keeper_librarian_durable_consumer.Nothing_to_read
+         | Memory_not_committed) -> ()
+     | Ok (Baseline_advanced _ | Progress_advanced _) ->
+       (* A stored advance can leave unread cuts, including after the first
+          baseline or a successful small retry. Continue on that evidence;
+          failures wait for another wake, and every pass rechecks the toggle. *)
+       run_durable_with_commit ~config ~keeper_name ~commit
+     | Error Keeper_librarian_durable_consumer.Keeper_meta_absent -> ()
+     | Error
+         (Keeper_librarian_durable_consumer.Checkpoint_unreadable
+            Keeper_checkpoint_store.Not_found) ->
+       (* Official-client turns have no Agent-Core checkpoint. Their direct
+          producer remains below until RFC librarian-lifecycle section 4.8 has
+          a durable source. *)
+       ()
+     | Error error ->
+       Log.Keeper.warn
+         ~keeper_name
+         "durable Librarian range not consumed: %s"
+         (Keeper_librarian_durable_consumer.error_to_string error))
+;;
+
+let run_durable ~base_path ~keeper_name =
+  match Env_config.KeeperMemoryOs.librarian_config_state () with
+  | Disabled | Invalid -> ()
+  | Enabled ->
+    let config = Workspace.default_config base_path in
+    let memory_keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path ~base_path
+    in
+    run_durable_with_commit
+      ~config
+      ~keeper_name
+      ~commit:
+        (Keeper_librarian_durable_consumer.commit_with_runtime
+           ~base_path
+           ~keepers_dir:memory_keepers_dir
+           ~keeper_id:keeper_name)
+;;
+
 let run ~trigger ~base_path ~keeper_name =
+  run_durable ~base_path ~keeper_name;
   match Env_config.KeeperMemoryOs.librarian_config_state (),
         Keeper_owner_projection.lookup ~base_path ~keeper_name with
   | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
@@ -109,6 +181,15 @@ let install () =
               ~base_path ~keeper_name)
         in ()))
 
+let submit_durable ~base_path ~keeper_name =
+  let (_ : Keeper_memory_lane.outcome) =
+    Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
+      run_durable ~base_path ~keeper_name)
+  in
+  ()
+;;
+
 module For_testing = struct
   let attempt_remembered = attempt_remembered
+  let run_durable_with_commit = run_durable_with_commit
 end

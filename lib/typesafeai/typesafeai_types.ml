@@ -43,7 +43,7 @@ type choice_answer =
 
 type score_answer =
   { score : float
-  ; probabilities : float list
+  ; probabilities : (string * float) list
   ; confidence : float
   }
 
@@ -120,6 +120,15 @@ let request_to_yojson ~model ~state ~questions =
     ]
 ;;
 
+let rec parse_probabilities acc = function
+  | [] -> Ok (List.rev acc)
+  | (key, `Float value) :: rest -> parse_probabilities ((key, value) :: acc) rest
+  | (key, `Int value) :: rest ->
+    parse_probabilities ((key, float_of_int value) :: acc) rest
+  | (key, _) :: _ ->
+    Error (Printf.sprintf "typesafeai: probability for %S must be a number" key)
+;;
+
 let answer_of_yojson json =
   match json with
   | `Assoc fields ->
@@ -143,15 +152,7 @@ let answer_of_yojson json =
        in
        let* probabilities =
          match List.assoc_opt "probabilities" fields with
-         | Some (`Assoc probs) ->
-           let rec parse_probs acc = function
-             | [] -> Ok (List.rev acc)
-             | (k, `Float v) :: rest -> parse_probs ((k, v) :: acc) rest
-             | (k, `Int v) :: rest -> parse_probs ((k, float_of_int v) :: acc) rest
-             | (k, _) :: _ ->
-               Error (Printf.sprintf "typesafeai: probability for %S must be a number" k)
-           in
-           parse_probs [] probs
+         | Some (`Assoc probs) -> parse_probabilities [] probs
          | _ -> Error "typesafeai: choice answer missing 'probabilities' map"
        in
        Ok (Choice_answer { choice; probabilities; confidence })
@@ -170,15 +171,9 @@ let answer_of_yojson json =
        in
        let* probabilities =
          match List.assoc_opt "probabilities" fields with
-         | Some (`List probs) ->
-           let rec parse_probs acc = function
-             | [] -> Ok (List.rev acc)
-             | (`Float v) :: rest -> parse_probs (v :: acc) rest
-             | (`Int v) :: rest -> parse_probs (float_of_int v :: acc) rest
-             | _ :: _ -> Error "typesafeai: score probability must be a number"
-           in
-           parse_probs [] probs
-         | _ -> Ok []
+         | Some (`Assoc []) -> Error "typesafeai: score 'probabilities' map is empty"
+         | Some (`Assoc probs) -> parse_probabilities [] probs
+         | _ -> Error "typesafeai: score answer missing 'probabilities' map"
        in
        Ok (Score_answer { score; probabilities; confidence })
      | Some (`String other) ->

@@ -2036,7 +2036,7 @@ thinking_control_token = "<|provider|>"
               Capabilities.for_provider_model_id
                 ~wire:None
                 ~allow_bare_fallback:false
-                ~provider_label:" ACME "
+                ~provider_label:"acme"
                 ~model_id:"EXACT-MODEL"
             with
             | Some caps ->

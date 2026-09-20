@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from typing import Any, cast
 import zlib
@@ -83,6 +84,14 @@ def run(executable: str, scenario: str) -> None:
 
     def interact(process, master, _slave, output, _base):
         h.palette_go(process, master, output, b"go lanes", b"Librarian")
+        h.send_and_wait(
+            process,
+            master,
+            output,
+            b"/Librarian",
+            re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian"),
+        )
+        h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
         # Summary IDs are abbreviated to fit their column; the exact detail
         # request and the full detail frame below establish run identity.
         h.send_and_wait(

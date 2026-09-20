@@ -16,7 +16,7 @@
 (test
  (name test_librarian_continuity_report)
  (modules test_librarian_continuity_report)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc yojson digestif))
 
 (test
  (name test_keeper_peer_artifact)

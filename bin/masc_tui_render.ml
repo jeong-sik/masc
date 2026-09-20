@@ -5589,7 +5589,7 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
     :: (match values with
         | [] -> [ Theme.muted (), "No scored samples" ]
         | values -> List.map (fun (probability, id) ->
-            Ansi.reset, Printf.sprintf "%s  %.17g" id probability) values)
+            Ansi.reset, id ^ "  " ^ Yojson.Safe.to_string (`Float probability)) values)
   in
   let samples = List.concat_map (fun (sample : R.sample) ->
       let style, status, lines = match sample.progress with
@@ -5607,7 +5607,7 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
         | R.Scored (question, answer, judgment) -> Ansi.reset, "SCORED",
             generation "QUESTION" question @ generation "ANSWER" answer
             @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
-              ; "Noul  " ^ Printf.sprintf "%.17g" judgment.probability
+              ; "Noul  " ^ Yojson.Safe.to_string (`Float judgment.probability)
               ; "TRUE  " ^ judgment.request.true_criteria
               ; "FALSE  " ^ judgment.request.false_criteria
               ; "REQUEST SHA256  " ^ judgment.request_body_sha256 ]

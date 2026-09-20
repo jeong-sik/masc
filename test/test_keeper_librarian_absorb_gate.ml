@@ -399,8 +399,13 @@ let run_runtime_evidence ?fixture_dir () =
      | Disabled_run ->
        Alcotest.(check string) "disabled is explicitly skipped" "not_enabled"
          (member "reason" gate |> string);
+       check_json "a skipped gate has no applied boundary" `Null
+         (member "conveyed_boundary" gate);
        check_json "no invented evaluations" `Null (member "evaluations" gate)
      | Judged_run | Http_failure | Memory_write_failure ->
+       Alcotest.(check (float 0.)) "the gate records the applied probability boundary"
+         Gate.conveyed_boundary
+         (member "conveyed_boundary" gate |> Yojson.Safe.Util.to_float);
        let evaluation = match member "evaluations" gate with
          | `List [ evaluation ] -> evaluation
          | _ -> Alcotest.fail "expected the one actual JEV evaluation" in

@@ -70,6 +70,10 @@ def run_case(executable: str, fixture_path: Path) -> None:
         for needle in (b"absorb_gate", gate["status"].encode(), b"RUN  " + status):
             if needle not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {needle!r}")
+        if scenario != "disabled":
+            boundary = f'"conveyed_boundary": {gate["conveyed_boundary"]}'.encode()
+            if boundary not in first_screen:
+                raise AssertionError(f"{scenario} first frame omitted {boundary!r}")
         if detail_reads != [run_id]:
             raise AssertionError(f"wrong detail reads: {detail_reads!r}")
 

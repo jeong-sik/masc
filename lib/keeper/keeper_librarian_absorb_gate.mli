@@ -145,7 +145,8 @@ val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement li
 val run_result_to_yojson : run_result -> Yojson.Safe.t
 (** Observed gate outcome and the actual evaluation responses, for the
     Librarian run's existing output payload. Valid Noul values are preserved
-    without rounding; rejected answers retain their decoder diagnostic.
+    without rounding and the applied [conveyed_boundary] is recorded;
+    rejected answers retain their decoder diagnostic.
     A request failure has no fabricated response model or request receipt. *)
 
 val run

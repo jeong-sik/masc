@@ -521,7 +521,8 @@ let run_result_to_yojson result =
            ; "unjudgeable", absorptions judged.unjudgeable
            ; "requests", `Int judged.requests ])
       in
-      status @ disposition @ [ "evaluations", `List (List.map evaluation_to_yojson evaluations) ]
+      status @ [ "conveyed_boundary", `Float conveyed_boundary ] @ disposition
+      @ [ "evaluations", `List (List.map evaluation_to_yojson evaluations) ]
   in
   `Assoc fields
 ;;

@@ -177,7 +177,7 @@ def test_mcp_registration_command_actually_runs(tmp_path, monkeypatch):
 def test_container_env_names_the_pool_and_starts_no_keeper(tmp_path):
     env = make_agent(tmp_path).masc_container_env()
     assert env["BENCH_KEEPER_POOL"] == "bench-1,bench-2,bench-3,bench-4"
-    assert env["BENCH_RUNTIME_ID"] == "anthropic.claude-sonnet-5"
+    assert env["BENCH_RUNTIME_ID"] == "claude.claude-sonnet-5"
     assert env["ANTHROPIC_API_KEY"] == "test-key"
     assert "KEEPER_COUNT" not in env
 

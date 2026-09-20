@@ -273,6 +273,8 @@ def test_http_endpoint(
             del format, args
 
     with ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler) as server:
+        # server_close must join handlers before Python starts shutting down.
+        server.daemon_threads = False
         thread: threading.Thread | None = None
 
         def start_endpoint() -> None:

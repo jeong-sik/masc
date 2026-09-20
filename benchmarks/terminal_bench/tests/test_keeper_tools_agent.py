@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -51,7 +52,7 @@ class FakeEnv:
         )
 
         class R:
-            # The container architecture masc_dist.container_binaries reads.
+            # The container architecture masc_dist.container_distribution reads.
             pass
             stderr = ""
             returncode = 0
@@ -71,6 +72,24 @@ def _provider_key(monkeypatch):
 def make_agent(tmp_path, **kw):
     kw.setdefault("model_name", "anthropic/claude-sonnet-5")
     return KeeperToolsAgent(logs_dir=tmp_path, **kw)
+
+
+def commit_dist(root):
+    import masc_dist
+
+    directory = root / "dist" / "linux-x64"
+    binaries = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in directory.iterdir()
+                if path.name in masc_dist.KNOWN_BINARIES}
+    (root / "dist" / masc_dist.MANIFEST_FILE).write_text(json.dumps({
+        "schema": masc_dist.MANIFEST_SCHEMA,
+        "release_version": masc_dist.MIN_VERSION_FILE.read_text().strip(),
+        "source_commit": "a" * 40,
+        "architectures": {"linux-x64": {
+            "machine": "x86_64", "platform": "linux/amd64",
+            "binaries": binaries,
+        }},
+    }))
 
 
 def test_pool_size_comes_from_the_arm(tmp_path):
@@ -184,19 +203,19 @@ def test_install_adds_masc_on_top_of_claude_code(tmp_path, monkeypatch):
     for name in ("masc", "masc-exec-shim"):
         (fake_root / "dist" / "linux-x64" / name).write_bytes(b"")
     (fake_root / "driver" / "bootstrap.sh").write_text("")
-    # A fetched release at the floor, as image/fetch_masc.sh records it.
-    import masc_dist
-    (fake_root / "dist" / ".version").write_text(masc_dist.MIN_VERSION_FILE.read_text())
+    # A fetched release at the floor, as image/fetch_masc.sh commits it.
+    commit_dist(fake_root)
     monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
 
     async def go():
         a = make_agent(tmp_path)
         env = FakeEnv()
         await a.install(env)
-        return env
+        return a, env
 
-    env = asyncio.run(go())
+    agent, env = asyncio.run(go())
     assert installed == ["claude-code"]
+    assert agent._dist_identity.source_commit == "a" * 40
     kinds = [(k, d) for k, _, d in env.uploads]
     assert ("file", "/opt/masc-bench/bin/masc") in kinds
     assert ("dir", "/opt/masc-bench/config") in kinds
@@ -211,7 +230,6 @@ def test_arm_k_gives_task_skills_to_the_keeper_pool(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "harbor.agents.installed.claude_code.ClaudeCode.install", fake_super_install)
-    import masc_dist
     import masc_sidecar
 
     fake_root = tmp_path / "bench-root"
@@ -219,7 +237,7 @@ def test_arm_k_gives_task_skills_to_the_keeper_pool(tmp_path, monkeypatch):
     (fake_root / "driver").mkdir()
     for name in ("masc", "masc-exec-shim"):
         (fake_root / "dist" / "linux-x64" / name).write_bytes(b"")
-    (fake_root / "dist" / ".version").write_text(masc_dist.MIN_VERSION_FILE.read_text())
+    commit_dist(fake_root)
     monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
 
     remote = tmp_path / "remote-skills" / "task-guide"
@@ -320,9 +338,37 @@ def test_the_run_adds_keeper_spend_and_the_left_out_record(tmp_path, monkeypatch
     monkeypatch.setattr(
         "harbor.agents.installed.claude_code.ClaudeCode.run", fake_super_run)
     context = AgentContext()
-    asyncio.run(make_agent(tmp_path).run("solve the task", RunEnv(), context))
+    agent = make_agent(tmp_path)
+    import masc_dist
+    agent._dist_identity = masc_dist.DistIdentity(
+        release_version="0.35.20", source_commit="a" * 40,
+        machine="x86_64", binary_sha256="b" * 64)
+    asyncio.run(agent.run("solve the task", RunEnv(), context))
     assert context.n_input_tokens == 1_100
     assert context.cost_usd == pytest.approx(1.25)
     assert context.metadata["keeper_usage"]["rows"] == 1
     assert context.metadata["endpoint_env_left_out"] == [
         {"name": "GH_TOKEN", "reason": "refused_by_shim"}]
+    assert context.metadata["masc_dist"] == {
+        "release_version": "0.35.20", "source_commit": "a" * 40,
+        "machine": "x86_64", "binary_sha256": "b" * 64}
+
+
+def test_parent_failure_still_records_the_dist_identity(tmp_path, monkeypatch):
+    async def failing_parent(self, instruction, environment, context):
+        context.metadata = {"parent": "started"}
+        raise RuntimeError("parent failed")
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.claude_code.ClaudeCode.run", failing_parent)
+    agent = make_agent(tmp_path)
+    import masc_dist
+    agent._dist_identity = masc_dist.DistIdentity(
+        release_version="0.35.20", source_commit="a" * 40,
+        machine="x86_64", binary_sha256="b" * 64)
+    context = AgentContext()
+    with pytest.raises(RuntimeError, match="parent failed"):
+        asyncio.run(agent.run("solve the task", FakeEnv(), context))
+    assert context.metadata["parent"] == "started"
+    assert context.metadata["masc_dist"]["source_commit"] == "a" * 40
+    assert "keeper_usage" not in context.metadata

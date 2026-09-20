@@ -11,11 +11,12 @@ import {
   type TurnRecordsResponse,
 } from '../api/dashboard'
 import {
-  initialTurnRowForTimestamp,
   initialTurnRowForTurnRef,
   KeeperMemoryOsRecallPanel,
   KeeperTurnInspector,
 } from './keeper-turn-inspector'
+import { TurnInspectorDrawer } from './keeper-turn-inspector-drawer'
+import type { KeeperConversationEntry } from '../types'
 
 vi.mock('../api/dashboard', () => {
   return {
@@ -519,16 +520,6 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')).toBeNull()
   })
 
-  it('matches an initial timestamp to the closest retained turn row', () => {
-    const response = turnRecordsWithMemoryOs()
-    const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()
-    const farFromRetainedTurns = new Date((1_781_587_560 + 3600) * 1000).toISOString()
-
-    expect(initialTurnRowForTimestamp(response.entries, nearTurn42)?.record.absolute_turn).toBe(42)
-    expect(initialTurnRowForTimestamp(response.entries, farFromRetainedTurns)).toBeNull()
-    expect(initialTurnRowForTimestamp(response.entries, 'not-a-date')).toBeNull()
-  })
-
   it('matches an exact turn_ref (trace_id + absolute_turn), no fuzzy fallback', () => {
     const response = turnRecordsWithMemoryOs()
 
@@ -554,14 +545,76 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(initialTurnRowForTurnRef([], 'trace-active#42')).toBeNull()
   })
 
-  it('opens the detail drawer when an initial timestamp matches a retained turn', async () => {
+  it.each([
+    { role: 'user', delivery: 'delivered', source: 'direct_user', label: 'You' },
+    { role: 'assistant', delivery: 'error', source: 'direct_assistant', label: 'albini' },
+  ] as const)('does not link a fresh $role/$delivery message to a nearby old turn', async state => {
+    // Current sends create user rows without turnRef; an assistant can fail
+    // before REPLY_DETAILS supplies it. This tests their inspector input,
+    // not the network send or SSE producer itself.
+    const entry: KeeperConversationEntry = {
+      ...state,
+      id: `fresh-${state.role}`,
+      text: 'new message with no completed turn identity',
+      timestamp: new Date((1_781_587_560 + 5) * 1000).toISOString(),
+      turnRef: null,
+      streamState: null,
+    }
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-    const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()
+    const { container } = render(html`
+      <${TurnInspectorDrawer}
+        keeperName="albini"
+        subtitle=${`${entry.label} · ${entry.timestamp}`}
+        anchor=${{ kind: 'unreferenced' }}
+        open=${true}
+        onClose=${() => {}}
+        testId="fresh-message"
+      />
+    `)
+    await waitFor(() => {
+      expect(container.textContent).toContain('턴 연결 정보 없음')
+    })
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeNull()
+    expect(container.textContent).toContain('T42')
+    fireEvent.click(container.querySelectorAll('.ti-turn-summary')[0]!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+        .toContain('trace-active#42')
+    })
+  })
+
+  it('keeps generic browsing unlinked and preserves manual selection across equivalent anchors', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    const drawer = () => html`<${TurnInspectorDrawer}
+      keeperName="albini"
+      anchor=${{ kind: 'no-origin' }}
+      open=${true}
+      onClose=${() => {}}
+      testId="generic-turns"
+    />`
+    const { container, rerender } = render(drawer())
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+    expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeNull()
+    fireEvent.click(container.querySelectorAll('.ti-turn-summary')[0]!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+        .toContain('trace-active#42')
+    })
+    rerender(drawer())
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+      .toContain('trace-active#42')
+  })
+
+  it('opens the detail drawer for an exact retained turn reference', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`
       <${KeeperTurnInspector}
         keeperName="albini"
-        initialTurnTimestamp=${nearTurn42}
+        anchor=${{ kind: 'ref', value: 'trace-active#42' }}
       />
     `)
 
@@ -574,14 +627,13 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeFalsy()
   })
 
-  it('keeps the list view when an initial timestamp is outside the retained turn window', async () => {
+  it('keeps the list view when the exact reference is unavailable', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-    const farFromRetainedTurns = new Date((1_781_587_560 + 3600) * 1000).toISOString()
 
     const { container } = render(html`
       <${KeeperTurnInspector}
         keeperName="albini"
-        initialTurnTimestamp=${farFromRetainedTurns}
+        anchor=${{ kind: 'ref', value: 'trace-other#42' }}
       />
     `)
 
@@ -593,7 +645,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeTruthy()
     })
     expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeFalsy()
-    expect(container.textContent).toContain('30분 이내의 turn record 없음')
+    expect(container.textContent).toContain('연결된 turn record를 찾지 못했습니다')
   })
 
   it('renders repeated trace turn rows without duplicate-key warnings', async () => {

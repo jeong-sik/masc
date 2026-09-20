@@ -10,12 +10,23 @@ from render_configs import (  # noqa: E402
     ARMS,
     COMPOSITION_FENCE,
     REPO_ROOT,
+    TASK_SKILL_SOURCE_ID,
     effective_runtime_id,
     composition_skill_names,
     instruction_skill_names,
     keeper_toml,
     render_arm,
 )
+
+
+def task_skills(tmp_path, name="task-guide"):
+    root = tmp_path / "task-skills"
+    package = root / name
+    (package / "references").mkdir(parents=True)
+    (package / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Task-provided guide.\n---\n\nRead references/guide.md.\n")
+    (package / "references" / "guide.md").write_text("task resource\n")
+    return root
 
 
 def test_skill_classification_agrees_with_the_files():
@@ -96,6 +107,59 @@ def test_skills_tree_copied_only_for_skills_arms():
     assert skill_dirs == sorted(instruction_skill_names() + composition_skill_names())
     out_b = render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
     assert not (out_b / "skills").exists()
+
+
+@pytest.mark.parametrize("arm", list(ARMS))
+def test_task_skills_are_common_input_without_changing_arm_treatments(tmp_path, arm):
+    out = render_arm(
+        arm, "anthropic.claude-fable-5", "high", out_root=tmp_path / "out",
+        task_skills_dir=task_skills(tmp_path))
+    runtime = tomllib.loads((out / "runtime.toml").read_text())
+    sources = runtime["skills"]["sources"]
+    assert sources[0] == {
+        "id": TASK_SKILL_SOURCE_ID,
+        "anchor": "base-path",
+        "path": ".masc/task-skills",
+        "access": "read-only",
+    }
+    resource = out / "task-skills" / "task-guide" / "references" / "guide.md"
+    assert resource.read_text() == "task resource\n"
+    keeper = tomllib.loads((out / "keepers" / "bench-1.toml").read_text())["keeper"]
+    if arm == "b":
+        assert keeper["skills"]["names"] == ["task-guide"]
+        assert len(sources) == 1
+        assert not (out / "skills").exists()
+    elif arm == "c":
+        assert keeper["skills"]["names"] == ["task-guide"] + instruction_skill_names()
+        assert len(sources) > 1
+    else:
+        assert "skills" not in keeper
+        assert len(sources) > 1
+
+
+def test_task_skill_collision_empty_and_missing_fail_closed(tmp_path):
+    with pytest.raises(ValueError, match="collide"):
+        render_arm("b", "anthropic.claude-fable-5", "high",
+                   task_skills_dir=task_skills(tmp_path, instruction_skill_names()[0]))
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError, match=r"no \*/SKILL.md"):
+        render_arm("b", "anthropic.claude-fable-5", "high", task_skills_dir=empty)
+    with pytest.raises(ValueError, match="missing"):
+        render_arm("b", "anthropic.claude-fable-5", "high",
+                   task_skills_dir=tmp_path / "absent")
+
+
+def test_absent_task_skills_keep_the_existing_render(tmp_path):
+    default = render_arm("c", "anthropic.claude-fable-5", "high",
+                         out_root=tmp_path / "default")
+    explicit = render_arm("c", "anthropic.claude-fable-5", "high",
+                          out_root=tmp_path / "explicit", task_skills_dir=None)
+    files = sorted(path.relative_to(default) for path in default.rglob("*") if path.is_file())
+    assert files == sorted(path.relative_to(explicit)
+                           for path in explicit.rglob("*") if path.is_file())
+    for relative in files:
+        assert (default / relative).read_bytes() == (explicit / relative).read_bytes()
 
 
 @pytest.mark.parametrize("arm", list(ARMS))

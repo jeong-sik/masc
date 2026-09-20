@@ -140,13 +140,15 @@ value = {}
   같은 SKILL.md 를 읽는 파서는 저장소에 하나다.
 - 스킬의 종류는 frontmatter 키가 아니라 **본문 내용이 결정한다**:
   ```` ```toml composition ```` fenced block 이 0개면 지시 스킬, 1개면 합성 스킬,
-  2개 이상이면 기동 오류. block 의 내용은 **기존
+  2개 이상이면 composition 투영 오류. block 의 내용은 **기존
   `Keeper_tool_composition_catalog.parse` 가 그대로 읽는다** — 새 문법은 없고, kind
   선언과 실체가 어긋나는 상태 자체가 표현 불가능하다.
-- Agent Skills frontmatter 계약을 어긴 문서와 composition/fence 오류는 그 문서만
-  fail-closed다. 이름 누락·불일치·문법 오류, 길이 초과, 알 수 없는 top-level field,
-  잘못된 metadata shape는 typed rejection으로 남는다. skills 디렉토리가 없거나 비어
-  있는 것은 오류가 아니라 "스킬 0개"다.
+- Agent Skills frontmatter 계약을 어긴 문서는 snapshot의 typed rejection으로 남는다.
+  frontmatter가 유효한 source 문서의 composition/fence 오류는 합성 도구만 만들지 않고
+  frozen Instruction과 typed projection diagnostic으로 남는다
+  (`Keeper_skill_catalog.of_snapshot`). 편집기 후보는 `parse_skill`로 composition까지
+  검사하므로 같은 오류를 생성·저장 전에 거절한다. skills 디렉토리가 없거나 비어 있는
+  것은 오류가 아니라 "스킬 0개"다.
 
 ### 2.2 표면 — 스킬 하나가 두 얼굴을 갖는다
 
@@ -265,9 +267,10 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
 
 - 지시 스킬 N개는 도구 스키마 표면을 0 B 늘린다. 합성 스킬만 도구가 된다.
   `test_keeper_tool_schema_bytes` 상한 85,000 B 유지.
-- Agent Skills frontmatter 계약을 어긴 SKILL.md와 fenced block/plan 오류는 source
-  candidate와 content revision을 가진 rejection으로 격리된다. 올바른 형제 Skill은 계속
-  발행된다.
+- Agent Skills frontmatter 계약을 어긴 SKILL.md는 source candidate와 content revision을
+  가진 rejection으로 격리된다. source 문서의 fenced block/plan 오류는 frozen
+  Instruction과 projection diagnostic으로 남고 합성 도구는 생기지 않는다.
+  올바른 형제 Skill은 계속 발행된다.
 - `mission-snapshot`/`background-snapshot` 이 SKILL.md 로 이전된 뒤 도구 이름·발행 스키마가
   이전과 동일하다(스키마 diff 테스트).
 - 파라미터 합성: `[[compositions.params]]` 선언이 input schema 에 반영되고, 라이브에서

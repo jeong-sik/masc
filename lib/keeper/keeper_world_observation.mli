@@ -300,6 +300,7 @@ type turn_reason =
   | Task_outcome_pending
   | Task_cancellation_pending
   | Workspace_message_pending
+  | Deferred_runtime_lane_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of { unclaimed : int; failed : int }
@@ -455,7 +456,13 @@ val actionable_signal_present : world_observation -> bool
     A [Schedule_due] work request is actionable but is not Board activity. *)
 val has_pending_board_activity : world_observation -> bool
 
-type cycle_wake = Periodic_tick | Attention_wake
+(** Typed source of scheduling authority. [Deferred_runtime_lane] carries the
+    unfinished input of a deferred runtime suffix; it is separate from a
+    periodic tick and from new Event Queue attention. *)
+type cycle_wake =
+  | Periodic_tick
+  | Attention_wake
+  | Deferred_runtime_lane
 
 val keeper_cycle_decision :
   ?wake:cycle_wake ->

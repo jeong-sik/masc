@@ -467,12 +467,6 @@ let http_protocol_metadata provider =
       (provider_kind_for_http_provider ?registry_entry provider)
 ;;
 
-let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spec) =
-  match spec.capabilities with
-  | Some capabilities -> Some capabilities.supports_tool_choice
-  | None -> None
-;;
-
 let agent_core_thinking_control_format = function
   | Runtime_schema.No_thinking_control ->
     Llm_provider.Capabilities.No_thinking_control
@@ -659,7 +653,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
   let* () = validate_parallel_tool_policy provider ~model_id:spec.id
       ~disable_parallel_tool_use in
   let registry_entry = find_registry_entry provider.id in
-  let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -732,7 +725,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~request_path
             ~disable_parallel_tool_use
             ?max_context
-            ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature
             ?top_p:spec.top_p
@@ -789,7 +781,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~api_key
             ~headers:(Option.value ~default:[] provider.headers)
             ?max_context
-            ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature
             ?top_p:spec.top_p

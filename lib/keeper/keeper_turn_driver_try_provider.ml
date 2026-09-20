@@ -731,10 +731,10 @@ let compose_carried_model_input
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
-      (* This seed names a range for which a response was observed. The next
-         refusal is answered by the in-turn ladder. Moving the front again
-         here would reinterpret a response observation as a size refusal and
-         make unrelated quota or connection failures shrink a stable history. *)
+      (* A response-observed persisted seed is evidence for the range it names.
+         Composition consumes that evidence; it does not reinterpret the prior
+         outcome as a size refusal. The next refusal is answered by the in-turn
+         ladder, which owns any further move toward the newest atom. *)
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes

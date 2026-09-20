@@ -1511,6 +1511,22 @@ let run_named
 	     pr-updater shrank 16 MB to 3.7 MB on one candidate and sent 16 MB
 	     to the next). *)
 	  let refused_carried_front = ref None in
+	  (* The same front the Agent Core branch reads, for the official-client
+	     branches: they cut their start seed from this very history
+	     ([Keeper_carried_front.Hands_over_its_own_list]), so a range the last
+	     completed turn measured names the same atoms there. A front a refusal
+	     moved is the turn's, not one candidate's, so it stands for these
+	     candidates too. Those lanes hold no ledger of their own — it is
+	     written from the usage of a request this process composed — so this
+	     is their whole answer. *)
+	  let official_client_carried_front_seed () : Keeper_carried_front.seed_read =
+	    match !refused_carried_front with
+	    | Some seed -> { Keeper_carried_front.seed = Some seed; unreadable = None }
+	    | None ->
+	      (match carried_front_seed with
+	       | Some read -> read ()
+	       | None -> Keeper_carried_front.no_seed_read)
+	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
   let routing_run_id = Random_id.hex ~bytes:16 in
@@ -2134,6 +2150,7 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~carried_front_seed:official_client_carried_front_seed
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
@@ -2251,6 +2268,7 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~carried_front_seed:official_client_carried_front_seed
             ~pre_tool_rejects
             ~base_path
             ~goal

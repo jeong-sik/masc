@@ -77,10 +77,18 @@ type outcome =
   | Judged of judged
 
 val conveyed_boundary : float
-(** A statement is conveyed when its [noul] is at least this. It is the
-    boundary of a yes/no probability, not a tuned number; the calibration in
-    issue #37079 (floor 0.94, ceiling 0.10) and the 88% statement-level
-    agreement with the list scorer were both measured at it. *)
+(** A statement is conveyed when its [noul] is at least this: the midpoint
+    of a yes/no probability, not a tuned number. The verdict does depend on
+    it. Re-counting the scoring of issue #37079 (84 production sources, 314
+    statements) at 0.3 / 0.5 / 0.7: statement-level agreement with the list
+    scorer 89 / 88 / 82%, sources whose verdict agrees with that scorer
+    87 / 88 / 76%, sources absorbed 51 / 38 / 19%, and 11 / 0 / 16 of the 84
+    sources change verdict against 0.5; 16% of statements fall between 0.3
+    and 0.7 (the question's ends, 0.94 and 0.10, are means). The midpoint
+    sits on the agreement plateau (0.3 to 0.5) and absorbs the same share
+    as the independent scorer (38%). Moving it trades absorption for
+    retention, which RFC-librarian-absorb-gate section 7 leaves to phase 2,
+    not to this constant. *)
 
 val questions_per_request : int
 (** Statements are asked in requests of at most this many questions. The

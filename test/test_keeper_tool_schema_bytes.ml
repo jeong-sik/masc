@@ -257,7 +257,9 @@ open Alcotest
    takes status=active; masc_schedule_notes_list 701 -> 718 declares limit's
    bounds; masc_schedule_note_add 1,018 -> 1,065 says when author_id is
    required. No headroom. *)
-let ceiling_bytes = 119_322
+(* 2026-09-20: the read-only keeper_skill_validate caller adds artifact document
+   validation. The production renderer measures 119,546 bytes / 136 tools. *)
+let ceiling_bytes = 119_546
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -342,6 +344,8 @@ let all_surface_golden_names =
   ; "keeper_constitution_write"
   ; "keeper_constitution_remove"
   ; "keeper_person_note_set"
+  (* A Keeper can statically validate an artifact-backed Skill draft. *)
+  ; "keeper_skill_validate"
   ; "keeper_spawn"
   ; "keeper_spawn_read"
   ; "keeper_spawn_stop"

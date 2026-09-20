@@ -1410,22 +1410,6 @@ let run_keeper_cycle
                     ~before:meta
                     ~after:updated_meta
                   |> ignore;
-                  (* Finish the Keeper Owner commit and its exact registry
-                     projection before storing the live failure observation.
-                     The two registry writes must not race on different entry
-                     snapshots. *)
-                  (match
-                     registry_failure_reason_of_terminal_reason
-                       ~core_error:err
-                       terminal_reason
-                       ~raw_error:e_str
-                   with
-                   | Some failure_reason ->
-                     Keeper_registry.set_failure_reason
-                       ~base_path:config.base_path
-                       meta.name
-                       (Some failure_reason)
-                   | None -> ());
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
@@ -1463,9 +1447,12 @@ let run_keeper_cycle
                       ; "class", Keeper_runtime_failure_route.route_class_label failure_route
                       ]
                     ();
+                  (* The Owner commit above must finish before this live
+                     observation replaces the registry's failure cause. *)
                   Keeper_unified_turn_failure.record_failure_observation
                     ~config
                     ~meta
+                    ~terminal_reason
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths

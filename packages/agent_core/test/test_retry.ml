@@ -83,6 +83,33 @@ let test_classify_error_edge_cases () =
   | _ -> fail "expected NotFound for 404"
 ;;
 
+let test_server_refusal_status_boundaries () =
+  let body = {|{"error":{"message":"provider unavailable"}}|} in
+  List.iter
+    (fun (status, expected) ->
+       let error = Retry.classify_error ~retry_after_header:None ~status ~body in
+       (match expected, error with
+        | `Server_error, Retry.ServerError { status = actual; message } ->
+          check int "original status survives" status actual;
+          check string "provider message survives" "provider unavailable" message
+        | `Overloaded, Retry.Overloaded { message } ->
+          check string "provider message survives" "provider unavailable" message
+        | `Unknown,
+          Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; message } ->
+          check string "provider message survives" "provider unavailable" message
+        | _ -> failf "HTTP %d classified as %s" status (Retry.error_message error));
+       check bool "only server refusals are retryable"
+         (expected <> `Unknown) (Retry.is_retryable error))
+    [ 499, `Unknown
+    ; 500, `Server_error
+    ; 503, `Server_error
+    ; 520, `Server_error
+    ; 529, `Overloaded
+    ; 599, `Server_error
+    ; 600, `Unknown
+    ]
+;;
+
 let test_classify_error_402_payment_required () =
   let body = {|{"error":{"message":"Insufficient Balance"}}|} in
   let err = Retry.classify_error ~retry_after_header:None ~status:402 ~body in
@@ -336,6 +363,10 @@ let () =
     [ ( "classify"
       , [ test_case "http status mapping" `Quick test_classify_error
         ; test_case "edge cases" `Quick test_classify_error_edge_cases
+        ; test_case
+            "server refusal status boundaries"
+            `Quick
+            test_server_refusal_status_boundaries
         ; test_case
             "a refusal body that never arrived is not an empty body"
             `Quick

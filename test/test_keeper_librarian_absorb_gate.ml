@@ -277,7 +277,7 @@ let test_selection_gate_and_store_keep_the_unconveyed_original () =
        selection.facts);
   let root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
     | Some root -> root | None -> Sys.getcwd () in
-  Masc.Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Masc.Prompt_defaults.init ();
   let librarian = Fixture.start_server ~sw ~net ~clock
     (Fixture.Reply (Fixture.openai_response answer)) in
@@ -289,12 +289,12 @@ let test_selection_gate_and_store_keep_the_unconveyed_original () =
   let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply jev_response) in
   let resolver = Fixture.resolver_snapshot ~source:"absorb-gate-fixture"
     [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
-  (match Masc.Runtime_exact_output_registry.publish
-    ~lanes:[ { Masc.Runtime_schema.id = "librarian_exact"
+  (match Runtime_exact_output_registry.publish
+    ~lanes:[ { Runtime_schema.id = "librarian_exact"
              ; slot_ids = [ "librarian-absorb-fixture" ]; cli_slot_ids = [] } ] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail
-       (Masc.Runtime_exact_output_registry.publication_error_to_string error));
+       (Runtime_exact_output_registry.publication_error_to_string error));
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") (fun () ->
     Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" (Some "true") (fun () ->
       Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some jev.base_url) (fun () ->

@@ -339,15 +339,13 @@ let test_board_write_routes_use_authenticated_actor () =
     ~prefix:"board-write-http-actor-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~router ~token ->
-  let prior_base_path = Sys.getenv_opt Env_config_core.base_path_env_key in
   Fun.protect
-    ~finally:(fun () ->
-      Masc.Board_dispatch.reset_for_test ();
-      Unix.putenv Env_config_core.base_path_env_key
-        (Option.value ~default:"" prior_base_path);
-      Masc.Board.reset_global_for_test ())
+    ~finally:Masc.Board.reset_global_for_test
   @@ fun () ->
-  Unix.putenv Env_config_core.base_path_env_key base_path;
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
+  @@ fun () ->
+  Fun.protect ~finally:Masc.Board_dispatch.reset_for_test
+  @@ fun () ->
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
   Masc.Board_dispatch.init_jsonl ();

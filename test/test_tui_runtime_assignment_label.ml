@@ -63,7 +63,7 @@ let test_unavailable_assignment_reaches_both_keeper_surfaces () =
 ;;
 
 let test_missing_assignment_does_not_target_any_runtime () =
-  let assignment =
+  let assignment : Masc.Tui_decode.runtime_assignment =
     { ra_keeper = "defaulted"
     ; ra_source = Default_runtime
     ; ra_resolution = Runtime_assignment_missing

@@ -888,6 +888,7 @@ let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
     let base_url = reserved_non_listening_loopback_base_url ~sw in
     let snapshot =
       Fixture.resolver_snapshot
+        ~requires_token_measurement:true
         ~source:"Board attention bookkeeping classification"
         [ target id base_url ]
     in

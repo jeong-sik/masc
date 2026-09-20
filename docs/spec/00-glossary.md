@@ -12,6 +12,11 @@ status: reference
 : 다중 에이전트의 Board, Task, Goal, Schedule, Keeper와 도구 실행을 조율하는
   OCaml/Eio 서버.
 
+**agent core**
+: `packages/agent_core`에 담긴 재사용 모델 실행 계층. Agent 구성, tool turn,
+  provider 요청, typed response와 실패를 소유하고, MASC는 제품 조율을 소유한다.
+  Agent Core는 MASC coordinator 라이브러리에 의존하지 않는다.
+
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 

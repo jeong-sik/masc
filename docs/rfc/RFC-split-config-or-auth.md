@@ -5,9 +5,17 @@
 `Keeper_terminal_reason.Config_or_auth` 는 설정 오류와 인증·권한 거부를 한 variant 에 담는다.
 이 variant 는 조건 없이 `Disp_operator_action_required` 로 가고, Keeper 는 거기서 멈춰 운영자 응답을 기다린다.
 
-두 실패는 운영자가 할 수 있는 일이 다르다. 설정 오류는 값을 고치면 풀린다.
-인증·권한 거부는 호스트에 자격 증명이 멀쩡히 있어도 나므로, 운영자가 `gh auth login` 을 다시 해도 풀리지 않는 경우가 있다.
-같은 갈래로 묶여 있는 한 Keeper 는 둘을 구분해 보고할 수 없고, 운영자는 매번 어느 쪽인지 직접 확인해야 한다.
+묶인 두 쪽이 실제로 무엇인지 세어 보면 갈라야 할 이유가 드러난다.
+인증 쪽 852건은 자격 증명 문제가 아니라 **사용량 한도**다 — 838건이 주간 한도,
+14건이 5시간 한도이고, 제공자가 그것을 `api_error_authorization` 으로 알린다.
+한도는 기다리면 풀리므로 운영자가 할 일이 없다. 그런데 지금은 운영자를 세운다.
+
+설정 쪽 1,261건은 런타임 능력·세션 불일치다. `multimodal_input` 532건,
+`preserve_thinking` 347건, `official_client_session.*` 337건 순이다.
+일부는 설정으로 끌 수 있고 일부는 런타임이 맞춰야 한다.
+
+같은 갈래로 묶여 있는 한 Keeper 는 둘을 구분해 보고할 수 없고,
+기다리면 풀릴 한도 초과가 운영자를 세운다.
 
 ## 왜 지금
 
@@ -19,8 +27,39 @@
 | `operator_action_required` | 2,113 |
 | 그 2,113건의 `operator_disposition_reason` | 전부 `preflight_config_error` |
 | 그중 `config_error` (설정) | 1,261 (59.7%) |
-| 그중 `api_error_authorization` (권한) | 852 (40.3%) |
+| 그중 `api_error_authorization` | 852 (40.3%) |
 | 그 밖의 코드 | 0 |
+
+852건의 본문을 읽으면 권한이 아니라 한도다.
+
+| 메시지 | 건수 |
+|---|---|
+| `You've reached your weekly (7-day) usage limit` | 838 |
+| `You've reached your 5-hour usage limit` | 14 |
+
+1,261건도 마찬가지로 종류가 갈린다.
+
+| 메시지 | 건수 |
+|---|---|
+| `Invalid config 'multimodal_input': provider glm:glm-5.3 cannot accept …` | 532 |
+| `Invalid config 'preserve_thinking': Claude Code official-client runtime …` | 347 |
+| `Invalid config 'official_client_session.claim': input_rejected(…)` | 232 |
+| `Invalid config 'official_client_session.context_admission': …` | 105 |
+| `Invalid config 'official_client_session.phase': …` | 17 |
+
+`Config_or_auth` 가 받는 wire 는 여섯인데 **실제로 도는 것은 둘뿐이다**.
+
+| wire | 09월 턴 수 |
+|---|---|
+| `config_error` | 1,261 |
+| `api_error_authorization` | 852 |
+| `api_error_auth` | 0 |
+| `provider_error_auth` | 0 |
+| `provider_error_authorization` | 0 |
+| `provider_error_invalid_config*` | 0 |
+
+날짜로는 한쪽이 몰려 있다. 설정은 11일에 퍼지고 가장 많은 날이 09-03 의 385건(31%),
+한도는 7일에 퍼지고 09-19 하루가 424건(50%)이다. 한도 쪽은 쿼터가 터진 날에 몰린다.
 
 sandbox 별로도 갈리지 않는다. 세 레인 모두에서 난다.
 
@@ -89,13 +128,19 @@ variant 가 하나이므로 정책도 하나다.
 type t =
   ...
   | Config_invalid of string     (* config_error, provider_error_invalid_config* *)
-  | Auth_denied of string        (* api_error_auth, api_error_authorization,
+  | Authorization_refused of string
+                                 (* api_error_auth, api_error_authorization,
                                     provider_error_auth, provider_error_authorization *)
   ...
 ```
 
 `Config_or_auth` 는 남기지 않는다. 남기면 호출자가 옛 갈래를 계속 고를 수 있다.
 컴파일러가 모든 소비자를 강제로 방문하게 한다.
+
+이름을 `Auth_denied` 가 아니라 `Authorization_refused` 로 둔다.
+실측에서 이 wire 가 실어 나른 것은 자격 증명 거부가 아니라 사용량 한도였다.
+wire 가 말하는 것은 "제공자가 이 요청을 authorization 으로 거절했다"까지이고,
+그 안의 이유는 wire 로 알 수 없다. 이름이 실체보다 넓게 말하지 않게 한다.
 
 ### 2. 판정을 갈래마다 따로 쓴다
 
@@ -146,11 +191,19 @@ variant grep 에는 안 잡히므로 같이 고친다.
 
 ## 열어 둔 결정
 
-1. **`Auth_denied` 의 disposition.** 운영자를 세우는 게 맞는지, 아니면
-   `retry_later` 나 `fail_open_next_runtime` 인지. 852건의 원인을 더 봐야 정해진다.
-   현재 `api_error_authorization` 만 852건이고 다른 세 wire 는 0건이라,
-   실제로 도는 인증 실패가 한 종류인지 먼저 확인해야 한다.
-2. **대시보드 표시.** 두 이유를 따로 보여줄지, 합쳐 보여주고 상세에서 가를지.
+1. **한도와 자격 증명 거부를 wire 로 가를 수 있는가.** 지금은 못 가른다.
+   제공자가 주간·5시간 한도를 `api_error_authorization` 으로 알리므로,
+   같은 wire 가 "기다리면 풀림"과 "사람이 고쳐야 함"을 둘 다 실어 나른다.
+   메시지 본문을 읽어 가르는 것은 문자열 분류기를 하나 더 만드는 일이라 하지 않는다.
+   제공자 응답에 구분 가능한 필드(`retry-after`, 오류 코드)가 있는지 먼저 확인해야 한다.
+2. **`Authorization_refused` 의 disposition.** 1 이 정해지기 전까지는
+   지금처럼 운영자를 세우는 쪽이 안전하다. 가를 수 있게 되면 한도는 `retry_later` 로 보낸다.
+   852건 중 838건이 주간 한도이므로 이득은 그쪽에 몰려 있다.
+3. **`Config_invalid` 안의 두 종류.** `multimodal_input`·`preserve_thinking` 은
+   런타임 능력 불일치이고 `official_client_session.*` 는 세션 상태다.
+   둘 다 운영자가 toml 로 끌 수 있는 것은 아니다. 이 RFC 는 가르지 않고,
+   필요하면 별도 RFC 로 연다.
+4. **대시보드 표시.** 두 이유를 따로 보여줄지, 합쳐 보여주고 상세에서 가를지.
 
 ## 근거 기록
 

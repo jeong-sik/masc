@@ -90,8 +90,8 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 | 1a | 상한 없는 HTTP 바인딩 `:902-908, 1137-1146` | 창 자체가 없어진다 | 부당 |
 | 2 | 브리핑 자르기 `keeper_unified_turn.ml:812-821` | 예산 = `min(max-prompt-bytes, C) × share`(기본 50, `keeper_config.ml:165-171`). 첫 런타임 기준이라 더 작은 C 로 폴백해도 다시 맞추지 않는다 | 부당 |
 | 3 | HTTP overflow shrink `:1430-1433, 1553-1587` | `ContextOverflow` 마다 C' 절반. 성공한 용량을 기억한다 | 부당 |
-| 4 | Claude Code 이력 창 `keeper_claude_code_runtime.ml:1207-1213` | `min(max-prompt-bytes, C)` 에서 시작한다 | 일부 부당 |
-| 5 | Antigravity 이력 창 | `max-prompt-bytes` 안에 들어오는 최신 atom suffix를 넘기고 실제 범위를 기록한다 | 일부 부당 |
+| 4 | Claude Code 이력 창 `keeper_claude_code_runtime.ml:1207-1213` | `min(max-prompt-bytes, C)`와 §10.4 씨앗 앞머리 중 뒤의 자리에서 시작한다 | 일부 부당 |
+| 5 | Antigravity 이력 창 | §10.4 씨앗 앞머리에서 시작한 뒤 `max-prompt-bytes` 안에 들어오는 최신 atom suffix를 넘기고 실제 범위를 기록한다 | 일부 부당 |
 | 6 | Codex 이력 창 `keeper_codex_runtime.ml:1288-1311` | 평소엔 무제한, overflow 뒤 바이트로 자르고 기억한다 | 부당 |
 | 7 | 현재 턴 도구 결과 강등 #28845 `:657-681` | C 기준으로 자를 수 없으면 이번 턴의 도구 결과까지 강등한다 | §7.3 참조 |
 | 8 | librarian 입력 `keeper_librarian_runtime.ml:67-72, 348-359, 421-441` | 메시지 수 상한(`librarian_max_messages × cadence`)에서 시작해, 쓸 수 있는 모든 사다리 슬롯의 타깃 상한에 맞을 때까지 이분 탐색으로 줄인다 | 부당 (일부) |
@@ -126,6 +126,8 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 
 **4·5·6. 공식 클라이언트 경로**
 - `max-prompt-bytes` 는 공식 클라이언트에 넘길 때의 실제 전송 한도일 때만 판정 근거가 된다. Antigravity 는 typed overflow를 보내지 않는다. 2,078,915 바이트가 끝까지 간 실측만으로 상한을 없앤 뒤, 세 장기 Keeper가 매번 21.9~48.5MB를 fresh session에 실어 첫 턴 전에 실패했다(#37123, 2026-09-19). 따라서 이 레인은 성공이 확인된 전송 크기를 명시하고, 그 안에서 이력을 자른다. 선언이 없으면 추측하지 않고 admission에서 거절한다.
+- 2026-09-20부터 Antigravity와 Claude Code의 fresh-session 이력은 먼저 §10.4의 검증된 씨앗 앞머리에서 시작한다. 각 레인의 선언 창이 더 깊게 자르면 그 뒤쪽 자리가 이기며, 씨앗이 없거나 현재 이력이 같은 atom을 열지 않으면 전체 이력에서 레인 창을 적용한다.
+- Antigravity 합성 순서는 durable 이력에서 씨앗 앞머리 승인 → Gate replay reference 추가 → 선언 바이트 창 적용 → durable 이력 좌표로 관측 기록이다. Gate reference는 실제 전송 한도에는 포함하지만 다음 checkpoint 이력의 앞머리 atom으로 기록하지 않는다.
 - 부당한 부분:
   - 그 한도를 창 크기 결정에 쓴다.
   - Claude Code 에는 HTTP 본문이 없는데 C 가 섞인다.

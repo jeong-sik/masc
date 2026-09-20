@@ -57,9 +57,9 @@ let test_response_decoding () =
         },
         "urgency": {
           "type": "score",
-          "score": 2.1,
-          "probabilities": [0.1, 0.2, 0.7],
-          "confidence": 0.85
+          "score": 1.25,
+          "probabilities": { "2": 0.25, "0": 0, "1": 0.75 },
+          "confidence": 0.5
         }
       },
       "usage": {
@@ -82,18 +82,70 @@ let test_response_decoding () =
      | Some (T.Choice_answer { choice; confidence; probabilities }) ->
        Alcotest.(check string) "choice is backend" "backend" choice;
        Alcotest.(check (float 0.001)) "confidence is 0.92" 0.92 confidence;
-       Alcotest.(check int) "2 probabilities" 2 (List.length probabilities)
+       Alcotest.(check (list (pair string (float 0.001))))
+         "choice probabilities retain named options"
+         [ "frontend", 0.05; "backend", 0.95 ] probabilities
      | _ -> Alcotest.fail "expected choice answer");
     (match List.assoc_opt "urgency" res.answers with
-     | Some (T.Score_answer { score; confidence; _ }) ->
-       Alcotest.(check (float 0.001)) "score is 2.1" 2.1 score;
-       Alcotest.(check (float 0.001)) "confidence is 0.85" 0.85 confidence
+     | Some (T.Score_answer { score; confidence; probabilities }) ->
+       Alcotest.(check (float 0.001)) "score is 1.25" 1.25 score;
+       Alcotest.(check (float 0.001)) "confidence is 0.5" 0.5 confidence;
+       Alcotest.(check int) "all score levels are retained" 3 (List.length probabilities);
+       Alcotest.(check (list (pair int (float 0.001))))
+         "score probabilities retain level indices in response order"
+         [ 2, 0.25; 0, 0.0; 1, 0.75 ]
+         probabilities
      | _ -> Alcotest.fail "expected score answer");
     (match res.usage with
      | Some u ->
        Alcotest.(check int) "input tokens" 120 u.input_tokens;
        Alcotest.(check int) "output tokens free" 0 u.output_tokens
      | None -> Alcotest.fail "expected usage")
+;;
+
+let test_score_response_rejects_invalid_probabilities () =
+  let check_error (label, probability_fields) =
+    let response =
+      `Assoc
+        [ "model", `String "jev-latest"
+        ; "answers",
+          `Assoc
+            [ "urgency",
+              `Assoc
+                ([ "type", `String "score"
+                 ; "score", `Float 1.25
+                 ; "confidence", `Float 0.5
+                 ] @ probability_fields)
+            ]
+        ]
+    in
+    match T.eval_response_of_yojson response with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "score response accepted %s" label
+  in
+  List.iter check_error
+    [ "missing probabilities", []
+    ; "null probabilities", [ "probabilities", `Null ]
+    ; "an array", [ "probabilities", `List [ `Float 0.5; `Float 0.5 ] ]
+    ; "an empty map", [ "probabilities", `Assoc [] ]
+    ; "a nonnumeric probability",
+      [ "probabilities", `Assoc [ "0", `Float 0.5; "1", `String "0.5" ] ]
+    ; "a nonnumeric level", [ "probabilities", `Assoc [ "high", `Float 1.0 ] ]
+    ; "a fractional level", [ "probabilities", `Assoc [ "1.5", `Float 1.0 ] ]
+    ; "a negative level", [ "probabilities", `Assoc [ "-1", `Float 1.0 ] ]
+    ]
+;;
+
+let test_choice_response_rejects_empty_probabilities () =
+  let response =
+    Yojson.Safe.from_string
+      {|{"model":"jev-latest","answers":{"team":{
+        "type":"choice","choice":"backend","confidence":0.9,"probabilities":{}
+      }}}|}
+  in
+  match T.eval_response_of_yojson response with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "choice response accepted empty probabilities"
 ;;
 
 type team =
@@ -181,6 +233,14 @@ let () =
     [ ( "codecs"
       , [ Alcotest.test_case "request_encoding" `Quick test_request_encoding
         ; Alcotest.test_case "response_decoding" `Quick test_response_decoding
+        ; Alcotest.test_case
+            "score response rejects invalid probabilities"
+            `Quick
+            test_score_response_rejects_invalid_probabilities
+        ; Alcotest.test_case
+            "choice response rejects empty probabilities"
+            `Quick
+            test_choice_response_rejects_empty_probabilities
         ; Alcotest.test_case
             "choice set builds the request and decodes the answer"
             `Quick

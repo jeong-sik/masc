@@ -22,6 +22,7 @@ let reason_read_failed = "turn_record_read_failed"
 let reason_without_usage = "turn_record_without_usage"
 let reason_trace_mismatch = "turn_record_trace_mismatch"
 let reason_cumulative_usage = "conversation_cumulative_usage"
+let reason_turn_total_usage = "turn_total_usage"
 let reason_usage_scope_unavailable = "usage_scope_unavailable"
 let reason_tokens_exceed_window = "context_tokens_exceed_window"
 
@@ -178,6 +179,14 @@ let context_fields ~config ~keeper_name ~current_trace_id =
              ~context_window:window
              ())
       | Runtime_usage_scope.Per_request, Some _, _ -> observed_context_fields record
+      | Runtime_usage_scope.Turn_total, tokens, window ->
+        context_fields_unavailable
+          (not_observed_json
+             ~reason:reason_turn_total_usage
+             ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
+             ?raw_input_tokens:tokens
+             ?context_window:window
+             ())
       | Runtime_usage_scope.Conversation_cumulative, tokens, window ->
         context_fields_unavailable
           (not_observed_json

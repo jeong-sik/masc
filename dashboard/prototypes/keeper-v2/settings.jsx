@@ -325,7 +325,7 @@ function SettingsSurface({ onNav }) {
                 <SetRow label="autoboot_max" hint="부팅 시 자동 기동할 keeper 수"><SetStepper v={maxPar} set={setMaxPar} min={1} max={12} label="autoboot_max" /></SetRow>
                 <SetRow label="플릿 메시지 상한" hint="다른 keeper 발화를 몇 건까지 볼지 · 0 = 끔"><SetStepper v={fleetMax} set={setFleetMax} min={0} max={50} label="플릿 메시지 상한" /></SetRow>
                 <SetRow label="스트림 idle timeout" hint="응답이 멈춘 채 이 시간을 넘기면 중단"><span className="set-ro mono">600s · floor (부팅 로그가 유효값과 출처를 명시)</span></SetRow>
-                <SetRow label="모델 카탈로그" hint="사용 가능한 모델 목록"><span className="set-ro mono">agent-core-models-overlay.toml · override = MASC_MODEL_CATALOG</span></SetRow>
+                <SetRow label="모델 카탈로그" hint="사용 가능한 모델 목록"><span className="set-ro mono">agent_core/models.toml · override = AGENT_CORE_MODEL_CATALOG</span></SetRow>
                 <div className="set-dead">☠ 읽히지 않는 키 — 있으면 제거: <span className="mono">[autonomous] concurrency</span> · <span className="mono">[bootstrap] max_active_keepers</span> · <span className="mono">memory_os_consolidation</span>(이 키가 남아있으면 파서가 unknown 으로 거부). 자동 컴팩션 임계치 설정은 소스에서 삭제되어 이 자리에 더 이상 없습니다.</div>
               </React.Fragment>
             )}

@@ -85,6 +85,12 @@ type raw_trace_run_ref =
   ; session_id : string
   }
 
+type raw_trace_reachability_root =
+  { keeper : string
+  ; trace_id : string
+  ; raw_trace_run_ref : raw_trace_run_ref option
+  }
+
 type t =
   { execution_ids : Ids.Execution_id.t list
   ; keeper : string
@@ -299,6 +305,14 @@ let require name fields =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "turn_record: missing field %S" name)
 
+let require_unique name fields =
+  match List.filter_map (fun (field, value) ->
+    if String.equal field name then Some value else None) fields with
+  | [ value ] -> Ok value
+  | [] -> Error (Printf.sprintf "turn_record: missing field %S" name)
+  | _ -> Error (Printf.sprintf "turn_record: duplicate field %S" name)
+;;
+
 let as_string name = function
   | `String s -> Ok s
   | _ -> Error (Printf.sprintf "turn_record: field %S is not a string" name)
@@ -460,6 +474,32 @@ let raw_trace_run_ref_of_json (json : Yojson.Safe.t) =
     let* session_id = as_nonempty_string "session_id" session_id_json in
     Ok { worker_run_id; path; start_seq; end_seq; agent_name; session_id }
   | _ -> Error "turn_record: raw_trace_run_ref is not an object"
+
+let raw_trace_run_ref_for_trace_id_of_json ~trace_id = function
+  | `Null -> Ok None
+  | json ->
+    let* run_ref = raw_trace_run_ref_of_json json in
+    let* () =
+      if String.equal run_ref.session_id trace_id
+      then Ok ()
+      else Error "turn_record: raw trace session_id does not match trace_id"
+    in
+    Ok (Some run_ref)
+;;
+
+let raw_trace_reachability_root_of_json = function
+  | `Assoc fields ->
+    let* keeper_json = require_unique "keeper" fields in
+    let* keeper = as_nonempty_string "keeper" keeper_json in
+    let* trace_id_json = require_unique "trace_id" fields in
+    let* trace_id = as_nonempty_string "trace_id" trace_id_json in
+    let* raw_trace_run_ref_json = require_unique "raw_trace_run_ref" fields in
+    let* raw_trace_run_ref =
+      raw_trace_run_ref_for_trace_id_of_json ~trace_id raw_trace_run_ref_json
+    in
+    Ok { keeper; trace_id; raw_trace_run_ref }
+  | _ -> Error "turn_record: raw trace reachability root is not an object"
+;;
 
 let rec collect_results acc = function
   | [] -> Ok (List.rev acc)
@@ -731,16 +771,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =
-        match raw_trace_run_ref_json with
-        | `Null -> Ok None
-        | json ->
-          let* run_ref = raw_trace_run_ref_of_json json in
-          let* () =
-            if String.equal run_ref.session_id trace_id
-            then Ok ()
-            else Error "turn_record: raw trace session_id does not match trace_id"
-          in
-          Ok (Some run_ref)
+        raw_trace_run_ref_for_trace_id_of_json ~trace_id raw_trace_run_ref_json
       in
       let* selected_model = opt_member "selected_model" fields as_nonempty_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in

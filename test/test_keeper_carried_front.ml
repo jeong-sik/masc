@@ -331,6 +331,35 @@ let dropped =
 
 let kept_or_dropped = result (of_pp (fun fmt (s : Front.seed) -> Format.pp_print_int fmt s.first_atom)) dropped
 
+(* A response observed by a runtime that later leaves the catalog was still
+   measured over this trace's checkpoint history. Selection keeps the record;
+   the exact atom index and opening-message digest then prove that its axis is
+   the current history's before the seed is used. *)
+let test_a_removed_runtimes_response_names_the_current_history () =
+  let history = exchanges 6 in
+  let digest_at = Window.atom_opening_digest history in
+  let front_digest =
+    match digest_at 8 with Some digest -> digest | None -> fail "fixture atom missing"
+  in
+  let recorded = record ~runtime:"gone" ~turn:15 (Some (4, 12)) in
+  let recorded =
+    match recorded.Turn_record.response_observed_model_input with
+    | None -> fail "the fixture response has no observed window"
+    | Some observation ->
+      { recorded with
+        Turn_record.response_observed_model_input =
+          Some
+            { observation with
+              window = { observation.window with front_atom_digest }
+            }
+      }
+  in
+  let selected = Option.get (of_records [ recorded ]) in
+  check kept_or_dropped "the removed runtime's exact position still opens this history"
+    (Ok selected)
+    (Front.for_history ~digest_at selected)
+;;
+
 (* 2026-09-17, msx-retro-mania: the attempt that measured the front added one
    atom it never saved, so the next turn's history was one atom shorter than
    the one the front was measured on. The front's atom opens with the same
@@ -458,6 +487,8 @@ let () =
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front
+        ; test_case "a removed runtime's response names the current history" `Quick
+            test_a_removed_runtimes_response_names_the_current_history
         ; test_case "one unsaved atom shorter keeps the front" `Quick
             test_a_history_one_unsaved_atom_shorter_keeps_the_front
         ; test_case "a purge drops the front with its reason" `Quick

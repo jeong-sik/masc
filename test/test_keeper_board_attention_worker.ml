@@ -1264,7 +1264,7 @@ let test_cli_exhaustion_preserves_prior_domain_rejection () =
       (E.Cli_slots_exhausted
          { prior_error = Some (E.Domain_output_invalid detail)
          ; failures =
-             [ Keeper_lane_cli_oneshot.Execution_failed
+             [ Masc.Keeper_lane_cli_oneshot.Execution_failed
                  { runtime_id = "claude_code.claude-sonnet-5"
                  ; detail = "client unavailable"
                  }

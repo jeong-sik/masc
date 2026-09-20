@@ -249,10 +249,11 @@ let warn_rejected_exact_output_slots registry =
            slot.slot_id
        | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
          when String.equal slot.lane_id Runtime.verifier_exact_lane_id ->
-         (* verifier_exact admits slots here but dispatches them through
-            Runtime.resolve_assignment, so its ids must exist in both
-            registries; #32653 measured the catalog-id form failing at
-            dispatch 27 times on 2026-08-29. *)
+         (* verifier_exact admits slots here, and judgement then admits each
+            id as a configured direct runtime
+            (Runtime.verifier_exact_slot_admission) and dispatches that id
+            alone, so its ids must exist in both registries; #32653 measured
+            the catalog-id form failing at dispatch 27 times on 2026-08-29. *)
          Log.Server.warn
            "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
            slot.lane_id
@@ -370,32 +371,29 @@ let exact_output_targets_of_runtimes () =
      by [command] — so declaring one as a target only to have the binding
      resolver reject it reports a missing catalog provider where the truth is
      that this kind of runtime does no exact output. *)
-  let runtimes =
-    List.filter
-      (fun (rt : Runtime.t) ->
-         match rt.execution with
-         | Runtime_execution.Agent_core _ -> true
-         | Runtime_execution.Codex_app_server _
-         | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _ -> false)
-      runtimes
-  in
-  List.map
-    (fun (rt : Runtime.t) : Exact_output.declared_target ->
-       { target_ref = rt.id
-       ; provider_ref = rt.provider.Runtime_schema.id
-       ; model_id = rt.model.Runtime_schema.api_name
-       ; enable_thinking = rt.model.Runtime_schema.thinking_support
-       ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
-       ; body_timeout_s = None
-       ; (* A slot's credential is the one its binding names; the catalog row
-            carries the provider's usual environment name, not this
-            deployment's. *)
-         api_key_env =
-           (match rt.provider.Runtime_schema.credentials with
-            | Some (Runtime_schema.Env name) -> Some name
-            | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
-       })
+  List.filter_map
+    (fun (rt : Runtime.t) ->
+       match rt.execution with
+       | Runtime_execution.Agent_core config ->
+         Some
+           ({ target_ref = rt.id
+            ; provider_ref = rt.provider.Runtime_schema.id
+            ; model_id = rt.model.Runtime_schema.api_name
+            ; enable_thinking = rt.model.Runtime_schema.thinking_support
+             ; reasoning_effort = config.reasoning_effort
+             ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
+             ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
+            ; (* A slot's credential is the one its binding names; the catalog row
+                 carries the provider's usual environment name, not this
+                 deployment's. *)
+              api_key_env =
+                (match rt.provider.Runtime_schema.credentials with
+                 | Some (Runtime_schema.Env name) -> Some name
+                 | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
+            } : Exact_output.declared_target)
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _ -> None)
     runtimes
 ;;
 

@@ -335,9 +335,9 @@ deferred** to whoever wires the iMessage gate.
 ### §7.4 Non-goals
 
 - No agent_core API change (per §3).
-- No backfill: legacy chat rows / posts decode `turn_ref = None`; the FE
-  30-min window survives only as an explicit, commented, removal-targeted
-  fallback for `None` rows.
+- No backfill: rows / posts without `turn_ref` show that the turn link is
+  unavailable. The inspector leaves its list open for manual selection;
+  message timestamps do not establish execution identity.
 - `turn_ref` does not replace `Execution_id` (tool-call identity) or fusion
   `run_id` (run correlation); it is the turn-level join key between them.
 
@@ -369,11 +369,11 @@ foundational-record-field rule).
    → backend-minted `Turn_ref` only.
 2. `run_id` / `meta_json` substring or prefix match (`starts_with "fus-"`) —
    the RFC-0042 string-classifier anti-pattern. → typed `origin` + real index.
-3. 30-min timestamp-window join (already in `keeper-turn-inspector.ts`) — a
-   heuristic standing in for a missing key; mis-attributes under dense/sparse
-   turns or clock skew. → exact `(trace_id, absolute_turn)` join; keep the
-   window only as a commented, removal-targeted fallback for legacy
-   `turn_ref = None` rows.
+3. 30-min timestamp-window join — a heuristic standing in for a missing key;
+   mis-attributes under dense/sparse turns or clock skew. → exact
+   `(trace_id, absolute_turn)` join only. Missing references are displayed as
+   unavailable and require manual selection, including on fresh messages
+   that have not received an exact reference (#37259).
 4. Telemetry-as-fix ("count chat rows missing turn_ref") — a counter is a
    backfill metric, not a fix. → propagate the id so new rows never miss it.
 5. Collapsing `run_id` into `turn_ref` — distinct typed concepts (run

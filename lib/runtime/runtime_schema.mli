@@ -58,6 +58,7 @@ type capabilities =
 [@@deriving show, eq]
 
 val connect_timeout_s_key : string
+val exact_body_timeout_s_key : string
 
 type antigravity_effort =
   | Antigravity_low
@@ -103,6 +104,11 @@ type provider =
       provider, not the model, because it is a transport property.
       agent-core boundary, Agent Core contract I2: MASC declares the budget;
       AGENT_CORE owns enforcement and phase=Http_operation attribution. *)
+  ; exact_body_timeout_s : float option
+    (** Explicit total HTTP request deadline for Exact-output calls through
+        this provider, including connection, response headers and the full
+        response body. [None] declares no body deadline. This does not replace
+        [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Present exactly when [protocol = "antigravity-cli"]. *)
   }
@@ -223,6 +229,13 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
+  ; disable_parallel_tool_use : bool
+        (** Request policy for this binding. [true] asks the provider for at
+            most one tool call per response; [false] (the default) leaves
+            parallel calls permitted by the model's catalog capability.
+            This does not change that capability or serialize spawned agents.
+            Official-client, native Ollama and Gemini runtimes cannot carry
+            this policy and refuse [true]. *)
   ; context_marks : context_marks option
         (** [context-high-water-tokens] and [context-low-water-tokens] on the
             binding table, declared together or not at all. Absent means the

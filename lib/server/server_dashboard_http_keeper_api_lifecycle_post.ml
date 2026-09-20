@@ -31,29 +31,44 @@ let tool_detail_json body =
      [execution_cache] typed-surface invalidation)
    - Operator control snapshot cache: [Operator_control_snapshot.invalidate_snapshot_cache]
    - Projection cache: [Dashboard_projection_cache.invalidate_snapshot_json] *)
+(* Which prefixes a refresh could not drop. A caller that cannot leave a
+   Keeper's caches half-dropped reads this instead of the warning text: the
+   lifecycle listener invalidates every keeper-dependent cache when a refresh
+   comes back partial (#37175). *)
+type surface_refresh =
+  | Surfaces_refreshed
+  | Surfaces_partly_dropped of string list
+
 let refresh_keeper_execution_surfaces ~config ~name event =
   let event_label =
     Keeper_lifecycle_events.lifecycle_event_to_string event
   in
   Operator_control_snapshot.invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
-  (try Dashboard_cache.invalidate_prefix "execution:" with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Dashboard.warn
-         "keeper %s %s: execution dashboard cache invalidate failed: %s"
-         name event_label (Printexc.to_string exn));
-  (try
-     Dashboard_cache.invalidate_prefix
-       (Server_dashboard_http_core.dashboard_shell_cache_prefix config)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Dashboard.warn
-         "keeper %s %s: shell surface cache invalidate failed: %s"
-         name event_label (Printexc.to_string exn));
+  let drop_prefix label prefix =
+    match Dashboard_cache.invalidate_prefix prefix with
+    | () -> []
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      Log.Dashboard.warn
+        "keeper %s %s: %s cache invalidate failed: %s"
+        name
+        event_label
+        label
+        (Printexc.to_string exn);
+      [ label ]
+  in
+  let undropped =
+    drop_prefix "execution dashboard" "execution:"
+    @ drop_prefix
+        "shell surface"
+        (Server_dashboard_http_core.dashboard_shell_cache_prefix config)
+  in
   Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
-    ~keeper_name:name ~event
+    ~keeper_name:name ~event;
+  match undropped with
+  | [] -> Surfaces_refreshed
+  | _ :: _ -> Surfaces_partly_dropped undropped
 
 (* Wakeup / invalidate path — same cache-surface coverage as
    [refresh_keeper_execution_surfaces]. Wakeup doesn't go through the directive
@@ -360,13 +375,16 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
            Keeper_keepalive.process_directive
              ~agent_name:entry.name
              Keeper_directive.Wakeup;
-           refresh_keeper_execution_surfaces
-             ~config
-             ~name
-             (Keeper_lifecycle_events.Custom_event
-                { verb = Keeper_lifecycle_events.Started
-                ; phase = Some Keeper_state_machine.Running
-                });
+           (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+           ignore
+             (refresh_keeper_execution_surfaces
+                ~config
+                ~name
+                (Keeper_lifecycle_events.Custom_event
+                   { verb = Keeper_lifecycle_events.Started
+                   ; phase = Some Keeper_state_machine.Running
+                   })
+               : surface_refresh);
            let detail =
              match Keeper_registry.get ~base_path:config.base_path name with
              | Some latest -> Keeper_meta_json.meta_to_json latest.meta
@@ -392,13 +410,16 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               let post_action_result =
                 if String.equal action "boot"
                 then (
-                  refresh_keeper_execution_surfaces
-                    ~config
-                    ~name
-                    (Keeper_lifecycle_events.Custom_event
-                       { verb = Keeper_lifecycle_events.Started
-                       ; phase = Some Keeper_state_machine.Running
-                       });
+                  (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+                  ignore
+                    (refresh_keeper_execution_surfaces
+                       ~config
+                       ~name
+                       (Keeper_lifecycle_events.Custom_event
+                          { verb = Keeper_lifecycle_events.Started
+                          ; phase = Some Keeper_state_machine.Running
+                          })
+                      : surface_refresh);
                   Ok ())
                 else (
                   match Keeper_registry.get_phase ~base_path:config.base_path name with
@@ -435,11 +456,14 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 | "shutdown" ->
                   if persist_keeper_pause ()
                   then (
-                    refresh_keeper_execution_surfaces
-                      ~config
-                      ~name
-                      (Keeper_lifecycle_events.Phase_event
-                         Keeper_state_machine.Paused);
+                    (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+                    ignore
+                      (refresh_keeper_execution_surfaces
+                         ~config
+                         ~name
+                         (Keeper_lifecycle_events.Phase_event
+                            Keeper_state_machine.Paused)
+                        : surface_refresh);
                     Ok ())
                   else Error "paused-state persist failed after shutdown"
                 | _ ->

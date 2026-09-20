@@ -34,37 +34,14 @@ import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
+import { USAGE_SCOPE_LABELS } from './common/turn-usage-scope'
 
-const INITIAL_TURN_MATCH_WINDOW_SEC = 30 * 60
 const EMPTY_TURN_RECORD_ROWS: TurnRecordRow[] = []
 
-export function initialTurnRowForTimestamp(
-  rows: TurnRecordRow[],
-  timestampIso?: string | null,
-): TurnRecordRow | null {
-  if (!timestampIso || rows.length === 0) return null
-  const targetMs = Date.parse(timestampIso)
-  if (!Number.isFinite(targetMs)) return null
-  const targetSec = targetMs / 1000
-  let best: { row: TurnRecordRow; delta: number } | null = null
-
-  for (const row of rows) {
-    const delta = Math.abs(row.record.ts - targetSec)
-    if (!best || delta < best.delta) {
-      best = { row, delta }
-    }
-  }
-
-  return best && best.delta <= INITIAL_TURN_MATCH_WINDOW_SEC ? best.row : null
-}
-
-// RFC-0233 §7: exact turn join-key match, superseding the 30-min timestamp
-// window (§7.6 guard #3). [turnRef] is "<trace_id>#<absolute_turn>" minted
-// MASC-side and carried on the originating chat row / board post; split on the
-// LAST '#' (a trace_id may itself contain '#') and match trace_id +
-// absolute_turn exactly against the server turn records. A malformed key or a
-// turn not present in the loaded records returns null — never a fuzzy
-// fallback, so an exact key cannot mis-attribute.
+// RFC-0233 §7: [turnRef] is "<trace_id>#<absolute_turn>" minted MASC-side
+// and carried on the originating chat row / board post. Split on the LAST
+// '#' (a trace_id may itself contain '#') and match both fields exactly.
+// Missing, malformed, or unavailable references never select another turn.
 export function initialTurnRowForTurnRef(
   rows: TurnRecordRow[],
   turnRef?: string | null,
@@ -382,8 +359,7 @@ type TurnDetail = {
   traceId: string
   tokIn: number | null
   tokOut: number | null
-  // RFC-0233 §8 — null when context_window/price are absent on the record
-  // (runtime unknown or operator left runtime.toml unset); render "미상".
+  // RFC-0233 §8: unknown when usage is not per-request or required facts are absent.
   ctxPct: number | null
   contextWindow: number | null
   cost: number | null
@@ -504,15 +480,15 @@ function buildTurnDetail(
   const traceId = record.turn_ref
   const tokIn = record.input_tokens ?? null
   const tokOut = record.output_tokens ?? null
-  // RFC-0233 §8 — ctx-fill% and cost grounded in runtime.toml-declared facts.
-  // context_window is the keeper-resolved effective budget (replaces the
-  // hardcoded 200K); prices are USD/1M from the binding (replace Claude $3/$15).
-  // Either is null when the record lacks the fact — the view renders "미상".
+  // RFC-0233 §8: only per-request usage can describe this request's context fill and cost.
+  // Preserve cumulative/unknown-scope counts without reinterpreting them.
+  const perRequest = record.usage_scope === 'per_request'
   const ctxPct =
-    tokIn != null && record.context_window != null && record.context_window > 0
+    perRequest && tokIn != null && record.context_window != null && record.context_window > 0
       ? (tokIn / record.context_window) * 100
       : null
   const cost =
+    perRequest &&
     tokIn != null &&
       tokOut != null &&
       record.price_input_per_million != null &&
@@ -822,11 +798,12 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">selected model</span><span class="v">${record.selected_model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
         <span class="k">fsm.state</span><span class="v">n/a</span>
+        <span class="k">usage scope</span><span class="v">${USAGE_SCOPE_LABELS[record.usage_scope]}</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn?.toLocaleString() ?? '미상'}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache read tokens</span><span class="v">${record.cache_read_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache write tokens</span><span class="v">${record.cache_creation_input_tokens?.toLocaleString() ?? '미상'}</span>
-        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${record.context_window?.toLocaleString() ?? '미상'}` : '미상'}</span>
+        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'} / ${record.context_window?.toLocaleString() ?? '미상'}</span>
         <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
         <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>
         <span class="k">thinking</span><span class="v">${thinkingStateLabel(record)}</span>
@@ -978,8 +955,8 @@ function TurnDetailDrawer({
 
         <div class="ti-tok" data-testid="turn-token-bar">
           <div class="ti-tok-top">
-            <span class="lbl">토큰 경제</span>
-            <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(t.contextWindow)}` : '컨텍스트 미상'}</span>
+            <span class="lbl">토큰 사용량 · ${USAGE_SCOPE_LABELS[row.record.usage_scope]}</span>
+            <span class="ctxpct">컨텍스트 ${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'}${t.contextWindow != null ? ` / ${formatCtxWindowK(t.contextWindow)}` : ''}</span>
           </div>
           <div class="ti-tok-bar">
             ${tokenCounts != null && tokenCounts.total > 0
@@ -1037,7 +1014,7 @@ function TurnRow({
   const record = row.record
   const tokens =
     record.input_tokens != null || record.output_tokens != null
-      ? `${record.input_tokens ?? '?'}→${record.output_tokens ?? '?'} tok`
+      ? `${record.input_tokens ?? '?'}→${record.output_tokens ?? '?'} tok · ${USAGE_SCOPE_LABELS[record.usage_scope]}`
       : null
   const sampling = [
     record.temperature != null ? `t=${record.temperature}` : null,
@@ -1164,17 +1141,17 @@ function TurnRow({
   `
 }
 
+export type TurnAnchor =
+  | { kind: 'no-origin' }
+  | { kind: 'unreferenced' }
+  | { kind: 'ref'; value: string }
+
 export function KeeperTurnInspector({
   keeperName,
-  initialTurnTimestamp,
-  initialTurnRef,
+  anchor = { kind: 'no-origin' },
 }: {
   keeperName: string
-  initialTurnTimestamp?: string | null
-  // RFC-0233 §7: exact turn join key from the originating chat row / board
-  // post. When present it supersedes [initialTurnTimestamp] (exact match, no
-  // window). Callers thread it as the turn_ref data flows (PR-C / follow-up).
-  initialTurnRef?: string | null
+  anchor?: TurnAnchor
 }) {
   const resource = useManagedAsyncResource<TurnInspectorData | null>(null)
   const [selectedRow, setSelectedRow] = useState<TurnRecordRow | null>(null)
@@ -1203,41 +1180,31 @@ export function KeeperTurnInspector({
   const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
   // Server returns oldest-first; show newest first.
   const sorted = useMemo(() => [...rows].reverse(), [rows])
-  const initialMatchedRow = useMemo(() => {
-    const exact = initialTurnRowForTurnRef(rows, initialTurnRef)
-    if (exact) return exact
-    // WORKAROUND (RFC-0233 §7.6 #3): legacy chat rows / board posts carry no
-    // turn_ref, so fall back to the 30-min timestamp window for those only.
-    // When a turn_ref IS present, a miss stays null — no fuzzy attribution.
-    // removal target: turn_ref backfilled onto persisted rows + populated by
-    // every producer (RFC-0233 follow-up).
-    if (initialTurnRef) return null
-    return initialTurnRowForTimestamp(rows, initialTurnTimestamp)
-  }, [rows, initialTurnRef, initialTurnTimestamp])
-
-  // Identity of the requested turn: the exact join key when available, else the
-  // timestamp. Drives the apply-once tracking below so either entry point works.
-  const initialTurnKey = initialTurnRef ?? initialTurnTimestamp ?? null
+  const initialTurnRef = anchor.kind === 'ref' ? anchor.value : null
+  const initialMatchedRow = useMemo(
+    () => initialTurnRowForTurnRef(rows, initialTurnRef),
+    [rows, initialTurnRef],
+  )
 
   useEffect(() => {
     appliedInitialTurnKey.current = null
     setInitialMatchState('idle')
     setSelectedRow(null)
-  }, [keeperName, initialTurnKey])
+  }, [keeperName, anchor.kind, initialTurnRef])
 
   useEffect(() => {
     if (
-      !initialTurnKey
+      anchor.kind !== 'ref'
       || rows.length === 0
-      || appliedInitialTurnKey.current === initialTurnKey
+      || appliedInitialTurnKey.current === initialTurnRef
     ) {
       return
     }
 
     setSelectedRow(initialMatchedRow)
     setInitialMatchState(initialMatchedRow ? 'matched' : 'missed')
-    appliedInitialTurnKey.current = initialTurnKey
-  }, [initialTurnKey, initialMatchedRow, rows.length])
+    appliedInitialTurnKey.current = initialTurnRef
+  }, [anchor.kind, initialTurnRef, initialMatchedRow, rows.length])
 
   if (resource.state.value.loading) {
     return html`<${LoadingState}>턴 레코드 불러오는 중...<//>`
@@ -1251,9 +1218,23 @@ export function KeeperTurnInspector({
     ? html`<${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${rows} />`
     : null
 
+  const anchorNotice = anchor.kind === 'unreferenced' || initialMatchState === 'missed'
+    ? html`
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row"
+        data-testid="turn-linked-empty"
+      >
+        ${anchor.kind === 'unreferenced'
+          ? '턴 연결 정보 없음. 리스트에서 직접 선택하세요.'
+          : '연결된 turn record를 찾지 못했습니다. 리스트에서 직접 선택하세요.'}
+      </div>
+    `
+    : null
+
   if (rows.length === 0) {
     return html`
       <div class="p-4 space-y-1 v2-monitoring-panel">
+        ${anchorNotice}
         ${memoryOsPanel}
         ${response?.health === 'incompatible'
           ? html`<div class="text-xs text-[var(--color-status-warn)]">
@@ -1281,18 +1262,7 @@ export function KeeperTurnInspector({
           : null}
       </div>
       ${memoryOsPanel}
-      ${initialMatchState === 'missed'
-        ? html`
-          <div
-            class="rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row"
-            data-testid="turn-linked-empty"
-          >
-            ${initialTurnRef
-              ? '연결된 turn record를 찾지 못했습니다. 리스트에서 직접 선택하세요.'
-              : '메시지 시각과 30분 이내의 turn record 없음. 리스트에서 직접 선택하세요.'}
-          </div>
-        `
-        : null}
+      ${anchorNotice}
       ${sorted.map(row => html`<${TurnRow}
         key=${`${row.record.trace_id}-${row.record.absolute_turn}-${row.record.ts}`}
         row=${row}

@@ -249,6 +249,8 @@ interface KeeperCheckpointDeleteResponse {
   keeper: string
   deleted_snapshot_ids: string[]
   missing_snapshot_ids: string[]
+  refused_snapshot_ids: string[]
+  failed_snapshot_ids: string[]
   inventory: KeeperCheckpointInventory
 }
 

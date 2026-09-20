@@ -1,4 +1,6 @@
 module Task = struct
+  let producer_payload_key = "producer"
+
   type t =
     | Created
     | Claimed

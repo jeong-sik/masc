@@ -1284,6 +1284,7 @@ let run_turn
        refused at the wire has a real cut and no wire observation. Sharing one
        cell would let the missing half erase the half that was measured. *)
     let model_input_window_ref = ref None in
+    let response_observed_model_input_ref = ref None in
     let current_request_provider_content_ref :
       ( Agent_core.Types.message list
       , Keeper_agent_prompt_metrics.provenance_failure )
@@ -1339,16 +1340,14 @@ let run_turn
        provider-bound history inside the runtime and hands the result to a
        client that assembles the wire itself.
 
-       Only a lane that started the conversation reports a list: on those
-       turns the whole window is rendered into the request, so its bytes are
-       the ones the model read. A resumed lane reports no list at all, because
-       the client re-sends only the new turn and the accumulated history never
-       leaves this process -- attributing the local window there would have
-       counted bytes that were not sent, and on Antigravity would additionally
-       have dropped the carrier that was. The gap is recorded as
-       [Client_session_holds_input] rather than as a zero or an absent
-       attribution, so a reader can tell it from a turn that never
-       dispatched. *)
+       The receipt distinguishes retransmitted MASC input from history held
+       by the client; it does not distinguish Start from Resume. On resume,
+       MASC can retransmit the canonical snapshot, as documented by
+       Keeper_official_client_host.transmitted_model_input. Client-owned
+       native history outside that snapshot is not measured here.
+       Held_by_client_session becomes an explicit attribution gap rather than
+       zero bytes or an absent receipt, so it remains distinct from a turn
+       that never dispatched. *)
     let record_transmitted_model_input ~runtime_id ~tools ~transmitted =
       let () = match direct_resume with
         | Some (Gate_continuation admission) ->
@@ -1624,7 +1623,7 @@ let run_turn
                               finally answered, and the metrics row credits
                               one lane's bytes to another.
 
-                              All four cells, not just the two the record is
+                              All four attempt-local cells, not just the two the record is
                               built from: the Agent Core wire handler reads
                               the provider-content and projected-message cells
                               to assemble its attribution, so leaving them set
@@ -1632,7 +1631,10 @@ let run_turn
                               the inputs it is assembled from. That the Agent
                               Core lane happens to overwrite both on every
                               request is a property of that lane, not of this
-                              invariant. *)
+                              invariant. The window and response-observed cells
+                              are turn-local: selecting a later candidate must
+                              not erase the last projection, nor the last
+                              request that actually received a response. *)
                            request_attribution_ref := None;
                            request_wire_evidence_ref := None;
                            current_request_provider_content_ref := None;
@@ -1672,6 +1674,10 @@ let run_turn
                         (fun ~measurement observation ->
                            model_input_window_ref :=
                              Some (measurement, observation))
+                      ~on_response_observed_model_input:
+                        (fun observation ->
+                           response_observed_model_input_ref :=
+                             Some observation)
                       ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
@@ -1809,9 +1815,10 @@ let run_turn
                    : Keeper_agent_prompt_metrics.ctx_composition_metrics
                    =
                    let actual_input_tokens =
-                     if usage.input_tokens > 0
-                     then Some usage.input_tokens
-                     else None
+                     match result.runtime_observation with
+                     | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
+                       when usage.input_tokens > 0 -> Some usage.input_tokens
+                     | Some _ | None -> None
                    in
                    (* Absent evidence and unresolved provenance are recorded
                       as what they are. Writing a zero here is what let a
@@ -2275,6 +2282,8 @@ let run_turn
                       observation.Runtime_model_input_tail_window.front_atom_digest
                   })
                !model_input_window_ref)
+          ~response_observed_model_input:
+            !response_observed_model_input_ref
           ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature

@@ -5624,6 +5624,11 @@ let lane_run_split_line buf cols ~left_width ~left ~right =
     (styled left_width left ^ Theme.recede () ^ divider ^ Ansi.reset
      ^ styled right_width right)
 
+(* Top, header, its divider, bottom and footer. A loaded run also draws
+   the divider beneath its summary. Split panes use one payload row for titles. *)
+let lane_run_chrome_rows_without_summary = framed_chrome_rows
+let lane_run_chrome_rows = lane_run_chrome_rows_without_summary + 1
+
 let render_lane_run_detail (state : state) ~run_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -5649,7 +5654,7 @@ let render_lane_run_detail (state : state) ~run_id =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text error);
        if Option.is_none detail then box_divider buf cols);
-  let error_rows =
+  let chrome_rows_for_error =
     match detail, state.lane_run_detail_error with
     | Some _, Some _ -> 1
     | None, Some _ -> 2
@@ -5658,22 +5663,28 @@ let render_lane_run_detail (state : state) ~run_id =
   (* The position the footer carries: [None] where the drawing already says
      it -- nothing to read yet, or two panes whose titles each name their
      own window. *)
-  let scroll, position =
+  let scroll, position, content_height =
     match detail, state.lane_run_detail_error with
     | None, error ->
-      let content_height = max 1 (rows - 5 - error_rows) in
+      let filler_rows = max 1 (rows - lane_run_chrome_rows_without_summary - chrome_rows_for_error) in
       let line =
         match error with
         | None -> Ansi.dim, "  (loading exact run record)"
         | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
-      for _ = 2 to content_height do
+      for _ = 2 to filler_rows do
         box_empty buf cols
       done;
-      0, None
+      0, None, 0
     | Some detail, (Some _ | None) ->
       let summary = lane_run_summary_lines detail in
+      let payload_rows =
+        max 0
+          (rows - List.length summary - lane_run_chrome_rows - chrome_rows_for_error)
+      in
+      let title_rows = if cols >= keeper_split_threshold_cols then 1 else 0 in
+      let content_height = max 0 (payload_rows - title_rows) in
       List.iter
         (fun (style, line) -> box_line_styled buf cols ~style line)
         summary;
@@ -5687,13 +5698,9 @@ let render_lane_run_detail (state : state) ~run_id =
           lane_run_input_lines ~width:left_width detail
         in
         let output_lines = lane_run_output_lines ~width:right_width detail in
-        let payload_rows =
-          max 0 (rows - List.length summary - 6 - error_rows)
-        in
         if payload_rows = 0
-        then 0, None
+        then 0, None, content_height
         else begin
-          let content_height = payload_rows - 1 in
           let input_max_scroll =
             if content_height = 0
             then 0
@@ -5735,15 +5742,12 @@ let render_lane_run_detail (state : state) ~run_id =
             in
             lane_run_split_line buf cols ~left_width ~left ~right
           done;
-          scroll, None
+          scroll, None, content_height
         end
       end
       else begin
         let lines =
           lane_run_stacked_lines ~width:(max 1 (cols - 8)) detail
-        in
-        let content_height =
-          max 0 (rows - List.length summary - 6 - error_rows)
         in
         let max_scroll =
           if content_height = 0
@@ -5757,14 +5761,16 @@ let render_lane_run_detail (state : state) ~run_id =
           | None -> box_empty buf cols
           | Some (style, line) -> box_line_styled buf cols ~style line
         done;
-        scroll, Some (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines))
+        scroll,
+        Some (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)),
+        content_height
       end
   in
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail ~position));
-  finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
+  finish_surface state ~clamped:(Lane_run_detail_scroll { scroll; content_height })
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
 (* The clients roster: everyone attached to this workspace in one reading —

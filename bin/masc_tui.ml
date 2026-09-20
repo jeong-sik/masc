@@ -6027,6 +6027,7 @@ let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
   state.lane_run_detail <- None;
   state.lane_run_detail_error <- None;
   state.lane_run_detail_scroll <- 0;
+  state.lane_run_detail_content_height <- 0;
   launch_lane_run_detail_load state ~mailbox ~run_id
 
 (* Everything that names a row stops meaning anything when the surface moves
@@ -6482,7 +6483,10 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
        | None -> None)
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ -> pane (fun v -> Lane_run_detail_scroll v)
+       | Lanes_run_detail _ ->
+           pane (fun scroll ->
+             Lane_run_detail_scroll
+               { scroll; content_height = state.lane_run_detail_content_height })
        | Lanes_run_list _ | Lanes_overview -> None)
   | Changes ->
       (match state.changes_diff_row with
@@ -20938,6 +20942,10 @@ and is loaded on demand through keeper_skill.
              | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
+                     let page =
+                       Masc_tui_scroll.page_step
+                         ~height:state.lane_run_detail_content_height
+                     in
                      state.lane_run_detail_scroll <-
                        (if direction > 0 then
                      Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:page

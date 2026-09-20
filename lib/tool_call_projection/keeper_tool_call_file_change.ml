@@ -70,66 +70,6 @@ let named_tool_of_row row =
           | Some d -> Handler d.Keeper_tool_descriptor.runtime_handler
           | None -> Unknown_descriptor id))
 
-(* Every handler is named. A new file-writing tool added to the registry
-   should stop this build rather than be classified as a read, which is what
-   a [_ -> Not_a_file_change] arm would do silently. *)
-let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
-  match handler with
-  | Keeper_tool_descriptor.Tool_edit_file
-  | Keeper_tool_descriptor.Tool_write_file
-  | Keeper_tool_descriptor.Tool_ide_annotate
-  | Keeper_tool_descriptor.Tool_peer_artifact -> true
-  | Keeper_tool_descriptor.Tool_execute
-  | Keeper_tool_descriptor.Tool_search_files
-  | Keeper_tool_descriptor.Tool_read_file
-  | Keeper_tool_descriptor.Tool_lane_status
-  | Keeper_tool_descriptor.Tool_tools_list
-  | Keeper_tool_descriptor.Tool_capability_search
-  | Keeper_tool_descriptor.Tool_context_status
-  | Keeper_tool_descriptor.Tool_artifact_read
-  | Keeper_tool_descriptor.Tool_workspace_memory_read
-  | Keeper_tool_descriptor.Tool_memory_search
-  | Keeper_tool_descriptor.Tool_memory_retract
-  | Keeper_tool_descriptor.Tool_memory_write
-  | Keeper_tool_descriptor.Tool_constitution_write
-  | Keeper_tool_descriptor.Tool_constitution_remove
-  | Keeper_tool_descriptor.Tool_library_search
-  | Keeper_tool_descriptor.Tool_library_read
-  | Keeper_tool_descriptor.Tool_surface_read
-  | Keeper_tool_descriptor.Tool_surface_post
-  | Keeper_tool_descriptor.Tool_person_note_set
-  | Keeper_tool_descriptor.Tool_voice_dispatch
-  | Keeper_tool_descriptor.Tool_task_dispatch
-  | Keeper_tool_descriptor.Tool_board_dispatch
-  | Keeper_tool_descriptor.Tool_masc_task_dispatch
-  | Keeper_tool_descriptor.Tool_masc_plan_dispatch
-  | Keeper_tool_descriptor.Tool_masc_run_dispatch
-  | Keeper_tool_descriptor.Tool_masc_agent_dispatch
-  | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
-  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
-  | Keeper_tool_descriptor.Tool_web_search
-  | Keeper_tool_descriptor.Tool_web_fetch
-  | Keeper_tool_descriptor.Tool_browser_tabs
-  | Keeper_tool_descriptor.Tool_browser_read
-  | Keeper_tool_descriptor.Tool_browser_session
-  | Keeper_tool_descriptor.Tool_browser_goto
-  | Keeper_tool_descriptor.Tool_browser_act
-  | Keeper_tool_descriptor.Tool_browser_interact
-  | Keeper_tool_descriptor.Tool_masc_control_dispatch
-  | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
-  | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
-  | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
-  | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
-  | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
-  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
-  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
-  | Keeper_tool_descriptor.Tool_masc_fusion_status
-  | Keeper_tool_descriptor.Tool_masc_fusion_decision
-  | Keeper_tool_descriptor.Tool_masc_file_dispatch
-  | Keeper_tool_descriptor.Tool_masc_library_dispatch
-  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-  | Keeper_tool_descriptor.Tool_analyze_image -> false
-
 let optional_string row key = Json_field.to_option (Json_field.string row key)
 let optional_int row key = Json_field.to_option (Json_field.int row key)
 
@@ -147,14 +87,16 @@ let required_int row key =
   | Json_field.Wrong_shape { expected; got } ->
       Error (Malformed (Printf.sprintf "%s is %s, expected %s" key got expected))
 
-(* The target as the write path resolved it, not as the model typed it.
-   [input.file_path] is the raw tool argument and carries whichever vocabulary
-   the keeper happened to use (#28582); [action_radius.target_path] is the
-   resolver's output.
+(* The target recorded by the action-radius producer. It reads the same
+   redacted input object that the log persists: for peer artifacts,
+   [Keeper_runtime_contract.action_radius_json] selects [input.path], so the
+   handler and this projection name the same materialize path. Other file
+   tools use their own target field rather than one display-name vocabulary
+   shared here (#28582).
 
-   The resolver's output is mostly bundle-relative and sometimes absolute --
-   528 against 40 over 2026-08-22..24 -- so the shape is decided by looking,
-   not assumed. *)
+   Logged targets are mostly bundle-relative and sometimes absolute -- 528
+   against 40 over 2026-08-22..24 -- so the shape is decided by looking, not
+   assumed. *)
 let target_path_of_row row =
   match Json_field.assoc row "action_radius" with
   | Json_field.Field_absent -> Error (Malformed "action_radius is absent")
@@ -230,15 +172,34 @@ let location_of_target ~target_path =
     | Some (repo_id, relative_path) -> In_repo { repo_id; relative_path }
     | None -> In_bundle { bundle_path = target_path }
 
-(* [kind_of_input] answers [None] when the handler ran but this call did not
-   write a file. Only [Tool_peer_artifact] needs that third answer: its
-   [export] action reads a file into the blob store and its [materialize]
-   action writes a blob into a file, and the action is a field of the call's
-   input, so the handler-level [writes_files] cannot separate them. Every
-   other file-writing handler writes on every call and answers [Some]. *)
-let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper input =
+let writing_input_of_row row =
+  match Json_field.assoc row "input" with
+  | Json_field.Found fields -> Ok (`Assoc fields)
+  | Json_field.Field_absent -> Error (Malformed "input is absent")
+  | Json_field.Wrong_shape { got = "string"; _ } ->
+    (* The log flattens a call's arguments to a preview string once they
+       serialize past its inline budget ([Keeper_tool_call_log.max_output_len]).
+       A string here is that and only that: nothing else in the writer produces
+       one. The change happened; its text is not on disk to be read back. *)
+    Error Input_exceeded_log_budget
+  | Json_field.Wrong_shape { expected; got } ->
+    Error (Malformed (Printf.sprintf "input is %s, expected %s" got expected))
+;;
+
+let writing_input_and_keeper row =
+  Result.bind (writing_input_of_row row) (fun input ->
+      Result.map (fun keeper -> input, keeper) (required_string row "keeper"))
+;;
+
+(* This is the single exhaustive handler classification. Non-writing handlers
+   return without reading [input], preserving the durable projection's legacy
+   treatment of their truncated or malformed arguments. A peer-artifact
+   export has valid writing-tool input but returns [None] because it reads the
+   file into the blob store; materialize returns its typed file change. *)
+let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   match handler with
-  | Keeper_tool_descriptor.Tool_edit_file -> (
+  | Keeper_tool_descriptor.Tool_edit_file ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
       match (required_string input "old_string", required_string input "new_string") with
       | Ok before, Ok after ->
           (* [replace_all] is optional in the tool's own schema, and its
@@ -246,13 +207,15 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
           let replace_all =
             Option.value ~default:false (Json_field.to_option (Json_field.bool input "replace_all"))
           in
-          Ok (Some (Edited { before; after; replace_all }))
+          Ok (Some (keeper, Edited { before; after; replace_all }))
       | Error detail, _ | _, Error detail -> Error detail)
-  | Keeper_tool_descriptor.Tool_write_file -> (
+  | Keeper_tool_descriptor.Tool_write_file ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
       match required_string input "content" with
-      | Ok content -> Ok (Some (Written { content }))
+      | Ok content -> Ok (Some (keeper, Written { content }))
       | Error detail -> Error detail)
-  | Keeper_tool_descriptor.Tool_ide_annotate -> (
+  | Keeper_tool_descriptor.Tool_ide_annotate ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
       (* The line the file received is composed the way the tool composed
          it, from the same three inputs and the same function, so the
          projection shows the comment that is in the file. *)
@@ -277,36 +240,25 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
                   match Lsp_process_manager.memo_line ~path:file_path memo with
                   | Error refusal ->
                       Error (Malformed (Lsp_process_manager.memo_line_refusal_to_string refusal))
-                  | Ok comment_line -> Ok (Some (Inserted { line; text = comment_line })))))
+                  | Ok comment_line ->
+                    Ok (Some (keeper, Inserted { line; text = comment_line })))))
       | Error detail, _, _ | _, Error detail, _ | _, _, Error detail -> Error detail)
-  | Keeper_tool_descriptor.Tool_peer_artifact -> (
+  | Keeper_tool_descriptor.Tool_peer_artifact ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
       (* One handler, two actions: [export] reads a file into the blob store
          and [materialize] writes a blob's bytes into a file. Only the second
-         is a file change, and the action is a field of the call's input, so
-         the handler-level [writes_files] cannot separate them. The artifact
-         is decoded with the handler's own decoder, so the projection reads
-         the shape the handler read rather than a second copy of it. *)
-      match required_string input "action" with
-      | Error detail -> Error detail
-      | Ok "export" -> Ok None
-      | Ok "materialize" -> (
-          match Json_field.assoc input "artifact" with
-          | Json_field.Field_absent -> Error (Malformed "artifact is absent")
-          | Json_field.Wrong_shape { expected; got } ->
-              Error (Malformed (Printf.sprintf "artifact is %s, expected %s" got expected))
-          | Json_field.Found fields -> (
-              match Keeper_peer_artifact_ref.of_json (`Assoc fields) with
-              | Ok reference ->
-                  Ok
-                    (Some
-                       (Materialized
-                          { sha256 = reference.blob.sha256
-                          ; bytes = reference.blob.bytes
-                          }))
-              | Error detail -> Error (Malformed ("artifact: " ^ detail))))
-      | Ok other ->
-          Error
-            (Malformed (Printf.sprintf "action is %s, expected export or materialize" other)))
+         is a file change. The handler and projection share this typed parser,
+         so a new action makes both exhaustive matches fail until classified. *)
+      match Keeper_peer_artifact_request.of_json input with
+      | Error detail -> Error (Malformed detail)
+      | Ok (Keeper_peer_artifact_request.Export _) -> Ok None
+      | Ok (Keeper_peer_artifact_request.Materialize { artifact; _ }) ->
+        Ok
+          (Some
+             ( keeper
+             , Materialized
+                 { sha256 = artifact.blob.sha256; bytes = artifact.blob.bytes }
+             )))
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files
   | Keeper_tool_descriptor.Tool_read_file
@@ -356,11 +308,7 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
   | Keeper_tool_descriptor.Tool_browser_goto
   | Keeper_tool_descriptor.Tool_browser_act
   | Keeper_tool_descriptor.Tool_browser_interact
-  | Keeper_tool_descriptor.Tool_analyze_image ->
-      (* Unreachable through [classify], which asks [writes_files] first. Named
-         so that adding a file-writing handler makes the compiler point here
-         too, instead of letting the new tool fall into a wildcard. *)
-      Ok None
+  | Keeper_tool_descriptor.Tool_analyze_image -> Ok None
 
 let classify row =
   match named_tool_of_row row with
@@ -370,29 +318,10 @@ let classify row =
          reported rather than counted as one. *)
       Unreadable (Malformed (Printf.sprintf "descriptor %s is not defined in this build" id))
   | Handler handler ->
-      if not (writes_files handler) then Not_a_file_change
-      else
-        let input =
-          match Json_field.assoc row "input" with
-          | Json_field.Found fields -> Ok (`Assoc fields)
-          | Json_field.Field_absent -> Error (Malformed "input is absent")
-          | Json_field.Wrong_shape { got = "string"; _ } ->
-              (* The log flattens a call's arguments to a preview string once
-                 they serialize past its inline budget
-                 ([Keeper_tool_call_log.max_output_len]). A string here is that
-                 and only that: nothing else in the writer produces one. The
-                 change happened; its text is not on disk to be read back. *)
-              Error Input_exceeded_log_budget
-          | Json_field.Wrong_shape { expected; got } ->
-              Error (Malformed (Printf.sprintf "input is %s, expected %s" got expected))
-        in
-        let parsed =
-          Result.bind input (fun input ->
-              Result.bind (required_string row "keeper") (fun keeper ->
-              Result.bind (kind_of_input ~handler ~keeper input) (fun kind ->
-                  match kind with
-                  | None -> Ok None
-                  | Some kind ->
+      let parsed =
+        Result.bind (kind_of_row ~handler row) (function
+          | None -> Ok None
+          | Some (keeper, kind) ->
                     let succeeded =
                       Option.value ~default:false
                         (Json_field.to_option (Json_field.bool row "success"))
@@ -422,12 +351,12 @@ let classify row =
                                  ; location = location_of_target ~target_path
                                  ; kind
                                  ; succeeded
-                                 })))))))
-        in
-        (match parsed with
-         | Ok None -> Not_a_file_change
-         | Ok (Some change) -> File_change change
-         | Error detail -> Unreadable detail)
+                                 })))))
+      in
+      (match parsed with
+       | Ok None -> Not_a_file_change
+       | Ok (Some change) -> File_change change
+       | Error detail -> Unreadable detail)
 
 type tally = {
   changes : t list;

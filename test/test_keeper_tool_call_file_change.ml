@@ -366,6 +366,13 @@ let test_read_is_not_a_change () =
   | Change.Unreadable _ -> fail "a read should classify, not come back Unreadable"
 ;;
 
+let test_read_does_not_parse_truncated_input () =
+  match classify (row ~descriptor_id:"agent.read_file" (`String "oversized input preview")) with
+  | Change.Not_a_file_change -> ()
+  | Change.File_change _ -> fail "a read is not a file change"
+  | Change.Unreadable _ -> fail "a read must not parse writing-tool input"
+;;
+
 (* Memory writes carry a [content] field of their own. Keying on the field
    would have swept them in; keying on the descriptor does not. *)
 let test_memory_write_is_not_a_file_change () =
@@ -656,15 +663,33 @@ let test_export_is_not_a_file_change () =
   | Change.Unreadable _ -> fail "export is a readable call that is not a change"
 ;;
 
+let test_export_uses_the_handlers_request_contract () =
+  List.iter
+    (fun input ->
+       expect_malformed
+         "an export rejected by the handler is not a readable export"
+         (row ~descriptor_id:"keeper.artifact.transfer" input))
+    [ `Assoc
+        [ ("action", `String "export")
+        ; ("path", `String "src.ml")
+        ; ("purpose", `String "")
+        ]
+    ; `Assoc
+        [ ("action", `String "export")
+        ; ("path", `String "src.ml")
+        ; ("purpose", `String "review")
+        ; ("artifact", `Assoc [])
+        ]
+    ]
+;;
+
 let test_materialize_unknown_action_is_unreadable () =
   match
     classify
       (row ~descriptor_id:"keeper.artifact.transfer"
          (`Assoc [ ("action", `String "teleport"); ("path", `String "x") ]))
   with
-  | Change.Unreadable (Change.Malformed detail) ->
-      check bool "the unknown action is named" true
-        (String_util.contains_substring detail "teleport")
+  | Change.Unreadable (Change.Malformed _) -> ()
   | Change.Unreadable Change.Input_exceeded_log_budget ->
       fail "an unknown action is not a budget problem"
   | Change.File_change _ -> fail "an unknown action cannot be read as a change"
@@ -702,6 +727,8 @@ let () =
         ] )
     ; ( "not a change"
       , [ test_case "read" `Quick test_read_is_not_a_change
+        ; test_case "read does not parse truncated input" `Quick
+            test_read_does_not_parse_truncated_input
         ; test_case "memory retract" `Quick test_memory_retract_is_not_a_file_change
         ; test_case "memory write" `Quick test_memory_write_is_not_a_file_change
         ; test_case "no route evidence" `Quick test_row_without_route_evidence_is_not_a_change
@@ -734,6 +761,8 @@ let () =
             test_materialize_is_a_file_change
         ; test_case "export is not a file change" `Quick
             test_export_is_not_a_file_change
+        ; test_case "export uses the handler request contract" `Quick
+            test_export_uses_the_handlers_request_contract
         ; test_case "unknown action is unreadable" `Quick
             test_materialize_unknown_action_is_unreadable
         ] )

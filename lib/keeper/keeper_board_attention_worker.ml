@@ -858,6 +858,7 @@ let execution_disposition partition = function
     Execution_blocked
       (before_advance_failure_reason partition ~cause ~failed ~next)
   | Exact_flow.Providers_exhausted _
+  | Exact_flow.Cli_slots_exhausted _
   | Exact_flow.Flow_bookkeeping_failed _ ->
     Execution_blocked
       (preserve_durable_progress partition Partition.Exact_execution_terminal)

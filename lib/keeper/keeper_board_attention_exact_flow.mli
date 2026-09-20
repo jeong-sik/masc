@@ -64,8 +64,19 @@ type 'callback_error execution_error =
   | Providers_exhausted of
       { attempts : attempt_provenance list
       ; detail : string
-          (** Why both transports gave up: the provider error's label and payload, and
-              the CLI tail's failures when it walked one. *)
+          (** Why the HTTP walk gave up: the provider error's label and
+              payload. The CLI tail, when the lane walks one, reports through
+              {!Cli_slots_exhausted} rather than being folded in here. *)
+      }
+  | Cli_slots_exhausted of
+      { prior_error : 'callback_error execution_error option
+          (** The HTTP failure the tail was walked after, or [None] on a
+              CLI-only lane, which has no HTTP walk. *)
+      ; failures : Keeper_lane_cli_oneshot.failure list
+          (** One per slot the tail walked, in the order it walked them.
+              Kept as the walker's own type: it separates an admission
+              refusal from an execution failure from a rejected answer, and
+              a reader counting those cannot recover them from a sentence. *)
       }
   | Flow_bookkeeping_failed of
       { attempts : attempt_provenance list

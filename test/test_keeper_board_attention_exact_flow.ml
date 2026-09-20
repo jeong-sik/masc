@@ -628,6 +628,40 @@ let test_cli_only_executes_without_http_provenance () =
            Alcotest.fail "a CLI answer recorded as a vendor answer"))))
 ;;
 
+(* A CLI-only lane has no HTTP failure behind it, so the failure it reports
+   carries the walked slots alone. [prior_error = None] is that fact, not a
+   missing field. *)
+let test_cli_only_failure_keeps_the_walked_slots () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-only-failed" in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "CLI-only Board lane must prepare"
+      in
+      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        Ok "not json"
+      in
+      match
+        Exact_flow.execute
+          ~cli_runner:runner
+          ~clock
+          ~before_dispatch:(fun _ -> Alcotest.fail "CLI-only must not bind an HTTP receipt")
+          ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "CLI-only must not advance HTTP")
+          prepared
+      with
+      | Error (Exact_flow.Cli_slots_exhausted { prior_error; failures }) ->
+        Alcotest.(check bool) "no HTTP failure is invented" true (Option.is_none prior_error);
+        Alcotest.(check int) "the one walked slot is kept" 1 (List.length failures)
+      | Error (Exact_flow.Providers_exhausted _) ->
+        Alcotest.fail "a CLI-only lane has no provider walk to exhaust"
+      | Error _ -> Alcotest.fail "a failed CLI-only walk must report its slots"
+      | Ok _ -> Alcotest.fail "a slot answering non-JSON must not produce a judgment")))
+;;
+
 (* The HTTP slot of [prepared_with_cli_tail] is a closed port, so [execute]
    exhausts it and walks the CLI tail, the path production takes when a quota
    pool is spent. Callbacks accept every binding. *)
@@ -758,6 +792,8 @@ let test_cli_tail_without_declared_slots_is_typed () =
           "the failure is the HTTP one, with no tail walked"
           false
           (contains_substring ~needle:"cli tail" detail)
+      | Error (Exact_flow.Cli_slots_exhausted _) ->
+        Alcotest.fail "a lane that declares no slot walked none, so none is exhausted"
       | Error _ -> Alcotest.fail "provider exhaustion must stay provider exhaustion"
       | Ok _ -> Alcotest.fail "a lane with no declared tail must not produce a judgment")))
 ;;
@@ -780,16 +816,29 @@ let test_cli_tail_rejects_a_verdict_for_another_candidate () =
                (judgment_output ~candidate_id:"some-other-candidate")))
       in
       match execute_with_tail ~clock ~runner prepared with
-      | Error (Exact_flow.Providers_exhausted { detail; _ }) ->
+      (* The failures arrive as the walker's own values, so the test asks the
+         type which slot refused and why -- not a sentence for the substring. *)
+      | Error (Exact_flow.Cli_slots_exhausted { prior_error; failures }) ->
         Alcotest.(check bool)
-          "the rejecting slot is named"
+          "the HTTP failure the tail followed is kept"
           true
-          (contains_substring ~needle:Fixture.cli_primary_runtime detail);
-        Alcotest.(check bool)
-          "the identity mismatch is reported"
-          true
-          (contains_substring ~needle:"identity mismatch" detail)
-      | Error _ -> Alcotest.fail "a rejected cli verdict must read as provider exhaustion"
+          (match prior_error with
+           | Some (Exact_flow.Providers_exhausted _) -> true
+           | Some _ | None -> false);
+        (match failures with
+         | [ failure ] ->
+           let rendered = Keeper_lane_cli_oneshot.failure_to_string failure in
+           Alcotest.(check bool)
+             "the rejecting slot is named"
+             true
+             (contains_substring ~needle:Fixture.cli_primary_runtime rendered);
+           Alcotest.(check bool)
+             "the identity mismatch is reported"
+             true
+             (contains_substring ~needle:"identity mismatch" rendered)
+         | failures ->
+           Alcotest.failf "walked one slot, kept %d failures" (List.length failures))
+      | Error _ -> Alcotest.fail "a rejected cli verdict must read as an exhausted tail"
       | Ok _ ->
         Alcotest.fail "a verdict naming another candidate must not become this judgment")))
 ;;
@@ -1130,6 +1179,10 @@ let () =
     [ ( "production adapter"
       , [ Alcotest.test_case "CLI-only Board judgments need no HTTP attempt" `Quick
             test_cli_only_executes_without_http_provenance
+        ; Alcotest.test_case
+            "a failed CLI-only walk keeps the slots it walked"
+            `Quick
+            test_cli_only_failure_keeps_the_walked_slots
         ; Alcotest.test_case
             "CLI domain mismatch advances with correct provenance"
             `Quick test_cli_tail_advances_after_wrong_candidate

@@ -25,7 +25,6 @@ type timeout_phase =
   | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
-  | Caller_budget
   | Wall_clock
   | Capacity_backpressure
   | Queue
@@ -34,8 +33,7 @@ type timeout_phase =
   | Unknown_timeout
 
 val timeout_phase_label : timeout_phase -> string
-(** Canonical phase label for public observations. Shared phases use the
-    HTTP client's formatter; [Caller_budget] belongs to the MASC vocabulary. *)
+(** Canonical phase label for public observations. *)
 
 type timeout_source = Keeper_turn_terminal_code.timeout_source =
   | Agent_core_api

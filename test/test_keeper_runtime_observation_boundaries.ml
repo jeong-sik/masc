@@ -200,12 +200,12 @@ let test_wire_only_provider_timeout_keeps_its_known_phase () =
   let terminal =
     Keeper_turn_terminal.of_disposition
       (Keeper_turn_disposition.Provider_error
-         (Keeper_turn_terminal_code.of_core_error_wire "provider_error_timeout:caller_budget"))
+         (Keeper_turn_terminal_code.of_core_error_wire "provider_error_timeout:queue"))
   in
   check_registry_observation terminal ~core_error:None
     ~expected:
-      (KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = Some KPB.Caller_budget })
-    ~expected_timeout_prefix:(Some "Provider timeout during caller_budget")
+      (KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = Some KPB.Queue })
+    ~expected_timeout_prefix:(Some "Provider timeout during queue")
 
 let test_api_specific_bridge_preserves_timeout_phase () =
   let error =

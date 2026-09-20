@@ -11,6 +11,16 @@ type stream_production =
   | Streaming_done
   | Streaming_unknown
 
+let stream_production_label = function
+  | Streaming_answer -> "streaming_answer"
+  | Streaming_thinking -> "streaming_thinking"
+  | Streaming_tool_call -> "streaming_tool_call"
+  | Streaming_heartbeat -> "streaming_heartbeat"
+  | Streaming_substrate -> "streaming_substrate"
+  | Streaming_done -> "streaming_done"
+  | Streaming_unknown -> "streaming_unknown"
+;;
+
 let stream_production_of_label = function
   | "streaming_answer" -> Some Streaming_answer
   | "streaming_thinking" -> Some Streaming_thinking
@@ -30,39 +40,23 @@ type timeout_phase =
   | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
-  | Caller_budget
   | Wall_clock
   | Capacity_backpressure
   | Queue
   | Unknown_timeout
 
-let timeout_phase_label phase =
-  let module Http = Llm_provider.Http_client in
-  let label = Http.timeout_phase_to_label in
-  match phase with
-  | First_token -> label Http.First_token
-  | Http_operation -> label Http.Http_operation
-  | Non_streaming_body -> label Http.Non_streaming_body
-  | Stream_body -> label Http.Stream_body
-  | Stream_idle production ->
-    let production =
-      match production with
-      | Streaming_answer -> Http.Streaming_answer
-      | Streaming_thinking -> Http.Streaming_thinking
-      | Streaming_tool_call -> Http.Streaming_tool_call
-      | Streaming_heartbeat -> Http.Streaming_heartbeat
-      | Streaming_substrate -> Http.Streaming_substrate
-      | Streaming_done -> Http.Streaming_done
-      | Streaming_unknown -> Http.Streaming_unknown
-    in
-    label (Http.Stream_idle production)
-  | Provider_step -> label Http.Provider_step
-  | Cli_stdout_idle -> label Http.Cli_stdout_idle
-  | Caller_budget -> "caller_budget"
-  | Wall_clock -> label Http.Wall_clock
-  | Capacity_backpressure -> label Http.Capacity_backpressure
-  | Queue -> label Http.Queue
-  | Unknown_timeout -> label Http.Unknown_timeout
+let timeout_phase_label = function
+  | First_token -> "first_token"
+  | Http_operation -> "http_operation"
+  | Non_streaming_body -> "non_streaming_body"
+  | Stream_body -> "stream_body"
+  | Stream_idle production -> "stream_idle:" ^ stream_production_label production
+  | Provider_step -> "provider_step"
+  | Cli_stdout_idle -> "cli_stdout_idle"
+  | Wall_clock -> "wall_clock"
+  | Capacity_backpressure -> "capacity_backpressure"
+  | Queue -> "queue"
+  | Unknown_timeout -> "unknown_timeout"
 ;;
 
 let timeout_phase_of_label label =
@@ -92,7 +86,6 @@ let timeout_phase_of_label label =
     | "stream_idle" -> Some (Stream_idle Streaming_unknown)
     | "provider_step" -> Some Provider_step
     | "cli_stdout_idle" -> Some Cli_stdout_idle
-    | "caller_budget" -> Some Caller_budget
     | "wall_clock" | "wall_clock_timeout" | "wall_exceeded" | "max_execution_time" ->
       Some Wall_clock
     | "capacity_backpressure" | "client_capacity" | "client_capacity_full" ->

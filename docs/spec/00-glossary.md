@@ -9,8 +9,8 @@ status: reference
 ## Core
 
 **MASC**
-: 다중 에이전트의 Board, Task, Goal, Schedule, Keeper와 도구 실행을 조율하는
-  OCaml/Eio 서버.
+: Multi-Agent Shared Context의 약어. 다중 에이전트의 Board, Task, Goal, Schedule,
+  Keeper와 도구 실행을 조율하는 OCaml/Eio 서버.
 
 **agent core**
 : `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를
@@ -31,11 +31,25 @@ status: reference
 : Human-in-the-Loop의 약어. Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로다.
   대기 중인 HITL 판정은 다른 Keeper의 턴이나 서로 독립인 작업을 멈추지 않는다.
 
+**Surface**
+: 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
+  입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
+
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
+**Heartbeat**
+: Workspace에서 Agent의 `last_seen`을 갱신하는 명시적 liveness 작업. 성공은
+  `Heartbeat_updated`일 때만 뜻하며, 잘못된 Agent 파일이나 없는 Agent는 생존 증거가 아니다.
+  → [Workspace_gc.heartbeat](../../lib/workspace/workspace_gc.mli)
+
 **Agent**
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
+
+**Agent Core**
+: `packages/agent_core`로 제공되는 재사용 모델 실행 계층. Agent 구성, tool turn,
+  provider 요청, typed response와 실패를 소유하며, MASC는 제품 오케스트레이션을
+  소유한다. 코드 식별자는 `agent_core`와 `Agent_core`다.
 
 **Keeper**
 : 독립된 agent core checkpoint와 MASC lifecycle을 가진 장기 실행 Agent. 현재 typed
@@ -129,6 +143,10 @@ status: reference
   판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
   구간의 소유자다.
 
+**Evidence**
+: 관찰·검증·전환이 실제 근거에 연결되었음을 나타내는 typed reference. `evidence_refs`
+  같은 필드로 전달하며, 설명 문장만으로 근거를 대신하지 않는다.
+
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
@@ -136,8 +154,8 @@ status: reference
   `Completed`가 된다(`lib/goal/goal_phase.mli`).
 
 **Schedule**
-: 미래 시점에 Keeper를 깨우는 durable 요청. 현재 동작은 create, list, get,
-  cancel이다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
+: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와
+  기록 추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행.
@@ -145,6 +163,64 @@ status: reference
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
+
+## Task Lifecycle
+
+**Created By**
+: Task 를 만든 에이전트나 사람의 이름(`created_by`). 만들 때 한 번 적히고 바뀌지 않는다.
+  Keeper 는 자기가 만든 `Todo` 를 자동 claim 대상에서 뺀다.
+
+**Assignee**
+: `Claimed`, `InProgress`, `AwaitingVerification` 에 적힌 에이전트 이름. 앞의 둘에서는
+  지금 일을 맡은 쪽이고, `AwaitingVerification` 에서는 제출한 쪽이다.
+
+**Producer**
+: 판정 쪽 코드가 제출한 에이전트를 부르는 이름. 이 RFC의 1단계가
+  `AwaitingVerification.assignee`도 `producer`로 바꾼다. 이후 새 Task 생애주기
+  코드는 제출자를 `producer`로만 부른다. verification 레코드의 외부 스키마 키
+  `worker`는 남지만 Task 소유권이나 관계를 찾는 키로 사용하지 않는다.
+
+**Claim**
+: `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
+  가질 수 있고, 이 검사는 claim 할 때만 한다. Keeper 의 claim 은 곧바로 Start 를 이어
+  보낸다.
+
+**Release**
+: 맡은 쪽이 Task 를 `Todo` 로 돌려놓는 전이. Handoff Context 를 남긴다.
+
+**Submission**
+: 맡은 쪽이 증거와 함께 완료를 내는 전이(`Submit_for_verification`). 상태는
+  `AwaitingVerification` 이 되고 새 Verification ID 를 받는다. 판정을 기다리는 Task 는
+  claim 한도에 세지 않는다. Producer 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
+  바뀐다.
+
+**Verification ID**
+: 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
+
+**Completion Authority**
+: 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
+  경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다. 취소 요청은
+  운영자만 승인한다.
+
+**Verdict**
+: `Verdict_approved` 또는 `Verdict_rejected { reason }`. 완료 제출의 승인은 `Done`, 취소
+  요청의 승인은 `Cancelled`, 반려는 어느 쪽이든 Producer 의 `InProgress` 다.
+
+**Handoff Context**
+: Task 에 붙어 다니는 인계 메모. summary, reason, next_step, evidence_refs, updated_by
+  를 담는다. Release, Submission, cancel 이 쓰고 Claim 과 Start 는 지우지 않는다. 반려
+  판정은 이 메모를 판정 사유로 덮어쓴다.
+
+**Evidence Reference**
+: 제출에 다는 증거 참조. `artifact:`, `note:`, `board:`, `fusion:` 네 형식만 열린다.
+
+**Operator Attention**
+: 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는 `Cancel_claim`,
+  `Held_without_actor`, `Producer_record_unreadable` 이다.
+
+**Current Task**
+: 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current
+  task. 기준은 backlog 이고 이 셋은 거기서 다시 계산되는 표시다.
 
 ## Skills
 
@@ -216,7 +292,11 @@ status: reference
   Keeper turn은 이 목록 끝에 message를 덧붙인다. 목록 안에는 어느 message가 어느
   Keeper turn의 것인지 표시가 없다.
   `keeper_memory_search`가 여러 저장 위치의 사용자 본문을 합칠 때에는 추출한 본문
-  전체의 일치로 중복을 판정한다.
+  전체의 일치로 중복을 판정한다. 현재 Working Context, 현재 trace의 저장된 메시지,
+  `trace_history`에 기록된 trace 순서로 검색하며, 각 위치에서는 최신 메시지부터 읽는다.
+  검색 결과 수는 검색어와 일치하고 중복되지 않는 본문에 적용한다. 그 전에 후보 메시지나
+  원문 줄 수를 제한하지 않는다. 읽지 못한 파일·행은 `history_read_errors`로 알리며,
+  불완전한 빈 검색 결과를 `no_match`로 표시하지 않는다.
   운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
   진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
 
@@ -238,9 +318,10 @@ status: reference
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
 
 **Model Input Ledger (모델 입력 원장)**
-: Keeper·runtime·trace별로 공급자 usage와 실린 Atom 범위를 기록한 프로세스 내 원장.
+: Keeper·runtime·trace별로 응답에서 확인한 Atom 범위와 제공된 usage를 기록한 프로세스 내 원장.
+  상한 판정과 거절 뒤 이동은 후보 안의 작업값에 적용하고, 응답 관측으로 원장을 갱신한다.
   원장이 아직 세지 않은 위치까지 거절이 앞을 옮길 수 있다. 이때 다음 요청은 턴이
-  보관한 Carried Front를 쓰고, 공급자 응답이 온 뒤 원장을 갱신한다.
+  보관한 Carried Front를 쓴다.
 
 **Turn Boundary**
 : 끝난 Keeper turn이 남기는 한 줄(`keepers/<keeper>/turn-boundaries.jsonl`).

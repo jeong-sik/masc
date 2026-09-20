@@ -10,6 +10,7 @@ import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
+import type { TurnAnchor } from '../keeper-turn-inspector'
 import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
 import type { ChatComposerCommand } from '../chat/primitives'
@@ -493,11 +494,20 @@ function TurnInspectorDrawer({
   onClose: () => void
 }) {
   // Thin chat-specific wrapper over the shared TurnInspectorDrawer: maps the
-  // chat entry to the drawer's anchor props (turnRef + timestamp window) and
+  // chat entry to the drawer's exact turn reference and
   // header label. The shared component owns the overlay markup so the board
   // surface (post-detail) reuses the identical drawer. testId is preserved so
   // existing chat tests keep their `kw-chat-turn-inspector-*` selectors.
   if (!open) return null
+
+  let anchor: TurnAnchor
+  if (!triggerEntry) {
+    anchor = { kind: 'no-origin' }
+  } else if (triggerEntry.turnRef == null) {
+    anchor = { kind: 'unreferenced' }
+  } else {
+    anchor = { kind: 'ref', value: triggerEntry.turnRef }
+  }
 
   return html`
     <${Suspense} fallback=${html`<div class="fixed inset-0 z-50 flex justify-end bg-black/40" role="dialog" aria-modal="true" aria-label="턴 검사">턴 검사 로딩…</div>`}>
@@ -507,8 +517,7 @@ function TurnInspectorDrawer({
         subtitle=${triggerEntry
           ? `메시지 ${triggerEntry.label} · ${triggerEntry.timestamp ?? triggerEntry.id}`
           : null}
-        initialTurnRef=${triggerEntry?.turnRef ?? null}
-        initialTurnTimestamp=${triggerEntry?.timestamp ?? null}
+        anchor=${anchor}
         open=${true}
         onClose=${onClose}
       />

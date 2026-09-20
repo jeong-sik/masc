@@ -33,6 +33,7 @@ val run :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -64,12 +65,17 @@ module For_testing : sig
     -> goal:string
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
+    -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
+    -> keeper_name:string
+    -> runtime_id:string
     -> Agent_core.Agent.model_input_projection option
     -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
-  (** Runs the source projection before applying the declared byte window, so
-      a Gate replay reference is counted in the provider-bound input. Refuses
-      an undeclared window: Antigravity has no typed overflow response from
-      which MASC could derive a safe retry capacity. *)
+  (** Starts from the admitted carried front, runs the source projection, then
+      applies the declared byte window. Thus a Gate replay reference is
+      charged to the provider-bound input without becoming a front in the
+      durable checkpoint vocabulary. Refuses an undeclared window:
+      Antigravity has no typed overflow response from which MASC could derive
+      a safe retry capacity. *)
 
   val start_prompt_bytes :
     system_prompt:string ->

@@ -114,43 +114,60 @@ let prompt_section_framing_reserved_bytes () =
   + (2 * String.length prompt_section_separator)
 ;;
 
-(* The source projection runs first: the one production source appends a
-   bounded Gate replay reference. The admission window therefore runs after
-   it and observes exactly the messages that can reach the CLI. *)
+(* The carried front is a position in durable checkpoint history, so admit it
+   before the source projection appends its bounded Gate replay reference.
+   The byte window still runs last and therefore charges every message that
+   can reach the CLI. Its observation is mapped back to the durable history:
+   a source-only atom is transmitted context, but cannot become a front that
+   a later checkpoint history is expected to open. *)
 let bounded_history_projection ~capacity_bytes ~reserved_bytes
-    ?on_model_input_window_observation source_projection
+    ?on_model_input_window_observation ?carried_front_seed ~keeper_name
+    ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
-  fun messages ->
-  let* messages =
+  fun history_messages ->
+  let carried =
+    Host.carried_start_range
+      ~keeper_name
+      ~runtime_id
+      ~carried_front_seed
+      ~own_first_atom:0
+      history_messages
+  in
+  let* projected_messages =
     match source_projection with
-    | None -> Ok messages
-    | Some project -> project messages
+    | None -> Ok carried.Host.messages
+    | Some project -> project carried.Host.messages
   in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    (* Atoms, not messages: the window's front is named by the message that
-       opens atom [total_atoms - transmitted_atoms], so both counts have to
-       be the atoms [Runtime_model_input_tail_window.annotate] numbers. *)
-    let _labelled, history_atom_count =
-      Runtime_model_input_tail_window.annotate messages
-    in
     match
       Runtime_model_input_tail_window.project_with_drop
         ~allow_empty_history:true
         ~measure_message_bytes:measure_model_input_message_bytes
         ~capacity_bytes
         ~reserved_bytes
-        messages
+        projected_messages
     with
     | Ok projection ->
+      let carried_atoms =
+        carried.Host.projection.atom_count - carried.Host.projection.dropped_atoms
+      in
+      let durable_dropped = Int.min projection.dropped_atoms carried_atoms in
+      let transmitted_atoms = carried_atoms - durable_dropped in
       Option.iter
         (fun observe ->
-           Option.iter
-             observe
-             (Runtime_model_input_tail_window.observe
-                ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-                ~history_atom_count
-                projection))
+           if transmitted_atoms > 0
+           then
+             Option.iter
+               (fun front_atom_digest ->
+                  observe
+                    { Runtime_model_input_tail_window.transmitted_atoms
+                    ; total_atoms = carried.Host.history_atom_count
+                    ; front_atom_digest
+                    })
+               (Runtime_model_input_tail_window.atom_opening_digest
+                  history_messages
+                  (carried.Host.history_atom_count - transmitted_atoms)))
         on_model_input_window_observation;
       Ok projection.messages
     | Error error ->
@@ -158,7 +175,8 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
-    ~system_prompt ~goal ?on_model_input_window_observation source_projection
+    ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
+    ~keeper_name ~runtime_id source_projection
   =
   match declared_max_prompt_bytes with
   | None ->
@@ -188,6 +206,9 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
               ~capacity_bytes
               ~reserved_bytes
               ?on_model_input_window_observation
+              ?carried_front_seed
+              ~keeper_name
+              ~runtime_id
               source_projection))
 ;;
 
@@ -358,6 +379,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
+    ~carried_front_seed
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -486,7 +508,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~system_prompt
         ~tools
         ~initial_messages
-        ~model_input_projection
+        ~model_input_projection:(if is_resume then model_input_projection else None)
         ~hooks:(Some hooks)
     in
     let* () =
@@ -513,7 +535,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~system_prompt:prepared.system_prompt
             ~goal
             ?on_model_input_window_observation
-            None
+            ?carried_front_seed
+            ~keeper_name
+            ~runtime_id
+            model_input_projection
         in
         let* messages =
           match capacity_projection with
@@ -1135,6 +1160,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?carried_front_seed
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
@@ -1154,6 +1180,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~runtime_id
         ~keeper_name
         ~on_model_input_window_observation
+        ~carried_front_seed
     ~pre_tool_rejects
         ~base_path
         ~goal

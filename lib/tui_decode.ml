@@ -2558,6 +2558,7 @@ type memory_fact_snapshot = {
   mfs_keeper : string;
   mfs_ordinary : memory_ordinary_store memory_store_reading;
   mfs_source : memory_source_store memory_store_reading;
+  mfs_events_read_error : string option;
 }
 
 type harness_verdict = {
@@ -5137,6 +5138,7 @@ let decode_memory_source_store json =
 
 let decode_memory_fact_snapshot json =
   let* mfs_keeper = required_string_field json "keeper" in
+  let* mfs_events_read_error = required_nullable_string_field json "events_read_error" in
   let* ordinary_json = required_member json "ordinary" in
   let* mfs_ordinary =
     decode_memory_store_reading ~label:"ordinary" decode_memory_ordinary_store
@@ -5147,7 +5149,7 @@ let decode_memory_fact_snapshot json =
     decode_memory_store_reading ~label:"source_bound"
       decode_memory_source_store source_json
   in
-  Ok { mfs_keeper; mfs_ordinary; mfs_source }
+  Ok { mfs_keeper; mfs_ordinary; mfs_source; mfs_events_read_error }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in

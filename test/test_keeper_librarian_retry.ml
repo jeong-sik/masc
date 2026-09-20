@@ -1303,7 +1303,11 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
         in
         check (list string) "no append errors" []
           (List.map Events.append_error_to_string append_errors);
-        let read_events = Events.read ~keepers_dir ~keeper_id in
+        let read_events =
+          match Events.read ~keepers_dir ~keeper_id with
+          | Ok rows -> rows
+          | Error error -> fail (Events.file_read_error_to_string error)
+        in
         check int "one event read from sidecar" 1 (List.length read_events);
 
         Domain_pool_ref.clear_for_tests ()))

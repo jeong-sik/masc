@@ -151,6 +151,12 @@ let events_only rows =
     rows
 ;;
 
+let read_ok ~keepers_dir ~keeper_id =
+  match Events.read ~keepers_dir ~keeper_id with
+  | Ok rows -> rows
+  | Error error -> fail (Events.file_read_error_to_string error)
+;;
+
 let test_append_then_read_in_order () =
   with_temp_keepers @@ fun keepers_dir ->
   let keeper_id = "keeper" in
@@ -166,14 +172,15 @@ let test_append_then_read_in_order () =
        | Ok () -> ()
        | Error error -> fail (Events.append_error_to_string error))
     written;
-  let rows = Events.read ~keepers_dir ~keeper_id in
+  let rows = read_ok ~keepers_dir ~keeper_id in
   check (list int) "indices follow file order" [ 0; 1; 2 ] (List.map fst rows);
   check (list event_testable) "every row reads back" written (events_only rows)
 ;;
 
 let test_missing_sidecar_reads_as_no_events () =
   with_temp_keepers @@ fun keepers_dir ->
-  check int "no file, no rows" 0 (List.length (Events.read ~keepers_dir ~keeper_id:"nobody"))
+  check int "no file, no rows" 0
+    (List.length (read_ok ~keepers_dir ~keeper_id:"nobody"))
 ;;
 
 let test_unreadable_line_stays_in_the_list () =
@@ -188,7 +195,7 @@ let test_unreadable_line_stays_in_the_list () =
   let oc = open_out path in
   output_string oc (good ^ "\n" ^ "not json\n" ^ "\n" ^ stale ^ "\n" ^ good ^ "\n");
   close_out oc;
-  let rows = Events.read ~keepers_dir ~keeper_id in
+  let rows = read_ok ~keepers_dir ~keeper_id in
   check int "blank line does not count" 4 (List.length rows);
   let tag (index, row) =
     match row with
@@ -229,7 +236,7 @@ let test_retraction_hard_cut_preserves_other_rows () =
                Events.event_to_json (retrieved ~at:3. "kept") ] in
   List.iter (Fs_compat.append_jsonl
       (Events.path_for_keepers_dir ~keepers_dir ~keeper_id)) rows;
-  let read = Events.read ~keepers_dir ~keeper_id in
+  let read = read_ok ~keepers_dir ~keeper_id in
   (match read with
    | (0, Error (Events.Malformed _)) :: _ -> ()
    | _ -> fail "the obsolete cited row must stay as a named read error");
@@ -255,7 +262,18 @@ let test_append_all_returns_only_the_failures () =
      check_names "the failure names the field" "memory_id" (Types.wire_error_to_string error)
    | _ -> fail "expected the invalid event's own rejection");
   check int "the valid ones were written" 2
-    (List.length (events_only (Events.read ~keepers_dir ~keeper_id)))
+    (List.length (events_only (read_ok ~keepers_dir ~keeper_id)))
+;;
+
+let test_sidecar_read_failure_is_not_empty_history () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let parent = Filename.concat keepers_dir "not-a-directory" in
+  Fs_compat.save_file parent "occupied";
+  match Events.read ~keepers_dir:parent ~keeper_id:"keeper" with
+  | Error { path; message = _ } ->
+    check string "failed sidecar path is retained"
+      (Events.path_for_keepers_dir ~keepers_dir:parent ~keeper_id:"keeper") path
+  | Ok _ -> fail "a non-directory sidecar parent must not become empty history"
 ;;
 
 (* ---------- projection ---------- *)
@@ -332,6 +350,8 @@ let () =
             test_append_refuses_what_read_would_refuse
         ; test_case "append_all returns only the failures" `Quick
             test_append_all_returns_only_the_failures
+        ; test_case "a sidecar read failure is not empty history" `Quick
+            test_sidecar_read_failure_is_not_empty_history
         ] )
     ; ( "projection"
       , [ test_case "the summary counts only this fact" `Quick test_summary_counts_only_this_fact

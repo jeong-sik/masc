@@ -574,6 +574,7 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
         + (match snapshot.mfs_source with
            | Memory_store_read_error _ -> 1
            | Memory_store_absent | Memory_store_present _ -> 0)
+        + (match snapshot.mfs_events_read_error with None -> 0 | Some _ -> 1)
   in
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
@@ -709,7 +710,12 @@ let render_memory_facts_body ~cols ~budget (state : state)
         | Memory_store_read_error detail ->
             push_styled ~style:(Theme.bad ())
               ("  source-bound store: " ^ Terminal_text.single_line detail)
-        | Memory_store_absent | Memory_store_present _ -> ()));
+        | Memory_store_absent | Memory_store_present _ -> ());
+       (match snapshot.mfs_events_read_error with
+        | None -> ()
+        | Some detail ->
+          push_styled ~style:(Theme.bad ())
+            ("  events sidecar: " ^ Terminal_text.single_line detail)));
   let col_header =
     if is_fleet then
       Printf.sprintf "  %-10s %-12s %6s %s" "KEEPER" "CATEGORY" "AGE" "CLAIM / BOUND PATH"

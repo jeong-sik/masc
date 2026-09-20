@@ -3752,12 +3752,14 @@ let test_decode_memory_health_rejects_stale_schema () =
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
     (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
 
-let memory_fact_snapshot_json ~ordinary ~source_bound =
+let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound =
   `Assoc
     [ "keeper", `String "alpha"
     ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-facts"
     ; "ordinary", ordinary
     ; "source_bound", source_bound
+    ; ( "events_read_error"
+      , match events_read_error with None -> `Null | Some detail -> `String detail )
     ]
 
 let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(retracted = 0)
@@ -3952,7 +3954,22 @@ let test_decode_memory_facts_keeps_store_states_apart () =
        | Tui_decode.Memory_store_absent -> ()
        | Tui_decode.Memory_store_read_error _
        | Tui_decode.Memory_store_present _ ->
-           Alcotest.fail "an absent store must stay absent")
+          Alcotest.fail "an absent store must stay absent")
+
+let test_decode_memory_facts_keeps_event_read_error () =
+  let json =
+    memory_fact_snapshot_json
+      ~events_read_error:"memory event sidecar read failed: permission denied"
+      ~ordinary:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ])
+  in
+  match Tui_decode.decode_memory_fact_snapshot json with
+  | Error error -> Alcotest.fail error
+  | Ok snapshot ->
+    Alcotest.(check (option string))
+      "sidecar failure is not empty history"
+      (Some "memory event sidecar read failed: permission denied")
+      snapshot.Tui_decode.mfs_events_read_error
 
 let test_decode_memory_facts_rejects_a_shapeless_store () =
   (* Neither read_error nor present: the store object answers nothing, and
@@ -9133,6 +9150,8 @@ let () =
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick
           test_decode_memory_facts_keeps_store_states_apart;
+        Alcotest.test_case "memory facts keep event read errors" `Quick
+          test_decode_memory_facts_keeps_event_read_error;
         Alcotest.test_case "memory facts reject a shapeless store" `Quick
           test_decode_memory_facts_rejects_a_shapeless_store;
         Alcotest.test_case "project changes keep project scope" `Quick

@@ -402,6 +402,7 @@ let test_render_memory_facts_body () =
     { mfs_keeper = "alpha"
     ; mfs_ordinary = Decode.Memory_store_present store
     ; mfs_source = Decode.Memory_store_absent
+    ; mfs_events_read_error = None
     }
   in
   state.memory_facts <- Some snapshot;
@@ -473,6 +474,7 @@ let test_rows_and_header_share_one_grid () =
        { mfs_keeper = "alpha"
        ; mfs_ordinary = Decode.Memory_store_present store
        ; mfs_source = Decode.Memory_store_absent
+       ; mfs_events_read_error = None
        };
   state.memory_facts_cursor <- 0;
   let styled = ref [] in
@@ -552,6 +554,7 @@ let three_kinds_state ?(keeper = "alpha") () =
        { mfs_keeper = keeper
        ; mfs_ordinary = Decode.Memory_store_present ordinary
        ; mfs_source = Decode.Memory_store_present source
+       ; mfs_events_read_error = None
        };
   state.memory_facts_cursor <- 0;
   state
@@ -903,6 +906,7 @@ let test_facts_selection_follows_the_rendered_viewport () =
     ; mfs_ordinary = Decode.Memory_store_present
         { mos_revision = 1; mos_updated_at = 200.0; mos_facts = facts }
     ; mfs_source = Decode.Memory_store_read_error "source unavailable"
+    ; mfs_events_read_error = None
     };
   let assert_visible ~cols ~budget () =
     let used = ref 0 and selected = ref [] in
@@ -943,6 +947,29 @@ let test_facts_selection_follows_the_rendered_viewport () =
   move ~cols:80 ~budget:18 0
 ;;
 
+let test_event_sidecar_read_error_is_visible () =
+  let state = make_state () in
+  state.memory_facts <-
+    Some
+      { Decode.mfs_keeper = "alpha"
+      ; mfs_ordinary = Decode.Memory_store_absent
+      ; mfs_source = Decode.Memory_store_absent
+      ; mfs_events_read_error = Some "permission denied"
+      };
+  let styled = ref [] in
+  Render_memory.render_memory_facts_body
+    ~cols:100
+    ~budget:16
+    state
+    ~push:(fun _ -> ())
+    ~push_styled:(fun ~style:_ line -> styled := line :: !styled)
+    ~push_selected:(fun _ -> ())
+    ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  check bool "the sidecar failure is shown to the operator" true
+    (List.exists (contains "events sidecar: permission denied") !styled)
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -970,6 +997,8 @@ let () =
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
         ; test_case "facts selection follows the rendered viewport" `Quick
             test_facts_selection_follows_the_rendered_viewport
+        ; test_case "event sidecar read errors are visible" `Quick
+            test_event_sidecar_read_error_is_visible
         ; test_case "an empty memory page uses the shared notes" `Quick
             test_an_empty_memory_page_uses_the_shared_notes
         ] )

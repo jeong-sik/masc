@@ -1718,25 +1718,29 @@ let test_absorbed_facts_are_searchable () =
          (json_field "into_current" matched = `Bool true))
     absorbed;
   Alcotest.(check (list string))
-    "all returns the current facts, then the absorbed ones"
-    [ "current_memory_snapshot"
-    ; "current_memory_snapshot"
-    ; "absorbed_memory"
-    ; "absorbed_memory"
-    ]
+    "all leaves out the rows whose claim answers too"
+    [ "current_memory_snapshot"; "current_memory_snapshot" ]
     (List.filter_map
        (function
          | `Assoc fields -> Option.map Yojson.Safe.Util.to_string (List.assoc_opt "store" fields)
          | _ -> None)
        (matches (search "all")));
   Alcotest.(check (list string))
-    "the default search returns the current facts, then the absorbed ones"
-    [ "gamma deploys on friday"
-    ; "alpha and beta deploy on tuesday"
-    ; "beta deploys on tuesday"
-    ; "alpha deploys on tuesday"
-    ]
+    "the default search answers with the merged claim, not the rows it absorbed"
+    [ "gamma deploys on friday"; "alpha and beta deploy on tuesday" ]
     (List.map (string_field "text") (matches (search "memory")));
+  let search_for query source =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String query; "source", `String source; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check (list string))
+    "a row whose claim does not answer is the only way to what it says and stays"
+    [ "gamma deploys on friday"; "beta deploys on tuesday"; "alpha deploys on tuesday" ]
+    (List.map (string_field "text") (matches (search_for "deploys" "memory")));
   let channel =
     open_out_gen
       [ Open_wronly; Open_append ]

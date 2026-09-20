@@ -594,9 +594,28 @@ let keeper_memory_search_with_outcome
              then search_history ~config ~meta ~ctx_work ~query ~limit
              else empty_history_search
            in
+           (* A librarian made one claim of the rows it absorbed (RFC-0456
+              §4.2). When that claim answers this search too, the rows say
+              the same thing again and are left out, so the claim is not
+              undone by its own sources crowding the limit. A row whose claim
+              does not answer is the only way to what it says and stays. *)
+           let answering_claims =
+             List.filter_map
+               (fun (m : fact_match) ->
+                  match m.identity with
+                  | Ordinary_memory_id id -> Some id
+                  | Source_sha256 _ -> None)
+               fact_matches
+           in
+           let absorbed_matches =
+             List.filter
+               (fun (m : absorbed_match) ->
+                  not (List.mem m.row.Keeper_memory_absorbed.into answering_claims))
+               absorbed.matches
+           in
            let candidates =
              List.map (fun match_ -> All_fact match_) fact_matches
-             @ List.map (fun match_ -> All_absorbed match_) absorbed.matches
+             @ List.map (fun match_ -> All_absorbed match_) absorbed_matches
              @ List.map (fun message -> All_history message) history.matches
            in
            let whole_query, fragments =

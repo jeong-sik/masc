@@ -626,6 +626,17 @@ let new_board_attention_run ~before =
   | None -> Alcotest.fail "board attention exact run was not recorded"
 ;;
 
+let new_board_attention_run_full ~before =
+  let summary = new_board_attention_run ~before in
+  match
+    Exact_lane_run_registry.get
+      (Exact_lane_run_registry.global ())
+      ~run_id:summary.run_id
+  with
+  | Some run -> run
+  | None -> Alcotest.fail "board attention exact run payload was not retained"
+;;
+
 let check_cli_run_selected ~before ~slot_id =
   match (new_board_attention_run ~before).Exact_lane_run_registry.status with
   | Exact_lane_run_registry.Completed
@@ -1496,6 +1507,8 @@ type jev_run =
   ; jev_request_bodies : string list
   ; llm_posts : int
   ; terminal_jev : Yojson.Safe.t list
+  ; exact_selected_slot : string option
+  ; exact_output : Yojson.Safe.t
   }
 
 (* Runs the exact flow with Jev switched on and answering [jev_choice], in
@@ -1524,12 +1537,27 @@ let execute_behind_jev ~name ~jev_choice =
       in
       with_jev ~endpoint:jev.base_url (fun () ->
         let since_seq = last_log_seq () in
+        let before = board_attention_run_ids () in
         let result =
           Exact_flow.execute
             ~clock
             ~before_dispatch:(fun _ -> Ok ())
             ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
             prepared
+        in
+        let exact_selected_slot, exact_output =
+          match (new_board_attention_run_full ~before).Exact_lane_run_registry.status with
+          | Exact_lane_run_registry.Completed
+              { outcome = Exact_lane_run_registry.Succeeded
+              ; selected_slot
+              ; output
+              ; _
+              } ->
+            selected_slot, output
+          | Exact_lane_run_registry.Running
+          | Exact_lane_run_registry.Completed _
+          | Exact_lane_run_registry.Completion_persistence_failed _ ->
+            Alcotest.fail "Jev fixture did not close the exact run as succeeded"
         in
         { result
         ; jev_posts = Fixture.post_count jev
@@ -1538,6 +1566,8 @@ let execute_behind_jev ~name ~jev_choice =
         ; llm_posts = Fixture.post_count llm
         ; terminal_jev =
             terminal_jev_entries ~since_seq ~candidate_id:candidate.candidate_id
+        ; exact_selected_slot
+        ; exact_output
         })))
 ;;
 
@@ -1590,6 +1620,14 @@ let test_jev_relevant_is_kept () =
   | Ok judgment ->
     Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
     Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+    Alcotest.(check (option string))
+      "Vendor System One does not fabricate a selected slot"
+      None
+      run.exact_selected_slot;
+    Alcotest.(check bool)
+      "the exact-run output keeps the accepted judgment"
+      true
+      (run.exact_output = Candidate.judgment_to_yojson judgment);
     (match judgment.Candidate.source with
      | Candidate.Vendor_system_one provenance ->
        let expected = expected_jev_provenance run in

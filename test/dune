@@ -2016,6 +2016,12 @@
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
 
+; Real Keeper/Board completion and durable ACK; CI supplies Docker explicitly.
+(test
+ (name test_keeper_board_turn_ack)
+ (modules test_keeper_board_turn_ack)
+ (libraries masc_test_deps exact_output_fixture eio_main unix))
+
 ; Production Board-attention adapter proof over the provider-neutral AGENT_CORE lane.
 (test
  (name test_keeper_board_attention_exact_flow)

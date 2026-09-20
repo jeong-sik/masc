@@ -16,8 +16,15 @@ which this script writes and checks, and which the OCaml test reads:
     python3 scripts/librarian/statements.py --check test/fixtures/librarian_statements_golden.json
 
 The inputs in the golden are fixed below; they hold no keeper memory text.
-Whitespace is ASCII whitespace on both sides (the scorer used Python's
-Unicode \\s; memories with non-ASCII whitespace would cut differently there).
+
+Whitespace policy, the same on both sides: only ASCII whitespace (space,
+tab, CR, LF, FF, VT) is a boundary or is stripped. A non-ASCII space
+(U+00A0, U+202F, U+3000, ...) is an ordinary character inside a statement.
+The scorer that produced the calibration in #37079 used Python's Unicode
+\\s; none of the 196 calibration sources held a non-ASCII space, and 4 of
+the 35,613 memory texts on this machine did (all U+202F), measured on
+2026-09-21, so the calibration holds under this policy and the golden below
+pins it with such characters.
 """
 import json
 import re
@@ -62,6 +69,9 @@ GOLDEN_INPUTS = [
     "— a dash with no space before it is kept, and this sentence stands\nsecond line ends without a period",
     "했다.그리고 바로 이어진다. 마침표 뒤 공백이 없어도 다. 는 자른다! 느낌표 뒤도 자른다? 물음표 뒤도 자른다.",
     "a; b; c; d; e; f; g; h; i; j; k; l; m; n; o; p; q; r; s; t; u; v; w; x; y; z; short pieces gather until twenty characters",
+    # Non-ASCII spaces are not boundaries and are not stripped: U+00A0 after the
+    # period, U+3000 inside the second sentence, U+202F before the third.
+    "first sentence ends here.\u00a0second\u3000sentence keeps its space. \u202fthird sentence follows the narrow one.",
 ]
 
 

@@ -68,5 +68,12 @@
    "o; p; q; r; s; t; u;",
    "v; w; x; y; z; short pieces gather until twenty characters"
   ]
+ },
+ {
+  "input": "first sentence ends here. second　sentence keeps its space.  third sentence follows the narrow one.",
+  "expected": [
+   "first sentence ends here. second　sentence keeps its space.",
+   " third sentence follows the narrow one."
+  ]
  }
 ]

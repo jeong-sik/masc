@@ -20,7 +20,9 @@ val statements : string -> string list
     shorter than {!min_statement_chars} characters carried into the next;
     every resulting statement is kept. Sentence boundaries match the scorer
     in issue #37079; the gate evaluates the full memory rather than a sample.
-    Whitespace is ASCII whitespace. *)
+    Whitespace is ASCII whitespace only: a non-ASCII space is an ordinary
+    character, the same on both sides of the golden (the calibration corpus
+    held none; see the script). *)
 
 val min_statement_chars : int
 

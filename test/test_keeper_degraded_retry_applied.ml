@@ -122,7 +122,15 @@ let test_no_hint_is_never_applied () =
    and that the driver walks a deferred lane from its head. The reason half of
    #37108 is not a verdict at all: the two lanes no longer share a runtime and
    reason slot, so no rule can put one lane's reason beside the other's
-   runtime. [test_keeper_terminal_reason_typed] pins that shape on the wire. *)
+   runtime. [test_keeper_terminal_reason_typed] pins that shape on the wire.
+
+   An earlier case asked whether a hint naming another runtime was taken up.
+   That question was phrased in a comparison against the runtime the turn was
+   routed to, and the comparison is gone: the driver leads with the lane's own
+   head, so the routed id never decided anything. The question itself splits in
+   two and both halves are still here -- whether the lane got its turn is the
+   provider-reached pair, and whether the reported runtime is the one the turn
+   started on is the head-order case at the end. *)
 
 let taken_up ?(provider_reached = Receipt_finalize.Provider_attempt_observed) ~hint () =
   Receipt_finalize.degraded_retry_taken_up ~hint ~provider_reached
@@ -227,17 +235,13 @@ let () =
         ] )
     ; ( "receipt"
       , [ test_case
-            "a pending hint toward another runtime is not on the receipt"
+            "a hint on a turn that reached no provider is not on the receipt"
             `Quick
-            test_receipt_pending_hint_on_another_runtime_is_not_taken_up
+            test_receipt_hint_without_a_provider_attempt_is_not_taken_up
         ; test_case
-            "the hint the turn dispatched on is on the receipt"
+            "a hint on a turn that reached a provider is on the receipt"
             `Quick
-            test_receipt_hint_the_turn_dispatched_on_is_taken_up
-        ; test_case
-            "a hint on a turn that never dispatched is not on the receipt"
-            `Quick
-            test_receipt_hint_without_a_dispatch_is_not_taken_up
+            test_receipt_hint_with_a_provider_attempt_is_taken_up
         ; test_case
             "no hint puts nothing on the receipt"
             `Quick

@@ -9,11 +9,11 @@ val default_model : string
 
 type readiness =
   | Off
-  | Ready of { model : string }
+  | Configured of { model : string }
 
 val readiness : unit -> readiness
 (** Credential-free readiness for operator projections. [Off] covers an
-    explicit disable and a missing key; [Ready] carries only the configured
+    explicit disable and a missing key; [Configured] carries only the configured
     model, never the API key. *)
 
 val is_enabled : unit -> bool

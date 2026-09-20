@@ -197,7 +197,7 @@ let test_config_readiness_is_typed_and_credential_free () =
     (fun () ->
        match C.readiness () with
        | C.Off -> ()
-       | C.Ready _ -> Alcotest.fail "a missing key reported JEV ready");
+       | C.Configured _ -> Alcotest.fail "a missing key reported JEV configured");
   with_jev_config
     ~api_key:(Some "secret-not-for-projection")
     ~enabled:(Some "false")
@@ -205,7 +205,7 @@ let test_config_readiness_is_typed_and_credential_free () =
     (fun () ->
        match C.readiness () with
        | C.Off -> ()
-       | C.Ready _ -> Alcotest.fail "an explicit disable reported JEV ready");
+       | C.Configured _ -> Alcotest.fail "an explicit disable reported JEV configured");
   with_jev_config
     ~api_key:(Some "secret-not-for-projection")
     ~enabled:(Some "true")
@@ -213,7 +213,7 @@ let test_config_readiness_is_typed_and_credential_free () =
     (fun () ->
        match C.readiness () with
        | C.Off -> Alcotest.fail "an enabled configuration reported JEV off"
-       | C.Ready { model } ->
+       | C.Configured { model } ->
          Alcotest.(check string) "readiness carries a trimmed model" "jev-next" model);
   with_jev_config
     ~api_key:(Some "secret-not-for-projection")
@@ -221,8 +221,8 @@ let test_config_readiness_is_typed_and_credential_free () =
     ~model:(Some " \t ")
     (fun () ->
        match C.readiness () with
-       | C.Off -> Alcotest.fail "a blank model disabled an otherwise ready JEV"
-       | C.Ready { model } ->
+       | C.Off -> Alcotest.fail "a blank model disabled an otherwise configured JEV"
+       | C.Configured { model } ->
          Alcotest.(check string) "blank model uses the default" C.default_model model)
 ;;
 

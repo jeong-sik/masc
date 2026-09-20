@@ -38,8 +38,8 @@ let is_enabled () =
 
 type readiness =
   | Off
-  | Ready of { model : string }
+  | Configured of { model : string }
 
 let readiness () =
-  if is_enabled () then Ready { model = model () } else Off
+  if is_enabled () then Configured { model = model () } else Off
 ;;

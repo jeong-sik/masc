@@ -20,7 +20,10 @@ SOURCE_MODULES = (
 def run(executable: str, captures: Path | None) -> None:
     cases = (
         ({"state": "off"}, "JEV OFF"),
-        ({"state": "on", "model": "jev-fixture"}, "JEV CONFIGURED · jev-fixture"),
+        (
+            {"state": "configured", "model": "jev-fixture"},
+            "JEV CONFIGURED · jev-fixture",
+        ),
         ({"state": "cli_only"}, "JEV unavailable: Board lane is CLI-only"),
         ({"state": "lane_unavailable"}, "JEV unavailable: Board lane is not ready"),
     )
@@ -77,4 +80,4 @@ if __name__ == "__main__":
     parser.add_argument("--captures", type=Path)
     args = parser.parse_args()
     run(os.path.abspath(args.executable), args.captures)
-    print("Board JEV readiness: PASS (off/on/cli_only/lane_unavailable)")
+    print("Board JEV readiness: PASS (off/configured/cli_only/lane_unavailable)")

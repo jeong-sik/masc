@@ -421,10 +421,10 @@ let test_board_lane_detail_draws_typed_jev_readiness () =
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:render ~binding_name:"standalone_lane_detail_lines"
        ~needle:"JEV OFF");
-  Alcotest.(check int) "the on state includes the model" 1
+  Alcotest.(check int) "the configured state includes the model" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:render ~binding_name:"standalone_lane_detail_lines"
-       ~needle:"JEV ON \xc2\xb7 %s")
+       ~needle:"JEV CONFIGURED \xc2\xb7 %s")
 
 (* The Code tree draws one arrow on a row that opens rather than reads, and
    it drew it from two places a branch apart: the selected row reached for

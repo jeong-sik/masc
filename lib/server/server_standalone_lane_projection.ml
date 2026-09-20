@@ -419,15 +419,15 @@ let json_string_opt = function
 
 type jev_lane_readiness =
   | Jev_off
-  | Jev_ready of { model : string }
+  | Jev_configured of { model : string }
   | Jev_cli_only
   | Jev_lane_unavailable
 
 let jev_lane_readiness configuration = function
   | Typesafeai_config.Off -> Jev_off
-  | Typesafeai_config.Ready { model } ->
+  | Typesafeai_config.Configured { model } ->
     (match configuration with
-     | Configured { admitted_slots = _ :: _; _ } -> Jev_ready { model }
+     | Configured { admitted_slots = _ :: _; _ } -> Jev_configured { model }
      | Configured { admitted_slots = []; cli_slots = _ :: _; _ } -> Jev_cli_only
      | Configured { admitted_slots = []; cli_slots = []; _ }
      | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
@@ -437,13 +437,8 @@ let jev_readiness_json = function
   | Jev_off -> `Assoc [ "state", `String "off" ]
   | Jev_cli_only -> `Assoc [ "state", `String "cli_only" ]
   | Jev_lane_unavailable -> `Assoc [ "state", `String "lane_unavailable" ]
-  | Jev_ready { model } ->
-    let model =
-      match Env_config_core.trim_opt (Some model) with
-      | Some model -> model
-      | None -> Typesafeai_config.default_model
-    in
-    `Assoc [ "state", `String "on"; "model", `String model ]
+  | Jev_configured { model } ->
+    `Assoc [ "state", `String "configured"; "model", `String model ]
 ;;
 
 let terminal_of_exact_outcome = function

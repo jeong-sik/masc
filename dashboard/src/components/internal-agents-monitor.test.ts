@@ -240,7 +240,7 @@ describe('InternalAgentsMonitor', () => {
     api.fetchStandaloneLanes.mockResolvedValue({
       ...laneSnapshot,
       lanes: laneSnapshot.lanes.map(item => item.laneId === 'board_attention_exact'
-        ? { ...item, jev: { state: 'on' as const, model: 'jev-next' } }
+        ? { ...item, jev: { state: 'configured' as const, model: 'jev-next' } }
         : item),
     })
     sse.refresh?.()

@@ -4438,11 +4438,11 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
    | Error detail -> Alcotest.fail detail);
   let enabled =
     replace_assoc_field "jev"
-      (`Assoc [ "state", `String "on"; "model", `String "jev-next" ])
+      (`Assoc [ "state", `String "configured"; "model", `String "jev-next" ])
       board
   in
   (match decode_board enabled with
-   | Ok (Some (Tui_decode.Jev_on { model })) ->
+   | Ok (Some (Tui_decode.Jev_configured { model })) ->
      Alcotest.(check string) "enabled model" "jev-next" model
    | Ok _ -> Alcotest.fail "enabled JEV state decoded to the wrong variant"
    | Error detail -> Alcotest.fail detail);
@@ -4450,7 +4450,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
     (fun model ->
        let blank =
          replace_assoc_field "jev"
-           (`Assoc [ "state", `String "on"; "model", `String model ])
+           (`Assoc [ "state", `String "configured"; "model", `String model ])
            board
        in
        match decode_board blank with
@@ -4473,15 +4473,19 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
        | Error detail -> Alcotest.fail detail)
     [ "cli_only", Tui_decode.Jev_cli_only
     ; "lane_unavailable", Tui_decode.Jev_lane_unavailable ];
-  let unknown =
-    replace_assoc_field "jev" (`Assoc [ "state", `String "warming" ]) board
-  in
-  (match decode_board unknown with
-   | Ok _ -> Alcotest.fail "an unknown JEV state decoded"
-   | Error detail ->
-     Alcotest.(check bool) "unknown state fails closed" true
-       (String_util.contains_substring detail
-          "standalone lane JEV state: unknown value warming"));
+  List.iter
+    (fun state ->
+       let unknown =
+         replace_assoc_field "jev"
+           (`Assoc [ "state", `String state; "model", `String "jev-next" ]) board
+       in
+       match decode_board unknown with
+       | Ok _ -> Alcotest.fail "an unknown JEV state decoded"
+       | Error detail ->
+         Alcotest.(check bool) "unknown state fails closed" true
+           (String_util.contains_substring detail
+              ("standalone lane JEV state: unknown value " ^ state)))
+    [ "warming"; "on" ];
   let without_jev =
     match board with
     | `Assoc fields -> `Assoc (List.remove_assoc "jev" fields)

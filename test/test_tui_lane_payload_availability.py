@@ -87,6 +87,13 @@ def run(executable: str, scenario: str) -> None:
         run_record["output"] = {
             f"field-{index:05}": f"VALUE_{index:05}" for index in range(10000)
         }
+    elif scenario == "total-fit":
+        run_record["output"] = {
+            "exact_output": {"body": "x" * 20000, "marker": "TOTAL_FIT_TAIL"},
+            "absorb_gate": {"status": "skipped", "reason": "absorb_gate_disabled"},
+            "before": {"marker": "before-small"},
+            "after": {"marker": "after-small"},
+        }
     elif scenario != "available-null":
         raise AssertionError("unknown fixture scenario")
     summary = {
@@ -219,18 +226,32 @@ def run(executable: str, scenario: str) -> None:
             assert b"truncated, total" in screen, screen
             h.send_and_wait(process, master, output, b"\x1b[F", b"FIELD_63_START")
             h.drain_until_quiet(process, master, output)
+            frame = bytes(output[start:])
             screen = h.screen_text(bytes(output))
             assert b'"field-63"' in screen, screen
         elif scenario == "many-labels":
+            assert b'"field-00000"' in screen and b"VALUE_00000" in screen, screen
             h.send_and_wait(
                 process, master, output, b"\x1b[F", b"field(s) not rendered"
             )
             h.drain_until_quiet(process, master, output)
+            frame = bytes(output[start:])
             screen = h.screen_text(bytes(output))
-            assert b'"field-09999"' in screen and b"VALUE_09999" in screen, screen
+            assert b'"field-09999"' not in screen and b"VALUE_09999" not in screen, (
+                screen
+            )
             assert re.search(rb"[1-9][0-9]* more field\(s\) not rendered", screen), (
                 screen
             )
+        elif scenario == "total-fit":
+            assert b'"exact_output"' in screen, screen
+            h.send_and_wait(process, master, output, b"\x1b[F", b"TOTAL_FIT_TAIL")
+            h.drain_until_quiet(process, master, output)
+            frame = bytes(output[start:])
+            screen = h.screen_text(bytes(output))
+            for needle in (b"TOTAL_FIT_TAIL", b"before-small", b"after-small"):
+                assert needle in screen, (needle, screen)
+            assert b"truncated, total" not in screen, screen
         assert b"INPUT \xc2\xb7 RUN INPUT" in initial_screen, initial_screen
         assert b"OUTPUT \xc2\xb7 RUN RESULT" in initial_screen, initial_screen
         assert b"MODEL RESPONSE" not in initial_screen, initial_screen
@@ -273,6 +294,7 @@ if __name__ == "__main__":
         "large-scalar",
         "many-fields",
         "many-labels",
+        "total-fit",
     ):
         run(os.path.abspath(sys.argv[1]), scenario)
     print("TUI lane original payload availability: PASS")

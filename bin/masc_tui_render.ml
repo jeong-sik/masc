@@ -5227,18 +5227,25 @@ let render_lane_run_list (state : state) ~lane_id =
        ~hints:Masc_tui_keys.footer_hints_lanes_run_list);
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
 
-(* Fields share the existing total preview budget, including labels and
-   truncation notices. Each remaining field receives an equal share of the
-   remaining bytes, so a large value cannot spend its siblings' space.
-   Full stored payloads are unchanged. *)
+(* The total preview includes labels, fences and notices. Complete payloads
+   that fit stay complete; oversized fields share the space left after each
+   field's minimum preview. If even those minima do not fit, preserve the
+   original prefix and name the omitted suffix count. Stored bytes do not change. *)
 let lane_run_render_max_bytes = 65536
 
 let lane_run_payload_lines ~width json =
   let fence = fenced_document_text ~language:"json" in
-  let render_document ~budget value =
+  let prepare_document value =
     let full = Yojson.Safe.pretty_to_string value in
     let full_document = fence full in
     let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full) in
+    full, full_document, notice
+  in
+  let minimum_document_bytes (full, full_document, notice) =
+    min (String.length full_document)
+      (String.length full_document - String.length full + String.length notice + 1)
+  in
+  let render_document ~budget (full, full_document, notice) =
     let preview =
       if String.length full_document <= budget then Some (full_document, [])
       else
@@ -5266,34 +5273,71 @@ let lane_run_payload_lines ~width json =
         used, lines @ notices)
       preview
   in
+  let document_lines ~budget prepared =
+    match render_document ~budget prepared with
+    | Some (_, lines) -> lines
+    | None -> [ Theme.warn (), "… payload not rendered" ]
+  in
   match json with
   | `Assoc (_ :: _ as fields) ->
     let omitted count = Printf.sprintf "… %d more field(s) not rendered" count in
-    let count = List.length fields in
-    let budget = lane_run_render_max_bytes - String.length (omitted count) - 1 in
-    let rec render_fields budget remaining skipped acc = function
-      | [] ->
-        let lines = List.rev acc in
-        if skipped = 0 then lines else lines @ [ Theme.warn (), omitted skipped ]
-      | (name, value) :: rest ->
-        let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
-        let heading_bytes = String.length heading + 1 in
-        let share = budget / remaining in
-        let preview =
-          if heading_bytes >= share then None
-          else render_document ~budget:(share - heading_bytes) value
-        in
-        (match preview with
-         | None -> render_fields budget (remaining - 1) (skipped + 1) acc rest
-         | Some (used, lines) ->
-           render_fields (budget - heading_bytes - used) (remaining - 1) skipped
-             (List.rev_append lines ((Ansi.bold, heading) :: acc)) rest)
+    let fields =
+      List.mapi
+        (fun index (name, value) ->
+          let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
+          let heading_bytes = String.length heading + 1 in
+          let ((_, full_document, _) as prepared) = prepare_document value in
+          ( index, heading, heading_bytes, prepared
+          , heading_bytes + minimum_document_bytes prepared
+          , heading_bytes + String.length full_document ))
+        fields
     in
-    render_fields budget count 0 [] fields
+    let render_field budget (_, heading, heading_bytes, prepared, _, _) =
+      (Ansi.bold, heading)
+      :: document_lines ~budget:(budget - heading_bytes) prepared
+    in
+    let total = List.fold_left (fun n (_, _, _, _, _, bytes) -> n + bytes) 0 fields in
+    if total <= lane_run_render_max_bytes then
+      List.concat_map (fun ((_, _, _, _, _, bytes) as field) -> render_field bytes field) fields
+    else begin
+      let minimum_total fields =
+        List.fold_left (fun n (_, _, _, _, bytes, _) -> n + bytes) 0 fields
+      in
+      let notice_bytes = function None -> 0 | Some text -> String.length text + 1 in
+      let fields, suffix_notice =
+        if minimum_total fields <= lane_run_render_max_bytes then fields, None
+        else
+          let rec prefix used remaining notice acc = function
+            | [] -> List.rev acc, None
+            | ((_, _, _, _, minimum, _) as field) :: rest ->
+              let next_notice =
+                if List.is_empty rest then None else Some (omitted (remaining - 1))
+              in
+              if used + minimum + notice_bytes next_notice <= lane_run_render_max_bytes then
+                prefix (used + minimum) (remaining - 1) next_notice (field :: acc) rest
+              else List.rev acc, notice
+          in
+          let count = List.length fields in
+          prefix 0 count (Some (omitted count)) [] fields
+      in
+      let needed (_, _, _, _, minimum, full) = full - minimum in
+      let ranked = List.stable_sort (fun a b -> Int.compare (needed a) (needed b)) fields in
+      let rec allocate extra remaining = function
+        | [] -> []
+        | ((_, _, _, _, minimum, _) as field) :: rest ->
+          let added = min (needed field) (extra / remaining) in
+          (field, minimum + added) :: allocate (extra - added) (remaining - 1) rest
+      in
+      let extra = lane_run_render_max_bytes - notice_bytes suffix_notice - minimum_total fields in
+      let allocated =
+        allocate extra (List.length fields) ranked
+        |> List.sort (fun ((a, _, _, _, _, _), _) ((b, _, _, _, _, _), _) -> Int.compare a b)
+      in
+      let lines = List.concat_map (fun (field, budget) -> render_field budget field) allocated in
+      match suffix_notice with None -> lines | Some text -> lines @ [ Theme.warn (), text ]
+    end
   | _ ->
-    (match render_document ~budget:lane_run_render_max_bytes json with
-     | Some (_, lines) -> lines
-     | None -> [ Theme.warn (), "… payload not rendered" ])
+    document_lines ~budget:lane_run_render_max_bytes (prepare_document json)
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_decision with

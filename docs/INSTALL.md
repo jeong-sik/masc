@@ -223,7 +223,7 @@ change existing Keeper configurations in bulk.
 | `<prefix>/masc-deployment-preflight-helper` | Helper binary for the execution-environment preflight |
 | `<prefix>/masc-check-runtime-deployment-preflight` | Script that runs the preflight |
 | `<prefix>/.masc-releases/<receipt-hash>/` | Dashboard from the same commit as the server, the server executable, and the verification receipt |
-| `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
+| `<base-path>/.masc/config/` | Runtime configuration and the default configuration seed. The model catalog, tools, and prompts used in operation come from embedded assets; `AGENT_CORE_MODEL_CATALOG` can explicitly replace the whole model catalog |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
 The **installed binary** provisions one `imp` with `activation_mode = "manual"` and the
@@ -552,7 +552,7 @@ bash /tmp/masc-install.sh --version "$TAG" \
 
 From 0.34.0, `--force` updates the binaries and preserves the existing
 runtime configuration, model choice, and Keeper files. In a workspace that
-already has the runtime and model overlay, it only adds new embedded skills
+already has the required runtime configuration, it only adds new embedded skills
 and leaves the existing configuration and any optional configuration files
 the user deleted as they are. In a new install or a workspace without the
 required configuration, it seeds the defaults. Add `--reset-config` only when

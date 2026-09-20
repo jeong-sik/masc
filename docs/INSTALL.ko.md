@@ -211,7 +211,7 @@ bash /tmp/masc-install.sh --version "$TAG" \
 | `<prefix>/masc-deployment-preflight-helper` | 실행 환경 사전점검 보조 바이너리 |
 | `<prefix>/masc-check-runtime-deployment-preflight` | 사전점검 실행 스크립트 |
 | `<prefix>/.masc-releases/<receipt-hash>/` | 서버와 같은 커밋의 대시보드, 서버 실행 파일, 검증 receipt |
-| `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
+| `<base-path>/.masc/config/` | runtime 설정 및 기본 설정 seed. 운영 중 모델 카탈로그·도구·프롬프트는 내장 자산을 사용하며, `AGENT_CORE_MODEL_CATALOG`로 모델 카탈로그 전체를 명시적으로 교체할 수 있음 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
 **설치된 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 준비합니다.
@@ -499,7 +499,7 @@ bash /tmp/masc-install.sh --version "$TAG" \
 ```
 
 0.34.0부터 `--force`는 바이너리를 갱신하며 기존 runtime 설정, 모델 선택,
-Keeper 파일을 보존합니다. runtime과 model overlay가 이미 있는 작업 공간에서는
+Keeper 파일을 보존합니다. 필수 runtime 설정이 이미 있는 작업 공간에서는
 새 내장 skill만 보충하고, 기존 설정과 사용자가 삭제한 선택 설정 파일을 보존합니다.
 새 설치 또는 필수 설정이 없는 작업 공간에서는 기본 설정을 seed합니다. 설정 초기화가 목적일
 때만 `--reset-config`를 추가합니다. 이 옵션은 seeded 설정과 선택한 팀 파일을

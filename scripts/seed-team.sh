@@ -7,8 +7,9 @@
 # team. It copies files from presets/<preset>/ (listed in that preset's
 # manifest.txt) into <base-path>/.masc/config/. The keepers name no model of
 # their own: they inherit [runtime].default from that config root's
-# runtime.toml, so no model catalog is touched — AGENT_CORE embedded catalog
-# plus deployment overlay stays authoritative.
+# runtime.toml, so no model catalog is touched. The AGENT_CORE embedded catalog,
+# or an explicit AGENT_CORE_MODEL_CATALOG whole-catalog replacement, remains
+# authoritative.
 #
 # Usage:
 #   scripts/seed-team.sh [--preset classic] --base-path DIR [--force] [--dry-run] [--list]

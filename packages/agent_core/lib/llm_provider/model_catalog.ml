@@ -776,11 +776,9 @@ let skipped_entry_label ~kind ~id_key position item =
 ;;
 
 (* Lenient variant of [parse_table_array]: a row that fails [parse] is
-   excluded and reported instead of failing the whole load. Deployment
-   overlays are hand-written and outlive the binary that wrote them; a stale
-   field introduced by a newer release (or removed by an older one) must not
-   block every other row. Whole-file failures stay fail-closed — see
-   [catalog_of_toml_lenient]. *)
+   excluded and reported instead of failing the whole load. This lets catalog
+   inspection or migration retain valid rows around a stale row. Whole-file
+   failures stay fail-closed — see [catalog_of_toml_lenient]. *)
 let parse_table_array_lenient ~kind ~id_key toml key parse =
   match Otoml.find_opt toml (Otoml.get_array Fun.id) [ key ] with
   | None -> [], []
@@ -811,10 +809,9 @@ let model_row_key (entry : model_entry) =
 
 let provider_entry_key (entry : provider_entry) = normalize_label entry.id
 
-(* Two rows under one key make the winner a property of declaration order,
-   which is what [merge]'s "order-independent" note says lookups are not. An
-   overlay is a file somebody writes by hand, so the two can differ by a
-   factor of 900 in price and nothing says which one is charging. *)
+(* Two rows under one key make the winner a property of declaration order.
+   They can disagree on any capability or price, so the catalog rejects the
+   contradiction instead of silently choosing one. *)
 let duplicate_model_label (entry : model_entry) =
   match entry.provider_name with
   | None ->
@@ -1110,37 +1107,6 @@ let lookup_for_provider t ~provider_name ~model_id =
   | None ->
     let canonical = canonical_provider_name t requested in
     if String.equal canonical requested then None else find_exact canonical
-;;
-
-(* Row-level catalog merge (Agent Core contract). Identity is what lookup keys on:
-   [(provider_name, id_prefix)] for model rows — a bare row and a
-   provider-scoped row with the same [id_prefix] are distinct rows — and [id]
-   for provider entries, all compared with lookup's normalization. Overlay
-   rows replace same-identity base rows; everything else is kept from both
-   sides. This is the deployment-delta alternative to forking the whole
-   catalog through [set_global]. *)
-let merge ~base ~overlay =
-  let overlay_model_keys = List.map model_row_key overlay.models in
-  let overlay_provider_keys = List.map provider_entry_key overlay.providers in
-  let kept_models =
-    List.filter
-      (fun entry -> not (List.mem (model_row_key entry) overlay_model_keys))
-      base.models
-  in
-  let kept_providers =
-    List.filter
-      (fun entry -> not (List.mem (provider_entry_key entry) overlay_provider_keys))
-      base.providers
-  in
-  (* Overlay rows come first: provider-entry consumers such as
-     [provider_label_for_base_url]/[provider_label_for_endpoint] scan in
-     declaration order, so a deployment entry whose endpoint identity is also
-     covered by an embedded entry must win. Model-row lookups are
-     order-independent (exact key or longest-prefix), so the same ordering is
-     applied there purely for consistency. *)
-  { models = overlay.models @ kept_models
-  ; providers = overlay.providers @ kept_providers
-  }
 ;;
 
 let provider_label_for_base_url ?getenv t ~kind ~base_url =

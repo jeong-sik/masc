@@ -6093,7 +6093,7 @@ let resolved_runtime id provider model =
     ; "effective_max_context", `Int 200000
     ; "max_context_source", `String "capability"
     ; "max_output_tokens", `Int 8192
-    ; "reasoning_effort", `Null
+    ; "declared_reasoning_effort", `Null
     ; "is_local", `Bool false
     ; "is_default", `Bool false
     ]
@@ -6310,9 +6310,9 @@ let test_runtime_limits_reject_unknown_or_invalid_values () =
     [replace "max_context_source" (`String "guessed") picker_default_runtime;
      replace "effective_max_context" (`Int 0) picker_default_runtime;
      replace "max_output_tokens" (`Int (-1)) picker_default_runtime;
-     replace "reasoning_effort" (`String "turbo") picker_default_runtime;
+     replace "declared_reasoning_effort" (`String "turbo") picker_default_runtime;
      (match picker_default_runtime with
-      | `Assoc fields -> `Assoc (List.remove_assoc "reasoning_effort" fields)
+      | `Assoc fields -> `Assoc (List.remove_assoc "declared_reasoning_effort" fields)
       | json -> json)]
 
 let test_runtime_default_limits_must_match_listed_row () =
@@ -6330,7 +6330,7 @@ let test_runtime_default_limits_must_match_listed_row () =
     ["effective_max_context", `Int 100000;
      "max_context_source", `String "capability";
      "max_output_tokens", `Null;
-     "reasoning_effort", `String "low";
+     "declared_reasoning_effort", `String "low";
      "is_local", `Bool true]
 
 let test_runtime_surface_keeps_resolved_rows_without_a_probe () =

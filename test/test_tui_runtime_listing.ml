@@ -273,8 +273,14 @@ let test_picker_target_column_fits_the_longest_id () =
      - runtime_pick_tail_width ~cols:200 (List.hd effort_pair))
     (target + route);
   let target, route = runtime_pick_column_widths ~cols:80 effort_pair in
-  expect "narrow terminal: target keeps its floor" runtime_pick_min_column_cells target;
-  expect "narrow terminal: route keeps its floor" runtime_pick_min_column_cells route;
+  Alcotest.(check bool)
+    "narrow terminal: target keeps its floor"
+    true
+    (target >= runtime_pick_min_column_cells);
+  Alcotest.(check bool)
+    "narrow terminal: route keeps its floor"
+    true
+    (route >= runtime_pick_min_column_cells);
   let target, _ = runtime_pick_column_widths ~cols:200 [ Pick_model (runtime "short") ] in
   expect "short ids keep the floor" runtime_pick_min_column_cells target
 

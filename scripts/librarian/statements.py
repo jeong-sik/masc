@@ -25,6 +25,11 @@ The scorer that produced the calibration in #37079 used Python's Unicode
 the 35,613 memory texts on this machine did (all U+202F), measured on
 2026-09-21, so the calibration holds under this policy and the golden below
 pins it with such characters.
+
+Markup: only backticks are dropped. The calibration scorer also dropped
+"**"; that is kept here because a memory about code can hold it as an
+operator (Codex review on #37369), and an emphasis marker left in a
+statement does not change what it says.
 """
 import json
 import re
@@ -32,14 +37,14 @@ import sys
 
 MIN_STATEMENT_CHARS = 20
 
-_MARKUP = re.compile(r"\*\*|`")
+_MARKUP = re.compile(r"`")   # backticks only; ** may be an operator in a code memory
 _LINES = re.compile(r"\n+")
 _ENDS = re.compile(r"(?<=[.!?])[ \t\r\f\v]+|(?<=다\.)[ \t\r\f\v]*|(?<=[;])[ \t\r\f\v]+|[ \t\r\f\v]+—[ \t\r\f\v]+")
 _ASCII_WS = " \t\r\n\f\v"
 
 
 def statements(text):
-    """Line breaks, then sentence ends; markup dropped; a piece under
+    """Line breaks, then sentence ends; backticks dropped; a piece under
     MIN_STATEMENT_CHARS characters carried into the next; a short tail joined
     to the last. Every statement is kept."""
     text = _MARKUP.sub("", text)
@@ -72,6 +77,8 @@ GOLDEN_INPUTS = [
     # Non-ASCII spaces are not boundaries and are not stripped: U+00A0 after the
     # period, U+3000 inside the second sentence, U+202F before the third.
     "first sentence ends here.\u00a0second\u3000sentence keeps its space. \u202fthird sentence follows the narrow one.",
+    # Backticks go, ** stays: an operator in a code memory is part of what it says.
+    "in python `x ** y` raises x to the power y; the **emphasis** stays as written.",
 ]
 
 

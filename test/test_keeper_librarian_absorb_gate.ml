@@ -292,10 +292,11 @@ let test_selection_gate_and_store_keep_the_unconveyed_original () =
        (Runtime_exact_output_registry.publication_error_to_string error));
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") (fun () ->
     Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" (Some "true") (fun () ->
+    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
       Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some jev.base_url) (fun () ->
         Masc.Keeper_librarian_runtime.run_best_effort
           ~trigger:Masc.Keeper_librarian_runtime.Queue_changed
-          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input)));
+          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input))));
   Alcotest.(check int) "the runtime obtained a real selection" 1 (Fixture.post_count librarian);
   Alcotest.(check int) "the runtime sent the originals to Jev" 1 (Fixture.post_count jev);
   let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
@@ -311,6 +312,37 @@ let test_selection_gate_and_store_keep_the_unconveyed_original () =
     | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
   Alcotest.(check (list string)) "only the conveyed original is archived"
     [ a.claim ] (List.map (fun (r : Absorbed.record) -> r.fact.claim) records)
+;;
+
+(* A noul is a probability. A value outside [0, 1] is a response-shape
+   failure, and the gate opens rather than reading 2.0 as "conveyed". *)
+let test_a_noul_outside_the_unit_interval_opens_the_gate () =
+  let facts = [ fact (List.hd sources) ] in
+  let absorbed = absorbed_into merged facts in
+  let evaluate, _, _ = table ~noul_of:(fun _ -> 2.0) in
+  match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
+  | Gate.Open _ -> ()
+  | Gate.Judged _ -> Alcotest.fail "2.0 is not a probability"
+;;
+
+(* A statement that does not fit a request cannot be judged; its memory
+   stays current instead of being absorbed on a refusal the gate can predict. *)
+let test_a_statement_too_large_to_judge_keeps_its_memory_current () =
+  let huge = fact (String.make (Gate.request_bytes_limit + 1) 'x') in
+  let small = fact (List.hd sources) in
+  let facts = [ huge; small ] in
+  let absorbed = absorbed_into merged facts in
+  let evaluate, requests, asked = table ~noul_of:(fun _ -> 1.0) in
+  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  Alcotest.(check (list string)) "only the small memory is absorbed"
+    [ id small ]
+    (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.absorbed);
+  Alcotest.(check (list string)) "the huge one is reported as too large to judge"
+    [ id huge ]
+    (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.unjudgeable);
+  Alcotest.(check int) "one request, for the small memory" 1 !requests;
+  Alcotest.(check bool) "the huge statement was never sent" true
+    (not (List.exists (fun s -> String.length s > Gate.request_bytes_limit) !asked))
 ;;
 
 let () =
@@ -330,6 +362,10 @@ let () =
             test_an_absorption_the_pass_cannot_place_goes_through_unjudged
         ; Alcotest.test_case "statements are asked in bounded requests" `Quick
             test_statements_are_asked_in_bounded_requests
+        ; Alcotest.test_case "a noul outside the unit interval opens the gate" `Quick
+            test_a_noul_outside_the_unit_interval_opens_the_gate
+        ; Alcotest.test_case "a statement too large to judge keeps its memory current" `Quick
+            test_a_statement_too_large_to_judge_keeps_its_memory_current
         ; Alcotest.test_case "a missing seventeenth statement keeps the original" `Quick
             test_a_missing_seventeenth_statement_keeps_the_whole_memory
         ; Alcotest.test_case "selection gate and store preserve the original" `Quick

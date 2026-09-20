@@ -16,7 +16,7 @@
 val statements : string -> string list
 (** A memory cut into the statements the model is asked about: line breaks,
     then sentence ends ([. ! ?] before whitespace, [다.], [;] before
-    whitespace, and [ — ]); markup ([**] and backticks) dropped; a piece
+    whitespace, and [ — ]); backticks dropped; a piece
     shorter than {!min_statement_chars} characters carried into the next;
     every resulting statement is kept. Sentence boundaries match the scorer
     in issue #37079; the gate evaluates the full memory rather than a sample.
@@ -51,6 +51,10 @@ type judged =
   ; unjudged : Keeper_memory_os_types.absorbed_statement list
         (** absorptions the gate could not judge because the answer names a
             claim or a memory the pass did not carry; applied as they came *)
+  ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
+        (** absorptions the gate could not judge because the claim, or a
+            statement of the memory, does not fit a request
+            ({!request_bytes_limit}); the memory stays current *)
   ; requests : int  (** evaluation requests made *)
   }
 
@@ -70,6 +74,13 @@ val questions_per_request : int
 (** Statements are asked in requests of at most this many questions. The
     model evaluates a request's questions in parallel; the limit bounds one
     request's size, not the number of statements judged. *)
+
+val request_bytes_limit : int
+(** A request carries at most this many bytes of claim and statements, well
+    under the model's 64k-token request and 32k-token state limits, so a
+    request is never refused for its size. A claim or a statement that does
+    not fit cannot be judged, and its memory stays current rather than being
+    absorbed on a predictable refusal. *)
 
 val judge
   :  evaluate:evaluate

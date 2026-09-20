@@ -20,11 +20,11 @@ val is_board_attention_enabled : unit -> bool
     ({!Keeper_board_attention_exact_flow}). *)
 
 val is_absorb_gate_enabled : unit -> bool
-(** {!is_enabled} and [MASC_TYPESAFEAI_ABSORB_GATE_ENABLED] does not say
-    otherwise: the librarian absorb gate
-    ({!Keeper_librarian_absorb_gate}). Each gate has its own switch so that
-    a key, which turns the lane on, does not turn on a gate that was not
-    reviewed with it. *)
+(** {!is_enabled} and [MASC_TYPESAFEAI_ABSORB_GATE_ENABLED] says so: the
+    librarian absorb gate ({!Keeper_librarian_absorb_gate}) is off unless the
+    operator turns it on, because it sends the librarian's memories to the
+    vendor. Each gate has its own switch so that a key, which turns the lane
+    on, does not turn on a gate that was not reviewed with it. *)
 
 val api_key : unit -> string option
 (** [TYPESAFEAI_API_KEY], trimmed. [None] when unset or blank. *)

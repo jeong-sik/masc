@@ -30,21 +30,10 @@ let strip s =
   String.sub s !i (!j - !i)
 ;;
 
-let drop_markup s =
-  let b = Buffer.create (String.length s) in
-  let n = String.length s in
-  let i = ref 0 in
-  while !i < n do
-    if s.[!i] = '`'
-    then incr i
-    else if s.[!i] = '*' && !i + 1 < n && s.[!i + 1] = '*'
-    then i := !i + 2
-    else (
-      Buffer.add_char b s.[!i];
-      incr i)
-  done;
-  Buffer.contents b
-;;
+(* Backticks are dropped; nothing else. Emphasis markers stay: a memory about
+   code can hold [**] as an operator, and dropping it would judge an altered
+   statement. *)
+let drop_markup s = String.concat "" (String.split_on_char '`' s)
 
 let da_period = "\xEB\x8B\xA4." (* 다. *)
 let em_dash = "\xE2\x80\x94" (* — *)
@@ -145,6 +134,7 @@ type judged =
   ; left : source_verdict list
   ; conveyed : source_verdict list
   ; unjudged : Keeper_memory_os_types.absorbed_statement list
+  ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
   ; requests : int
   }
 
@@ -154,6 +144,14 @@ type outcome =
 
 let conveyed_boundary = 0.5
 let questions_per_request = 64
+
+(* The model takes 64k tokens a request and 32k for the state; a byte bound
+   well under both keeps a request from being refused for its size, which
+   would open the gate for exactly the memory it should keep. Statements
+   are not bounded by the cut -- a memory without sentence ends is one
+   statement -- so a statement that does not fit alone, or a claim that does
+   not fit, cannot be judged; that memory stays current. *)
+let request_bytes_limit = 96_000
 
 let instructions_prefix =
   "The claim under review conveys this statement, in any wording.\n\nStatement:\n"
@@ -171,16 +169,21 @@ let question statement =
     }
 ;;
 
-let rec chunks size = function
-  | [] -> []
-  | items ->
-    let rec take k acc = function
-      | rest when k = 0 -> List.rev acc, rest
-      | [] -> List.rev acc, []
-      | x :: rest -> take (k - 1) (x :: acc) rest
-    in
-    let head, rest = take size [] items in
-    head :: chunks size rest
+(* [numbered] cut into requests of at most [questions_per_request] questions
+   and at most [budget] bytes of statements each. Every statement fits alone
+   by construction (the caller keeps out the ones that do not). *)
+let chunks ~budget numbered =
+  let rec go current_bytes current acc = function
+    | [] -> List.rev (if current = [] then acc else List.rev current :: acc)
+    | ((_, statement) as item) :: rest ->
+      let bytes = String.length statement in
+      if current <> []
+         && (List.length current >= questions_per_request
+             || current_bytes + bytes > budget)
+      then go bytes [ item ] (List.rev current :: acc) rest
+      else go (current_bytes + bytes) (item :: current) acc rest
+  in
+  go 0 [] [] numbered
 ;;
 
 (* Every statement of [sources], asked in requests of at most
@@ -188,6 +191,7 @@ let rec chunks size = function
 let ask ~evaluate ~claim (numbered : (string * string) list) =
   let open Result.Syntax in
   let state = `String claim in
+  let budget = request_bytes_limit - String.length claim in
   List.fold_left
     (fun acc chunk ->
        let* table, requests = acc in
@@ -198,7 +202,10 @@ let ask ~evaluate ~claim (numbered : (string * string) list) =
            (fun acc (id, _) ->
               let* acc = acc in
               match List.assoc_opt id response.Typesafeai_types.answers with
-              | Some (Typesafeai_types.Noul_answer { noul }) -> Ok ((id, noul) :: acc)
+              | Some (Typesafeai_types.Noul_answer { noul }) ->
+                if Float.is_nan noul || noul < 0.0 || noul > 1.0
+                then Error (Printf.sprintf "answer %s is not a probability: %g" id noul)
+                else Ok ((id, noul) :: acc)
               | Some (Typesafeai_types.Choice_answer _ | Typesafeai_types.Score_answer _) ->
                 Error (Printf.sprintf "answer %s is not a noul" id)
               | None -> Error (Printf.sprintf "no answer for %s" id))
@@ -207,7 +214,7 @@ let ask ~evaluate ~claim (numbered : (string * string) list) =
        in
        Ok (answers @ table, requests + 1))
     (Ok ([], 0))
-    (chunks questions_per_request numbered)
+    (chunks ~budget numbered)
 ;;
 
 let judge ~evaluate ~facts ~new_claims ~absorbed =
@@ -236,6 +243,10 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
          let* acc = acc in
          match claim_of into new_claims with
          | None -> Ok { acc with unjudged = acc.unjudged @ members }
+         | Some claim when String.length claim >= request_bytes_limit ->
+           (* The claim alone fills a request: nothing it absorbs can be judged
+              against it, and nothing it absorbs is absorbed. *)
+           Ok { acc with unjudgeable = acc.unjudgeable @ members }
          | Some claim ->
            let judgeable, unjudged =
              List.partition_map
@@ -244,6 +255,13 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
                   | Some text -> Either.Left (statement, statements text)
                   | None -> Either.Right statement)
                members
+           in
+           let budget = request_bytes_limit - String.length claim in
+           let judgeable, unjudgeable =
+             List.partition
+               (fun (_, sts) ->
+                  List.for_all (fun st -> String.length st <= budget) sts)
+               judgeable
            in
            let numbered =
              List.concat
@@ -278,9 +296,17 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
              ; left = acc.left @ List.map snd left
              ; conveyed = acc.conveyed @ List.map snd kept
              ; unjudged = acc.unjudged @ unjudged
+             ; unjudgeable = acc.unjudgeable @ List.map fst unjudgeable
              ; requests = acc.requests + requests
              })
-      (Ok { absorbed = []; left = []; conveyed = []; unjudged = []; requests = 0 })
+      (Ok
+         { absorbed = []
+         ; left = []
+         ; conveyed = []
+         ; unjudged = []
+         ; unjudgeable = []
+         ; requests = 0
+         })
       by_into
   in
   match judged with
@@ -314,7 +340,12 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
        then Typesafeai_config.api_key ()
        else None
      with
-     | None -> absorbed
+     | None ->
+       Log.Keeper.info
+         ~keeper_name:keeper_id
+         "librarian absorb gate off (no key, or a switch): %d absorption(s) applied as answered"
+         (List.length absorbed);
+       absorbed
      | Some api_key ->
        let evaluate ~state ~questions =
          Typesafeai_client.evaluate ?clock ~api_key ~state ~questions ()
@@ -335,11 +366,12 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
           Log.Keeper.info
             ~keeper_name:keeper_id
             "librarian absorb gate: %d absorbed, %d kept current (%d statement(s) not \
-             conveyed), %d unjudged, %d request(s)"
+             conveyed), %d unjudged, %d too large to judge (kept current), %d request(s)"
             (List.length judged.conveyed)
             (List.length judged.left)
             not_conveyed
             (List.length judged.unjudged)
+            (List.length judged.unjudgeable)
             judged.requests;
           judged.absorbed))
 ;;

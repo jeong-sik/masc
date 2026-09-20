@@ -187,25 +187,27 @@ let test_each_gate_has_its_own_switch () =
     lane_on (fun () ->
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
         env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" None (fun () ->
-          Alcotest.(check (pair bool bool)) "a key alone turns both gates on"
-            (true, true) (gates ())));
+          Alcotest.(check (pair bool bool))
+            "a key alone turns the board gate on and leaves the absorb gate off"
+            (true, false) (gates ())));
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" (Some "false") (fun () ->
-        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" None (fun () ->
-          Alcotest.(check (pair bool bool)) "the board gate off leaves the absorb gate on"
+        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
+          Alcotest.(check (pair bool bool)) "each switch reaches only its own gate"
             (false, true) (gates ())));
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
-        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "off") (fun () ->
-          Alcotest.(check (pair bool bool)) "the absorb gate off leaves the board gate on"
-            (true, false) (gates ()))));
+        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "on") (fun () ->
+          Alcotest.(check (pair bool bool)) "the absorb gate turned on leaves the board gate on"
+            (true, true) (gates ()))));
     env "MASC_TYPESAFEAI_ENABLED" (Some "false") (fun () ->
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
-        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" None (fun () ->
+        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
           Alcotest.(check (pair bool bool)) "the lane off turns both gates off"
             (false, false) (gates ())))));
   env "TYPESAFEAI_API_KEY" None (fun () ->
     lane_on (fun () ->
-      Alcotest.(check (pair bool bool)) "without a key neither gate is on"
-        (false, false) (gates ())))
+      env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
+        Alcotest.(check (pair bool bool)) "without a key neither gate is on"
+          (false, false) (gates ()))))
 ;;
 
 let () =

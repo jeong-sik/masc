@@ -76,6 +76,15 @@
 - 신뢰도: High
 - 내용: `claude plugin marketplace add typesafe-ai/skills` → `claude plugin install typesafe@typesafe-ai`. 환경변수 이름은 `TYPESAFE_API_KEY`(masc 의 `TYPESAFEAI_API_KEY` 와 다름).
 
+### 8. 질문 모양 비교 (이 세션 실측)
+
+- 항목: 원문 문장을 `instructions` 에 두는 모양 vs `state.statements[id]` 에 두고 지시문이 id 로 가리키는 모양의 양 끝
+- 출처: `~/me/.tmp/jev-replay/absorption-20260919/jev_shape_ends.py`(로컬, #37079 의 12묶음 258문장; 요청당 문장 수 64/8/4/1)
+- 확인일시: 2026-09-21T02:15:00+09:00
+- 신뢰도: High (같은 자료·같은 자르기로 직접 측정)
+- 내용: state 모양 바닥(원문 그대로) 0.30 / 0.38 / 0.53 / 0.71(요청당 64 / 8 / 4 / 1문장), 천장(무관한 claim) 0.02~0.03, 1문장은 245초. 지시문 모양은 바닥 0.94·천장 0.10(#37079).
+- 델타: 지시문 고정 + state 데이터 분리는 이 판정에 못 쓴다. 주입 위험은 한계로 기록(RFC §8).
+
 ## 제한
 
 - 공개 사용례의 수치는 그 글의 조건에서만 성립한다. 이 RFC 의 근거 수치는 #37079 의 우리 말뭉치 측정이다.

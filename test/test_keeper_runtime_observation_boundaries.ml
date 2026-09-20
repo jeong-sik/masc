@@ -91,6 +91,10 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
   Fun.protect ~finally:R.For_testing.clear (fun () ->
     ignore (R.For_testing.register ~base_path meta.name meta);
     R.set_failure_reason ~base_path meta.name reason;
+    KHL.refresh_failure_reason_after_turn
+      ~base_path
+      ~keeper_name:meta.name
+      ~turn_fail_count:1;
     let stored =
       match R.get ~base_path meta.name with
       | Some { last_failure_reason = Some reason; _ } -> reason
@@ -104,7 +108,7 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
           | Some _, KPB.Provider_timeout _ -> true
           | None, _ | Some _, KPB.Not_provider_runtime_failure -> false
         in
-        Alcotest.(check bool) "typed timeout evidence survives without wire inference"
+        Alcotest.(check bool) "typed timeout evidence survives post-turn refresh"
           expected_presence (Option.is_some agent_core_timeout);
         code,
         KPB.classify_provider_runtime_error_record

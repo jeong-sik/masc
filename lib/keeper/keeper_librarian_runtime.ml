@@ -594,12 +594,10 @@ let execute_exact_output_classified
     Ok (success.accepted, selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
     let terminal () = Error (Exact_execution_failed (exact_execution_error cause)) in
-    (* Only provider exhaustion may fall back to the cli walk; the
-       infrastructure causes keep their terminal (RFC
-       cli-runtimes-as-lane-slots, same split as the other lanes). *)
-    (match cause with
-     | Exact_output.Flow_candidates_exhausted _
-     | Exact_output.Flow_exact_execution_failed _ ->
+    (* The CLI tail follows the same advancement rule as HTTP successors;
+       input-specific and infrastructure failures keep their terminal. *)
+    (match Exact_output.flow_execution_terminal_kind cause with
+     | Exact_output.Advanceable_candidates_exhausted ->
        (match
           try_cli_slots
             ~keeper_id
@@ -616,13 +614,7 @@ let execute_exact_output_classified
             (with_cli_failure
                (Exact_execution_failed (exact_execution_error cause))
                cli_failure))
-     | Exact_output.Flow_attempt_already_started _
-     | Exact_output.Flow_attempt_start_failed _
-     | Exact_output.Flow_measurement_start_failed _
-     | Exact_output.Flow_before_measurement_dispatch_callback_failed _
-     | Exact_output.Flow_measurement_terminal_callback_failed _
-     | Exact_output.Flow_before_dispatch_callback_failed _
-     | Exact_output.Flow_before_advance_callback_failed _ -> terminal ())
+     | Exact_output.Non_advanceable_terminal -> terminal ())
   | Error
       (Exact_output.Flow_semantic_candidates_exhausted
          { rejections; _ }) ->

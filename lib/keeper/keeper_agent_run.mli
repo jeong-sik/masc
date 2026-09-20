@@ -3,11 +3,13 @@ type direct_continuation =
   | Runtime_continuation of Keeper_direct_runtime_continuation.admission
   | Gate_continuation of Keeper_direct_gate_continuation.admission
 
-(** Keeper single-turn orchestration via Agent_core.Agent.run().
+(** Orchestration of one Keeper turn.
 
-    This module is intentionally a compatibility facade: public types and
-    entrypoints stay here while prompt metrics, result/error helpers, and
-    tool-surface policy live in focused implementation modules. *)
+    Prepares Keeper context, tools and hooks, then dispatches through
+    [Keeper_turn_driver.run_named]. The selected [Runtime_execution.t]
+    determines whether AGENT_CORE or an official client runs the model/tool loop.
+    Re-exports [Keeper_agent_result] and [Keeper_agent_prompt_metrics] for
+    existing callers. *)
 
 include module type of Keeper_agent_prompt_metrics
 include module type of Keeper_agent_tool_surface

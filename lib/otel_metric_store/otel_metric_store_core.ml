@@ -40,12 +40,25 @@ let with_lock f =
 
 (** Best-effort wrapper: never crash the caller fiber for a metrics update.
     Metrics are advisory; losing one sample must not take down the OTel tick
-    fiber or the keeper turn. *)
+    fiber or the keeper turn.
+
+    [Cancel_safe.observe] (RFC-0106) draws the one line this wrapper must not
+    cross: [Eio.Cancel.Cancelled] leaves verbatim, every other exception becomes
+    a warning. Until #37349 the handler was a bare [| exn ->], so a counter
+    bumped inside a cancelled fiber would have turned the cancellation into a
+    log line and let the caller run on.
+
+    Nothing under this wrapper suspends today — [metric_key] is string work and
+    [with_lock] is [Stdlib.Mutex] plus [Hashtbl] — so [Cancelled] has no way to
+    originate here and no call site changes behaviour. The guard is what keeps
+    that true if an Eio write or an OTLP export ever moves under the lock. *)
 let best_effort f =
-  try f () with
-  | exn ->
-    Log.Metrics.warn "Otel_metric_store update failed (non-fatal): %s"
-      (Printexc.to_string exn)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Metrics.warn
+        "Otel_metric_store update failed (non-fatal): %s"
+        (Printexc.to_string exn))
+    f
 ;;
 
 let register_counter ~name ~help ?(labels = []) () =

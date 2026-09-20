@@ -6,8 +6,8 @@
     - the [heartbeat_event_intake] record returned to the heartbeat loop;
     - per-class string labels used in Otel_metric_store and log lines;
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
-    - the top-level all-ready draining function ([heartbeat_event_intake])
-      that admits one durable snapshot. *)
+    - the bounded-batch intake function ([heartbeat_event_intake]) that reads
+      one durable snapshot. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -805,13 +805,14 @@ let heartbeat_event_intake
       ~meta_after_triage
       ~pending_board_events
   =
-  (* RFC-event-queue-admit-all-ready — one turn observes every source that is
-     ready in this durable snapshot. The queue is a wake/attention layer, not a
-     second work tracker: admitting one row per turn made a steady arrival rate
-     an unbounded backlog even while every Keeper remained alive.
+  (* RFC-event-queue-admit-all-ready — one turn observes a bounded batch of
+     ready sources from this durable snapshot. The queue is a wake/attention
+     layer, not a second work tracker: admitting one row per turn made a
+     steady arrival rate an unbounded backlog even while every Keeper remained
+     alive.
 
-     Connector attention keeps RFC-0377's conversation boundary: the
-     first ready connector conversation is admitted as a whole, while rows for
+     Connector attention keeps RFC-0377's conversation boundary:
+     only the first ready connector conversation is eligible, while rows for
      other conversations remain pending for their own routed turn. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
@@ -875,23 +876,18 @@ let heartbeat_event_intake
                     first_channel))
           selections
       in
-      (* RFC-event-queue-admit-all-ready bounds the batch: a steady arrival
-         rate must not turn into an unbounded backlog. Selections past the
-         bound stay pending for a later turn instead of being dropped. *)
-      let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
-      let rec take n = function
-        | [] -> []
-        | _ when n <= 0 -> []
-        | x :: rest -> x :: take (n - 1) rest
-      in
-      take max_events admitted
+      admitted
   in
+  let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
   let connector_attention_items_of_batch selections =
     let event_ids =
-      List.filter_map
+      selections
+      |> List.to_seq
+      |> Seq.filter_map
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
            connector_attention_event_id selection.source)
-        selections
+      |> Seq.take max_events
+      |> List.of_seq
     in
     match event_ids with
     | [] | [ _ ] -> None
@@ -919,20 +915,27 @@ let heartbeat_event_intake
     | Keeper_event_queue.Task_outcome _ -> false
   in
   let consume_batch selections =
+    (* Each Connector source spends one admission slot, so at most the first
+       [max_events] Connector ids can enter this turn. This private lazy is
+       forced only by this sequential intake loop, and avoids reading the
+       Connector store when earlier sources fill all slots. *)
     let connector_attention_items =
-      connector_attention_items_of_batch selections
+      lazy (connector_attention_items_of_batch selections)
     in
     let rec loop
+          remaining
           observations_rev
           selections_rev
           first_withdrawn
-          = function
-      | [] ->
+          selections
+      =
+      match remaining, selections with
+      | 0, _ | _, [] ->
         ( List.rev observations_rev
         , List.rev selections_rev
         , first_withdrawn
         , None )
-      | selection :: rest ->
+      | _, selection :: rest ->
         (match
            reconcile_spent_selection
              ~config:ctx.config
@@ -949,7 +952,7 @@ let heartbeat_event_intake
              "turn entry: acknowledged spent Gate grant replay without a turn \
               keeper=%s"
              keeper_name;
-           loop observations_rev selections_rev first_withdrawn rest
+           loop remaining observations_rev selections_rev first_withdrawn rest
          | Ok (Absent_grant_retired { approval_id; absence }) ->
            Log.Keeper.warn
              "turn entry: retired approved Gate resolution without a durable \
@@ -957,8 +960,13 @@ let heartbeat_event_intake
              keeper_name
              approval_id
              (Keeper_approval_queue.resolution_absence_to_string absence);
-           loop observations_rev selections_rev first_withdrawn rest
+           loop remaining observations_rev selections_rev first_withdrawn rest
          | Ok Selection_actionable ->
+           let connector_attention_items =
+             match connector_attention_event_id selection.source with
+             | None -> None
+             | Some _ -> Lazy.force connector_attention_items
+           in
            (match
               consume_single_heartbeat_stimulus
                 ~ctx
@@ -978,7 +986,7 @@ let heartbeat_event_intake
                 | None -> Some (selection, unavailable)
                 | Some _ as kept -> kept
               in
-              loop observations_rev selections_rev first_withdrawn rest
+              loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the
                  one safe empty-source ACK: the post id cannot become readable
@@ -996,7 +1004,7 @@ let heartbeat_event_intake
                     observation stimulus_id=%s keeper=%s"
                    selection.source.post_id
                    keeper_name;
-                 loop observations_rev selections_rev first_withdrawn rest
+                 loop remaining observations_rev selections_rev first_withdrawn rest
                | Error message ->
                  let detail =
                    "failed to acknowledge Board stimulus with no remaining \
@@ -1009,12 +1017,13 @@ let heartbeat_event_intake
                  , Some (selection, Pending_selection_failed detail) ))
             | Stimulus_consumed observations ->
               loop
+                (remaining - 1)
                 (List.rev_append observations observations_rev)
                 (selection :: selections_rev)
                 first_withdrawn
                 rest))
     in
-    loop [] [] None selections
+    loop max_events [] [] None selections
   in
   let ( queued_observations
       , consumed_selections

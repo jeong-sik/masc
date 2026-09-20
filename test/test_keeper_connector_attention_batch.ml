@@ -361,6 +361,40 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
        |> Result.value ~default:(-1)))
 ;;
 
+let test_transient_board_prefix_keeps_connector_content_within_admission_limit () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  @@ fun () ->
+  with_ctx "connector-after-transient" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let board = board_attention_stimulus ~label:"unavailable-head" ~arrived_at:1.0 in
+    let messages = List.init 3 (fun index ->
+      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"C-bounded"
+        ~message_id:(string_of_int index) ~arrived_at:(Float.of_int (index + 2))
+        ~content:(Printf.sprintf "connector content %d" index))
+    in
+    List.iter (enqueue_exn ~base_path keeper_name) (board :: messages);
+    Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
+    let intake =
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx ~meta_after_triage:meta ~pending_board_events:[]
+    in
+    let expected = List.take 2 messages |> List.map (fun (source : Q.stimulus) -> source.post_id) in
+    check (list string) "readable connector members fill the limit after the failed Board row"
+      expected
+      (Keeper_heartbeat_source_batch.stimuli intake.source_batch
+       |> List.map (fun (source : Q.stimulus) -> source.post_id));
+    check (list string) "every admitted member retains its recorded content"
+      (List.map (fun id -> "connector-attention:" ^ id) expected)
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
+         intake.pending_board_events);
+    check (list string) "recorded message bodies reach the turn in order"
+      [ "connector content 0"; "connector content 1" ]
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+         intake.pending_board_events);
+    check int "unadmitted and admitted sources remain pending before ACK" 4
+      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
+       |> Result.map Q.length |> Result.value ~default:(-1)))
+;;
+
 let test_proactive_yields_only_to_ready_intake () =
   with_ctx "proactive-ready-intake" (fun ~base_path ~keeper_name ~meta ~ctx ->
     (match Keeper_owner_registry.install_from_store
@@ -1098,6 +1132,10 @@ let () =
             "admits only one exact HITL resolution per turn"
             `Quick
             test_one_intake_admits_only_one_hitl_resolution
+        ; test_case
+            "transient Board prefix preserves bounded connector content"
+            `Quick
+            test_transient_board_prefix_keeps_connector_content_within_admission_limit
         ; test_case
             "admits a channel's whole backlog in arrival order, leaves other \
              channels queued"

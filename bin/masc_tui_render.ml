@@ -5227,46 +5227,73 @@ let render_lane_run_list (state : state) ~lane_id =
        ~hints:Masc_tui_keys.footer_hints_lanes_run_list);
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
 
-(* Each top-level field has its own preview so a large field cannot hide its
-   siblings. The total preview can therefore grow with the number of fields;
-   this is not the separate HTTP record-size limit. Other JSON values remain
-   one bounded document. Full stored payloads are unchanged. *)
+(* Fields share the existing total preview budget, including labels and
+   truncation notices. Each remaining field receives an equal share of the
+   remaining bytes, so a large value cannot spend its siblings' space.
+   Full stored payloads are unchanged. *)
 let lane_run_render_max_bytes = 65536
 
 let lane_run_payload_lines ~width json =
-  let render_document value =
+  let fence = fenced_document_text ~language:"json" in
+  let render_document ~budget value =
     let full = Yojson.Safe.pretty_to_string value in
-    let text, truncated =
-      if String.length full <= lane_run_render_max_bytes then full, false
+    let full_document = fence full in
+    let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full) in
+    let preview =
+      if String.length full_document <= budget then Some (full_document, [])
       else
-        let cut =
-          match String.rindex_from_opt full lane_run_render_max_bytes '\n' with
-          | Some newline -> newline
-          | None -> String_util.utf8_char_boundary full lane_run_render_max_bytes
+        let wrapper_bytes = String.length full_document - String.length full in
+        let room = budget - wrapper_bytes - String.length notice - 1 in
+        if room < 0 then None
+        else
+          let cut =
+            match String.rindex_from_opt full room '\n' with
+            | Some newline -> newline
+            | None -> String_util.utf8_char_boundary full room
+          in
+          Some (fence (String.sub full 0 cut), [ Theme.warn (), notice ])
+    in
+    Option.map
+      (fun (document, notices) ->
+        let used =
+          String.length document
+          + List.fold_left (fun n (_, text) -> n + String.length text + 1) 0 notices
         in
-        String.sub full 0 cut, true
-    in
-    let rendered =
-      fenced_document_text ~language:"json" text
-      |> document_markdown ~width
-      |> List.map (fun line -> Ansi.reset, line)
-    in
-    if truncated then
-      rendered
-      @ [ ( Theme.warn ()
-          , Printf.sprintf "… truncated, total %d bytes" (String.length full) ) ]
-    else rendered
+        let lines =
+          document_markdown ~width document
+          |> List.map (fun line -> Ansi.reset, line)
+        in
+        used, lines @ notices)
+      preview
   in
   match json with
   | `Assoc (_ :: _ as fields) ->
-    List.concat_map
-      (fun (name, value) ->
-        let heading =
-          Yojson.Safe.to_string (`String name) |> Terminal_text.single_line
+    let omitted count = Printf.sprintf "… %d more field(s) not rendered" count in
+    let count = List.length fields in
+    let budget = lane_run_render_max_bytes - String.length (omitted count) - 1 in
+    let rec render_fields budget remaining skipped acc = function
+      | [] ->
+        let lines = List.rev acc in
+        if skipped = 0 then lines else lines @ [ Theme.warn (), omitted skipped ]
+      | (name, value) :: rest ->
+        let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
+        let heading_bytes = String.length heading + 1 in
+        let share = budget / remaining in
+        let preview =
+          if heading_bytes >= share then None
+          else render_document ~budget:(share - heading_bytes) value
         in
-        (Ansi.bold, heading) :: render_document value)
-      fields
-  | _ -> render_document json
+        (match preview with
+         | None -> render_fields budget (remaining - 1) (skipped + 1) acc rest
+         | Some (used, lines) ->
+           render_fields (budget - heading_bytes - used) (remaining - 1) skipped
+             (List.rev_append lines ((Ansi.bold, heading) :: acc)) rest)
+    in
+    render_fields budget count 0 [] fields
+  | _ ->
+    (match render_document ~budget:lane_run_render_max_bytes json with
+     | Some (_, lines) -> lines
+     | None -> [ Theme.warn (), "… payload not rendered" ])
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_decision with

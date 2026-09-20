@@ -72,6 +72,21 @@ def run(executable: str, scenario: str) -> None:
     elif scenario == "large-scalar":
         # The quote and ASCII prefix put the old byte cut inside a Korean rune.
         run_record["output"] = "u" + "한" * 23000 + "SCALAR_TAIL"
+    elif scenario == "many-fields":
+        # Every value fits the former per-field bound, but together these
+        # remain just below the HTTP record limit and overwhelm a frame.
+        run_record["output"] = {
+            f"field-{index:02}": {
+                "start": f"FIELD_{index:02}_START",
+                "body": "x" * 60000,
+                "end": f"FIELD_{index:02}_END",
+            }
+            for index in range(64)
+        }
+    elif scenario == "many-labels":
+        run_record["output"] = {
+            f"field-{index:05}": f"VALUE_{index:05}" for index in range(10000)
+        }
     elif scenario != "available-null":
         raise AssertionError("unknown fixture scenario")
     summary = {
@@ -196,9 +211,26 @@ def run(executable: str, scenario: str) -> None:
             frame = bytes(output[start:])
             screen = h.screen_text(bytes(output))
             frame.decode("utf-8", errors="strict")
-            assert "�".encode() not in frame, frame
+            assert "\ufffd".encode() not in frame, frame
             assert "한".encode() in screen, screen
             assert b"SCALAR_TAIL" not in frame, frame
+        elif scenario == "many-fields":
+            assert b'"field-00"' in screen and b"FIELD_00_START" in screen, screen
+            assert b"truncated, total" in screen, screen
+            h.send_and_wait(process, master, output, b"\x1b[F", b"FIELD_63_START")
+            h.drain_until_quiet(process, master, output)
+            screen = h.screen_text(bytes(output))
+            assert b'"field-63"' in screen, screen
+        elif scenario == "many-labels":
+            h.send_and_wait(
+                process, master, output, b"\x1b[F", b"field(s) not rendered"
+            )
+            h.drain_until_quiet(process, master, output)
+            screen = h.screen_text(bytes(output))
+            assert b'"field-09999"' in screen and b"VALUE_09999" in screen, screen
+            assert re.search(rb"[1-9][0-9]* more field\(s\) not rendered", screen), (
+                screen
+            )
         assert b"INPUT \xc2\xb7 RUN INPUT" in initial_screen, initial_screen
         assert b"OUTPUT \xc2\xb7 RUN RESULT" in initial_screen, initial_screen
         assert b"MODEL RESPONSE" not in initial_screen, initial_screen
@@ -239,6 +271,8 @@ if __name__ == "__main__":
         "available-array",
         "available-empty-object",
         "large-scalar",
+        "many-fields",
+        "many-labels",
     ):
         run(os.path.abspath(sys.argv[1]), scenario)
     print("TUI lane original payload availability: PASS")

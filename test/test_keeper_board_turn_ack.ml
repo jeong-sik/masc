@@ -1,8 +1,8 @@
 (* Board routing, the Owner-internal turn and durable ACK use production code.
    The fixture seeds the runtime registry, injects one transient Board read and
-   supplies a loopback model response. It calls the cycle directly, so the outer
-   heartbeat scheduler and its admission checks are outside this test. Existing
-   CI supplies the real Docker image and explicit opt-in. *)
+   supplies a loopback model response to a short Board preview. It calls the
+   cycle directly, so the outer heartbeat scheduler and its admission checks
+   are outside this test. No sandbox tools are invoked. *)
 open Masc
 
 let require condition detail = if not condition then failwith detail
@@ -57,9 +57,9 @@ let queue config name =
 
 let queue_count config name = Keeper_event_queue.length (queue config name)
 
-let evidence config post_id =
+let evidence config stimulus_id =
   match Keeper_reaction_ledger.event_queue_reaction_evidence_result
-    ~base_path:config.Workspace.base_path ~keeper_name ~stimulus_id:post_id
+    ~base_path:config.Workspace.base_path ~keeper_name ~stimulus_id
     |> get Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string with
   | Keeper_reaction_ledger.Evidence_complete evidence -> evidence
   | Keeper_reaction_ledger.Evidence_quarantined _ -> failwith "reaction evidence quarantined"
@@ -154,13 +154,16 @@ data: [DONE]
   Board_dispatch.init_jsonl ();
   Board_dispatch.set_board_signal_hook
     (Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config);
-  let content = "@" ^ keeper_name ^ " Synthetic Atlas: staging uses PostgreSQL 15; keep this exact fact." in
+  let content = "@" ^ keeper_name ^ " Atlas staging uses PostgreSQL 15." in
   let post = Board_dispatch.create_post ~author:"synthetic-user" ~content
     ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error in
   let post_id = Board.Post_id.to_string post.id in
   require (queue_count config keeper_name = 1) "direct mention did not enqueue exactly once";
   require (queue_count config other_name = 0) "direct mention reached the unaddressed Keeper";
   let pending = Keeper_event_queue.to_list (queue config keeper_name) in
+  let stimulus_id = match pending with
+    | [stimulus] -> Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus
+    | _ -> failwith "expected one durable Board stimulus" in
   let shared_context = Agent_core.Context.create () in
   let cycle meta = Keeper_heartbeat_loop.run_keepalive_unified_turn
     ~wake:Keeper_world_observation.Attention_wake ~ctx ~meta_after_triage:meta
@@ -174,7 +177,7 @@ data: [DONE]
   require (Exact_output_fixture.post_count server = 0) "transient read dispatched a model request";
   require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
     "transient read changed the durable pending source";
-  require (not (evidence config post_id).event_queue_ack_seen) "transient read persisted ACK evidence";
+  require (not (evidence config stimulus_id).event_queue_ack_seen) "transient read persisted ACK evidence";
   let second = cycle first.meta in
   require (second.stimuli_acked) "actual completed turn did not ACK its source";
   require (queue_count config keeper_name = 0) "source remains queued after completion";
@@ -189,12 +192,20 @@ data: [DONE]
     "the fixture did not exercise the streaming Keeper request";
   let request_texts = request |> member "messages" |> to_list
     |> List.map (fun message -> message |> member "content" |> to_string) in
-  (* This compares the exact known source text, not a content-based routing rule. *)
-  require (List.exists (Astring.String.is_infix ~affix:content) request_texts)
-    "the actual request omitted the admitted Board body";
-  let settled = evidence config post_id in
-  require (settled.turn_started_seen && settled.turn_finished_seen && settled.event_queue_ack_seen)
-    "production turn/ACK reaction evidence is incomplete";
+  (* Production renders admitted Board evidence as quoted row fields. *)
+  require (List.exists
+    (Astring.String.is_infix ~affix:(Printf.sprintf "post_id=%S" post_id)) request_texts)
+    "the actual request omitted the admitted Board post identity";
+  require (List.exists
+    (Astring.String.is_infix ~affix:(Printf.sprintf "preview=%S" content)) request_texts)
+    "the actual request omitted the short Board preview";
+  let settled = evidence config stimulus_id in
+  (* Board input is persisted in the queue checked above. Its reaction ledger
+     records the ACK; Schedule/HITL turn reactions are a different contract.
+     Completion above comes from the actual TurnRecord. *)
+  require (settled.event_queue_ack_seen && not settled.event_queue_cancelled_seen)
+    (Printf.sprintf "Board ACK missing for %s (rows=%d, cancelled=%b)"
+       stimulus_id settled.matched_record_count settled.event_queue_cancelled_seen);
   (* Inspect the next intake only: an empty queue does not forbid unrelated
      autonomous work, so another model turn would not itself prove redelivery. *)
   let third = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
@@ -204,7 +215,7 @@ data: [DONE]
   require (queue_count config keeper_name = 0 && queue_count config other_name = 0)
     "next tick repeated delivery";
   require (Exact_output_fixture.post_count server = 1) "intake unexpectedly dispatched";
-  require ((evidence config post_id).matched_record_count = settled.matched_record_count)
+  require ((evidence config stimulus_id).matched_record_count = settled.matched_record_count)
     "empty next intake added another reaction or ACK";
   let summary = `Assoc
     ["post_id", `String post_id; "keeper", `String keeper_name

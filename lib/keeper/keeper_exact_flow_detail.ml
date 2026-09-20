@@ -22,8 +22,9 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
 ;;
 
 (* [flow_evidence] is a private agent-core type with no constructor outside
-   agent core. Tests must obtain it through an actual flow, which keeps this
-   caller wiring covered instead of testing only its leaf renderers. *)
+   agent core. The candidate-rejected branch is covered through an actual
+   flow. The execution-failed branch is exhaustively matched here, while its
+   cause wording is covered by the leaf renderer test. *)
 let advance_failure_kind : Exact_output.flow_advance_failure_snapshot -> string * string
   = function
   | Exact_output.Flow_advance_candidate_rejected rejection ->

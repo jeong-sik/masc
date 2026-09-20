@@ -102,9 +102,9 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
 
 (* The eleven distinct execution causes reach the advance line through
    [execution_cause_detail]. The execution-failed branch of
-   the execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
-   private agent-core type with no constructor — so what is pinned is that every
-   cause the renderer can receive still renders apart from every other. A
+   [advance_failure_kind] cannot be built here — [flow_attempt_snapshot] is a
+   private agent-core type with no constructor — so this test pins that every
+   cause the branch can receive still renders apart from every other. A
    single shared label is what made the eleven indistinguishable in the log,
    and this fails if any two collapse onto the same string. *)
 let test_every_execution_cause_renders_distinctly () =

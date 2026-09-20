@@ -256,6 +256,40 @@ let evidence_provenance (evidence : Exact_output.flow_evidence) =
   List.map attempt_snapshot_provenance evidence.attempts
 ;;
 
+let terminal_of_flow_error = function
+  | Exact_output.Flow_attempt_already_started evidence ->
+    Flow_already_started (evidence_provenance evidence)
+  | Exact_output.Flow_before_dispatch_callback_failed
+      { cause; evidence; candidate } ->
+    Before_dispatch_persistence_failed
+      { cause
+      ; current = attempt_provenance candidate
+      ; evidence = evidence_provenance evidence
+      }
+  | Exact_output.Flow_before_advance_callback_failed
+      { cause; evidence; failed; next } ->
+    Before_advance_persistence_failed
+      { cause
+      ; failed = advance_source_of_failure failed
+      ; next = candidate_visit next
+      ; evidence = evidence_provenance evidence
+      }
+  | ( Exact_output.Flow_attempt_start_failed { evidence; _ }
+    | Exact_output.Flow_measurement_start_failed { evidence; _ }
+    | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
+    | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ } ) as cause ->
+    Flow_bookkeeping_failed
+      { attempts = evidence_provenance evidence
+      ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+      }
+  | ( Exact_output.Flow_candidates_exhausted { evidence; _ }
+    | Exact_output.Flow_exact_execution_failed { evidence; _ } ) as cause ->
+    Providers_exhausted
+      { attempts = evidence_provenance evidence
+      ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+      }
+;;
+
 let admitted_candidate candidate_id admissions =
   List.find_map
     (function
@@ -674,43 +708,6 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
     | Ok judgment -> Exact_output.Accept judgment
     | Error rejection -> Exact_output.Reject_and_advance rejection
   in
-  let terminal_error = function
-    | Exact_output.Flow_attempt_already_started evidence ->
-      Error (Flow_already_started (evidence_provenance evidence))
-    | Exact_output.Flow_before_dispatch_callback_failed
-        { cause; evidence; candidate } ->
-      Error
-        (Before_dispatch_persistence_failed
-           { cause
-           ; current = attempt_provenance candidate
-           ; evidence = evidence_provenance evidence
-           })
-    | Exact_output.Flow_before_advance_callback_failed
-        { cause; evidence; failed; next } ->
-      Error
-        (Before_advance_persistence_failed
-           { cause
-           ; failed = advance_source_of_failure failed
-           ; next = candidate_visit next
-           ; evidence = evidence_provenance evidence
-           })
-    | ( Exact_output.Flow_attempt_start_failed { evidence; _ }
-      | Exact_output.Flow_measurement_start_failed { evidence; _ }
-      | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
-      | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ } ) as cause ->
-      Error
-        (Flow_bookkeeping_failed
-           { attempts = evidence_provenance evidence
-           ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
-           })
-    | ( Exact_output.Flow_candidates_exhausted { evidence; _ }
-      | Exact_output.Flow_exact_execution_failed { evidence; _ } ) as cause ->
-      Error
-        (Providers_exhausted
-           { attempts = evidence_provenance evidence
-           ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
-           })
-  in
   let jev_first, result =
     try
       let jev_first = ask_jev ~clock prepared in
@@ -758,17 +755,16 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
                    failure, not an unreachable provider. Every arm is written
                    out so a new terminal has to be classified here rather than
                    silently inheriting the fallback. *)
-                (match terminal_error cause with
-                 | Ok judgment -> Ok judgment
-                 | Error
-                     ( Flow_already_started _
-                     | Before_dispatch_persistence_failed _
-                     | Before_advance_persistence_failed _
-                     | Flow_bookkeeping_failed _
-                     | Cli_slots_exhausted _
-                     | Provenance_mismatch _
-                     | Domain_output_invalid _ ) as terminal -> terminal
-                 | Error (Providers_exhausted { attempts; detail }) as exhausted ->
+                (match terminal_of_flow_error cause with
+                 | ( Flow_already_started _
+                   | Before_dispatch_persistence_failed _
+                   | Before_advance_persistence_failed _
+                   | Flow_bookkeeping_failed _
+                   | Cli_slots_exhausted _
+                   | Provenance_mismatch _
+                   | Domain_output_invalid _ ) as terminal ->
+                   Error terminal
+                 | Providers_exhausted { attempts; detail } as exhausted ->
                    (match
                       run_cli_tail
                         ?runner:cli_runner
@@ -782,7 +778,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
                         slot_id;
                       cli_selected_slot := Some slot_id;
                       Ok judgment
-                    | Error Tail_no_slots -> exhausted
+                    | Error Tail_no_slots -> Error exhausted
                     | Error (Tail_failures failures as error) ->
                       Log.Keeper.warn
                         "board_attention_cli_tail_failed keeper=%s reason=%s"

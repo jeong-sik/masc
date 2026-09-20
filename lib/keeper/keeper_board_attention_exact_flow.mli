@@ -91,6 +91,13 @@ type prepared
 
 val lane_id : string
 
+val terminal_of_flow_error
+  :  'callback_error Exact_output.flow_execution_error
+  -> 'callback_error execution_error
+(** Classify every AGENT_CORE flow terminal before deciding whether a second
+    transport may run. The closed input and output variants make a new flow
+    terminal a compile-time classification request. *)
+
 (** Snapshot only an effective resumable pending candidate. Quarantined and
     requeue-requested candidates are not executable; a durably requeued pending
     candidate is executable through the same exact flow as a normal pending one. *)

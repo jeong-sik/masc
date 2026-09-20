@@ -877,6 +877,94 @@ let test_persistence_failure_does_not_walk_the_cli_tail () =
       | Ok _ -> Alcotest.fail "a persistence failure must not become a judgment")))
 ;;
 
+(* The four AGENT_CORE bookkeeping failures all stay on the typed terminal
+   side of the transport decision. One real measurement failure supplies the
+   opaque visit, receipt, and evidence values needed to construct the closed
+   input variants without a test-only production hook. *)
+let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
+  run_eio (fun ~sw ~net ~clock ->
+    let id = "board-attention-bookkeeping-classification" in
+    let base_url = reserved_non_listening_loopback_base_url ~sw in
+    let snapshot =
+      Fixture.resolver_snapshot
+        ~source:"Board attention bookkeeping classification"
+        [ target id base_url ]
+    in
+    let admitted_target =
+      Exact_output.admit_target_ref snapshot id |> Result.get_ok
+    in
+    let flow_candidate =
+      Exact_output.make_flow_candidate ~id ~admitted_target |> Result.get_ok
+    in
+    let requirement =
+      Exact_output.make_output_requirement
+        ~schema:Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
+        ~minimum_guarantee:Exact_output.Json_syntax
+    in
+    let flow =
+      Exact_output.snapshot_flow
+        ~first:flow_candidate
+        ~rest:[]
+        ~messages:[ Agent_core.Types.user_msg "classify bookkeeping failure" ]
+        requirement
+      |> Result.get_ok
+      |> Exact_output.start_flow
+      |> Result.get_ok
+    in
+    let raw_failure =
+      Exact_output.execute_flow_once
+        ~net
+        ~clock
+        ~before_measurement_dispatch:(fun _ -> Error "measurement intent")
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Alcotest.fail "measurement failure reached dispatch")
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          Alcotest.fail "measurement failure advanced")
+        ~validate:(fun _ -> Alcotest.fail "measurement failure reached validation")
+        flow
+    in
+    match raw_failure with
+    | Error
+        (Exact_output.Flow_execution_terminal
+           { cause =
+               (Exact_output.Flow_before_measurement_dispatch_callback_failed
+                  { measurement; evidence; _ } as before_measurement)
+           ; _
+           }) ->
+      let visit =
+        match evidence.admissions with
+        | Exact_output.Candidate_admitted admitted :: _ -> admitted.visit
+        | Exact_output.Candidate_rejected _ :: _ | [] ->
+          Alcotest.fail "measurement failure lost its admitted visit"
+      in
+      let failures =
+        [ Exact_output.Flow_attempt_start_failed
+            { candidate = visit
+            ; cause = Exact_output.Call_id_generation_failed "call id"
+            ; evidence
+            }
+        ; Exact_output.Flow_measurement_start_failed
+            { candidate = visit
+            ; cause =
+                Exact_output.Measurement_operation_id_generation_failed "operation id"
+            ; evidence
+            }
+        ; before_measurement
+        ; Exact_output.Flow_measurement_terminal_callback_failed
+            { measurement; cause = "measurement terminal"; evidence }
+        ]
+      in
+      List.iter
+        (fun failure ->
+           match Exact_flow.terminal_of_flow_error failure with
+           | Exact_flow.Flow_bookkeeping_failed _ -> ()
+           | Exact_flow.Providers_exhausted _ ->
+             Alcotest.fail "bookkeeping failure was classified as provider exhaustion"
+           | _ -> Alcotest.fail "bookkeeping failure lost its typed terminal")
+        failures
+    | Ok _ | Error _ -> Alcotest.fail "fixture did not reach measurement bookkeeping")
+;;
+
 (* Jev goes out through the pooled client, which needs a pool on this domain;
    the exact-output lane dials its own connections and does not. *)
 let run_eio_with_http_pool f =
@@ -1224,6 +1312,10 @@ let () =
             "a persistence failure does not walk the cli tail"
             `Quick
             test_persistence_failure_does_not_walk_the_cli_tail
+        ; Alcotest.test_case
+            "flow bookkeeping failures are not provider exhaustion"
+            `Quick
+            test_flow_bookkeeping_failures_are_not_provider_exhaustion
         ] )
     ; ( "jev first"
       , [ Alcotest.test_case

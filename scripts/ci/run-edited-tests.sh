@@ -125,6 +125,12 @@ ${sources}
 CANDIDATES
   sources=$( { printf '%s\n' "${runnable}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+  # Keep the suites this pull request edits as their own execution class.
+  # Source-derived guards can expand one test edit into hundreds of suites;
+  # if all names are sorted together, the test carrying the changed assertion
+  # may receive only the tail of the step budget. Selection stays complete,
+  # but [run_selected] executes this class before attributed suites.
+  direct_sources="${sources}"
 
   # A guard can protect an input that is not itself a test, and then no pull
   # request that breaks it ever edits it.
@@ -569,11 +575,38 @@ run_selected() {
   ran=0
   skipped=0
   failed=""
-  # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
-  # "${a[@]}" as unbound under nounset.
-  local linked_ids=() linked_deps=() linked_envs=() linked_count=0
-  local python_sources=() python_count=0
-  local source dir name verdict stanza_deps stanza_env
+  local direct_group="" attributed_group="" source
+  local linked_jobs="${DUNE_JOBS:-1}"
+  if ! [[ "${linked_jobs}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "DUNE_JOBS must be a positive integer, got ${linked_jobs}" >&2
+    return 2
+  fi
+
+  # A directly edited suite is the closest executable claim about the changed
+  # assertion. Run that finite class first, then every suite attributed from
+  # source, stanza, guard, or reference analysis. This changes only execution
+  # order: no selected suite is dropped or treated as passing without running.
+  # Within each class, keep the existing linked-suite-then-Python-rule order.
+  while IFS= read -r source; do
+    [ -n "${source}" ] || continue
+    if printf '%s\n' "${direct_sources:-}" | grep -Fxq "${source}"
+    then direct_group=$(printf '%s\n%s\n' "${direct_group}" "${source}")
+    else attributed_group=$(printf '%s\n%s\n' "${attributed_group}" "${source}")
+    fi
+  done <<EOF
+${sources}
+EOF
+
+  local group_sources
+  for group_sources in "${direct_group}" "${attributed_group}"; do
+    if ! printf '%s\n' "${group_sources}" | grep -q '[^[:space:]]'; then
+      continue
+    fi
+    # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
+    # "${a[@]}" as unbound under nounset.
+    local linked_ids=() linked_deps=() linked_envs=() linked_count=0
+    local python_sources=() python_count=0 python_batchable=true
+    local dir name verdict stanza_deps stanza_env
 
   while IFS= read -r source; do
     [ -n "${source}" ] || continue
@@ -595,6 +628,8 @@ run_selected() {
       *.py)
         python_sources[python_count]="${source}"
         python_count=$((python_count + 1))
+        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] \
+          || python_batchable=false
         continue
         ;;
     esac
@@ -626,15 +661,15 @@ run_selected() {
     linked_deps[linked_count]="${stanza_deps}"
     linked_envs[linked_count]="${stanza_env}"
     linked_count=$((linked_count + 1))
-  done <<EOF
-${sources}
+    done <<EOF
+${group_sources}
 EOF
 
-  local i id target left limit status binary
-  local targets=() target_count=0 build_status=0 build_ran_out=false
-  local linked_built=()
-  i=0
-  while [ "${i}" -lt "${linked_count}" ]; do
+    local i id target left limit status binary
+    local targets=() target_count=0 build_status=0 build_ran_out=false
+    local linked_built=()
+    i=0
+    while [ "${i}" -lt "${linked_count}" ]; do
     targets[target_count]="${linked_ids[i]}.exe"
     target_count=$((target_count + 1))
     while IFS= read -r target; do
@@ -646,8 +681,8 @@ ${linked_deps[i]}
 DEPS
     linked_built[i]=true
     i=$((i + 1))
-  done
-  if [ "${linked_count}" -gt 0 ]; then
+    done
+    if [ "${linked_count}" -gt 0 ]; then
     left=$(budget_left)
     if [ "${left}" -le 0 ]; then
       build_ran_out=true
@@ -656,12 +691,12 @@ DEPS
       timeout "${left}" dune build "${targets[@]}" < /dev/null || build_status=$?
       [ "${build_status}" -ne 124 ] || build_ran_out=true
     fi
-  fi
+    fi
   # A failed invocation says something failed, not which suite. An absent
   # executable is that suite's. A present one whose stanza also declares
   # deps may still have lost a dep, so those are asked again one at a time;
   # dune answers at once for what is already built.
-  if [ "${build_status}" -ne 0 ] && [ "${build_ran_out}" = false ]; then
+    if [ "${build_status}" -ne 0 ] && [ "${build_ran_out}" = false ]; then
     i=0
     while [ "${i}" -lt "${linked_count}" ]; do
       id=${linked_ids[i]}
@@ -683,88 +718,157 @@ DEPS
       fi
       i=$((i + 1))
     done
-  fi
+    fi
 
-  i=0
-  while [ "${i}" -lt "${linked_count}" ]; do
-    id=${linked_ids[i]}
-    dir=${id%/*}
-    name=${id##*/}
-    i=$((i + 1))
-    binary="${repo_root}/_build/default/${id}.exe"
-    if [ ! -x "${binary}" ] && [ "${build_ran_out}" = true ]; then
-      failed="${failed}${id} (not built: the step budget ran out)\n"
-      continue
-    fi
-    if [ "${linked_built[i - 1]}" = false ]; then
-      failed="${failed}${id} (build)\n"
-      continue
-    fi
-    if [ ! -x "${binary}" ]; then
-      # The build reported success and the binary is not where dune puts it,
-      # which is a different thing from a suite that failed to link.
-      failed="${failed}${id} (built, but no binary at ${binary})\n"
-      continue
-    fi
-    if [ "$(budget_left)" -le 0 ]; then
-      failed="${failed}${id} (not run: the step budget ran out)\n"
-      continue
-    fi
-    limit=$(bounded_by_budget "${per_suite_timeout}")
-    local stanza_setenv=()
-    while IFS= read -r assignment; do
-      [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
-    done <<ENVS
-${linked_envs[i - 1]}
+    # Dune already builds with DUNE_JOBS workers. Use the same worker count
+    # for the independent linked executables instead of paying their runtime
+    # serially after one batched build. A wave finishes before the next starts,
+    # so the direct class still completes before attributed work begins. Each
+    # child keeps its own timeout and every failed or unreached suite is still
+    # named below; concurrency changes neither selection nor certification.
+    i=0
+    while [ "${i}" -lt "${linked_count}" ]; do
+      local wave_pids=() wave_indices=() wave_limits=() wave_count=0
+      while [ "${i}" -lt "${linked_count}" ] && [ "${wave_count}" -lt "${linked_jobs}" ]; do
+        local linked_index="${i}"
+        id=${linked_ids[linked_index]}
+        dir=${id%/*}
+        name=${id##*/}
+        i=$((i + 1))
+        binary="${repo_root}/_build/default/${id}.exe"
+        if [ ! -x "${binary}" ] && [ "${build_ran_out}" = true ]; then
+          failed="${failed}${id} (not built: the step budget ran out)\n"
+          continue
+        fi
+        if [ "${linked_built[linked_index]}" = false ]; then
+          failed="${failed}${id} (build)\n"
+          continue
+        fi
+        if [ ! -x "${binary}" ]; then
+          # The build reported success and the binary is not where dune puts
+          # it, which is different from a suite that failed to link.
+          failed="${failed}${id} (built, but no binary at ${binary})\n"
+          continue
+        fi
+        if [ "$(budget_left)" -le 0 ]; then
+          failed="${failed}${id} (not run: the step budget ran out)\n"
+          continue
+        fi
+        limit=$(bounded_by_budget "${per_suite_timeout}")
+        local stanza_setenv=()
+        while IFS= read -r assignment; do
+          [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
+        done <<ENVS
+${linked_envs[linked_index]}
 ENVS
-    echo "== ${id}"
-    status=0
-    # dune runs a suite from inside its own build directory, and suites read
-    # relative paths from there. DUNE_SOURCEROOT is what the ones that want
-    # the checkout read; without it they fall back to the cwd, which from
-    # here would be the wrong tree.
-    ( cd "${repo_root}/_build/default/${dir}" \
-      && env DUNE_SOURCEROOT="${repo_root}" \
-         ${stanza_setenv+"${stanza_setenv[@]}"} \
-         timeout "${limit}" "./${name}.exe" < /dev/null ) || status=$?
-    if [ "${status}" -eq 0 ]; then
-      ran=$((ran + 1))
-    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
-      failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
-    else
-      failed="${failed}${id} (run)\n"
-    fi
-  done
+        echo "== ${id}"
+        # Dune runs a suite from inside its own build directory, and suites
+        # read relative paths from there. DUNE_SOURCEROOT is what the ones
+        # that want the checkout read; without it they fall back to the cwd.
+        ( cd "${repo_root}/_build/default/${dir}" \
+          && env DUNE_SOURCEROOT="${repo_root}" \
+             ${stanza_setenv+"${stanza_setenv[@]}"} \
+             timeout "${limit}" "./${name}.exe" < /dev/null ) &
+        wave_pids[wave_count]=$!
+        wave_indices[wave_count]="${linked_index}"
+        wave_limits[wave_count]="${limit}"
+        wave_count=$((wave_count + 1))
+      done
 
-  # A .py suite has no executable to build and run, so dune runs it: the rule
-  # supplies the deps and the environment its action declares. Asked for by
-  # path (@test/runtest-x, not @runtest-x) so a name that stopped existing
-  # fails here instead of matching a rule in some other directory.
-  # Measured 2026-09-13: the alias exits 0 on a pass and 1 on a planted
-  # failure, both forms, so this is a verdict and not a build line that
-  # always reports success.
-  i=0
-  while [ "${i}" -lt "${python_count}" ]; do
-    source=${python_sources[i]}
-    i=$((i + 1))
-    dir=$(dirname "${source}")
-    name=$(basename "${source}" .py)
-    if [ "$(budget_left)" -le 0 ]; then
-      failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
-      continue
-    fi
-    local own
-    own=$(suite_timeout "${source}")
-    limit=$(bounded_by_budget "${own}")
-    echo "== ${dir}/${name} (dune rule)"
-    status=0
-    timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
-    if [ "${status}" -eq 0 ]; then
-      ran=$((ran + 1))
-    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
-      failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+      local wave_index=0
+      while [ "${wave_index}" -lt "${wave_count}" ]; do
+        linked_index=${wave_indices[wave_index]}
+        id=${linked_ids[linked_index]}
+        limit=${wave_limits[wave_index]}
+        if wait "${wave_pids[wave_index]}"; then
+          status=0
+        else
+          status=$?
+        fi
+        if [ "${status}" -eq 0 ]; then
+          ran=$((ran + 1))
+        elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
+          failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
+        else
+          failed="${failed}${id} (run)\n"
+        fi
+        wave_index=$((wave_index + 1))
+      done
+    done
+
+  # A .py suite has no executable to build and run, so dune runs its rule: the
+  # rule supplies the deps, sandbox and environment its action declares.
+  # Default-bound rules share one dune invocation, which lets DUNE_JOBS run
+  # their independent sandboxes concurrently. Before this, a broad selection
+  # paid every PTY rule serially: run 35502819681 passed 414 suites, then spent
+  # the final two seconds on the first of 15 remaining PTY rules. Directly
+  # edited rules remain their own earlier execution class, and a rule with a
+  # custom timeout stays on the one-at-a-time path below. Selection and the
+  # fail-closed step budget are unchanged.
+    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then
+      local python_targets=()
+      i=0
+      while [ "${i}" -lt "${python_count}" ]; do
+        source=${python_sources[i]}
+        dir=$(dirname "${source}")
+        name=$(basename "${source}" .py)
+        python_targets[i]="@${dir}/runtest-${name}"
+        i=$((i + 1))
+      done
+      if [ "$(budget_left)" -le 0 ]; then
+        status=124
+        limit=0
+      else
+        limit=$(bounded_by_budget "${per_suite_timeout}")
+        echo "== running ${python_count} dune-rule suites in one invocation"
+        status=0
+        timeout "${limit}" dune build "${python_targets[@]}" < /dev/null || status=$?
+      fi
+      if [ "${status}" -eq 0 ]; then
+        ran=$((ran + python_count))
+      else
+        i=0
+        while [ "${i}" -lt "${python_count}" ]; do
+          source=${python_sources[i]}
+          i=$((i + 1))
+          dir=$(dirname "${source}")
+          name=$(basename "${source}" .py)
+          if [ "${limit}" -eq 0 ]; then
+            failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+          elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
+            failed="${failed}${dir}/${name} (dune-rule batch stopped at the step budget after ${limit}s)\n"
+          else
+            failed="${failed}${dir}/${name} (dune-rule batch)\n"
+          fi
+        done
+      fi
     else
-      failed="${failed}${dir}/${name} (run)\n"
+      # Asked for by path (@test/runtest-x, not @runtest-x) so a name that
+      # stopped existing fails here instead of matching another directory.
+      i=0
+      while [ "${i}" -lt "${python_count}" ]; do
+        source=${python_sources[i]}
+        i=$((i + 1))
+        dir=$(dirname "${source}")
+        name=$(basename "${source}" .py)
+        if [ "$(budget_left)" -le 0 ]; then
+          failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+          continue
+        fi
+        local own
+        own=$(suite_timeout "${source}")
+        limit=$(bounded_by_budget "${own}")
+        echo "== ${dir}/${name} (dune rule)"
+        status=0
+        timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
+        if [ "${status}" -eq 0 ]; then
+          ran=$((ran + 1))
+        elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
+          failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+        else
+          failed="${failed}${dir}/${name} (run)\n"
+        fi
+      done
     fi
   done
 }
@@ -788,6 +892,7 @@ self_test() {
     shift 2
     changed=$(printf '%s\n' "$@")
     local got=""
+    direct_sources="__stale_direct_sources__"
     if select_sources > /dev/null 2>&1; then
       # LC_ALL=C: the first case whose two suites differ only at "." against
       # "_" -- test_tui_browser.ml and test_tui_browser_history.py -- ordered
@@ -829,6 +934,24 @@ self_test() {
     # Assert the required coverage and exclusion, without freezing that set.
     local allow_additional=true
     check "$@"
+  }
+  check_direct() {
+    local label="$1" want="$2"
+    shift 2
+    changed=$(printf '%s\n' "$@")
+    local got=""
+    if select_sources > /dev/null 2>&1; then
+      got=$(printf '%s\n' "${direct_sources}" | grep -v '^[[:space:]]*$' \
+        | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')
+    fi
+    if [ "${got}" = "${want}" ]; then
+      echo "ok   ${label}"
+    else
+      echo "FAIL ${label}"
+      echo "     want: ${want:-<nothing>}"
+      echo "     got:  ${got:-<nothing>}"
+      failures=$((failures + 1))
+    fi
   }
 
   # The regression this mapping exists for: #34247 edited only this module and
@@ -1009,6 +1132,9 @@ self_test() {
   check "an edited terminal scenario is selected" \
     "test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py" \
     "test/test_tui_keyboard_input.py"
+  check_direct "an edited suite stays direct before attribution expands selection" \
+    "test/test_tui_keyboard_input.py" \
+    "test/test_tui_keyboard_input.py"
   # tui_browser names five suites, over the per-module cap, so the name
   # mapping attributes nothing to this interface. What is left is the
   # scenario that declares the path and the one suite whose stanza links the
@@ -1042,7 +1168,7 @@ for target in "$@"; do
   name=$(basename "${target}" .exe)
   case "${name}" in
     *broken*) echo "stand-in dune: ${name} does not link" >&2; status=1; continue ;;
-    *slow*) body='exec sleep 60' ;;
+    *slow*) body='sleep "${FAKE_DUNE_SUITE_SECONDS:-60}"' ;;
     *failing*) body='exit 1' ;;
     *) body='exit 0' ;;
   esac
@@ -1058,6 +1184,7 @@ FAKE
   # globals run_selected reads.
   runner_failures() {
     local build_seconds="$1" budget="$2"
+    local fixture_source source_path
     shift 2
     work=$(mktemp -d)
     trap 'rm -rf "${work}"' EXIT
@@ -1071,7 +1198,16 @@ FAKE
     stanza_reader="${work}/reader.py"
     repo_root="${work}/root"
     cd "${repo_root}"
-    sources=$(printf 'test/%s.ml\n' "$@")
+    DUNE_JOBS="${RUNNER_DUNE_JOBS:-1}"
+    sources=""
+    for fixture_source in "$@"; do
+      case "${fixture_source}" in
+        */*.ml | */*.py) source_path="${fixture_source}" ;;
+        *) source_path="test/${fixture_source}.ml" ;;
+      esac
+      sources=$(printf '%s\n%s\n' "${sources}" "${source_path}")
+    done
+    direct_sources="${RUNNER_DIRECT_SOURCES:-}"
     budget_seconds="${budget}"
     SECONDS=0
     run_selected > /dev/null 2>&1
@@ -1097,6 +1233,26 @@ FAKE
   runner_check "the budget stops a slow suite and names the suites after it" \
     "test/test_broken (build);test/test_failing (run);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
     0 3 test_ok test_broken test_failing test_slow test_zz_after
+  RUNNER_DIRECT_SOURCES="test/test_zz_direct_failing.ml" \
+    runner_check "a directly edited suite runs before attributed suites spend the budget" \
+      "test/test_zz_direct_failing (run);test/test_aa_slow (stopped at the step budget);" \
+      0 3 test_aa_slow test_zz_direct_failing
+  RUNNER_DIRECT_SOURCES="test/test_zz_direct_broken.py" \
+    runner_check "a directly edited Python rule runs before attributed linked suites" \
+      "test/test_zz_direct_broken (run);test/test_aa_slow (stopped at the step budget);" \
+      0 3 test_aa_slow test/test_zz_direct_broken.py
+  RUNNER_DUNE_JOBS=2 FAKE_DUNE_SUITE_SECONDS=1 \
+    runner_check "linked suites share the existing Dune worker count" "" \
+      0 3 test_slow_one test_slow_two
+  RUNNER_DUNE_JOBS=2 \
+    runner_check "a linked failure stays named beside a parallel pass" \
+      "test/test_failing (run);" 0 3 test_failing test_ok
+  RUNNER_DUNE_JOBS=2 \
+    runner_check "a parallel wave that spends the budget names every remainder" \
+      "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
+      0 2 test_slow_one test_slow_two test_zz_after
+  runner_check "default-bound Python rules share one dune invocation" "" \
+    2 3 test/test_python_one.py test/test_python_two.py
   # The build starts with budget left and outlasts it, so the timeout on the
   # build is what ends it. With a one-second budget the budget was already
   # spent before the build began, and that case passed without the timeout.

@@ -910,14 +910,14 @@ type memory_health_snapshot = {
 
 (** What the keeper did with one fact, as the server projected it from the
     memory-events sidecar (RFC-0418): how often a search returned it, on how
-    many distinct UTC days, when last, how often a tool cited it by id, and
+    many distinct UTC days, when last, how often it was retracted, and
     which dropped facts it continues. No strength or score; the numbers are
     the record. *)
 type memory_fact_events = {
   mfe_retrieved_count : int;
   mfe_retrieved_distinct_days : int;
   mfe_last_retrieved_at : float option;
-  mfe_cited_count : int;
+  mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
@@ -981,6 +981,7 @@ type memory_fact_snapshot = {
   mfs_keeper : string;
   mfs_ordinary : memory_ordinary_store memory_store_reading;
   mfs_source : memory_source_store memory_store_reading;
+  mfs_events_read_error : string option;
 }
 
 (** One verdict the harness recorded: which gate ran on which task, what it
@@ -2382,7 +2383,9 @@ val decode_memory_fact_snapshot :
 (** Decode one keeper's fact listing served at
     [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
     field it carries -- [read_error], [present]:false, or [present]:true with
-    its rows -- and any other shape is a decode error, not an empty store. *)
+    its rows -- and any other shape is a decode error, not an empty store.
+    [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
+    event history. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

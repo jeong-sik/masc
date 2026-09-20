@@ -1,11 +1,12 @@
 name = "keeper_memory_search"
 description = """
 Search durable Memory OS facts or raw conversation history, case-insensitively. \
-Complete-query substrings rank first. The fallback requires every fragment \
-split by ASCII whitespace to appear as a substring, in any order. source='all' \
-applies those two tiers across all stores. Within a tier, source order and each \
-source's existing result order stay fixed. History requires a non-empty query. Results name their store; \
-current facts include exact memory_id, category, and basis. Use a memory_id as \
+Complete-query substrings rank first. Fallback requires every ASCII-whitespace \
+fragment to appear as a substring, in any order. source='all' uses both tiers \
+across stores. Each tier preserves source order and each store's order. History \
+requires a non-empty query. Fact \
+results name their store and original basis; current facts include exact \
+memory_id and category. Use a memory_id as \
 a derived conclusion's premise_id only for store='current_memory_snapshot'. \
 source='absorbed' finds facts merged into a newer claim: into names that claim, \
 and into_current=false means it is not current. source='history' searches raw \

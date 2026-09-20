@@ -289,6 +289,7 @@ let absorbed_match_to_json { row; into_current } : Yojson.Safe.t =
           (Keeper_memory_os_types.category_to_string
              row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.category) )
     ; "memory_id", `String row.Keeper_memory_absorbed.memory_id
+    ; "basis", Keeper_memory_os_types.basis_to_json row.fact.basis
     ; "into", `String row.Keeper_memory_absorbed.into
     ; "into_current", `Bool into_current
     ; "absorbed_at", `Float row.Keeper_memory_absorbed.recorded_at
@@ -1537,14 +1538,13 @@ let keeper_memory_retract_with_outcome
          ()
      with
      | Ok snapshot ->
-       (* The model named this fact by id and the store found it: a citation
-          (RFC-0418). The fact is gone from the snapshot from here on, and the
-          event stays as the record of its last use. *)
+       (* The fact is gone from the snapshot; its retraction remains in the
+          history if the same claim is later stored again. *)
        record_memory_events
          ~keepers_dir
          ~meta
          ~now
-         ~kind:(Keeper_memory_os_events.Cited { tool = "keeper_memory_retract" })
+         ~kind:Keeper_memory_os_events.Retracted
          [ memory_id ];
        Log.Keeper.info
          "explicit current Memory retracted keeper=%s revision=%d memory_id=%s support_invalidations=%d"

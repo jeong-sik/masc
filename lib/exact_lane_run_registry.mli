@@ -144,8 +144,11 @@ val mark_completed
     raised. The durable core entry remains [Running], while [get]/[list_runs]
     expose [Completion_persistence_failed] with an explicit durability state;
     callers never silently present a terminal run as still executing. The
-    labelled [selected_slot] argument forces every producer to state whether it
-    owns an accepted exact-flow receipt. Blank slot identities are rejected. *)
+    labelled [selected_slot] argument forces every producer to state its lane
+    attribution. It names the last bound HTTP attempt, or the successful CLI
+    slot after HTTP exhaustion. Vendor System One runs before either and leaves
+    it [None]; its provenance remains in [output]. Blank slot identities are
+    rejected. *)
 
 val list_runs : t -> run list
 

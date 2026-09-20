@@ -19,7 +19,8 @@
 
 ## 왜 지금
 
-2026-09-21 에 `~/me/.masc/keepers/*/execution-receipts/2026-09/*.jsonl` 전량을 셌다.
+2026-09-21 에 `<base-path>/.masc/keepers/*/execution-receipts/2026-09/*.jsonl` 전량을 셌다
+(`<base-path>` 는 `MASC_BASE_PATH` 또는 `--base-path` 가 정한다).
 21명 Keeper · 56,824 턴이다.
 
 | 항목 | 값 |

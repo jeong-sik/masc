@@ -120,10 +120,17 @@ let request_to_yojson ~model ~state ~questions =
     ]
 ;;
 
+let finite_float ~field value =
+  if Float.is_finite value then Ok value
+  else Error (Printf.sprintf "typesafeai: %s must be finite" field)
+;;
+
 let parse_probabilities probabilities =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
-    | (key, `Float value) :: rest -> loop ((key, value) :: acc) rest
+    | (key, `Float value) :: rest ->
+      let* value = finite_float ~field:(Printf.sprintf "probability for %S" key) value in
+      loop ((key, value) :: acc) rest
     | (key, `Int value) :: rest -> loop ((key, float_of_int value) :: acc) rest
     | (key, _) :: _ ->
       Error (Printf.sprintf "typesafeai: probability for %S must be a number" key)
@@ -155,7 +162,9 @@ let answer_of_yojson json =
     (match List.assoc_opt "type" fields with
      | Some (`String "noul") ->
        (match List.assoc_opt "noul" fields with
-        | Some (`Float n) -> Ok (Noul_answer { noul = n })
+        | Some (`Float n) ->
+          let* noul = finite_float ~field:"noul" n in
+          Ok (Noul_answer { noul })
         | Some (`Int i) -> Ok (Noul_answer { noul = float_of_int i })
         | _ -> Error "typesafeai: noul answer missing numeric 'noul' field")
      | Some (`String "choice") ->
@@ -166,7 +175,7 @@ let answer_of_yojson json =
        in
        let* confidence =
          match List.assoc_opt "confidence" fields with
-         | Some (`Float f) -> Ok f
+         | Some (`Float f) -> finite_float ~field:"choice confidence" f
          | Some (`Int i) -> Ok (float_of_int i)
          | _ -> Error "typesafeai: choice answer missing numeric 'confidence' field"
        in
@@ -179,13 +188,13 @@ let answer_of_yojson json =
      | Some (`String "score") ->
        let* score =
          match List.assoc_opt "score" fields with
-         | Some (`Float f) -> Ok f
+         | Some (`Float f) -> finite_float ~field:"score" f
          | Some (`Int i) -> Ok (float_of_int i)
          | _ -> Error "typesafeai: score answer missing numeric 'score' field"
        in
        let* confidence =
          match List.assoc_opt "confidence" fields with
-         | Some (`Float f) -> Ok f
+         | Some (`Float f) -> finite_float ~field:"score confidence" f
          | Some (`Int i) -> Ok (float_of_int i)
          | _ -> Error "typesafeai: score answer missing numeric 'confidence' field"
        in
@@ -216,17 +225,11 @@ let answer_of_yojson json =
 
 let usage_of_yojson = function
   | `Assoc fields ->
-    let input_tokens =
-      match List.assoc_opt "input_tokens" fields with
-      | Some (`Int i) -> i
-      | _ -> 0
-    in
-    let output_tokens =
-      match List.assoc_opt "output_tokens" fields with
-      | Some (`Int i) -> i
-      | _ -> 0
-    in
-    Some { input_tokens; output_tokens }
+    (match List.assoc_opt "input_tokens" fields, List.assoc_opt "output_tokens" fields with
+     | Some (`Int input_tokens), Some (`Int output_tokens)
+       when input_tokens >= 0 && output_tokens >= 0 ->
+       Some { input_tokens; output_tokens }
+     | _ -> None)
   | _ -> None
 ;;
 

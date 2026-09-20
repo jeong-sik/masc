@@ -976,13 +976,24 @@ let bounded_model_input_projection
     in
     Option.iter
       (fun stale ->
-         Log.Keeper.info
-           ~keeper_name:ctx.keeper_name
-            "model input working ledger dropped runtime=%s: the history this request composes \
-            from does not open the ledger's front or newest atom with the message it \
-            recorded ledger=%s"
-           ctx.runtime_id
-           (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json stale)))
+         match !(state.ledger) with
+         | Some observed ->
+           Log.Keeper.info
+             ~keeper_name:ctx.keeper_name
+             "model input working ledger replaced runtime=%s: the history this request \
+              composes from does not hold the working ledger; the observed table entry \
+              does working=%s observed=%s"
+             ctx.runtime_id
+             (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json stale))
+             (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json observed))
+         | None ->
+           Log.Keeper.info
+             ~keeper_name:ctx.keeper_name
+             "model input working ledger dropped runtime=%s: the history this request \
+              composes from does not open the ledger's front or newest atom with the \
+              message it recorded ledger=%s"
+             ctx.runtime_id
+             (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json stale)))
       dropped_ledger;
     (* The last resort is consumed by one composition: the request it shapes
        is the retry the refusal asked for, and the requests after a success

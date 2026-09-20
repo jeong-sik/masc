@@ -5120,6 +5120,7 @@
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
+(include stanzas/test_keeper_librarian_store_scope.inc)
 (include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)

@@ -50,7 +50,7 @@ Keeper
 | facts | Keeper 의 기억 항목들. 파일 하나(스냅숏)에 전부 들어 있고, Keeper 턴의 첫 요청에 전부 실린다 | `<keeper>.memory-current.json`, `Memory_os_recall` 블록 |
 | 받은 일 | Keeper 에게 들어왔고 아직 처리되지 않은 요청들 | working-context 의 `sources` |
 | 받은 일 정리 | 받은 일을 묶어 맥락과 다음 할 일을 적은 것 | `working_contexts`, pocket |
-| 읽은 위치 | Librarian 이 이력의 어디까지 읽었는가. atom 번호다 | `<keeper>.librarian-progress.json` |
+| 읽은 위치 | Librarian 이 이력의 어디까지 읽었는가. atom 번호다 | `keepers/<keeper>/librarian-progress.json` (선택한 cluster runtime root 아래) |
 | 창이 보는 위치 | Keeper 요청이 이력의 어디서부터 실리는가. 지금 코드의 `front` | §7 (라) |
 | 밀림 | 끝났는데 아직 안 읽은 턴이 있는 상태. 그 범위가 밀린 구간이다 | |
 
@@ -363,7 +363,11 @@ flowchart TD
 
 기억 스냅숏과 턴 기록은 필드 이름이 정확히 일치해야 디코딩된다(`keeper_memory_os_current.ml` `of_json` 의 `exact_field_names_result`, `turn_record.ml` `of_json`). 스냅숏에 필드를 더하면 배포와 롤백 때 모든 Keeper 의 facts 가 격리된다. 턴 기록에 더하면 hard cut 이 배포 preflight, raw-trace 정리, 창의 첫 요청까지 번진다. 턴 기록은 보존 기간(`jsonl_retention_days`)이 지나면 정리 pass 가 지우기도 한다(`server_runtime_startup_maintenance.ml`). 그래서 둘 다 기존 저장소 밖에 둔다.
 
-1. **턴 끝 기록** `<keepers_dir>/<keeper>.turn-boundaries.jsonl`
+두 파일의 `keepers_dir`는 선택한 cluster의 `Workspace.keepers_runtime_dir`다.
+공유할 수 있는 operator config 디렉터리가 아니다. 기존 Keeper runtime 하위
+디렉터리를 사용하며 읽기와 경로 계산은 디렉터리를 만들지 않는다.
+
+1. **턴 끝 기록** `<keepers_dir>/<keeper>/turn-boundaries.jsonl`
    - 끝난 턴마다 한 줄: `kind`, `turn_ref`, 시작할 때의 이력, 위치, 끝난 시각. trace id 는 `turn_ref` 안에 있으므로 따로 적지 않는다. `kind` 는 둘이다: 끝난 턴이 쓰는 `turn_ended`, 이력에 atom 이 없는 것을 본 쪽이 쓰는 `history_restarted`(아래). 첫날부터 구분자를 둔 이유는 이 파일도 필드 이름이 정확히 일치해야 읽히기 때문이다. 구분자가 있어서 두 번째 종류의 줄을 variant 로 더했고, 기존 줄에 필드를 더하는 hard cut 을 피했다.
    - 위치는 넷 가운데 하나다. `Atom_history { end_atom; last_atom_digest }`: `end_atom` 은 atom 수(마지막 atom 의 다음 번호)이고 `last_atom_digest` 는 atom `end_atom - 1` 을 여는 메시지의 digest 다. `Empty_atom_history`: atom 이 0개다. `No_atom_history`: 공식 클라이언트라 Agent-Core checkpoint 가 없다. `Stale_noop`: Agent-Core 턴인데 저장이 stale no-op 이었다(더 새 writer 가 파일을 쥐고 있었다). 그 턴의 메시지는 durable 이력에 없으므로 읽을 범위가 없는 줄이다. 줄을 빼지 않고 남기는 이유는 밀린 턴 수를 줄 수로 세기 때문이다.
    - 위치는 저장이 돌려준 checkpoint 로 계산한다. 저장은 그 턴의 꼬리를 자르므로(`keeper_replay_checkpoint.ml`) 런타임이 돌려준 checkpoint 로 계산하면 디스크와 어긋난다. 끝의 저장을 건너뛰는 턴도 있다. 턴 도중의 저장이 이미 같은 checkpoint 를 저장했으면 끝에서 다시 저장하지 않고(`keeper_agent_run_finalize_response.ml` 의 `Reused`) 그 checkpoint 로 계산한다. 디스크를 다시 읽지는 않는다. 그 저장과 줄 사이에 `keeper_clear` 가 끼면 줄은 디스크에 없는 이력을 말하게 되고, §4.4 의 2a 가 그 줄을 거른다.
@@ -387,7 +391,7 @@ flowchart TD
    - 어휘는 기존 `Runtime_model_input_tail_window.atom_opening_digest` 를 그대로 쓴다. 창 조립의 `project_from_atom ~first_atom` 과 같은 단위다.
    - 턴의 시작은 적지 않는다. 직전 턴의 끝이 곧 시작이다. `demote_before` 는 resume·HITL 턴에서 안전한 하한이 아니다(그 턴들은 user 메시지가 이미 checkpoint 에 들어간 채로 시작한다).
    - 줄을 지우는 일은 이 RFC 의 범위가 아니다. 지난 이력의 줄과 이미 지나간 재시작 줄은 쌓이기만 한다. 2단계에서 파일 읽는 비용을 재고, 지우기로 하면 진행 파일의 줄 수(아래)와 재시작 줄을 같은 잠금 아래에서 같이 다룬다. 크기나 줄 수 문턱은 두지 않는다.
-2. **진행 파일** `<keepers_dir>/<keeper>.librarian-progress.json`
+2. **진행 파일** `<keepers_dir>/<keeper>/librarian-progress.json`
    - 읽은 위치: trace id, `end_atom`, 그 자리 atom 의 digest. 줄을 가리키지 않고 값을 갖는다(§4.4 의 2).
    - 읽은 위치를 옮길 때, 그 회차가 checkpoint 를 읽기 **전에** 읽은 턴 끝 기록에서 개행으로 끝난 줄의 수도 같이 적는다. §4.4 의 3c 가 "위치를 옮긴 뒤에 더해진 줄"을 가리는 데 쓴다. 진행 파일을 쓸 때 다시 센 값을 적으면 안 된다. 회차가 도는 동안 더해진 표식을 보지도 않고 지나간 것으로 치게 된다. 파일에 더해진 순서는 턴 순서는 아니지만 줄이 보이기 시작한 순서이기는 하다. 3c 가 묻는 것은 뒤쪽이다.
    - 쓰는 곳은 그 Keeper 의 Librarian 루프 하나다.

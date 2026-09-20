@@ -3976,7 +3976,10 @@ let assert_production_keeper_result result =
    so the line it leaves at its end names the turn, repeats that the history
    was fresh, and states that there is no atom history. *)
 let assert_official_client_turn_boundary ~base_path ~trace_id =
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let keepers_dir =
+    Filename.concat (Workspace.backend_config_for base_path).base_path
+      Common.keepers_runtime_dirname
+  in
   match
     Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:"codex-production-fixture"
   with

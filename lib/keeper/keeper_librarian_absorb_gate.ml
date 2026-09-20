@@ -317,7 +317,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
 
 (* --- Entry point --- *)
 
-let run ?clock ~keeper_id ~facts ~new_claims ~absorbed =
+let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
   match absorbed with
   | [] -> absorbed
   | _ :: _ ->

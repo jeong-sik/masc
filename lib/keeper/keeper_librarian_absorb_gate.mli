@@ -89,6 +89,7 @@ val run
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> unit
   -> Keeper_memory_os_types.absorbed_statement list
 (** The absorptions to apply. Reads {!Typesafeai_config}: without a key, or
     with the lane turned off, returns [absorbed] unchanged and says nothing.

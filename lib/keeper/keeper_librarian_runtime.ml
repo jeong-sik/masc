@@ -855,6 +855,7 @@ let run_best_effort
                  ~facts:selection.facts
                  ~new_claims:selection.new_claims
                  ~absorbed:selection.absorbed
+                 ()
              in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition

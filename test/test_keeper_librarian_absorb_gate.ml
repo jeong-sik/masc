@@ -327,6 +327,20 @@ let test_a_noul_outside_the_unit_interval_opens_the_gate () =
   | Gate.Judged _ -> Alcotest.fail "2.0 is not a probability"
 ;;
 
+(* A claim over the state bound cannot be asked about at all: every memory
+   it absorbs stays current, and nothing is sent. *)
+let test_a_claim_over_the_state_bound_keeps_all_its_absorptions_current () =
+  let wide = fact (String.make (Gate.state_bytes_limit + 1) 'x') in
+  let facts = List.map fact sources in
+  let absorbed = absorbed_into wide facts in
+  let evaluate, requests, _asked = table ~noul_of:(fun _ -> 1.0) in
+  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ wide ] ~absorbed) in
+  Alcotest.(check int) "nothing is absorbed" 0 (List.length j.absorbed);
+  Alcotest.(check int) "every memory is reported as too large to judge"
+    (List.length sources) (List.length j.unjudgeable);
+  Alcotest.(check int) "no request was made" 0 !requests
+;;
+
 (* An oversized memory stays current even when the model fails on another
    memory's request: what cannot be judged is decided before asking. *)
 let test_an_oversized_memory_stays_current_when_another_request_fails () =
@@ -385,6 +399,8 @@ let () =
             test_a_statement_too_large_to_judge_keeps_its_memory_current
         ; Alcotest.test_case "an oversized memory stays current when another request fails" `Quick
             test_an_oversized_memory_stays_current_when_another_request_fails
+        ; Alcotest.test_case "a claim over the state bound keeps all its absorptions current" `Quick
+            test_a_claim_over_the_state_bound_keeps_all_its_absorptions_current
         ; Alcotest.test_case "a missing seventeenth statement keeps the original" `Quick
             test_a_missing_seventeenth_statement_keeps_the_whole_memory
         ; Alcotest.test_case "selection gate and store preserve the original" `Quick

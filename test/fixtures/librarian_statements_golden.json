@@ -3,7 +3,7 @@
   "input": "배포는 **매주 화요일** 09:00 에 돈다. 다섯 분쯤 걸린다; 실패하면 `rollback.sh` 를 돌린다 — 운영자에게 알린다.\n한 줄 더: 이 규칙은 2026-09-01 부터다.",
   "expected": [
    "배포는 **매주 화요일** 09:00 에 돈다.",
-   "다섯 분쯤 걸린다; 실패하면 rollback.sh 를 돌린다",
+   "다섯 분쯤 걸린다; 실패하면 `rollback.sh` 를 돌린다",
    "운영자에게 알린다. 한 줄 더: 이 규칙은 2026-09-01 부터다."
   ]
  },
@@ -79,7 +79,7 @@
  {
   "input": "in python `x ** y` raises x to the power y; the **emphasis** stays as written.",
   "expected": [
-   "in python x ** y raises x to the power y;",
+   "in python `x ** y` raises x to the power y;",
    "the **emphasis** stays as written."
   ]
  }

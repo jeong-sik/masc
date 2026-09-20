@@ -30,11 +30,6 @@ let strip s =
   String.sub s !i (!j - !i)
 ;;
 
-(* Backticks are dropped; nothing else. Emphasis markers stay: a memory about
-   code can hold [**] as an operator, and dropping it would judge an altered
-   statement. *)
-let drop_markup s = String.concat "" (String.split_on_char '`' s)
-
 let da_period = "\xEB\x8B\xA4." (* 다. *)
 let em_dash = "\xE2\x80\x94" (* — *)
 
@@ -98,7 +93,6 @@ let cut_line line =
 ;;
 
 let statements text =
-  let text = drop_markup text in
   let pieces = List.concat_map cut_line (String.split_on_char '\n' text) in
   (* A short piece is carried into the next; a short tail joins the last. *)
   let out, carry =
@@ -148,13 +142,17 @@ type outcome =
 let conveyed_boundary = 0.5
 let questions_per_request = 64
 
-(* The model takes 64k tokens a request and 32k for the state; a byte bound
-   well under both keeps a request from being refused for its size, which
-   would open the gate for exactly the memory it should keep. Statements
-   are not bounded by the cut -- a memory without sentence ends is one
-   statement -- so a statement that does not fit alone, or a claim that does
-   not fit, cannot be judged; that memory stays current. *)
-let request_bytes_limit = 96_000
+(* The model takes 64k tokens a request and 32k for the state. The bounds
+   are the same numbers in bytes: a token is at least one byte, so text
+   under the byte bound is under the token bound whatever its tokenizer
+   makes of it (JSON escaping is not tokenized). A request refused for its
+   size would open the gate for exactly the memory it should keep, so what
+   cannot fit is decided here, before asking. Statements are not bounded by
+   the cut -- a memory without sentence ends is one statement -- so a
+   statement that does not fit a request beside its claim, or a claim that
+   does not fit the state, cannot be judged; that memory stays current. *)
+let state_bytes_limit = 32_000
+let request_bytes_limit = 64_000
 
 let instructions_prefix =
   "The claim under review conveys this statement, in any wording.\n\nStatement:\n"
@@ -172,14 +170,22 @@ let question statement =
     }
 ;;
 
+(* What a statement adds to a request: its question, fixed text included. *)
+let question_bytes statement =
+  String.length instructions_prefix
+  + String.length statement
+  + String.length (fst criteria)
+  + String.length (snd criteria)
+;;
+
 (* [numbered] cut into requests of at most [questions_per_request] questions
-   and at most [budget] bytes of statements each. Every statement fits alone
-   by construction (the caller keeps out the ones that do not). *)
+   and at most [budget] bytes of questions each. Every question fits alone
+   by construction (the caller keeps out the statements that do not). *)
 let chunks ~budget numbered =
   let rec go current_bytes current acc = function
     | [] -> List.rev (if current = [] then acc else List.rev current :: acc)
     | ((_, statement) as item) :: rest ->
-      let bytes = String.length statement in
+      let bytes = question_bytes statement in
       if current <> []
          && (List.length current >= questions_per_request
              || current_bytes + bytes > budget)
@@ -222,7 +228,7 @@ let ask ~evaluate ~claim (numbered : (string * string) list) =
 
 (* The answer's absorptions into one claim, classified before any request
    is made: what has no claim or no source text passes through unjudged,
-   what does not fit a request ({!request_bytes_limit}) cannot be judged
+   what does not fit a request ({!state_bytes_limit}, {!request_bytes_limit}) cannot be judged
    and stays current, the rest is asked. Classifying first is what lets a
    request that fails for another reason leave the unjudgeable alone. *)
 type group =
@@ -256,8 +262,8 @@ let classify ~facts ~new_claims ~absorbed =
     (fun (into, members) ->
        match claim_of into new_claims with
        | None -> { into; claim = None; unjudged = members; unjudgeable = []; judgeable = [] }
-       | Some claim when String.length claim >= request_bytes_limit ->
-         (* The claim alone fills a request: nothing it absorbs can be judged
+       | Some claim when String.length claim > state_bytes_limit ->
+         (* The claim does not fit the state: nothing it absorbs can be judged
             against it, and nothing it absorbs is absorbed. *)
          { into; claim = Some claim; unjudged = []; unjudgeable = members; judgeable = [] }
        | Some claim ->
@@ -272,7 +278,7 @@ let classify ~facts ~new_claims ~absorbed =
          let budget = request_bytes_limit - String.length claim in
          let judgeable, unjudgeable =
            List.partition
-             (fun (_, sts) -> List.for_all (fun st -> String.length st <= budget) sts)
+             (fun (_, sts) -> List.for_all (fun st -> question_bytes st <= budget) sts)
              judgeable
          in
          { into; claim = Some claim; unjudged; unjudgeable = List.map fst unjudgeable; judgeable })

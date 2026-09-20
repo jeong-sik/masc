@@ -230,51 +230,31 @@ OpenAI 호환 wire 에서 일반 경로는 `ollama_cloud_v1` 을 얹는다. `thi
 
 단계마다 PR 하나다. 앞 단계가 머지된 뒤에 다음 단계를 연다.
 
-### 3.a 지금 값을 카탈로그에 적어 둔다 (요청 변화 없음)
+### 3.a 근거 있는 값만 카탈로그에 적는다
 
-**무엇.** 행마다 지금 resolver 가 내는 값을 TOML 에 적는다. 새로 쓰는 값은 두 종류다.
+**무엇.** 행이 preset 에서 받는 값은 1,959쌍이다. preset 값이 `default_capabilities` 와 다른 필드 1,473개와, preset 이 기본값과 같은 값을 일부러 적은 필드 486개다. 뒤쪽 예로 `glm_capabilities` 의 `supports_structured_output = false` 는 문서 근거와 함께 적은 선언이다 (`capabilities.ml:695-704`).
 
-- preset 값이 `default_capabilities` 와 다른 필드: 1,473개.
-- preset 이 기본값과 같은 값을 일부러 적은 필드: 486개. 예를 들어 `glm_capabilities` 의 `supports_structured_output = false` 는 문서 근거와 함께 적은 선언이다 (`capabilities.ml:695-704`).
+이 중 **근거가 있는 값만** 행에 적는다. 근거는 공식 문서 링크나 실측 기록과 확인 날짜다. 적을 때 `models.toml:3065-3071` 형식의 행 주석으로 그 근거를 같이 적는다.
 
-`default_capabilities` 에서만 오는 값(4,134개)은 적지 않는다. 아무도 선언하지 않은 값이기 때문이다. 3.c 에서 `unknown` 이 된다.
+근거가 없는 값은 적지 않는다. 아무도 적지 않은 값이므로 원칙 2 의 `unknown` 이다. `default_capabilities` 에서만 오는 값 4,134개와 같은 취급이다. 근거 없는 값을 행에 적고 "이건 근거가 없다" 고 표시하는 키는 만들지 않는다. 그런 키는 한 필드에 "선언" 과 "unknown" 말고 세 번째 상태를 만들고, 비울 기한 없는 목록을 남긴다.
 
-**첫 산출물: 근거를 붙일 수 있는 값의 수.** 옮길 값은 1,959쌍(1,473 + 486)이다. 이 중 근거를 붙일 수 있는 쌍이 몇 개인지는 아직 아무도 세지 않았다. 이 PR 은 값을 옮기기 전에 그 수를 두 묶음(1,473 과 486)으로 나눠 PR 본문에 먼저 적는다. 근거는 공식 문서 링크나 실측 기록과 확인 날짜다. 근거를 붙인 값은 `models.toml:3065-3071` 형식의 행 주석과 함께 옮긴다. 나머지는 아래 `preset_carried` 에 든다. 이 수가 3.b 가 할 일의 크기다.
+**첫 산출물: 근거를 붙일 수 있는 값의 수.** 1,959쌍 중 근거를 붙일 수 있는 쌍이 몇 개인지는 아직 아무도 세지 않았다. 이 PR 은 값을 적기 전에 그 수를 두 묶음(1,473 과 486)으로 나눠 PR 본문에 먼저 적는다. 그 수가 이 PR 이 적을 값이고, 나머지는 3.c·3.d 에서 `unknown` 이 될 값이다.
 
-**근거 없이 옮긴 값의 표시.** 근거 없이 옮긴 필드는 행의 `preset_carried` 목록에 이름을 적는다. 주석이 아니라 로더가 읽는 키다.
-
-```toml
-[[models]]
-id_prefix = "glm-image"
-provider_name = "zai-image"
-task = "image_generation"
-max_context_tokens = 200000
-max_output_tokens = 40960
-# 3.a 가 옮기는 나머지 glm preset 필드와 그 목록 항목은 줄였다
-preset_carried = ["max_context_tokens", "max_output_tokens"]
-```
-
-- 로더는 목록의 이름을 capability 필드 이름의 닫힌 variant 로 파싱한다. 모르는 이름, 같은 이름 두 번, 행이 값을 적지 않은 필드 이름은 로드 실패다.
-- 로더가 읽으므로 출력 토큰 영수증이 값의 출처를 가를 수 있다. 지금 영수증의 출처는 `Catalog_model | Declared_capability_override | Provider_default` 셋이다 (`types.mli:591-594`). `max_output_tokens` 가 목록에 있는 행이면 영수증은 그 값을 `Catalog_model` 이 아닌 따로 된 갈래로 적는다. 1.3 에서 본 "출처는 카탈로그인데 값은 코드" 가 요청 기록에서 구별된다. 갈래 이름은 이 PR 에서 정한다.
-- 카탈로그 검사가 목록 항목 수를 센다. 수가 늘면 실패한다. 3.b 가 근거를 붙일 때마다 줄고, 0 이 되면 키를 지운다.
-
-행 주석으로 표시하지 않는다. 1.8 이 적은 것처럼 주석은 코드가 못 읽고 검사가 못 센다. 필드마다 `<필드>_source` 키를 두지도 않는다. 그러면 필드 수만큼 키가 늘고, 근거 없는 값이 행 곳곳에 흩어진다. 행마다 목록 하나면 행을 열었을 때 근거 없는 값이 한 줄에 모여 보인다.
-
-**도구.** Python 으로 resolver 를 다시 구현하지 않는다. 이미 두 구현이 어긋났다(1.7). `llm_provider` 를 링크한 OCaml 실행 파일이 `Capabilities.apply_catalog_entry` 를 불러 값을 뽑는다.
+**도구.** Python 으로 resolver 를 다시 구현하지 않는다. 이미 두 구현이 어긋났다(1.7). `llm_provider` 를 링크한 OCaml 실행 파일이 `Capabilities.apply_catalog_entry` 를 불러 지금 값을 뽑는다. 근거와 이 값을 나란히 놓고 쌍마다 판정한다.
 
 **wire 에 따라 답이 다른 행.** `ollama_cloud` 행 40개는 wire 마다 세 필드가 다르다(1.7). 한 행에 값 하나로 적을 수 없다. 적는 형식은 열린 질문 Q1 이다.
 
 **두 resolver 가 다른 행.** 이 PR 은 먼저 두 resolver 가 다른 레코드를 내는 행을 모두 뽑아 PR 본문에 적는다. 이 수는 아직 재지 않았다(dune 실행 필요). 0이 아니면 그 행은 한쪽 경로의 동작이 바뀐다. 행마다 어느 쪽 값이 맞는지 적는다.
 
-**바뀌는 파일.** `packages/agent_core/models.toml`, `model_catalog.ml(i)` (`preset_carried` 키와 필드 이름 variant), 영수증 출처(`types.ml(i)`, `output_token_wire_internal.ml(i)`, `backend_openai_request.ml:216-237`), 새 실행 파일과 dune 규칙, 목록 항목 수를 세는 카탈로그 검사.
+**바뀌는 파일.** `packages/agent_core/models.toml`, 새 실행 파일과 dune 규칙.
 
-**wire 변화.** 없다. `base` 는 아직 남아 있고 적은 값은 preset 값과 같다. 바뀌는 것은 영수증의 출처 표시뿐이다.
+**wire 변화.** 근거가 지금 값과 같으면 없다. 근거가 지금 값과 다르면 그 행의 요청이 바뀐다. 적지 않은 값은 `base` 가 아직 남아 있어 이 단계에서는 preset 에서 그대로 온다. 그 값들이 사라지는 것은 필드마다 3.c 이고, 3.c 가 옮기지 않은 필드는 3.d 다.
 
-**검증.** 모든 행 × 공급자의 모든 `identity_kinds` 에 대해 적기 전과 뒤의 capability 레코드가 같아야 한다. 두 resolver 모두 확인한다. 기존 요청 스냅샷 테스트가 그대로 통과해야 한다. `preset_carried` 의 모든 이름은 그 행이 값을 적은 필드다.
+**검증.** 변경 전후 요청 스냅샷에서 달라지는 행이 근거를 보고 고친 행과 정확히 같다. 두 resolver 모두 확인한다.
 
-### 3.b 틀린 값을 근거와 함께 고친다
+### 3.b 남은 값의 근거를 만든다
 
-**무엇.** 3.a 가 드러낸 값 중 근거가 있는 값만 고친다. PR 은 공급자 하나 또는 사실 한 종류 단위로 나눈다. 값마다 공식 문서 링크나 실측 기록, 확인 날짜를 행 주석에 적는다. `models.toml:3065-3071` 의 형식을 따른다. 근거를 붙인 필드는 `preset_carried` 에서 뺀다.
+**무엇.** 3.a 뒤에 남은 값은 지금 근거를 찾을 수 없는 값이다. 공급자 문서를 다시 읽거나 엔드포인트를 재서 근거를 만들고, 값을 행에 적는다. PR 은 공급자 하나 또는 사실 한 종류 단위로 나눈다. 값마다 공식 문서 링크나 실측 기록, 확인 날짜를 행 주석에 적는다. `models.toml:3065-3071` 의 형식을 따른다. 끝까지 근거를 못 만든 값은 적지 않는다. 그 필드는 `unknown` 으로 남는다.
 
 첫 후보(1.3, 1.4):
 
@@ -286,9 +266,9 @@ preset_carried = ["max_context_tokens", "max_output_tokens"]
 | GLM `supports_parallel_tool_calls` | 30 | 2026-09-18 실측은 `glm-5.3-flash` 1개 모델뿐이다. 잰 행만 `true` 로 적는다 |
 | `ollama_cloud` `supports_parallel_tool_calls = true` | 64 | 모델마다 잰 기록 |
 
-**wire 변화.** 고친 행만 바뀐다. `max_output_tokens` 는 호출자가 상한보다 큰 값을 요청할 때 깎이는 값과 Anthropic 필수 필드 값이 바뀐다. GLM 행을 `true` 로 고치면 그 행 요청에서 `parallel_tool_calls:false` 가 빠진다.
+**wire 변화.** 값을 적은 행만 바뀐다. `max_output_tokens` 는 호출자가 상한보다 큰 값을 요청할 때 깎이는 값과 Anthropic 필수 필드 값이 바뀐다. GLM 행을 `true` 로 적으면 그 행 요청에서 `parallel_tool_calls:false` 가 빠진다.
 
-**검증.** 고친 행마다 근거 링크나 실측 기록이 있다. `preset_carried` 항목 수가 줄어든다.
+**검증.** 적은 값마다 근거 링크나 실측 기록이 있다. 변경 전후 요청 스냅샷에서 달라지는 행이 값을 적은 행과 정확히 같다.
 
 ### 3.c 적지 않은 사실은 typed unknown 으로 둔다
 
@@ -318,6 +298,7 @@ match caller_disabled, declared with
 **바뀌는 파일 (측정).** `capabilities.ml(i)` 레코드와 `effective_disable_parallel_tool_use` (`:307-313`), `backend_openai_request.ml:487-495`, `backend_openai_responses.ml:540-545`, `backend_anthropic.ml:414-418`, `backend_ollama.ml:161-170`, `exact_output_catalog_binding.ml:231`·`:549`, `model_catalog.ml:420-421`, `capability_manifest.ml:475`, `provider_catalog.ml:635-636`·`:676-677`, masc `runtime_schema.ml:165`·`:189`, `runtime_schema.mli:141`, `runtime_toml.ml:915`, `runtime_adapter.ml:553`, `server_dashboard_http_runtime_info.ml:1738`·`:1853`·`:1997`.
 
 **wire 변화.** 필드를 적지 않은 행 중 지금 `false` 로 읽히는 행이 요청에서 끄기 필드를 뺀다. 3.b 전 기준으로 GLM 30행이다. 필드를 직접 `false` 로 적은 OpenRouter 12행은 계속 보낸다. 나머지 행은 지금도 `true` 라 바뀌지 않는다.
+3.a·3.b 가 근거와 함께 적지 않은 값은 필드마다 이 단계에서 사라진다. 그 목록이 이 wire 변화이고, 아래 검증이 스냅샷으로 대조한다.
 
 **필드마다 unknown 이 wire 에서 뜻하는 것.** 필드마다 따로 정한다. 지금까지 확인한 것만 적는다. 나머지는 Q2 다.
 
@@ -335,7 +316,7 @@ match caller_disabled, declared with
 
 ### 3.d preset 과 `base` 상속을 지운다
 
-**무엇.** 3.a 로 값이 모두 행에 옮겨졌으므로 preset 을 지운다.
+**무엇.** 근거 있는 값은 3.a·3.b 가 행에 적었고, 나머지 필드는 3.c 가 `unknown` 으로 옮겼으므로 preset 을 지운다. 3.c 가 모든 필드를 옮긴 뒤에 이 PR 을 연다. 남은 필드가 있으면 그 필드의 요청 변화가 이 PR 에 한꺼번에 몰린다.
 
 - `capabilities.ml:241-749` preset 13개, `:773-781` `capabilities_of_kind`, `:783-792` `provider_kind_alias_of_label`, `:802-818` `capabilities_for_provider_label`, `:945-984` 의 `base_label`, `capabilities.mli:197-219`·`:319-352` 공개 선언.
 - `model_catalog.ml:311` 의 `base` 키, `model_provider_catalog.ml:24-25`·`:113-114`·`:199-215`·`:288-295` 의 `capabilities_base`, `capabilities_base_by_identity_kind`.
@@ -355,11 +336,11 @@ match caller_disabled, declared with
 
 `uncontrolled_reasoning`, `emits_usage_tokens` 에 `models.toml` 키를 만든다. `supported_models` 는 3.f 의 단일 resolver 가 넘긴다.
 
-**wire 변화.** 카탈로그 행이 있는 config 는 없다. 값은 3.a 에서 이미 행에 있다.
+**wire 변화.** 카탈로그 행이 있는 config 는 없다. 근거 있는 값은 행에 있고, 나머지 필드는 3.c 가 이미 `unknown` 으로 옮겼다.
 행이 없는 config 는 아직 3.e 전이라 "아무것도 선언하지 않음" 레코드를 받는다. 1.6 의 1·2·3번과 나머지가 이 시점에 같은 답을 내게 된다.
 카탈로그에 없는 모델의 `runtime.toml` 선언도 바뀐다. `runtime_adapter.ml:545` 가 쓰는 `capabilities_of_kind` 가 없어지므로, 선언할 키가 없는 15개 필드(1.6)가 wire preset 값 대신 "아무것도 선언하지 않음" 값을 받는다. 그 전에 Q5 를 정한다.
 
-**검증.** `rg -n '_capabilities\b|capabilities_base|base_label'` 가 운영 코드에서 0건. 3.a 의 레코드 비교 테스트가 그대로 통과한다.
+**검증.** `rg -n '_capabilities\b|capabilities_base|base_label'` 가 운영 코드에서 0건. 3.c 까지의 요청 스냅샷이 그대로 통과한다.
 
 ### 3.e 행이 없을 때의 답을 하나로 만든다
 
@@ -396,8 +377,7 @@ preset 을 fixture 바탕이나 인자로만 쓰는 파일이 20개다. `capabil
 - preset 값을 확인하는 테스트는 지운다. 대신 카탈로그 데이터 검사를 둔다.
   - 모든 행이 필수 필드를 적었는가. 빠진 필드는 `unknown` 으로 세고, 필드별 개수를 출력한다.
   - `max_output_tokens <= max_context_tokens` 같은 행 안 일관성.
-  - `preset_carried` 항목 수가 늘지 않는다.
-  - 단일 resolver 의 결과를 행별 스냅샷으로 고정한다.
+  - 단일 resolver 의 결과를 행별 스냅샷으로 고정한다. 행에 값이 더해지면 이 스냅샷이 그 행을 짚고, 근거는 리뷰가 본다.
 - fixture 는 3.d 의 "아무것도 선언하지 않음" 레코드 위에 필요한 필드만 얹는다.
 
 **검증.** 테스트가 preset 이름이나 preset 에서 나온 숫자를 참조하지 않는다.
@@ -416,7 +396,8 @@ preset 을 fixture 바탕이나 인자로만 쓰는 파일이 20개다. `capabil
 
 ### 4.2 위험
 
-- **틀린 값이 선언처럼 보인다.** preset 에 있을 때는 공급자 기본값이던 값이, 행에 옮겨 적히면 그 모델의 사실처럼 읽힌다. 3.a 는 이런 값을 `preset_carried` 에 넣고, 카탈로그 검사가 항목 수를 세며, 영수증이 출처를 따로 적는다. 목록이 빌 때까지 목록에 든 값에는 1.8 의 문제가 남는다. 다만 그 값이 어디 있는지는 코드와 검사가 안다.
+- **단계마다 요청이 바뀐다.** 근거 없는 값을 행에 적지 않으므로, 그 값이 사라지는 시점마다 요청이 바뀐다. 필드마다 3.c 이고, 남은 필드가 있으면 3.d 다. 기계적 이동과 의미 수정을 갈라 두는 단계는 없다. 대신 3.a·3.b·3.c 가 모두 같은 방법으로 확인한다. 달라지는 행을 PR 본문에 먼저 적고, 변경 전후 요청 스냅샷이 그 목록과 같은지 본다.
+- **근거를 못 만든 값이 남는다.** 3.b 가 문서를 다시 읽어도 근거가 안 나오는 값이 있다. 그 필드는 `unknown` 이 되고, 원칙 2 에 따라 요청에서 빠진다. 엔드포인트가 그 기능을 실제로는 지원하는데 요청이 그것을 못 쓰게 되는 경우가 생길 수 있다. 이때 답은 기본값을 되살리는 것이 아니라 그 행을 재서 근거를 만드는 것이다.
 - **교체 카탈로그가 기동을 막는다.** 3.d 뒤에 `base` 는 모르는 키다. `model_catalog.ml:363-375` 가 그 행을 거절한다. masc 는 `AGENT_CORE_MODEL_CATALOG` 파일을 `Model_catalog.load_file` 로 읽고, 실패하면 기동 오류를 낸다 (`server_runtime_bootstrap.ml:40-50`). `base` 를 적은 교체 카탈로그를 쓰는 배포는 3.d 릴리스에서 기동이 멈춘다. `models.toml:29-34` 는 이 변수를 쓰는 배포가 지금 없다고 적는다. 3.d 는 릴리스 노트에 교체 카탈로그 변환을 적는다.
 - **두 resolver 중 한쪽 동작이 바뀐다.** 1.7 의 차이 때문에 3.a·3.f 에서 한쪽 경로의 값이 반드시 바뀐다. 3.a 가 먼저 그 행을 센다.
 - **행이 없는 lane 이 멈춘다.** 3.e 뒤에는 preset 으로 돌던 config 가 요청 전에 거절된다. 3.e 가 실제 배포 기준으로 먼저 센다.
@@ -441,7 +422,7 @@ preset 을 fixture 바탕이나 인자로만 쓰는 파일이 20개다. `capabil
   - **#36969** — `models.toml` 의 `ollama_cloud` `kimi-k2.6` 행을 고친다. 3.a 가 세는 "preset 과 다른 값" 목록을 바꾸므로, 3.a 를 열 때 개수를 다시 잰다.
 - 요청에서 언급된 #36944 는 2026-09-17T17:06:37Z 에 머지됐다. 바꾼 파일은 `agent.mli`, `agent_types.ml(i)`, `test_agent_core.ml`, keeper 도구 검색 파일들이다. 이 RFC 의 파일과 겹치지 않는다.
 - 최근 머지된 PR 중 이 RFC 와 방향이 같은 것: #37009·#37016 (공급자·모델 사실을 내장 카탈로그 한 벌로 모았다. 원칙 1), #36981 (Ollama 가 서빙하는 deepseek 행의 재전송 정책을 행에서 고쳤다. 2.2), #36512 (OpenAI 호환 preset 에서 context 값을 뺐다. 원칙 2의 선례), #36412 (`uncontrolled_reasoning` 도입, 키는 만들지 않았다), #35254 (1.7 의 두 resolver 어긋남), #36139 (스트리밍 파서가 선언된 멤버만 읽는다).
-- 방향이 반대인 것: #36991 이 `openrouter_capabilities` preset 을 더했다. 이 preset 을 받는 행은 없어서(1.1) 3.a 가 옮길 값은 없고, 3.d 가 지울 preset 에 든다.
+- 방향이 반대인 것: #36991 이 `openrouter_capabilities` preset 을 더했다. 이 preset 을 받는 행은 없어서(1.1) 3.a 가 적을 값은 없고, 3.d 가 지울 preset 에 든다.
 - `docs/rfc/` 의 frontmatter 검사(#36898)는 `docs/rfc/RFC-*.md` 만 본다 (`scripts/rfc-generate-index.py:23`, `:231`). 이 파일은 대상이 아니다. 형식은 RFC-AC-039 의 머리 표를 따랐다.
 
 ## 부록 A. 검증 명령

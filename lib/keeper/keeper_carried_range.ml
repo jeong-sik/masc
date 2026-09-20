@@ -90,14 +90,30 @@ let evict ~stop ~at_least_one (ledger : Keeper_model_input_ledger.t) =
 ;;
 
 let at_turn_boundary ~(marks : Runtime_schema.context_marks) (ledger : Keeper_model_input_ledger.t) =
-  match ledger.total_tokens with
-  | None -> Unchanged Total_unknown
-  | Some total when total <= marks.high_water_tokens -> Unchanged Within_high_water
-  | Some _ ->
+  match ledger.last.ends, ledger.total_tokens with
+  | Keeper_model_input_ledger.No_atom_carried, (Some _ | None) ->
+    Unchanged Nothing_evictable
+  | Keeper_model_input_ledger.Carried_atoms _, None -> Unchanged Total_unknown
+  | Keeper_model_input_ledger.Carried_atoms _, Some total
+    when total <= marks.high_water_tokens ->
+    Unchanged Within_high_water
+  | Keeper_model_input_ledger.Carried_atoms _, Some _ ->
     evict
       ~stop:(fun remaining -> remaining <= marks.low_water_tokens)
       ~at_least_one:false
       ledger
+;;
+
+let apply_turn_boundary ~(marks : Runtime_schema.context_marks) ledger =
+  let step = at_turn_boundary ~marks ledger in
+  match step with
+  | Unchanged _ -> ledger, step
+  | Evicted { first_atom; front_digest; _ } ->
+    (match Keeper_model_input_ledger.move_front ledger ~first_atom ~front_digest with
+     | Some moved -> moved, step
+     | None ->
+       invalid_arg
+         "Keeper_carried_range.apply_turn_boundary: eviction did not advance the ledger")
 ;;
 
 let after_overflow ~(marks : Runtime_schema.context_marks option) (ledger : Keeper_model_input_ledger.t) =

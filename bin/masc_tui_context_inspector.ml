@@ -77,6 +77,7 @@ type forecast_carried_origin =
   | Carried_from_ledger
   | Carried_from_turn_record of { turn : int }
   | Carried_halved_after_refusal of { retry : int }
+  | Carried_evicted_after_refusal of { retry : int }
   | Carried_whole_history
 
 type forecast_carried =
@@ -719,6 +720,10 @@ let decode_forecast_origin = function
       let* retry_json = field "retry" fields in
       let* retry = nonnegative_int "origin.retry" retry_json in
       Ok (Carried_halved_after_refusal { retry })
+    else if String.equal kind "evicted_after_refusal" then
+      let* retry_json = field "retry" fields in
+      let* retry = nonnegative_int "origin.retry" retry_json in
+      Ok (Carried_evicted_after_refusal { retry })
     else if String.equal kind "whole_history" then Ok Carried_whole_history
     else Error ("origin.kind is not a known kind: " ^ kind)
   | _ -> Error "origin is not an object"

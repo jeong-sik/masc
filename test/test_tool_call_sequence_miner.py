@@ -98,7 +98,9 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             )
 
             report = MINER.analyze(
-                root, evidence_sequences=frozenset({("tie-a", "tie-b")})
+                root,
+                evidence_sequences=frozenset({("tie-a", "tie-b")}),
+                evidence_limit=10,
             )
 
             self.assertEqual(report["summary"]["selected_tool_calls"], 4)
@@ -186,7 +188,9 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             write_rows(root / "calls.jsonl", [truncated, blob, ungrouped])
 
             report = MINER.analyze(
-                root, evidence_sequences=frozenset({("truncated", "blob")})
+                root,
+                evidence_sequences=frozenset({("truncated", "blob")}),
+                evidence_limit=10,
             )
             gaps = report["summary"]["coverage_gap_counts"]
 
@@ -232,7 +236,7 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertNotIn("coverage_gaps", compact)
 
             expanded = subprocess.run(
-                command + ["--evidence-sequence", "one,two"],
+                command + ["--evidence-sequence", "one,two", "--evidence-limit", "10"],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -249,6 +253,7 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
                 check=False,
             )
             self.assertIn("--evidence-sequence", help_result.stdout)
+            self.assertIn("--evidence-limit", help_result.stdout)
 
     def test_streams_each_jsonl_file_instead_of_reading_it_whole(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -331,11 +336,88 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
 
             report = MINER.analyze(root)
 
-            self.assertEqual(
-                report["summary"]["excluded_ambiguous_concurrent_calls"], 2
-            )
-            self.assertEqual(report["summary"]["ambiguous_concurrent_groups"], 1)
+            self.assertEqual(report["summary"]["excluded_unordered_calls"], 2)
+            self.assertEqual(report["summary"]["concurrent_groups"], 1)
             self.assertEqual(report["summary"]["pair_occurrences"], 0)
+
+    def test_missing_and_partial_schedules_break_directed_adjacency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            missing = fixture_call("missing", 1.0)
+            partial = fixture_call("partial", 2.0)
+            for name in (
+                "turn",
+                "planned_index",
+                "batch_index",
+                "batch_size",
+                "execution_mode",
+            ):
+                del missing[name]
+                if name != "turn":
+                    del partial[name]
+            write_rows(
+                root / "calls.jsonl",
+                [missing, partial, fixture_call("serial", 3.0)],
+            )
+
+            report = MINER.analyze(root)
+            gaps = report["summary"]["coverage_gap_counts"]
+
+            self.assertEqual(gaps["missing_execution_schedule"], 1)
+            self.assertEqual(gaps["partial_execution_schedule"], 1)
+            self.assertEqual(report["summary"]["excluded_unordered_calls"], 2)
+            self.assertEqual(report["summary"]["pair_occurrences"], 0)
+
+    def test_deferred_false_is_a_disposition_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_rows(
+                root / "calls.jsonl",
+                [
+                    fixture_call(
+                        "deferred-conflict",
+                        1.0,
+                        success=False,
+                        disposition="deferred",
+                    )
+                ],
+            )
+
+            report = MINER.analyze(root)
+
+            self.assertEqual(report["summary"]["excluded_conflicting_calls"], 1)
+            self.assertEqual(
+                report["summary"]["call_outcome_counts"][
+                    "disposition_success_conflict"
+                ],
+                1,
+            )
+
+    def test_targeted_evidence_uses_one_explicit_global_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_rows(
+                root / "calls.jsonl",
+                [
+                    fixture_call("a", 1.0),
+                    fixture_call("b", 2.0),
+                    fixture_call("a", 3.0),
+                    fixture_call("b", 4.0),
+                ],
+            )
+
+            report = MINER.analyze(
+                root,
+                evidence_sequences=frozenset({("a", "b")}),
+                evidence_limit=1,
+            )
+            pair = next(item for item in report["pairs"] if item["tools"] == ["a", "b"])
+
+            self.assertEqual(pair["occurrence_count"], 2)
+            self.assertEqual(pair["evidence_included_count"], 1)
+            self.assertEqual(pair["evidence_omitted_count"], 1)
+            self.assertEqual(report["evidence"]["included_occurrences"], 1)
+            self.assertEqual(report["evidence"]["omitted_occurrences"], 1)
 
     def test_malformed_row_fails_closed_with_source_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

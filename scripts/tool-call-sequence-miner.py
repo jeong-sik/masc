@@ -62,7 +62,7 @@ class Call:
     batch_size: int | None
     execution_mode: str | None
     turn: int | None
-    ambiguous_concurrent: bool
+    directed_order_unproven: bool
     descriptor_id: str | None
     runtime_profile: str | None
     result_bytes: int | None
@@ -102,7 +102,7 @@ class CompactCall:
     source_line: int
     tool: str
     outcome: CallOutcome
-    ambiguous_concurrent: bool
+    directed_order_unproven: bool
 
 
 @dataclass(slots=True)
@@ -111,6 +111,11 @@ class NgramAggregate:
     outcome_counts: Counter[CallOutcome] = field(default_factory=Counter)
     keepers: set[str] = field(default_factory=set)
     occurrences: list[tuple[tuple[str, str, int], tuple[Call, ...]]] | None = None
+
+
+@dataclass(slots=True)
+class EvidenceBudget:
+    remaining: int
 
 
 LoadedCall = Call | CompactCall
@@ -148,23 +153,18 @@ def _execution_schedule(
     present = tuple(name in row and row[name] is not None for name in names)
     if not any(present):
         gaps.add("missing_execution_schedule")
-        return None, None, None, None, None, False
+        return None, None, None, None, None, True
     if not all(present):
-        raise RowError("execution schedule fields must be all present or all absent")
+        gaps.add("partial_execution_schedule")
 
     turn = _optional_nonnegative_int(row, "turn")
     planned_index = _optional_nonnegative_int(row, "planned_index")
     batch_index = _optional_nonnegative_int(row, "batch_index")
     batch_size = _optional_nonnegative_int(row, "batch_size")
     execution_mode = _optional_string(row, "execution_mode")
-    assert turn is not None
-    assert planned_index is not None
-    assert batch_index is not None
-    assert batch_size is not None
-    assert execution_mode is not None
     if batch_size == 0:
         raise RowError("batch_size must be positive")
-    if execution_mode not in VALID_EXECUTION_MODES:
+    if execution_mode is not None and execution_mode not in VALID_EXECUTION_MODES:
         raise RowError("execution_mode must be serial or concurrent")
     return (
         turn,
@@ -172,7 +172,7 @@ def _execution_schedule(
         batch_index,
         batch_size,
         execution_mode,
-        execution_mode == "concurrent" and batch_size > 1,
+        not all(present) or execution_mode != "serial",
     )
 
 
@@ -183,9 +183,11 @@ def _call_outcome(row: dict[str, Any], success: bool, gaps: set[str]) -> CallOut
     disposition = row["disposition"]
     if not isinstance(disposition, str) or disposition not in VALID_DISPOSITIONS:
         raise RowError("disposition must be completed, deferred, or failed")
-    if (disposition == "completed" and not success) or (
-        disposition == "failed" and success
-    ):
+    if (disposition, success) not in {
+        ("completed", True),
+        ("deferred", True),
+        ("failed", False),
+    }:
         gaps.add("disposition_success_conflict")
         return CallOutcome.CONFLICT
     if disposition == "completed":
@@ -349,7 +351,7 @@ def _call_from_row(row: dict[str, Any], source: Source) -> Call | None:
         batch_index,
         batch_size,
         execution_mode,
-        ambiguous_concurrent,
+        directed_order_unproven,
     ) = _execution_schedule(row, gaps)
     return Call(
         source=source,
@@ -367,7 +369,7 @@ def _call_from_row(row: dict[str, Any], source: Source) -> Call | None:
         batch_size=batch_size,
         execution_mode=execution_mode,
         turn=turn,
-        ambiguous_concurrent=ambiguous_concurrent,
+        directed_order_unproven=directed_order_unproven,
         descriptor_id=descriptor_id,
         runtime_profile=_optional_string(row, "runtime_profile"),
         result_bytes=result_bytes,
@@ -395,12 +397,13 @@ def _ngram_report(
     size: int,
     *,
     evidence_sequences: frozenset[tuple[str, ...]],
+    evidence_budget: EvidenceBudget | None,
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, ...], NgramAggregate] = {}
     for turn_key in sorted(turns):
         directed_segment: list[LoadedCall] = []
         for call in turns[turn_key]:
-            if call.ambiguous_concurrent or call.outcome is CallOutcome.CONFLICT:
+            if call.directed_order_unproven or call.outcome is CallOutcome.CONFLICT:
                 directed_segment.clear()
                 continue
             directed_segment.append(call)
@@ -433,7 +436,13 @@ def _ngram_report(
                     raise AssertionError(
                         "evidence report requires full call identities"
                     )
-                aggregate.occurrences.append((turn_key, full_occurrence))
+                if evidence_budget is None:
+                    raise AssertionError(
+                        "targeted evidence requires an explicit budget"
+                    )
+                if evidence_budget.remaining > 0:
+                    aggregate.occurrences.append((turn_key, full_occurrence))
+                    evidence_budget.remaining -= 1
 
     report = []
     for tools in sorted(grouped):
@@ -453,6 +462,10 @@ def _ngram_report(
             ],
         }
         if aggregate.occurrences is not None:
+            item["evidence_included_count"] = len(aggregate.occurrences)
+            item["evidence_omitted_count"] = aggregate.occurrence_count - len(
+                aggregate.occurrences
+            )
             item["occurrences"] = [
                 {
                     "turn": {
@@ -472,6 +485,7 @@ def analyze(
     tool_calls_dir: Path,
     *,
     evidence_sequences: frozenset[tuple[str, ...]] = frozenset(),
+    evidence_limit: int | None = None,
 ) -> dict[str, Any]:
     root = tool_calls_dir.resolve()
     if not root.is_dir():
@@ -480,6 +494,10 @@ def analyze(
     for sequence in evidence_sequences:
         if len(sequence) not in {2, 3} or any(not tool for tool in sequence):
             raise RowError("evidence sequences must contain two or three tool names")
+    if evidence_sequences and (evidence_limit is None or evidence_limit <= 0):
+        raise RowError("targeted evidence requires a positive evidence_limit")
+    if not evidence_sequences and evidence_limit is not None:
+        raise RowError("evidence_limit requires at least one evidence sequence")
     evidence_tools = {tool for sequence in evidence_sequences for tool in sequence}
 
     turns: dict[tuple[str, str, int], list[LoadedCall]] = defaultdict(list)
@@ -490,9 +508,9 @@ def analyze(
     ignored_non_tool_records = 0
     excluded_composition_nodes = 0
     excluded_pre_schema_rows = 0
-    excluded_ambiguous_concurrent_calls = 0
+    excluded_unordered_calls = 0
     excluded_conflicting_calls = 0
-    ambiguous_concurrent_groups: set[tuple[tuple[str, str, int], int, int]] = set()
+    concurrent_groups: set[tuple[tuple[str, str, int], int, int]] = set()
     gap_counts: Counter[str] = Counter()
     outcome_counts: Counter[CallOutcome] = Counter()
     schema_seen = False
@@ -538,13 +556,16 @@ def analyze(
                             continue
 
                         grouped_tool_calls += 1
-                        if call.ambiguous_concurrent:
-                            excluded_ambiguous_concurrent_calls += 1
-                            assert call.turn is not None
-                            assert call.batch_index is not None
-                            ambiguous_concurrent_groups.add(
-                                (turn_key, call.turn, call.batch_index)
-                            )
+                        if call.directed_order_unproven:
+                            excluded_unordered_calls += 1
+                            if (
+                                call.execution_mode == "concurrent"
+                                and call.turn is not None
+                                and call.batch_index is not None
+                            ):
+                                concurrent_groups.add(
+                                    (turn_key, call.turn, call.batch_index)
+                                )
                         if call.outcome is CallOutcome.CONFLICT:
                             excluded_conflicting_calls += 1
                         if call.tool in evidence_tools:
@@ -557,7 +578,7 @@ def analyze(
                                     source_line=call.source.line,
                                     tool=call.tool,
                                     outcome=call.outcome,
-                                    ambiguous_concurrent=call.ambiguous_concurrent,
+                                    directed_order_unproven=call.directed_order_unproven,
                                 )
                             )
                     except RowError as exc:
@@ -573,8 +594,32 @@ def analyze(
                 call.source.line if isinstance(call, Call) else call.source_line,
             )
         )
-    pairs = _ngram_report(turns, 2, evidence_sequences=evidence_sequences)
-    triplets = _ngram_report(turns, 3, evidence_sequences=evidence_sequences)
+    evidence_budget = (
+        EvidenceBudget(remaining=evidence_limit) if evidence_limit is not None else None
+    )
+    pairs = _ngram_report(
+        turns,
+        2,
+        evidence_sequences=evidence_sequences,
+        evidence_budget=evidence_budget,
+    )
+    triplets = _ngram_report(
+        turns,
+        3,
+        evidence_sequences=evidence_sequences,
+        evidence_budget=evidence_budget,
+    )
+    evidence_included = (
+        evidence_limit - evidence_budget.remaining
+        if evidence_limit is not None and evidence_budget is not None
+        else 0
+    )
+    evidence_items = [
+        item for item in pairs + triplets if tuple(item["tools"]) in evidence_sequences
+    ]
+    evidence_omitted = sum(
+        item.get("evidence_omitted_count", 0) for item in evidence_items
+    )
     report = {
         "schema": SCHEMA_VERSION,
         "source": {
@@ -592,8 +637,8 @@ def analyze(
             "ignored_non_tool_records": ignored_non_tool_records,
             "grouped_tool_calls": grouped_tool_calls,
             "ungrouped_tool_calls": ungrouped_count,
-            "excluded_ambiguous_concurrent_calls": excluded_ambiguous_concurrent_calls,
-            "ambiguous_concurrent_groups": len(ambiguous_concurrent_groups),
+            "excluded_unordered_calls": excluded_unordered_calls,
+            "concurrent_groups": len(concurrent_groups),
             "excluded_conflicting_calls": excluded_conflicting_calls,
             "turns": len(turns),
             "pair_occurrences": sum(item["occurrence_count"] for item in pairs),
@@ -609,6 +654,9 @@ def analyze(
             "target_sequences": [
                 list(sequence) for sequence in sorted(evidence_sequences)
             ],
+            "limit": evidence_limit,
+            "included_occurrences": evidence_included,
+            "omitted_occurrences": evidence_omitted,
             "omitted": [
                 "row-level coverage gaps",
                 "ungrouped call identities",
@@ -620,7 +668,7 @@ def analyze(
         "triplets": triplets,
         "limits": [
             "No frequency threshold or candidate verdict is inferred.",
-            "Calls in multi-call concurrent batches and disposition/success conflicts are barriers, not directed sequence edges.",
+            "Calls without a proven serial schedule and disposition/success conflicts are barriers, not directed sequence edges.",
             "No JSON Pointer data-flow mapping is inferred from truncated, blob-only, opaque, or descriptor-less evidence.",
             "Lane-specific inline size eligibility is not inferred because tool-call rows do not carry the typed runtime execution owner.",
             "Skill visibility, N_u adoption, dry-run safety, and Skill publication are outside this read-only report.",
@@ -649,6 +697,11 @@ def _parser() -> argparse.ArgumentParser:
         metavar="TOOL,TOOL[,TOOL]",
         help="include exact occurrence identities for one pair or triplet; repeatable",
     )
+    parser.add_argument(
+        "--evidence-limit",
+        type=int,
+        help="maximum total occurrences retained for requested evidence sequences",
+    )
     return parser
 
 
@@ -673,7 +726,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     try:
         evidence_sequences = _parse_evidence_sequences(args.evidence_sequence)
-        report = analyze(tool_calls_dir, evidence_sequences=evidence_sequences)
+        report = analyze(
+            tool_calls_dir,
+            evidence_sequences=evidence_sequences,
+            evidence_limit=args.evidence_limit,
+        )
     except RowError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

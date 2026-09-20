@@ -65,6 +65,12 @@ status: reference
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
 
+**Tool-host failure report**
+: 클라이언트가 관측한 도구 연결 실패 기록. HTTP 인증 결과의 보고자는 감사
+  이벤트의 `actor`가 된다. 본문의 `agent_name`은 실패가 보고된 Agent이며,
+  감사 상세의 `reported_agent`와 실패 envelope에 보존한다. 허용된 tokenless
+  요청의 보고자는 기존 로컬 attribution 정책을 따른다.
+
 **Provider**
 : 모델에 접속하는 protocol·transport·credential을 소유하는 설정 항목.
   → [Runtime_schema.provider](../../lib/runtime/runtime_schema.mli)

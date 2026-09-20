@@ -694,13 +694,14 @@ let log_non_public_tool_call config ~agent_id ~tool_name ~success ~error_msg
   log_action config ~agent_id ~action:(Custom "non_public_tool_call")
     ~details ?cost_estimate ?token_count ?trace_id ~outcome ()
 
-let log_client_tool_host_failure config ~agent_id ~client_name ~tool_name
+let log_client_tool_host_failure config ~agent_id ~reported_agent ~client_name ~tool_name
     ~transport ~message ?phase ?request_id ?session_id ?trace_id ?timeout_ms () =
   let details =
     `Assoc
       (List.filter_map
          Fun.id
          [
+           Some ("reported_agent", `String reported_agent);
            Some ("client_name", `String client_name);
            Some ("tool_name", `String tool_name);
            Some ("transport", `String transport);

@@ -844,12 +844,24 @@ let run_best_effort
                 one fact of its own in that window ended the pass (masc
                 #32859). The decision itself has no such requirement: a fact it
                 never mentions is one it never saw. *)
+             (* An absorption the merged claim does not convey is not applied:
+                that memory stays current (RFC-librarian-absorb-gate). The
+                gate only narrows the list; without a key or an answer it is
+                the answer's list. *)
+             let absorbed =
+               Keeper_librarian_absorb_gate.run
+                 ~clock
+                 ~keeper_id
+                 ~facts:selection.facts
+                 ~new_claims:selection.new_claims
+                 ~absorbed:selection.absorbed
+             in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
                  ~clock
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
-                 ~absorbed:selection.absorbed
+                 ~absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())

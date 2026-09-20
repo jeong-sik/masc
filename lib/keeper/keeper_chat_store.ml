@@ -2557,7 +2557,16 @@ let transcript_identity path =
   | exception Unix.Unix_error _ -> None
 ;;
 
-let parse_transcript_row ~path ~redaction ~line_no line =
+let parse_transcript_row_permissive ~path ~redaction line =
+  let trimmed = String.trim line in
+  if String.equal trimmed ""
+  then None
+  else (
+    let decoded = parse_line_decoded ~file_path:path trimmed in
+    Option.map (redact_message redaction) decoded.message)
+;;
+
+let parse_transcript_row_strict ~path ~redaction ~line_no line =
   let trimmed = String.trim line in
   if String.equal trimmed ""
   then `Blank
@@ -2579,10 +2588,7 @@ let parse_transcript_row ~path ~redaction ~line_no line =
 let parse_transcript_rows ~path ~redaction rows =
   rows
   |> String.split_on_char '\n'
-  |> List.mapi (fun index line -> parse_transcript_row ~path ~redaction ~line_no:(index + 1) line)
-  |> List.filter_map (function
-    | `Blank | `Unreadable _ -> None
-    | `Message message -> Some message)
+  |> List.filter_map (parse_transcript_row_permissive ~path ~redaction)
 ;;
 
 let parse_transcript_rows_result ~path ~redaction rows =
@@ -2593,7 +2599,7 @@ let parse_transcript_rows_result ~path ~redaction rows =
           let ( let* ) = Result.bind in
           let* messages_rev, line_no = state in
           let line_no = line_no + 1 in
-          match parse_transcript_row ~path ~redaction ~line_no line with
+          match parse_transcript_row_strict ~path ~redaction ~line_no line with
           | `Blank -> Ok (messages_rev, line_no)
           | `Message message -> Ok (message :: messages_rev, line_no)
           | `Unreadable detail -> Error detail)

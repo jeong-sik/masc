@@ -190,14 +190,32 @@ let test_load_all_result_speaker_authority_contract () =
        | Ok messages ->
          Alcotest.failf "expected two strict rows, got %d" (List.length messages));
       write_file path
-        ({|{"id":"unknown-authority","role":"user","content":"unknown","ts":3.0,"speaker_authority":"admin"}|}
+        ({|{"id":"valid-before","role":"user","content":"before","ts":3.0,"speaker_authority":"owner"}|}
+         ^ "\n"
+         ^ {|{"id":"unknown-authority","role":"user","content":"unknown","ts":4.0,"speaker_authority":"admin"}|}
+         ^ "\n"
+         ^ {|{"id":"valid-after","role":"user","content":"after","ts":5.0,"speaker_authority":"external"}|}
          ^ "\n");
+      (match K.load_all ~base_dir ~keeper_name with
+       | [ before; unknown; after ] ->
+         Alcotest.(check (list string))
+           "permissive load keeps every row"
+           [ "before"; "unknown"; "after" ]
+           [ before.K.content; unknown.K.content; after.K.content ];
+         Alcotest.(check bool)
+           "unknown authority stays unresolved"
+           true
+           (Option.is_none unknown.K.speaker)
+       | messages ->
+         Alcotest.failf
+           "permissive load dropped a mixed row: got %d"
+           (List.length messages));
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted unknown speaker authority"
       | Error detail ->
         Alcotest.(check string)
-          "strict error preserves the typed authority failure"
-          (Printf.sprintf "%s:1 unknown speaker_authority %S" path "admin")
+          "mixed strict load fails at the typed authority error"
+          (Printf.sprintf "%s:2 unknown speaker_authority %S" path "admin")
           detail)
 ;;
 

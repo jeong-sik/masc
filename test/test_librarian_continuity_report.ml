@@ -210,7 +210,13 @@ let test_report_question_origin () =
     [ "changed provided wording", Some text, R.Provided (text ^ " Changed.")
     ; "generated origin for provided question", Some text, R.Generated generated_question
     ; "provided origin without supplied question", None, R.Provided text
-    ]
+    ];
+  let case = { case with question = Some text } in
+  let (_ : R.t) = get (R.of_yojson (R.to_yojson (report [ { R.case; progress = R.Not_started } ]))) in
+  rejects "provided question cannot fail generation"
+    (R.of_yojson (R.to_yojson (report
+       [ { R.case; progress = R.Question_failed
+           { request = generated_question.request; error = "provider unavailable"; incomplete_response = None } } ])))
 
 let () =
   Alcotest.run "Librarian continuity measurement"

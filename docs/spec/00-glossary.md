@@ -124,11 +124,6 @@ status: reference
   최신 대기 하나를 가진다. 코드 이름은 `Keeper_memory_lane`이다.
   → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
 
-**Skill**
-: `SKILL.md`로 선언한 재사용 지시 또는 Tool 합성. 출처·패키지·이름·문서 revision으로
-  식별한다. → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
-  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
-
 **Composition**
 : Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
   허용된 계획을 Tool로 노출한다. → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
@@ -239,10 +234,13 @@ status: reference
 
 **Skill**
 : 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
+  출처·패키지·이름·문서 revision으로 식별한다.
   Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
   `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
   뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
+  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.

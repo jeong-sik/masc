@@ -572,10 +572,10 @@ type rate_limit_error = {
 
 ## 11. Global Invariants
 
-`INV-TYPE-*` ID는 이 문서 안의 앵커다. 코드나 테스트 좌표로 확인할 수 있는 불변식에만 ID를 붙이고, 좌표는 표의 `검증 좌표` 열에 적는다.
+`INV-TYPE-*` ID는 이 문서 안의 앵커다. 코드나 테스트 좌표로 확인할 수 있는 불변식에만 ID를 붙이고, 좌표는 표의 `검증 좌표` 열에 적는다. 좌표는 줄 번호보다 심볼 이름을 우선한다. 형식 스펙이 있으면 파일과 속성 이름을 같이 적는다.
 
 ### Evidence-backed invariants
 
 | ID | 불변식 | 검증 좌표 |
 |----|--------|----------|
-| INV-TYPE-003 | `task_status`는 `Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`를 가진다. `Release`는 `Claimed`를 `Todo`로 되돌리고, 검증 거절은 `AwaitingVerification`을 `InProgress`로 되돌릴 수 있으므로 전이는 단방향이 아니다. `Todo`에서 `Cancelled`로 직접 전이할 수도 있다. | `lib/types/types_core.ml:136,237`; `lib/workspace/workspace_task_lifecycle.ml` |
+| INV-TYPE-003 | `task_status`는 `Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`를 가진다. `Release`는 `Claimed`를 `Todo`로 되돌리고, 검증 거절은 `AwaitingVerification`을 `InProgress`로 되돌릴 수 있으므로 전이는 단방향이 아니다. `Todo`에서 `Cancelled`로 직접 전이할 수도 있다. | `Types_core.task_status` (`lib/types/types_core.ml`); `Workspace_task_lifecycle.decide`, `Workspace_task_lifecycle.decide_verdict` (`lib/workspace/workspace_task_lifecycle.ml`) |

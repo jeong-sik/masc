@@ -174,7 +174,8 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
         record: {
           keeper: 'albini',
           agent_name: 'keeper-albini-agent',
-          generation: 1,
+          usage_scope: 'per_request',
+          response_observed_model_input: null,
           turn_kind: 'autonomous',
           raw_trace_run_ref: null,
           trace_id: 'trace-active',
@@ -194,7 +195,8 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
         record: {
           keeper: 'albini',
           agent_name: 'keeper-albini-agent',
-          generation: 1,
+          usage_scope: 'per_request',
+          response_observed_model_input: null,
           turn_kind: 'autonomous',
           raw_trace_run_ref: null,
           trace_id: 'trace-active',

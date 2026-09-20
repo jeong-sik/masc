@@ -97,9 +97,29 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
-(* Filter the keeper's current facts by an explicit query substring while
-   preserving snapshot order. Search does not assign value scores or introduce
-   a recency authority. *)
+(* Which of [items], given in store order, answer [query]: first the ones
+   whose claim holds the whole query as one run of text, then the ones whose
+   claim holds every whitespace-separated fragment of it anywhere. The two
+   tiers stay separate so the old whole-query results cannot be displaced by
+   the broader fallback. Neither tier is scored; each keeps store order. *)
+let answering ~claim_of ~query items =
+  if String.equal query ""
+  then items, []
+  else (
+    let whole_query, rest =
+      List.partition
+        (fun item -> String_util.contains_substring_ci (claim_of item) query)
+        items
+    in
+    ( whole_query
+    , List.filter
+        (fun item -> String_util.contains_all_tokens_ci (claim_of item) query)
+        rest ))
+;;
+
+(* The keeper's current facts that answer the query ({!answering}): ordinary
+   then source-bound facts holding the whole query, then ordinary then
+   source-bound facts holding its fragments. *)
 let search_durable_facts
       ~(config : Workspace.config)
       ~(keepers_dir : string)
@@ -121,46 +141,42 @@ let search_durable_facts
   | Ok source_projection ->
   let source_facts = source_projection.facts in
   let total_candidates = List.length facts + List.length source_facts in
-  let matched =
-    if String.equal query ""
-    then facts
-    else
-      List.filter
-        (fun (fact : Keeper_memory_os_types.fact) ->
-          String_util.contains_substring_ci fact.claim query)
-        facts
+  let ordinary_whole, ordinary_fragments =
+    answering
+      ~claim_of:(fun (fact : Keeper_memory_os_types.fact) -> fact.claim)
+      ~query
+      facts
   in
-  let source_matched =
-    if String.equal query ""
-    then source_facts
-    else
-      List.filter
-        (fun (fact : Keeper_memory_source_current.fact) ->
-           String_util.contains_substring_ci fact.claim query)
-        source_facts
+  let source_whole, source_fragments =
+    answering
+      ~claim_of:(fun (fact : Keeper_memory_source_current.fact) -> fact.claim)
+      ~query
+      source_facts
   in
-  let ordinary_matches =
-    matched
-    |> List.map (fun (fact : Keeper_memory_os_types.fact) ->
-      { claim = fact.claim
-      ; identity = Ordinary_memory_id (Keeper_memory_os_types.memory_id fact)
-      ; category = Keeper_memory_os_types.category_to_string fact.category
-      ; basis = fact.basis
-      ; store = Ordinary_current
-      })
+  let ordinary_match (fact : Keeper_memory_os_types.fact) : fact_match =
+    { claim = fact.claim
+    ; identity = Ordinary_memory_id (Keeper_memory_os_types.memory_id fact)
+    ; category = Keeper_memory_os_types.category_to_string fact.category
+    ; basis = fact.basis
+    ; store = Ordinary_current
+    }
   in
-  let source_matches =
-    List.map
-      (fun (fact : Keeper_memory_source_current.fact) ->
-      { identity = Source_sha256 fact.source.sha256
-      ; claim = fact.claim
-      ; category = "fact"
-      ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
-      ; store = Source_bound_current
-      })
-      source_matched
+  let source_match (fact : Keeper_memory_source_current.fact) : fact_match =
+    { identity = Source_sha256 fact.source.sha256
+    ; claim = fact.claim
+    ; category = "fact"
+    ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
+    ; store = Source_bound_current
+    }
   in
-  Ok (take limit (ordinary_matches @ source_matches), total_candidates)
+  Ok
+    ( take
+        limit
+        (List.map ordinary_match ordinary_whole
+         @ List.map source_match source_whole
+         @ List.map ordinary_match ordinary_fragments
+         @ List.map source_match source_fragments)
+    , total_candidates )
 ;;
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
@@ -198,10 +214,12 @@ let current_memory_ids facts =
     facts
 ;;
 
-(* Rows a librarian pass wrote for facts that left the snapshot, filtered the
-   way current facts are: by the query substring, in the order written. The
-   rows are written just before a snapshot replace, so a replace that failed
-   leaves rows for a pass that never committed (RFC-0456 §4.2). Two of their
+(* Rows a librarian pass wrote for facts that left the snapshot, answering the
+   query the way current facts do ({!answering}): whole-query rows first, then
+   fragment rows, each tier in stored order. Every result still carries its
+   own [absorbed_at], so prioritising the stronger match does not erase merge
+   time. The rows are written just before a snapshot replace, so a replace
+   that failed leaves rows for a pass that never committed (RFC-0456 §4.2). Two of their
    shapes are exact to recognise: a row for a fact that is still current is
    not an absorption, and a row repeating another row's memory_id and into
    states the same thing, kept once at its last write. The third -- an [into]
@@ -244,17 +262,14 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~query ~limit =
            Hashtbl.find_opt last_write (row.memory_id, row.into) = Some index)
         absorbed
     in
-    let matched =
-      if String.equal query ""
-      then statements
-      else
-        List.filter
-          (fun (row : Keeper_memory_absorbed.record) ->
-             String_util.contains_substring_ci
-               row.fact.Keeper_memory_os_types.claim
-               query)
-          statements
+    let whole_query, fragments =
+      answering
+        ~claim_of:(fun (row : Keeper_memory_absorbed.record) ->
+          row.fact.Keeper_memory_os_types.claim)
+        ~query
+        statements
     in
+    let matched = whole_query @ fragments in
     Ok
       { matches =
           List.map
@@ -274,6 +289,7 @@ let absorbed_match_to_json { row; into_current } : Yojson.Safe.t =
           (Keeper_memory_os_types.category_to_string
              row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.category) )
     ; "memory_id", `String row.Keeper_memory_absorbed.memory_id
+    ; "basis", Keeper_memory_os_types.basis_to_json row.fact.basis
     ; "into", `String row.Keeper_memory_absorbed.into
     ; "into_current", `Bool into_current
     ; "absorbed_at", `Float row.Keeper_memory_absorbed.recorded_at
@@ -317,57 +333,110 @@ let history_read_error_fields history =
 let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
   if query = "" || limit <= 0 then empty_history_search
   else
-    let accept seen content =
-      if StringSet.mem content !seen
-         || not (String_util.contains_all_tokens_ci content query)
-      then false
-      else (seen := StringSet.add content !seen; true)
+    let whole_query content = String_util.contains_substring_ci content query in
+    let fragments content =
+      (not (whole_query content))
+      && String_util.contains_all_tokens_ci content query
     in
-    let checkpoint_seen = ref StringSet.empty in
-    let rec select_checkpoint remaining selected = function
-      | [] -> List.rev selected
-      | _ when remaining = 0 -> List.rev selected
-      | content :: rest ->
-        if accept checkpoint_seen content
-        then select_checkpoint (remaining - 1) (content :: selected) rest
-        else select_checkpoint remaining selected rest
-    in
-    let checkpoint =
-      Keeper_memory_recall.user_messages_newest_first (messages_of_context ctx_work)
-      |> select_checkpoint limit []
-    in
-    let rec read_traces remaining seen matches unreadable_rows unavailable_traces = function
+    let exact_seen = ref StringSet.empty in
+    let fragment_seen = ref StringSet.empty in
+    let checkpoint_exact = ref [] in
+    let checkpoint_fragments = ref [] in
+    Keeper_memory_recall.user_messages_newest_first (messages_of_context ctx_work)
+    |> List.iter (fun content ->
+      if whole_query content && not (StringSet.mem content !exact_seen)
+      then (
+        exact_seen := StringSet.add content !exact_seen;
+        if List.length !checkpoint_exact < limit
+        then checkpoint_exact := !checkpoint_exact @ [ content ])
+      else if fragments content
+              && not (StringSet.mem content !fragment_seen)
+              && List.length !checkpoint_fragments < limit
+      then (
+        fragment_seen := StringSet.add content !fragment_seen;
+        checkpoint_fragments := !checkpoint_fragments @ [ content ]));
+    let rec read_traces remaining exact_seen fragment_seen exact_matches
+        fragment_matches unreadable_rows unavailable_traces = function
       | [] ->
-        { matches = List.rev matches
+        { matches = exact_matches @ take remaining fragment_matches
         ; unreadable_rows
         ; unavailable_traces = List.rev unavailable_traces
         }
       | _ when remaining = 0 ->
-        { matches = List.rev matches
+        { matches = exact_matches @ take remaining fragment_matches
         ; unreadable_rows
         ; unavailable_traces = List.rev unavailable_traces
         }
       | trace_id :: rest ->
         (* Selection belongs to this read until it succeeds. A failed scan
-           must not hide the same body in a later readable trace. *)
-        let local_seen = ref seen in
+           must not hide the same body in a later readable trace. Fragment
+           candidates stay side effects of the same scan so malformed rows
+           and unavailable traces are observed exactly once. *)
+        let local_exact_seen = ref exact_seen in
+        let local_fragment_seen = ref fragment_seen in
+        let local_fragments = ref fragment_matches in
+        let select content =
+          if whole_query content
+             && not (StringSet.mem content !local_exact_seen)
+          then (
+            local_exact_seen := StringSet.add content !local_exact_seen;
+            true)
+          else if fragments content
+                  && not (StringSet.mem content !local_fragment_seen)
+                  && List.length !local_fragments < limit
+          then (
+            local_fragment_seen := StringSet.add content !local_fragment_seen;
+            local_fragments := !local_fragments @ [ content ];
+            false)
+          else false
+        in
         let result, unreadable =
           Keeper_memory_recall.load_history_user_messages_result
             ~path:(Keeper_types_support.keeper_history_path config trace_id)
-            ~limit:remaining ~accept:(accept local_seen)
+            ~limit:remaining ~accept:select
         in
         (match result with
          | Ok selected ->
-           read_traces (remaining - List.length selected) !local_seen
-             (List.rev_append selected matches) (unreadable_rows + unreadable)
-             unavailable_traces rest
+           read_traces (remaining - List.length selected) !local_exact_seen
+             !local_fragment_seen (exact_matches @ selected) !local_fragments
+             (unreadable_rows + unreadable) unavailable_traces rest
          | Error error ->
-           read_traces remaining seen matches (unreadable_rows + unreadable)
-             ((trace_id, error) :: unavailable_traces) rest)
+           read_traces remaining exact_seen fragment_seen exact_matches fragment_matches
+             (unreadable_rows + unreadable) ((trace_id, error) :: unavailable_traces)
+             rest)
     in
-    read_traces (limit - List.length checkpoint) !checkpoint_seen
-      (List.rev checkpoint) 0 []
+    let exact_matches = !checkpoint_exact in
+    read_traces (limit - List.length exact_matches) !exact_seen !fragment_seen
+      exact_matches !checkpoint_fragments 0 []
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id :: meta.runtime.trace_history)
+;;
+
+type all_search_match =
+  | All_fact of fact_match
+  | All_absorbed of absorbed_match
+  | All_history of string
+
+let all_search_match_text = function
+  | All_fact match_ -> match_.claim
+  | All_absorbed match_ -> match_.row.fact.claim
+  | All_history message -> message
+;;
+
+let all_search_match_to_json = function
+  | All_fact match_ -> fact_match_to_json match_
+  | All_absorbed match_ -> absorbed_match_to_json match_
+  | All_history message ->
+    `Assoc
+      [ "source", `String (memory_search_source_to_string History)
+      ; "text", `String message
+      ]
+;;
+
+let ordinary_memory_id_of_all_match = function
+  | All_fact { identity = Ordinary_memory_id memory_id; _ } -> Some memory_id
+  | All_fact { identity = Source_sha256 _; _ }
+  | All_absorbed _
+  | All_history _ -> None
 ;;
 
 (* The ordinary facts in a result set, by identity. Source-bound facts are
@@ -525,7 +594,6 @@ let keeper_memory_search_with_outcome
            (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
             | Error _ as error -> error
             | Ok (fact_matches, fact_total) ->
-              let absorbed_limit = max 0 (limit - List.length fact_matches) in
               let absorbed, unavailable =
                 match
                   search_absorbed_facts
@@ -533,47 +601,34 @@ let keeper_memory_search_with_outcome
                     ~keeper_id:meta.name
                     ~current_ids:(current_memory_ids facts)
                     ~query
-                    ~limit:absorbed_limit
+                    ~limit
                 with
                 | Ok absorbed -> absorbed, None
                 | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
               in
-                 let history_limit =
-                   max 0 (absorbed_limit - List.length absorbed.matches)
+                 let history = search_history ~config ~meta ~ctx_work ~query ~limit in
+                 let candidates =
+                   List.map (fun match_ -> All_fact match_) fact_matches
+                   @ List.map (fun match_ -> All_absorbed match_) absorbed.matches
+                   @ List.map (fun message -> All_history message) history.matches
                  in
-                 let history =
-                   search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
+                 let whole_query, fragments =
+                   answering ~claim_of:all_search_match_text ~query candidates
                  in
-                 let history_matches = history.matches in
-                 let total_matches =
-                   List.length fact_matches
-                   + List.length absorbed.matches
-                   + List.length history_matches
-                 in
-                 let extra_matches =
-                   List.map
-                     (fun msg ->
-                        `Assoc
-                          [ "source", `String (memory_search_source_to_string History)
-                          ; "text", `String msg
-                          ])
-                     history_matches
-                 in
+                 let selected = take limit (whole_query @ fragments) in
                  Ok
                    ( durable_json
-                       ~fact_jsons:
-                         (List.map fact_match_to_json fact_matches
-                          @ List.map absorbed_match_to_json absorbed.matches)
+                       ~fact_jsons:(List.map all_search_match_to_json selected)
                        ~fact_total:(fact_total + absorbed.candidates)
-                       ~total_matches
-                       ~extra_matches
+                       ~total_matches:(List.length selected)
+                       ~extra_matches:[]
                        ~read_errors:
                          (history_has_read_errors history
                           || absorbed.unreadable <> [] || unavailable <> None)
                        ~read_error_fields:
                          (absorbed_fields ~absorbed ~unavailable
                           @ history_read_error_fields history)
-                   , ordinary_memory_ids fact_matches )))
+                   , List.filter_map ordinary_memory_id_of_all_match selected )))
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
            the events sidecar is about current memories (RFC-0418). *)
@@ -1483,14 +1538,13 @@ let keeper_memory_retract_with_outcome
          ()
      with
      | Ok snapshot ->
-       (* The model named this fact by id and the store found it: a citation
-          (RFC-0418). The fact is gone from the snapshot from here on, and the
-          event stays as the record of its last use. *)
+       (* The fact is gone from the snapshot; its retraction remains in the
+          history if the same claim is later stored again. *)
        record_memory_events
          ~keepers_dir
          ~meta
          ~now
-         ~kind:(Keeper_memory_os_events.Cited { tool = "keeper_memory_retract" })
+         ~kind:Keeper_memory_os_events.Retracted
          [ memory_id ];
        Log.Keeper.info
          "explicit current Memory retracted keeper=%s revision=%d memory_id=%s support_invalidations=%d"

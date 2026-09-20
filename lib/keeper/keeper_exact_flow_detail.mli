@@ -42,3 +42,22 @@ val candidates_exhausted_detail
   :  rejection:Agent_core.Exact_output.candidate_rejection_receipt
   -> evidence:Agent_core.Exact_output.flow_evidence
   -> string
+
+(** Typed allocation cause, including the underlying call-id generator detail. *)
+val attempt_start_error_detail
+  :  Agent_core.Exact_output.start_attempt_error
+  -> string
+
+(** Typed measurement allocation cause, keeping operation-id generation
+    details distinct from a missing timeout clock. *)
+val measurement_start_error_detail
+  :  Agent_core.Exact_output.measurement_start_error
+  -> string
+
+(** One line for any terminal flow error: a static label ("attempt_start_failed",
+    "candidates_exhausted: ...", "agent_core_execution_failed: ...") followed by
+    the payload the branch carries. Callback arms read
+    "unexpected_callback_failure". *)
+val flow_execution_error_detail
+  :  _ Agent_core.Exact_output.flow_execution_error
+  -> string

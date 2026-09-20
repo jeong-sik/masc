@@ -141,14 +141,12 @@ let () =
     | Some _ | None -> error ("--trace is required\n" ^ usage)
   in
   let base_path =
-    match !base with
-    | Some value ->
-      value
-      |> Config_dir_resolver.absolute_path
-      |> Masc.Workspace.runtime_base_path_for_request
-    | None ->
-      Config_dir_resolver.base_path_or_cwd ()
-      |> Masc.Workspace.runtime_base_path_for
+    (match !base with
+     | Some value ->
+       Masc.Workspace.Explicit (Config_dir_resolver.absolute_path value)
+     | None ->
+       Masc.Workspace.Ambient (Config_dir_resolver.base_path_or_cwd ()))
+    |> Masc.Workspace.runtime_base_path
   in
   (* The save below prunes the session's checkpoint history to the window the
      operator set, and that window lives in this workspace's overrides. Without

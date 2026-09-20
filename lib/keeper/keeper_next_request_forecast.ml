@@ -401,7 +401,7 @@ let candidate
       (* Apply the driver's boundary policy to a local value; the Table
          remains the observation the next real turn will read. If this
          history no longer holds its positions, use the seed the newest
-         completed Agent Core record on the trace gives every candidate alike.
+         response-observed record on the trace gives every candidate alike.
          The forecast only reads: a ledger that does not hold is passed over
          here and dropped by the turn driver's next composition. *)
       let front, counted_tokens =

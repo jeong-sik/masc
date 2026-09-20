@@ -2504,7 +2504,7 @@ type memory_fact_events = {
   mfe_retrieved_count : int;
   mfe_retrieved_distinct_days : int;
   mfe_last_retrieved_at : float option;
-  mfe_cited_count : int;
+  mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
@@ -2512,7 +2512,7 @@ let no_memory_fact_events =
   { mfe_retrieved_count = 0
   ; mfe_retrieved_distinct_days = 0
   ; mfe_last_retrieved_at = None
-  ; mfe_cited_count = 0
+  ; mfe_retracted_count = 0
   ; mfe_revised_from = []
   }
 
@@ -2561,6 +2561,7 @@ type memory_fact_snapshot = {
   mfs_keeper : string;
   mfs_ordinary : memory_ordinary_store memory_store_reading;
   mfs_source : memory_source_store memory_store_reading;
+  mfs_events_read_error : string option;
 }
 
 type harness_verdict = {
@@ -5075,13 +5076,13 @@ let decode_memory_fact_events json =
   let* mfe_retrieved_count = required_int_field json "retrieved_count" in
   let* mfe_retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
   let* mfe_last_retrieved_at = optional_float_field json "last_retrieved_at" in
-  let* mfe_cited_count = required_int_field json "cited_count" in
+  let* mfe_retracted_count = required_int_field json "retracted_count" in
   let* mfe_revised_from = require_string_list json "revised_from" in
   Ok
     { mfe_retrieved_count
     ; mfe_retrieved_distinct_days
     ; mfe_last_retrieved_at
-    ; mfe_cited_count
+    ; mfe_retracted_count
     ; mfe_revised_from
     }
 
@@ -5155,6 +5156,7 @@ let decode_memory_source_store json =
 
 let decode_memory_fact_snapshot json =
   let* mfs_keeper = required_string_field json "keeper" in
+  let* mfs_events_read_error = required_nullable_string_field json "events_read_error" in
   let* ordinary_json = required_member json "ordinary" in
   let* mfs_ordinary =
     decode_memory_store_reading ~label:"ordinary" decode_memory_ordinary_store
@@ -5165,7 +5167,7 @@ let decode_memory_fact_snapshot json =
     decode_memory_store_reading ~label:"source_bound"
       decode_memory_source_store source_json
   in
-  Ok { mfs_keeper; mfs_ordinary; mfs_source }
+  Ok { mfs_keeper; mfs_ordinary; mfs_source; mfs_events_read_error }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in
@@ -8380,6 +8382,11 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
       Ok Lane_run_gate_judgment_not_reached
 ;;
 
+type lane_run_failure =
+  { lrf_code : string
+  ; lrf_detail : string
+  }
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
@@ -8390,6 +8397,7 @@ type lane_run_summary =
   ; lrs_status : lane_run_status
   ; lrs_elapsed_s : float option
   ; lrs_selected_slot : string option
+  ; lrs_failure : lane_run_failure option
   }
 
 type lane_run_page =
@@ -8408,6 +8416,7 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_failure : lane_run_failure option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
@@ -8428,19 +8437,33 @@ let decode_lane_run_summary json =
   let* lrs_status = required_string_field json "status" in
   let* lrs_elapsed_s = optional_float_field json "elapsed_s" in
   let* lrs_selected_slot = optional_string_field json "selected_slot" in
+  let lrs_run_kind =
+    match lrs_run_kind with
+    | None -> Lane_run_exact_output
+    | Some kind -> lane_run_kind_of_string kind
+  in
+  let lrs_status = lane_run_status_of_string lrs_status in
+  let* lrs_failure =
+    match lrs_run_kind, lrs_status with
+    | Lane_run_exact_output, Lane_run_failed ->
+      let* code = required_string_field json "code" in
+      let* detail = required_string_field json "detail" in
+      Ok (Some { lrf_code = code; lrf_detail = detail })
+    | ( (Lane_run_task_verification | Lane_run_goal_verification
+        | Lane_run_kind_other _ | Lane_run_exact_output)
+      , _ ) -> Ok None
+  in
   Ok
     { lrs_run_id
-    ; lrs_run_kind =
-        (match lrs_run_kind with
-         | None -> Lane_run_exact_output
-         | Some kind -> lane_run_kind_of_string kind)
+    ; lrs_run_kind
     ; lrs_lane
     ; lrs_subject_id
     ; lrs_actor
     ; lrs_started_at
-    ; lrs_status = lane_run_status_of_string lrs_status
+    ; lrs_status
     ; lrs_elapsed_s
     ; lrs_selected_slot
+    ; lrs_failure
     }
 ;;
 
@@ -8542,6 +8565,7 @@ let decode_lane_run_detail json =
     ; lrd_status = summary.lrs_status
     ; lrd_elapsed_s = summary.lrs_elapsed_s
     ; lrd_selected_slot = summary.lrs_selected_slot
+    ; lrd_failure = summary.lrs_failure
     ; lrd_input_payload
     ; lrd_input_availability
     ; lrd_output_availability

@@ -20,6 +20,7 @@ let fixture_post_connect_timeout_seconds = 30.0
 
 type server_behavior =
   | Reply of string
+  | Stream_reply of string
   | Replies of string list
   | Abort_after_request
   | Delay_then_reply of float * string
@@ -27,6 +28,8 @@ type server_behavior =
     (** Answer [200 text/event-stream], write the given bytes once, then keep
         the connection open and silent until the server's switch is released.
         Stands in for a provider whose stream stops mid-answer. *)
+  | Incomplete_reply of string
+    (** Send JSON response headers and a body prefix, then keep the body open. *)
 
 type test_server =
   { base_url : string
@@ -88,6 +91,10 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
     Option.iter (fun hook -> hook ()) on_request_before_reply;
     match behavior with
     | Reply response -> Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    | Stream_reply response ->
+      Cohttp_eio.Server.respond_string
+        ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
+        ~status:`OK ~body:response ()
     | Replies responses ->
       let response =
         match List.nth_opt responses request_index with
@@ -102,6 +109,12 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
     | Stream_then_stall first_bytes ->
       Cohttp_eio.Server.respond
         ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
+        ~status:`OK
+        ~body:(stalling_source first_bytes)
+        ()
+    | Incomplete_reply first_bytes ->
+      Cohttp_eio.Server.respond
+        ~headers:(Cohttp.Header.init_with "content-type" "application/json")
         ~status:`OK
         ~body:(stalling_source first_bytes)
         ()
@@ -132,7 +145,9 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
 
 let target_fixture_toml
       ~connect_timeout_s
+      ?body_timeout_s
       ?enable_thinking
+      ~requires_token_measurement
       ~supports_response_format_json
       ~supports_structured_output
       ~api_key_env
@@ -142,24 +157,43 @@ let target_fixture_toml
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
   let timeout = Printf.sprintf "connect_timeout_s = %.6g\n" connect_timeout_s in
+  let body_timeout =
+    Option.fold ~none:""
+      ~some:(Printf.sprintf "body_timeout_s = %.6g\n") body_timeout_s
+  in
   let enable_thinking_line =
     Option.fold
       ~none:""
       ~some:(fun value -> Printf.sprintf "enable_thinking = %b\n" value)
       enable_thinking
   in
+  let provider_kind, request_path, serving_constraint_lines =
+    if requires_token_measurement
+    then
+      ( "anthropic"
+      , "/v1/messages"
+      , "serving_constraint_source_kind = \"probe\"\n\
+         serving_constraint_source = \"probe://exact-output-fixture\"\n\
+         serving_constraint_checked_at_unix_s = 0\n\
+         serving_constraint_confidence = \"high\"\n\
+         serving_constraint_expires_at_unix_s = 2000000000\n\
+         serving_constraint_accepted_through_tokens = 524298\n\
+         serving_constraint_rejected_from_tokens = 524299\n" )
+    else "openai_compat", "/v1/chat/completions", ""
+  in
   Printf.sprintf
     "[[providers]]\n\
      id = %S\n\
-     kind = \"openai_compat\"\n\
+     kind = %S\n\
      base_url = %S\n\
-     request_path = \"/v1/chat/completions\"\n\
+     request_path = %S\n\
      api_key_env = %S\n\n\
      [[models]]\n\
      id_prefix = %S\n\
      provider_name = %S\n\
      max_context_tokens = 8192\n\
      max_output_tokens = 1024\n\
+     %s\
      supports_response_format_json = %b\n\
      supports_structured_output = %b\n\n\
      [[targets]]\n\
@@ -169,24 +203,29 @@ let target_fixture_toml
      %s\
      %s"
     provider_id
+    provider_kind
     fixture.base_url
+    request_path
     api_key_env
     model_id
     provider_id
+    serving_constraint_lines
     supports_response_format_json
     supports_structured_output
     fixture.id
     provider_id
     model_id
-    timeout
+    (timeout ^ body_timeout)
     enable_thinking_line
 ;;
 
 let resolver_snapshot
       ?(connect_timeouts = [])
+      ?(body_timeouts = [])
       ?(enable_thinkings = [])
       ?(api_key_env = "")
       ?(api_key_envs = [])
+      ?(requires_token_measurement = false)
       ?(supports_response_format_json = true)
       ?(supports_structured_output = true)
       ~source
@@ -207,7 +246,9 @@ let resolver_snapshot
         |> List.mapi (fun index fixture ->
             target_fixture_toml
               ~connect_timeout_s:(timeout_for fixture.id)
+              ?body_timeout_s:(List.assoc_opt fixture.id body_timeouts)
               ?enable_thinking:(enable_thinking_for fixture.id)
+              ~requires_token_measurement
               ~supports_response_format_json
               ~supports_structured_output
               ~api_key_env:(api_key_env_for fixture.id)

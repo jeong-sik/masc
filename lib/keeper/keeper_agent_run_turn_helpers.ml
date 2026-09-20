@@ -368,8 +368,7 @@ let record_history_restart ~(config : Workspace.config) ~keeper_name ~trace_id s
   in
   match
     Keeper_turn_boundaries.append
-      ~keepers_dir:
-        (Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
       ~keeper_id:keeper_name
       record
   with

@@ -63,21 +63,29 @@ dispatch. For each predetermined candidate:
    `dispatch_count = 0`; it does not enter
    `before_dispatch`.
 3. For an admitted candidate, the caller's `before_dispatch` callback must
-   confirm its durable binding before agent_core invokes the unchanged single-plan
-   `execute_once`.
+   confirm its domain prerequisites, including any durable binding it owns,
+   before agent_core invokes the unchanged single-plan `execute_once`.
 4. agent_core may select the next frozen candidate only after one of these typed
    outcomes:
    - that candidate rejection receipt;
    - a first-use transport failure whose exact execution receipt is
      `Before_dispatch` with `dispatch_count = 0`;
-   - an HTTP 413 request-body refusal recorded at `Response_received` with
-     `dispatch_count = 1`;
+   - successful HTTP response headers followed by the declared total body
+     deadline expiring, recorded at `Response_received` with
+     `dispatch_count = 1` and no complete raw body or provider trace;
+   - a complete HTTP 413 request-body refusal, HTTP 429 rate limit, HTTP 529
+     overload, or other HTTP 5xx server error recorded at `Response_received`
+     with `dispatch_count = 1`;
    - locally detected invalid JSON after one structurally complete response,
      recorded at `Response_received` or `Terminal` with
-     `dispatch_count = 1`.
+     `dispatch_count = 1`;
+   - typed `Missing_output` after a response, recorded at `Response_received`
+     or `Terminal` with `dispatch_count = 1`.
 5. The caller's `before_advance` callback receives the typed failure and
-   the predetermined successor visit, and must durably confirm release before
-   agent_core prepares that successor.
+   the predetermined successor visit, and must confirm release of any durable
+   binding it owns before agent_core prepares that successor. The callback
+   itself does not persist state. A caller without such a binding may use it
+   solely to observe the ordered transition.
 
 Callbacks can stop a transition but cannot select, replace, or reorder a
 candidate.
@@ -96,10 +104,20 @@ The following outcomes are terminal:
 - duplicate/replayed execution;
 - cancellation;
 - a missing execution prerequisite or frozen-request invariant failure;
-- any dispatched response outside the two typed advance cases above;
-- partial, tool, ambiguous structural-output, or non-JSON-contract exposure;
+- any dispatched response outside the typed advance cases above;
+- a completed provider response exposing structurally incomplete output,
+  tools, ambiguous structural output, or non-JSON-contract content;
 - a final typed candidate rejection, reported as `Flow_candidates_exhausted`;
 - structural success.
+
+A successful-response body deadline is local transport evidence. Its socket
+has been closed and no domain validator has received a result, so the caller
+may settle that candidate before the next declared candidate starts. It does
+not establish remote cancellation, zero provider work, or zero billing. The
+failed dispatch remains in the transcript, with absent body/trace hashes.
+Unknown transport errors and observer/callback exceptions remain terminal.
+The non-success HTTP path has a separate `Not_received_in_window` refusal
+contract; this body-deadline transition does not reclassify those refusals.
 
 After each structural success, agent_core invokes the caller's pure `validate`
 callback exactly once. `Accept` returns the accepted value and prior rejection
@@ -107,7 +125,7 @@ evidence. `Reject_and_advance` preserves the transport success and domain
 rejection as immutable evidence, then advances directly to the predetermined
 successor. A final semantic rejection returns a typed nonempty trace.
 
-The two post-response advance cases may add one completion dispatch for each
+The post-response advance cases may add one completion dispatch for each
 subsequent declared candidate. This is explicit failover blast radius, not a
 retry of the same candidate: every attempt remains affine and every successful
 advance is retained with its exact failed and successor visits. Provider error

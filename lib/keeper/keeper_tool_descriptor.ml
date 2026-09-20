@@ -106,6 +106,7 @@ type runtime_handler =
   | Tool_context_status
   | Tool_peer_artifact
   | Tool_artifact_read
+  | Tool_skill_validate
   | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract
@@ -238,6 +239,7 @@ let runtime_handler_to_string = function
   | Tool_context_status -> "tool_context_status"
   | Tool_peer_artifact -> "keeper_artifact_transfer"
   | Tool_artifact_read -> "tool_artifact_read"
+  | Tool_skill_validate -> "tool_skill_validate"
   | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_retract -> "tool_memory_retract"
@@ -464,6 +466,7 @@ let descriptor
       | Tool_context_status
       | Tool_peer_artifact
   | Tool_artifact_read
+      | Tool_skill_validate
       | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_library_search
@@ -2403,6 +2406,17 @@ let internal_descriptors : t list =
       ()
     |> with_model_output_projection Tool_output.bounded_inline_model_projection
     |> with_composable_output (Json_output { schema = artifact_read_output_schema }))
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.skill.validate"
+      ~name:Keeper_runtime_schemas_toml.skill_validate.name
+      ~description:Keeper_runtime_schemas_toml.skill_validate.description
+      ~input_schema:Keeper_runtime_schemas_toml.skill_validate.input_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_skill_validate
+      ()
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name

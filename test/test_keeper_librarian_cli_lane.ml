@@ -318,7 +318,6 @@ let test_failure_reaches_journal
       ~answer
       ~failure
       ~kind
-      ?detail_contains
       ~calls
       ()
   =
@@ -341,13 +340,6 @@ let test_failure_reaches_journal
   (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
    | [Ok (Current.Journal_failed { detail; kind = actual_kind; cadence_deferred; _ })] ->
      check_detail ?api_failure ?cli_failure:failure detail;
-     Option.iter
-       (fun expected ->
-          check bool
-            "journal names the transport declaration failure"
-            true
-            (Astring.String.is_infix ~affix:expected detail))
-       detail_contains;
      check bool "journal keeps the original failure kind" true (actual_kind = kind);
      check bool "failure retains the existing cadence policy" true cadence_deferred
    | _ -> fail "failed pass must write one decodable journal failure");
@@ -427,11 +419,6 @@ let () =
         ; test_case "no CLI declaration preserves the API failure" `Quick
             (test_failure_reaches_journal ~cli_only:false ~cli_slot_ids:[]
               ~answer:(Error "must not run") ~failure:None
-              ~kind:Current.Exact_setup_failure ~calls:0)
-        ; test_case "a lane with no transport reports setup failure" `Quick
-            (test_failure_reaches_journal ~cli_only:true ~cli_slot_ids:[]
-              ~answer:(Error "must not run") ~failure:None
-              ~detail_contains:"declares no API or official-client slots"
               ~kind:Current.Exact_setup_failure ~calls:0)
         ; test_case "CLI admission refusal reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false

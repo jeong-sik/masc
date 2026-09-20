@@ -562,6 +562,9 @@ let execute_exact_output_classified
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
   match selected_slots with
   | [] ->
+    (* Registry publication rejects a lane with neither transport, and lane
+       resolution rejects a lane with no admitted transport. Keep this final
+       classification defensive in case either upstream contract changes. *)
     (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)

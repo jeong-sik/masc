@@ -324,21 +324,16 @@ let search_history
   let checkpoint_user_msgs =
     Keeper_memory_recall.recent_user_messages (messages_of_context ctx_work) ~max_n:100
   in
-  let key_of s =
-    let len = min 100 (String.length s) in
-    String.sub s 0 len
-  in
   let seen0 =
     List.fold_left
-      (fun acc s -> StringSet.add (key_of s) acc)
+      (fun acc s -> StringSet.add s acc)
       StringSet.empty
       checkpoint_user_msgs
   in
   let dedup seen lst =
     List.fold_left
       (fun (acc, seen) s ->
-         let k = key_of s in
-         if StringSet.mem k seen then acc, seen else s :: acc, StringSet.add k seen)
+         if StringSet.mem s seen then acc, seen else s :: acc, StringSet.add s seen)
       ([], seen)
       lst
     |> fun (acc, seen) -> List.rev acc, seen

@@ -95,6 +95,12 @@ val binding_to_provider_config
     or provider-base ceiling. An absent declaration preserves the catalog;
     neither ceiling becomes a request-side [max_tokens] default.
 
+    The binding's [disable_parallel_tool_use] is request policy. It reaches
+    [Provider_config] without replacing the model's catalog capability.
+    The canonical provider must declare suppression support in its catalog;
+    HTTP wire compatibility alone is not a support contract.
+    Native Ollama and Gemini cannot carry it and refuse [true].
+
     Returns [Error reason] (no silent fallback) when the provider or model id
     is unresolved, or when the provider transport/kind cannot be mapped to a
     concrete provider config. *)
@@ -108,4 +114,6 @@ val binding_to_execution
     a credential-free CLI transport becomes
     {!Runtime_execution.Codex_app_server}; [claude-code] becomes
     {!Runtime_execution.Claude_code}; and [antigravity-cli] becomes
-    {!Runtime_execution.Antigravity_cli}. Other CLI protocols remain rejected. *)
+    {!Runtime_execution.Antigravity_cli}. These clients have no supported
+    [disable_parallel_tool_use] control here, so bindings requesting it are
+    refused. Other CLI protocols remain rejected. *)

@@ -58,3 +58,6 @@ val allocate_board_read_side :
   body_line_count:int ->
   comment_count:int ->
   board_read_side_allocation
+(** Give each side-by-side column the full shared vertical viewport. A comment
+    column with content still reserves its first row for the heading and folds
+    away when the viewport cannot fit both heading and content. *)

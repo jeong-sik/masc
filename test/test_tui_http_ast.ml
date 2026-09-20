@@ -1844,6 +1844,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:render_path ~binding_name:"board_read_pane"
        ~callees:[ "Layout.project_board_read_scroll" ]
        ~fields:[ "board_scroll" ]);
+  check int "side board read owns one row allocation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"draw_board_read_side"
+       ~callee:"Layout.allocate_board_read_side");
+  check int "side board read owns one scroll projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"draw_board_read_side"
+       ~callee:"Layout.project_board_read_scroll");
   (* Two doors notice a resize and they learn of it differently: SIGWINCH
      knows only that the size changed, the loop's own ioctl already read the
      new one and must keep it for the frame it is about to draw. What a

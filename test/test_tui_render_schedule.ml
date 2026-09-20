@@ -534,7 +534,12 @@ let test_board_read_side_allocation_reserves_the_heading () =
           terminal_rows comment_count allocation.comment_rows;
       if allocation.body_rows < 0 || allocation.comment_rows < 0 then
         failf "rows=%d comments=%d: negative row allocation" terminal_rows
-          comment_count
+          comment_count;
+      let available = max 0 (terminal_rows - 9) in
+      if max allocation.body_rows allocation.comment_rows <> available then
+        failf
+          "rows=%d comments=%d: side columns leave vertical space unused"
+          terminal_rows comment_count
     done
   done;
   let no_comments =

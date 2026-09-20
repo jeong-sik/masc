@@ -2191,7 +2191,7 @@ let board_read_layout = Board_read_layout.create ()
    consumes its own row budget through the calls that produced it, not by
    re-reading the record across two branches inside one binding. *)
 let draw_board_read_side buf (state : state) document ~rows ~body_cols
-    ~comment_cols ~total_lines ~detail_line_count =
+    ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count =
   let side_budget =
     Layout.allocate_board_read_side ~terminal_rows:rows
       ~body_line_count:total_lines ~comment_count:detail_line_count
@@ -2232,7 +2232,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
     if i = 0 && comment_header_rows > 0 then
       box_line comment_buf comment_cols
         (Ansi.bold
-        ^ Printf.sprintf "  Comments (%d)" detail_line_count
+        ^ Printf.sprintf "  Comments (%d)" detail_comment_count
         ^ Ansi.reset)
     else if i < side_budget.comment_rows then
       let idx = i - comment_header_rows + scroll.comment_offset in
@@ -2324,7 +2324,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   let has_detail_content =
     match detail with
     | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
-        true
+        false
     | Board_detail.Ready (_, comments) -> comments <> []
   in
   let side_layout =
@@ -2478,10 +2478,12 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                     follow-up: a wide-column approximation of the heading's
                     width left almost no room for content once the column
                     narrowed). When the heading claims the column on its own,
-                    content gets its own row wrapped to the column's full
-                    width instead of the sliver the heading did not use. *)
+                    content gets its own row wrapped to the width left after
+                    its thread rail instead of the sliver the heading did not
+                    use. *)
+                 let inner_width = framed_inner_width comment_wrap_cols in
                  let heading_width = Message_layout.display_width heading in
-                 let joined_budget = comment_wrap_cols - heading_width - 2 in
+                 let joined_budget = inner_width - heading_width - 2 in
                  if joined_budget >= 8 then
                    match
                      Message_layout.wrap_body ~markdown:board_document_markdown
@@ -2495,21 +2497,39 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                        :: List.map
                             (fun line -> "  " ^ rail ^ "  " ^ line) lines
                  else
-                   match
-                     Message_layout.wrap_body ~markdown:board_document_markdown
-                       ~max_cells:(max 1 comment_wrap_cols)
+                   let identity =
+                     Printf.sprintf "  %s%s@%s%s%s" rail
+                       (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                       author Ansi.reset author_role
+                   in
+                   let timestamp =
+                     Printf.sprintf "  %s%s%s%s" rail Ansi.dim created_at
+                       Ansi.reset
+                   in
+                   let content_prefix = "  " ^ rail ^ "  " in
+                   let content_width =
+                     max 1
+                       (inner_width
+                       - Message_layout.display_width content_prefix)
+                   in
+                   let lines =
+                     Message_layout.wrap_body
+                       ~markdown:board_document_markdown
+                       ~max_cells:content_width
                        ~sanitize:Terminal_text.single_line c.bc_content
-                   with
-                   | [] -> [ heading ]
-                   | lines ->
-                       heading
-                       :: List.map
-                            (fun line -> "  " ^ rail ^ "  " ^ line) lines)
+                   in
+                   identity :: timestamp
+                   :: List.map (fun line -> content_prefix ^ line) lines)
       in
       (body_lines, detail_lines))
   in
   let total_lines = Board_read_layout.body_count document in
   let detail_line_count = Board_read_layout.comment_count document in
+  let detail_comment_count =
+    match detail with
+    | Board_detail.Ready (_, comments) -> List.length comments
+    | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> 0
+  in
   (* [board_read_allocation] and [board_read_side_allocation] share field
      names but are different record types, so this match cannot return one
      of them -- only the scroll and the two drawn-row counts survive it. *)
@@ -2517,7 +2537,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     match side_layout with
     | Some (body_cols, comment_cols) ->
         draw_board_read_side buf state document ~rows ~body_cols
-          ~comment_cols ~total_lines ~detail_line_count
+          ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count
     | None ->
         let row_budget =
           Layout.allocate_board_read ~terminal_rows:rows

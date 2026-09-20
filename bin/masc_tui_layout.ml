@@ -94,22 +94,13 @@ let allocate_board_read_side ~terminal_rows ~body_line_count ~comment_count =
       (terminal_rows - board_read_box_rows - board_read_footer_rows
        - board_read_position_rows)
   in
-  let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
   let comment_header_rows = if comment_count > 0 then 1 else 0 in
   let minimum_comment_rows =
     if comment_count > 0 then comment_header_rows + 1 else 0
   in
-  let comment_target =
-    comment_header_rows
-    + min comment_count (max 0 ((available / 2) - comment_header_rows))
-  in
   let comment_rows =
-    min (max 0 (available - minimum_body_rows))
-      (max minimum_comment_rows comment_target)
+    if comment_count > 0 && available >= minimum_comment_rows then available
+    else 0
   in
-  let comment_rows =
-    if comment_rows > 0 && comment_rows < minimum_comment_rows then 0
-    else comment_rows
-  in
-  let body_rows = max 0 (available - comment_rows) in
+  let body_rows = if body_line_count > 0 then available else 0 in
   { body_rows; comment_rows }

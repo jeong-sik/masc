@@ -107,6 +107,7 @@ slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
 # host = "builder.local"              # required — remote host
 # user = "masc-exec"                  # required — remote unix user
 # remote_root = "/srv/masc/playground"  # required — remote playground root
+# workspace_layout = "per_keeper"       # required — "per_keeper" or "shared"
 # port = 22                           # ssh port (default 22)
 # # Dedicated key — a path *reference*; key material lives at 0600 under
 # # <base>/.masc/ssh/ (config/identity/ conventions). Defaults resolve

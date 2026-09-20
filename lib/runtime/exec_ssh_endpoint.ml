@@ -31,6 +31,22 @@ let default_port = 22
 let default_connect_timeout_sec = 10
 let default_max_concurrent_sessions = 8
 
+type workspace_layout =
+  | Per_keeper
+  | Shared
+[@@deriving show, eq]
+
+let workspace_layout_to_string = function
+  | Per_keeper -> "per_keeper"
+  | Shared -> "shared"
+;;
+
+let workspace_layout_of_string = function
+  | "per_keeper" -> Some Per_keeper
+  | "shared" -> Some Shared
+  | _ -> None
+;;
+
 let validate_destination ~host ~user =
   let validate kind value =
     if value = ""
@@ -78,6 +94,9 @@ type t =
     (** Pinned host keys (public; may be committed). Default
         [<base>/.masc/ssh/known_hosts.d/<name>], stored base-relative. *)
   ; remote_root : string  (** Remote playground root (required). *)
+  ; workspace_layout : workspace_layout
+    (** Whether the endpoint root contains one directory per Keeper or is
+        itself the workspace shared by the task runtime. *)
   ; connect_timeout_sec : int
     (** Maps to ssh [ConnectTimeout]. Default {!default_connect_timeout_sec}. *)
   ; max_concurrent_sessions : int
@@ -111,6 +130,7 @@ let toml_of_endpoint (endpoint : t) : Otoml.t =
     ; ("identity_file", Otoml.string endpoint.identity_file)
     ; ("known_hosts_file", Otoml.string endpoint.known_hosts_file)
     ; ("remote_root", Otoml.string endpoint.remote_root)
+    ; ("workspace_layout", Otoml.string (workspace_layout_to_string endpoint.workspace_layout))
     ; ("connect_timeout_sec", Otoml.integer endpoint.connect_timeout_sec)
     ; ("max_concurrent_sessions", Otoml.integer endpoint.max_concurrent_sessions)
     ; ("env_allowlist", string_array endpoint.env_allowlist)

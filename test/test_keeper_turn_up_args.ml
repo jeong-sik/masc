@@ -117,6 +117,7 @@ let test_remote_endpoint_validation () =
 host = "fixture.invalid"
 user = "masc"
 remote_root = "/srv/masc/playground"
+workspace_layout = "per_keeper"
 |});
   let parse fields =
     parse_stating_a_profile ctx (`Assoc (("name", `String "remote-new") :: fields))
@@ -259,6 +260,7 @@ let test_remote_endpoint_persistence_round_trip () =
 host = "fixture.invalid"
 user = "masc"
 remote_root = "/srv/masc/playground"
+workspace_layout = "per_keeper"
 |});
   let name = "remote-persist-fixture" in
   let base_meta =

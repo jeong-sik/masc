@@ -64,7 +64,11 @@ let stub_main () =
   (* [--probe] takes no frame: the shim answers its identity on stdout and
      exits. The two probe modes differ only in what the shim says it can
      build, which is the one fact the observe stage reads (RFC-0422). *)
-  if List.exists (String.equal "--probe") args
+  if
+    List.exists
+      (fun arg ->
+         String.equal arg "--probe" || String.equal arg "masc-exec-shim --probe")
+      args
   then (
     let capabilities =
       if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ] else []
@@ -291,7 +295,8 @@ let test_openssh_probe_stays_one_word () =
     { name = "build-box"; host = "build.example"; user = "masc"; port = 22
     ; identity_file = ".masc/ssh/build-box.key"
     ; known_hosts_file = ".masc/ssh/known_hosts.d/build-box"
-    ; remote_root = "/srv/masc/playground"; connect_timeout_sec = 1
+    ; remote_root = "/srv/masc/playground"; workspace_layout = Exec_ssh_endpoint.Per_keeper
+    ; connect_timeout_sec = 1
     ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []; private_home = false }
   in
   match Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a" ~endpoint () with
@@ -302,6 +307,60 @@ let test_openssh_probe_stays_one_word () =
      | [] -> fail "empty probe argv");
     check string "lane prefix" "remote_ssh"
       (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport state))
+;;
+
+let test_openssh_workspace_layout_controls_request_root () =
+  with_eio @@ fun () ->
+  List.iter
+    (fun (layout, expected_root) ->
+       let base_path = temp_dir () in
+       let cli, frame_path = make_stub ~dir:base_path ~mode:"exit3" in
+       let endpoint : Exec_ssh_endpoint.t =
+         { name = "build-box"
+         ; host = "build.example"
+         ; user = "masc"
+         ; port = 22
+         ; identity_file = ".masc/ssh/build-box.key"
+         ; known_hosts_file = ".masc/ssh/known_hosts.d/build-box"
+         ; remote_root = "/srv/masc/playground"
+         ; workspace_layout = layout
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 1
+         ; env_allowlist = [ "LANG" ]
+         ; capabilities = []
+         ; private_home = false
+         }
+       in
+       let state =
+         match
+           Keeper_sandbox_ssh.create ~ssh_bin:cli ~base_path ~keeper_name:"keeper-a"
+             ~endpoint ()
+         with
+         | Ok state -> state
+         | Error error -> fail error
+       in
+       check string "workspace resolver follows typed layout" expected_root
+         (Keeper_sandbox_remote.workspace_root state);
+       let runner = Keeper_sandbox_remote.runner ~timeout_sec:2.0 state in
+       ignore
+         (Masc_exec.Sandbox_target.status_tuple
+            (runner ~on_stdout_chunk:None ~on_stderr_chunk:None
+               ~stdin_content:(Some "in")
+               ~argv:[ "/usr/bin/printf"; "hello" ] ~env:[| "LANG=C" |]
+               ~cwd:None)
+          : Unix.process_status * string * string);
+       match Exec_ssh_protocol.decode_request (read_file frame_path) with
+       | Error error -> fail error
+       | Ok (request, _) ->
+         check string "request root follows typed layout" expected_root
+           request.remote_root;
+         check string "default cwd follows typed layout" expected_root request.cwd;
+         check string "GitHub identity remains Keeper-scoped"
+           "/srv/masc/playground/keeper-a/.config/gh"
+           (Keeper_sandbox_remote.gh_config_dir state))
+    [ Exec_ssh_endpoint.Per_keeper, "/srv/masc/playground/keeper-a"
+    ; Exec_ssh_endpoint.Shared, "/srv/masc/playground"
+    ]
 ;;
 
 let run_request runner ?(env = [| "LANG=C" |]) ?(cwd = None) () =
@@ -377,6 +436,20 @@ let test_default_cwd_is_the_request_root () =
      | Ok (request, _) ->
        check string "Docker cwd stays at its resolved root" remote_root request.cwd;
        check string "Docker request root" request.cwd request.remote_root)
+;;
+
+let test_docker_relative_cwd_is_rejected () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"exit3" in
+  let runner =
+    Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe ~timeout_sec:2.0
+      (make_docker_state ~base_path ~cli)
+  in
+  let status, _, stderr = run_request runner ~cwd:(Some "relative/path") () in
+  check status_testable "request refused before dispatch" (Unix.WEXITED 1) status;
+  check bool "names absolute-cwd contract" true
+    (contains "docker_observe_cwd_requires_guest_absolute_path" stderr)
 ;;
 
 (* ── the box (RFC-0422) ─────────────────────────────────────────────── *)
@@ -693,6 +766,10 @@ let () =
               test_frame_exit_and_injected_env
           ; test_case "default cwd is the request root" `Quick
               test_default_cwd_is_the_request_root
+          ; test_case "Docker rejects relative cwd" `Quick
+              test_docker_relative_cwd_is_rejected
+          ; test_case "OpenSSH workspace layout controls request root" `Quick
+              test_openssh_workspace_layout_controls_request_root
           ; test_case "the requested mode travels in the frame" `Quick
               test_the_requested_mode_travels_in_the_frame
           ; test_case "observe support is what the shim advertises" `Quick

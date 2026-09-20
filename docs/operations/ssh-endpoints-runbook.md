@@ -26,6 +26,7 @@ host = "builder.example.net"
 user = "masc-exec"
 port = 22
 remote_root = "/srv/masc/playground"
+workspace_layout = "per_keeper"
 connect_timeout_sec = 10
 max_concurrent_sessions = 8
 env_allowlist = ["LANG"]
@@ -35,6 +36,12 @@ capabilities = []
 # 만들고, 없으면 그 요청은 judge 로 간다 (RFC-0422 §3.4).
 private_home = false
 ```
+
+`workspace_layout` is required. Use `per_keeper` when each Keeper works under
+`remote_root/<keeper>`. Use `shared` only when the endpoint runtime already
+provides one task workspace at `remote_root`; MASC then sends that exact root
+as the request jail and default working directory. GitHub CLI state remains
+Keeper-scoped under `remote_root/<keeper>/.config/gh` in either layout.
 
 Omitted path defaults resolve against the MASC base path:
 

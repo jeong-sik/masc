@@ -70,7 +70,7 @@ let step ~redaction endpoint ~argv =
 
 let bootstrap_workspace ~redaction endpoint =
   let argv = [ "mkdir"; "-p"; Keeper_sandbox_remote.remote_keeper_root endpoint ] in
-  Keeper_sandbox_remote.bootstrap_keeper_workspace
+  Keeper_sandbox_remote.bootstrap_keeper_control_root
     ~timeout_sec:step_timeout_sec endpoint
   |> step_result ~redaction endpoint ~argv
   |> Result.map (fun _ -> ())

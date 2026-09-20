@@ -77,3 +77,4 @@ def test_the_rendered_endpoint_uses_the_directory_the_bootstrap_prepares():
     out = render_configs.render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
     runtime_toml = (out / "runtime.toml").read_text()
     assert f'remote_root = "{render_configs.REMOTE_ROOT}"' in runtime_toml
+    assert 'workspace_layout = "per_keeper"' in runtime_toml

@@ -79,6 +79,11 @@ val remote_root : t -> string
 val remote_keeper_root : t -> string
 (** [<remote_root>/<sanitized keeper name>]. *)
 
+val workspace_root : t -> string
+(** The exact request jail and default cwd. OpenSSH resolves the endpoint's
+    typed layout; a microVM remains per-Keeper and Docker keeps its mounted
+    workdir. *)
+
 val gh_config_dir : t -> string
 (** Where this endpoint's [gh] keeps the Keeper's identity, and the value the
     lane injects as [GH_CONFIG_DIR] on every request:
@@ -202,11 +207,13 @@ val runner :
     [on_receipt] receives only this runner call's response evidence. The caller
     owns its collection; endpoint-wide [last_dispatch] is never consulted. *)
 
-val bootstrap_keeper_workspace :
+val bootstrap_keeper_control_root :
   timeout_sec:float -> t -> Masc_exec.Sandbox_target.run_outcome
-(** Create an OpenSSH Keeper's workspace with one fixed [mkdir] request rooted
-    at the endpoint base. Ordinary payloads cannot select this wider root.
-    Other transports are already provisioned by their runtime and fail here. *)
+(** Create [remote_root/<keeper>] with one fixed OpenSSH [mkdir] request rooted
+    at the endpoint base. It is the workspace for [Per_keeper] and remains the
+    Keeper-scoped control root for [Shared], including GitHub CLI state.
+    Ordinary payloads cannot select the wider endpoint root. Other transports
+    are already provisioned by their runtime and fail here. *)
 
 module For_testing : sig
   val clear_preflight_cache : unit -> unit

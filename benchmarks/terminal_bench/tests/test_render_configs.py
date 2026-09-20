@@ -84,6 +84,7 @@ def test_arm_b_skills_off():
     assert '[fusion]' in rt and "enabled = false" in rt
     assert 'default = "anthropic.claude-fable-5"' in rt
     assert "[exec.ssh.endpoints.local]" in rt
+    assert 'workspace_layout = "per_keeper"' in rt
     assert 'reasoning-effort = "high"' in rt
 
 
@@ -232,6 +233,7 @@ def test_claude_code_lane_renders_official_client_provider():
     assert '[claude_code."claude-sonnet-5"]' in rt
     assert "max-concurrent = 4" in rt
     assert "[exec.ssh.endpoints.local]" in rt
+    assert 'workspace_layout = "per_keeper"' in rt
     assert '[models."claude-sonnet-5".capabilities]' not in rt
     keeper = (out / "keepers" / "bench-1.toml").read_text()
     assert 'sandbox_profile = "remote_ssh"' in keeper

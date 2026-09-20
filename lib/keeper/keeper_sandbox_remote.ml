@@ -162,10 +162,14 @@ let gh_config_dir t = t.gh_config_dir
 
 (* Docker receives one Keeper's mounted workdir. SSH and a microVM guest
    receive the shared endpoint volume and resolve the Keeper below it. *)
-let resolved_workspace_root t =
+let workspace_root t =
   match t.transport with
   | Docker_exec _ -> t.remote_root
-  | Openssh _ | Container_exec _ -> remote_keeper_root t
+  | Openssh o ->
+    (match o.endpoint.workspace_layout with
+     | Exec_ssh_endpoint.Per_keeper -> remote_keeper_root t
+     | Exec_ssh_endpoint.Shared -> t.remote_root)
+  | Container_exec _ -> remote_keeper_root t
 ;;
 
 let of_openssh ~base_path ~keeper_name (o : openssh) =
@@ -459,11 +463,29 @@ let remote_cwd t cwd =
      Keeper_remote_path.normalize_remote). *)
   let normalized = Keeper_remote_path.normalize_remote cwd in
   let endpoint_root = Keeper_remote_path.normalize_remote t.remote_root in
+  let resolved_root = Keeper_remote_path.normalize_remote (workspace_root t) in
   if (match t.transport with Docker_exec _ -> true | Openssh _ | Container_exec _ -> false)
   then
-    if Filename.is_relative normalized
+    if Filename.is_relative cwd
     then Error "docker_observe_cwd_requires_guest_absolute_path"
     else Ok normalized
+  else if String.equal normalized resolved_root
+  then Ok resolved_root
+  else if
+    match t.transport with
+    | Openssh { endpoint = { workspace_layout = Exec_ssh_endpoint.Shared; _ }; _ } ->
+      let candidate =
+        if Filename.is_relative cwd
+        then Keeper_remote_path.normalize_remote (Filename.concat resolved_root cwd)
+        else normalized
+      in
+      Exec_policy_paths.is_within_dir ~dir:resolved_root candidate
+    | Openssh _ | Container_exec _ | Docker_exec _ -> false
+  then
+    Ok
+      (if Filename.is_relative cwd
+       then Keeper_remote_path.normalize_remote (Filename.concat resolved_root cwd)
+       else normalized)
   else if String.equal normalized endpoint_root
   then Ok endpoint_root
   else
@@ -713,10 +735,16 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            Eio.Semaphore.acquire t.shared.semaphore;
            Eio.Switch.on_release sw (fun () ->
              Eio.Semaphore.release t.shared.semaphore);
-           let path_stream emit =
+           let rewrites_keeper_paths =
              match t.transport with
-             | Docker_exec _ -> emit, (fun () -> ())
-             | Openssh _ | Container_exec _ ->
+             | Openssh { endpoint = { workspace_layout = Exec_ssh_endpoint.Shared; _ }; _ }
+             | Docker_exec _ -> false
+             | Openssh _ | Container_exec _ -> true
+           in
+           let path_stream emit =
+             if not rewrites_keeper_paths
+             then emit, (fun () -> ())
+             else
                let stream = Keeper_remote_path.stream ~base_path:t.base_path
                  ~remote_root:t.remote_root ~keeper:t.keeper_name ~emit in
                Keeper_remote_path.rewrite_stream_chunk stream,
@@ -736,9 +764,9 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              { callback = Option.map fst stderr_path_stream; tail = "" }
            in
            let rewrite text =
-             match t.transport with
-             | Docker_exec _ -> text
-             | Openssh _ | Container_exec _ ->
+             if not rewrites_keeper_paths
+             then text
+             else
                Keeper_remote_path.rewrite_output ~base_path:t.base_path
                  ~remote_root:t.remote_root ~keeper:t.keeper_name text
            in
@@ -848,10 +876,10 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
 
 let runner ?stdout_mode ?mode ?on_receipt ~timeout_sec t =
   runner_for_root ?stdout_mode ?mode ?on_receipt
-    ~request_root:(resolved_workspace_root t) ~timeout_sec t
+    ~request_root:(workspace_root t) ~timeout_sec t
 ;;
 
-let bootstrap_keeper_workspace ~timeout_sec t =
+let bootstrap_keeper_control_root ~timeout_sec t =
   match t.transport with
   | Openssh _ ->
     let run = runner_for_root ~request_root:t.remote_root ~timeout_sec t in
@@ -861,7 +889,7 @@ let bootstrap_keeper_workspace ~timeout_sec t =
   | Container_exec _ | Docker_exec _ ->
     let reason =
       Printf.sprintf
-        "%s_keeper_workspace_bootstrap_unsupported: endpoint %s is not remote SSH"
+        "%s_keeper_control_root_bootstrap_unsupported: endpoint %s is not remote SSH"
         (lane_prefix t.transport) t.name
     in
     Masc_exec.Sandbox_target.Transport_failed
@@ -972,8 +1000,8 @@ let run_preflight_command_at t ~request_root ~cwd ~error_code argv =
 ;;
 
 let run_preflight_command t ~error_code argv =
-  let workspace_root = resolved_workspace_root t in
-  run_preflight_command_at t ~request_root:workspace_root ~cwd:workspace_root
+  let resolved_root = workspace_root t in
+  run_preflight_command_at t ~request_root:resolved_root ~cwd:resolved_root
     ~error_code argv
 ;;
 
@@ -1006,7 +1034,7 @@ let github_transport t =
   let status, _stdout, _stderr =
     Masc_exec.Sandbox_target.status_tuple
       (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-         ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some (resolved_workspace_root t)))
+         ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some (workspace_root t)))
   in
   match status with
   | Unix.WEXITED 0 -> Api_reachable
@@ -1050,7 +1078,7 @@ let github_identity_intent t =
     Masc_exec.Sandbox_target.status_tuple
       (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
          ~argv:[ "test"; "-s"; github_hosts_path t ]
-         ~env:[||] ~cwd:(Some (resolved_workspace_root t)))
+         ~env:[||] ~cwd:(Some (workspace_root t)))
   in
   match status with
   | Unix.WEXITED 1 -> No_login_configured
@@ -1083,8 +1111,12 @@ let perform_preflight t =
       [ "test"; "-d"; t.remote_root ]
   in
   let* _ =
-    run_endpoint_preflight_command t ~error_code:(code t "keeper_root_missing")
-      [ "test"; "-d"; remote_keeper_root t ]
+    match t.transport with
+    | Openssh { endpoint = { workspace_layout = Exec_ssh_endpoint.Shared; _ }; _ } ->
+      Ok ""
+    | Openssh _ | Container_exec _ | Docker_exec _ ->
+      run_endpoint_preflight_command t ~error_code:(code t "keeper_root_missing")
+        [ "test"; "-d"; remote_keeper_root t ]
   in
   let* _ =
     run_preflight_command t ~error_code:"remote_git_unavailable"
@@ -1096,7 +1128,7 @@ let perform_preflight t =
   in
   let* disk =
     run_preflight_command t ~error_code:(code t "disk_probe_failed")
-      [ "df"; "-Pk"; resolved_workspace_root t ]
+      [ "df"; "-Pk"; workspace_root t ]
   in
   let minimum = Env_config_sandbox.Preflight.ssh_disk_free_min_kib () in
   let* () =

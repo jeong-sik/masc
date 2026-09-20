@@ -120,6 +120,7 @@ let write_runtime_toml ~base_path =
            ; identity_file = default_identity_file ~name:ssh_fixture_endpoint
            ; known_hosts_file = default_known_hosts_file ~name:ssh_fixture_endpoint
            ; remote_root = "/srv/masc/playground"
+           ; workspace_layout = Exec_ssh_endpoint.Per_keeper
            ; connect_timeout_sec = 1
            ; max_concurrent_sessions = 2
            ; env_allowlist = []

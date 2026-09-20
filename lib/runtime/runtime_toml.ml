@@ -1301,6 +1301,7 @@ let exec_ssh_endpoint_keys =
   ; "identity_file"
   ; "known_hosts_file"
   ; "remote_root"
+  ; "workspace_layout"
   ; "connect_timeout_sec"
   ; "max_concurrent_sessions"
   ; "env_allowlist"
@@ -1368,7 +1369,8 @@ let exec_ssh_port_field ~(path : string) (tbl : Otoml.t)
 
 (** Parse one [\[exec.ssh.endpoints.<name>\]] table. Every key must be one of
     {!exec_ssh_endpoint_keys}; any other key fails the load so a misspelled
-    knob is never silently dropped. [host], [user], and [remote_root] are
+    knob is never silently dropped. [host], [user], [remote_root], and
+    [workspace_layout] are
     required non-empty strings and reject surrounding whitespace (padding is
     a typo, not a value); [remote_root] must additionally be absolute, since
     the shim's path mapping is defined against it. [port] must be in
@@ -1411,6 +1413,20 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
     | Error _, _ | _, Error _ -> Ok ()
   in
   let remote_root_result = exec_ssh_remote_root_field ~path tbl in
+  let workspace_layout_result =
+    match exec_ssh_required_string ~path tbl ~key:"workspace_layout" with
+    | Error _ as error -> error
+    | Ok raw ->
+      (match Exec_ssh_endpoint.workspace_layout_of_string raw with
+       | Some layout -> Ok layout
+       | None ->
+         Error
+           (error
+              (path ^ ".workspace_layout")
+              (Printf.sprintf
+                 "workspace_layout must be exactly \"per_keeper\" or \"shared\"; got %S"
+                 raw)))
+  in
   let port_result = exec_ssh_port_field ~path tbl in
   let identity_file_result = exact_non_empty_string_opt_field ~path tbl "identity_file" in
   let known_hosts_file_result =
@@ -1446,6 +1462,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
     @ errs user_result
     @ errs destination_result
     @ errs remote_root_result
+    @ errs workspace_layout_result
     @ errs port_result
     @ errs identity_file_result
     @ errs known_hosts_file_result
@@ -1463,6 +1480,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , user_result
        , destination_result
        , remote_root_result
+       , workspace_layout_result
        , port_result
        , identity_file_result
        , known_hosts_file_result
@@ -1476,6 +1494,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , Ok user
        , Ok ()
        , Ok remote_root
+       , Ok workspace_layout
        , Ok port
        , Ok identity_file
        , Ok known_hosts_file
@@ -1511,6 +1530,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
                ~default:(Exec_ssh_endpoint.default_known_hosts_file ~name)
                known_hosts_file
          ; remote_root
+         ; workspace_layout
          ; connect_timeout_sec =
              Option.value
                ~default:Exec_ssh_endpoint.default_connect_timeout_sec

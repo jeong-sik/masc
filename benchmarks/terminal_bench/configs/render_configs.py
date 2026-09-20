@@ -170,6 +170,7 @@ cli_slots = ["{runtime_id}"]
 host = "127.0.0.1"
 user = "root"
 remote_root = "{remote_root}"
+workspace_layout = "per_keeper"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 
@@ -224,6 +225,7 @@ cli_slots = ["{runtime_id}"]
 host = "127.0.0.1"
 user = "root"
 remote_root = "{remote_root}"
+workspace_layout = "per_keeper"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 

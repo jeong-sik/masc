@@ -1252,36 +1252,37 @@ describe('board context inference', () => {
   it('normalizes queued keeper submissions', () => {
     expect(normalizeBoardContextInferenceSubmission({
       ok: true,
-      request_id: 'kmsg-1',
+      operation_id: 'kmsg-1',
       keeper_name: 'luna',
       post_id: 'post-1',
-      status: 'queued',
+      state: 'queued',
       target_source: 'explicit_target',
-      message: 'queued',
     })).toEqual({
       ok: true,
-      requestId: 'kmsg-1',
+      operationId: 'kmsg-1',
       keeperName: 'luna',
       postId: 'post-1',
-      status: 'queued',
+      state: 'queued',
       targetSource: 'explicit_target',
-      message: 'queued',
     })
   })
 
   it('rejects malformed context inference submissions', () => {
     expect(normalizeBoardContextInferenceSubmission({ ok: true, keeper_name: 'luna' })).toBeNull()
     expect(normalizeBoardContextInferenceSubmission({ ok: false })).toBeNull()
+    expect(normalizeBoardContextInferenceSubmission({
+      ok: true, operation_id: 'kmsg-1', keeper_name: 'luna', post_id: 'post-1', state: 'unknown',
+    })).toBeNull()
   })
 
   it('requests board context inference with an explicit target keeper', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
-        request_id: 'kmsg-ctx',
+        operation_id: 'kmsg-ctx',
         keeper_name: 'luna',
         post_id: 'post-1',
-        status: 'queued',
+        state: 'queued',
         target_source: 'explicit_target',
       }), {
         status: 202,
@@ -1293,10 +1294,10 @@ describe('board context inference', () => {
     const result = await requestBoardContextInference(' post-1 ', ' luna ')
 
     expect(result).toMatchObject({
-      requestId: 'kmsg-ctx',
+      operationId: 'kmsg-ctx',
       keeperName: 'luna',
       postId: 'post-1',
-      status: 'queued',
+      state: 'queued',
       targetSource: 'explicit_target',
     })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -1313,7 +1314,7 @@ describe('board context inference', () => {
         ok: true,
         keeper_name: 'luna',
         post_id: 'post-1',
-        status: 'queued',
+        state: 'queued',
       }), {
         status: 202,
         headers: { 'Content-Type': 'application/json' },

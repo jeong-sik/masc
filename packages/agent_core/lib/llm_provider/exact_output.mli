@@ -526,6 +526,8 @@ val plan_provenance_catalog_generation : plan_provenance -> catalog_generation
 val plan_provenance_catalog_evidence : plan_provenance -> catalog_evidence
 val plan_provenance_target_identity : plan_provenance -> target_identity
 val plan_fingerprint : ready_plan -> string
+val connect_timeout_s : ready_plan -> float option
+val body_timeout_s : ready_plan -> float option
 val schema_fingerprint_to_string : schema_fingerprint -> string
 
 type start_attempt_error = Call_id_generation_failed of string

@@ -538,3 +538,5 @@ let admit_candidate_request
 
 let plan_provenance (ready : ready_plan) = ready.provenance
 let plan_fingerprint (ready : ready_plan) = ready.plan_fingerprint
+let connect_timeout_s (ready : ready_plan) = Plan.connect_timeout_s ready.plan
+let body_timeout_s (ready : ready_plan) = Plan.body_timeout_s ready.plan

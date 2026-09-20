@@ -97,9 +97,35 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
-(* Filter the keeper's current facts by an explicit query substring while
-   preserving snapshot order. Search does not assign value scores or introduce
-   a recency authority. *)
+(* Which of [items], given in store order, answer [query]: first the ones
+   whose claim holds the whole query as one run of text, then the ones whose
+   claim holds every whitespace-separated word of it anywhere
+   ({!String_util.contains_all_tokens_ci}, the rule the history search uses).
+   Keepers ask in several words, and a claim rarely holds such a query as one
+   run of text, so the first rule alone left most searches unanswered.
+
+   The two kinds come back apart so that what the first rule alone returned is
+   still the head of the result. Neither kind is scored; each keeps store
+   order. An empty query is answered by everything. *)
+let answering ~claim_of ~query items =
+  if String.equal query ""
+  then items, []
+  else (
+    let whole_query, rest =
+      List.partition
+        (fun item -> String_util.contains_substring_ci (claim_of item) query)
+        items
+    in
+    ( whole_query
+    , List.filter
+        (fun item -> String_util.contains_all_tokens_ci (claim_of item) query)
+        rest ))
+;;
+
+(* The keeper's current facts that answer the query ({!answering}): ordinary
+   then source-bound facts holding the whole query, then ordinary then
+   source-bound facts holding its words. Search does not assign value scores
+   or introduce a recency authority. *)
 let search_durable_facts
       ~(config : Workspace.config)
       ~(keepers_dir : string)
@@ -121,46 +147,42 @@ let search_durable_facts
   | Ok source_projection ->
   let source_facts = source_projection.facts in
   let total_candidates = List.length facts + List.length source_facts in
-  let matched =
-    if String.equal query ""
-    then facts
-    else
-      List.filter
-        (fun (fact : Keeper_memory_os_types.fact) ->
-          String_util.contains_substring_ci fact.claim query)
-        facts
+  let ordinary_whole, ordinary_words =
+    answering
+      ~claim_of:(fun (fact : Keeper_memory_os_types.fact) -> fact.claim)
+      ~query
+      facts
   in
-  let source_matched =
-    if String.equal query ""
-    then source_facts
-    else
-      List.filter
-        (fun (fact : Keeper_memory_source_current.fact) ->
-           String_util.contains_substring_ci fact.claim query)
-        source_facts
+  let source_whole, source_words =
+    answering
+      ~claim_of:(fun (fact : Keeper_memory_source_current.fact) -> fact.claim)
+      ~query
+      source_facts
   in
-  let ordinary_matches =
-    matched
-    |> List.map (fun (fact : Keeper_memory_os_types.fact) ->
-      { claim = fact.claim
-      ; identity = Ordinary_memory_id (Keeper_memory_os_types.memory_id fact)
-      ; category = Keeper_memory_os_types.category_to_string fact.category
-      ; basis = fact.basis
-      ; store = Ordinary_current
-      })
+  let ordinary_match (fact : Keeper_memory_os_types.fact) : fact_match =
+    { claim = fact.claim
+    ; identity = Ordinary_memory_id (Keeper_memory_os_types.memory_id fact)
+    ; category = Keeper_memory_os_types.category_to_string fact.category
+    ; basis = fact.basis
+    ; store = Ordinary_current
+    }
   in
-  let source_matches =
-    List.map
-      (fun (fact : Keeper_memory_source_current.fact) ->
-      { identity = Source_sha256 fact.source.sha256
-      ; claim = fact.claim
-      ; category = "fact"
-      ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
-      ; store = Source_bound_current
-      })
-      source_matched
+  let source_match (fact : Keeper_memory_source_current.fact) : fact_match =
+    { identity = Source_sha256 fact.source.sha256
+    ; claim = fact.claim
+    ; category = "fact"
+    ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
+    ; store = Source_bound_current
+    }
   in
-  Ok (take limit (ordinary_matches @ source_matches), total_candidates)
+  Ok
+    ( take
+        limit
+        (List.map ordinary_match ordinary_whole
+         @ List.map source_match source_whole
+         @ List.map ordinary_match ordinary_words
+         @ List.map source_match source_words)
+    , total_candidates )
 ;;
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
@@ -198,8 +220,8 @@ let current_memory_ids facts =
     facts
 ;;
 
-(* Rows a librarian pass wrote for facts that left the snapshot, filtered the
-   way current facts are: by the query substring, in the order written. The
+(* Rows a librarian pass wrote for facts that left the snapshot, answering the
+   query the way current facts do ({!answering}), in the order written. The
    rows are written just before a snapshot replace, so a replace that failed
    leaves rows for a pass that never committed (RFC-0456 §4.2). Two of their
    shapes are exact to recognise: a row for a fact that is still current is
@@ -244,17 +266,14 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~query ~limit =
            Hashtbl.find_opt last_write (row.memory_id, row.into) = Some index)
         absorbed
     in
-    let matched =
-      if String.equal query ""
-      then statements
-      else
-        List.filter
-          (fun (row : Keeper_memory_absorbed.record) ->
-             String_util.contains_substring_ci
-               row.fact.Keeper_memory_os_types.claim
-               query)
-          statements
+    let whole_query, words =
+      answering
+        ~claim_of:(fun (row : Keeper_memory_absorbed.record) ->
+          row.fact.Keeper_memory_os_types.claim)
+        ~query
+        statements
     in
+    let matched = whole_query @ words in
     Ok
       { matches =
           List.map

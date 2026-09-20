@@ -1413,6 +1413,77 @@ let test_absorbed_facts_are_searchable () =
      = `Assoc [ "count", `Int 1; "first", `Int 5; "last", `Int 5 ])
 ;;
 
+(* A keeper asks in several words, and a claim rarely holds them as one run of
+   text. A claim answers when it holds the whole query or every word of it, in
+   any order. The whole-query answers come first, so a search the substring
+   rule answered is still answered the same way at its head. The absorbed
+   store follows the same rule. *)
+let test_a_query_of_several_words_is_answered () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "several-words" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let apart = fact "the alpha service deploys every tuesday" in
+  let together = fact "alpha tuesday checklist lives in the wiki" in
+  let other = fact "beta ships on tuesday" in
+  let retired = fact "tuesday was chosen for alpha after the outage" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ apart; together; other; retired ];
+  let merged = fact "alpha deploys on a fixed weekday" in
+  (match
+     Current.apply_disposition
+       ~keepers_dir
+       ~keeper_id:meta.name
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+       ~absorbed:[ { Masc.Keeper_memory_os_types.absorbed = id retired; into = id merged } ]
+       ~new_claims:[ merged ]
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let search ?(limit = 10) ~source query =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc [ "query", `String query; "source", `String source; "limit", `Int limit ])
+    |> Yojson.Safe.from_string
+  in
+  let texts response =
+    match json_field "matches" response with
+    | `List items -> List.map (string_field "text") items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list string))
+    "the claim holding the whole query, then the one holding its words apart"
+    [ "alpha tuesday checklist lives in the wiki"; "the alpha service deploys every tuesday" ]
+    (texts (search ~source:"memory" "alpha tuesday"));
+  Alcotest.(check (list string))
+    "what the substring rule alone returned is the head of the result"
+    [ "alpha tuesday checklist lives in the wiki" ]
+    (texts (search ~limit:1 ~source:"memory" "alpha tuesday"));
+  Alcotest.(check (list string))
+    "word order does not matter, and snapshot order is kept"
+    [ "the alpha service deploys every tuesday"; "alpha tuesday checklist lives in the wiki" ]
+    (texts (search ~source:"memory" "tuesday alpha"));
+  Alcotest.(check (list string))
+    "the absorbed store answers by the same rule"
+    [ "tuesday was chosen for alpha after the outage" ]
+    (texts (search ~source:"absorbed" "alpha tuesday"));
+  let unanswered = search ~source:"memory" "alpha gamma" in
+  Alcotest.(check (list string))
+    "a word no claim holds leaves the query unanswered"
+    []
+    (texts unanswered);
+  Alcotest.(check bool) "and the answer says so" true
+    (json_field "no_match" unanswered = `Bool true)
+;;
+
 (* The absorbed store is one of three that source=all reads. When it cannot be
    read at all, source=absorbed fails as a store that did not answer, and
    source=all still answers from the current facts and names the store it went
@@ -1876,6 +1947,10 @@ let () =
             "absorbed facts are searchable"
             `Quick
             test_absorbed_facts_are_searchable
+        ; Alcotest.test_case
+            "a query of several words is answered"
+            `Quick
+            test_a_query_of_several_words_is_answered
         ; Alcotest.test_case
             "an unreadable absorbed store leaves all its current facts"
             `Quick

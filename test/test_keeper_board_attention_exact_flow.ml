@@ -1,6 +1,7 @@
 open Masc
 
 module Candidate = Keeper_board_attention_candidate
+module Exact_output = Agent_core.Exact_output
 module Exact_flow = Keeper_board_attention_exact_flow
 module Fixture = Exact_output_fixture
 module Judgment = Keeper_board_attention_judgment

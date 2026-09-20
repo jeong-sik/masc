@@ -261,6 +261,12 @@ let test_failed_commit_and_restart_retry_the_same_range () =
   check (list string) "restart reads identical range" !first !after_restart
 ;;
 
+let check_progress_end config expected =
+  match read_progress config with
+  | Some progress -> check int "durable progress end" expected progress.position.end_atom
+  | None -> fail "durable progress is missing"
+;;
+
 let check_no_task label = function
   | Masc.Keeper_librarian.No_task -> ()
   | Masc.Keeper_librarian.Task_goals { task_id; _ } ->
@@ -321,12 +327,6 @@ let prepare_three_unread_turns config ~trace_id =
   append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 first_three;
   append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 first_four;
   save_checkpoint config ~trace_id first_four 4
-;;
-
-let check_progress_end config expected =
-  match read_progress config with
-  | Some progress -> check int "durable progress end" expected progress.position.end_atom
-  | None -> fail "durable progress is missing"
 ;;
 
 (* These cases call the production wake body with only its Memory commit

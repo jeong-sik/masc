@@ -7457,6 +7457,7 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "raw_trace_run_ref": None,
                         "selected_model": "claude-opus-5",
                         "context_window": 200000,
+                        "usage_scope": "per_request",
                         "input_tokens": 50000,
                         "output_tokens": 1200,
                         "cache_read_input_tokens": 32000,

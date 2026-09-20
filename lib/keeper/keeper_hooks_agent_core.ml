@@ -627,21 +627,6 @@ let make_hooks
         let file_change_evidence =
           Keeper_tool_call_log.peek_file_change_evidence ~invocation ()
         in
-        let disposition =
-          match
-            Keeper_tool_call_log.consume_disposition ~invocation (), outcome
-          with
-          | Some (Tool_result.Completed () | Tool_result.Deferred ()),
-            Tool_result.Error ->
-            (* The dispatch completed, but its model-facing projection failed
-               afterwards (for example while storing an output artifact). The
-               durable call row describes the final result observed by Agent
-               Core, so its legacy [success] bit and typed disposition must
-               reach the same conclusion. *)
-            Some (Tool_result.Failed Tool_result.Runtime_failure)
-          | disposition, (Tool_result.Ok | Tool_result.Error | Tool_result.Unknown) ->
-            disposition
-        in
         (* Producer evidence and prior page observations cannot be reconstructed
            from current state. Supplying [on_committed] forces this row through the
            synchronous append boundary; only that acknowledgement removes the
@@ -679,7 +664,9 @@ let make_hooks
                 typed value crossed from the masc dispatch boundary; without
                 it the row cannot tell a policy rejection from a runtime
                 failure, and cannot represent [Deferred] at all. *)
-             ?disposition
+             ~wire_outcome:outcome
+             ?disposition:
+               (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
              ~artifact_refs:(retained_artifacts @ Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms

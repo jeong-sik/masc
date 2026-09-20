@@ -218,6 +218,7 @@ val log_call :
   ?batch_index:int ->
   ?batch_size:int ->
   ?execution_mode:Agent_core.Tool_contract.execution_mode ->
+  ?wire_outcome:Tool_result.tool_call_outcome ->
   ?typed_result:Tool_result.result ->
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
@@ -259,7 +260,10 @@ val log_call :
     repeated provider ids remain meaningful when scoped by [turn] and
     [planned_index], so they are persisted unchanged. [batch_index],
     [batch_size], and [execution_mode] preserve Agent Core's actual schedule
-    rather than inferring concurrency from timing.
+    rather than inferring concurrency from timing. [wire_outcome] is the
+    separate AGENT_CORE response projection; it does not replace the MASC
+    execution [disposition]. A completed or deferred execution may therefore
+    have [wire_outcome=error] when result delivery fails afterwards.
     [typed_result] serializes the producer-owned disposition when it is
     available. Any canonical normalized artifact references in its typed data
     are also persisted as actual JSON under [artifact_refs], keeping the

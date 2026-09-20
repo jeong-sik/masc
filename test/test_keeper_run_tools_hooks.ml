@@ -799,7 +799,7 @@ let test_plain_tool_commits_before_hook_returns ~success () =
         (List.length rows))
 ;;
 
-let test_projection_failure_settles_completed_disposition_as_failed () =
+let test_projection_failure_keeps_execution_and_wire_outcomes_separate () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
   Fun.protect
@@ -865,12 +865,14 @@ let test_projection_failure_settles_completed_disposition_as_failed () =
        let open Yojson.Safe.Util in
        check bool "legacy success records the final projection failure" false
          (row |> member "success" |> to_bool);
-       check string "typed disposition records the final projection failure"
-         "failed"
+       check string "typed disposition preserves the completed execution"
+         "completed"
          (row |> member "disposition" |> to_string);
-       check string "projection failure has a typed failure class"
-         "runtime_failure"
-         (row |> member "failure_class" |> to_string))
+       check string "wire outcome records the projection failure"
+         "error"
+         (row |> member "wire_outcome" |> to_string);
+       check bool "completed execution has no fabricated failure class" true
+         (row |> member "failure_class" = `Null))
 ;;
 
 let rejected_rows_for ?on_tool_result_ready ~stage () =
@@ -1679,9 +1681,9 @@ let () =
         ; test_case "autonomous rejected call commits before completion" `Quick
             (test_plain_tool_commits_before_hook_returns ~success:false)
         ; test_case
-            "projection failure settles completed disposition as failed"
+            "projection failure keeps execution and wire outcomes separate"
             `Quick
-            test_projection_failure_settles_completed_disposition_as_failed
+            test_projection_failure_keeps_execution_and_wire_outcomes_separate
         ; test_case
             "a call refused before execution leaves a row"
             `Quick

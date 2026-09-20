@@ -40,12 +40,12 @@ flowchart TD
     end
 
     subgraph Facts ["Current fact store"]
-        EV ==>|"derives actual usage"| DB["<keeper>.memory-current.json"]
+        EV ==>|"projects event history"| DB["<keeper>.memory-current.json"]
     end
 ```
 
 ### 1. Typed sidecar event stream
-Each keeper appends memory-use events to one JSONL sidecar (`<keeper>.memory-events.jsonl`). The closed set of kinds:
+Each keeper appends memory history events to one JSONL sidecar (`<keeper>.memory-events.jsonl`). The closed set of kinds:
 * `retrieved`: the fact was among the results `keeper_memory_search` returned for a query.
 * `retracted`: `keeper_memory_retract` successfully removed the fact identified by its `memory_id`.
 * `revised`: the librarian wrote a new claim that continues this fact and dropped this one; `superseded_by` carries the new fact's id.

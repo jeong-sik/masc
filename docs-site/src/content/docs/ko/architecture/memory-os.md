@@ -40,12 +40,12 @@ flowchart TD
     end
 
     subgraph Facts ["현재 사실 저장소"]
-        EV ==>|"실제 활용도 도출"| DB["<keeper>.memory-current.json"]
+        EV ==>|"사건 이력 투영"| DB["<keeper>.memory-current.json"]
     end
 ```
 
 ### 1. 타입화된 사이드카 이벤트 스트림
-각 키퍼는 기억 사용 사건을 단일 JSONL 사이드카(`<keeper>.memory-events.jsonl`)에 순차 기록합니다. 종류는 닫힌 세 가지입니다:
+각 키퍼는 기억 이력 사건을 단일 JSONL 사이드카(`<keeper>.memory-events.jsonl`)에 순차 기록합니다. 종류는 닫힌 세 가지입니다:
 * `retrieved`: 사실이 `keeper_memory_search`가 어떤 질의에 대해 반환한 결과에 들어 있을 때 1건.
 * `retracted`: `keeper_memory_retract`가 `memory_id`로 지목한 사실을 실제로 철회했을 때 1건.
 * `revised`: librarian이 이 사실을 잇는 새 주장을 쓰고 이것을 버릴 때. `superseded_by`에 새 사실의 id가 남습니다.

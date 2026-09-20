@@ -7,17 +7,28 @@ name: Test
 #
 # The PR gate (pr-check.yml) stopped there too until 2026-09-06. Since #33507
 # its `@check` job ends by running scripts/ci/run-edited-tests.sh over the
-# suites the pull request selects: the test files it edits, plus the suites
-# named after the bin/, lib/ and packages/*/lib modules it touches, inside a
-# 1080-second budget. A suite the budget does not reach fails the step by
-# name. So a red `@check` there can be a failing assertion rather than a
-# compile error, and a green one is a real run of those suites — read the
-# step log, not the job conclusion.
+# suites the pull request selects, inside a 1080-second budget. The step log
+# names them in four groups, in the script's own words:
+#
+#   - test sources this pull request edits
+#   - suites named after the sources this pull request edits
+#   - guards that name the sources this pull request edits
+#   - suites whose code calls a module this pull request edits
+#
+# The fourth is call-graph reachability rather than naming, and it is the
+# widest by far: on #37371 the four groups were 1, 1, 4 and 18 suites, and
+# the step reported "ran 22, skipped 0". Sizing this gate from the first two
+# groups alone understates it several times over.
+#
+# A suite the budget does not reach fails the step by name. So a red `@check`
+# there can be a failing assertion rather than a compile error, and a green
+# one is a real run of those suites — read the step log, not the job
+# conclusion.
 #
 # What that still leaves: a behavioural regression in a suite the pull
-# request neither edits nor names. Nothing in the gate runs those. It
-# happened with the test_keeper_owner actor-38 incident; nothing ran the
-# suite before the breakage landed.
+# request neither edits, nor names, nor calls. Nothing in the gate runs
+# those. It happened with the test_keeper_owner actor-38 incident; nothing
+# ran the suite before the breakage landed.
 #
 # This lane covers that rest on a schedule. It runs the full behavioral suite
 # nightly (02:43 KST, off-peak) and on manual dispatch, so a regression the

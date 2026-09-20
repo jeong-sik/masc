@@ -461,7 +461,10 @@ val run :
     [agent_core_checkpoint] is present, {!resume_from_checkpoint}
     is used; otherwise {!build} produces a fresh agent.
     Returns the wrapped {!run_result}; errors propagate
-    as [Agent_core.Error.t]. *)
+    as [Agent_core.Error.t].
+    [on_event] observes actual SSE events when the resolved model supports
+    native streaming. Otherwise the run uses sync JSON without invoking
+    [on_event]. *)
 
 val run_blocks :
   sw:Eio.Switch.t ->
@@ -475,7 +478,8 @@ val run_blocks :
   ?cooperative_yield_probe:cooperative_yield_probe ->
   Agent_core.Types.content_block list ->
   (run_result, Agent_core.Error.t) result
-(** Runs an Agent Core agent against structured user-authored content blocks. *)
+(** Runs an Agent Core agent against structured user-authored content blocks.
+    [on_event] follows the same streaming-capability rule as {!run}. *)
 
 val continue_from_checkpoint :
   sw:Eio.Switch.t ->
@@ -492,7 +496,8 @@ val continue_from_checkpoint :
 (** Resumes the checkpoint's next provider turn without appending another User
     message. The checkpoint must already contain the caller-authored request and
     every completed tool result. This is for same-turn continuation after a
-    typed incomplete provider terminal, not for starting a new Keeper turn. *)
+    typed incomplete provider terminal, not for starting a new Keeper turn.
+    [on_event] follows the same streaming-capability rule as {!run}. *)
 
 type agent_core_tool_projector =
   name:string ->

@@ -14,6 +14,11 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_librarian_continuity_report)
+ (modules test_librarian_continuity_report)
+ (libraries alcotest masc yojson))
+
+(test
  (name test_keeper_peer_artifact)
  (modules test_keeper_peer_artifact)
  (libraries masc_test_deps))

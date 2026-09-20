@@ -4689,7 +4689,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   let output_meaning, evidence_contract =
     if exact_lane Masc.Exact_lane_run_registry.Board_attention then
       ( "Output meaning: the accepted candidate judgment JSON."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output and outcome. HTTP/CLI attribution uses selected slot; Vendor System One provenance stays in Output." )
     else if exact_lane Masc.Exact_lane_run_registry.Hitl_auto_judge then
       ( "Output meaning: the validated and durably settled approval-context judgment summary."
       , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
@@ -5413,9 +5413,22 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
   in
   let slot =
-    match detail.lrd_selected_slot with
-    | None -> ""
-    | Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+    match detail.lrd_answer_source, detail.lrd_selected_slot with
+    | Some _, _ | None, None -> ""
+    | None, Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+  in
+  let answer_source =
+    match detail.lrd_answer_source with
+    | None -> []
+    | Some (Tui_decode.Lane_run_answer_exact_attempt slot) ->
+      [ Ansi.reset, "  ANSWER  EXACT · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_cli_slot slot) ->
+      [ Ansi.reset, "  ANSWER  CLI · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_vendor_system_one { model; endpoint = _ }) ->
+      [ ( Ansi.reset
+        , "  ANSWER  VENDOR SYSTEM ONE · "
+          ^ Terminal_text.single_line model
+          ^ " · NO EXACT-FLOW RECEIPT" ) ]
   in
   let failure =
     match detail.lrd_failure with
@@ -5453,6 +5466,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
         Ansi.reset )
   ]
   @ failure
+  @ answer_source
   @ gate_judgment
   @ [ tool_style, "  " ^ tools; skill_style, "  " ^ skills ]
 

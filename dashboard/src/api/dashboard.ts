@@ -79,6 +79,7 @@ export {
   parseExactLaneRunsResponse,
   type DashboardExactLaneRunsResponse,
   type ExactLane,
+  type ExactLaneAnswerSource,
   type ExactLaneRunCursor,
   type ExactLaneRunRecord,
   type ExactLaneRunSummary,

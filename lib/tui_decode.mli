@@ -2228,6 +2228,17 @@ type lane_run_page =
   ; lrpg_total : int option
   }
 
+type lane_run_answer_source =
+  | Lane_run_answer_exact_attempt of string
+  | Lane_run_answer_cli_slot of string
+  | Lane_run_answer_vendor_system_one of
+      { model : string
+      ; endpoint : string
+      }
+(** The typed source of a successful Board-attention answer. This is separate
+    from [lrd_selected_slot]: Vendor System One answers before a slot runs and
+    therefore has no exact-flow receipt or selected slot. *)
+
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
@@ -2238,6 +2249,7 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_answer_source : lane_run_answer_source option
   ; lrd_failure : lane_run_failure option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability

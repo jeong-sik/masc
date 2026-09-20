@@ -369,6 +369,7 @@ let finalize
       ~agent_core_turn_count:result.turns
       ~tool_observations:librarian_tool_observations
       ~librarian_messages
+      ~checkpoint_owner
       ~post_turn_t0
       ~inference_telemetry:result.response.telemetry
       ();

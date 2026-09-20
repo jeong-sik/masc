@@ -3129,7 +3129,7 @@ let context_split_width cols =
   min 62 (max 44 (available * 45 / 100))
 
 
-let context_next_request_lines ~cols ~scale
+let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
     (forecast : (Masc_tui_context_inspector.forecast, string) result) =
   let width = max 1 (framed_inner_width cols - 2) in
   let prose text =
@@ -3146,6 +3146,9 @@ let context_next_request_lines ~cols ~scale
   ]
   @ Masc_tui_next_request_band.lines ~prose ~fact
       ~safe:Keeper_chat.terminal_safe_text ~scale forecast
+  @ (if show_scale_note
+     then prose (Masc_tui_token_scale.note scale)
+     else [])
   @ [ "" ]
 
 
@@ -4366,6 +4369,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                     ]
                     @ context_next_request_lines ~cols
                         ~scale:Masc_tui_token_scale.fleet
+                        ~show_scale_note:true
                         reading.Masc_tui_context_inspector.forecast
                   , None ))
        | Masc_tui_context_inspector.Exact_input ->

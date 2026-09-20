@@ -163,7 +163,11 @@ let check_forecast_survives_turn_failure ~label ~failure ~turn =
   Alcotest.(check bool)
     (label ^ " keeps the forecast candidate")
     true
-    (says "forecast.runtime" rows)
+    (says "forecast.runtime" rows);
+  Alcotest.(check bool)
+    (label ^ " names the fleet scale used without a turn record")
+    true
+    (says "this screen has no turn record to take a ratio from" rows)
 
 let test_empty_turn_record_keeps_forecast () =
   check_forecast_survives_turn_failure

@@ -9,18 +9,28 @@ module Mermaid = Masc_tui_mermaid
 let rows = Alcotest.(list string)
 
 let node_id =
+  let scope_text = function
+    | Mermaid.Top_level -> ""
+    | Mermaid.Inside id -> " of " ^ id
+  in
+  let scope_equal a b =
+    match (a, b) with
+    | Mermaid.Top_level, Mermaid.Top_level -> true
+    | Mermaid.Inside a, Mermaid.Inside b -> String.equal a b
+    | (Mermaid.Top_level | Mermaid.Inside _), _ -> false
+  in
   Alcotest.testable
     (fun formatter id ->
       Format.pp_print_string formatter
         (match id with
          | Mermaid.Named name -> name
-         | Mermaid.Initial -> "[*] start"
-         | Mermaid.Final -> "[*] end"))
+         | Mermaid.Initial scope -> "[*] start" ^ scope_text scope
+         | Mermaid.Final scope -> "[*] end" ^ scope_text scope))
     (fun a b ->
       match (a, b) with
       | Mermaid.Named a, Mermaid.Named b -> String.equal a b
-      | Mermaid.Initial, Mermaid.Initial | Mermaid.Final, Mermaid.Final -> true
-      | (Mermaid.Named _ | Mermaid.Initial | Mermaid.Final), _ -> false)
+      | Mermaid.Initial a, Mermaid.Initial b | Mermaid.Final a, Mermaid.Final b -> scope_equal a b
+      | (Mermaid.Named _ | Mermaid.Initial _ | Mermaid.Final _), _ -> false)
 
 let render ?(cols = 80) source =
   match Mermaid.render ~cols source with
@@ -573,7 +583,13 @@ let test_state_diagram_keeper_fsm_parses () =
       Alcotest.(check int) "5 distinct states" 5 (List.length g.nodes);
       Alcotest.(check int) "5 transitions" 5 (List.length g.edges);
       Alcotest.(check (list node_id)) "the start and the end are nodes of their own"
-        Mermaid.[ Initial; Named "Offline"; Named "Running"; Named "Stopped"; Final ]
+        Mermaid.
+          [ Initial Top_level
+          ; Named "Offline"
+          ; Named "Running"
+          ; Named "Stopped"
+          ; Final Top_level
+          ]
         (List.map (fun (n : Mermaid.node) -> n.id) g.nodes)
   | Ok (Mermaid.Sequence _) -> Alcotest.fail "parsed as sequence instead of graph"
   | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
@@ -596,10 +612,258 @@ let test_state_diagram_skips_classdef_and_notes () =
   match Mermaid.parse src with
   | Ok (Mermaid.Graph g) ->
       Alcotest.(check (list node_id)) "a note's text is not a state"
-        Mermaid.[ Initial; Named "Active"; Final ]
+        Mermaid.[ Initial Top_level; Named "Active"; Final Top_level ]
         (List.map (fun (n : Mermaid.node) -> n.id) g.nodes);
       Alcotest.(check int) "2 edges" 2 (List.length g.edges)
   | _ -> Alcotest.fail "expected Ok Graph"
+
+let test_composite_state_draws_titled_box () =
+  let src =
+    "stateDiagram-v2\n\
+     state Active {\n\
+         [*] --> Running\n\
+         Running --> Paused\n\
+     }\n\
+     [*] --> Active\n\
+     Active --> [*]"
+  in
+  let drawn = render src in
+  Alcotest.(check bool) "renders active bounding box" true (List.exists (contains "Active") drawn);
+  Alcotest.(check bool) "renders inner Running node" true (List.exists (contains "Running") drawn);
+  Alcotest.(check bool) "renders inner Paused node" true (List.exists (contains "Paused") drawn)
+
+let test_state_diagram_choice_pseudo_state () =
+  let src =
+    "stateDiagram-v2\n\
+     state is_valid <<choice>>\n\
+     [*] --> is_valid\n\
+     is_valid --> Ok : yes\n\
+     is_valid --> Error : no"
+  in
+  let drawn = render src in
+  Alcotest.(check bool) "draws choice with diamond brackets" true
+    (List.exists (contains "\xe2\x9f\xa8is_valid\xe2\x9f\xa9") drawn)
+
+(* Mermaid's own fork example (stateDiagram.md, "Forks"). A fork and a join
+   are a thick bar across the flow with no name on it, and the transitions
+   meet the bar as they meet a border. *)
+let fork_join_rows =
+  [ {|        ╭─────╮|}
+  ; {|        │ [*] │|}
+  ; {|        ╰──┬──╯|}
+  ; {|           │|}
+  ; {|           v|}
+  ; {|        ━━━┼━━━|}
+  ; {|           │|}
+  ; {|     ┌─────┤|}
+  ; {|     │     └──────┐|}
+  ; {|     v            v|}
+  ; {|╭────┴───╮   ╭────┴───╮|}
+  ; {|│ State2 │   │ State3 │|}
+  ; {|╰────┬───╯   ╰────┬───╯|}
+  ; {|     │            │|}
+  ; {|     └─────┐      │|}
+  ; {|           ├──────┘|}
+  ; {|           v|}
+  ; {|        ━━━┼━━━|}
+  ; {|           │|}
+  ; {|           v|}
+  ; {|      ╭────┴───╮|}
+  ; {|      │ State4 │|}
+  ; {|      ╰────┬───╯|}
+  ; {|           │|}
+  ; {|           v|}
+  ; {|        ╭──┴──╮|}
+  ; {|        │ [*] │|}
+  ; {|        ╰─────╯|}
+  ]
+
+let test_fork_and_join_are_bars_across_the_flow () =
+  Alcotest.check rows "the fork example from the Mermaid docs" fork_join_rows
+    (render
+       {|   stateDiagram-v2
+    state fork_state <<fork>>
+      [*] --> fork_state
+      fork_state --> State2
+      fork_state --> State3
+
+      state join_state <<join>>
+      State2 --> join_state
+      State3 --> join_state
+      join_state --> State4
+      State4 --> [*]|})
+
+(* Across a left-to-right flow the bar stands upright. *)
+let fork_left_right_rows =
+  [ {|              ╭───╮|}
+  ; {|         ┃ ┌─>┤ A │|}
+  ; {|         ┃ │  ╰───╯|}
+  ; {|╭─────╮  ┃ │|}
+  ; {|│ [*] ├─>┼─┴┐|}
+  ; {|╰─────╯  ┃  │|}
+  ; {|         ┃  │ ╭───╮|}
+  ; {|         ┃  └>┤ B │|}
+  ; {|              ╰───╯|}
+  ]
+
+let test_a_fork_across_a_left_right_flow_stands_upright () =
+  Alcotest.check rows "a vertical bar" fork_left_right_rows
+    (render
+       "stateDiagram-v2\n\
+        direction LR\n\
+        state fork_state <<fork>>\n\
+        [*] --> fork_state\n\
+        fork_state --> A\n\
+        fork_state --> B")
+
+let count_rows_with needle drawn = List.length (List.filter (contains needle) drawn)
+
+(* Mermaid's first composite example (stateDiagram.md, "Composite states"):
+   both composite states are named before their block opens, one of them
+   with a description. The block takes the id over, so the box is that
+   state and no box of the same name stands beside it. *)
+let official_composite_example =
+  {|stateDiagram-v2
+    [*] --> First
+    state First {
+        [*] --> second
+        second --> [*]
+    }
+
+    [*] --> NamedComposite
+    NamedComposite: Another Composite
+    state NamedComposite {
+        [*] --> namedSimple
+        namedSimple --> [*]
+        namedSimple: Another simple
+    }|}
+
+let test_a_composite_state_may_open_on_a_state_already_named () =
+  let graph = parsed official_composite_example in
+  let first = Mermaid.Inside "First" and named = Mermaid.Inside "NamedComposite" in
+  Alcotest.(check (list (triple string string (list node_id)))) "the two boxes"
+    Mermaid.
+      [ ("First", "First", [ Initial first; Named "second"; Final first ])
+      ; ( "NamedComposite"
+        , "Another Composite"
+        , [ Initial named; Named "namedSimple"; Final named ] )
+      ]
+    (List.map
+       (fun (g : Mermaid.group) -> (g.group_id, g.group_label, g.group_nodes))
+       graph.groups);
+  Alcotest.(check (list node_id)) "no node carries a composite state's id"
+    Mermaid.
+      [ Initial Top_level
+      ; Initial first
+      ; Named "second"
+      ; Final first
+      ; Initial named
+      ; Named "namedSimple"
+      ; Final named
+      ]
+    (List.map (fun (n : Mermaid.node) -> n.id) graph.nodes);
+  let drawn = render official_composite_example in
+  Alcotest.(check int) "First is written once, on its box" 1 (count_rows_with "First" drawn);
+  Alcotest.(check int) "the description titles the other box" 1
+    (count_rows_with "Another Composite" drawn)
+
+(* Each composite state with the one it is drawn in and its own members. *)
+let rec placements parent (g : Mermaid.group) =
+  (g.group_id, parent, g.group_nodes)
+  :: List.concat_map (placements (Some g.group_id)) g.group_children
+
+(* Mermaid gives each id one state and sets its parent every time a
+   composite state names it, never back to the top (dataFetcher.ts). So a
+   composite state named inside another is drawn in it, whichever block
+   comes first in the source. *)
+let test_a_state_named_in_a_composite_state_is_drawn_in_it () =
+  let expected =
+    Mermaid.
+      [ ("Outer", None, [ Initial (Inside "Outer") ])
+      ; ("Inner", Some "Outer", [ Initial (Inside "Inner"); Named "Deep" ])
+      ]
+  in
+  List.iter
+    (fun source ->
+      Alcotest.(check (list (triple string (option string) (list node_id)))) source expected
+        (List.concat_map (placements None) (parsed source).groups);
+      Alcotest.(check int) "Inner is drawn once" 1 (count_rows_with "Inner" (render source)))
+    [ "stateDiagram-v2\n\
+       state Outer {\n\
+       [*] --> Inner\n\
+       }\n\
+       state Inner {\n\
+       [*] --> Deep\n\
+       }"
+    ; "stateDiagram-v2\n\
+       state Inner {\n\
+       [*] --> Deep\n\
+       }\n\
+       state Outer {\n\
+       [*] --> Inner\n\
+       }"
+    ]
+
+let test_a_composite_state_drawn_inside_itself_is_refused () =
+  match
+    failure
+      "stateDiagram-v2\n\
+       state A {\n\
+       [*] --> B\n\
+       }\n\
+       state B {\n\
+       [*] --> A\n\
+       }"
+  with
+  | Mermaid.Unsupported what ->
+      Alcotest.(check string) "names the state" "state A would be drawn inside itself" what
+  | Mermaid.Parse_error _ | Mermaid.Too_wide _ -> Alcotest.fail "not Unsupported"
+
+let test_nested_composite_states () =
+  let src =
+    "stateDiagram-v2\n\
+     state Outer {\n\
+         state Inner {\n\
+             [*] --> Deep\n\
+         }\n\
+     }"
+  in
+  let drawn = render src in
+  Alcotest.(check bool) "renders outer box" true (List.exists (contains "Outer") drawn);
+  Alcotest.(check bool) "renders inner box" true (List.exists (contains "Inner") drawn);
+  Alcotest.(check bool) "renders deep node" true (List.exists (contains "Deep") drawn)
+
+(* Each composite state has a start and an end of its own, apart from the
+   diagram's, and they are members of its box. *)
+let test_composite_state_has_its_own_start_and_end () =
+  let graph =
+    parsed
+      "stateDiagram-v2\n\
+       state Parent {\n\
+       [*] --> Child\n\
+       Child --> [*]\n\
+       }\n\
+       [*] --> Parent\n\
+       Parent --> [*]"
+  in
+  let inside = Mermaid.Inside "Parent" in
+  Alcotest.(check (list (list node_id))) "the members of Parent"
+    Mermaid.[ [ Initial inside; Named "Child"; Final inside ] ]
+    (List.map (fun (g : Mermaid.group) -> g.group_nodes) graph.groups);
+  Alcotest.(check (list (pair node_id node_id))) "four transitions, two scopes"
+    Mermaid.
+      [ (Initial inside, Named "Child")
+      ; (Named "Child", Final inside)
+      ; (Initial Top_level, Named "Parent")
+      ; (Named "Parent", Final Top_level)
+      ]
+    (List.map (fun (e : Mermaid.edge) -> (e.from_id, e.to_id)) graph.edges)
+
+let test_unclosed_composite_state_is_refused () =
+  match failure "stateDiagram-v2\nstate OpenBlock {\n[*] --> S1" with
+  | Mermaid.Unsupported what ->
+      Alcotest.(check bool) "mentions open state" true (contains "state OpenBlock with no }" what)
+  | Mermaid.Parse_error _ | Mermaid.Too_wide _ -> Alcotest.fail "not Unsupported"
 
 let test_state_diagram_note_with_no_end_is_refused () =
   match failure "stateDiagram-v2\n[*] --> Idle\nnote right of Idle\nwaits here" with
@@ -645,6 +909,8 @@ let test_state_diagram_line_that_names_no_state_is_refused () =
     ; "Click --> X"
     ; "classDef"
     ; "title Keeper phases"
+    ; "state A <<nope>>"
+    ; "A {"
     ]
 
 (* What Mermaid itself does with these lines, read from its stateDb: a line
@@ -670,7 +936,7 @@ let test_state_diagram_reads_lines_as_mermaid_does () =
   in
   Alcotest.(check (list (pair node_id string))) "states and their labels"
     Mermaid.
-      [ (Initial, "[*]")
+      [ (Initial Top_level, "[*]")
       ; (Named "Quoted", "Quoted")
       ; (Named "B", "B")
       ; (Named "C", "described")
@@ -775,6 +1041,26 @@ let () =
         ; Alcotest.test_case "keeper fsm parses" `Quick test_state_diagram_keeper_fsm_parses
         ; Alcotest.test_case "skips classdef and notes" `Quick
             test_state_diagram_skips_classdef_and_notes
+        ; Alcotest.test_case "composite state draws titled box" `Quick
+            test_composite_state_draws_titled_box
+        ; Alcotest.test_case "choice pseudo-state" `Quick
+            test_state_diagram_choice_pseudo_state
+        ; Alcotest.test_case "fork and join are bars across the flow" `Quick
+            test_fork_and_join_are_bars_across_the_flow
+        ; Alcotest.test_case "a fork across a left-right flow stands upright" `Quick
+            test_a_fork_across_a_left_right_flow_stands_upright
+        ; Alcotest.test_case "a composite state may open on a state already named" `Quick
+            test_a_composite_state_may_open_on_a_state_already_named
+        ; Alcotest.test_case "a state named in a composite state is drawn in it" `Quick
+            test_a_state_named_in_a_composite_state_is_drawn_in_it
+        ; Alcotest.test_case "a composite state drawn inside itself is refused" `Quick
+            test_a_composite_state_drawn_inside_itself_is_refused
+        ; Alcotest.test_case "nested composite states" `Quick
+            test_nested_composite_states
+        ; Alcotest.test_case "composite state has its own start and end" `Quick
+            test_composite_state_has_its_own_start_and_end
+        ; Alcotest.test_case "unclosed composite state is refused" `Quick
+            test_unclosed_composite_state_is_refused
         ; Alcotest.test_case "a note with no end note is refused" `Quick
             test_state_diagram_note_with_no_end_is_refused
         ; Alcotest.test_case "an arrow in text is text" `Quick

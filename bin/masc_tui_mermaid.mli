@@ -12,10 +12,18 @@
     and thick edges, edge labels in both spellings, chains and [&] groups.
     [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
     state boxes, initial and terminal [[*]] pseudo-states, [-->] transitions
-    and their labels, and state descriptions. A state id is one token of
-    letters, digits, [_] or non-ASCII text. A [note left of] or [note right
-    of] a state, on one line or running to [end note], is read and its text
-    is not drawn.
+    and their labels, state descriptions, [<<choice>>] states drawn as a
+    diamond, and composite states drawn as titled boxes around their members.
+    A [[*]] inside a composite state is that state's own start or end. A
+    composite state may open on an id the source named before, and the box
+    is then that state; a state named inside several composite states is
+    drawn in the last of them, which is where Mermaid places it. A
+    composite state that this would put inside itself is refused.
+    [<<fork>>] and [<<join>>] states are drawn as a thick bar across the
+    flow, without their id, as Mermaid draws them. A state id is
+    one token of letters, digits, [_] or non-ASCII text. A [note left of] or
+    [note right of] a state, on one line or running to [end note], is read
+    and its text is not drawn.
     [sequenceDiagram] draws participants, lifelines, messages with their
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the
@@ -40,15 +48,23 @@ type shape =
   | Rect  (** [id[label]], [id[[label]]], [id>label]] *)
   | Round  (** [id(label)], [id([label])], [id[(label)]], [id((label))] *)
   | Diamond  (** [id{label}], [id{{label}}]; drawn as a box whose label wears ⟨ ⟩ *)
+  | Bar  (** a state diagram's [<<fork>>] or [<<join>>]; a thick line across the flow *)
+
+(** Where a state diagram's [[*]] was written: at the top of the diagram, or
+    inside the composite state of that id. Each has a start and an end of
+    its own. *)
+type scope =
+  | Top_level
+  | Inside of string
 
 (** What names a node. A state diagram's [[*]] names no state: it is where
-    the diagram starts on the left of a transition, and where it ends on
-    the right. Those are two nodes, and neither can meet a state the source
-    named. *)
+    its scope starts on the left of a transition, and where it ends on the
+    right. Those are nodes of their own, and none of them can meet a state
+    the source named. *)
 type node_id =
   | Named of string  (** an id the source wrote *)
-  | Initial  (** [[*] --> X] *)
-  | Final  (** [X --> [*]] *)
+  | Initial of scope  (** [[*] --> X] *)
+  | Final of scope  (** [X --> [*]] *)
 
 type node = {
   id : node_id;

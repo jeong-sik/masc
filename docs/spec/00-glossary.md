@@ -18,6 +18,11 @@ status: reference
 **Agent**
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
 
+**Agent Core**
+: `packages/agent_core`로 제공되는 재사용 모델 실행 계층. Agent 구성, tool turn,
+  provider 요청, typed response와 실패를 소유하며, MASC는 제품 오케스트레이션을
+  소유한다. 코드 식별자는 `agent_core`와 `Agent_core`다.
+
 **Keeper**
 : 독립된 agent core checkpoint와 MASC lifecycle을 가진 장기 실행 Agent. 현재 typed
   event와 tool schema를 관찰하고 자율 turn을 실행한다.

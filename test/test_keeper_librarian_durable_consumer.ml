@@ -630,6 +630,107 @@ let test_unknown_speaker_authority_does_not_advance_progress () =
   | None -> fail "unreadable counterpart row removed progress"
 ;;
 
+let test_torn_external_tail_retries_the_same_range_once () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-torn-external-tail" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let external_item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key "torn:consumer"
+    ; dedupe_key = "torn:consumer"
+    ; keeper_name
+    ; conversation =
+        { conversation_id = "agent:torn"
+        ; surface = Keeper_external_attention.Agent
+        }
+    ; external_message = None
+    ; source_label = "agent"
+    ; actor =
+        { actor_id = Some "external"
+        ; display_name = Some "External"
+        ; authority = Keeper_chat_store.External
+        }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "recover-after-newline"
+    ; content_ref = None
+    ; received_at = 1.5
+    ; metadata = []
+    }
+  in
+  let line =
+    Yojson.Safe.to_string
+      (Keeper_external_attention.event_to_json
+         (Keeper_external_attention.Recorded external_item))
+  in
+  let path =
+    Keeper_external_attention.attention_path
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let write contents =
+    match Fs_compat.save_file_atomic_strict path contents with
+    | Ok () -> ()
+    | Error detail -> failf "write external attention fixture: %s" detail
+  in
+  write line;
+  let commits = ref 0 in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ _ ->
+         incr commits;
+         true)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.External_attention_unreadable
+             (Keeper_external_attention.Incomplete_tail _))) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "torn external tail advanced as complete evidence");
+  check int "torn tail does not call Memory commit" 0 !commits;
+  check_progress_end config 1;
+  write (line ^ "\n");
+  let observations = ref [] in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ input ->
+         incr commits;
+         observations :=
+           List.map
+             (fun (observation : Keeper_counterpart_observation.t) ->
+                observation.content)
+             input.counterpart_observations;
+         true)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "repaired range advances once" 2 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "repaired external row did not advance the same range");
+  check (list string)
+    "repaired row reaches the retried range"
+    [ "recover-after-newline" ]
+    !observations;
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ _ ->
+         incr commits;
+         true)
+   with
+   | Ok Consumer.Nothing_to_read -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "settled range was consumed more than once");
+  check int "Memory commit runs exactly once" 1 !commits
+;;
+
 let test_same_name_clusters_keep_independent_ranges () =
   with_workspace @@ fun default ->
   let a = config_in_cluster default "Durable/A" in
@@ -913,6 +1014,8 @@ let () =
             test_distinct_boundaries_reject_non_monotone_counterpart_interval
         ; test_case "unknown speaker authority keeps durable progress" `Quick
             test_unknown_speaker_authority_does_not_advance_progress
+        ; test_case "torn external tail retries the same range once" `Quick
+            test_torn_external_tail_retries_the_same_range_once
         ; test_case "same-name clusters isolate range progress" `Quick
             test_same_name_clusters_keep_independent_ranges
         ; test_case "selected range bypasses recent window" `Quick

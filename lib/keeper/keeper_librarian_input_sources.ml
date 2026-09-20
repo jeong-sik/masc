@@ -1,11 +1,12 @@
 type read_error =
   | Chat_store_unreadable of string
-  | External_attention_unreadable of string
+  | External_attention_unreadable of Keeper_external_attention.read_error
 
 let read_error_to_string = function
   | Chat_store_unreadable detail -> "keeper chat store is unreadable: " ^ detail
-  | External_attention_unreadable detail ->
-    "external attention store is unreadable: " ^ detail
+  | External_attention_unreadable error ->
+    "external attention store is unreadable: "
+    ^ Keeper_external_attention.read_error_to_string error
 ;;
 
 let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
@@ -35,7 +36,7 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   in
   let* all_external_items =
     Keeper_external_attention.load_events_result ~base_path:base_dir ~keeper_name
-    |> Result.map_error (fun detail -> External_attention_unreadable detail)
+    |> Result.map_error (fun error -> External_attention_unreadable error)
     |> Result.map (List.filter_map (function
       | Keeper_external_attention.Recorded item -> Some item))
   in

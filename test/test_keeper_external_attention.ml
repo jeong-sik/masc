@@ -82,6 +82,14 @@ let with_temp_base name f =
     ~finally:(fun () -> try remove_tree base_path with _ -> ())
     (fun () -> f base_path)
 
+let write_file path contents =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
+;;
+
 (* F943: [record] dedups against a bounded recent tail, not the whole
    (unbounded) store. A duplicate inside the window is still suppressed;
    one pushed past the window is re-appended (rare, harmless). This pins
@@ -159,6 +167,16 @@ let test_record_dedupes_and_reads_pending () =
   | `Error detail -> Alcotest.failf "duplicate record failed: %s" detail);
   Alcotest.(check int) "one physical recorded event" 1
     (List.length (A.load_events ~base_path ~keeper_name:att.A.keeper_name));
+  (match A.load_events_result ~base_path ~keeper_name:att.A.keeper_name with
+   | Ok [ A.Recorded recorded ] ->
+     Alcotest.(check string)
+       "durable writer makes a complete strict row"
+       att.A.event_id
+       recorded.A.event_id
+   | Ok events ->
+     Alcotest.failf "expected 1 strict event, got %d" (List.length events)
+   | Error error ->
+     Alcotest.failf "strict read failed: %s" (A.read_error_to_string error));
   match
     A.load_events ~base_path ~keeper_name:att.A.keeper_name
     |> List.filter_map (function A.Recorded item -> Some item)
@@ -168,6 +186,41 @@ let test_record_dedupes_and_reads_pending () =
         recorded.A.event_id
   | recorded ->
       Alcotest.failf "expected 1 recorded item, got %d" (List.length recorded)
+
+let test_strict_reader_rejects_torn_tail () =
+  with_temp_base "keeper-external-attention-torn-tail" @@ fun base_path ->
+  let keeper_name = "torn-reader" in
+  let first = item ~keeper_name ~dedupe_key:"torn:first" ~preview:"first" () in
+  let second = item ~keeper_name ~dedupe_key:"torn:second" ~preview:"second" () in
+  let first_line =
+    Yojson.Safe.to_string (A.event_to_json (A.Recorded first)) ^ "\n"
+  in
+  let second_line = Yojson.Safe.to_string (A.event_to_json (A.Recorded second)) in
+  let path = A.attention_path ~base_path ~keeper_name in
+  write_file path (first_line ^ second_line);
+  (match A.load_events_result ~base_path ~keeper_name with
+   | Error (A.Incomplete_tail { rows_end; end_offset; _ }) ->
+     Alcotest.(check int) "complete prefix boundary" (String.length first_line) rows_end;
+     Alcotest.(check int)
+       "physical file end"
+       (String.length first_line + String.length second_line)
+       end_offset
+   | Error error ->
+     Alcotest.failf "wrong strict error: %s" (A.read_error_to_string error)
+   | Ok _ -> Alcotest.fail "strict reader accepted a torn final row");
+  (match A.load_events ~base_path ~keeper_name with
+   | [ A.Recorded recorded ] ->
+     Alcotest.(check string)
+       "permissive reader keeps the complete prefix"
+       first.A.event_id
+       recorded.A.event_id
+   | events ->
+     Alcotest.failf "expected one permissive event, got %d" (List.length events));
+  write_file path (first_line ^ second_line ^ "\n");
+  match A.load_events_result ~base_path ~keeper_name with
+  | Ok events -> Alcotest.(check int) "completed rows pass" 2 (List.length events)
+  | Error error ->
+    Alcotest.failf "completed fixture stayed unreadable: %s" (A.read_error_to_string error)
 
 let test_discord_channel_and_thread_conversation_ids_stay_distinct () =
   let channel =
@@ -195,6 +248,8 @@ let () =
             test_record_dedupes_and_reads_pending;
           Alcotest.test_case "record dedup window is bounded (F943)" `Quick
             test_record_dedup_window_bounded;
+          Alcotest.test_case "strict reader rejects torn final row" `Quick
+            test_strict_reader_rejects_torn_tail;
           Alcotest.test_case "Discord channel/thread lanes are distinct" `Quick
             test_discord_channel_and_thread_conversation_ids_stay_distinct;
         ] );

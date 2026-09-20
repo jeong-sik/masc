@@ -130,10 +130,43 @@ val record : base_path:string -> item -> record_result
 val attention_path : base_path:string -> keeper_name:string -> string
 
 val load_events : base_path:string -> keeper_name:string -> event list
+(** Best-effort public projection. Complete rows before an incomplete final
+    fragment remain visible; malformed complete rows and store failures return
+    the empty list as before. Durable cursor consumers use
+    {!load_events_result}. *)
+
+type malformed_line_error =
+  | Json_syntax_error of string
+  | Invalid_payload of string
+
+type read_error =
+  | Malformed_line of
+      { path : string
+      ; line_no : int
+      ; cause : malformed_line_error
+      }
+  | Incomplete_tail of
+      { path : string
+      ; rows_end : int
+      ; end_offset : int
+      }
+  | Io_failed of
+      { path : string
+      ; cause : exn
+      }
+  | Settlement_failed of
+      { path : string
+      ; primary_cause : exn option
+      ; cleanup_failure : Fs_compat.private_jsonl_operation_failure
+      }
+
+val read_error_to_string : read_error -> string
 
 val load_events_result :
-  base_path:string -> keeper_name:string -> (event list, string) result
-(** Fail-closed whole-log reader for durable consumers. *)
+  base_path:string -> keeper_name:string -> (event list, read_error) result
+(** Fail-closed whole-log reader for durable consumers. A final fragment
+    without its newline is {!Incomplete_tail}; complete rows before it are not
+    returned as a successful snapshot. *)
 
 val recorded_items_by_event_ids :
   base_path:string -> keeper_name:string -> event_ids:string list ->

@@ -2,7 +2,7 @@
 
 type read_error =
   | Chat_store_unreadable of string
-  | External_attention_unreadable of string
+  | External_attention_unreadable of Keeper_external_attention.read_error
 
 val read_error_to_string : read_error -> string
 

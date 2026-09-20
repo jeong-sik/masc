@@ -15,9 +15,11 @@ status: reference
 **Agent Core**
 : `packages/agent_core`의 재사용 모델 실행 계층. MASC coordinator를 참조하지
   않아 MASC 없이도 쓸 수 있다. `Agent_core.Agent`를 거치는 실행의 Agent 구성,
-  tool turn, provider 요청, typed 응답·사용량·실패를 소유한다. MASC는 Keeper
-  실행과 제품 조율을 소유하고, 공식 클라이언트 레인은 자기 프로세스에서 provider
-  요청을 보낸다. 코드 식별자는 `agent_core`와 `Agent_core`다.
+  tool turn, provider 요청, typed 응답·사용량·실패를 소유한다. 공통 타입은
+  레인과 무관하게 공유한다. 공식 클라이언트 레인도 `Agent_core.Error`·
+  `Agent_core.Llm_provider`·`Agent_core.Retry`를 쓰고, provider 요청은 자기
+  프로세스에서 보낸다. MASC는 Keeper 실행과 제품 조율을 소유한다.
+  코드 식별자는 `agent_core`와 `Agent_core`다.
   → [Agent Core 경계](13-agent-core.md)
 
 **Official Client Lane**

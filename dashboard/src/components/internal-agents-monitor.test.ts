@@ -244,7 +244,7 @@ describe('InternalAgentsMonitor', () => {
         : item),
     })
     sse.refresh?.()
-    expect(await within(matrix).findByText('JEV ON · jev-next')).toBeTruthy()
+    expect(await within(matrix).findByText('JEV CONFIGURED · jev-next')).toBeTruthy()
     expect(within(matrix).queryByText('JEV OFF')).toBeNull()
 
     for (const [state, label] of [
@@ -259,7 +259,7 @@ describe('InternalAgentsMonitor', () => {
       })
       sse.refresh?.()
       expect(await within(matrix).findByText(label)).toBeTruthy()
-      expect(within(matrix).queryByText('JEV ON · jev-next')).toBeNull()
+      expect(within(matrix).queryByText('JEV CONFIGURED · jev-next')).toBeNull()
     }
   })
 

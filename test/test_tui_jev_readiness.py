@@ -20,7 +20,7 @@ SOURCE_MODULES = (
 def run(executable: str, captures: Path | None) -> None:
     cases = (
         ({"state": "off"}, "JEV OFF"),
-        ({"state": "on", "model": "jev-fixture"}, "JEV ON · jev-fixture"),
+        ({"state": "on", "model": "jev-fixture"}, "JEV CONFIGURED · jev-fixture"),
         ({"state": "cli_only"}, "JEV unavailable: Board lane is CLI-only"),
         ({"state": "lane_unavailable"}, "JEV unavailable: Board lane is not ready"),
     )

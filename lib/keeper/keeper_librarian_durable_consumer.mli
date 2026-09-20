@@ -40,8 +40,9 @@ val consume_one
 (** The first attempt reads all unread cut points. A failed commit, typed
     error, or cancellation keeps a process-local marker; the next attempt for
     that cluster-scoped Keeper reads only through the oldest unread cut point.
-    Success or no unread range clears the marker. Durable progress remains the
-    authority across process restarts. *)
+    A small successful cut keeps that mode until the backlog is empty;
+    a successful all-unread pass or a baseline also clears the marker.
+    Durable progress remains the authority across process restarts. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)

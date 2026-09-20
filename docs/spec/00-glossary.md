@@ -75,6 +75,38 @@ status: reference
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
 
+## Skills
+
+**Skill**
+: 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
+  Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
+  생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
+
+**Instruction Skill**
+: Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
+  본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
+
+**Composition Skill**
+: 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
+  검증된 계획이 `keeper_compose_<name>` 도구가 된다. 실행기는 선언된 입력과
+  의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
+  도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
+
+**Skill Reference**
+: source, package, name으로 이뤄진 신원과 content revision의 조합
+  (`Skill_reference.t`). 이름 하나가 아닌 이 참조로 읽을 내용을 지정한다.
+
+**Skill Snapshot**
+: `Skill_catalog_snapshot_service`가 발행한 source 관측과 원문 bytes의 불변 묶음.
+  Keeper는 턴 경계에서 고정한 snapshot으로 Skill을 선택한다. 원문이 바뀌어도
+  이미 시작한 턴의 참조를 새 내용으로 바꾸지 않는다.
+
+**Skill Activation**
+: 정확한 Skill 참조의 본문·리소스 읽기 또는 합성 호출을 기록한 사건.
+  `Keeper_skill_activation_ledger`는 결과 전달(`delivery`)과 이후 모델이 고른
+  도구 호출(`actions`)을 별도로 붙인다. 이후 호출이 있다는 사실만으로 Skill이
+  그 행동의 원인이었거나 작업을 성공시켰다고 판정하지 않는다.
+
 ## Repository Execution
 
 **Repository Catalog**

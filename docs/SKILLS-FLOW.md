@@ -66,8 +66,9 @@ Agent Skills의 실험적 선택 필드 `allowed-tools`는 string 문법만 검�
 MASC 승인이나 도구 제한으로 해석하지 않으며 AST, registry, prompt, Gate, Keeper
 effective surface, immutable snapshot entry에 값을 남기지 않는다. 원본 `SKILL.md`를
 편집할 때 보이는 source text는 이식성을 위한 round-trip 원문이지 정책 상태가 아니다.
-composition 선언을 남겨 놓고 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴
-CommonMark 외부 fence로 감싼다.
+composition의 종류는 본문으로 정한다. 유효한 composition이라도 노드 도구가 현재
+Keeper 표면에 없으면 합성 도구를 숨기고 `node_tools_outside_surface`를 표시한다
+(`Keeper_capability_surface`). 문서용 예시는 더 긴 CommonMark 외부 fence로 감싼다.
 
 **실패와 편차는 다르다**: `Skill_catalog_snapshot`이 source scan 결과와 진단을 먼저
 불변 snapshot으로 발행하고, `Keeper_skill_catalog.of_snapshot`이 그 snapshot을 runtime

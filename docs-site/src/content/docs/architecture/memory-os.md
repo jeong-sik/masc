@@ -35,7 +35,7 @@ flowchart TD
 
     subgraph Sidecar ["Per-keeper event sidecar"]
         RET -.->|"retrieved"| EV["<keeper>.memory-events.jsonl"]
-        TOOL["Tool call carries the id"] -.->|"cited"| EV
+        DROP["keeper_memory_retract succeeds"] -.->|"retracted"| EV
         REV["Revision (continues and drops)"] -.->|"revised"| EV
     end
 
@@ -47,13 +47,13 @@ flowchart TD
 ### 1. Typed sidecar event stream
 Each keeper appends memory-use events to one JSONL sidecar (`<keeper>.memory-events.jsonl`). The closed set of kinds:
 * `retrieved`: the fact was among the results `keeper_memory_search` returned for a query.
-* `cited`: the fact's `memory_id` was a typed argument of a tool call. Ids found by scanning free text do not count.
+* `retracted`: `keeper_memory_retract` successfully removed the fact identified by its `memory_id`.
 * `revised`: the librarian wrote a new claim that continues this fact and dropped this one; `superseded_by` carries the new fact's id.
 
-A dropped fact keeps its events — events outlive facts, and readers attach them only to facts that still exist. The API row and the terminal UI show, per fact, what the keeper actually did with it — retrieved, cited, revised — from this sidecar.
+A dropped fact keeps its events — events outlive facts, and readers attach them only to facts that still exist. If the same claim is added again, the API row and terminal UI show its retrieved, retracted, and revised history from this sidecar.
 
 ### 2. Dead counters removed
-The static integer counter (`fact.reinforcement`) is gone from the fact store. A fact's row in the terminal UI shows the counts gathered from these events — retrieved, distinct days, last retrieval, cited, revised-from — as they are.
+The static integer counter (`fact.reinforcement`) is gone from the fact store. A fact's row in the terminal UI shows the counts gathered from these events — retrieved, distinct days, last retrieval, retracted, revised-from — as they are.
 
 ---
 

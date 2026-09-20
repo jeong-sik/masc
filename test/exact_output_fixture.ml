@@ -27,6 +27,8 @@ type server_behavior =
     (** Answer [200 text/event-stream], write the given bytes once, then keep
         the connection open and silent until the server's switch is released.
         Stands in for a provider whose stream stops mid-answer. *)
+  | Incomplete_reply of string
+    (** Send JSON response headers and a body prefix, then keep the body open. *)
 
 type test_server =
   { base_url : string
@@ -105,6 +107,12 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
         ~status:`OK
         ~body:(stalling_source first_bytes)
         ()
+    | Incomplete_reply first_bytes ->
+      Cohttp_eio.Server.respond
+        ~headers:(Cohttp.Header.init_with "content-type" "application/json")
+        ~status:`OK
+        ~body:(stalling_source first_bytes)
+        ()
   in
   let socket =
     Eio.Net.listen
@@ -132,6 +140,7 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
 
 let target_fixture_toml
       ~connect_timeout_s
+      ?body_timeout_s
       ?enable_thinking
       ~supports_response_format_json
       ~supports_structured_output
@@ -142,6 +151,10 @@ let target_fixture_toml
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
   let timeout = Printf.sprintf "connect_timeout_s = %.6g\n" connect_timeout_s in
+  let body_timeout =
+    Option.fold ~none:""
+      ~some:(Printf.sprintf "body_timeout_s = %.6g\n") body_timeout_s
+  in
   let enable_thinking_line =
     Option.fold
       ~none:""
@@ -178,12 +191,13 @@ let target_fixture_toml
     fixture.id
     provider_id
     model_id
-    timeout
+    (timeout ^ body_timeout)
     enable_thinking_line
 ;;
 
 let resolver_snapshot
       ?(connect_timeouts = [])
+      ?(body_timeouts = [])
       ?(enable_thinkings = [])
       ?(api_key_env = "")
       ?(api_key_envs = [])
@@ -207,6 +221,7 @@ let resolver_snapshot
         |> List.mapi (fun index fixture ->
             target_fixture_toml
               ~connect_timeout_s:(timeout_for fixture.id)
+              ?body_timeout_s:(List.assoc_opt fixture.id body_timeouts)
               ?enable_thinking:(enable_thinking_for fixture.id)
               ~supports_response_format_json
               ~supports_structured_output

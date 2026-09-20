@@ -191,6 +191,27 @@ let test_report_judge_identity () =
     rejects "invalid stored probability" (decode (R.Scored { question; answer; judgment = { judgment with probability } })))
     [ nan; infinity; -0.1; 1.1 ]
 
+let test_report_question_origin () =
+  let text = generated_question.response.text in
+  let judgment = get (R.judgment request (evaluated [ case.id, T.Noul_answer { noul = 0.5 } ])) in
+  let states question =
+    [ R.Question_ready question
+    ; R.Answer_failed (question, { request = answer.request; error = "provider unavailable"; incomplete_response = None })
+    ; R.Answer_ready { question; answer }
+    ; R.Judge_failed { question; answer; failure = { request; error = "HTTP 503" } }
+    ; R.Scored { question; answer; judgment }
+    ]
+  in
+  List.iter (fun (label, supplied, question) ->
+    let case = { case with question = supplied } in
+    List.iter (fun progress ->
+      rejects label (R.of_yojson (R.to_yojson (report [ { R.case; progress } ]))))
+      (states question))
+    [ "changed provided wording", Some text, R.Provided (text ^ " Changed.")
+    ; "generated origin for provided question", Some text, R.Generated generated_question
+    ; "provided origin without supplied question", None, R.Provided text
+    ]
+
 let () =
   Alcotest.run "Librarian continuity measurement"
     [ "boundaries",
@@ -200,5 +221,6 @@ let () =
       ; Alcotest.test_case "failures and incomplete samples are retained" `Quick test_report_keeps_incomplete_and_failed
       ; Alcotest.test_case "stored judgments belong to their sample" `Quick test_report_judge_identity
       ; Alcotest.test_case "fixed questions retain provided origin" `Quick test_provided_question
+      ; Alcotest.test_case "stored questions match their sample origin and text" `Quick test_report_question_origin
       ]
     ]

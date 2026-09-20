@@ -330,6 +330,62 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
      |> to_string)
 ;;
 
+let test_goal_transition_uses_authenticated_actor () =
+  with_authenticated_activity_router
+    ~prefix:"goal-transition-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~router ~token ->
+  let goal =
+    match
+      Goal_store.upsert_goal config
+        ~title:"Canonical actor transition"
+        ~metric:"transition"
+        ~target_value:"recorded"
+        ()
+    with
+    | Ok (goal, `created) -> goal
+    | Ok (_, `updated) -> fail "goal fixture unexpectedly updated an existing row"
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  let status, _ =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_goal_transition"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "goal_id", `String goal.id
+              ; "action", `String "drop"
+              ; "note", `String "route actor audit"
+              ]))
+      ()
+  in
+  check int "goal transition accepted" 200 status;
+  let events_path =
+    Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+  in
+  let events =
+    In_channel.with_open_bin events_path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+           let line = String.trim line in
+           if String.equal line "" then None else Some (Yojson.Safe.from_string line))
+  in
+  let event =
+    match events with
+    | [event] -> event
+    | [] | _ :: _ -> fail "goal transition must write one durable event"
+  in
+  let open Yojson.Safe.Util in
+  check string "goal event id" goal.id (event |> member "goal_id" |> to_string);
+  check string "goal event kind" "goal_phase"
+    (event |> member "event_type" |> to_string);
+  check string "goal event phase" "dropped"
+    (event |> member "payload" |> member "phase" |> to_string);
+  check string "goal event actor" "credential-owner"
+    (event |> member "payload" |> member "actor" |> to_string)
+;;
+
 let board_post_by_title title =
   Masc.Board_dispatch.list_posts ~sort_by:Masc.Board_dispatch.Recent ~limit:20 ()
   |> List.find_opt (fun (post : Masc.Board.post) -> String.equal post.title title)
@@ -757,6 +813,8 @@ let () =
             test_schedule_write_actor_is_stamped_from_auth
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_stamped_from_auth
+        ; test_case "goal transition actor comes from auth" `Quick
+            test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick
             test_board_write_routes_use_authenticated_actor
         ; test_case "sub-board owner comes from auth" `Quick

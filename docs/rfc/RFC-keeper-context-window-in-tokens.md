@@ -18,12 +18,12 @@ related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-o
 
 이 RFC 의 결정은 이 절에만 적는다. 다른 절은 근거와 설계다.
 
-1. 창 크기를 숫자로 정하지 않는다. 요청은 Librarian 이 마지막으로 흡수한 지점부터 지금까지를 싣는다. Librarian 이 대화 이력까지 정리하므로, 그 앞은 다시 보내지 않는다. `context-high-water-tokens`·`context-low-water-tokens`·`max-prompt-bytes` 는 두지 않는다(§13.2, §13.6).
+1. 창 크기를 숫자로 정하지 않는다. 요청은 Librarian 이 마지막으로 흡수한 지점부터 지금까지를 싣는다. Librarian 이 대화 이력까지 정리하므로, 그 앞은 다시 보내지 않는다. `context-high-water-tokens`·`context-low-water-tokens`·`max-prompt-bytes` 는 두지 않는다(§13.2, §13.6). Librarian 자신의 입력은 여기서 제외한다. Librarian 은 `keeper_librarian_runtime` 의 `prompt_max_messages` 로 자기 입력을 메시지 수로 자른다. 흡수 지점을 옮기는 쪽이 자기 흡수 지점에 묶이면, 한 번 못 도는 크기가 된 뒤로 영영 못 돈다.
 2. 요청이 너무 큰지는 공급자가 판정한다. masc 는 바이트 상한을 선언하지도, 요청을 보내기 전에 재지도 않는다. 거절은 오류로 올리고, 범위를 좁혀 다시 보내지 않는다. 시작할 자리를 모를 때 이력 전체를 보내지 않는다(§13.3, §13.4).
 3. masc 에는 컴팩션(LLM 요약)이 없다. librarian 이 수시로 기억을 정리하고, 창은 최근 원문만 담는다. 그래서 librarian 이 창 밖으로 밀려난 것 중 무엇이 살아남을지를 결정한다.
 4. 입력할 자료 자체가 많은 경우를 빼면, 턴마다 보내는 컨텍스트는 가능한 한 줄인다. 컨텍스트가 커질수록 효율이 급격히 떨어진다고 본다. 근거는 §6.2~6.4 에 있다. 증거가 받쳐 주는 형태는 "관련 없는 것은 빼고, 필요한 것은 넣는다"이다. 모든 과제에 맞는 길이 기준은 증거에 없다.
 5. 한 사실은 한 곳에만 적는다. 같은 사실이 두 곳 이상에 있으면 두 번째부터 지운다(§13.0). 이 배포가 쓰는 모델 창은 `runtime.toml` 바인딩의 `max-context` 한 곳에 적고, `agent-core-models-overlay.toml` 은 비운다(§13.8).
-6. 1·2 를 코드에 넣기 시작하는 때는 Librarian 생명주기 RFC(`RFC-librarian-lifecycle.md`) §7 (라)가 정한다(§13.7).
+6. 1·2 를 코드에 넣기 시작하는 때는 Librarian 생명주기 RFC(`RFC-librarian-lifecycle.md`) §7 (라)가 정하고, 그 전에 밀림 표시(같은 RFC 의 I4)가 화면에 떠 있어야 한다(§13.7).
 
 ## 2. 사고와 측정
 
@@ -611,6 +611,8 @@ type origin =
 
 13.2~13.4 를 걷어내기 시작하는 때는 Librarian 생명주기 RFC(`RFC-librarian-lifecycle.md`) §7 (라)가 정한다. 그 조건과 진행은 그 RFC 에만 적는다. 순서를 바꾸면 대체할 것이 없는 상태에서 45 MB 가 아무 제지 없이 나간다.
 
+조건이 하나 더 있다. 밀림 표시(같은 RFC 의 I4)가 창이 그 위치에 기대기 전에 화면에 떠 있어야 한다. Librarian 이 서면 이력은 자라고 요청은 결국 provider 한도에서 거절되는데(§13.9), 표시가 없으면 화면에는 실패한 턴만 보이고 원인은 보이지 않는다.
+
 ### 13.8 overlay 를 비운다
 
 `agent-core-models-overlay.toml` 은 183줄에 세 종류가 섞여 있다. 세 종류 모두 두 번째 벌이다.
@@ -651,5 +653,5 @@ match rt.model.max_context, capability_cap with
 
 - 이력을 빼고 남는 부분(`pinned` 메시지: 매 턴 새로 붙는 system·facts·브리핑 블록)이 혼자 provider 한도를 넘는 경우. 13.2 가 바이트 창을 없애면 이것을 알려 주는 것은 provider 의 typed 거절뿐이다. 턴은 그 오류로 끝나고(13.6), 다음 사이클도 같은 요청으로 같은 거절을 받는다. §1 에는 그 반복을 멈추는 장치가 없다. 줄일 것은 이력이 아니라 그 부분이고, facts 는 Librarian 의 `absorbs`·`dropped` 가 줄인다(Librarian RFC §6).
   - `critic` 의 30턴(13.2)은 이 경우가 아니었다. 거절한 쪽은 provider 가 아니라 `antigravity_subscription.gemini-3-8-flash-high` 레인의 masc 바이트 창(`max-prompt-bytes` 131,072)이었고, 그 모델의 `max-context` 는 1,048,576 토큰이다(`<base-path>/.masc/config/runtime.toml` 의 `[models.gemini-3-8-flash-high]`). 그 레인은 지금 이력을 자르지 않고 넘긴다(§4 의 5번).
-- Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자라고, 좁혀 다시 보내는 길은 13.3 이 지웠다. 그래서 요청은 끝내 provider 한도에서 거절되고 턴마다 오류로 끝난다. 이 대가와 원인별로 푸는 방법은 Librarian RFC §4.10 에 있다. 밀림 표시(Librarian RFC 의 I4)는 창이 그 위치에 기대기 전에 화면에 떠 있어야 한다.
+- Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자라고, 좁혀 다시 보내는 길은 13.3 이 지웠다. 그래서 요청은 끝내 provider 한도에서 거절되고 턴마다 오류로 끝난다. 이 대가와 원인별로 푸는 방법은 Librarian RFC §4.10 에 있다. 밀림 표시를 먼저 띄우는 조건은 §1 의 6 과 §13.7 에 있다.
 - `#36984` 이 요구하는 deadline 을 `[[targets]]` 두 슬롯이 선언하지 않은 문제(#37004). 13.8 의 3번에서 같이 정리된다.

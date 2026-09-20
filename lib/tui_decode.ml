@@ -7404,46 +7404,64 @@ let decode_keeper_turns json =
   in
   loop [] items
 
-type runtime_assignment = {
-  ra_keeper : string;
-  ra_source : string;  (* "default" | "explicit" *)
-  ra_target_id : string option;
-  ra_unavailable_reason : string option;
-}
+type runtime_assignment_source =
+  | Default_runtime
+  | Explicit_runtime
+
+type runtime_unavailable_reason =
+  | Missing_catalog_model of
+      { provider_label : string
+      ; model_id : string
+      }
+
+type runtime_assignment_resolution =
+  | Runtime_assignment_lane of string
+  | Runtime_assignment_missing
+  | Runtime_assignment_unavailable of
+      { runtime_id : string
+      ; reason : runtime_unavailable_reason
+      }
+
+type runtime_assignment =
+  { ra_keeper : string
+  ; ra_source : runtime_assignment_source
+  ; ra_resolution : runtime_assignment_resolution
+  }
 
 let decode_runtime_assignment json =
   let* ra_keeper = required_string_field json "keeper" in
-  let* ra_source = required_string_field json "assignment_source" in
-  let* () =
-    match ra_source with
-    | "default" | "explicit" -> Ok ()
+  let* source = required_string_field json "assignment_source" in
+  let* ra_source =
+    match source with
+    | "default" -> Ok Default_runtime
+    | "explicit" -> Ok Explicit_runtime
     | value -> Error (Printf.sprintf "unknown runtime assignment source %S" value)
   in
   let* resolved = required_object_field json "resolved" in
   let* kind = required_string_field resolved "kind" in
   let* id = required_nullable_string_field resolved "id" in
-  let* ra_target_id, ra_unavailable_reason =
+  let* ra_resolution =
     match kind, id with
-    | "lane", Some lane_id -> Ok (Some lane_id, None)
-    | "missing", None -> Ok (None, None)
+    | "lane", Some lane_id -> Ok (Runtime_assignment_lane lane_id)
+    | "missing", None -> Ok Runtime_assignment_missing
     | "unavailable", Some runtime_id ->
         let* reason = required_object_field resolved "reason" in
-        let* kind = required_string_field reason "kind" in
-        let* () = match kind with
-          | "missing_catalog_model" -> Ok ()
+        let* reason_kind = required_string_field reason "kind" in
+        let* reason =
+          match reason_kind with
+          | "missing_catalog_model" ->
+              let* provider_label = required_string_field reason "provider_label" in
+              let* model_id = required_string_field reason "model_id" in
+              Ok (Missing_catalog_model { provider_label; model_id })
           | value -> Error (Printf.sprintf "unknown runtime unavailability reason %S" value)
         in
-        let* message = required_string_field reason "message" in
-        let* _provider_id = required_string_field reason "provider_id" in
-        let* _provider_label = required_string_field reason "provider_label" in
-        let* _model_id = required_string_field reason "model_id" in
-        Ok (Some runtime_id, Some message)
+        Ok (Runtime_assignment_unavailable { runtime_id; reason })
     | "unavailable", None -> Error "unavailable runtime assignment is missing its configured id"
     | "lane", None -> Error "runtime lane assignment is missing its id"
     | "missing", Some _ -> Error "missing runtime assignment carries an id"
     | value, _ -> Error (Printf.sprintf "unknown resolved runtime kind %S" value)
   in
-  Ok { ra_keeper; ra_source; ra_target_id; ra_unavailable_reason }
+  Ok { ra_keeper; ra_source; ra_resolution }
 
 let decode_runtime_resolved_full json =
   let* snapshot = decode_runtime_resolved_snapshot json in
@@ -7455,9 +7473,9 @@ let decode_runtime_resolved_full json =
     match
       List.find_opt
         (fun assignment ->
-           match assignment.ra_target_id, assignment.ra_unavailable_reason with
-           | None, _ | Some _, Some _ -> false
-           | Some lane_id, None ->
+           match assignment.ra_resolution with
+           | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false
+           | Runtime_assignment_lane lane_id ->
                not
                  (List.exists
                     (fun lane -> String.equal lane.rrl_id lane_id)

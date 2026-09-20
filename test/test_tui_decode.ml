@@ -5982,9 +5982,14 @@ let test_decode_runtime_resolved () =
       (match assignments with
        | [ a ] ->
            Alcotest.(check string) "keeper" "orbiter" a.Tui_decode.ra_keeper;
-           Alcotest.(check string) "source" "explicit" a.ra_source;
-           Alcotest.(check (option string)) "resolved id"
-             (Some "ollama_cloud.deepseek") a.ra_target_id
+           (match a.ra_source with
+            | Explicit_runtime -> ()
+            | Default_runtime -> Alcotest.fail "explicit source decoded as default");
+           (match a.ra_resolution with
+            | Runtime_assignment_lane lane_id ->
+              Alcotest.(check string) "resolved lane" "ollama_cloud.deepseek" lane_id
+            | Runtime_assignment_missing | Runtime_assignment_unavailable _ ->
+              Alcotest.fail "lane assignment lost its typed resolution")
        | other ->
            Alcotest.failf "expected one assignment, got %d" (List.length other))
 
@@ -6020,8 +6025,14 @@ let test_decode_unavailable_runtime_assignment () =
   (match Tui_decode.decode_runtime_resolved (unavailable reason) with
    | Ok (runtimes, [assignment]) ->
        Alcotest.(check int) "healthy runtime catalog remains visible" 2 (List.length runtimes);
-       Alcotest.(check (option string)) "configured unavailable identity survives" (Some "fixture.missing") assignment.ra_target_id;
-       Alcotest.(check (option string)) "unavailability is explicit" (Some "Capability catalog entry unavailable") assignment.ra_unavailable_reason
+       (match assignment.ra_resolution with
+        | Runtime_assignment_unavailable
+            { runtime_id; reason = Missing_catalog_model { provider_label; model_id } } ->
+          Alcotest.(check string) "configured unavailable identity survives" "fixture.missing" runtime_id;
+          Alcotest.(check string) "provider label survives" "fixture" provider_label;
+          Alcotest.(check string) "model id survives" "missing" model_id
+        | Runtime_assignment_lane _ | Runtime_assignment_missing ->
+          Alcotest.fail "unavailable assignment lost its typed resolution")
    | Ok _ -> Alcotest.fail "unavailable assignment lost"
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "missing reason cannot claim unavailable certainty" true

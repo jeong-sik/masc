@@ -817,6 +817,7 @@ self_test() {
     shift 2
     changed=$(printf '%s\n' "$@")
     local got=""
+    direct_sources="__stale_direct_sources__"
     if select_sources > /dev/null 2>&1; then
       # LC_ALL=C: the first case whose two suites differ only at "." against
       # "_" -- test_tui_browser.ml and test_tui_browser_history.py -- ordered

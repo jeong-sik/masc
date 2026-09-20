@@ -1337,7 +1337,7 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
         ~category:Memory.Validated_approach ~now:300.
         ~origin:{ kind = Memory.Injected; trace_id = "trace-derived" }
         ~derivations:
-          [ { rule_id = "primary"; premise_ids = [Memory.memory_id primary] }
+          [ { rule_id = Memory.memory_id primary; premise_ids = [Memory.memory_id primary] }
           ; { rule_id = "emergency"; premise_ids = [Memory.memory_id emergency] } ]
       |> require
     in

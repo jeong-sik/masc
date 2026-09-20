@@ -221,7 +221,7 @@ let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
 
 type runtime_case =
   | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run
-  | Http_failure | Memory_write_failure
+  | Http_failure | Invalid_answer_run | Memory_write_failure
 
 let runtime_case_name = function
   | Judged_run -> "judged"
@@ -229,6 +229,7 @@ let runtime_case_name = function
   | Lane_disabled_run -> "lane-disabled"
   | Missing_key_run -> "missing-key"
   | Http_failure -> "http-failure"
+  | Invalid_answer_run -> "invalid-answer"
   | Memory_write_failure -> "memory-write-failure"
 ;;
 
@@ -236,7 +237,7 @@ let runtime_skip_reason = function
   | Gate_disabled_run -> Some "absorb_gate_disabled"
   | Lane_disabled_run -> Some "lane_disabled"
   | Missing_key_run -> Some "missing_api_key"
-  | Judged_run | Http_failure | Memory_write_failure -> None
+  | Judged_run | Http_failure | Invalid_answer_run | Memory_write_failure -> None
 ;;
 
 let run_runtime_evidence ?fixture_dir () =
@@ -305,7 +306,7 @@ let run_runtime_evidence ?fixture_dir () =
       | Judged_run -> claims @
           [ `Assoc [ "claim", `String (String.make 70000 'x' ^ "EXACT_OUTPUT_TAIL")
                    ; "category", `String "fact" ] ]
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Memory_write_failure -> claims
+      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_answer_run | Memory_write_failure -> claims
     in
     let answer = `Assoc
       [ "new_claims", `List claims; "dropped", `List []; "working_contexts", `List [] ] in
@@ -318,11 +319,16 @@ let run_runtime_evidence ?fixture_dir () =
          selection.facts);
     let librarian = Fixture.start_server ~sw ~net ~clock
       (Fixture.Reply (Fixture.openai_response answer)) in
+    let returned_answers =
+      [ "s0_0", (if scenario = Invalid_answer_run
+          then `Assoc [ "type", `String "choice"; "choice", `String "yes"
+             ; "probabilities", `Assoc [ "yes", `Float 0.7; "no", `Float 0.3 ]
+             ; "confidence", `Float 0.8 ]
+          else `Assoc [ "type", `String "noul"; "noul", `Float 1.0 ])
+      ; "s1_0", `Assoc [ "type", `String "noul"; "noul", `Float 0.0 ] ] in
     let jev_response = Yojson.Safe.to_string
       (`Assoc [ "model", `String "jev-fixture"
-              ; "answers", `Assoc
-                  [ "s0_0", `Assoc [ "type", `String "noul"; "noul", `Float 1.0 ]
-                  ; "s1_0", `Assoc [ "type", `String "noul"; "noul", `Float 0.0 ] ] ]) in
+              ; "answers", `Assoc returned_answers ]) in
     let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
     let saved_path = current_path ^ ".preserved" in
     let jev_requests = ref [] in
@@ -341,11 +347,11 @@ let run_runtime_evidence ?fixture_dir () =
             Alcotest.fail "the directory must fail the Memory file read"
           with Sys_error _ as exn ->
             observed_storage_error := Some (Printexc.to_string exn))
-       | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure -> ());
+       | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_answer_run -> ());
       match scenario with
       | Http_failure -> Cohttp_eio.Server.respond_string
           ~status:`Service_unavailable ~body:"fixture unavailable" ()
-      | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Memory_write_failure ->
+      | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Invalid_answer_run | Memory_write_failure ->
         Cohttp_eio.Server.respond_string ~status:`OK ~body:jev_response ()
     in
     let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
@@ -396,7 +402,7 @@ let run_runtime_evidence ?fixture_dir () =
        Alcotest.(check string) "the actual storage exception reaches run detail"
          expected
          (member "detail" original |> string)
-     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure -> ());
+     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_answer_run -> ());
     let replayed = Runs.get (Runs.replay registry_path) ~run_id:run.run_id |> Option.get in
     check_json "the full execution evidence survives disk replay"
       original (Runs.run_to_yojson replayed);
@@ -408,7 +414,7 @@ let run_runtime_evidence ?fixture_dir () =
     let expected_status = match scenario with
       | Judged_run | Memory_write_failure -> "judged"
       | Gate_disabled_run | Lane_disabled_run | Missing_key_run -> "skipped"
-      | Http_failure -> "open" in
+      | Http_failure | Invalid_answer_run -> "open" in
     Alcotest.(check string) "gate status" expected_status (member "status" gate |> string);
     (match scenario with
      | Gate_disabled_run | Lane_disabled_run | Missing_key_run ->
@@ -417,7 +423,7 @@ let run_runtime_evidence ?fixture_dir () =
        check_json "a skipped gate has no applied boundary" `Null
          (member "conveyed_boundary" gate);
        check_json "no invented evaluations" `Null (member "evaluations" gate)
-     | Judged_run | Http_failure | Memory_write_failure ->
+     | Judged_run | Http_failure | Invalid_answer_run | Memory_write_failure ->
        Alcotest.(check (float 0.)) "the gate records the applied probability boundary"
          Gate.conveyed_boundary
          (member "conveyed_boundary" gate |> Yojson.Safe.Util.to_float);
@@ -427,6 +433,8 @@ let run_runtime_evidence ?fixture_dir () =
        let raw = List.hd !jev_requests in
        let sent = Yojson.Safe.from_string raw in
        let request = member "request" evaluation in
+       Alcotest.(check string) "the attempted endpoint survives durable replay" jev_uri
+         (member "endpoint" request |> string);
        List.iter (fun key -> check_json ("actual JEV request " ^ key)
          (member key sent) (member key request)) [ "model"; "state"; "questions" ];
        Alcotest.(check string) "the configured request model was sent" requested_model
@@ -439,6 +447,13 @@ let run_runtime_evidence ?fixture_dir () =
           Alcotest.(check string) "same evaluation failure" reason (member "reason" evaluation |> string);
           List.iter (fun key -> check_json ("failure does not invent " ^ key)
             `Null (member key evaluation)) [ "model"; "answers"; "request_body_sha256" ]
+        | Invalid_answer_run ->
+          Alcotest.(check string) "gate rejection is not transport failure" "invalid_answer"
+            (member "status" evaluation |> string);
+          check_json "every typed returned answer survives durable replay"
+            (`Assoc returned_answers) (member "returned_answers" evaluation);
+          check_json "no validated score map for an invalid response" `Null
+            (member "answers" evaluation)
         | Judged_run | Memory_write_failure ->
           Alcotest.(check string) "answered evaluation" "answered" (member "status" evaluation |> string);
           Alcotest.(check string) "actual answer model" "jev-fixture" (member "model" evaluation |> string);
@@ -455,13 +470,13 @@ let run_runtime_evidence ?fixture_dir () =
      | Memory_write_failure ->
        Unix.rmdir current_path;
        Unix.rename saved_path current_path
-     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure -> ());
+     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_answer_run -> ());
     let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
       | Some snapshot -> snapshot
       | None -> Alcotest.fail "current snapshot is missing" in
     let expected_facts = match scenario with
       | Judged_run -> b :: untouched :: selection.new_claims
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure -> untouched :: selection.new_claims
+      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_answer_run -> untouched :: selection.new_claims
       | Memory_write_failure -> seeded.facts in
     Alcotest.(check (list string)) "correct originals remain current"
       (List.sort String.compare (List.map id expected_facts))
@@ -472,7 +487,7 @@ let run_runtime_evidence ?fixture_dir () =
       | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
     let archived = match scenario with
       | Judged_run -> [ a.claim ]
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure -> [ a.claim; b.claim ]
+      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_answer_run -> [ a.claim; b.claim ]
       | Memory_write_failure -> [] in
     Alcotest.(check (list string)) "only applied originals are archived"
       (List.sort String.compare archived)
@@ -489,7 +504,7 @@ let run_runtime_evidence ?fixture_dir () =
       Yojson.Safe.to_file (Filename.concat directory (case_name ^ ".json"))
         (`Assoc [ "scenario", `String case_name; "detail", detail; "page", page ])) fixture_dir)
     [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run
-    ; Http_failure; Memory_write_failure ]
+    ; Http_failure; Invalid_answer_run; Memory_write_failure ]
 ;;
 
 let test_selection_gate_and_store_keep_the_unconveyed_original () =
@@ -568,6 +583,114 @@ let test_a_conveyed_verdict_survives_a_later_failure () =
     | _ -> Alcotest.fail "open report lost the completed positive verdict" in
   Alcotest.(check (list string)) "only the completed positive verdict is reported"
     [ id first ] conveyed
+;;
+
+let test_open_preserves_unjudged_from_unvisited_groups () =
+  let source = fact (List.hd sources) in
+  let missing_source : Types.absorbed_statement = { absorbed = "absent-source"; into = id merged } in
+  let missing_claim : Types.absorbed_statement = { absorbed = id source; into = "absent-claim" } in
+  let absorbed = absorbed_into merged [ source ] @ [ missing_source; missing_claim ] in
+  let outcome = Gate.judge ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
+      ~facts:[ source ] ~new_claims:[ merged ] ~absorbed in
+  let run = Gate.Evaluated { outcome; evaluations = [] } in
+  Alcotest.(check int) "all three retain the existing fail-open application" 3
+    (List.length (Gate.absorbed_of_run run));
+  let report = Gate.run_result_to_yojson run in
+  let open Yojson.Safe.Util in
+  let actual = match member "unjudged" report with
+    | `List values -> List.map (fun value ->
+        member "absorbed" value |> to_string, member "into" value |> to_string) values
+    | _ -> Alcotest.fail "open report lost classified unjudged absorptions" in
+  Alcotest.(check (list (pair string string)))
+    "classified missing source and later missing claim are distinct from request failure"
+    [ missing_source.absorbed, missing_source.into; missing_claim.absorbed, missing_claim.into ] actual
+;;
+
+let with_gate_http_fixture f =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let env = Masc_test_deps.with_process_env in
+  env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  env "MASC_TYPESAFEAI_ENABLED" (Some "true") @@ fun () ->
+  env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") @@ fun () ->
+  f ~sw ~net ~clock
+;;
+
+let test_run_uses_one_destination_and_model_snapshot () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let response = {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":1.0}}}|} in
+  let alternate = F.start_server ~sw ~net ~clock (F.Reply response) in
+  let initial = F.start_server ~sw ~net ~clock
+      ~on_request_before_reply:(fun () ->
+        Unix.putenv "MASC_TYPESAFEAI_ENDPOINT" alternate.base_url;
+        Unix.putenv "MASC_TYPESAFEAI_MODEL" "changed-after-first-request")
+      (F.Reply response) in
+  let env = Masc_test_deps.with_process_env in
+  env "MASC_TYPESAFEAI_ENDPOINT" (Some initial.base_url) @@ fun () ->
+  env "MASC_TYPESAFEAI_MODEL" (Some "initial-request-model") @@ fun () ->
+  let first = fact (List.nth sources 0) in
+  let second = fact (List.nth sources 1) in
+  let other = fact "beta ships on fridays and pages the operator" in
+  let absorbed = absorbed_into merged [ first ] @ absorbed_into other [ second ] in
+  let report = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~facts:[ first; second ]
+      ~new_claims:[ merged; other ] ~absorbed () |> Gate.run_result_to_yojson in
+  Alcotest.(check int) "both requests use the endpoint captured before dispatch" 2 (F.post_count initial);
+  Alcotest.(check int) "the later configuration is not used by this run" 0 (F.post_count alternate);
+  let open Yojson.Safe.Util in
+  List.iter (fun raw ->
+    Alcotest.(check string) "every transmitted model is the initial snapshot"
+      "initial-request-model" (Yojson.Safe.from_string raw |> member "model" |> to_string))
+    (F.request_bodies initial);
+  List.iter (fun evaluation ->
+    let request = member "request" evaluation in
+    Alcotest.(check string) "reported endpoint is the transmitted snapshot" initial.base_url
+      (member "endpoint" request |> to_string);
+    Alcotest.(check string) "reported model is the transmitted snapshot" "initial-request-model"
+      (member "model" request |> to_string))
+    (member "evaluations" report |> to_list)
+;;
+
+let test_rejected_response_retains_every_typed_answer () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let noul value = `Assoc [ "type", `String "noul"; "noul", `Float value ] in
+  let choice = `Assoc [ "type", `String "choice"; "choice", `String "yes"
+    ; "probabilities", `Assoc [ "yes", `Float 0.7; "no", `Float 0.3 ]
+    ; "confidence", `Float 0.8 ] in
+  let score = `Assoc [ "type", `String "score"; "score", `Float 1.25
+    ; "probabilities", `Assoc [ "2", `Float 0.25; "1", `Float 0.75 ]
+    ; "confidence", `Float 0.5 ] in
+  let cases =
+    [ "missing ID", `Assoc [ "s0_0", noul 0.9; "extra", score ]
+    ; "wrong type", `Assoc [ "s0_0", choice; "s1_0", noul 0.6 ]
+    ; "out of range", `Assoc [ "s0_0", noul 1.2; "s1_0", noul 0.6 ] ] in
+  let server = F.start_server ~sw ~net ~clock (F.Replies
+    (List.map (fun (_, answers) -> Yojson.Safe.to_string
+       (`Assoc [ "model", `String "invalid-response-model"; "answers", answers ])) cases)) in
+  Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some server.base_url) @@ fun () ->
+  let facts = List.map fact sources in
+  List.iter (fun (label, expected) ->
+    let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~facts
+        ~new_claims:[ merged ] ~absorbed:(absorbed_into merged facts) () in
+    Alcotest.(check int) "existing fail-open application is unchanged" 2
+      (List.length (Gate.absorbed_of_run run));
+    let open Yojson.Safe.Util in
+    let report = Gate.run_result_to_yojson run in
+    Alcotest.(check string) (label ^ " opens the gate") "open" (member "status" report |> to_string);
+    let evaluation = member "evaluations" report |> to_list |> List.hd in
+    Alcotest.(check string) (label ^ " is explicitly invalid") "invalid_answer"
+      (member "status" evaluation |> to_string);
+    Alcotest.(check string) (label ^ " retains all returned typed answers")
+      (Yojson.Safe.to_string expected)
+      (member "returned_answers" evaluation |> Yojson.Safe.to_string);
+    Alcotest.(check bool) "invalid answers are not presented as validated scores" true
+      (member "answers" evaluation = `Null)) cases
 ;;
 
 (* The same inside one source: a statement not conveyed in an answered
@@ -688,6 +811,12 @@ let () =
             test_a_rejection_completed_before_a_later_failure_is_kept
         ; Alcotest.test_case "a conveyed verdict survives a later failure" `Quick
             test_a_conveyed_verdict_survives_a_later_failure
+        ; Alcotest.test_case "open retains unjudged from unvisited groups" `Quick
+            test_open_preserves_unjudged_from_unvisited_groups
+        ; Alcotest.test_case "one run uses one endpoint and model snapshot" `Quick
+            test_run_uses_one_destination_and_model_snapshot
+        ; Alcotest.test_case "invalid responses retain all typed answers" `Quick
+            test_rejected_response_retains_every_typed_answer
         ; Alcotest.test_case "a rejection in an answered request survives the next failing" `Quick
             test_a_rejection_in_an_answered_request_survives_the_next_failing
         ; Alcotest.test_case "a missing seventeenth statement keeps the original" `Quick

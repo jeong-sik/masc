@@ -21,13 +21,16 @@ let model () = Env_config_core.get_string ~default:default_model "MASC_TYPESAFEA
    anything else instead of silently reading it as off. *)
 type unavailable_reason = Lane_disabled | Missing_api_key | Absorb_gate_disabled
 
+let unavailable_reason_to_string = function
+  | Lane_disabled -> "lane_disabled"
+  | Missing_api_key -> "missing_api_key"
+  | Absorb_gate_disabled -> "absorb_gate_disabled"
+;;
+
 let lane_api_key () =
   if not (Env_config_core.get_bool ~default:true "MASC_TYPESAFEAI_ENABLED")
   then Error Lane_disabled
   else match api_key () with Some key -> Ok key | None -> Error Missing_api_key
-;;
-
-let is_enabled () = Result.is_ok (lane_api_key ())
 ;;
 
 (* One switch per gate. A key turns the lane on; each gate can still be
@@ -37,7 +40,7 @@ let is_enabled () = Result.is_ok (lane_api_key ())
    defaults to off: it sends the librarian's memories to the vendor, which a
    deployment that set its key for the Board gate did not choose. *)
 let is_board_attention_enabled () =
-  is_enabled ()
+  Result.is_ok (lane_api_key ())
   && Env_config_core.get_bool ~default:true "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED"
 ;;
 
@@ -48,7 +51,4 @@ let absorb_gate_api_key () =
     if Env_config_core.get_bool ~default:false "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED"
     then Ok key
     else Error Absorb_gate_disabled
-;;
-
-let is_absorb_gate_enabled () = Result.is_ok (absorb_gate_api_key ())
 ;;

@@ -234,7 +234,7 @@ let test_each_gate_has_its_own_switch () =
   let env = Masc_test_deps.with_process_env in
   let with_key f = env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") f in
   let lane_on f = env "MASC_TYPESAFEAI_ENABLED" None f in
-  let gates () = C.is_board_attention_enabled (), C.is_absorb_gate_enabled () in
+  let gates () = C.is_board_attention_enabled (), Result.is_ok (C.absorb_gate_api_key ()) in
   with_key (fun () ->
     lane_on (fun () ->
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->

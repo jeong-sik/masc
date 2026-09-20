@@ -69,6 +69,7 @@ val request_to_yojson :
   Yojson.Safe.t
 
 val answer_of_yojson : Yojson.Safe.t -> (answer, string) result
+val answer_to_yojson : answer -> Yojson.Safe.t
 val eval_response_of_yojson : Yojson.Safe.t -> (eval_response, string) result
 
 (** The closed option set of one [Choice] question. The request's criteria and

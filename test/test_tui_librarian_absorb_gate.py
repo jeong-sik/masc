@@ -22,6 +22,8 @@ SOURCE_MODULES = (
     "lib/keeper/keeper_librarian_runtime.ml",
     "lib/typesafeai/typesafeai_config.ml",
     "lib/typesafeai/typesafeai_config.mli",
+    "lib/typesafeai/typesafeai_types.ml",
+    "lib/typesafeai/typesafeai_types.mli",
 )
 
 
@@ -87,6 +89,15 @@ def run_case(executable: str, fixture_path: Path) -> None:
                 b"fixture unavailable",
                 b"configured-request-fixture",
             ]
+        elif scenario == "invalid-answer":
+            needles = [
+                b"invalid_answer",
+                b"returned_answers",
+                b'"type": "choice"',
+                b'"yes": 0.7',
+                b'"noul": 0.0',
+                b"configured-request-fixture",
+            ]
         else:
             needles = [
                 b"jev-fixture",
@@ -96,6 +107,10 @@ def run_case(executable: str, fixture_path: Path) -> None:
             ]
             if scenario == "memory-write-failure":
                 needles.append(cast(str, run["detail"]).encode())
+        if gate["status"] != "skipped":
+            needles.append(
+                cast(str, gate["evaluations"][0]["request"]["endpoint"]).encode()
+            )
         seen = first_screen
         # Only the short report is searched. The unrelated exact_output can
         # be much larger, so its size must not decide how far this test walks.
@@ -175,6 +190,7 @@ def main() -> None:
             "lane-disabled",
             "missing-key",
             "http-failure",
+            "invalid-answer",
             "memory-write-failure",
         ):
             run_case(executable, Path(directory, scenario + ".json"))

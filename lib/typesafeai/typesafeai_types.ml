@@ -133,6 +133,22 @@ let parse_probabilities probabilities =
   | _ :: _ -> loop [] probabilities
 ;;
 
+let answer_to_yojson = function
+  | Noul_answer { noul } ->
+    `Assoc [ "type", `String "noul"; "noul", `Float noul ]
+  | Choice_answer { choice; probabilities; confidence } ->
+    `Assoc
+      [ "type", `String "choice"; "choice", `String choice
+      ; "probabilities", `Assoc (List.map (fun (id, p) -> id, `Float p) probabilities)
+      ; "confidence", `Float confidence ]
+  | Score_answer { score; probabilities; confidence } ->
+    `Assoc
+      [ "type", `String "score"; "score", `Float score
+      ; "probabilities", `Assoc
+          (List.map (fun (level, p) -> string_of_int level, `Float p) probabilities)
+      ; "confidence", `Float confidence ]
+;;
+
 let answer_of_yojson json =
   match json with
   | `Assoc fields ->

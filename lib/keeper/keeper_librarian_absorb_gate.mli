@@ -68,6 +68,7 @@ type outcome =
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
       ; conveyed : source_verdict list
+      ; unjudged : Keeper_memory_os_types.absorbed_statement list
       ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
       }
       (** the model stopped answering. What the gate had decided by then
@@ -75,7 +76,9 @@ type outcome =
           {!request_bytes_limit}) and [left] (a completed answer showed a
           statement not conveyed) stay current; [absorbed] is the answer's
           list without them, applied as answered. [conveyed] retains completed
-          positive verdicts separately from fail-open absorptions. *)
+          positive verdicts separately from fail-open absorptions. [unjudged]
+          includes every source or claim classified as absent before requests,
+          including groups not visited after the failure. *)
   | Judged of judged
 
 val conveyed_boundary : float
@@ -128,7 +131,8 @@ val judge
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { model : string
+  { endpoint : string
+  ; model : string
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, string) result
@@ -150,7 +154,7 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     Librarian run's existing output payload. Valid Noul values are preserved
     without rounding and the applied [conveyed_boundary] is recorded;
     rejected answers retain their decoder diagnostic.
-    The requested model is captured before dispatch; a request failure has no
+    Endpoint and model are captured once per run; a request failure has no
     fabricated response model or request receipt. *)
 
 val run

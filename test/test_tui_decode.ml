@@ -3752,7 +3752,7 @@ let test_decode_memory_health_rejects_stale_schema () =
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
     (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
 
-let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound =
+let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc
     [ "keeper", `String "alpha"
     ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-facts"
@@ -3801,7 +3801,7 @@ let test_decode_memory_fact_reads_the_use_record () =
               ; "updated_at", `Float 1_775_000_100.0
               ; "facts", `List [ fact ]
               ])
-         ~source_bound:(`Assoc [ "present", `Bool false ]))
+         ~source_bound:(`Assoc [ "present", `Bool false ]) ())
   in
   let only_fact = function
     | Error error -> Alcotest.failf "snapshot rejected: %s" error
@@ -3892,7 +3892,7 @@ let test_decode_memory_facts_keeps_both_stores () =
   in
   match
     Tui_decode.decode_memory_fact_snapshot
-      (memory_fact_snapshot_json ~ordinary ~source_bound)
+      (memory_fact_snapshot_json ~ordinary ~source_bound ())
   with
   | Error err -> Alcotest.fail err
   | Ok snapshot -> (
@@ -3939,7 +3939,7 @@ let test_decode_memory_facts_keeps_store_states_apart () =
   let json =
     memory_fact_snapshot_json
       ~ordinary:(`Assoc [ "read_error", `String "corrupt row 12" ])
-      ~source_bound:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   match Tui_decode.decode_memory_fact_snapshot json with
   | Error err -> Alcotest.fail err
@@ -3961,7 +3961,7 @@ let test_decode_memory_facts_keeps_event_read_error () =
     memory_fact_snapshot_json
       ~events_read_error:"memory event sidecar read failed: permission denied"
       ~ordinary:(`Assoc [ "present", `Bool false ])
-      ~source_bound:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   match Tui_decode.decode_memory_fact_snapshot json with
   | Error error -> Alcotest.fail error
@@ -3977,7 +3977,7 @@ let test_decode_memory_facts_rejects_a_shapeless_store () =
   let json =
     memory_fact_snapshot_json
       ~ordinary:(`Assoc [ "revision", `Int 3 ])
-      ~source_bound:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   Alcotest.(check bool) "a shapeless store is a decode error, not empty" true
     (Result.is_error (Tui_decode.decode_memory_fact_snapshot json))

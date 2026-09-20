@@ -82,17 +82,30 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
                 "record_kind": "composition_run",
                 "ts": 16.0,
             }
-            write_rows(root / "2026-09" / "01.jsonl", [first, second, tie_a])
+            pre_schema = {"tool": "legacy", "ts": 5.0}
+            null_schema = {"record_kind": None, "tool": "legacy-null", "ts": 6.0}
+            write_rows(
+                root / "2026-09" / "01.jsonl",
+                [first, second, tie_a, pre_schema],
+            )
             write_rows(
                 root / "2026-09" / "02.jsonl",
-                [tie_b, composition_node, aggregate],
+                [tie_b, composition_node, aggregate, null_schema],
             )
 
-            report = MINER.analyze(root)
+            report = MINER.analyze(root, include_evidence=True)
 
             self.assertEqual(report["summary"]["selected_tool_calls"], 4)
             self.assertEqual(report["summary"]["excluded_composition_nodes"], 1)
+            self.assertEqual(report["summary"]["excluded_pre_schema_rows"], 2)
+            self.assertEqual(
+                report["summary"]["coverage_gap_counts"][
+                    "pre_schema_missing_record_kind"
+                ],
+                2,
+            )
             self.assertEqual(report["summary"]["ignored_non_tool_records"], 1)
+            self.assertEqual(len(report["pre_schema_rows"]), 2)
             pairs = {tuple(item["tools"]): item for item in report["pairs"]}
             self.assertEqual(
                 set(pairs),
@@ -141,6 +154,11 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertEqual(sequence["keeper_count"], 2)
             self.assertEqual(sequence["failed_occurrence_count"], 1)
             self.assertEqual(sequence["keepers"], ["keeper-a", "keeper-b"])
+            self.assertNotIn("occurrences", sequence)
+            self.assertFalse(report["evidence"]["included"])
+            self.assertIn("pairs[].occurrences", report["evidence"]["omitted"])
+            self.assertNotIn("coverage_gaps", report)
+            self.assertNotIn("ungrouped_calls", report)
 
     def test_preserves_coverage_gaps_and_does_not_group_missing_turn_identity(
         self,
@@ -162,7 +180,7 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             ungrouped = fixture_call("ungrouped", 3.0, trace_id=None)
             write_rows(root / "calls.jsonl", [truncated, blob, ungrouped])
 
-            report = MINER.analyze(root)
+            report = MINER.analyze(root, include_evidence=True)
             gaps = report["summary"]["coverage_gap_counts"]
 
             self.assertEqual(gaps["truncated_input"], 1)
@@ -175,6 +193,8 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertEqual(report["summary"]["ungrouped_tool_calls"], 1)
             self.assertEqual(report["ungrouped_calls"][0]["tool"], "ungrouped")
             self.assertEqual(report["summary"]["pair_occurrences"], 1)
+            self.assertTrue(report["evidence"]["included"])
+            self.assertEqual(report["evidence"]["omitted"], [])
 
     def test_cli_is_deterministic_and_base_path_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -196,6 +216,29 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertEqual(
                 json.loads(first.stdout)["source"]["files"], ["calls.jsonl"]
             )
+            compact = json.loads(first.stdout)
+            self.assertNotIn("occurrences", compact["pairs"][0])
+            self.assertNotIn("coverage_gaps", compact)
+
+            expanded = subprocess.run(
+                command + ["--include-evidence"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(expanded.returncode, 0, expanded.stderr)
+            evidence = json.loads(expanded.stdout)
+            self.assertIn("occurrences", evidence["pairs"][0])
+            self.assertIn("coverage_gaps", evidence)
+            self.assertTrue(evidence["evidence"]["included"])
+
+            help_result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--help"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn("--include-evidence", help_result.stdout)
 
     def test_malformed_row_fails_closed_with_source_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -223,6 +266,14 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             with self.assertRaisesRegex(
                 MINER.RowError, "runtime_contract.keeper_turn_id"
             ):
+                MINER.analyze(root)
+
+    def test_unknown_non_null_record_kind_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_rows(root / "bad.jsonl", [{"record_kind": "future_kind"}])
+
+            with self.assertRaisesRegex(MINER.RowError, "unknown record_kind"):
                 MINER.analyze(root)
 
 

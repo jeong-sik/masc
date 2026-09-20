@@ -12,7 +12,7 @@ import json
 import math
 import sys
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -77,6 +77,14 @@ class Call:
             "result_bytes": self.result_bytes,
             "coverage_gaps": list(self.gaps),
         }
+
+
+@dataclass
+class NgramAggregate:
+    occurrence_count: int = 0
+    failure_count: int = 0
+    keepers: set[str] = field(default_factory=set)
+    occurrences: list[tuple[tuple[str, str, int], tuple[Call, ...]]] | None = None
 
 
 def _required_string(row: dict[str, Any], name: str) -> str:
@@ -288,51 +296,58 @@ def _load_json(line: str) -> dict[str, Any]:
 
 
 def _ngram_report(
-    turns: dict[tuple[str, str, int], list[Call]], size: int
+    turns: dict[tuple[str, str, int], list[Call]],
+    size: int,
+    *,
+    include_evidence: bool,
 ) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, ...], list[tuple[tuple[str, str, int], list[Call]]]] = (
-        defaultdict(list)
-    )
+    grouped: dict[tuple[str, ...], NgramAggregate] = {}
     for turn_key in sorted(turns):
         calls = turns[turn_key]
         for start in range(0, len(calls) - size + 1):
-            occurrence = calls[start : start + size]
-            grouped[tuple(call.tool for call in occurrence)].append(
-                (turn_key, occurrence)
-            )
+            occurrence = tuple(calls[start : start + size])
+            tools = tuple(call.tool for call in occurrence)
+            aggregate = grouped.get(tools)
+            if aggregate is None:
+                aggregate = NgramAggregate(occurrences=[] if include_evidence else None)
+                grouped[tools] = aggregate
+            aggregate.occurrence_count += 1
+            aggregate.keepers.add(turn_key[0])
+            if any(not call.success for call in occurrence):
+                aggregate.failure_count += 1
+            if aggregate.occurrences is not None:
+                aggregate.occurrences.append((turn_key, occurrence))
 
     report = []
     for tools in sorted(grouped):
-        occurrences = grouped[tools]
-        keepers = sorted({turn_key[0] for turn_key, _ in occurrences})
-        failure_count = sum(
-            1 for _, calls in occurrences if any(not call.success for call in calls)
-        )
-        report.append(
-            {
-                "tools": list(tools),
-                "occurrence_count": len(occurrences),
-                "keeper_count": len(keepers),
-                "keepers": keepers,
-                "successful_occurrence_count": len(occurrences) - failure_count,
-                "failed_occurrence_count": failure_count,
-                "occurrences": [
-                    {
-                        "turn": {
-                            "keeper": turn_key[0],
-                            "trace_id": turn_key[1],
-                            "keeper_turn_id": turn_key[2],
-                        },
-                        "calls": [call.identity_json() for call in calls],
-                    }
-                    for turn_key, calls in occurrences
-                ],
-            }
-        )
+        aggregate = grouped[tools]
+        item: dict[str, Any] = {
+            "tools": list(tools),
+            "occurrence_count": aggregate.occurrence_count,
+            "keeper_count": len(aggregate.keepers),
+            "keepers": sorted(aggregate.keepers),
+            "successful_occurrence_count": (
+                aggregate.occurrence_count - aggregate.failure_count
+            ),
+            "failed_occurrence_count": aggregate.failure_count,
+        }
+        if aggregate.occurrences is not None:
+            item["occurrences"] = [
+                {
+                    "turn": {
+                        "keeper": turn_key[0],
+                        "trace_id": turn_key[1],
+                        "keeper_turn_id": turn_key[2],
+                    },
+                    "calls": [call.identity_json() for call in calls],
+                }
+                for turn_key, calls in aggregate.occurrences
+            ]
+        report.append(item)
     return report
 
 
-def analyze(tool_calls_dir: Path) -> dict[str, Any]:
+def analyze(tool_calls_dir: Path, *, include_evidence: bool = False) -> dict[str, Any]:
     root = tool_calls_dir.resolve()
     if not root.is_dir():
         raise RowError(f"tool calls directory does not exist: {root}")
@@ -342,6 +357,8 @@ def analyze(tool_calls_dir: Path) -> dict[str, Any]:
     rows_read = 0
     ignored_non_tool_records = 0
     excluded_composition_nodes = 0
+    excluded_pre_schema_rows = 0
+    pre_schema_rows: list[dict[str, Any]] | None = [] if include_evidence else None
     diagnostics: list[str] = []
     for path in files:
         relative = path.relative_to(root).as_posix()
@@ -356,6 +373,11 @@ def analyze(tool_calls_dir: Path) -> dict[str, Any]:
             try:
                 row = _load_json(line)
                 kind = row.get("record_kind")
+                if kind is None:
+                    excluded_pre_schema_rows += 1
+                    if pre_schema_rows is not None:
+                        pre_schema_rows.append({"source": source.json()})
+                    continue
                 has_composition_run_id = "composition_run_id" in row
                 call = _call_from_row(row, source)
                 if call is None:
@@ -371,20 +393,23 @@ def analyze(tool_calls_dir: Path) -> dict[str, Any]:
         raise RowError("\n".join(diagnostics))
 
     turns: dict[tuple[str, str, int], list[Call]] = defaultdict(list)
-    ungrouped = []
+    ungrouped_count = 0
+    ungrouped: list[dict[str, Any]] | None = [] if include_evidence else None
     for call in calls:
         turn_key = call.turn_key
         if turn_key is None:
-            ungrouped.append(
-                {
-                    "source": call.source.json(),
-                    "keeper": call.keeper,
-                    "tool": call.tool,
-                    "execution_id": call.execution_id,
-                    "tool_use_id": call.tool_use_id,
-                    "coverage_gaps": list(call.gaps),
-                }
-            )
+            ungrouped_count += 1
+            if ungrouped is not None:
+                ungrouped.append(
+                    {
+                        "source": call.source.json(),
+                        "keeper": call.keeper,
+                        "tool": call.tool,
+                        "execution_id": call.execution_id,
+                        "tool_use_id": call.tool_use_id,
+                        "coverage_gaps": list(call.gaps),
+                    }
+                )
         else:
             turns[turn_key].append(call)
 
@@ -392,21 +417,24 @@ def analyze(tool_calls_dir: Path) -> dict[str, Any]:
         turn_calls.sort(key=lambda call: (call.ts, call.source.file, call.source.line))
 
     gap_counts = Counter(gap for call in calls for gap in call.gaps)
-    coverage_rows = [
-        {
-            "source": call.source.json(),
-            "keeper": call.keeper,
-            "tool": call.tool,
-            "execution_id": call.execution_id,
-            "tool_use_id": call.tool_use_id,
-            "gaps": list(call.gaps),
-        }
-        for call in calls
-        if call.gaps
-    ]
-    pairs = _ngram_report(turns, 2)
-    triplets = _ngram_report(turns, 3)
-    return {
+    gap_counts["pre_schema_missing_record_kind"] += excluded_pre_schema_rows
+    coverage_rows = None
+    if include_evidence:
+        coverage_rows = [
+            {
+                "source": call.source.json(),
+                "keeper": call.keeper,
+                "tool": call.tool,
+                "execution_id": call.execution_id,
+                "tool_use_id": call.tool_use_id,
+                "gaps": list(call.gaps),
+            }
+            for call in calls
+            if call.gaps
+        ]
+    pairs = _ngram_report(turns, 2, include_evidence=include_evidence)
+    triplets = _ngram_report(turns, 3, include_evidence=include_evidence)
+    report = {
         "schema": SCHEMA_VERSION,
         "source": {
             "tool_calls_dir": str(root),
@@ -419,16 +447,30 @@ def analyze(tool_calls_dir: Path) -> dict[str, Any]:
             "rows_read": rows_read,
             "selected_tool_calls": len(calls),
             "excluded_composition_nodes": excluded_composition_nodes,
+            "excluded_pre_schema_rows": excluded_pre_schema_rows,
             "ignored_non_tool_records": ignored_non_tool_records,
             "grouped_tool_calls": sum(len(value) for value in turns.values()),
-            "ungrouped_tool_calls": len(ungrouped),
+            "ungrouped_tool_calls": ungrouped_count,
             "turns": len(turns),
             "pair_occurrences": sum(item["occurrence_count"] for item in pairs),
             "triplet_occurrences": sum(item["occurrence_count"] for item in triplets),
             "coverage_gap_counts": dict(sorted(gap_counts.items())),
         },
-        "coverage_gaps": coverage_rows,
-        "ungrouped_calls": ungrouped,
+        "evidence": {
+            "included": include_evidence,
+            "request_flag": "--include-evidence",
+            "omitted": (
+                []
+                if include_evidence
+                else [
+                    "coverage_gaps",
+                    "ungrouped_calls",
+                    "pre_schema_rows",
+                    "pairs[].occurrences",
+                    "triplets[].occurrences",
+                ]
+            ),
+        },
         "pairs": pairs,
         "triplets": triplets,
         "limits": [
@@ -438,6 +480,11 @@ def analyze(tool_calls_dir: Path) -> dict[str, Any]:
             "Skill visibility, N_u adoption, dry-run safety, and Skill publication are outside this read-only report.",
         ],
     }
+    if include_evidence:
+        report["coverage_gaps"] = coverage_rows
+        report["ungrouped_calls"] = ungrouped
+        report["pre_schema_rows"] = pre_schema_rows
+    return report
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -453,6 +500,11 @@ def _parser() -> argparse.ArgumentParser:
     source.add_argument(
         "--tool-calls-dir", type=Path, help="explicit tool_calls directory"
     )
+    parser.add_argument(
+        "--include-evidence",
+        action="store_true",
+        help="include every occurrence and row identity; omitted by default",
+    )
     return parser
 
 
@@ -464,7 +516,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else args.base_path / ".masc" / "tool_calls"
     )
     try:
-        report = analyze(tool_calls_dir)
+        report = analyze(tool_calls_dir, include_evidence=args.include_evidence)
     except RowError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

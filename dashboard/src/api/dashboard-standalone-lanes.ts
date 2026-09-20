@@ -26,6 +26,10 @@ export interface StandaloneLaneSlotCount {
   count: number
 }
 
+export type StandaloneLaneJev =
+  | { state: 'off' }
+  | { state: 'on'; model: string }
+
 export interface StandaloneLaneSnapshotRow {
   laneId: StandaloneLaneId
   label: string
@@ -33,6 +37,7 @@ export interface StandaloneLaneSnapshotRow {
   observationOnly: true
   configured: boolean | null
   configurationState: StandaloneLaneConfigurationState
+  jev: StandaloneLaneJev | null
   admittedSlots: string[]
   cliSlots: string[]
   droppedSlots: string[]
@@ -51,7 +56,7 @@ export interface StandaloneLaneSnapshotRow {
 }
 
 export interface StandaloneLanesSnapshot {
-  schema: 'masc.standalone_llm_lanes.v1'
+  schema: 'masc.standalone_llm_lanes.v2'
   generatedAt: string
   observedAtUnix: number
   observationOnly: true
@@ -106,6 +111,14 @@ function nullableString(value: unknown, context: string): string | null {
   return value === null ? null : string(value, context)
 }
 
+function parseJev(value: unknown, context: string): StandaloneLaneJev {
+  if (!isRecord(value)) fail(`${context} must be an object`)
+  const state = string(value.state, `${context}.state`)
+  if (state === 'off') return { state: 'off' }
+  if (state === 'on') return { state: 'on', model: string(value.model, `${context}.model`).trim() }
+  fail(`${context}.state is unknown`)
+}
+
 function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
   const context = `lanes[${index}]`
   if (!isRecord(raw)) fail(`${context} must be an object`)
@@ -117,6 +130,9 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
   if (!CONFIGURATION_STATES.includes(configurationState)) {
     fail(`${context}.configuration_state is unknown`)
   }
+  const jev = laneId === 'board_attention_exact'
+    ? parseJev(raw.jev, `${context}.jev`)
+    : null
   if (!Array.isArray(raw.admitted_slots)) fail(`${context}.admitted_slots must be an array`)
   if (!Array.isArray(raw.cli_slots)) fail(`${context}.cli_slots must be an array`)
   if (!Array.isArray(raw.dropped_slots)) fail(`${context}.dropped_slots must be an array`)
@@ -135,6 +151,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     observationOnly: true,
     configured: raw.configured as boolean | null,
     configurationState: configurationState as StandaloneLaneConfigurationState,
+    jev,
     admittedSlots: raw.admitted_slots.map((slot, slotIndex) => string(slot, `${context}.admitted_slots[${slotIndex}]`)),
     cliSlots: raw.cli_slots.map((slot, slotIndex) => string(slot, `${context}.cli_slots[${slotIndex}]`)),
     droppedSlots: raw.dropped_slots.map((slot, slotIndex) => string(slot, `${context}.dropped_slots[${slotIndex}]`)),
@@ -161,7 +178,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
 
 export function parseStandaloneLanesSnapshot(raw: unknown): StandaloneLanesSnapshot {
   if (!isRecord(raw)) fail('root must be an object')
-  if (raw.schema !== 'masc.standalone_llm_lanes.v1') fail('root.schema is unknown')
+  if (raw.schema !== 'masc.standalone_llm_lanes.v2') fail('root.schema is unknown')
   if (raw.observation_only !== true) fail('root.observation_only must be true')
   if (typeof raw.exact_run_projection_truncated !== 'boolean') {
     fail('root.exact_run_projection_truncated must be a boolean')

@@ -13,7 +13,14 @@ let endpoint () =
   Env_config_core.get_string ~default:default_endpoint "MASC_TYPESAFEAI_ENDPOINT"
 ;;
 
-let model () = Env_config_core.get_string ~default:default_model "MASC_TYPESAFEAI_MODEL"
+let model () =
+  match
+    Env_config_core.trim_opt
+      (Env_config_core.raw_value_opt "MASC_TYPESAFEAI_MODEL")
+  with
+  | Some model -> model
+  | None -> default_model
+;;
 
 (* The variable turns the lane off; it cannot turn it on without a key, and a
    key alone is enough to opt in. [get_bool] reads the same spellings this
@@ -22,4 +29,12 @@ let model () = Env_config_core.get_string ~default:default_model "MASC_TYPESAFEA
 let is_enabled () =
   Env_config_core.get_bool ~default:true "MASC_TYPESAFEAI_ENABLED"
   && Option.is_some (api_key ())
+;;
+
+type readiness =
+  | Off
+  | Ready of { model : string }
+
+let readiness () =
+  if is_enabled () then Ready { model = model () } else Off
 ;;

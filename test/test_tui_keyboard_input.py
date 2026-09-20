@@ -10093,7 +10093,7 @@ def standalone_lane_fixture(
         ),
     }
     purpose, required = lane_contracts[lane_id]
-    return {
+    row = {
         "lane_id": lane_id,
         "label": label,
         "purpose": purpose,
@@ -10122,13 +10122,16 @@ def standalone_lane_fixture(
         "p50_elapsed_s": 8.0,
         "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
     }
+    if lane_id == "board_attention_exact":
+        row["jev"] = {"state": "off"}
+    return row
 
 
 def standalone_lanes_response() -> HttpResponse:
     return (
         200,
         {
-            "schema": "masc.standalone_llm_lanes.v1",
+            "schema": "masc.standalone_llm_lanes.v2",
             "generated_at": "2026-08-27T20:36:29Z",
             "observed_at_unix": 1787557669.715736,
             "exact_run_projection_count": 60,
@@ -10463,6 +10466,7 @@ def keeper_lanes_ia_interaction(
         for detail in (
             "Judges one durable Board candidate for Keeper attention.",
             "Config: [runtime.exact_output_lanes.board_attention_exact]",
+            "JEV OFF",
             "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
             "Then CLI (after catalog exhaustion): (none)",
             "Output meaning: the accepted candidate judgment JSON.",

@@ -176,6 +176,46 @@ let test_config_defaults () =
   Alcotest.(check string) "default model" "jev-latest" C.default_model
 ;;
 
+let with_jev_config ~api_key ~enabled ~model f =
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" api_key (fun () ->
+    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" enabled (fun () ->
+      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" model f))
+;;
+
+let test_config_readiness_is_typed_and_credential_free () =
+  with_jev_config ~api_key:None ~enabled:(Some "true") ~model:(Some "unused")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> ()
+       | C.Ready _ -> Alcotest.fail "a missing key reported JEV ready");
+  with_jev_config
+    ~api_key:(Some "secret-not-for-projection")
+    ~enabled:(Some "false")
+    ~model:(Some "unused")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> ()
+       | C.Ready _ -> Alcotest.fail "an explicit disable reported JEV ready");
+  with_jev_config
+    ~api_key:(Some "secret-not-for-projection")
+    ~enabled:(Some "true")
+    ~model:(Some "  jev-next  ")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> Alcotest.fail "an enabled configuration reported JEV off"
+       | C.Ready { model } ->
+         Alcotest.(check string) "readiness carries a trimmed model" "jev-next" model);
+  with_jev_config
+    ~api_key:(Some "secret-not-for-projection")
+    ~enabled:(Some "true")
+    ~model:(Some " \t ")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> Alcotest.fail "a blank model disabled an otherwise ready JEV"
+       | C.Ready { model } ->
+         Alcotest.(check string) "blank model uses the default" C.default_model model)
+;;
+
 let () =
   Alcotest.run "typesafeai"
     [ ( "codecs"
@@ -194,6 +234,10 @@ let () =
             `Quick
             test_choice_set_rejects_no_options_and_shared_labels
         ] )
-    ; "config", [ Alcotest.test_case "defaults" `Quick test_config_defaults ]
+    ; ( "config"
+      , [ Alcotest.test_case "defaults" `Quick test_config_defaults
+        ; Alcotest.test_case "typed credential-free readiness" `Quick
+            test_config_readiness_is_typed_and_credential_free
+        ] )
     ]
 ;;

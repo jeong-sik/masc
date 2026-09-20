@@ -707,9 +707,14 @@ export function InternalAgentsMonitor() {
                       : lane.status === 'running'
                         ? 'text-[var(--status-warn)]'
                         : 'text-[var(--color-fg-primary)]'
+                    const jevLabel = lane.laneId !== 'board_attention_exact' || lane.jev === null
+                      ? null
+                      : lane.jev.state === 'off'
+                        ? 'JEV OFF'
+                        : `JEV ON · ${lane.jev.model}`
                     return html`
                       <tr key=${lane.laneId}>
-                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code></td>
+                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
                         <td class=${statusClass}><strong>${statusLabel}</strong>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
                         <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
                         <td class="r mono">${lane.runningCount}</td>

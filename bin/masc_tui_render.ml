@@ -4767,6 +4767,14 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
     | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
   in
+  let jev_lines =
+    match lane.sl_jev with
+    | None -> []
+    | Some Tui_decode.Jev_off -> wrap (Theme.recede ()) "JEV OFF"
+    | Some (Tui_decode.Jev_on { model }) ->
+      wrap Ansi.reset
+        (Printf.sprintf "JEV ON \xc2\xb7 %s" (Terminal_text.single_line model))
+  in
   let run_stats =
     let total = lane.sl_retained_run_count in
     if total > 0 then
@@ -4811,6 +4819,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
          (Terminal_text.single_line lane.sl_lane_id))
+  @ jev_lines
   @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
       run_stats
   @ slot_distribution

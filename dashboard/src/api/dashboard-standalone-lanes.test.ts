@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseStandaloneLanesSnapshot } from './dashboard-standalone-lanes'
 
-function row(laneId: string, status = 'idle') {
+function row(laneId: string, status = 'idle'): Record<string, unknown> {
   return {
     lane_id: laneId,
     label: laneId,
@@ -24,12 +24,13 @@ function row(laneId: string, status = 'idle') {
     last_outcome: status === 'no_retained_observation' ? null : 'succeeded',
     p50_elapsed_s: status === 'no_retained_observation' ? null : 1,
     selected_slots: status === 'no_retained_observation' ? [] : [{ slot_id: 'primary', count: 1 }],
+    ...(laneId === 'board_attention_exact' ? { jev: { state: 'off' } } : {}),
   }
 }
 
 function snapshot() {
   return {
-    schema: 'masc.standalone_llm_lanes.v1',
+    schema: 'masc.standalone_llm_lanes.v2',
     generated_at: '2026-08-27T00:00:00Z',
     observed_at_unix: 20,
     observation_only: true,
@@ -58,5 +59,20 @@ describe('standalone lane snapshot decoder', () => {
   it('rejects a projection that claims control semantics', () => {
     expect(() => parseStandaloneLanesSnapshot({ ...snapshot(), observation_only: false }))
       .toThrow(/observation_only must be true/)
+  })
+
+  it('keeps typed JEV readiness and rejects unknown states', () => {
+    const enabled = snapshot()
+    enabled.lanes[0] = { ...enabled.lanes[0], jev: { state: 'on', model: '  jev-next  ' } }
+    expect(parseStandaloneLanesSnapshot(enabled).lanes[0]?.jev)
+      .toEqual({ state: 'on', model: 'jev-next' })
+
+    const malformed = snapshot()
+    malformed.lanes[0] = { ...malformed.lanes[0], jev: { state: 'warming' } }
+    expect(() => parseStandaloneLanesSnapshot(malformed)).toThrow(/jev\.state is unknown/)
+
+    const blankModel = snapshot()
+    blankModel.lanes[0] = { ...blankModel.lanes[0], jev: { state: 'on', model: ' \t ' } }
+    expect(() => parseStandaloneLanesSnapshot(blankModel)).toThrow(/model must be a non-empty string/)
   })
 })

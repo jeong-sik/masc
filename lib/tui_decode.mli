@@ -1238,6 +1238,10 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev =
+  | Jev_off
+  | Jev_on of { model : string }
+
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
@@ -1247,6 +1251,7 @@ type standalone_lane = {
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : standalone_lane_configuration;
+  sl_jev : standalone_lane_jev option;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;

@@ -4,6 +4,7 @@ module Projection = Server_standalone_lane_projection
 module Exact = Masc.Exact_lane_run_registry
 module Verification = Masc.Verification_run_registry
 module Goal_verification = Masc.Goal_verification_run_registry
+module Typesafeai = Masc.Typesafeai_config
 
 let exact_run ~run_id ~lane ~started_at ~status : Exact.run =
   { run_id
@@ -91,11 +92,14 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
     Projection.For_testing.snapshot_json_with
       ~now:110.
       ~resolve_lane
+      ~jev_readiness:Typesafeai.Off
       ~exact_runs_total:(List.length exact_runs)
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs:[]
   in
+  check string "schema" "masc.standalone_llm_lanes.v2"
+    (json |> Yojson.Safe.Util.member "schema" |> Yojson.Safe.Util.to_string);
   check bool
     "observation only"
     true
@@ -137,6 +141,53 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
       1
       (slot |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int)
   | _ -> fail "expected one selected HITL slot"
+;;
+
+let test_board_lane_projects_credential_free_jev_readiness () =
+  let snapshot jev_readiness =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:(fun lane_id ->
+        Projection.Configured
+          { admitted_slots = [ lane_id ^ "-primary" ]
+          ; cli_slots = []
+          ; dropped_slots = []
+          ; admission_error = None
+          })
+      ~jev_readiness
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let jev readiness =
+    lane_by_id (snapshot readiness) "board_attention_exact"
+    |> Yojson.Safe.Util.member "jev"
+  in
+  check string "disabled state" "off"
+    (jev Typesafeai.Off
+     |> Yojson.Safe.Util.member "state"
+     |> Yojson.Safe.Util.to_string);
+  let enabled = jev (Typesafeai.Ready { model = "jev-next" }) in
+  check string "enabled state" "on"
+    (enabled |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.to_string);
+  check string "enabled model" "jev-next"
+    (enabled |> Yojson.Safe.Util.member "model" |> Yojson.Safe.Util.to_string);
+  check string "blank model normalizes at the producer boundary" "jev-latest"
+    (jev (Typesafeai.Ready { model = " \t " })
+     |> Yojson.Safe.Util.member "model"
+     |> Yojson.Safe.Util.to_string);
+  check bool "no credential field" false
+    (match enabled with
+     | `Assoc fields -> List.mem_assoc "api_key" fields
+     | _ -> true);
+  check bool "JEV belongs only to the Board lane" true
+    (match
+       lane_by_id (snapshot Typesafeai.Off) "librarian_exact"
+       |> Yojson.Safe.Util.member "jev"
+     with
+     | `Null -> true
+     | _ -> false)
 ;;
 
 (* Lane audit W5+W7: the verifier lane's success means A VERDICT WAS
@@ -206,6 +257,7 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
     Projection.For_testing.snapshot_json_with
       ~now:110.
       ~resolve_lane
+      ~jev_readiness:Typesafeai.Off
       ~exact_runs_total:(List.length exact_runs)
       ~exact_runs
       ~verification_runs
@@ -300,6 +352,7 @@ let test_an_operator_routed_claim_is_not_a_lane_run () =
     Projection.For_testing.snapshot_json_with
       ~now:110.
       ~resolve_lane
+      ~jev_readiness:Typesafeai.Off
       ~exact_runs_total:0
       ~exact_runs:[]
       ~verification_runs
@@ -355,6 +408,7 @@ let test_latest_terminal_uses_completion_time () =
       ; dropped_slots = []
       ; admission_error = None
       })
+      ~jev_readiness:Typesafeai.Off
       ~exact_runs_total:10
       ~exact_runs
       ~verification_runs:[]
@@ -511,6 +565,7 @@ let test_goal_judgement_metric_does_not_depend_on_replacement_request () =
     in
     let snapshot = Projection.For_testing.snapshot_json_with ~now:20.
       ~resolve_lane:(fun _ -> Projection.Unconfigured "fixture")
+      ~jev_readiness:Typesafeai.Off
       ~exact_runs_total:0 ~exact_runs:[] ~verification_runs:[] ~goal_verification_runs:[ run ] in
     let lane = lane_by_id snapshot Runtime.verifier_exact_lane_id in
     check int "produced judgement succeeds independently of application" 1
@@ -788,13 +843,17 @@ let () =
             `Quick
             test_goal_judgement_metric_does_not_depend_on_replacement_request
         ; test_case
-            "all four lanes and observation states"
+            "all lanes and observation states"
             `Quick
             test_snapshot_names_every_lane_and_keeps_observed_truth
         ; test_case
             "latest terminal is ordered by completion time"
             `Quick
             test_latest_terminal_uses_completion_time
+        ; test_case
+            "Board lane projects credential-free JEV readiness"
+            `Quick
+            test_board_lane_projects_credential_free_jev_readiness
         ; test_case
             "no verdict is failed; synthetic elapsed skips p50"
             `Quick

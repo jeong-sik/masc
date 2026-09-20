@@ -84,7 +84,7 @@ describe('InternalAgentsMonitor', () => {
   beforeEach(() => {
     rawApi.fetchKeeperRawTraces.mockResolvedValue([])
     api.fetchStandaloneLanes.mockResolvedValue({
-      schema: 'masc.standalone_llm_lanes.v1',
+      schema: 'masc.standalone_llm_lanes.v2',
       generatedAt: 'now',
       observedAtUnix: 1,
       observationOnly: true,
@@ -127,32 +127,38 @@ describe('InternalAgentsMonitor', () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
-    const lane = (overrides: Record<string, unknown>) => ({
-      laneId: 'board_attention_exact',
-      label: 'Board Attention',
-      required: true,
-      observationOnly: true,
-      configured: true,
-      configurationState: 'ready',
-      admittedSlots: ['qwen3-5-cloud'],
-      cliSlots: [],
-      droppedSlots: [],
-      admissionError: null,
-      status: 'idle',
-      retainedRunCount: 4,
-      runningCount: 0,
-      succeededCount: 4,
-      failedCount: 0,
-      cancelledCount: 0,
-      lastStartedAt: 10,
-      lastTerminalAt: 12,
-      lastOutcome: 'succeeded',
-      p50ElapsedSeconds: 2,
-      selectedSlots: [{ slotId: 'qwen3-5-cloud', count: 4 }],
-      ...overrides,
-    })
-    api.fetchStandaloneLanes.mockResolvedValue({
-      schema: 'masc.standalone_llm_lanes.v1',
+    const lane = (overrides: Record<string, unknown>) => {
+      const laneId = typeof overrides.laneId === 'string'
+        ? overrides.laneId
+        : 'board_attention_exact'
+      return {
+        laneId,
+        label: 'Board Attention',
+        required: true,
+        observationOnly: true,
+        configured: true,
+        configurationState: 'ready',
+        jev: laneId === 'board_attention_exact' ? { state: 'off' as const } : null,
+        admittedSlots: ['qwen3-5-cloud'],
+        cliSlots: [],
+        droppedSlots: [],
+        admissionError: null,
+        status: 'idle',
+        retainedRunCount: 4,
+        runningCount: 0,
+        succeededCount: 4,
+        failedCount: 0,
+        cancelledCount: 0,
+        lastStartedAt: 10,
+        lastTerminalAt: 12,
+        lastOutcome: 'succeeded',
+        p50ElapsedSeconds: 2,
+        selectedSlots: [{ slotId: 'qwen3-5-cloud', count: 4 }],
+        ...overrides,
+      }
+    }
+    const laneSnapshot = {
+      schema: 'masc.standalone_llm_lanes.v2',
       generatedAt: 'now',
       observedAtUnix: 20,
       observationOnly: true,
@@ -165,7 +171,8 @@ describe('InternalAgentsMonitor', () => {
         lane({ laneId: 'librarian_exact', label: 'Librarian', status: 'no_retained_observation', retainedRunCount: 0, lastStartedAt: null, lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [] }),
         lane({ laneId: 'verifier_exact', label: 'Verifier', required: false }),
       ],
-    })
+    }
+    api.fetchStandaloneLanes.mockResolvedValue(laneSnapshot)
 
     const { container } = render(html`<${InternalAgentsMonitor} />`)
 
@@ -173,8 +180,19 @@ describe('InternalAgentsMonitor', () => {
     const matrix = await screen.findByTestId('standalone-lane-matrix')
     expect(within(matrix).getAllByText('Running')).toHaveLength(2)
     expect(within(matrix).getAllByText('No retained observation')).toHaveLength(1)
+    expect(within(matrix).getByText('JEV OFF')).toBeTruthy()
     expect(container.textContent).toContain('qwen3-5-cloud ×4')
     expect(container.textContent).toContain('관측 기록 없음')
+
+    api.fetchStandaloneLanes.mockResolvedValue({
+      ...laneSnapshot,
+      lanes: laneSnapshot.lanes.map(item => item.laneId === 'board_attention_exact'
+        ? { ...item, jev: { state: 'on' as const, model: 'jev-next' } }
+        : item),
+    })
+    sse.refresh?.()
+    expect(await within(matrix).findByText('JEV ON · jev-next')).toBeTruthy()
+    expect(within(matrix).queryByText('JEV OFF')).toBeNull()
   })
 
   it('does not let an older refresh overwrite the latest lane matrix', async () => {
@@ -185,14 +203,14 @@ describe('InternalAgentsMonitor', () => {
     const older = new Promise(resolve => { resolveOlder = resolve })
     const lane = (label: string) => ({
       laneId: 'board_attention_exact', label, required: true, observationOnly: true,
-      configured: true, configurationState: 'ready', admittedSlots: ['primary'], cliSlots: [], droppedSlots: [],
+      configured: true, configurationState: 'ready', jev: { state: 'off' as const }, admittedSlots: ['primary'], cliSlots: [], droppedSlots: [],
       admissionError: null, status: 'idle', retainedRunCount: 1, runningCount: 0,
       succeededCount: 1, failedCount: 0, cancelledCount: 0, lastStartedAt: 10,
       lastTerminalAt: 11, lastOutcome: 'succeeded', p50ElapsedSeconds: 1,
       selectedSlots: [{ slotId: 'primary', count: 1 }],
     })
     const snapshot = (label: string) => ({
-      schema: 'masc.standalone_llm_lanes.v1', generatedAt: 'now', observedAtUnix: 20,
+      schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now', observedAtUnix: 20,
       observationOnly: true, exactRunProjectionCount: 1, exactRunSourceTotal: 1,
       exactRunProjectionTruncated: false, lanes: [lane(label)],
     })

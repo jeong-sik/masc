@@ -7,6 +7,15 @@
 val default_endpoint : string
 val default_model : string
 
+type readiness =
+  | Off
+  | Ready of { model : string }
+
+val readiness : unit -> readiness
+(** Credential-free readiness for operator projections. [Off] covers an
+    explicit disable and a missing key; [Ready] carries only the configured
+    model, never the API key. *)
+
 val is_enabled : unit -> bool
 (** [true] when [TYPESAFEAI_API_KEY] holds a non-blank value and
     [MASC_TYPESAFEAI_ENABLED] does not say otherwise. The variable can turn the
@@ -21,4 +30,5 @@ val endpoint : unit -> string
 (** [MASC_TYPESAFEAI_ENDPOINT], else {!default_endpoint}. *)
 
 val model : unit -> string
-(** [MASC_TYPESAFEAI_MODEL], else {!default_model}. *)
+(** Trimmed [MASC_TYPESAFEAI_MODEL], else {!default_model} when absent or
+    blank. *)

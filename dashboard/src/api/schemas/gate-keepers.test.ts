@@ -15,6 +15,7 @@ function keeperWire(name = 'planner') {
     name,
     meta: {
       name,
+      sandbox_profile: 'docker',
       trace_id: `trace-${name}`,
       created_at: '2026-08-12T00:00:00Z',
       updated_at: '2026-08-12T00:01:00Z',
@@ -24,6 +25,7 @@ function keeperWire(name = 'planner') {
     health: 'healthy',
     paused: false,
     next_action: null,
+    runtime_blocker_summary: null,
     keepalive_running: true,
     activation_mode: 'on_demand',
     runtime_id: `runtime-${name}`,
@@ -80,6 +82,41 @@ describe('decodeGateKeepers', () => {
       directoryIssues: [],
       listing: { total: 1, limit: 200, truncated: false },
     })
+  })
+
+  it('accepts the roster current failure without changing the compact product values', () => {
+    const data = Effect.runSync(decodeGateKeepers({
+      count: 1,
+      keepers: [{ ...keeperWire(), runtime_blocker_summary: 'current failure' }],
+      ...listingWire(1),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+  })
+
+  it('accepts a nonempty sandbox name this consumer does not interpret', () => {
+    const wire = keeperWire()
+    wire.meta.sandbox_profile = 'uninterpreted-sandbox'
+    const data = Effect.runSync(decodeGateKeepers({
+      count: 1, keepers: [wire], ...listingWire(1),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+  })
+
+  it.each(['missing', 'empty'] as const)('rejects a %s sandbox name', kind => {
+    const wire = keeperWire()
+    const meta: Record<string, unknown> = { ...wire.meta }
+    if (kind === 'missing') delete meta.sandbox_profile
+    else meta.sandbox_profile = ''
+    const error = expectDrift({
+      count: 1, keepers: [{ ...wire, meta }], ...listingWire(1),
+    })
+    expect(error.issues.some(issue => issue.path.join('.') === 'keepers.0.meta.sandbox_profile')).toBe(true)
+  })
+
+  it('rejects an omitted current failure field', () => {
+    const wire: Record<string, unknown> = keeperWire()
+    delete wire.runtime_blocker_summary
+    expectDrift({ count: 1, keepers: [wire], ...listingWire(1) })
   })
 
   it('separates producer-declared error rows from usable keepers once', () => {

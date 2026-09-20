@@ -988,19 +988,6 @@ let exact_lane_supports_cli_tail = function
   | Workspace_curator -> false
 ;;
 
-let verifier_exact_slot_ids_of_lane_decls
-      (decls : Runtime_schema.exact_output_lane_decl list)
-  =
-  match
-    List.find_opt
-      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id verifier_exact_lane_id)
-      decls
-  with
-  | None -> []
-  | Some lane -> lane.slot_ids
-;;
-
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
    twice. The exact registry admits them against the AGENT_CORE catalog, and
    completion-authority judgement admits each one through
@@ -1011,23 +998,41 @@ let verifier_exact_slot_ids_of_lane_decls
    sent judgements to such an id 113 times, one failure each, and the trace
    was a Board post per attempt rather than a config that refused to load.
 
+   [cli_slots] are read the same way: [verifier_exact_lane_slot_ids] admits
+   every one through [verifier_cli_slot_admission] and fails the whole lane
+   on the first id that names no configured runtime, so an unknown CLI slot
+   also loads and then refuses every judgement.
+
    The sibling lanes are deliberately not checked here. They dispatch through
-   the registry alone, so a catalog-only target id is right for them, and
-   [hitl_auto_judge] holds one today. *)
+   the registry alone, so a catalog-only target id is right for their slots,
+   and [hitl_auto_judge] holds one today; their CLI slots answer an
+   unresolved id with a typed error at execution and walk on. *)
 let verifier_exact_slot_references
       (decls : Runtime_schema.exact_output_lane_decl list)
   =
-  List.map
-    (fun id ->
-       { site =
-           Printf.sprintf
-             "[runtime.exact_output_lanes.%s].slots"
-             verifier_exact_lane_id
-       ; shape = List_entry
-       ; id
-       ; domain = Runtime_only
-       })
-    (verifier_exact_slot_ids_of_lane_decls decls)
+  let references key ids =
+    List.map
+      (fun id ->
+         { site =
+             Printf.sprintf
+               "[runtime.exact_output_lanes.%s].%s"
+               verifier_exact_lane_id
+               key
+         ; shape = List_entry
+         ; id
+         ; domain = Runtime_only
+         })
+      ids
+  in
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id verifier_exact_lane_id)
+      decls
+  with
+  | None -> []
+  | Some lane ->
+    references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
@@ -3177,28 +3182,41 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
 ;;
 
 (* Exact-output lanes name their walk order in [slots]; the routing API edits
-   them the same way conversation lanes edit [candidates]. *)
-let exact_lane_table_path lane_name =
-  let bare =
-    String.for_all
-      (function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false)
-      lane_name
-  in
-  if bare && not (String.equal lane_name "")
-  then Printf.sprintf "runtime.exact_output_lanes.%s" lane_name
-  else
-    (* [escape_string] escapes the contents; the quotes are the caller's. *)
-    Printf.sprintf "runtime.exact_output_lanes.\"%s\"" (Toml_line_editor.escape_string lane_name)
+   them the same way conversation lanes edit [candidates]. Every exact lane id
+   is a bare key. *)
+let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ exact_lane_id lane
+
+let exact_lane_decl (config : Runtime_schema.config) lane =
+  List.find_opt
+    (fun (decl : Runtime_schema.exact_output_lane_decl) ->
+       String.equal decl.id (exact_lane_id lane))
+    config.exact_output_lane_decls
 ;;
 
-let set_exact_output_lane_slots ?runtime_config_path ~lane_name ~slots () =
-  let lane_name = String.trim lane_name in
+(* The line editor writes an exact lane as its own
+   [runtime.exact_output_lanes.<id>] table. A lane the file declares any other
+   way -- inline under [runtime.exact_output_lanes], or through dotted keys --
+   has no such header, and the editor would add one, which declares the lane a
+   second time and fails the whole file. A lane the file does not declare yet
+   gets its table. *)
+let exact_lane_editable ~content (config : Runtime_schema.config) lane =
+  let path = exact_lane_table_path lane in
+  let lines, _trailing_newline = Toml_line_editor.split_lines content in
+  match exact_lane_decl config lane with
+  | None -> Ok ()
+  | Some _ when List.exists (Toml_line_editor.is_table ~path) lines -> Ok ()
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "exact-output lane %s is not written as its own [%s] table, so it cannot be \
+          edited here"
+         (exact_lane_id lane)
+         path)
+;;
+
+let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
   let slots = List.map String.trim slots in
-  if String.equal lane_name ""
-  then Error "exact-output lane name must not be empty"
-  else if contains_newline lane_name
-  then Error "exact-output lane name must not contain newlines"
-  else if slots = []
+  if slots = []
   then
     (* Mandatory exact lanes fail the boot fail-closed without a slot; a lane
        that resolves to nothing is not the edit an operator is making. *)
@@ -3207,20 +3225,61 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane_name ~slots () =
   then Error "slots must not contain empty entries"
   else if List.exists contains_newline slots
   then Error "slots must not contain newlines"
-  else (
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* locked =
-      with_runtime_config_write_lock path (fun () ->
-        let* content = load_file_result path in
-        let next =
-          Toml_line_editor.edit_table_multiline_array
-            content
-            ~path:(exact_lane_table_path lane_name)
-            ~key:"slots"
-            ~values:slots
-        in
-        commit_runtime_config_text ~path next)
-    in
-    let* receipt = locked.value in
-    Ok (attach_lock_warnings locked.warnings receipt))
+  else
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let* () = exact_lane_editable ~content config lane in
+      let cli_slots =
+        match exact_lane_decl config lane with
+        | Some decl -> decl.cli_slot_ids
+        | None -> []
+      in
+      (* Checked here, not left to the registry: before the registry is
+         published the commit writes the file without it, and the next
+         publication then fails for every lane. *)
+      match List.find_opt (fun slot -> List.mem slot cli_slots) slots with
+      | Some slot ->
+        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (exact_lane_id lane))
+      | None ->
+        Ok
+          (Toml_line_editor.edit_table_multiline_array
+             content
+             ~path:(exact_lane_table_path lane)
+             ~key:"slots"
+             ~values:slots))
+;;
+
+(* The order an operator extends is the one the file declares. The standalone
+   lane projection shows the slots the registry admitted, which leaves out a
+   declared slot the catalog rejected; a whole order rebuilt from that view and
+   written with [set_exact_output_lane_slots] deleted every such slot. Reading
+   the declaration under the write lock keeps it, and a second writer's slot
+   written in between is read too. An id the lane already declares, as a slot
+   or as a CLI slot, is refused by name: the registry would refuse the
+   duplicate too, but only as a lane it cannot publish. *)
+let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
+  let slot = String.trim slot in
+  let lane_id = exact_lane_id lane in
+  if String.equal slot ""
+  then Error "slot must not be empty"
+  else if contains_newline slot
+  then Error "slot must not contain newlines"
+  else
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let* () = exact_lane_editable ~content config lane in
+      let slots, cli_slots =
+        match exact_lane_decl config lane with
+        | Some decl -> decl.slot_ids, decl.cli_slot_ids
+        | None -> [], []
+      in
+      if List.exists (String.equal slot) slots
+      then Error (Printf.sprintf "%s is already a slot of %s" slot lane_id)
+      else if List.exists (String.equal slot) cli_slots
+      then Error (Printf.sprintf "%s is already a CLI slot of %s" slot lane_id)
+      else
+        Ok
+          (Toml_line_editor.edit_table_multiline_array
+             content
+             ~path:(exact_lane_table_path lane)
+             ~key:"slots"
+             ~values:(slots @ [ slot ])))
 ;;

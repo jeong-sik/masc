@@ -77,13 +77,14 @@ export type TurnRawTraceRunRef = {
   session_id: string
 }
 
+// Wire tokens owned by Runtime_usage_scope.to_string.
+export const TURN_USAGE_SCOPES = ['per_request', 'conversation_cumulative', 'unavailable'] as const
+
 export type TurnRecordEntry = {
   execution_ids: string[]
   keeper: string
-  // lib/types/turn_record.ml:148-163 writes these four unconditionally and its
-  // own reader [require]s them, so the wire always carries them.
+  // Required identity fields emitted by Turn_record.to_json.
   agent_name: string
-  generation: number
   turn_kind: TurnKind
   raw_trace_run_ref: TurnRawTraceRunRef | null
   trace_id: string
@@ -93,6 +94,7 @@ export type TurnRecordEntry = {
   // null means the producer reached no exact composition observation; an
   // observed empty input remains [].
   input_components: TurnInputComponent[] | null
+  tool_surface_ref?: string
   request_runtime_profile: string | null
   request_body_bytes: number | null
   runtime_profile: string
@@ -105,6 +107,7 @@ export type TurnRecordEntry = {
   top_p?: number
   max_tokens?: number
   enable_thinking?: boolean
+  usage_scope: (typeof TURN_USAGE_SCOPES)[number]
   input_tokens?: number
   output_tokens?: number
   // #25779 made the provider cache counts durable on the turn record
@@ -128,10 +131,8 @@ export type TurnRecordEntry = {
   // history, so the inspector renders absence rather than 0.
   transmitted_atoms?: number
   total_atoms?: number
-  // Which shape the budget was measured against. 'durable_shape' means the
-  // reasoning projection declined and the window was sized against the
-  // checkpoint, so this turn saw less history than it needed to — and nothing
-  // about the decline ages out, so a keeper can stay there.
+  // 'wire_shape' uses the Agent Core checkpoint history; 'durable_shape'
+  // uses the prepared message list supplied to an official client runtime.
   model_input_measurement?: 'wire_shape' | 'durable_shape'
   price_input_per_million?: number
   price_output_per_million?: number
@@ -459,7 +460,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'execution_ids',
     'keeper',
     'agent_name',
-    'generation',
     'turn_kind',
     'raw_trace_run_ref',
     'trace_id',
@@ -467,6 +467,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'turn_ref',
     'blocks',
     'input_components',
+    'tool_surface_ref',
     'request_runtime_profile',
     'request_body_bytes',
     'transmitted_atoms',
@@ -488,6 +489,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'top_p',
     'max_tokens',
     'enable_thinking',
+    'usage_scope',
     'input_tokens',
     'cache_creation_input_tokens',
     'cache_read_input_tokens',
@@ -496,7 +498,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   ])) return null
   const keeper = decodeExactNonEmptyString(raw.keeper)
   const agent_name = decodeExactNonEmptyString(raw.agent_name)
-  const generation = decodeNonNegativeSafeInteger(raw.generation)
   const turn_kind =
     raw.turn_kind === 'autonomous' || raw.turn_kind === 'direct' ? raw.turn_kind : null
   const raw_trace_run_ref =
@@ -525,6 +526,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
       : request_runtime_profile === null && request_body_bytes === null
         ? { request_runtime_profile: null, request_body_bytes: null }
         : null
+  const usage_scope = TURN_USAGE_SCOPES.find(scope => scope === raw.usage_scope)
+  const tool_surface_ref = decodeOptionalField(raw, 'tool_surface_ref', decodeExactNonEmptyString)
   const selected_model = decodeOptionalField(raw, 'selected_model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
   const context_window = decodeOptionalField(raw, 'context_window', decodeNonNegativeSafeInteger)
@@ -556,7 +559,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (
     keeper === null
     || agent_name === null
-    || generation === null
     || turn_kind === null
     || !Object.hasOwn(raw, 'raw_trace_run_ref')
     || (raw_trace_run_ref === null && raw.raw_trace_run_ref !== null)
@@ -578,6 +580,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || requestWireObservation === null
     || !Array.isArray(raw.execution_ids)
     || !raw.execution_ids.every((id): id is string => typeof id === 'string' && id.length > 0)
+    || usage_scope === undefined
+    || tool_surface_ref === null
     || selected_model === null
     || finish_reason === null
     || context_window === null
@@ -601,7 +605,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     execution_ids,
     keeper,
     agent_name,
-    generation,
     turn_kind,
     raw_trace_run_ref,
     trace_id,
@@ -609,6 +612,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     turn_ref,
     blocks,
     input_components,
+    tool_surface_ref,
     ...requestWireObservation,
     runtime_profile,
     selected_model,
@@ -617,6 +621,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     top_p,
     max_tokens,
     enable_thinking,
+    usage_scope,
     input_tokens,
     output_tokens,
     cache_creation_input_tokens,

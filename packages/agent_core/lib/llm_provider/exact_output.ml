@@ -414,6 +414,10 @@ type ('callback_error, 'rejection) validated_flow_error =
       ; evidence : flow_evidence
       }
 
+type flow_execution_terminal_kind =
+  | Advanceable_candidates_exhausted
+  | Non_advanceable_terminal
+
 type 'callback_error flow_step_failure =
   | Flow_step_candidate_rejected of candidate_rejection_receipt
   | Flow_step_attempt_start_failed of flow_candidate_visit * start_attempt_error
@@ -1775,6 +1779,29 @@ let execution_failure_may_advance (error : execution_error) =
     , _ ) -> false
 ;;
 
+let candidate_rejection_may_advance (receipt : candidate_rejection_receipt) =
+  receipt.measurement.dispatch = No_measurement_dispatch
+;;
+
+let flow_execution_terminal_kind = function
+  | Flow_candidates_exhausted { rejection; _ }
+    when candidate_rejection_may_advance rejection ->
+    Advanceable_candidates_exhausted
+  | Flow_exact_execution_failed { cause; _ }
+    when execution_failure_may_advance cause ->
+    Advanceable_candidates_exhausted
+  | Flow_attempt_already_started _
+  | Flow_attempt_start_failed _
+  | Flow_measurement_start_failed _
+  | Flow_before_measurement_dispatch_callback_failed _
+  | Flow_measurement_terminal_callback_failed _
+  | Flow_before_dispatch_callback_failed _
+  | Flow_before_advance_callback_failed _
+  | Flow_candidates_exhausted _
+  | Flow_exact_execution_failed _ ->
+    Non_advanceable_terminal
+;;
+
 let admitted_flow_candidate visit (plan : ready_plan) =
   { visit
   ; plan_fingerprint = plan.plan_fingerprint
@@ -1874,7 +1901,7 @@ let execute_flow_candidate
 
 let advanceable_flow_failure = function
   | Flow_step_candidate_rejected receipt
-    when receipt.measurement.dispatch = No_measurement_dispatch ->
+    when candidate_rejection_may_advance receipt ->
     Some (Flow_candidate_rejected receipt)
   | Flow_step_candidate_rejected _ -> None
   | Flow_step_execution_failed ({ cause; _ } as failure)

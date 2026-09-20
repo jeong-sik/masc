@@ -809,6 +809,22 @@ type ('callback_error, 'rejection) validated_flow_error =
       ; evidence : flow_evidence
       }
 
+type flow_execution_terminal_kind =
+  | Advanceable_candidates_exhausted
+      (** The final candidate failed in the same typed way that would have
+          advanced to another frozen candidate, or was rejected without a
+          measurement dispatch. The declared candidate sequence is exhausted. *)
+  | Non_advanceable_terminal
+      (** The failure must stop this flow: replay, bookkeeping callbacks, or
+          an execution failure that is specific to this input or attempt. *)
+
+val flow_execution_terminal_kind
+  :  'callback_error flow_execution_error
+  -> flow_execution_terminal_kind
+(** Classify why a terminal flow could not continue. This reuses the exact
+    typed advancement rule used between candidates; callers never recover the
+    distinction from an error string or receipt phase. *)
+
 (** Closed fact for the invocation returning the error: whether its one outward
     completion dispatch began. This does not claim provider acceptance, response
     receipt, billing, retryability, failover eligibility, or any Pricing

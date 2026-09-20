@@ -488,7 +488,9 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
       let before = workspace_contents owner_root in
       let runtime_entries = Sys.readdir runtime_root |> Array.to_list in
       let run_cli ?(from_cwd = false) args =
-        let runtime_base_path = Masc.Workspace.runtime_base_path_for base_path in
+        let runtime_base_path =
+          Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit base_path)
+        in
         let executable =
           Sys.getenv "MASC_TEST_CHECKPOINT_PURGE_EXE"
           |> Config_dir_resolver.absolute_path

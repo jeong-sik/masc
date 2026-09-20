@@ -142,9 +142,11 @@ let () =
   in
   let base_path =
     (match !base with
-     | Some value -> Config_dir_resolver.absolute_path value
-     | None -> Config_dir_resolver.base_path_or_cwd ())
-    |> Masc.Workspace.runtime_base_path_for_request
+     | Some value ->
+       Masc.Workspace.Explicit (Config_dir_resolver.absolute_path value)
+     | None ->
+       Masc.Workspace.Explicit (Config_dir_resolver.base_path_or_cwd ()))
+    |> Masc.Workspace.runtime_base_path
   in
   (* The save below prunes the session's checkpoint history to the window the
      operator set, and that window lives in this workspace's overrides. Without

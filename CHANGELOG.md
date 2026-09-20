@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.35.21] - 2026-09-20
+## [0.35.21] - 2026-09-21
 
 ### Upgrade notes
 
@@ -45,6 +45,7 @@
 - Librarian: absorbing several memories into one claim keeps a source sentence the claim does not carry. Each source sentence is judged by TypeSafe AI's Noul, and one sentence below 0.5 excludes that source from the absorption while the new claim and the other changes still apply. With no key, with the check disabled, or on an HTTP or response error, the absorption list applies as before. The design is in `docs/rfc/RFC-librarian-absorb-gate.md` (#37369).
 - Memory: `keeper_memory_search` called without `source` reads the absorbed sources as well as the current memory, where it used to read the current memory alone; `source = "all"` adds the conversation on top. A keeper asking about something it once knew could get "nothing" back after the Librarian folded that memory into a claim. Measured on this workspace on 2026-09-21 over 945 calls: 755 empty results became 669 (#37360).
 - Librarian: typed input and result documents for continuity measurement, with question and answer preparation, per-step failure and the Noul observation each kept as their own state. No threshold, gate or coverage figure is added, and this carries no CLI or TUI entry point of its own (#37393).
+- Librarian: a measurement path records how answers hold up against explicit synthetic context snapshots. Each case asks a fixed question or one generated from its reference and answers from only the question, the facts and the unread text; TypeSafe Noul records the probability of the stated answer. Six cases ship, covering retained and absent controls, paraphrased and partial rules, unread-only evidence and generated questions. No threshold or coverage percentage is inferred (#37401).
 
 ### Changed
 
@@ -75,6 +76,8 @@
 - Board attention: the dashboard and the TUI name the answer's source as Exact, CLI or Vendor System One. A run that finished through Vendor System One keeps `selected_slot` empty by design, and that was drawn as unrecorded attribution (#37296).
 - Context: the inspectors say when a displayed history range has no runtime recorded against it. After a failover a turn can keep an earlier candidate's range while its row names a later runtime; the dashboard called that range transmitted and the TUI said it was sent this turn (#37258).
 - TUI: the NEXT REQUEST band stays on screen when the turn history is empty or its read fails. The forecast is measured separately and used to disappear with the history error (#37347).
+- Board: the Board JEV status reads the same on the server, the TUI and the Dashboard. `CONFIGURED` means an API model is set, not that a call or a credential check succeeded; `OFF` means Board judgement is switched off; a CLI-only lane and a lane that is not ready each show their reason. A valid key with the Board switch off no longer reads as configured. Blank or whitespace-only endpoint and model values are normalized in the shared config, so the HTTP client's defaults change along with the display. The `masc.standalone_llm_lanes.v2` payload carries a typed `configured` field and has no compatibility reader (#37339).
+- Exact output: whether a verifier slot can judge is decided by one shared check instead of separately at load and at dispatch. Which slots can judge is unchanged; a slot that cannot is now found earlier (#37395).
 
 ### Fixed
 
@@ -117,6 +120,14 @@
 - Librarian: a CLI fallback failure keeps its evidence (#37191).
 - Retry: a `retry-after` given as a JSON integer is read (#37384).
 - Observability: the metric store no longer swallows `Eio.Cancel.Cancelled`. `best_effort` caught it with `| exn ->`, so a counter incremented inside a cancelled fiber turned the cancellation into one warning line and the caller carried on, against the rule in RFC-0106 (#37371).
+- Librarian: a failure that cannot move to the next candidate, such as an HTTP 200 whose provider response is malformed, is no longer handed to the CLI fallback, where a CLI answer turned it into a success. The original error and its dispatch class are kept; candidate exhaustion and domain refusals still fall back (#37411, #37421).
+- HITL: Auto Judge no longer runs its CLI fallback after an HTTP exact flow ends in a failure it must stop at. It used to deliver the CLI's approve summary for a malformed HTTP 200 response; the original HTTP attempt is now kept and quarantined (#37413, #37421).
+- Librarian: Official-client input that is refused before the Librarian runtime is entered, by a failed Memory snapshot read or a pre-run configuration check, is kept for the next wake. It used to be recorded as run and dropped, so restoring the snapshot could not retry it (#37161).
+- Keeper: `masc_keeper_clear` no longer reports nothing to clear, and no longer resets the failure streak, when a checkpoint exists but cannot be read or parsed. Only a missing file counts as nothing to clear; any other read error is returned with the checkpoint path, and the file, the restart marker and the failure state are left as they were (#37121).
+- TUI: a long action result no longer disappears from the footer. It keeps its full text when it fits and is cut with a truncation marker otherwise, after warnings, search and the required keys keep their room (#37414).
+- TUI: creating a Composition with `C` checks the authored source the way the server does before sending it, so a frontmatter name that differs from the Composition body's name is shown on screen instead of coming back as a server refusal (#37420).
+- TUI: a lane-run payload shows each top-level field as its own labeled preview, so a large first field no longer hides the results after it. When the 65,536-byte preview budget cannot hold every field whole, each keeps a minimum preview and the count of omitted fields is stated (#37418).
+- TUI: PageDown and PageUp on a lane run move by the payload rows actually on screen, so no rows are skipped between pages; at 180×42 rows 29–32 used to be skipped (#37426).
 
 ## [0.35.20] - 2026-09-17
 

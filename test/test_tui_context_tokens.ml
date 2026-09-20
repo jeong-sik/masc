@@ -228,7 +228,11 @@ let test_no_body_names_what_masc_handed_over () =
     | None -> rows
   in
   Alcotest.(check bool) "and never calls it unobserved" false
-    (says "not observed" request_band)
+    (says "not observed" request_band);
+  Alcotest.(check bool) "the absent history measurement stays explicit" true
+    (says "Conversation history window was not observed" rows);
+  Alcotest.(check bool) "no projected range is invented for an absent measurement" false
+    (Option.is_some (find "projected range" rows))
 
 let with_window measurement turn =
   { turn with
@@ -241,25 +245,39 @@ let with_window measurement turn =
         }
   }
 
-let test_a_wire_shape_cut_is_labelled_sent () =
+let test_a_wire_shape_cut_is_a_projection_not_a_transmission () =
   let rows =
     lines (with_window Turn_record.Wire_shape (record ~wire:(Some 560_513) ~scope:per_request ()))
   in
-  Alcotest.(check bool) "the pointer says sent" true
+  Alcotest.(check bool) "the pointer names a projected range" true
+    (Option.is_some (find "projected range" rows));
+  Alcotest.(check bool) "the wire basis is still explicit" true
+    (Option.is_some (find "wire shape" rows));
+  Alcotest.(check bool) "the recorded atom counts are preserved" true
+    (says "26 of 9137 kept atoms" rows);
+  Alcotest.(check bool) "the omitted count describes this projection" true
+    (says "9111 older atoms were outside this projected range" rows);
+  Alcotest.(check bool) "the pointer does not claim transmission" false
     (Option.is_some (find "sent this turn" rows));
-  Alcotest.(check bool) "9111 atoms stayed behind" true
-    (says "9111 older atoms stayed behind" rows)
+  Alcotest.(check bool) "the row runtime is not attributed to the range" true
+    (says "Range observation runtime: not recorded" rows)
 
-let test_a_durable_shape_cut_is_not_labelled_sent () =
+let test_a_durable_shape_cut_is_prepared_history () =
   let rows =
     lines (with_window Turn_record.Durable_shape (record ~wire:None ~scope:per_request ()))
   in
-  Alcotest.(check bool) "the pointer says in reach" true
-    (Option.is_some (find "in reach this turn" rows));
-  Alcotest.(check bool) "and never sent" false
+  Alcotest.(check bool) "the pointer names prepared history" true
+    (Option.is_some (find "prepared history" rows));
+  Alcotest.(check bool) "the durable basis is still explicit" true
+    (Option.is_some (find "durable shape" rows));
+  Alcotest.(check bool) "and never claims it was sent" false
     (Option.is_some (find "sent this turn" rows));
-  Alcotest.(check bool) "the prose names the resumed client session" true
-    (says "resumed client session already holds the earlier ones" rows)
+  Alcotest.(check bool) "the final client request remains unmeasured" true
+    (says "Measured on the history list prepared for a client; its final request is not measured here" rows);
+  Alcotest.(check bool) "preparation does not prove retained session history" false
+    (says "resumed client session already holds the earlier ones" rows);
+  Alcotest.(check bool) "the row runtime is not attributed to the range" true
+    (says "Range observation runtime: not recorded" rows)
 
 (* A record that carried a body but a conversation-cumulative count: the
    page supplies the ratio and the note says why this turn could not. *)
@@ -352,10 +370,10 @@ let () =
             test_no_body_names_what_masc_handed_over
         ] )
     ; ( "history reach"
-      , [ Alcotest.test_case "a wire shape cut is labelled sent" `Quick
-            test_a_wire_shape_cut_is_labelled_sent
-        ; Alcotest.test_case "a durable shape cut is not labelled sent" `Quick
-            test_a_durable_shape_cut_is_not_labelled_sent
+      , [ Alcotest.test_case "a wire shape cut is a projection, not a transmission" `Quick
+            test_a_wire_shape_cut_is_a_projection_not_a_transmission
+        ; Alcotest.test_case "a durable shape cut is prepared history" `Quick
+            test_a_durable_shape_cut_is_prepared_history
         ] )
     ; ( "token scale"
       , [ Alcotest.test_case "this turn outranks the page" `Quick

@@ -16,7 +16,7 @@ let initialize_runtime ~base_path (server : Exact_output_fixture.test_server) =
   let model_id = "board-ack-protocol-fixture" in
   let catalog_path = Filename.concat base_path "model-catalog.toml" in
   save catalog_path (Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = true\n"
     model_id);
   Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id
   |> Llm_provider.Model_catalog.set_global;
@@ -24,7 +24,7 @@ let initialize_runtime ~base_path (server : Exact_output_fixture.test_server) =
     (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
     "runtime.toml" in
   save path (Printf.sprintf
-    "[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = %S\n[models.sample]\napi-name = %S\nmax-context = 1048576\nstreaming = false\n[fixture.sample]\n"
+    "[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = %S\n[models.sample]\napi-name = %S\nmax-context = 1048576\nstreaming = true\n[fixture.sample]\n"
     server.Exact_output_fixture.base_url model_id);
   match Runtime.init_default_degraded_report ~config_path:path with
   | Ok Runtime.Initialized -> ()
@@ -116,8 +116,15 @@ let run base_path prompt_root =
   require (Eio.Path.load Eio.Path.(env#fs / base_path / "filesystem-proof.txt")
     = "isolated FileSystem\n") "FileSystem write/read disagree";
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
-    (Exact_output_fixture.Reply (Exact_output_fixture.openai_response
-      (`Assoc ["acknowledgement", `String "synthetic Board message observed"]))) in
+    (* Keeper's progress observer uses the streaming Agent Core path. *)
+    (Exact_output_fixture.Stream_reply
+      {|data: {"id":"board-ack","model":"board-ack-protocol-fixture","choices":[{"index":0,"delta":{"role":"assistant","content":"Synthetic Board message observed."},"finish_reason":null}]}
+
+data: {"id":"board-ack","model":"board-ack-protocol-fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}}
+
+data: [DONE]
+
+|}) in
   initialize_runtime ~base_path server;
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir prompt_root;
@@ -178,6 +185,8 @@ let run base_path prompt_root =
     | [body] -> Yojson.Safe.from_string body | _ -> failwith "expected one captured request" in
   json (Filename.concat base_path "provider-input.json") request;
   let open Yojson.Safe.Util in
+  require (member "stream" request = `Bool true)
+    "the fixture did not exercise the streaming Keeper request";
   let request_texts = request |> member "messages" |> to_list
     |> List.map (fun message -> message |> member "content" |> to_string) in
   (* This compares the exact known source text, not a content-based routing rule. *)

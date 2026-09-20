@@ -752,17 +752,63 @@ let live_lane_configuration registry lane_id =
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots; cli_slots } ->
+    (* [verifier_exact] dispatches each cli slot as a judge, so the ids it can
+       actually judge through are a shorter list than the declaration whenever
+       one names an HTTP runtime, a client with no native-tool suppression, or
+       a Claude Code binding without tools-support. Showing the declaration
+       here would read as a configured judge that then refuses every review
+       (#37179). Sibling lanes answer an unresolved cli id with a typed error
+       at execution and walk on, so their declaration is what to show. *)
+    let admitted_cli_slots, cli_slot_rejections =
+      match Runtime.exact_lane_of_id lane_id with
+      | Some Runtime.Verifier ->
+        Runtime.verifier_cli_slots_admission
+          ~catalog_slot_count:
+            (Runtime.exact_lane_declared_catalog_slot_count
+               registry
+               ~lane_id
+               ~admitted_catalog_slots:(List.length selected_slots))
+          cli_slots
+      | Some
+          ( Runtime.Librarian
+          | Runtime.Hitl_auto_judge
+          | Runtime.Board_attention
+          | Runtime.Workspace_curator )
+      | None -> cli_slots, []
+    in
+    let dropped_slots =
+      dropped_slots
+      @ List.map
+          (fun (rejection : Runtime.verifier_cli_slot_rejection) ->
+             rejection.Runtime.slot_id)
+          cli_slot_rejections
+    in
     Configured
       { admitted_slots =
           List.map
             (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
             selected_slots
-      ; cli_slots
+      ; cli_slots = admitted_cli_slots
       ; dropped_slots
       ; admission_error =
-          if String.equal lane_id Server_workspace_memory_curator.lane_id && cli_slots <> []
-          then Some "Workspace curator requires admitted exact-output slots; CLI tails are not supported"
-          else None
+          (match selected_slots, admitted_cli_slots with
+           | [], [] ->
+             (match cli_slot_rejections with
+              | [] -> None
+              | _ :: _ as rejections ->
+                Some
+                  (String.concat
+                     "; "
+                     (List.map Runtime.verifier_cli_slot_rejection_to_string rejections)))
+           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
+             if
+               String.equal lane_id Server_workspace_memory_curator.lane_id
+               && admitted_cli_slots <> []
+             then
+               Some
+                 "Workspace curator requires admitted exact-output slots; CLI tails \
+                  are not supported"
+             else None)
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured

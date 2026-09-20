@@ -439,17 +439,6 @@ let ordinary_memory_id_of_all_match = function
   | All_history _ -> None
 ;;
 
-(* The ordinary facts in a result set, by identity. Source-bound facts are
-   keyed by their file digest, not a memory id, so they carry no event. *)
-let ordinary_memory_ids (matches : fact_match list) =
-  List.filter_map
-    (fun (m : fact_match) ->
-       match m.identity with
-       | Ordinary_memory_id memory_id -> Some memory_id
-       | Source_sha256 _ -> None)
-    matches
-;;
-
 (* Append one memory use event per id to the keeper's events sidecar
    (RFC-0418). The caller's result is already decided; a failed append is
    reported in the log and does not change it. *)
@@ -531,9 +520,10 @@ let keeper_memory_search_with_outcome
        results, and both the model and the operator are told. The store is
        append-only, so the same lines are reported on every search until the
        file is repaired; a count and the first and last line numbers keep that
-       report the same size however many lines there are. For source=all, a
-       store that cannot be read at all is named beside the stores that
-       answered rather than taking their results with it. *)
+       report the same size however many lines there are. For the default
+       search and source=all, a store that cannot be read at all is named
+       beside the stores that answered rather than taking their results with
+       it. *)
     let absorbed_fields ~(absorbed : absorbed_search) ~unavailable =
       (match absorbed.unreadable with
        | [] -> []
@@ -558,7 +548,8 @@ let keeper_memory_search_with_outcome
       | Some error ->
         Log.Keeper.warn
           ~keeper_name:meta.name
-          "keeper_memory_search answered source=all without the absorbed memory store: %s"
+          "keeper_memory_search answered source=%s without the absorbed memory store: %s"
+          source_label
           (durable_search_error_detail error);
         [ ( "unavailable_stores"
           , `List
@@ -569,6 +560,81 @@ let keeper_memory_search_with_outcome
                   ]
               ] )
         ]
+    in
+    (* The current facts and the absorbed rows answered together, the match
+       tier before the store order ({!answering}): a weaker current fact does
+       not take a slot from an absorbed row holding the whole query. The
+       default search reads these two stores; source=all adds the history.
+       The default reads the absorbed rows because a keeper mostly asks the
+       default and the rows are the originals a librarian merged (RFC-0456
+       §8): a search the snapshot alone leaves unanswered is not the same as
+       the keeper never having known it. Only ordinary current facts are
+       retrievals (RFC-0418); an absorbed row leaves no Retrieved event. *)
+    let durable_stores ~with_history =
+      match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+      | Error _ as error -> error
+      | Ok facts ->
+        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
+         | Error _ as error -> error
+         | Ok (fact_matches, fact_total) ->
+           let absorbed, unavailable =
+             match
+               search_absorbed_facts
+                 ~keepers_dir
+                 ~keeper_id:meta.name
+                 ~current_ids:(current_memory_ids facts)
+                 ~query
+                 ~limit
+             with
+             | Ok absorbed -> absorbed, None
+             | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
+           in
+           let history =
+             if with_history
+             then search_history ~config ~meta ~ctx_work ~query ~limit
+             else empty_history_search
+           in
+           (* A librarian made one claim of the rows it absorbed (RFC-0456
+              §4.2). When that claim answers this search too, the rows say
+              the same thing again and are left out, so the claim is not
+              undone by its own sources crowding the limit. A row whose claim
+              does not answer is the only way to what it says and stays. *)
+           let answering_claims =
+             List.filter_map
+               (fun (m : fact_match) ->
+                  match m.identity with
+                  | Ordinary_memory_id id -> Some id
+                  | Source_sha256 _ -> None)
+               fact_matches
+           in
+           let absorbed_matches =
+             List.filter
+               (fun (m : absorbed_match) ->
+                  not (List.mem m.row.Keeper_memory_absorbed.into answering_claims))
+               absorbed.matches
+           in
+           let candidates =
+             List.map (fun match_ -> All_fact match_) fact_matches
+             @ List.map (fun match_ -> All_absorbed match_) absorbed_matches
+             @ List.map (fun message -> All_history message) history.matches
+           in
+           let whole_query, fragments =
+             answering ~claim_of:all_search_match_text ~query candidates
+           in
+           let selected = take limit (whole_query @ fragments) in
+           Ok
+             ( durable_json
+                 ~fact_jsons:(List.map all_search_match_to_json selected)
+                 ~fact_total:(fact_total + absorbed.candidates)
+                 ~total_matches:(List.length selected)
+                 ~extra_matches:[]
+                 ~read_errors:
+                   (history_has_read_errors history
+                    || absorbed.unreadable <> [] || unavailable <> None)
+                 ~read_error_fields:
+                   (absorbed_fields ~absorbed ~unavailable
+                    @ history_read_error_fields history)
+             , List.filter_map ordinary_memory_id_of_all_match selected ))
     in
     let result =
       match source with
@@ -587,48 +653,7 @@ let keeper_memory_search_with_outcome
                @ (if no_match then [ "no_match", `Bool true ] else [])
                @ history_read_error_fields history)
           , [] )
-      | All ->
-        (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
-         | Error _ as error -> error
-         | Ok facts ->
-           (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
-            | Error _ as error -> error
-            | Ok (fact_matches, fact_total) ->
-              let absorbed, unavailable =
-                match
-                  search_absorbed_facts
-                    ~keepers_dir
-                    ~keeper_id:meta.name
-                    ~current_ids:(current_memory_ids facts)
-                    ~query
-                    ~limit
-                with
-                | Ok absorbed -> absorbed, None
-                | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
-              in
-                 let history = search_history ~config ~meta ~ctx_work ~query ~limit in
-                 let candidates =
-                   List.map (fun match_ -> All_fact match_) fact_matches
-                   @ List.map (fun match_ -> All_absorbed match_) absorbed.matches
-                   @ List.map (fun message -> All_history message) history.matches
-                 in
-                 let whole_query, fragments =
-                   answering ~claim_of:all_search_match_text ~query candidates
-                 in
-                 let selected = take limit (whole_query @ fragments) in
-                 Ok
-                   ( durable_json
-                       ~fact_jsons:(List.map all_search_match_to_json selected)
-                       ~fact_total:(fact_total + absorbed.candidates)
-                       ~total_matches:(List.length selected)
-                       ~extra_matches:[]
-                       ~read_errors:
-                         (history_has_read_errors history
-                          || absorbed.unreadable <> [] || unavailable <> None)
-                       ~read_error_fields:
-                         (absorbed_fields ~absorbed ~unavailable
-                          @ history_read_error_fields history)
-                   , List.filter_map ordinary_memory_id_of_all_match selected )))
+      | All -> durable_stores ~with_history:true
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
            the events sidecar is about current memories (RFC-0418). *)
@@ -654,22 +679,7 @@ let keeper_memory_search_with_outcome
                     ~read_errors:(absorbed.unreadable <> [])
                     ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
                 , [] )))
-      | Memory ->
-        (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
-         | Error _ as error -> error
-         | Ok facts ->
-           (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
-            | Error _ as error -> error
-            | Ok (matches, total_candidates) ->
-              Ok
-                ( durable_json
-                    ~fact_jsons:(List.map fact_match_to_json matches)
-                    ~fact_total:total_candidates
-                    ~total_matches:(List.length matches)
-                    ~extra_matches:[]
-                    ~read_errors:false
-                    ~read_error_fields:[]
-                , ordinary_memory_ids matches )))
+      | Memory -> durable_stores ~with_history:false
     in
     match result with
     | Error error ->

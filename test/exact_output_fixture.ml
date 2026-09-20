@@ -20,6 +20,7 @@ let fixture_post_connect_timeout_seconds = 30.0
 
 type server_behavior =
   | Reply of string
+  | Stream_reply of string
   | Replies of string list
   | Abort_after_request
   | Delay_then_reply of float * string
@@ -90,6 +91,10 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
     Option.iter (fun hook -> hook ()) on_request_before_reply;
     match behavior with
     | Reply response -> Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    | Stream_reply response ->
+      Cohttp_eio.Server.respond_string
+        ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
+        ~status:`OK ~body:response ()
     | Replies responses ->
       let response =
         match List.nth_opt responses request_index with

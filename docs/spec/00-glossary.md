@@ -31,8 +31,17 @@ status: reference
 : Human-in-the-Loop의 약어. Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로다.
   대기 중인 HITL 판정은 다른 Keeper의 턴이나 서로 독립인 작업을 멈추지 않는다.
 
+**Surface**
+: 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
+  입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
+
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
+
+**Heartbeat**
+: Workspace에서 Agent의 `last_seen`을 갱신하는 명시적 liveness 작업. 성공은
+  `Heartbeat_updated`일 때만 뜻하며, 잘못된 Agent 파일이나 없는 Agent는 생존 증거가 아니다.
+  → [Workspace_gc.heartbeat](../../lib/workspace/workspace_gc.mli)
 
 **Agent**
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
@@ -118,6 +127,10 @@ status: reference
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
+
+**Evidence**
+: 관찰·검증·전환이 실제 근거에 연결되었음을 나타내는 typed reference. `evidence_refs`
+  같은 필드로 전달하며, 설명 문장만으로 근거를 대신하지 않는다.
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,

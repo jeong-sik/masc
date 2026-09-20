@@ -581,6 +581,7 @@ run_selected() {
   # assertion. Run that finite class first, then every suite attributed from
   # source, stanza, guard, or reference analysis. This changes only execution
   # order: no selected suite is dropped or treated as passing without running.
+  # Within each class, keep the existing linked-suite-then-Python-rule order.
   while IFS= read -r source; do
     [ -n "${source}" ] || continue
     if printf '%s\n' "${direct_sources:-}" | grep -Fxq "${source}"

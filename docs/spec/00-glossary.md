@@ -441,3 +441,12 @@ status: reference
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
+
+**JEV**
+: Board의 주의 대상 선택이나 Librarian의 기억 흡수 검사에 쓰는 TypeSafe AI 평가 모델.
+  Librarian은 새 claim이 흡수할 원문을 전달하는지 묻고, 반환된 Noul 판정값과
+  적용 기준을 기록한다. 이 판정 기록은 Memory 저장 성공과 별개다.
+  실행의 `run.status`와 판정 기록의 `absorb_gate.status`도 구분한다.
+  `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단되기 전에 완료된 응답만 담는다.
+  `open`은 검사 실패 후 기존 처리 규칙에 따라 반환한 결과이고, `judged`는 검사를 마친 결과다.
+  취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.

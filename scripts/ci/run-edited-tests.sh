@@ -576,6 +576,11 @@ run_selected() {
   skipped=0
   failed=""
   local direct_group="" attributed_group="" source
+  local linked_jobs="${DUNE_JOBS:-1}"
+  if ! [[ "${linked_jobs}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "DUNE_JOBS must be a positive integer, got ${linked_jobs}" >&2
+    return 2
+  fi
 
   # A directly edited suite is the closest executable claim about the changed
   # assertion. Run that finite class first, then every suite attributed from
@@ -600,7 +605,7 @@ EOF
     # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
     # "${a[@]}" as unbound under nounset.
     local linked_ids=() linked_deps=() linked_envs=() linked_count=0
-    local python_sources=() python_count=0
+    local python_sources=() python_count=0 python_batchable=true
     local dir name verdict stanza_deps stanza_env
 
   while IFS= read -r source; do
@@ -623,6 +628,8 @@ EOF
       *.py)
         python_sources[python_count]="${source}"
         python_count=$((python_count + 1))
+        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] \
+          || python_batchable=false
         continue
         ;;
     esac
@@ -713,88 +720,156 @@ DEPS
     done
     fi
 
+    # Dune already builds with DUNE_JOBS workers. Use the same worker count
+    # for the independent linked executables instead of paying their runtime
+    # serially after one batched build. A wave finishes before the next starts,
+    # so the direct class still completes before attributed work begins. Each
+    # child keeps its own timeout and every failed or unreached suite is still
+    # named below; concurrency changes neither selection nor certification.
     i=0
     while [ "${i}" -lt "${linked_count}" ]; do
-    id=${linked_ids[i]}
-    dir=${id%/*}
-    name=${id##*/}
-    i=$((i + 1))
-    binary="${repo_root}/_build/default/${id}.exe"
-    if [ ! -x "${binary}" ] && [ "${build_ran_out}" = true ]; then
-      failed="${failed}${id} (not built: the step budget ran out)\n"
-      continue
-    fi
-    if [ "${linked_built[i - 1]}" = false ]; then
-      failed="${failed}${id} (build)\n"
-      continue
-    fi
-    if [ ! -x "${binary}" ]; then
-      # The build reported success and the binary is not where dune puts it,
-      # which is a different thing from a suite that failed to link.
-      failed="${failed}${id} (built, but no binary at ${binary})\n"
-      continue
-    fi
-    if [ "$(budget_left)" -le 0 ]; then
-      failed="${failed}${id} (not run: the step budget ran out)\n"
-      continue
-    fi
-    limit=$(bounded_by_budget "${per_suite_timeout}")
-    local stanza_setenv=()
-    while IFS= read -r assignment; do
-      [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
-    done <<ENVS
-${linked_envs[i - 1]}
+      local wave_pids=() wave_indices=() wave_limits=() wave_count=0
+      while [ "${i}" -lt "${linked_count}" ] && [ "${wave_count}" -lt "${linked_jobs}" ]; do
+        local linked_index="${i}"
+        id=${linked_ids[linked_index]}
+        dir=${id%/*}
+        name=${id##*/}
+        i=$((i + 1))
+        binary="${repo_root}/_build/default/${id}.exe"
+        if [ ! -x "${binary}" ] && [ "${build_ran_out}" = true ]; then
+          failed="${failed}${id} (not built: the step budget ran out)\n"
+          continue
+        fi
+        if [ "${linked_built[linked_index]}" = false ]; then
+          failed="${failed}${id} (build)\n"
+          continue
+        fi
+        if [ ! -x "${binary}" ]; then
+          # The build reported success and the binary is not where dune puts
+          # it, which is different from a suite that failed to link.
+          failed="${failed}${id} (built, but no binary at ${binary})\n"
+          continue
+        fi
+        if [ "$(budget_left)" -le 0 ]; then
+          failed="${failed}${id} (not run: the step budget ran out)\n"
+          continue
+        fi
+        limit=$(bounded_by_budget "${per_suite_timeout}")
+        local stanza_setenv=()
+        while IFS= read -r assignment; do
+          [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
+        done <<ENVS
+${linked_envs[linked_index]}
 ENVS
-    echo "== ${id}"
-    status=0
-    # dune runs a suite from inside its own build directory, and suites read
-    # relative paths from there. DUNE_SOURCEROOT is what the ones that want
-    # the checkout read; without it they fall back to the cwd, which from
-    # here would be the wrong tree.
-    ( cd "${repo_root}/_build/default/${dir}" \
-      && env DUNE_SOURCEROOT="${repo_root}" \
-         ${stanza_setenv+"${stanza_setenv[@]}"} \
-         timeout "${limit}" "./${name}.exe" < /dev/null ) || status=$?
-    if [ "${status}" -eq 0 ]; then
-      ran=$((ran + 1))
-    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
-      failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
-    else
-      failed="${failed}${id} (run)\n"
-    fi
+        echo "== ${id}"
+        # Dune runs a suite from inside its own build directory, and suites
+        # read relative paths from there. DUNE_SOURCEROOT is what the ones
+        # that want the checkout read; without it they fall back to the cwd.
+        ( cd "${repo_root}/_build/default/${dir}" \
+          && env DUNE_SOURCEROOT="${repo_root}" \
+             ${stanza_setenv+"${stanza_setenv[@]}"} \
+             timeout "${limit}" "./${name}.exe" < /dev/null ) &
+        wave_pids[wave_count]=$!
+        wave_indices[wave_count]="${linked_index}"
+        wave_limits[wave_count]="${limit}"
+        wave_count=$((wave_count + 1))
+      done
+
+      local wave_index=0
+      while [ "${wave_index}" -lt "${wave_count}" ]; do
+        linked_index=${wave_indices[wave_index]}
+        id=${linked_ids[linked_index]}
+        limit=${wave_limits[wave_index]}
+        if wait "${wave_pids[wave_index]}"; then
+          status=0
+        else
+          status=$?
+        fi
+        if [ "${status}" -eq 0 ]; then
+          ran=$((ran + 1))
+        elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
+          failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
+        else
+          failed="${failed}${id} (run)\n"
+        fi
+        wave_index=$((wave_index + 1))
+      done
     done
 
-  # A .py suite has no executable to build and run, so dune runs it: the rule
-  # supplies the deps and the environment its action declares. Asked for by
-  # path (@test/runtest-x, not @runtest-x) so a name that stopped existing
-  # fails here instead of matching a rule in some other directory.
-  # Measured 2026-09-13: the alias exits 0 on a pass and 1 on a planted
-  # failure, both forms, so this is a verdict and not a build line that
-  # always reports success.
-    i=0
-    while [ "${i}" -lt "${python_count}" ]; do
-    source=${python_sources[i]}
-    i=$((i + 1))
-    dir=$(dirname "${source}")
-    name=$(basename "${source}" .py)
-    if [ "$(budget_left)" -le 0 ]; then
-      failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
-      continue
-    fi
-    local own
-    own=$(suite_timeout "${source}")
-    limit=$(bounded_by_budget "${own}")
-    echo "== ${dir}/${name} (dune rule)"
-    status=0
-    timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
-    if [ "${status}" -eq 0 ]; then
-      ran=$((ran + 1))
-    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
-      failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+  # A .py suite has no executable to build and run, so dune runs its rule: the
+  # rule supplies the deps, sandbox and environment its action declares.
+  # Default-bound rules share one dune invocation, which lets DUNE_JOBS run
+  # their independent sandboxes concurrently. Before this, a broad selection
+  # paid every PTY rule serially: run 35502819681 passed 414 suites, then spent
+  # the final two seconds on the first of 15 remaining PTY rules. Directly
+  # edited rules remain their own earlier execution class, and a rule with a
+  # custom timeout stays on the one-at-a-time path below. Selection and the
+  # fail-closed step budget are unchanged.
+    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then
+      local python_targets=()
+      i=0
+      while [ "${i}" -lt "${python_count}" ]; do
+        source=${python_sources[i]}
+        dir=$(dirname "${source}")
+        name=$(basename "${source}" .py)
+        python_targets[i]="@${dir}/runtest-${name}"
+        i=$((i + 1))
+      done
+      if [ "$(budget_left)" -le 0 ]; then
+        status=124
+        limit=0
+      else
+        limit=$(bounded_by_budget "${per_suite_timeout}")
+        echo "== running ${python_count} dune-rule suites in one invocation"
+        status=0
+        timeout "${limit}" dune build "${python_targets[@]}" < /dev/null || status=$?
+      fi
+      if [ "${status}" -eq 0 ]; then
+        ran=$((ran + python_count))
+      else
+        i=0
+        while [ "${i}" -lt "${python_count}" ]; do
+          source=${python_sources[i]}
+          i=$((i + 1))
+          dir=$(dirname "${source}")
+          name=$(basename "${source}" .py)
+          if [ "${limit}" -eq 0 ]; then
+            failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+          elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
+            failed="${failed}${dir}/${name} (dune-rule batch stopped at the step budget after ${limit}s)\n"
+          else
+            failed="${failed}${dir}/${name} (dune-rule batch)\n"
+          fi
+        done
+      fi
     else
-      failed="${failed}${dir}/${name} (run)\n"
+      # Asked for by path (@test/runtest-x, not @runtest-x) so a name that
+      # stopped existing fails here instead of matching another directory.
+      i=0
+      while [ "${i}" -lt "${python_count}" ]; do
+        source=${python_sources[i]}
+        i=$((i + 1))
+        dir=$(dirname "${source}")
+        name=$(basename "${source}" .py)
+        if [ "$(budget_left)" -le 0 ]; then
+          failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+          continue
+        fi
+        local own
+        own=$(suite_timeout "${source}")
+        limit=$(bounded_by_budget "${own}")
+        echo "== ${dir}/${name} (dune rule)"
+        status=0
+        timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
+        if [ "${status}" -eq 0 ]; then
+          ran=$((ran + 1))
+        elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
+          failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+        else
+          failed="${failed}${dir}/${name} (run)\n"
+        fi
+      done
     fi
-    done
   done
 }
 
@@ -1093,7 +1168,7 @@ for target in "$@"; do
   name=$(basename "${target}" .exe)
   case "${name}" in
     *broken*) echo "stand-in dune: ${name} does not link" >&2; status=1; continue ;;
-    *slow*) body='exec sleep 60' ;;
+    *slow*) body='sleep "${FAKE_DUNE_SUITE_SECONDS:-60}"' ;;
     *failing*) body='exit 1' ;;
     *) body='exit 0' ;;
   esac
@@ -1123,6 +1198,7 @@ FAKE
     stanza_reader="${work}/reader.py"
     repo_root="${work}/root"
     cd "${repo_root}"
+    DUNE_JOBS="${RUNNER_DUNE_JOBS:-1}"
     sources=""
     for fixture_source in "$@"; do
       case "${fixture_source}" in
@@ -1165,6 +1241,18 @@ FAKE
     runner_check "a directly edited Python rule runs before attributed linked suites" \
       "test/test_zz_direct_broken (run);test/test_aa_slow (stopped at the step budget);" \
       0 3 test_aa_slow test/test_zz_direct_broken.py
+  RUNNER_DUNE_JOBS=2 FAKE_DUNE_SUITE_SECONDS=1 \
+    runner_check "linked suites share the existing Dune worker count" "" \
+      0 3 test_slow_one test_slow_two
+  RUNNER_DUNE_JOBS=2 \
+    runner_check "a linked failure stays named beside a parallel pass" \
+      "test/test_failing (run);" 0 3 test_failing test_ok
+  RUNNER_DUNE_JOBS=2 \
+    runner_check "a parallel wave that spends the budget names every remainder" \
+      "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
+      0 2 test_slow_one test_slow_two test_zz_after
+  runner_check "default-bound Python rules share one dune invocation" "" \
+    2 3 test/test_python_one.py test/test_python_two.py
   # The build starts with budget left and outlasts it, so the timeout on the
   # build is what ends it. With a one-second budget the budget was already
   # spent before the build began, and that case passed without the timeout.

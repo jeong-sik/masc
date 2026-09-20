@@ -6644,6 +6644,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
         {
             "keeper": "alpha",
             "dashboard_surface": "/api/v1/keepers/:name/memory-facts",
+            "events_read_error": None,
             "ordinary": {
                 "present": True,
                 "revision": 7,
@@ -6660,7 +6661,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                             "retrieved_count": 3,
                             "retrieved_distinct_days": 2,
                             "last_retrieved_at": 1787347500.0,
-                            "cited_count": 0,
+                            "retracted_count": 0,
                             "revised_from": [],
                         },
                     },
@@ -6675,7 +6676,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                             "retrieved_count": 0,
                             "retrieved_distinct_days": 0,
                             "last_retrieved_at": None,
-                            "cited_count": 0,
+                            "retracted_count": 0,
                             "revised_from": [],
                         },
                     },

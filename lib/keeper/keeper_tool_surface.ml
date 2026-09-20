@@ -288,9 +288,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
            | Some wctx ->
              Clear_attempted
                (Keeper_history_clear.clear
-                  ~keepers_dir:
-                    (Config_dir_resolver.keepers_dir_for_base_path
-                       ~base_path:config.base_path)
+                  ~keepers_dir:(Workspace.keepers_runtime_dir config)
                   ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                   ~keeper_name:meta.name
                   ~session

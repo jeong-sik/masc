@@ -226,6 +226,8 @@ let uses_anthropic_schema_prefill (config : Provider_config.t) messages =
 
 let request_uses_exact_cross_feature (request : Llm_transport.completion_request) =
   let config = request.config in
+  (* A binding's explicit effort is a validated request control, like
+     [enable_thinking]; it does not add tools or reasoning history. *)
   request.tools <> []
   || config.tool_stream
   || config.disable_parallel_tool_use
@@ -233,7 +235,6 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
       | None | Some Types.None_ -> false
       | Some _ -> true)
   || Option.is_some config.preserve_thinking
-  || Option.is_some config.reasoning_effort
   || Option.is_some config.clear_thinking
   || uses_anthropic_schema_prefill config request.messages
   || List.exists

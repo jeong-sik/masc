@@ -123,6 +123,16 @@ let sample_record () : Turn_record.t =
         ; measurement = Wire_shape
         ; front_atom_digest = String.make 64 'a'
         }
+  ; response_observed_model_input =
+      Some
+        { runtime_profile = "ollama_cloud.deepseek-v4-flash"
+        ; window =
+            { transmitted_atoms = 25
+            ; total_atoms = 7_700
+            ; measurement = Wire_shape
+            ; front_atom_digest = String.make 64 'b'
+            }
+        }
   ; raw_trace_run_ref =
       Some
         { worker_run_id = "worker-run-41"
@@ -272,7 +282,7 @@ let test_historical_row_without_usage_scope_is_unavailable () =
 let test_dashboard_writer_fixture_roundtrip () =
   let lines =
     In_channel.with_open_text
-      "../dashboard/src/api/fixtures/turn-record-writer-main.jsonl"
+      "../dashboard/src/api/fixtures/turn-record-writer.jsonl"
       In_channel.input_lines
   in
   let scopes =
@@ -291,7 +301,6 @@ let test_dashboard_writer_fixture_roundtrip () =
     (List.map Runtime_usage_scope.to_string
        Runtime_usage_scope.all)
     scopes
-
 let test_codec_roundtrip () =
   let record = sample_record () in
   match Turn_record.of_json (Turn_record.to_json record) with
@@ -362,6 +371,18 @@ let test_codec_roundtrip () =
          (fun (observation : Turn_record.request_wire_observation) ->
            observation.body_bytes)
          decoded.request_wire_observation);
+    (match decoded.response_observed_model_input with
+     | None -> fail "response-observed model input was dropped"
+     | Some observed ->
+       check string "response runtime survives"
+         "ollama_cloud.deepseek-v4-flash"
+         observed.runtime_profile;
+       check int "response window remains distinct from latest attempt" 25
+         observed.window.transmitted_atoms;
+       check int "response window total survives" 7_700
+         observed.window.total_atoms;
+       check string "response window digest survives" (String.make 64 'b')
+         observed.window.front_atom_digest);
     check (option string) "exact raw trace run survives"
       (Option.map
          (fun (run_ref : Turn_record.raw_trace_run_ref) -> run_ref.worker_run_id)
@@ -395,6 +416,7 @@ let test_codec_optional_fields_absent () =
     ; ttfrc_ms = None
     ; request_wire_observation = None
     ; model_input_window = None
+    ; response_observed_model_input = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -439,7 +461,11 @@ let test_codec_optional_fields_absent () =
      check bool "request bytes key required" true
        (List.mem_assoc "request_body_bytes" fields);
      check bool "request bytes None is explicit null" true
-       (List.assoc_opt "request_body_bytes" fields = Some `Null)
+       (List.assoc_opt "request_body_bytes" fields = Some `Null);
+     check bool "response-observed key required" true
+       (List.mem_assoc "response_observed_model_input" fields);
+     check bool "no response observation is explicit null" true
+       (List.assoc_opt "response_observed_model_input" fields = Some `Null)
    | _ -> fail "to_json did not produce an object");
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
@@ -467,6 +493,8 @@ let test_codec_optional_fields_absent () =
          (fun (observation : Turn_record.request_wire_observation) ->
            observation.body_bytes)
          decoded.request_wire_observation);
+    check bool "response observation absent stays None" true
+      (Option.is_none decoded.response_observed_model_input);
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;
@@ -521,7 +549,47 @@ let test_codec_requires_current_observation_fields () =
     ; "transmitted_atoms"
     ; "total_atoms"
     ; "front_atom_digest"
+    ; "response_observed_model_input"
     ]
+
+let test_codec_rejects_invalid_response_observed_model_input () =
+  let replace_observed update =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      let observed =
+        match List.assoc "response_observed_model_input" fields with
+        | `Assoc observed_fields -> `Assoc (update observed_fields)
+        | _ -> fail "sample response observation is not an object"
+      in
+      `Assoc
+        (("response_observed_model_input", observed)
+         :: List.remove_assoc "response_observed_model_input" fields)
+    | other -> other
+  in
+  let cases =
+    [ ( "blank runtime"
+      , replace_observed (fun fields ->
+          ("runtime_profile", `String " ")
+          :: List.remove_assoc "runtime_profile" fields) )
+    ; "partial window", replace_observed (List.remove_assoc "front_atom_digest")
+    ; ( "transmitted above total"
+      , replace_observed (fun fields ->
+          ("transmitted_atoms", `Int 8)
+          :: ("total_atoms", `Int 7)
+          :: List.remove_assoc "transmitted_atoms"
+               (List.remove_assoc "total_atoms" fields)) )
+    ]
+  in
+  List.iter
+    (fun (label, json) ->
+       match Turn_record.of_json json with
+       | Ok _ -> failf "%s decoded" label
+       | Error message ->
+         check bool label true
+           (Astring.String.is_infix
+              ~affix:"response_observed_model_input"
+              message))
+    cases
 
 (* The record has to carry how much of its own history the turn transmitted,
    because nothing downstream can recover it: the request itself keeps no trace
@@ -1026,6 +1094,8 @@ let () =
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "current observation fields required" `Quick
             test_codec_requires_current_observation_fields
+        ; test_case "invalid response-observed input rejected" `Quick
+            test_codec_rejects_invalid_response_observed_model_input
         ; test_case "record carries transmitted history share" `Quick
             test_record_carries_transmitted_history_share
         ; test_case "transmitting more than held rejected" `Quick

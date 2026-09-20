@@ -140,20 +140,45 @@ let format_messages_for_prompt messages =
    invented identity stays fail-closed. *)
 let surrogate_id_of_index index = Printf.sprintf "m%d" (index + 1)
 
-let current_fact_json index fact =
+let basis_for_prompt ~by_identity = function
+  | Observed _ as basis -> basis_to_json basis
+  | Derived derivations ->
+    (* Deduplicate before projection: distinct missing premises both become null. *)
+    let premise_paths =
+      List.map (fun proof -> (normalize_derivation proof).premise_ids) derivations
+      |> List.sort_uniq (List.compare String.compare)
+    in
+    `Assoc
+      [ wire_field_kind, `String "derived"
+      ; wire_field_derivations,
+        `List (List.map (fun premise_ids ->
+          `List (List.map (fun identity ->
+            String_map.find_opt identity by_identity
+            |> Json_util.string_opt_to_json) premise_ids)) premise_paths)
+      ]
+;;
+
+let current_fact_json ~by_identity index fact =
   `Assoc
     [ wire_field_memory_id, `String (surrogate_id_of_index index)
     ; ( "fact"
       , `Assoc
           [ wire_field_claim, `String fact.claim
           ; wire_field_category, `String (category_to_string fact.category)
+          ; wire_field_origin,
+            `Assoc [ wire_field_kind, `String (origin_kind_to_string fact.origin.kind) ]
+          ; wire_field_basis, basis_for_prompt ~by_identity fact.basis
           ] )
     ]
 ;;
 
 let current_selection_json (current : current_selection) =
+  let by_identity =
+    List.mapi (fun index fact -> memory_id fact, surrogate_id_of_index index) current.facts
+    |> List.to_seq |> String_map.of_seq
+  in
   `Assoc
-    [ "facts", `List (List.mapi current_fact_json current.facts) ]
+    [ "facts", `List (List.mapi (current_fact_json ~by_identity) current.facts) ]
 ;;
 
 let format_current_selection_for_prompt

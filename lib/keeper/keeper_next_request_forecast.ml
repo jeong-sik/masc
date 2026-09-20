@@ -399,7 +399,7 @@ let candidate
     | Ok () ->
       (* The same front the turn driver composes from: the pair's ledger
          while this history holds its positions, else the seed the newest
-         completed Agent Core record on the trace gives every candidate alike.
+         response-observed record on the trace gives every candidate alike.
          The forecast only reads: a ledger that does not hold is passed over
          here and dropped by the turn driver's next composition. *)
       let front, counted_tokens =

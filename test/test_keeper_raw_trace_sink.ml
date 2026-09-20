@@ -105,18 +105,20 @@ let materialize_turn ~(meta : Keeper_meta_contract.keeper_meta) ~turn sink =
        ~final_text:(Some (Printf.sprintf "done-%d" turn))
        ~stop_reason:(Some "end_turn") ~error:None)
 
+let raw_trace_run_ref ~(meta : Keeper_meta_contract.keeper_meta) ~turn
+    ~raw_trace_path : Turn_record.raw_trace_run_ref =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  { worker_run_id = Printf.sprintf "run-%d" turn
+  ; path = raw_trace_path
+  ; start_seq = 1
+  ; end_seq = 1
+  ; agent_name = meta.name
+  ; session_id = trace_id
+  }
+
 let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~raw_trace_path =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  let raw_trace_run_ref : Turn_record.raw_trace_run_ref =
-    { worker_run_id = Printf.sprintf "run-%d" turn
-    ; path = raw_trace_path
-    ; start_seq = 1
-    ; end_seq = 1
-    ; agent_name = meta.name
-    ; session_id = trace_id
-    }
-  in
   Keeper_turn_record_writer.write
     ~model_input_window:None
     ~response_observed_model_input:None
@@ -135,7 +137,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~request_latency_ms:None
     ~ttfrc_ms:None
     ~request_wire_observation:None
-    ~raw_trace_run_ref:(Some raw_trace_run_ref)
+    ~raw_trace_run_ref:(Some (raw_trace_run_ref ~meta ~turn ~raw_trace_path))
     ~sampling:
       { temperature = None
       ; top_p = None
@@ -154,6 +156,48 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~input_components:None
     ~tool_surface_ref:None
     ()
+
+let turn_record_json ~(meta : Keeper_meta_contract.keeper_meta) ~turn
+    ~raw_trace_path =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  Turn_record.to_json
+    { execution_ids = []
+    ; keeper = meta.name
+    ; agent_name = meta.name
+    ; turn_kind = Turn_record.Autonomous
+    ; trace_id
+    ; absolute_turn = turn
+    ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+    ; blocks = []
+    ; input_components = None
+    ; runtime_profile = "test-runtime"
+    ; selected_model = Some "test-model"
+    ; finish_reason = Some "completed"
+    ; tool_surface_ref = None
+    ; context_window = None
+    ; price_input_per_million = None
+    ; price_output_per_million = None
+    ; request_latency_ms = None
+    ; ttfrc_ms = None
+    ; request_wire_observation = None
+    ; model_input_window = None
+    ; response_observed_model_input = None
+    ; raw_trace_run_ref = Some (raw_trace_run_ref ~meta ~turn ~raw_trace_path)
+    ; sampling =
+        { temperature = None
+        ; top_p = None
+        ; max_tokens = None
+        ; enable_thinking = None
+        }
+    ; usage =
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        }
+    ; ts = 0.0
+    }
 
 (* Per-turn store lives under the keepers runtime dir — the SSOT shared
    with the metrics/receipt stores — and every call hands out a fresh
@@ -393,6 +437,46 @@ let test_prune_preserves_current_references_and_removes_orphans () =
   Alcotest.(check bool) "non-jsonl file is not a retention candidate" true
     (Sys.file_exists non_trace)
 
+(* Retention owns only the keeper/trace/run-reference projection. An unrelated
+   TurnRecord hard cut remains strict for full consumers while both generations'
+   exact references stay reachable. *)
+let test_prune_mixed_turn_record_generations () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
+  let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+  Fs_compat.mkdir_p dir;
+  let old_path = Filename.concat dir "old-generation.jsonl" in
+  let current_path = Filename.concat dir "current-generation.jsonl" in
+  let orphan = Filename.concat dir "orphan.jsonl" in
+  List.iter (fun path -> write_file path "{}\n") [ old_path; current_path; orphan ];
+  let old_json =
+    match turn_record_json ~meta ~turn:1 ~raw_trace_path:old_path with
+    | `Assoc fields ->
+      `Assoc (List.remove_assoc "response_observed_model_input" fields)
+    | _ -> Alcotest.fail "TurnRecord writer did not produce an object"
+  in
+  (match Turn_record.of_json old_json with
+   | Error detail ->
+     Alcotest.(check bool)
+       "full TurnRecord codec keeps the hard cut"
+       true
+       (Astring.String.is_infix ~affix:"response_observed_model_input" detail)
+   | Ok _ -> Alcotest.fail "full TurnRecord codec accepted a previous-schema row");
+  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Dated_jsonl.append store old_json;
+  Dated_jsonl.append store
+    (turn_record_json ~meta ~turn:2 ~raw_trace_path:current_path);
+  let summary = prune_or_fail config in
+  Alcotest.(check int) "only the orphan is removed" 1 summary.removed;
+  Alcotest.(check int) "both generations contribute references" 2
+    summary.retained_references;
+  Alcotest.(check bool) "previous-generation reference survives" true
+    (Sys.file_exists old_path);
+  Alcotest.(check bool) "current reference survives" true
+    (Sys.file_exists current_path);
+  Alcotest.(check bool) "current orphan is removed" false
+    (Sys.file_exists orphan)
+
 (* A malformed current reachability root must never be converted into a
    destructive guess. The entire cleanup is skipped and every file survives. *)
 let test_prune_fails_open_on_incompatible_turn_record () =
@@ -416,6 +500,84 @@ let test_prune_fails_open_on_incompatible_turn_record () =
         ^ Keeper_raw_trace_retention.error_to_string error)
   | Ok _ -> Alcotest.fail "incompatible TurnRecord must skip cleanup");
   Alcotest.(check bool) "orphan survives fail-open cleanup" true
+    (Sys.file_exists orphan)
+
+let test_prune_fails_open_on_invalid_reachability_root () =
+  let cases =
+    [ ( "missing keeper"
+      , `Assoc
+          [ "trace_id", `String "trace"
+          ; "raw_trace_run_ref", `Null
+          ] )
+    ; ( "duplicate keeper"
+      , `Assoc
+          [ "keeper", `String keeper_name
+          ; "keeper", `String keeper_name
+          ; "trace_id", `String "trace"
+          ; "raw_trace_run_ref", `Null
+          ] )
+    ; ( "wrong-typed keeper"
+      , `Assoc
+          [ "keeper", `Int 1
+          ; "trace_id", `String "trace"
+          ; "raw_trace_run_ref", `Null
+          ] )
+    ; ( "mismatched raw-trace session"
+      , `Assoc
+          [ "keeper", `String keeper_name
+          ; "trace_id", `String "trace"
+          ; ( "raw_trace_run_ref"
+            , `Assoc
+                [ "worker_run_id", `String "run"
+                ; "path", `String "/not/used.jsonl"
+                ; "start_seq", `Int 1
+                ; "end_seq", `Int 2
+                ; "agent_name", `String "agent"
+                ; "session_id", `String "another-trace"
+                ] )
+          ] )
+    ]
+  in
+  List.iter
+    (fun (label, json) ->
+      with_workspace @@ fun config ->
+      let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+      Fs_compat.mkdir_p dir;
+      let orphan = Filename.concat dir (label ^ ".jsonl") in
+      write_file orphan "{}\n";
+      Dated_jsonl.append
+        (Keeper_types_support.keeper_turn_record_store config keeper_name)
+        json;
+      (match Keeper_raw_trace_retention.prune ~config ~keeper_name () with
+       | Error (Keeper_raw_trace_retention.Incompatible_turn_record _) -> ()
+       | Error error ->
+         Alcotest.failf "%s returned the wrong error: %s" label
+           (Keeper_raw_trace_retention.error_to_string error)
+       | Ok _ -> Alcotest.failf "%s allowed cleanup" label);
+      Alcotest.(check bool) (label ^ " preserves every trace") true
+        (Sys.file_exists orphan))
+    cases
+
+let test_prune_fails_open_on_malformed_json () =
+  with_workspace @@ fun config ->
+  let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+  Fs_compat.mkdir_p dir;
+  let orphan = Filename.concat dir "malformed-root.jsonl" in
+  write_file orphan "{}\n";
+  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  let dated =
+    Jsonl_writer.dated_path_now ~base_dir:(Dated_jsonl.base_dir store)
+  in
+  Fs_compat.mkdir_p dated.month_dir;
+  write_file dated.path "{not-json\n";
+  (match Keeper_raw_trace_retention.prune ~config ~keeper_name () with
+   | Error (Keeper_raw_trace_retention.Malformed_turn_record _) -> ()
+   | Error error ->
+     Alcotest.fail
+       ("malformed root returned the wrong error: "
+        ^ Keeper_raw_trace_retention.error_to_string error)
+   | Ok _ -> Alcotest.fail "malformed JSON allowed cleanup");
+  Alcotest.(check bool) "malformed JSON preserves every trace" true
     (Sys.file_exists orphan)
 
 let test_prune_syscalls_yield_and_finish_before_cancelled_caller () =
@@ -764,8 +926,14 @@ let () =
             test_degraded_sink_dispatches_untraced;
           Alcotest.test_case "retention preserves refs and removes orphans" `Quick
             test_prune_preserves_current_references_and_removes_orphans;
+          Alcotest.test_case "retention crosses unrelated TurnRecord hard cuts"
+            `Quick test_prune_mixed_turn_record_generations;
           Alcotest.test_case "retention fails open on incompatible record" `Quick
             test_prune_fails_open_on_incompatible_turn_record;
+          Alcotest.test_case "retention rejects invalid reachability roots" `Quick
+            test_prune_fails_open_on_invalid_reachability_root;
+          Alcotest.test_case "retention fails open on malformed JSON" `Quick
+            test_prune_fails_open_on_malformed_json;
           Alcotest.test_case "retention syscalls yield and finish before cancelled caller" `Quick
             test_prune_syscalls_yield_and_finish_before_cancelled_caller;
           Alcotest.test_case "retention shares reader's exact window" `Quick

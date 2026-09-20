@@ -315,13 +315,21 @@ let run_runtime_evidence ?fixture_dir () =
     let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
     let saved_path = current_path ^ ".preserved" in
     let jev_requests = ref [] in
+    let observed_storage_error = ref None in
     let handler _conn _request body =
       let raw = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
       jev_requests := raw :: !jev_requests;
       (match scenario with
        | Memory_write_failure ->
          Unix.rename current_path saved_path;
-         Unix.mkdir current_path 0o700
+         Unix.mkdir current_path 0o700;
+         (* Observe the same reader/path the Memory writer will use. The
+            filesystem's Sys_error text differs between Linux and macOS. *)
+         (try
+            ignore (Fs_compat.load_file_opt current_path : string option);
+            Alcotest.fail "the directory must fail the Memory file read"
+          with Sys_error _ as exn ->
+            observed_storage_error := Some (Printexc.to_string exn))
        | Judged_run | Disabled_run | Http_failure -> ());
       match scenario with
       | Http_failure -> Cohttp_eio.Server.respond_string
@@ -367,8 +375,11 @@ let run_runtime_evidence ?fixture_dir () =
     let original = Runs.run_to_yojson run in
     (match scenario with
      | Memory_write_failure ->
+       let expected = match !observed_storage_error with
+         | Some error -> "Librarian raised: " ^ error
+         | None -> Alcotest.fail "the storage failure was not observed" in
        Alcotest.(check string) "the actual storage exception reaches run detail"
-         "Librarian raised: Sys_error(\"Is a directory\")"
+         expected
          (member "detail" original |> string)
      | Judged_run | Disabled_run | Http_failure -> ());
     let replayed = Runs.get (Runs.replay registry_path) ~run_id:run.run_id |> Option.get in

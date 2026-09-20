@@ -80,7 +80,7 @@ def run_case(executable: str, fixture_path: Path) -> None:
         else:
             needles = [b"jev-fixture", b'"s0_0": 1.0', b'"s1_0": 0.0']
             if scenario == "memory-write-failure":
-                needles.append(b"Is a directory")
+                needles.append(cast(str, run["detail"]).encode())
         seen = first_screen
         # Only the short report is searched. The unrelated exact_output can
         # be much larger, so its size must not decide how far this test walks.

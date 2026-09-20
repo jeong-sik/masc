@@ -29,6 +29,53 @@ The case catalog is `benchmarks/data/tool_call_quality_cases.json`. The live
 mode starts an isolated local server, executes the cases, writes raw evidence,
 and passes it through the benchmark CLI.
 
+## Librarian Continuity Measurement
+
+`masc-librarian-continuity` measures answers produced from explicit synthetic
+snapshots. It generates a question from a reference turn, then answers in a fresh,
+tool-free context containing only that question, the supplied facts, and unread
+text. TypeSafe JEV Noul evaluates the answer against the reference. The existing
+`masc-librarian-replay` remains a separate, read-only structural replay.
+
+With an installed CLI, a configured Agent Core runtime, and the existing
+`TYPESAFEAI_API_KEY` configuration:
+
+```bash
+masc-librarian-continuity \
+  --config /path/to/runtime.toml \
+  --runtime '<configured-runtime-id>' \
+  --input benchmarks/data/librarian_continuity_synthetic.json \
+  --output /path/to/continuity-report.json \
+  --publish-base-path /path/to/masc-workspace
+```
+
+The runtime ID selects the question/answer model; the existing TypeSafe model
+and endpoint configuration selects the judge. This command supports Agent Core
+API runtimes. CLI runtime transports are rejected explicitly. It does not read
+live Keeper history or change Memory, Librarian progress, or scheduling.
+
+The output file is the canonical report. It is saved before any sample starts
+and after each stage, retaining provider failures and incomplete work. A nonzero
+exit means the measurement or its persistence/publication failed, not that a
+Noul score was below a threshold. Each scored sample keeps its actual response
+models, question, answer, context, criteria and raw probability. Generation
+request hashes describe prepared bytes before dispatch; they alone do not prove
+that the remote provider received a request.
+
+`--publish-base-path` is optional. It publishes the same final bytes in the
+selected server's artifact store and prints their SHA. The artifact is a view
+copy and may be collected when no durable consumer references it; keep the
+output file.
+
+The checked-in cases contain one synthetic fact present/absent from the answer
+context. Questions are generated separately for each case; inspect their actual
+wording before comparing scores. A live model observation is not a guarantee of
+semantic preservation across a fleet or a long-running Keeper.
+
+[Source: official Noul contract](https://docs.typesafe.ai/primitives/noul),
+checked 2026-09-21 KST: Noul is the probability that the stated proposition is
+true, not a measure of the degree of memory retained.
+
 ## Isolated Server Ports
 
 An isolated benchmark or campaign server must not bind the production ports

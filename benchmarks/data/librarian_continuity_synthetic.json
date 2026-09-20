@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "retained",
+      "source": {
+        "trace_id": "synthetic-original",
+        "turn": 1,
+        "text": "The cabinet code is ORCHID-731."
+      },
+      "context": {
+        "keeper_name": "synthetic-keeper",
+        "trace_id": "synthetic-later",
+        "read_position": 17,
+        "facts": [{"id": "synthetic-fact", "claim": "The cabinet code is ORCHID-731."}],
+        "unread": "The cabinet is still locked."
+      }
+    },
+    {
+      "id": "absent",
+      "source": {
+        "trace_id": "synthetic-original",
+        "turn": 1,
+        "text": "The cabinet code is ORCHID-731."
+      },
+      "context": {
+        "keeper_name": "synthetic-keeper",
+        "trace_id": "synthetic-later",
+        "read_position": 17,
+        "facts": [],
+        "unread": "The cabinet is still locked."
+      }
+    }
+  ]
+}

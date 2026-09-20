@@ -451,6 +451,10 @@ type run_result =
       ; evaluations : evaluation list
       }
 
+type observation =
+  | Incomplete of evaluation list
+  | Complete of run_result
+
 let absorbed_of_run = function
   | Skipped { absorbed; _ }
   | Evaluated { outcome = Open { absorbed; _ }; _ }
@@ -546,9 +550,20 @@ let run_result_to_yojson result =
   `Assoc fields
 ;;
 
-let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
+let observation_to_yojson = function
+  | Incomplete evaluations ->
+    `Assoc
+      [ "status", `String "incomplete"
+      ; "evaluations", `List (List.map evaluation_to_yojson evaluations)
+      ]
+  | Complete result -> run_result_to_yojson result
+;;
+
+let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
+  let publish observation = Option.iter (fun notify -> notify observation) observe in
+  let complete result = publish (Complete result); result in
   match absorbed with
-  | [] -> Skipped { reason = No_absorptions; absorbed }
+  | [] -> complete (Skipped { reason = No_absorptions; absorbed })
   | _ :: _ ->
     (match Typesafeai_config.absorb_gate_api_key () with
      | Error reason ->
@@ -557,7 +572,7 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
          "librarian absorb gate off (%s): %d absorption(s) applied as answered"
          (Typesafeai_config.unavailable_reason_to_string reason)
          (List.length absorbed);
-       Skipped { reason = Unavailable reason; absorbed }
+       complete (Skipped { reason = Unavailable reason; absorbed })
      | Ok api_key ->
        let endpoint = Typesafeai_config.endpoint () in
        let model = Typesafeai_config.model () in
@@ -568,6 +583,7 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
        let evaluate ~state ~questions =
          let result = Typesafeai_client.evaluate ?clock ~endpoint ~model ~api_key ~state ~questions () in
          evaluations := { endpoint; model; state; questions; result } :: !evaluations;
+         publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
        in
        let outcome = judge ~evaluate ~facts ~new_claims ~absorbed in
@@ -605,5 +621,5 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
             (List.length judged.unjudgeable)
             judged.requests
             (shas ()));
-       Evaluated { outcome; evaluations })
+       complete (Evaluated { outcome; evaluations }))
 ;;

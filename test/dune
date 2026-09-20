@@ -19,6 +19,11 @@
  (deps fixtures/librarian_statements_golden.json)
  (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
 
+(test
+ (name test_keeper_librarian_cancellation)
+ (modules test_keeper_librarian_cancellation)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
 ; The reference cut (scripts/librarian/statements.py, the scorer of issue
 ; #37079) must still write the golden the OCaml test above reads.
 (rule

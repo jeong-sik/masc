@@ -2,7 +2,9 @@
 
     Prepares Keeper context, tools and hooks, then dispatches through
     [Keeper_turn_driver.run_named]. The selected [Runtime_execution.t]
-    determines whether AGENT_CORE or an official client runs the model/tool loop. *)
+    determines whether AGENT_CORE or an official client runs the model/tool loop.
+    Re-exports [Keeper_agent_result] and [Keeper_agent_prompt_metrics] for
+    existing callers. *)
 
 include Keeper_agent_prompt_metrics
 include Keeper_agent_tool_surface

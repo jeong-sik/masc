@@ -567,18 +567,7 @@ let submit_agent_operation
       ~source
       ~input
   with
-  | Ok acceptance ->
-    Ok
-      (tool_result_ok_data
-         (`Assoc
-            [ "operation_id", `String operation_id_raw
-            ; "state",
-              `String
-                (Keeper_owner.Chat_operation.state_to_string
-                   acceptance.operation.state)
-            ; "queued_count", `Int acceptance.queued_count
-            ; "existing", `Bool acceptance.existing
-            ]))
+  | Ok acceptance -> Ok acceptance
   | Error error ->
     Error
       (operation_payload_error ~class_:Tool_result.Runtime_failure
@@ -586,38 +575,58 @@ let submit_agent_operation
          (Keeper_owner_registry.command_error_to_string error))
 ;;
 
+let tool_result_of_operation_acceptance (acceptance : Keeper_owner.operation_acceptance) =
+  tool_result_ok_data
+    (`Assoc
+       [ "operation_id",
+         `String
+           (Keeper_owner.Chat_operation.Operation_id.to_string
+              acceptance.operation.operation_id)
+       ; "state",
+         `String
+           (Keeper_owner.Chat_operation.state_to_string acceptance.operation.state)
+       ; "queued_count", `Int acceptance.queued_count
+       ; "existing", `Bool acceptance.existing
+       ])
+;;
+
+let submit_keeper_msg ?continuation_channel ~submitted_by ctx message =
+  let* name, meta =
+    (* The caller named a keeper that is not there. *)
+    message_error ~class_:Tool_result.Workflow_rejection (resolve_keeper ctx message)
+  in
+  let* message =
+    Keeper_invocation_contract.direct_message_with_keeper_name message name
+    |> Result.map_error Keeper_invocation_contract.request_error_to_string
+    |> message_error ~class_:Tool_result.Policy_rejection
+  in
+  let* message =
+    message_error ~class_:Tool_result.Workflow_rejection
+      (Turn.preflight_keeper_msg_resolved
+         ~base_path:ctx.config.base_path
+         ~meta
+         message)
+  in
+  let* acceptance = submit_agent_operation
+    ?continuation_channel
+    ~submitted_by
+    ~keeper_name:name
+    ~message:(Keeper_invocation_contract.direct_message_prompt message)
+    ~user_blocks:(Keeper_invocation_contract.direct_message_user_blocks message)
+    ~turn_instructions:
+      (Keeper_invocation_contract.direct_message_turn_instructions message)
+    ~surface_context:
+      (Keeper_invocation_contract.direct_message_surface_context message)
+    ~attachments:(Keeper_invocation_contract.direct_message_attachments message)
+    ctx
+  in
+  Ok (name, acceptance)
+;;
+
 let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_result =
-  match
-    let* name, meta =
-      (* The caller named a keeper that is not there. *)
-      message_error ~class_:Tool_result.Workflow_rejection (resolve_keeper ctx message)
-    in
-    let* message =
-      Keeper_invocation_contract.direct_message_with_keeper_name message name
-      |> Result.map_error Keeper_invocation_contract.request_error_to_string
-      |> message_error ~class_:Tool_result.Policy_rejection
-    in
-    let* message =
-      message_error ~class_:Tool_result.Workflow_rejection
-        (Turn.preflight_keeper_msg_resolved
-           ~base_path:ctx.config.base_path
-           ~meta
-           message)
-    in
-    submit_agent_operation
-      ?continuation_channel
-      ~submitted_by
-      ~keeper_name:name
-      ~message:(Keeper_invocation_contract.direct_message_prompt message)
-      ~user_blocks:(Keeper_invocation_contract.direct_message_user_blocks message)
-      ~turn_instructions:
-        (Keeper_invocation_contract.direct_message_turn_instructions message)
-      ~surface_context:
-        (Keeper_invocation_contract.direct_message_surface_context message)
-      ~attachments:(Keeper_invocation_contract.direct_message_attachments message)
-      ctx
+  match submit_keeper_msg ?continuation_channel ~submitted_by ctx message
   with
-  | Ok result -> result
+  | Ok (_keeper_name, acceptance) -> tool_result_of_operation_acceptance acceptance
   | Error error -> tool_result_of_handler_error error
 ;;
 
@@ -685,7 +694,7 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
       ~attachments:[]
       ctx
   with
-  | Ok result -> result
+  | Ok acceptance -> tool_result_of_operation_acceptance acceptance
   | Error error -> tool_result_of_handler_error error
 ;;
 

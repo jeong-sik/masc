@@ -48,10 +48,10 @@ vi.mock('../../api/board', () => ({
   voteComment: vi.fn().mockResolvedValue(undefined),
   requestBoardContextInference: vi.fn().mockResolvedValue({
     ok: true,
-    requestId: 'kmsg-post-share',
+    operationId: 'kmsg-post-share',
     keeperName: 'sleepers',
     postId: 'post-share',
-    status: 'queued',
+    state: 'queued',
     targetSource: 'explicit_target',
   }),
   toggleReaction: vi.fn().mockResolvedValue({

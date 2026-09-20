@@ -13,8 +13,8 @@
     - [model_id] ("agent-core-snapshot-fixture-model") matches no static capability
       prefix and is not expected in any capability manifest, so capability
       lookup falls through to per-kind defaults.
-    - [supports_tool_choice_override:true] pins whether the OpenAI/GLM
-      [tool_choice] field is emitted, independent of any manifest entry.
+    - the resolved capability record decides whether the OpenAI/GLM
+      [tool_choice] field is emitted.
     - [keep_alive:"-1"] explicitly pins the Ollama [keep_alive] field.
     - No model in this fixture reports [supports_seed], so no [seed] field is
       emitted. *)
@@ -128,6 +128,22 @@ let nudged_messages =
   ]
 ;;
 
+(* The fixture model id names nothing in any catalog, so its capabilities are
+   declared here. Forced and named tool choice are on because the snapshots
+   below pin how a forced choice is serialized; a model that refused one would
+   fail closed before reaching the wire and there would be nothing to pin.
+   Built on the kind's own preset rather than the bare defaults, because the
+   snapshots also pin wire-shaped facts the preset carries -- GLM writes an
+   empty string where the default writes null for an assistant tool call. *)
+let snapshot_capabilities kind =
+  { (Capabilities.capabilities_of_kind kind) with
+    supports_tools = true
+  ; supports_tool_choice = true
+  ; supports_required_tool_choice = true
+  ; supports_named_tool_choice = true
+  }
+;;
+
 let cfg ~kind ~base_url ~tool_choice =
   Provider_config.make
     ~kind
@@ -138,8 +154,8 @@ let cfg ~kind ~base_url ~tool_choice =
     ~temperature:0.7
     ~tool_choice
     ~disable_parallel_tool_use:true
-    ~supports_tool_choice_override:true
     ~keep_alive:"-1"
+    ~model_capabilities_override:(snapshot_capabilities kind)
     ()
 ;;
 
@@ -363,8 +379,8 @@ let test_openai_parallel_disabled_by_capability () =
 (* ── DeepSeek via OpenAI-compat (Agent Core contract routing fence) ───
    This fixture pins the current provider wire for [deepseek-v4-flash]
    through the OpenAI-compat backend. It exercises the REAL capability
-   lookup (no [supports_tool_choice_override]), so it runs through the
-   prefix dispatcher fixed in Agent Core contract.
+   lookup, so it runs through the prefix dispatcher fixed in Agent Core
+   contract.
 
    It is a regression FENCE, not a discrimination proof: with
    [enable_thinking=None] and [max_tokens=1024], no thinking control field is

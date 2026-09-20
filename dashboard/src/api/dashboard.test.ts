@@ -1562,7 +1562,7 @@ describe('fetchDashboardFullHealth', () => {
         last_error_age_sec: null,
       },
       keeper_event_queue: {
-        schema: 'masc.keeper_event_queue.fleet_summary.v6',
+        schema: 'masc.keeper_event_queue.fleet_summary.v7',
         status: 'warning',
         operator_action_required: false,
         status_reasons: ['runnable_backlog=18'],
@@ -1625,6 +1625,7 @@ describe('fetchDashboardFullHealth', () => {
       last_error_age_sec: null,
     })
     expect(result.keeper_event_queue).toMatchObject({
+      schema: 'masc.keeper_event_queue.fleet_summary.v7',
       status: 'warning',
       backlog_clean: false,
       storage_integrity: { status: 'ok', counts_complete: true },
@@ -4404,7 +4405,6 @@ describe('fetchRuntimeProviders', () => {
               },
               has_output_schema: true,
               cache_system_prompt: true,
-              supports_tool_choice_override: true,
               supports_structured_output_override: null,
               has_model_capabilities_override: true,
               keep_alive: '30m',

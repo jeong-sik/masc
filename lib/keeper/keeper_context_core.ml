@@ -135,13 +135,13 @@ let save_agent_core_checkpoint
 (* ================================================================ *)
 
 (* What a load found. [Checkpoint_unread] is every failure other than a missing
-   file: the saved history was not seen, and may still be there. A caller that
-   only needs a context to start from reads it like [Checkpoint_absent]; a
-   caller that states something about the saved history must not. *)
+   file: the saved history was not seen, and may still be there. Its typed
+   cause lets a turn distinguish an intentional version cut from a failed
+   read, which must not produce an empty replacement history. *)
 type checkpoint_load =
   | Checkpoint_loaded of working_context
   | Checkpoint_absent
-  | Checkpoint_unread
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
 
 let load_context_from_checkpoint_classified ~trace_id ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
@@ -198,18 +198,18 @@ let load_context_from_checkpoint_classified ~trace_id ~base_dir =
       | Parse_error _
       | Store_error _
       | Io_error _
-      | Agent_core_error _ ) ->
+      | Agent_core_error _ as error ) ->
     (* Each was logged above with its own diagnostics. *)
     Log.Keeper.warn
       "keeper:%s AGENT_CORE checkpoint unavailable after explicit load diagnostics"
       trace_id;
-    session, Checkpoint_unread
+    session, Checkpoint_unread error
 
 let load_context_from_checkpoint ~trace_id ~base_dir =
   let session, load = load_context_from_checkpoint_classified ~trace_id ~base_dir in
   match load with
   | Checkpoint_loaded ctx -> session, Some ctx
-  | Checkpoint_absent | Checkpoint_unread -> session, None
+  | Checkpoint_absent | Checkpoint_unread _ -> session, None
 
 (** Patch an AGENT_CORE checkpoint: unify session_id and normalize the last assistant
     message's visible text. AGENT_CORE-owned internal replay blocks (reasoning/tool blocks) stay

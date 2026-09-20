@@ -549,97 +549,6 @@ let test_soft_rate_limit_classifies_as_rate_limit () =
     [ "api", api_err; "provider", provider_err ]
 ;;
 
-let with_temp_runtime_toml content f =
-  let path = Filename.temp_file "runtime-rate-limit-pool" ".toml" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-      try Sys.remove path with
-      | _ -> ())
-    (fun () -> f path)
-;;
-
-let rate_limit_pool_runtime_toml =
-  {|
-[runtime]
-default = "same.a"
-
-[providers.same]
-display-name = "Same Pool"
-protocol = "openai-compatible-http"
-endpoint = "https://same.example/v1"
-
-[providers.same.credentials]
-type = "env"
-key = "SAME_POOL_API_KEY"
-
-[providers.other]
-display-name = "Other Pool"
-protocol = "openai-compatible-http"
-endpoint = "https://other.example/v1"
-
-[providers.other.credentials]
-type = "env"
-key = "OTHER_POOL_API_KEY"
-
-[models.a]
-api-name = "a"
-max-context = 1024
-tools-support = true
-thinking-support = true
-
-[models.no_tool]
-api-name = "no-tool"
-max-context = 1024
-tools-support = false
-thinking-support = true
-
-[models.b]
-api-name = "b"
-max-context = 1024
-tools-support = true
-thinking-support = true
-
-[models.c]
-api-name = "c"
-max-context = 1024
-tools-support = true
-thinking-support = true
-
-[same.a]
-
-[same.no_tool]
-
-[same.b]
-
-[other.c]
-|}
-;;
-
-let init_rate_limit_pool_runtime () =
-  with_temp_runtime_toml rate_limit_pool_runtime_toml (fun path ->
-    match Runtime.init_default ~config_path:path with
-    | Ok () -> ()
-    | Error msg -> Alcotest.failf "Runtime.init_default failed: %s" msg)
-;;
-
-let soft_rate_limit_err =
-  CoreError.Api
-    (Retry.RateLimited
-       { retry_after = Some 30.0; message = "rate limited, retry later" })
-;;
-
-let hard_quota_err =
-  CoreError.Provider
-    (Llm_provider.Error.HardQuota
-       { provider = "typed-provider"
-       ; retry_after = None
-       ; detail = "typed quota exhaustion"
-       })
-;;
-
 let server_error_500 =
   CoreError.Api
     (Retry.ServerError { status = 500; message = "Internal Server Error" })
@@ -675,98 +584,6 @@ let test_generic_accept_rejected_is_not_locally_recoverable () =
       (EC.degraded_retry_reason_to_string reason)
 ;;
 
-let test_soft_rate_limit_preserves_declared_same_credential_runtime () =
-  init_rate_limit_pool_runtime ();
-  match
-    EC.degraded_rotation_after_recoverable_error
-      ~fallback_hint:"same.b"
-      ~base_runtime:"same.a"
-      ~effective_runtime:"same.a"
-      ~attempted_runtimes:[ "same.a" ]
-      soft_rate_limit_err
-  with
-  | Some { EC.next_runtime; fallback_reason = EC.Rate_limit } ->
-    Alcotest.(check string)
-      "declared same-credential runtime remains eligible"
-      "same.b"
-      next_runtime
-  | Some { fallback_reason; next_runtime } ->
-    Alcotest.failf
-      "expected rate_limit -> same.b, got %s -> %s"
-      (EC.degraded_retry_reason_to_string fallback_reason)
-      next_runtime
-  | None -> Alcotest.fail "expected declared same-credential runtime fallback"
-;;
-
-let test_soft_rate_limit_preserves_other_declared_runtime () =
-  init_rate_limit_pool_runtime ();
-  match
-    EC.degraded_rotation_after_recoverable_error
-      ~fallback_hint:"other.c"
-      ~base_runtime:"same.a"
-      ~effective_runtime:"same.a"
-      ~attempted_runtimes:[ "same.a" ]
-      soft_rate_limit_err
-  with
-  | Some { EC.next_runtime; fallback_reason = EC.Rate_limit } ->
-    Alcotest.(check string)
-      "other declared runtime remains eligible"
-      "other.c"
-      next_runtime
-  | Some { fallback_reason; next_runtime } ->
-    Alcotest.failf
-      "expected rate_limit -> other.c, got %s -> %s"
-      (EC.degraded_retry_reason_to_string fallback_reason)
-      next_runtime
-  | None -> Alcotest.fail "expected other declared runtime fallback"
-;;
-
-let test_hard_quota_preserves_declared_same_credential_runtime () =
-  init_rate_limit_pool_runtime ();
-  match
-    EC.degraded_rotation_after_recoverable_error
-      ~fallback_hint:"same.b"
-      ~base_runtime:"same.a"
-      ~effective_runtime:"same.a"
-      ~attempted_runtimes:[ "same.a" ]
-      hard_quota_err
-  with
-  | Some { EC.next_runtime; fallback_reason = EC.Hard_quota } ->
-    Alcotest.(check string)
-      "declared same-credential runtime remains eligible"
-      "same.b"
-      next_runtime
-  | Some { fallback_reason; next_runtime } ->
-    Alcotest.failf
-      "expected hard_quota -> same.b, got %s -> %s"
-      (EC.degraded_retry_reason_to_string fallback_reason)
-      next_runtime
-  | None -> Alcotest.fail "expected declared same-credential runtime fallback"
-;;
-
-let test_hard_quota_preserves_other_declared_runtime () =
-  init_rate_limit_pool_runtime ();
-  match
-    EC.degraded_rotation_after_recoverable_error
-      ~fallback_hint:"other.c"
-      ~base_runtime:"same.a"
-      ~effective_runtime:"same.a"
-      ~attempted_runtimes:[ "same.a" ]
-      hard_quota_err
-  with
-  | Some { EC.next_runtime; fallback_reason = EC.Hard_quota } ->
-    Alcotest.(check string)
-      "other declared runtime remains eligible"
-      "other.c"
-      next_runtime
-  | Some { fallback_reason; next_runtime } ->
-    Alcotest.failf
-      "expected hard_quota -> other.c, got %s -> %s"
-      (EC.degraded_retry_reason_to_string fallback_reason)
-      next_runtime
-  | None -> Alcotest.fail "expected other declared runtime fallback"
-;;
-
 let test_server_error_classifies_as_runtime_recoverable () =
   Alcotest.(check bool)
     "500 is not same-runtime transient retry"
@@ -779,24 +596,6 @@ let test_server_error_classifies_as_runtime_recoverable () =
       "expected server_error, got %s"
       (EC.degraded_retry_reason_to_string reason)
   | None -> Alcotest.fail "expected server_error recoverable reason"
-;;
-
-let test_rate_limit_exhaustion_stops_after_candidate_pass () =
-  init_rate_limit_pool_runtime ();
-  let attempted = [ "same.a"; "same.b"; "other.c" ] in
-  match
-    EC.degraded_rotation_after_recoverable_error
-      ~fallback_hint:"other.c"
-      ~base_runtime:"same.a"
-      ~effective_runtime:"same.a"
-      ~attempted_runtimes:attempted
-      soft_rate_limit_err
-  with
-  | None -> ()
-  | Some { EC.next_runtime; _ } ->
-    Alcotest.failf
-      "an exhausted candidate pass must not invent another cycle, got %s"
-      next_runtime
 ;;
 
 let test_receipt_persistence_failure_is_typed () =
@@ -1078,22 +877,6 @@ let () =
             `Quick
             test_overloaded_with_quota_prose_is_not_hard_quota
         ; Alcotest.test_case
-            "soft rate limits preserve declared same-credential runtimes"
-            `Quick
-            test_soft_rate_limit_preserves_declared_same_credential_runtime
-        ; Alcotest.test_case
-            "soft rate limits preserve other declared runtimes"
-            `Quick
-            test_soft_rate_limit_preserves_other_declared_runtime
-        ; Alcotest.test_case
-            "hard quota preserves declared same-credential runtimes"
-            `Quick
-            test_hard_quota_preserves_declared_same_credential_runtime
-        ; Alcotest.test_case
-            "hard quota preserves other declared runtimes"
-            `Quick
-            test_hard_quota_preserves_other_declared_runtime
-        ; Alcotest.test_case
             "500 classifies as recoverable server_error"
             `Quick
             test_server_error_classifies_as_runtime_recoverable
@@ -1101,10 +884,6 @@ let () =
             "generic accept rejection is not locally recoverable"
             `Quick
             test_generic_accept_rejected_is_not_locally_recoverable
-        ; Alcotest.test_case
-            "rate-limit exhaustion stops after one candidate pass"
-            `Quick
-            test_rate_limit_exhaustion_stops_after_candidate_pass
         ] )
     ]
 ;;

@@ -72,7 +72,11 @@ let librarian_current_output_schema =
     ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
     ; "working_contexts", array_schema (object_schema
         ~required:["merge_contexts"; "sources"; "context"; "next_steps"]
-        ["merge_contexts", string_array_schema; "sources", string_array_schema; "context", string_schema; "next_steps", string_array_schema])
+        [ "merge_contexts", string_array_schema
+        ; "sources", `Assoc
+            [ "type", `String "array"; "items", string_schema; "minItems", `Int 1 ]
+        ; "context", string_schema
+        ; "next_steps", string_array_schema ])
     ]
   in
   object_schema ~required:(List.map fst fields) fields

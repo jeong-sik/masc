@@ -64,7 +64,6 @@ val with_keeper_turn_span
   -> trace_id:string
   -> max_context:int
   -> channel:string
-  -> is_retry:bool
   -> current_task_id:string option
   -> ((unit -> (string * string) option) -> 'a)
   -> 'a

@@ -18,8 +18,9 @@
     With neither, the range an unfinished turn on the same trace reached
     ({!Unfinished_turn}); with none of the three the caller has no atom to
     start from and carries the whole history; the provider judges it, and the turn driver owns the one move a
-    refusal forces before any usage has been counted, which
-    {!Halved_after_refusal} names.
+    refusal forces, which {!Halved_after_refusal} and
+    {!Evicted_after_refusal} name. These positions belong to the turn and
+    take precedence over an older front in a later candidate's ledger.
 
     A front is a position: the atom index and the digest of the message that
     opens that atom
@@ -49,8 +50,11 @@ type source =
           the turn, and the record that carries it forward was skipped for
           having no finish reason (2026-09-18: five keepers). *)
   | Halved_after_refusal of { retry : int }
-      (** A provider or wire refusal before any usage: the range was halved
-          toward the newest atom, [retry] times so far. *)
+      (** A provider or wire refusal with no block ahead to evict: the range
+          was halved toward the newest atom on retry [retry]. *)
+  | Evicted_after_refusal of { retry : int }
+      (** A provider or wire refusal moved the front past measured blocks.
+          The turn shares this position with its later candidates. *)
 
 type seed =
   { first_atom : int
@@ -189,5 +193,5 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [unfinished_turn] with [turn], [halved_after_refusal] with [retry], or
-    [whole_history]. *)
+    [unfinished_turn] with [turn], [halved_after_refusal] or
+    [evicted_after_refusal] with [retry], or [whole_history]. *)

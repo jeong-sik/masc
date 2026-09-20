@@ -1,6 +1,6 @@
 module EC = Keeper_error_classify
 
-let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
+let handle ~config ~keeper_name ~runtime_id err =
   if EC.is_runtime_exhausted_error err
   then (
     Keeper_registry.mark_turn_runtime_exhausted
@@ -12,12 +12,10 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       ();
     Log.Keeper.warn
       ~keeper_name
-      "%s: all runtimes exhausted (terminal) — last_err=%s attempt=%d \
-       attempted_runtimes=[%s]"
+      "%s: all runtimes exhausted (terminal) — last_err=%s runtime=%s"
       keeper_name
       (Agent_core.Error.to_string err)
-      attempt
-      (String.concat ", " attempted_runtimes);
+      runtime_id;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string Agent_coreExecutionErrors)
       ~labels:
@@ -40,7 +38,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       ();
     Log.Keeper.warn
       ~keeper_name
-      "%s: turn terminal (non-exhaustion error) — err=%s attempt=%d"
+      "%s: turn terminal (non-exhaustion error) — err=%s runtime=%s"
       keeper_name
       (Agent_core.Error.to_string err)
-      attempt)
+      runtime_id)

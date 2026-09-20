@@ -70,6 +70,14 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+let activity_result_json_with_data ~ok ~message ~data =
+  `Assoc
+    [ ("ok", `Bool ok)
+    ; ("message", `String message)
+    ; ("data", data)
+    ]
+;;
+
 type schedule_write_tool =
   | Schedule_create
   | Schedule_update
@@ -96,11 +104,33 @@ let schedule_write_schema tool =
 
 let schedule_stamp_operator_actor ~agent_name = function
   | `Assoc fields ->
+    let operator_kind =
+      Schedule_domain.actor_kind_to_string Schedule_domain.Human_operator
+    in
     let stamped =
       [ "requested_by_id", `String agent_name
-      ; "requested_by_kind", `String "human_operator"
+      ; "requested_by_kind", `String operator_kind
       ; "scheduled_by_id", `String agent_name
-      ; "scheduled_by_kind", `String "human_operator"
+      ; "scheduled_by_kind", `String operator_kind
+      ]
+    in
+    let stamped_names = List.map fst stamped in
+    `Assoc
+      (stamped
+       @ List.filter
+           (fun (name, _) -> not (List.mem name stamped_names))
+           fields)
+  | other -> other
+;;
+
+let schedule_stamp_cancel_operator_actor ~agent_name = function
+  | `Assoc fields ->
+    let operator_kind =
+      Schedule_domain.actor_kind_to_string Schedule_domain.Human_operator
+    in
+    let stamped =
+      [ "cancelled_by_id", `String agent_name
+      ; "cancelled_by_kind", `String operator_kind
       ]
     in
     let stamped_names = List.map fst stamped in
@@ -1516,14 +1546,12 @@ let add_routes ~sw ~clock router =
          request reqd)
   (* Schedule cancel from the terminal (#29684). The workspace tool owns the
      argument contract ([Tool_schedule.handle_cancel]: schedule_id,
-     cancelled_by_*, reason) and the store transition; the route pipes HTTP
-     straight into that handler, so validation and error text stay identical
-     to the MCP tool. Cancel takes only the config -- no creation hooks, no
-     agent identity to inject -- because its arguments already carry the
-     canceller. *)
+     cancelled_by_*, reason) and the store transition. The HTTP trust boundary
+     owns the canceller: client-supplied identity fields are replaced with the
+     actor resolved from the credential before entering the tool. *)
   |> Http.Router.post "/api/v1/tools/masc_schedule_cancel" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_schedule_cancel"
-         (fun state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_schedule_cancel"
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1537,6 +1565,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let args = schedule_stamp_cancel_operator_actor ~agent_name args in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
              let start_time = Unix.gettimeofday () in
              let result =
@@ -1547,7 +1576,8 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
              respond_json_value_with_cors ~status request reqd
-               (activity_result_json ~ok ~message:msg)
+               (activity_result_json_with_data ~ok ~message:msg
+                  ~data:(Tool_result.data result))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))

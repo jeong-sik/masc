@@ -46,8 +46,9 @@ access = "read-write"
 # same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
 # coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
 default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
-# Vision read fleet (RFC-0414). When a keeper's assigned runtime cannot take an
-# image, analyze_image's eager read walks these first. gemma4-31b (Gemma 4,
+# Vision read fleet (RFC-0414). When no runtime in a keeper's lane can take an
+# image, the eager read and analyze_image read it with these, in order. They
+# never take the keeper's turn. gemma4-31b (Gemma 4,
 # strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
 # measured 5+ min per read under load, so it is deliberately not here.
 # gemma4-31b declares image input and an explicit image payload limit below.
@@ -57,6 +58,30 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # this explicit smart lane. The judgement call resolves the verifier_exact
 # exact-output lane below (RFC-0361 D7(a)) — [runtime] carries no scalar
 # binding for it.
+
+# TypeSafe AI (System One Jev) Opt-in Integration
+# Calibrated probabilistic decisions for the board_attention_exact lane only.
+# A non-blank TYPESAFEAI_API_KEY turns it on. MASC_TYPESAFEAI_ENABLED=false
+# turns it off even with a key; the variable cannot turn it on without one.
+# When enabled, MASC POSTs the TYPESAFEAI_API_KEY as an Authorization bearer
+# credential to the configured TypeSafe AI endpoint. The JSON body's top-level
+# fields are model, state, and questions. state.items[0] contains candidate_id;
+# signal fields kind, post_id, author, title, content, hearth, updated_at,
+# reaction (target_type, target_id, user_id, emoji, reacted) and optional vote
+# (target_kind, target_id, target_author, voter, direction); post fields id,
+# author, title, body, post_kind, visibility, created_at, updated_at, expires_at,
+# votes_up, votes_down, reply_count, pinned, and optional hearth, thread_id,
+# origin, classification_reason, arbitrary meta; and every comment's id,
+# post_id, parent_id, author, content, created_at, expires_at, votes_up,
+# votes_down.
+# state.keeper_context sends lane_keeper_name, keeper_record_id,
+# keeper_runtime_uid, the Keeper's full instructions, current_task_id, and
+# mention_keeper_ids. questions.relevance sends type=choice, the Keeper-naming
+# instructions, and relevant/not_relevant criteria descriptions.
+# When on, board attention asks Jev first. A relevant answer is kept; a
+# not-relevant answer or a failed call is judged again by the
+# board_attention_exact slots below. So only a relevant answer saves an
+# LLM call, and every other candidate waits for Jev and then the LLM.
 
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
@@ -515,10 +540,12 @@ streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
 # This runtime rides AGENT_CORE native Ollama /api/chat, which does not serialize
-# tool_choice (agent_core backend_ollama.ml:24). Declaring true here would override
-# agent_core models.toml's supports_tool_choice=false (provider_runtime_binding.ml
-# applies this override last) while the transport silently drops forced tool
-# choice. Do not re-enable without a serializer path + model-side proof.
+# tool_choice (agent_core backend_ollama.ml:24). The catalog row for this model
+# names no supports_tool_choice, so the ollama preset's false is what reaches the
+# wire. A supports-tool-choice line in this block would not change that: for a
+# model the catalog names, runtime_adapter reads only thinking-control-format,
+# reasoning-streaming-format and max-output-tokens from here. Re-enabling needs a
+# serializer path + model-side proof, written on the catalog row.
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
 supports-top-k = true
@@ -602,6 +629,13 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-3]
+# The deployment has carried these three since before this table existed, and
+# an empty binding does not mean "defaults" — it means whatever the runtime
+# falls back to. #37039 measured that shape on another lane: a runtime that
+# declares no capacity takes max_int and sends the whole history every turn.
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the
 # 2026-08-28 swap (json_schema+strict probed live; quota independent of
@@ -1032,8 +1066,8 @@ candidates = [
 # (<provider>.<model>). A lane of that name is taken first, so a lane named
 # after a runtime still wins. A name that is neither is rejected at load — which
 # is why a lane with a name of its own is worth more than one that copies a
-# runtime id: delete it and the load fails instead of quietly falling back to
-# [this runtime, [runtime].default].
+# runtime id: delete it and the load fails instead of quietly walking that
+# runtime alone.
 [runtime.assignments]
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"

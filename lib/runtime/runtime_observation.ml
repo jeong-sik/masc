@@ -120,10 +120,8 @@ let record_attempt_start (capture : runtime_metrics_capture) ~model_id:_ =
     "why did the runtime exhaust" signals. Errors are recorded verbatim — no
     string-based classification at this layer (see #12817 spirit and the
     project memory rule "no string matching for classification"). *)
-let runtime_attempt_terminal_event_json ?slot_release_at_phase
-    ?productive_phase_elapsed_ms ?retry_phase_elapsed_ms ~model_id:_
-    ~model_label:_
-    ~latency_ms ~error () =
+let runtime_attempt_terminal_event_json ~model_id:_ ~model_label:_ ~latency_ms
+    ~error =
   let outcome = if Option.is_some error then "failure" else "success" in
   `Assoc
     [
@@ -133,16 +131,13 @@ let runtime_attempt_terminal_event_json ?slot_release_at_phase
       ( "latency_ms", Json_util.int_opt_to_json latency_ms );
       ("outcome", `String outcome);
       ( "error_message", Json_util.string_opt_to_json error );
-      ( "slot_release_at_phase", Json_util.string_opt_to_json slot_release_at_phase );
-      ( "productive_phase_elapsed_ms", Json_util.int_opt_to_json productive_phase_elapsed_ms );
-      ( "retry_phase_elapsed_ms", Json_util.int_opt_to_json retry_phase_elapsed_ms );
     ]
 
 let log_runtime_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
   let outcome = if Option.is_some error then "failure" else "success" in
   let details =
     runtime_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
-      ~error ()
+      ~error
   in
   let summary =
     Printf.sprintf

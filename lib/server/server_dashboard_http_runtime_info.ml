@@ -1687,7 +1687,6 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; "disable_parallel_tool_use", `Bool cfg.disable_parallel_tool_use
     ; "response_format", response_format_json cfg.response_format
     ; "cache_system_prompt", `Bool cfg.cache_system_prompt
-    ; "supports_tool_choice_override", Json_util.bool_opt_to_json cfg.supports_tool_choice_override
     ; ( "supports_structured_output_override"
       , Json_util.bool_opt_to_json cfg.supports_structured_output_override )
     ; "has_model_capabilities_override", `Bool (Option.is_some cfg.model_capabilities_override)

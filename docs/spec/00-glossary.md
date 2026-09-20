@@ -12,11 +12,15 @@ status: reference
 : Multi-Agent Shared Context의 약어. 다중 에이전트의 Board, Task, Goal, Schedule,
   Keeper와 도구 실행을 조율하는 OCaml/Eio 서버.
 
-**agent core**
-: `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를
-  참조하지 않아 MASC 없이도 쓸 수 있다. Agent 구성, tool turn, typed response와
-  실패의 타입은 모든 레인이 여기 것을 쓴다. Provider 요청을 실제로 보내는 것은
-  agent core 레인뿐이고, 공식 클라이언트 레인은 자기 프로세스가 보낸다.
+**Agent Core**
+: `packages/agent_core`의 재사용 모델 실행 계층. MASC coordinator를 참조하지
+  않아 MASC 없이도 쓸 수 있다. `Agent_core.Agent`를 거치는 실행의 Agent 구성,
+  tool turn, provider 요청, typed 응답·사용량·실패를 소유한다. 공통 타입은
+  레인과 무관하게 공유한다. 공식 클라이언트 레인도 `Agent_core.Error`·
+  `Agent_core.Llm_provider`·`Agent_core.Retry`를 쓰고, provider 요청은 자기
+  프로세스에서 보낸다. MASC는 Keeper 실행과 제품 조율을 소유한다.
+  코드 식별자는 `agent_core`와 `Agent_core`다.
+  → [Agent Core 경계](13-agent-core.md)
 
 **Official Client Lane**
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
@@ -47,11 +51,6 @@ status: reference
 
 **Agent**
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
-
-**Agent Core**
-: `packages/agent_core`로 제공되는 재사용 모델 실행 계층. Agent 구성, tool turn,
-  provider 요청, typed response와 실패를 소유하며, MASC는 제품 오케스트레이션을
-  소유한다. 코드 식별자는 `agent_core`와 `Agent_core`다.
 
 **Keeper**
 : MASC가 lifecycle을 관리하는 장기 실행 Agent. 현재 typed event와 tool schema를
@@ -129,11 +128,6 @@ status: reference
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
   최신 대기 하나를 가진다. 코드 이름은 `Keeper_memory_lane`이다.
   → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
-
-**Skill**
-: `SKILL.md`로 선언한 재사용 지시 또는 Tool 합성. 출처·패키지·이름·문서 revision으로
-  식별한다. → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
-  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
 **Composition**
 : Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
@@ -245,10 +239,13 @@ status: reference
 
 **Skill**
 : 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
+  출처·패키지·이름·문서 revision으로 식별한다.
   Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
   `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
   뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
+  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.

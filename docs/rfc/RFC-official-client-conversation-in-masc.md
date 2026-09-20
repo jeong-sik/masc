@@ -326,7 +326,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | §7 | 이 RFC 에서 |
 |---|---|
 | 1. 창은 토큰으로 선언한다 | `W` 하나를 쓴다 |
-| 2. 본문 상한은 판정에만 쓴다 | `max-prompt-bytes` 는 Claude Code 씨앗 판정에만 쓴다. Antigravity 경로에서는 2026-09-18 에 없앴다 |
+| 2. 본문 상한은 판정에만 쓴다 | 원칙 유지. 예외: Antigravity 는 typed overflow 가 없어 선언된 `max-prompt-bytes` 안에서 fresh-session 씨앗을 임시로 자른다. 미선언은 거절한다. 대체: agy usage `input_tokens` 로 만든 토큰 창과 "trajectory cleared" 의 typed 분류 (#37123) |
 | 5. 앞부분 흔들림을 재고 그 이상 늘리지 않는다 | 매 턴 새 세션은 고정부와 씨앗을 매번 다시 쓴다. 지금 resume 턴의 재기록 비율은 0.001 이다. §11 에서 잰다 |
 | 6. 도구 호출과 결과는 같이 남거나 같이 빠진다 | §5.6 이 짝을 id 로 남긴다. 씨앗 자르기는 지금 규칙 그대로다 |
 | 7. 요약하지 않는다 | §5.7 뒤에 `DISABLE_COMPACT=1`. 대화 원문은 체크포인트에 있다 |
@@ -361,6 +361,11 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | 5 | 고정부 예산(§5.5) | 운영자 결정 | 요청 크기가 준다 |
 | 6 | 턴 대화를 체크포인트에(§5.6) | §8 2·3번 | 체크포인트 쓰기 증가 |
 | 7 | 씨앗을 토큰으로, 매 턴 새 세션, `DISABLE_COMPACT`(§5.7) | 5·6단계 | 요청 하나가 `W + 턴 증가` 안으로 |
+
+Antigravity 임시 guard 를 배포하기 전에는 운영 중인 `antigravity-cli` 모델마다
+실측한 `max-prompt-bytes`를 명시한다. 저장소 seed는 새 설정에만 들어가며 기존
+설정의 모델 행을 덮지 않는다. 선언이 빠진 기존 모델은 조용히 무제한으로
+돌아가지 않고 typed `InvalidConfig(max_prompt_bytes)`로 거절된다.
 
 ## 11. 배포 후 측정
 

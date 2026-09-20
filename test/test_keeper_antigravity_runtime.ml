@@ -167,6 +167,7 @@ path = %S
 [models.gemini]
 api-name = "gemini-fixture"
 max-context = 128000
+max-prompt-bytes = 1048576
 
 [antigravity.gemini]
 
@@ -287,6 +288,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       in
       let observed_trace_ref = ref None in
       let transmitted_inputs = ref [] in
+      let input_window_observations = ref [] in
       let record_transmitted ~runtime_id:_ ~tools:_ ~transmitted =
         transmitted_inputs := transmitted :: !transmitted_inputs
       in
@@ -384,6 +386,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~agent_core_tools:[ tool ]
                       ~initial_messages:large_history
                       ~on_request_attribution:record_transmitted
+                      ~on_model_input_window_observation:
+                        (fun ~measurement:_ reading ->
+                           input_window_observations :=
+                             reading :: !input_window_observations)
                       ~hooks
                       ~context:(Agent_core.Context.create ())
                       ~raw_trace
@@ -506,6 +512,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~agent_core_tools:[ tool ]
                         ~initial_messages:large_history
                         ~on_request_attribution:record_transmitted
+                        ~on_model_input_window_observation:
+                          (fun ~measurement:_ reading ->
+                             input_window_observations :=
+                               reading :: !input_window_observations)
                         ~hooks
                         ~context:(Agent_core.Context.create ())
                         ~raw_trace
@@ -551,6 +561,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
          check bool "fresh transmission contains prepared history" true
            (List.length messages > 0)
        | _ -> fail "successful start/resume did not each report their exact input mode");
+      check int
+        "only the fresh input reports a history window"
+        1
+        (List.length !input_window_observations);
       check string
         "tool arguments"
         {|{"marker":"from-antigravity"}|}
@@ -789,6 +803,8 @@ let test_spawn_failure_is_pre_dispatch () =
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:None "antigravity-pre-dispatch";
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:None "antigravity-capacity-override";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let missing_cli = Filename.concat base_path "missing-antigravity" in
@@ -822,6 +838,60 @@ let test_spawn_failure_is_pre_dispatch () =
                     | Some _ | None -> fail "Antigravity runtime fixture did not resolve"
                   in
                   let reports = ref [] in
+                  let oversized_system_prompt = String.make 1_048_577 'x' in
+                  let hooks =
+                    { Agent_core.Hooks.empty with
+                      before_turn_params =
+                        Some
+                          (function
+                            | Agent_core.Hooks.BeforeTurnParams
+                                { current_params; _ } ->
+                              Agent_core.Hooks.AdjustParams
+                                { current_params with
+                                  system_prompt_override =
+                                    Some oversized_system_prompt
+                                }
+                            | _ -> Agent_core.Hooks.Continue)
+                    }
+                  in
+                  let oversized_attempt =
+                    Keeper_antigravity_runtime.run
+                      ~accepts_image_input:
+                        (Runtime_agent.runtime_accepts_image_input
+                           ~runtime:
+                             (Runtime.get_runtime_by_id "antigravity.gemini"
+                              |> Option.get))
+                      ~pre_tool_rejects:(ref [])
+                      ~runtime_id:"antigravity.gemini"
+                      ~keeper_name:"antigravity-capacity-override"
+                      ~base_path
+                      ~goal:"override must be bounded"
+                      ~goal_blocks:None
+                      ~system_prompt:"small original prompt"
+                      ~tools:[]
+                      ~initial_messages:[]
+                      ~model_input_projection:None
+                      ~on_transmitted_model_input:
+                        (fun report -> reports := report :: !reports)
+                      ~hooks:(Some hooks)
+                      ~context_injector:None
+                      ~context:None
+                      ~event_bus:None
+                      ~raw_trace:None
+                      ~on_event:None
+                      ~config
+                      ()
+                  in
+                  (match oversized_attempt.result with
+                   | Error
+                       (Agent_core.Error.Config
+                          (Agent_core.Error.InvalidConfig { field; _ })) ->
+                     check string "override refused field" "max_prompt_bytes" field
+                   | Error error ->
+                     fail
+                       ("oversized system prompt override produced the wrong error: "
+                        ^ Agent_core.Error.to_string error)
+                   | Ok _ -> fail "oversized system prompt override reached the CLI");
                   let attempt =
                     Keeper_antigravity_runtime.run
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
@@ -976,191 +1046,253 @@ let plain_user_message text : Agent_core.Types.message =
   }
 ;;
 
-(* The window reading is what a turn record carries and what /context reads.
-   Before this was wired, the official-client adapters measured the history
-   and threw the counts away, so every one of their turn records was written
-   with no window -- and /context answered "no turn has an exact provider-input
-   composition" for keepers that had been running all day. Nothing is cut
-   here, so the reading says the whole history went, which is the fact the
-   next turn starts from. *)
-let test_the_window_reports_the_whole_history () =
-  let observed = ref None in
-  let messages = List.init 40 (fun i -> plain_user_message (Printf.sprintf "m%02d" i)) in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
-      ~keeper_name:"alpha"
-      ~runtime_id:"antigravity_subscription.gemini"
+let capacity_projection ?on_model_input_window_observation ?carried_front_seed
+    ~declared_max_prompt_bytes ~system_prompt ~goal source =
+  Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
+    ~declared_max_prompt_bytes
+    ~system_prompt
+    ~goal
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ~keeper_name:"alpha"
+    ~runtime_id:"antigravity_subscription.gemini"
+    source
+;;
+
+let test_undeclared_capacity_is_refused () =
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:None
+      ~system_prompt:"system"
+      ~goal:"goal"
       None
-  in
-  match project messages with
+  with
+  | Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig { field = "max_prompt_bytes"; _ })) ->
+    ()
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok carried ->
-    check int "every message is handed over" (List.length messages) (List.length carried);
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "the reading counts the history it was offered" (List.length messages)
-         observation.Runtime_model_input_tail_window.total_atoms;
-       check int "and reports all of it as carried" (List.length messages)
-         observation.Runtime_model_input_tail_window.transmitted_atoms)
+  | Ok _ -> fail "Antigravity admitted history without max-prompt-bytes"
 ;;
 
-(* The reading counts atoms, not messages. An assistant message and the tool
-   results answering it are one atom, so a history of such exchanges has
-   fewer atoms than messages, and the front the window names by its opening
-   message has to be an atom index for the digest to be that atom's. With the
-   whole history carried the front is the oldest atom. *)
-let test_the_reading_counts_atoms_and_names_its_front () =
+let test_declared_capacity_windows_history_and_reports_the_cut () =
   let observed = ref None in
-  let message role text : Agent_core.Types.message =
-    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  let assistant_tool_use : Agent_core.Types.message =
+    { role = Assistant
+    ; content = [ ToolUse { id = "call-latest"; name = "lookup"; input = `Null } ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
   in
-  let messages =
-    List.concat
-      (List.init 20 (fun i ->
-         [ message User (Printf.sprintf "ask %02d" i)
-         ; message Assistant (Printf.sprintf "call %02d" i)
-         ; { (message Tool (Printf.sprintf "result %02d" i)) with
-             Agent_core.Types.tool_call_id = Some (Printf.sprintf "call-%02d" i)
-           }
-         ]))
+  let tool_result : Agent_core.Types.message =
+    { role = Tool
+    ; content =
+        [ ToolResult
+            { tool_use_id = "call-latest"
+            ; content = "latest result"
+            ; outcome = Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
   in
-  let atoms = 40 in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
-      ~keeper_name:"alpha"
-      ~runtime_id:"antigravity_subscription.gemini"
+  let history =
+    List.init 10 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
+    @ [ assistant_tool_use; tool_result ]
+  in
+  let _labelled, history_atoms = Runtime_model_input_tail_window.annotate history in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 8192)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
       None
-  in
-  match project messages with
+  with
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok _ ->
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "the total is the atoms, not the 60 messages" atoms
-         observation.Runtime_model_input_tail_window.total_atoms;
-       check int "all of them carried" atoms
-         observation.Runtime_model_input_tail_window.transmitted_atoms;
-       check (option string) "the front is the oldest atom"
-         (Runtime_model_input_tail_window.atom_opening_digest messages 0)
-         (Some observation.Runtime_model_input_tail_window.front_atom_digest))
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok projected ->
+       let _labelled, projected_atoms =
+         Runtime_model_input_tail_window.annotate projected
+       in
+       let prompt_bytes =
+         Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+           ~system_prompt:"system"
+           ~goal:"goal"
+           projected
+         |> Result.get_ok
+       in
+       check bool "rendered prompt is bounded" true (prompt_bytes <= 8192);
+       check bool "old history was dropped" true (List.length projected < List.length history);
+       check bool "a recent suffix remains" true (List.length projected > 0);
+       (match List.rev projected with
+        | { Agent_core.Types.role = Tool; _ }
+          :: { Agent_core.Types.role = Assistant; _ }
+          :: _ ->
+          ()
+        | _ -> fail "the newest Assistant+Tool atom was split by the window");
+       (match !observed with
+        | None -> fail "the projection reported no window"
+        | Some reading ->
+          check
+            int
+            "all source atoms are counted"
+            history_atoms
+            reading.total_atoms;
+          check int "reported count is what ships" projected_atoms
+            reading.transmitted_atoms;
+          check
+            (option string)
+            "the reported front is the first retained atom"
+            (Runtime_model_input_tail_window.atom_opening_digest
+               history
+               (history_atoms - projected_atoms))
+            (Some reading.front_atom_digest)))
 ;;
 
-(* The one production source appends a bounded typed Gate replay reference
-   (keeper_agent_run.ml). It runs over the carried range and what it appends
-   ships. The reading counts the checkpoint history instead, because that is
-   the vocabulary a front is a position in and the checkpoint never holds the
-   appended reference: counted here, every reading this lane wrote would name
-   an atom the next turn's history does not have. *)
-let test_an_appending_source_projection_ships_outside_the_reading () =
+let test_appended_gate_reference_is_inside_the_window () =
   let observed = ref None in
-  let messages = List.init 10 (fun i -> plain_user_message (Printf.sprintf "m%02d" i)) in
-  let appended = plain_user_message "gate replay reference" in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
-      ~keeper_name:"alpha"
-      ~runtime_id:"antigravity_subscription.gemini"
-      (Some (fun ms -> Ok (ms @ [ appended ])))
+  let history =
+    List.init 10 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
   in
-  match project messages with
+  let marker = plain_user_message "gate replay reference" in
+  let source = Some (fun messages -> Ok (messages @ [ marker ])) in
+  let seed_first_atom = 2 in
+  let seed_front_digest =
+    Runtime_model_input_tail_window.atom_opening_digest history seed_first_atom
+    |> Option.get
+  in
+  let seed_read : Keeper_carried_front.seed_read =
+    { seed =
+        Some
+          { first_atom = seed_first_atom
+          ; front_digest = seed_front_digest
+          ; source = Keeper_carried_front.Turn_record { turn = 40 }
+          }
+    ; unreadable = None
+    }
+  in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 8192)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
+      ~carried_front_seed:(fun () -> seed_read)
+      source
+  with
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok carried ->
-    check int "the appended message ships" (List.length messages + 1) (List.length carried);
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "the reading counts the checkpoint history" (List.length messages)
-         observation.Runtime_model_input_tail_window.total_atoms)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok projected ->
+       (match List.rev projected with
+        | last :: _ ->
+          check
+            bool
+            "the appended newest material survives the cut"
+             true
+             (last.Agent_core.Types.content = marker.content)
+        | [] -> fail "the declared window removed the appended Gate reference");
+       (match !observed with
+       | None -> fail "the projection reported no durable-history window"
+       | Some reading ->
+          check int "the Gate reference is not a durable-history atom" 10
+            reading.total_atoms;
+          check bool "capacity cuts deeper than the seed" true
+            (reading.transmitted_atoms < 10 - seed_first_atom);
+          check int "the final list adds only the Gate atom to the durable suffix"
+            (reading.transmitted_atoms + 1)
+            (snd (Runtime_model_input_tail_window.annotate projected));
+          let expected_front = reading.total_atoms - reading.transmitted_atoms in
+          check (option string) "the front digest uses the original history coordinate"
+            (Runtime_model_input_tail_window.atom_opening_digest history expected_front)
+            (Some reading.front_atom_digest);
+          let next_seed : Keeper_carried_front.seed =
+            { first_atom = expected_front
+            ; front_digest = reading.front_atom_digest
+            ; source = Keeper_carried_front.Turn_record { turn = 41 }
+            }
+          in
+          (match
+             Keeper_carried_front.for_history
+               ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest history)
+               next_seed
+           with
+           | Ok admitted ->
+             check int "the next seed reopens the same durable front" expected_front
+               admitted.first_atom
+           | Error _ -> fail "the projected observation did not seed the same history")))
 ;;
 
-(* A start seed begins where the last completed turn's range did, whichever
-   runtime measured it: an official client cuts from the keeper's checkpoint
-   history like every Agent Core candidate, so the same position names the
-   same atoms. Without this the lane handed over 11,447 atoms (45MB) on every
-   start while the same turn's Agent Core candidate carried 7, and the CLI
-   answered every one of them with "all steps in trajectory are cleared"
-   (#37123). The range is compared against the Agent Core composition itself,
-   not against a number, so the two cannot drift apart. *)
-let carried_front_history () =
-  let message role text : Agent_core.Types.message =
-    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+let test_gate_only_floor_emits_no_durable_front () =
+  let observed = ref None in
+  let history =
+    List.init 3 (fun index ->
+      plain_user_message
+        (Printf.sprintf "oversized-%02d:%s" index (String.make 20_000 'x')))
   in
-  List.concat
-    (List.init 60 (fun i ->
-       [ message Agent_core.Types.User (Printf.sprintf "ask %02d" i)
-       ; message Agent_core.Types.Assistant (Printf.sprintf "answer %02d" i)
-       ]))
-;;
-
-(* A completed record of this history that carried [transmitted] atoms, as
-   [Keeper_carried_front.of_records] reads one. *)
-let completed_record ~messages ~transmitted : Turn_record.t =
-  let total_atoms = snd (Runtime_model_input_tail_window.annotate messages) in
-  let front_atom_digest =
+  let marker = plain_user_message "gate replay reference" in
+  let projected =
     match
-      Runtime_model_input_tail_window.atom_opening_digest
-        messages
-        (total_atoms - transmitted)
+      capacity_projection
+        ~declared_max_prompt_bytes:(Some 8192)
+        ~system_prompt:"system"
+        ~goal:"goal"
+        ~on_model_input_window_observation:(fun reading -> observed := Some reading)
+        (Some (fun messages -> Ok (messages @ [ marker ])))
     with
-    | Some digest -> digest
-    | None -> fail "the record's own history has that atom"
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok None -> fail "declared capacity produced no projection"
+    | Ok (Some project) ->
+      (match project history with
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok projected -> projected)
   in
-  { execution_ids = []
-  ; keeper = "alpha"
-  ; agent_name = "alpha-agent"
-  ; turn_kind = Turn_record.Direct
-  ; trace_id = "trace-1"
-  ; absolute_turn = 1260
-  ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1260
-  ; blocks = []
-  ; input_components = None
-  ; tool_surface_ref = None
-  ; runtime_profile = "kimi_coding.kimi-k3"
-  ; selected_model = None
-  ; finish_reason = Some "completed"
-  ; context_window = None
-  ; price_input_per_million = None
-  ; price_output_per_million = None
-  ; request_latency_ms = None
-  ; ttfrc_ms = None
-  ; request_wire_observation = None
-  ; model_input_window =
-      Some
-        { Turn_record.transmitted_atoms = transmitted
-        ; total_atoms
-        ; measurement = Turn_record.Wire_shape
-        ; front_atom_digest
-        }
-  ; raw_trace_run_ref = None
-  ; sampling =
-      { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
-  ; usage =
-      { input_tokens = None
-      ; output_tokens = None
-      ; cache_creation_input_tokens = None
-      ; cache_read_input_tokens = None
-      ; scope = Runtime_usage_scope.Per_request
-      }
-  ; ts = 0.
-  }
+  (match List.rev projected with
+   | last :: _ ->
+     check bool "the Gate atom remains at the floor" true (last.content = marker.content)
+   | [] -> fail "the capacity floor removed the Gate atom");
+  check (option reject) "a Gate-only suffix has no durable front" None !observed
 ;;
 
-let seed_read_of records =
+let carried_front_history () =
+  List.init 60 (fun index -> plain_user_message (Printf.sprintf "history-%02d" index))
+;;
+
+let seed_read_at ~messages first_atom =
+  let front_digest =
+    match Runtime_model_input_tail_window.atom_opening_digest messages first_atom with
+    | Some digest -> digest
+    | None -> fail "the fixture front must name an atom in its history"
+  in
   { Keeper_carried_front.seed =
-      Keeper_carried_front.of_records
-        ~composer:(fun _ -> Keeper_carried_front.Composes_from_the_history)
-        ~trace_id:"trace-1"
-        records
+      Some
+        { Keeper_carried_front.first_atom
+        ; front_digest
+        ; source = Keeper_carried_front.Turn_record { turn = 41 }
+        }
   ; unreadable = None
   }
 ;;
 
-(* What the Agent Core path composes for the same front, so the assertion is
-   "the same range", not "this many atoms". *)
+let encoded_history messages =
+  List.map Keeper_official_client_host.encode_history_message messages
+;;
+
 let agent_core_range ~front messages =
   (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
@@ -1174,88 +1306,91 @@ let agent_core_range ~front messages =
     .Runtime_model_input_tail_window.messages
 ;;
 
-let test_a_start_carries_the_range_the_agent_core_path_would () =
+let project_with_capacity ?on_model_input_window_observation ?carried_front_seed
+    ~capacity messages =
+  match
+    capacity_projection
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ~declared_max_prompt_bytes:(Some capacity)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project messages with
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok projected -> projected)
+;;
+
+let test_seeded_start_matches_the_agent_core_range () =
   let observed = ref None in
   let messages = carried_front_history () in
-  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
+  let seed_read = seed_read_at ~messages 53 in
+  let projected =
+    project_with_capacity
+      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
       ~carried_front_seed:(fun () -> seed_read)
-      ~keeper_name:"alpha"
-      ~runtime_id:"antigravity_subscription.gemini"
-      None
+      ~capacity:1_000_000
+      messages
   in
-  match project messages with
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok carried ->
-    check int "the seed is the record's front" 113
-      (match seed_read.Keeper_carried_front.seed with
-       | Some seed -> seed.Keeper_carried_front.first_atom
-       | None -> fail "the record names a front");
-    check (list string) "the same range the Agent Core path composes"
-      (List.map Keeper_official_client_host.encode_history_message (agent_core_range ~front:seed_read.Keeper_carried_front.seed messages))
-      (List.map Keeper_official_client_host.encode_history_message carried);
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "the reading counts the whole history" 120
-         observation.Runtime_model_input_tail_window.total_atoms;
-       check int "and says seven atoms went" 7
-         observation.Runtime_model_input_tail_window.transmitted_atoms)
+  check (list string) "the same durable range is carried"
+    (encoded_history (agent_core_range ~front:seed_read.seed messages))
+    (encoded_history projected);
+  match !observed with
+  | None -> fail "the seeded projection reported no window"
+  | Some reading ->
+    check int "the reading keeps the full durable denominator" 60 reading.total_atoms;
+    check int "the reading reports the seven seeded atoms" 7 reading.transmitted_atoms
 ;;
 
-(* Cold start: no record on this history names a front, so the range is the
-   whole history and the provider judges it — the same answer the Agent Core
-   path gives when neither a ledger nor a record answers
-   ([Keeper_carried_front.read_seed] returning no seed). *)
-let test_a_cold_start_carries_the_whole_history () =
-  let observed = ref None in
+let test_cold_start_is_capacity_bounded_from_the_whole_history () =
   let messages = carried_front_history () in
-  let seed_read = seed_read_of [] in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
-      ~carried_front_seed:(fun () -> seed_read)
-      ~keeper_name:"alpha"
-      ~runtime_id:"antigravity_subscription.gemini"
-      None
-  in
-  match project messages with
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok carried ->
-    check (list string) "the same range the Agent Core path composes"
-      (List.map Keeper_official_client_host.encode_history_message (agent_core_range ~front:None messages))
-      (List.map Keeper_official_client_host.encode_history_message carried);
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "every atom went" 120
-         observation.Runtime_model_input_tail_window.transmitted_atoms)
+  let projected = project_with_capacity ~capacity:1_000_000 messages in
+  check (list string) "without a seed the whole fitting history is carried"
+    (encoded_history messages)
+    (encoded_history projected)
 ;;
 
-(* A front measured on another history names no atom of this one, so the
-   start begins over rather than carrying the newest atom alone from a
-   position that would never widen again. *)
-let test_a_front_this_history_does_not_open_is_dropped () =
+let test_a_front_from_another_history_is_dropped () =
   let messages = carried_front_history () in
-  let elsewhere = List.init 200 (fun i -> plain_user_message (Printf.sprintf "other %03d" i)) in
-  let seed_read = seed_read_of [ completed_record ~messages:elsewhere ~transmitted:7 ] in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~carried_front_seed:(fun () -> seed_read)
-      ~keeper_name:"alpha"
-      ~runtime_id:"antigravity_subscription.gemini"
-      None
+  let other =
+    List.init 60 (fun index -> plain_user_message (Printf.sprintf "other-%02d" index))
   in
-  match project messages with
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok carried ->
-    check (list string) "the whole history goes"
-      (List.map Keeper_official_client_host.encode_history_message (agent_core_range ~front:None messages))
-      (List.map Keeper_official_client_host.encode_history_message carried)
+  let seed_read = seed_read_at ~messages:other 53 in
+  let projected =
+    project_with_capacity
+      ~carried_front_seed:(fun () -> seed_read)
+      ~capacity:1_000_000
+      messages
+  in
+  check (list string) "a mismatched seed restarts from the whole fitting history"
+    (encoded_history messages)
+    (encoded_history projected)
 ;;
 
+let test_fixed_sections_at_capacity_are_refused () =
+  let capacity =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes
+      ~system_prompt:"system"
+      ~goal:"goal"
+  in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some capacity)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig { field = "max_prompt_bytes"; _ })) ->
+    ()
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "fixed sections filled the declared capacity"
+;;
 
 let () =
   run
@@ -1280,29 +1415,37 @@ let () =
         ] )
     ; ( "model input window"
         , [ test_case
-              "the window reports the whole history"
+              "an undeclared capacity is refused"
               `Quick
-              test_the_window_reports_the_whole_history
+              test_undeclared_capacity_is_refused
           ; test_case
-              "the reading counts atoms and names its front"
+              "declared capacity windows history and reports the cut"
               `Quick
-              test_the_reading_counts_atoms_and_names_its_front
+              test_declared_capacity_windows_history_and_reports_the_cut
           ; test_case
-              "an appending source projection ships outside the reading"
+              "the appended Gate reference stays inside the window"
               `Quick
-              test_an_appending_source_projection_ships_outside_the_reading
+              test_appended_gate_reference_is_inside_the_window
           ; test_case
-              "a start carries the range the Agent Core path would"
+              "a Gate-only floor emits no durable front"
               `Quick
-              test_a_start_carries_the_range_the_agent_core_path_would
+              test_gate_only_floor_emits_no_durable_front
           ; test_case
-              "a cold start carries the whole history"
+              "a seeded start matches the Agent Core carried range"
               `Quick
-              test_a_cold_start_carries_the_whole_history
+              test_seeded_start_matches_the_agent_core_range
           ; test_case
-              "a front this history does not open is dropped"
+              "a cold start is bounded from the whole history"
               `Quick
-              test_a_front_this_history_does_not_open_is_dropped
+              test_cold_start_is_capacity_bounded_from_the_whole_history
+          ; test_case
+              "a front from another history is dropped"
+              `Quick
+              test_a_front_from_another_history_is_dropped
+          ; test_case
+              "fixed sections at capacity are refused"
+              `Quick
+              test_fixed_sections_at_capacity_are_refused
         ] )
     ]
 ;;

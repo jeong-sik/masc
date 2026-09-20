@@ -59,9 +59,8 @@ val add_sampling_field
 
 (** Shared tool_choice emission gate for the Chat and Responses envelopes:
     explicit forcing ([Any] / [Tool _]) is always emitted (validation fails
-    closed on unsupported forcing), advisory [Auto] only when the model
-    supports tool_choice ([supports_tool_choice_override] wins over the
-    capability record). *)
+    closed on unsupported forcing), advisory [Auto] only when the resolved
+    capability record says the model supports tool_choice. *)
 val should_emit_tool_choice : Provider_config.t -> bool
 
 val openai_json_schema_payload : Yojson.Safe.t -> Yojson.Safe.t

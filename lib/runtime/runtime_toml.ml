@@ -708,26 +708,19 @@ let parse_provider (id : string) (tbl : Otoml.t)
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match
-          ( capabilities_result
-          , enabled_result
-          , healthcheck_result
-          , connect_timeout_result
-          , is_non_interactive_result
-          , wire_kind_result )
-        with
-        | Error errs, _, _, _, _, _
-        | _, Error errs, _, _, _, _
-        | _, _, Error errs, _, _, _
-        | _, _, _, Error errs, _, _
-        | _, _, _, _, Error errs, _
-        | _, _, _, _, _, Error errs -> Error errs
-        | ( Ok capabilities
-          , Ok enabled_opt
-          , Ok healthcheck_path
-          , Ok connect_timeout_s
-          , Ok is_non_interactive
-          , Ok wire_kind ) ->
+       let exact_body_timeout_key = Runtime_schema.exact_body_timeout_s_key in
+       let exact_body_timeout_result =
+         strict_float_find path tbl exact_body_timeout_key
+         |> positive_finite_float_opt_field ~path ~key:exact_body_timeout_key
+       in
+       (let ( let* ) = Result.bind in
+        let* capabilities = capabilities_result in
+        let* enabled_opt = enabled_result in
+        let* healthcheck_path = healthcheck_result in
+        let* connect_timeout_s = connect_timeout_result in
+        let* exact_body_timeout_s = exact_body_timeout_result in
+        let* is_non_interactive = is_non_interactive_result in
+        let* wire_kind = wire_kind_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -743,6 +736,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; healthcheck_path
             ; headers
             ; connect_timeout_s
+            ; exact_body_timeout_s
             ; antigravity_cli
             }))
 ;;

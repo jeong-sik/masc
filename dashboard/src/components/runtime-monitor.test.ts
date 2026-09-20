@@ -185,6 +185,7 @@ describe('RuntimeMonitor', () => {
               },
               custom_header_count: 2,
               connect_timeout_s: 120.375,
+              exact_body_timeout_s: 0.125,
             },
             model: {
               id: 'qwen',
@@ -454,6 +455,8 @@ describe('RuntimeMonitor', () => {
     expect(parameterValue(container, 'request · seed')).toBe('1234567')
     expect(parameterValue(container, 'request · connect timeout')).toBe('120.125')
     expect(parameterValue(container, 'declared provider · connect timeout')).toBe('120.375')
+    expect(parameterValue(container, 'declared provider · Exact timeout (s)')).toBe('0.125')
+    expect(container.textContent).toContain('Exact timeout:0.125s')
     expect(container.textContent).toContain('effective · tools')
     expect(container.textContent).toContain('tools,tool-choice,required,named,parallel,runtime-mcp,runtime-events')
     expect(container.textContent).toContain('effective · reasoning')
@@ -491,7 +494,7 @@ describe('RuntimeMonitor', () => {
         request_config: { ...provider.request_config, connect_timeout_s: value },
         declared_spec: {
           ...provider.declared_spec,
-          provider: { ...provider.declared_spec.provider, connect_timeout_s: value },
+          provider: { ...provider.declared_spec.provider, connect_timeout_s: value, exact_body_timeout_s: value },
         },
       })),
     })
@@ -502,6 +505,7 @@ describe('RuntimeMonitor', () => {
     )
     expect(parameterValue(container, 'request · connect timeout')).toBe(expected)
     expect(parameterValue(container, 'declared provider · connect timeout')).toBe(expected)
+    expect(parameterValue(container, 'declared provider · Exact timeout (s)')).toBe(expected)
     expect(parameterValue(container, 'effective · max context')).toBe('131,072')
   })
 

@@ -1397,6 +1397,7 @@ type validated_sync_request =
 
 type sync_transport_receipt =
   { response : raw_sync_response
+  ; body_receipt : refusal_body
   ; response_header_evidence : response_header_evidence
   }
 
@@ -2262,13 +2263,15 @@ let post_sync_once_after_validation
         raise exn
       | exn -> `Failed (http_error_of_exn exn)
     in
-    let response_of body =
+    let response_of body_receipt =
+      let body = refusal_body_text body_receipt in
       { response =
           { status = response_status
           ; body
           ; retry_after_header
           ; content_type = content_type_of_response_headers (Cohttp.Response.headers response)
           }
+      ; body_receipt
       ; response_header_evidence
       }
     in
@@ -2286,7 +2289,7 @@ let post_sync_once_after_validation
           not turn the refusal into silence. The connection has unread
           bytes on it and is not parked. *)
        release_connection ();
-       Ok (response_of "")
+       Ok (response_of Not_received_in_window)
      | `Body response_body ->
        let release_result =
          match
@@ -2307,7 +2310,7 @@ let post_sync_once_after_validation
         | Error error ->
           release_connection ();
           fail error
-        | Ok () -> Ok (response_of response_body)))
+        | Ok () -> Ok (response_of (Received response_body))))
 ;;
 
 let dispatch_sync_request

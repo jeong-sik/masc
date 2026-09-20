@@ -38,6 +38,17 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
+**Cluster**
+: `.masc/` 상태 디렉터리 레이아웃을 가르는 이름 범위(`MASC_CLUSTER_NAME`). 기본값은
+  `default`이며 그때 경로는 `<base>/.masc/`다. 다른 이름은
+  `<base>/.masc/clusters/<sanitized>/`를 쓴다. TUI 개요의 `Cluster:` 행이 이 값을
+  보여준다. Turn Boundary와 Read Position 같은 runtime 좌표는 선택한 cluster의
+  디렉터리에만 의미가 있고, 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
+  Memory OS와 Working Context는 cluster가 아니라 Keeper 이름에 귀속되므로 cluster
+  간에 공유된다.
+  → [masc_root_dir_from](../../lib/workspace/workspace_utils_paths_backend.mli),
+  [cluster_name](../../lib/config/env_config_core.mli)
+
 **Workspace Heartbeat**
 : `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
   `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의

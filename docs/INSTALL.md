@@ -223,8 +223,26 @@ change existing Keeper configurations in bulk.
 | `<prefix>/masc-deployment-preflight-helper` | Helper binary for the execution-environment preflight |
 | `<prefix>/masc-check-runtime-deployment-preflight` | Script that runs the preflight |
 | `<prefix>/.masc-releases/<receipt-hash>/` | Dashboard from the same commit as the server, the server executable, and the verification receipt |
-| `<base-path>/.masc/config/` | Runtime configuration and the default configuration seed. The model catalog, tools, and prompts used in operation come from embedded assets; `AGENT_CORE_MODEL_CATALOG` can explicitly replace the whole model catalog |
+| `<base-path>/.masc/config/` | Runtime configuration and the default configuration seed. The model catalog, tools, and prompts used in operation come from embedded assets; `AGENT_CORE_MODEL_CATALOG` can explicitly replace the whole model catalog (see below) |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
+
+### Replacing the model catalog
+
+`AGENT_CORE_MODEL_CATALOG` points at a file that replaces the embedded catalog
+whole. A replacement is not a patch: nothing from the embedded catalog is kept,
+and nothing is derived from `runtime.toml` to fill a gap.
+
+That second half is the one that stops a boot. With the embedded catalog the
+server builds one exact-output target per runtime binding it finds in
+`runtime.toml`; with a replacement file it builds none, and the lanes named in
+`[runtime.exact_output_lanes.*]` resolve to nothing. The mandatory lanes then
+fail to publish and the server exits with `exact-output resolver-and-lane
+registry`.
+
+A replacement file therefore has to declare its own `[[targets]]` rows, one per
+slot any lane names. `packages/agent_core/models.toml` in the source tree has
+none -- it is the provider and model half of the catalog -- so a copy of it is
+not a working replacement on its own.
 
 The **installed binary** provisions one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is

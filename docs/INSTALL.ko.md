@@ -211,8 +211,22 @@ bash /tmp/masc-install.sh --version "$TAG" \
 | `<prefix>/masc-deployment-preflight-helper` | 실행 환경 사전점검 보조 바이너리 |
 | `<prefix>/masc-check-runtime-deployment-preflight` | 사전점검 실행 스크립트 |
 | `<prefix>/.masc-releases/<receipt-hash>/` | 서버와 같은 커밋의 대시보드, 서버 실행 파일, 검증 receipt |
-| `<base-path>/.masc/config/` | runtime 설정 및 기본 설정 seed. 운영 중 모델 카탈로그·도구·프롬프트는 내장 자산을 사용하며, `AGENT_CORE_MODEL_CATALOG`로 모델 카탈로그 전체를 명시적으로 교체할 수 있음 |
+| `<base-path>/.masc/config/` | runtime 설정 및 기본 설정 seed. 운영 중 모델 카탈로그·도구·프롬프트는 내장 자산을 사용하며, `AGENT_CORE_MODEL_CATALOG`로 모델 카탈로그 전체를 명시적으로 교체할 수 있음(아래 참고) |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
+
+### 모델 카탈로그를 통째로 바꿀 때
+
+`AGENT_CORE_MODEL_CATALOG` 가 가리키는 파일은 내장 카탈로그를 **통째로** 대신합니다.
+일부만 덮는 게 아니라서, 내장 카탈로그에서 남는 것도 없고 `runtime.toml` 에서 채워 주는 것도 없습니다.
+
+부팅이 막히는 건 뒤쪽 때문입니다. 내장 카탈로그를 쓸 때는 서버가 `runtime.toml` 의 바인딩마다
+exact-output target 을 하나씩 만들어 줍니다. 교체 파일을 쓰면 하나도 안 만들어서,
+`[runtime.exact_output_lanes.*]` 가 부르는 슬롯이 아무것도 안 잡힙니다.
+그러면 필수 레인이 등록에 실패하고 서버는 `exact-output resolver-and-lane registry` 로 멈춥니다.
+
+그래서 교체 파일은 레인이 부르는 슬롯마다 `[[targets]]` 행을 자기 안에 적어야 합니다.
+소스 트리의 `packages/agent_core/models.toml` 에는 그 행이 없습니다 — provider 와 model 쪽만 담은 파일이라,
+그대로 복사해서 쓰면 교체 파일로는 모자랍니다.
 
 **설치된 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 준비합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.

@@ -3,8 +3,8 @@ description = """
 Search durable Memory OS facts or raw conversation history, case-insensitively. \
 Complete-query substrings rank first. The fallback requires every fragment \
 split by ASCII whitespace to appear as a substring, in any order. source='all' \
-applies those two tiers across all stores. Within a tier, store and stored \
-order stay fixed. History requires a non-empty query. Results name their store; \
+applies those two tiers across all stores. Within a tier, source order and each \
+source's existing result order stay fixed. History requires a non-empty query. Results name their store; \
 current facts include exact memory_id, category, and basis. Use a memory_id as \
 a derived conclusion's premise_id only for store='current_memory_snapshot'. \
 source='absorbed' finds facts merged into a newer claim: into names that claim, \

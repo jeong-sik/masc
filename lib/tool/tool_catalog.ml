@@ -254,6 +254,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_dos_eject", mutating_tool);
     ("masc_dos_step", mutating_tool);
     ("masc_dos_press", mutating_tool);
+    ("masc_dos_click", mutating_tool);
     ("masc_dos_type", mutating_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);

@@ -152,6 +152,12 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev =
+  | Jev_off
+  | Jev_configured of { model : string }
+  | Jev_cli_only
+  | Jev_lane_unavailable
+
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
@@ -159,6 +165,7 @@ type standalone_lane = {
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : standalone_lane_configuration;
+  sl_jev : standalone_lane_jev option;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -5880,6 +5887,20 @@ let decode_standalone_lane_slot_count json =
   let* slsc_count = required_int_field json "count" in
   Ok { slsc_slot_id; slsc_count }
 
+let decode_standalone_lane_jev json =
+  let* state = required_string_field json "state" in
+  match state with
+  | "off" -> Ok Jev_off
+  | "cli_only" -> Ok Jev_cli_only
+  | "lane_unavailable" -> Ok Jev_lane_unavailable
+  | "configured" ->
+    let* model = required_string_field json "model" in
+    let model = String.trim model in
+    if String.equal model ""
+    then Error "standalone lane JEV model must be a non-empty string"
+    else Ok (Jev_configured { model })
+  | other -> Error ("standalone lane JEV state: unknown value " ^ other)
+
 let decode_standalone_lane json =
   let* sl_lane_id = required_string_field json "lane_id" in
   let* sl_label = required_string_field json "label" in
@@ -5894,6 +5915,16 @@ let decode_standalone_lane json =
   let* configuration_state = required_string_field json "configuration_state" in
   let* sl_configuration_state =
     standalone_lane_configuration_of_string configuration_state
+  in
+  let* sl_jev =
+    if
+      String.equal sl_lane_id
+        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention)
+    then
+      let* jev = required_object_field json "jev" in
+      let* decoded = decode_standalone_lane_jev jev in
+      Ok (Some decoded)
+    else Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -5945,6 +5976,7 @@ let decode_standalone_lane json =
     ; sl_required
     ; sl_status
     ; sl_configuration_state
+    ; sl_jev
     ; sl_admitted_slots
     ; sl_cli_slots
     ; sl_dropped_slots
@@ -5964,7 +5996,7 @@ let decode_standalone_lane json =
 let decode_standalone_lanes_snapshot json =
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "masc.standalone_llm_lanes.v1" then Ok ()
+    if String.equal schema "masc.standalone_llm_lanes.v2" then Ok ()
     else Error ("standalone lanes: unsupported schema " ^ schema)
   in
   let* _generated_at = required_string_field json "generated_at" in

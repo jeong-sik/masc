@@ -10,10 +10,22 @@ let default_model = "jev-latest"
 let api_key () = Env_config_core.trim_opt (Env_config_core.raw_value_opt "TYPESAFEAI_API_KEY")
 
 let endpoint () =
-  Env_config_core.get_string ~default:default_endpoint "MASC_TYPESAFEAI_ENDPOINT"
+  match
+    Env_config_core.trim_opt
+      (Env_config_core.raw_value_opt "MASC_TYPESAFEAI_ENDPOINT")
+  with
+  | Some endpoint -> endpoint
+  | None -> default_endpoint
 ;;
 
-let model () = Env_config_core.get_string ~default:default_model "MASC_TYPESAFEAI_MODEL"
+let model () =
+  match
+    Env_config_core.trim_opt
+      (Env_config_core.raw_value_opt "MASC_TYPESAFEAI_MODEL")
+  with
+  | Some model -> model
+  | None -> default_model
+;;
 
 (* The variable turns the lane off; it cannot turn it on without a key, and a
    key alone is enough to opt in. [get_bool] reads the same spellings this
@@ -38,4 +50,12 @@ let is_board_attention_enabled () =
 let is_absorb_gate_enabled () =
   is_enabled ()
   && Env_config_core.get_bool ~default:false "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED"
+;;
+
+type readiness =
+  | Off
+  | Configured of { model : string }
+
+let readiness () =
+  if is_board_attention_enabled () then Configured { model = model () } else Off
 ;;

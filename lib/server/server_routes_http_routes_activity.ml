@@ -540,9 +540,6 @@ let board_tool_agent_name_from_request request =
              the sibling board REST bridges already use this dashboard actor fallback. *)
           "dashboard")
 
-let board_tool_owner_from_request request =
-  board_tool_agent_name_from_request request |> board_actor_author_for_write
-
 let sub_board_owner_matches ~owner (sb : Board.sub_board) =
   String.equal (Board.Agent_id.to_string sb.Board.owner) owner
 
@@ -1177,8 +1174,8 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_sub_board_create"
-         (fun _state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_board_sub_board_create"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1192,7 +1189,7 @@ let add_routes ~sw ~clock router =
                Safe_ops.json_string_opt "description" args |> Option.value ~default:""
              in
              let members = Safe_ops.json_string_list "members" args in
-             let owner = board_tool_owner_from_request request in
+             let owner = board_actor_author_for_write agent_name in
              let access =
                match Safe_ops.json_string_opt "access" args with
                | Some s -> Board.sub_board_access_of_string_opt s
@@ -1229,8 +1226,8 @@ let add_routes ~sw ~clock router =
                    reqd)))
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_sub_board_delete"
-         (fun _state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_board_sub_board_delete"
+         (fun _state agent_name _req reqd ->
          let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
           | None ->
@@ -1238,7 +1235,7 @@ let add_routes ~sw ~clock router =
                 (`Assoc [("error", `String "sub_board_id is required")])
                 reqd
          | Some sub_board_id ->
-              let owner = board_tool_owner_from_request request in
+              let owner = board_actor_author_for_write agent_name in
               (match Board_dispatch.get_sub_board ~sub_board_id with
                | Error e ->
                    Http.Response.json_value ~status:`Not_found
@@ -1260,8 +1257,8 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_board_sub_board_update"
-         (fun _state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_board_sub_board_update"
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1281,7 +1278,7 @@ let add_routes ~sw ~clock router =
                     (`Assoc [("error", `String "sub_board_id is required")])
                     reqd
               | Some sub_board_id ->
-                  let owner = board_tool_owner_from_request request in
+                  let owner = board_actor_author_for_write agent_name in
                   (match Board_dispatch.get_sub_board ~sub_board_id with
                    | Error e ->
                        Http.Response.json_value ~status:`Not_found

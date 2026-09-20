@@ -217,7 +217,9 @@ let test_phased_network_error_preserves_typed_timeout () =
   in
   match AE.terminal_reason_code_of_core_error_typed error with
   | Code.Agent_core_error
-      { wire; timeout = Some { phase = Some Http.First_token } } ->
+      { wire
+      ; timeout = Some { source = Code.Agent_core_provider; phase = Some Http.First_token }
+      } ->
     Alcotest.(check string)
       "wire remains byte-compatible"
       "provider_error_network:dns_failure:first_token"

@@ -1772,6 +1772,7 @@ let runtime_declared_spec_json (rt : Runtime.t) =
                  | None -> 0
                  | Some headers -> List.length headers) )
           ; "connect_timeout_s", Json_util.float_opt_to_json rt.provider.connect_timeout_s
+          ; "exact_body_timeout_s", Json_util.float_opt_to_json rt.provider.exact_body_timeout_s
           ] )
     ; ( "model"
       , `Assoc

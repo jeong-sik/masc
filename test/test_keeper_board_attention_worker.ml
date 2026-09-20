@@ -1251,6 +1251,64 @@ let test_domain_error_quarantines_bound_progress_without_hot_retry () =
   Alcotest.(check int) "one domain-invalid exact execution" 1 !calls
 ;;
 
+let test_cli_exhaustion_preserves_prior_domain_rejection () =
+  with_temp_base "board-attention-worker-cli-prior-domain-invalid" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "cli-prior-domain-invalid" in
+  let detail = "singleton candidate identity mismatch" in
+  let calls = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind rejected HTTP response" (before_dispatch exact);
+    Error
+      (E.Cli_slots_exhausted
+         { prior_error = Some (E.Domain_output_invalid detail)
+         ; failures =
+             [ Keeper_lane_cli_oneshot.Execution_failed
+                 { runtime_id = "claude_code.claude-sonnet-5"
+                 ; detail = "client unavailable"
+                 }
+             ]
+         })
+  in
+  (match
+     ok
+       "CLI exhaustion after domain rejection"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id; reason = P.Domain_output_invalid observed }
+     when String.equal candidate_id persisted.candidate_id
+          && String.equal observed detail ->
+     ()
+   | _ -> Alcotest.fail "CLI exhaustion replaced its prior domain rejection");
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked { reason = P.Domain_output_invalid observed; _ }
+     when String.equal observed detail ->
+     ()
+   | _ -> Alcotest.fail "partition lost the prior domain rejection");
+  (match (load_one_candidate ~base_path).status with
+   | A.Quarantine
+       { quarantine =
+           { failure_category = A.Domain_output_invalid
+           ; attempt_provenance = None
+           ; _
+           }
+       ; phase = A.Quarantined
+       } ->
+     ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "candidate lost the prior domain rejection classification");
+  (match
+     ok
+       "domain rejection with exhausted CLI is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "quarantined CLI/domain failure became claimable");
+  Alcotest.(check int) "one exact execution" 1 !calls
+;;
+
 let test_bound_cancellation_is_prompt_and_process_recoverable () =
   Eio_main.run @@ fun _env ->
   with_temp_base "board-attention-worker-bound-cancel" @@ fun base_path ->
@@ -2652,6 +2710,10 @@ let () =
             "domain error quarantines Bound without retry"
             `Quick
             test_domain_error_quarantines_bound_progress_without_hot_retry
+        ; Alcotest.test_case
+            "CLI exhaustion preserves prior domain rejection"
+            `Quick
+            test_cli_exhaustion_preserves_prior_domain_rejection
         ; Alcotest.test_case
             "Bound cancellation is prompt and process-recoverable"
             `Quick

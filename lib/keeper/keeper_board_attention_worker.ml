@@ -857,6 +857,11 @@ let execution_disposition partition = function
       { cause; failed; next; evidence = _ } ->
     Execution_blocked
       (before_advance_failure_reason partition ~cause ~failed ~next)
+  | Exact_flow.Cli_slots_exhausted
+      { prior_error = Some (Exact_flow.Domain_output_invalid detail)
+      ; failures = _
+      } ->
+    Execution_blocked (Partition.Domain_output_invalid detail)
   | Exact_flow.Providers_exhausted _
   | Exact_flow.Cli_slots_exhausted _
   | Exact_flow.Flow_bookkeeping_failed _ ->

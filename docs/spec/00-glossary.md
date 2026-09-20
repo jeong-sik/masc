@@ -221,7 +221,11 @@ status: reference
   Keeper turn은 이 목록 끝에 message를 덧붙인다. 목록 안에는 어느 message가 어느
   Keeper turn의 것인지 표시가 없다.
   `keeper_memory_search`가 여러 저장 위치의 사용자 본문을 합칠 때에는 추출한 본문
-  전체의 일치로 중복을 판정한다.
+  전체의 일치로 중복을 판정한다. 현재 Working Context, 현재 trace의 저장된 메시지,
+  `trace_history`에 기록된 trace 순서로 검색하며, 각 위치에서는 최신 메시지부터 읽는다.
+  검색 결과 수는 검색어와 일치하고 중복되지 않는 본문에 적용한다. 그 전에 후보 메시지나
+  원문 줄 수를 제한하지 않는다. 읽지 못한 파일·행은 `history_read_errors`로 알리며,
+  불완전한 빈 검색 결과를 `no_match`로 표시하지 않는다.
   운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
   진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
 

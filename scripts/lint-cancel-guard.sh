@@ -23,7 +23,7 @@ VIOLATIONS=0
 # It ratchets down, never up. Removing an exemption means lowering this, which
 # is the direction the guard wants; adding one means saying so in a diff.
 EXEMPTIONS=0
-EXEMPTION_BUDGET=18
+EXEMPTION_BUDGET=17
 while IFS= read -r file; do
   echo "$file" | grep -qE "/(${NO_EIO_DIRS})/" 2>/dev/null && continue
   while IFS=: read -r lineno line; do

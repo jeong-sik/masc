@@ -714,54 +714,61 @@ let live_lane_configuration registry lane_id =
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots; cli_slots } ->
-    (* [verifier_exact] dispatches each cli slot as a judge, so the ids it can
-       actually judge through are a shorter list than the declaration whenever
-       one names an HTTP runtime, a client with no native-tool suppression, or
-       a Claude Code binding without tools-support. Showing the declaration
-       here would read as a configured judge that then refuses every review
-       (#37179). Sibling lanes answer an unresolved cli id with a typed error
-       at execution and walk on, so their declaration is what to show. *)
-    let admitted_cli_slots, cli_slot_rejections =
-      match Runtime.exact_lane_of_id lane_id with
-      | Some Runtime.Verifier ->
-        Runtime.verifier_cli_slots_admission
-          ~catalog_slot_count:
-            (Runtime.exact_lane_declared_catalog_slot_count
-               registry
-               ~lane_id
-               ~admitted_catalog_slots:(List.length selected_slots))
-          cli_slots
+    (* [verifier_exact] dispatches each of its slots as a judge, so the ids it
+       can actually judge through are a shorter list than the declaration
+       whenever one names a binding that takes no inline tools or no system
+       prompt, a client with no native-tool suppression, or a Claude Code
+       binding without tools-support. Showing the declaration here would read
+       as a configured judge that then refuses every review (#37179, #37382).
+       Sibling lanes answer an unresolved cli id with a typed error at
+       execution and walk on, so their declaration is what to show. *)
+    let registry_admitted_catalog_slots =
+      List.map
+        (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+        selected_slots
+    in
+    let admitted_catalog_slots, admitted_cli_slots, slot_rejections =
+      match
+        Runtime.exact_lane_of_id lane_id,
+        Runtime_exact_output_registry.declared_lane registry ~lane_id
+      with
+      | Some Runtime.Verifier, Some declared ->
+        let lane =
+          Runtime.verifier_exact_lane_admission ~declared ~registry_admitted_catalog_slots
+        in
+        ( lane.Runtime.admitted_catalog_slot_ids
+        , lane.Runtime.admitted_cli_slot_ids
+        , lane.Runtime.slot_rejections )
+      | Some Runtime.Verifier, None
       | Some
           ( Runtime.Librarian
           | Runtime.Hitl_auto_judge
           | Runtime.Board_attention
           | Runtime.Workspace_curator )
-      | None -> cli_slots, []
+        , _
+      | None, _ -> registry_admitted_catalog_slots, cli_slots, []
     in
     let dropped_slots =
       dropped_slots
       @ List.map
-          (fun (rejection : Runtime.verifier_cli_slot_rejection) ->
+          (fun (rejection : Runtime.verifier_slot_rejection) ->
              rejection.Runtime.slot_id)
-          cli_slot_rejections
+          slot_rejections
     in
     Configured
-      { admitted_slots =
-          List.map
-            (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-            selected_slots
+      { admitted_slots = admitted_catalog_slots
       ; cli_slots = admitted_cli_slots
       ; dropped_slots
       ; admission_error =
-          (match selected_slots, admitted_cli_slots with
+          (match admitted_catalog_slots, admitted_cli_slots with
            | [], [] ->
-             (match cli_slot_rejections with
+             (match slot_rejections with
               | [] -> None
               | _ :: _ as rejections ->
                 Some
                   (String.concat
                      "; "
-                     (List.map Runtime.verifier_cli_slot_rejection_to_string rejections)))
+                     (List.map Runtime.verifier_slot_rejection_to_string rejections)))
            | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
              if
                String.equal lane_id Server_workspace_memory_curator.lane_id

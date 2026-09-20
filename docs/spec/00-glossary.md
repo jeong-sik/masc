@@ -12,11 +12,13 @@ status: reference
 : Multi-Agent Shared Context의 약어. 다중 에이전트의 Board, Task, Goal, Schedule,
   Keeper와 도구 실행을 조율하는 OCaml/Eio 서버.
 
-**agent core**
-: `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를
-  참조하지 않아 MASC 없이도 쓸 수 있다. Agent 구성, tool turn, typed response와
-  실패의 타입은 모든 레인이 여기 것을 쓴다. Provider 요청을 실제로 보내는 것은
-  agent core 레인뿐이고, 공식 클라이언트 레인은 자기 프로세스가 보낸다.
+**Agent Core**
+: `packages/agent_core`의 재사용 모델 실행 계층. MASC coordinator를 참조하지
+  않아 MASC 없이도 쓸 수 있다. `Agent_core.Agent`를 거치는 실행의 Agent 구성,
+  tool turn, provider 요청, typed 응답·사용량·실패를 소유한다. MASC는 Keeper
+  실행과 제품 조율을 소유하고, 공식 클라이언트 레인은 자기 프로세스에서 provider
+  요청을 보낸다. 코드 식별자는 `agent_core`와 `Agent_core`다.
+  → [Agent Core 경계](13-agent-core.md)
 
 **Official Client Lane**
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
@@ -47,11 +49,6 @@ status: reference
 
 **Agent**
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
-
-**Agent Core**
-: `packages/agent_core`로 제공되는 재사용 모델 실행 계층. Agent 구성, tool turn,
-  provider 요청, typed response와 실패를 소유하며, MASC는 제품 오케스트레이션을
-  소유한다. 코드 식별자는 `agent_core`와 `Agent_core`다.
 
 **Keeper**
 : 독립된 agent core checkpoint와 MASC lifecycle을 가진 장기 실행 Agent. 현재 typed

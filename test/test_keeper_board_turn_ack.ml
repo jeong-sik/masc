@@ -48,8 +48,10 @@ let install_keeper config name =
     "effective Keeper profile is not Docker";
   require (meta.network_mode = Keeper_types_profile_sandbox.Network_none)
     "effective Keeper network mode changed";
-  ignore (Keeper_registry.For_testing.register ~base_path:config.base_path name meta);
-  meta
+  let registry_entry =
+    Keeper_registry.For_testing.register ~base_path:config.base_path name meta
+  in
+  meta, registry_entry
 
 let queue config name =
   Keeper_registry_event_queue.snapshot_result ~base_path:config.Workspace.base_path name
@@ -133,7 +135,7 @@ data: [DONE]
   Keeper_registry.For_testing.clear ();
   ignore (Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
     ~on_turn_slot_released:None config |> get Keeper_owner_registry.install_error_to_string);
-  let meta = install_keeper config keeper_name in
+  let meta, registry_entry = install_keeper config keeper_name in
   (* The control Keeper receives no cycle, so it never starts a sandbox. *)
   ignore (install_keeper config other_name);
   Eio.Switch.on_release sw (fun () ->
@@ -166,7 +168,8 @@ data: [DONE]
     | _ -> failwith "expected one durable Board stimulus" in
   let shared_context = Agent_core.Context.create () in
   let cycle meta = Keeper_heartbeat_loop.run_keepalive_unified_turn
-    ~wake:Keeper_world_observation.Attention_wake ~ctx ~meta_after_triage:meta
+    ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry
+    ~meta_after_triage:meta
     ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true
     ~reactive_wake:true ~shared_context ~deferred_runtime_lane:None
     ~on_deferred_runtime_consumed:(fun () -> ())

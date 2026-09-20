@@ -152,8 +152,74 @@ let test_missing_owner_does_not_clear () =
     (Context.messages_of_context saved = Context.messages_of_context (load ()))
 ;;
 
+let checkpoint_path config (meta : Keeper_meta_contract.keeper_meta) =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  Keeper_checkpoint_store.agent_core_checkpoint_path
+    ~session_dir:(Keeper_types_support.keeper_session_dir config trace_id)
+    ~session_id:trace_id
+;;
+
+let test_checkpoint_read_failure fault () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved ~save:_ ~load ~clear ->
+  let path = checkpoint_path config meta in
+  let original = Fs_compat.load_file path in
+  let backup = path ^ ".test-original" in
+  let missing_target = path ^ ".missing" in
+  let invalid_json = "{broken-checkpoint" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  let boundaries () = Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:meta.name |> require_ok in
+  let before_boundaries = boundaries () in
+  let before_failures = Keeper_turn_failure_streak.increment
+    ~base_path:config.base_path ~keeper_name:meta.name in
+  Unix.rename path backup;
+  (match fault with
+   | `Malformed -> Fs_compat.save_file path invalid_json
+   | `Unreadable_path -> Unix.symlink missing_target path);
+  Fun.protect
+    ~finally:(fun () -> Unix.unlink path; Unix.rename backup path)
+    (fun () ->
+      let result = clear () in
+      check_refused result;
+      check string "failure identifies the checkpoint" path
+        (Tool_result.data result |> Yojson.Safe.Util.member "checkpoint_path"
+         |> Yojson.Safe.Util.to_string);
+      (match fault with
+       | `Malformed ->
+         check string "malformed original is not overwritten" invalid_json (Fs_compat.load_file path)
+       | `Unreadable_path ->
+         check string "unreadable path is not replaced" missing_target (Unix.readlink path));
+      check bool "failed clear appends no restart marker" true (before_boundaries = boundaries ());
+      check int "process failure streak is preserved" before_failures
+        (Keeper_registry.get_turn_failures ~base_path:config.base_path meta.name);
+      match Keeper_turn_failure_streak_store.load ~base_path:config.base_path ~keeper_name:meta.name with
+      | Ok count -> check (option int) "durable failure streak is preserved" (Some before_failures) count
+      | Error error -> fail (Keeper_turn_failure_streak_store.error_to_string error));
+  check string "original bytes remain available after read recovery" original (Fs_compat.load_file path);
+  check bool "next load continues the original conversation" true
+    (Context.messages_of_context saved = Context.messages_of_context (load ()))
+;;
+
+let test_absent_checkpoint_is_a_noop () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ->
+  let path = checkpoint_path config meta in
+  Unix.unlink path;
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  let data = Tool_result.data result in
+  check bool "absence is reported" false
+    (Yojson.Safe.Util.member "checkpoint_found" data |> Yojson.Safe.Util.to_bool);
+  check int "no messages were cleared" 0
+    (Yojson.Safe.Util.member "cleared_message_count" data |> Yojson.Safe.Util.to_int);
+  check bool "absence does not create a checkpoint" false (Sys.file_exists path)
+;;
+
 let () =
   run "keeper clear admission"
     [ "owner", [ test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
                ; test_case "paused keeper remains paused" `Quick test_paused_keeper_can_clear_without_resuming
-               ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear ] ]
+               ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear
+               ; test_case "parse failure preserves history and failure state" `Quick (test_checkpoint_read_failure `Malformed)
+               ; test_case "unreadable path is not absence" `Quick (test_checkpoint_read_failure `Unreadable_path)
+               ; test_case "absent checkpoint is a no-op" `Quick test_absent_checkpoint_is_a_noop ] ]

@@ -7453,6 +7453,7 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
                         "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        "response_observed_model_input": None,
                         "raw_trace_run_ref": None,
                         "selected_model": "claude-opus-5",
                         "context_window": 200000,

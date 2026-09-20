@@ -104,6 +104,148 @@ let test_without_a_front_everything_goes () =
   Alcotest.(check bool) "the origin says so" true
     (c.origin = Keeper_carried_front.Whole_history)
 
+(* The real forecast entrypoint reads a persisted meta, checkpoint and turn
+   store. A recent-row limit for byte-composition readings must not also
+   limit the search for the last response-observed front. The synthetic
+   runtime is never called; the test observes only the forecast's range. *)
+let test_forecast_reads_an_observed_front_beyond_unobserved_rows () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Workspace.default_config base_path in
+  let config_path = Filename.concat base_path "runtime.toml" in
+  Out_channel.with_open_bin config_path (fun output ->
+    output_string output
+      {|[runtime]
+default = "forecast.seed"
+[providers.forecast]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.seed]
+api-name = "forecast-test-model"
+max-context = 8192
+tools-support = true
+streaming = false
+[forecast.seed]
+max-concurrent = 1
+|});
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String "forecast-cold-entry" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail
+  in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let persisted = history ~exchanges:5 ~text_bytes:100 in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id
+    ; agent_name = meta.name
+    ; model = "forecast-test-model"
+    ; system_prompt = None
+    ; messages = persisted
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 1
+    ; created_at = 0.
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+       checkpoint
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let store = Keeper_types_support.keeper_turn_record_store config meta.name in
+  Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
+  let _, total_atoms = Runtime_model_input_tail_window.annotate persisted in
+  let window : Turn_record.model_input_window =
+    { transmitted_atoms = total_atoms - 8
+    ; total_atoms
+    ; measurement = Turn_record.Wire_shape
+    ; front_atom_digest = (seed ~messages:persisted 8).front_digest
+    }
+  in
+  let write_record ~turn response_observed_model_input =
+    Keeper_turn_record_writer.write
+      ~config ~keeper_name:meta.name ~agent_name:meta.name ~turn_kind:Turn_record.Direct
+      ~trace_id ~absolute_turn:turn ~runtime_profile:"forecast.seed"
+      ~selected_model:None ~finish_reason:None ~context_window:None
+      ~price_input_per_million:None ~price_output_per_million:None
+      ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
+      ~model_input_window:(Some window) ~response_observed_model_input
+      ~raw_trace_run_ref:None
+      ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+      ~usage:
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        }
+      ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ()
+  in
+  write_record ~turn:1 (Some { Turn_record.runtime_profile = "forecast.seed"; window });
+  (* The former seed reader stopped after 200 rows, even when none carried
+     a response observation. This is the regression boundary, not a new cap. *)
+  let unobserved_rows = 200 in
+  for index = 1 to unobserved_rows do
+    write_record ~turn:(index + 1) None
+  done;
+  Alcotest.(check int) "all turn records were appended"
+    (unobserved_rows + 1) (Dated_jsonl.count_entries store);
+  match Keeper_next_request_forecast.forecast ~config ~keeper_name:meta.name with
+  | Error detail -> Alcotest.fail detail
+  | Ok forecast ->
+    Alcotest.(check int) "the forecast loaded the persisted checkpoint" 10
+      forecast.checkpoint_messages;
+    (match forecast.candidates with
+     | [ candidate ] ->
+       Alcotest.(check string) "the configured runtime was resolved" "forecast.seed"
+         candidate.runtime_id;
+       (match candidate.carried with
+        | None -> Alcotest.fail "the materialized Agent Core runtime must have a range"
+        | Some carried ->
+          Alcotest.(check int) "the older observed front survives the recent-row limit" 8
+            carried.first_atom;
+          Alcotest.(check int) "two retained atoms plus the forecast wake" 3 carried.kept_atoms;
+          Alcotest.(check bool) "the range names the observed turn" true
+            (carried.origin =
+             Keeper_carried_front.Carried (Keeper_carried_front.Turn_record { turn = 1 })))
+     | _ -> Alcotest.fail "one configured runtime must produce one forecast candidate")
+
 let component component bytes : Turn_record.input_component = { component; bytes }
 
 (* lane-smith turn 3646 on 2026-09-16: memory recall and dynamic context
@@ -693,5 +835,9 @@ let () =
             test_a_declared_place_is_the_index_in_the_lane
         ; Alcotest.test_case "the JSON carries the walk and each place" `Quick
             test_the_json_carries_the_walk_and_each_place
+        ] )
+    ; ( "store"
+      , [ Alcotest.test_case "forecast finds a response beyond unobserved rows" `Quick
+            test_forecast_reads_an_observed_front_beyond_unobserved_rows
         ] )
     ]

@@ -1499,6 +1499,155 @@ let test_a_query_of_several_words_is_answered () =
     (json_field "no_match" unanswered = `Bool true)
 ;;
 
+(* [source=all] applies the match tier before the store order. A weaker current
+   fact must not consume [limit] before an exact absorbed or history result.
+   Once the tier is equal, the documented current/source-bound/absorbed/history
+   order remains deterministic. *)
+let test_all_ranks_complete_queries_before_fragments_across_stores () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "all-match-tiers" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let ordinary_fragment = fact "ordinary alpha deploys each tuesday" in
+  let absorbed_exact = fact "absorbed alpha tuesday exact" in
+  replace_current_facts
+    ~keepers_dir
+    ~keeper_id:meta.name
+    [ ordinary_fragment; absorbed_exact ];
+  let merged = fact "merged weekday decision" in
+  (match
+     Current.apply_disposition
+       ~keepers_dir
+       ~keeper_id:meta.name
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "all-tier-pass" }
+       ~absorbed:
+         [ { Masc.Keeper_memory_os_types.absorbed =
+               Masc.Keeper_memory_os_types.memory_id absorbed_exact
+           ; into = Masc.Keeper_memory_os_types.memory_id merged
+           }
+         ]
+       ~new_claims:[ merged ]
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let source_path = "facts/source.txt" in
+  Fs_compat.mkdir_p (Filename.dirname (Filename.concat sandbox_root source_path));
+  (match
+     Fs_compat.save_file_atomic
+       (Filename.concat sandbox_root source_path)
+       "source truth\n"
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Masc.Keeper_memory_source_current.upsert_file_fact
+       ~config
+       ~meta
+       ~keepers_dir
+       ~now:(Time_compat.now ())
+       ~claim:"source alpha deploys each tuesday"
+       ~source_path
+       ()
+   with
+   | Ok _ -> ()
+   | Error error ->
+     let detail =
+       match error with
+       | Masc.Keeper_memory_source_current.Source_read_failed failure ->
+         Masc.Keeper_memory_source_current.source_read_failure_to_string failure
+       | Masc.Keeper_memory_source_current.Store_write_failed detail -> detail
+     in
+     Alcotest.fail detail);
+  let ctx_work =
+    Masc.Keeper_context_runtime.append
+      (empty_ctx ())
+      (Agent_core.Types.user_msg "history alpha tuesday exact")
+  in
+  let search limit =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work
+      ~args:
+        (`Assoc
+           [ "query", `String "alpha tuesday"
+           ; "source", `String "all"
+           ; "limit", `Int limit
+           ])
+    |> Yojson.Safe.from_string
+    |> match_texts
+  in
+  Alcotest.(check (list string))
+    "limit one keeps the first complete-query result"
+    [ "absorbed alpha tuesday exact" ]
+    (search 1);
+  Alcotest.(check (list string))
+    "limit two keeps complete-query results from later stores"
+    [ "absorbed alpha tuesday exact"; "history alpha tuesday exact" ]
+    (search 2);
+  Alcotest.(check (list string))
+    "fragment matches follow every complete-query result in store order"
+    [ "absorbed alpha tuesday exact"
+    ; "history alpha tuesday exact"
+    ; "ordinary alpha deploys each tuesday"
+    ; "source alpha deploys each tuesday"
+    ]
+    (search 4)
+;;
+
+let test_fragment_contract_is_whitespace_split_substring_matching () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "fragment-contract" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  replace_current_facts
+    ~keepers_dir
+    ~keeper_id:meta.name
+    [ fact "concatenate task-10 safely"; fact "alpha deploys tuesday" ];
+  let search query =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String query; "source", `String "memory" ])
+    |> Yojson.Safe.from_string
+    |> match_texts
+  in
+  Alcotest.(check (list string))
+    "ASCII fragments are substrings rather than lexical words"
+    [ "concatenate task-10 safely" ]
+    (search "cat task-1");
+  Alcotest.(check (list string))
+    "punctuation stays in a whitespace-delimited fragment"
+    []
+    (search "alpha, tuesday");
+  let history_empty =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:
+        (Masc.Keeper_context_runtime.append
+           (empty_ctx ())
+           (Agent_core.Types.user_msg "history row"))
+      ~args:(`Assoc [ "query", `String ""; "source", `String "history" ])
+    |> Yojson.Safe.from_string
+    |> match_texts
+  in
+  Alcotest.(check (list string))
+    "history requires a non-empty query"
+    []
+    history_empty
+;;
+
 (* The absorbed store is one of three that source=all reads. When it cannot be
    read at all, source=absorbed fails as a store that did not answer, and
    source=all still answers from the current facts and names the store it went
@@ -1966,6 +2115,14 @@ let () =
             "a query of several words is answered"
             `Quick
             test_a_query_of_several_words_is_answered
+        ; Alcotest.test_case
+            "all ranks complete queries across stores"
+            `Quick
+            test_all_ranks_complete_queries_before_fragments_across_stores
+        ; Alcotest.test_case
+            "fragment matching contract is explicit"
+            `Quick
+            test_fragment_contract_is_whitespace_split_substring_matching
         ; Alcotest.test_case
             "an unreadable absorbed store leaves all its current facts"
             `Quick

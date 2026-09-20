@@ -1,22 +1,22 @@
 name = "keeper_memory_search"
 description = """
-Search your durable Memory OS facts or conversation history. A fact matches \
-when it holds the whole query, else every word of it; each store lists \
-whole-query matches first, else in stored order. Results give exact \
-memory_id, category, and basis. Use returned memory_id values as premise_ids \
-when writing a derived conclusion only when store='current_memory_snapshot'; \
-other results name their different store explicitly. Use source='absorbed' \
-for facts a librarian merged into a newer claim: into names that claim's \
-memory_id, and into_current=false means that claim is not current -- removed \
-since, or never committed. Use source='history' for raw user messages, \
-source='all' for every store."""
+Search durable Memory OS facts or raw conversation history, case-insensitively. \
+Complete-query substrings rank first. The fallback requires every fragment \
+split by ASCII whitespace to appear as a substring, in any order. source='all' \
+applies those two tiers across all stores. Within a tier, store and stored \
+order stay fixed. History requires a non-empty query. Results name their store; \
+current facts include exact memory_id, category, and basis. Use a memory_id as \
+a derived conclusion's premise_id only for store='current_memory_snapshot'. \
+source='absorbed' finds facts merged into a newer claim: into names that claim, \
+and into_current=false means it is not current. source='history' searches raw \
+user messages; source='all' searches every store."""
 additional_properties = false
 
 [[params]]
 name = "query"
 type = "string"
 required = true
-description = "words to search for"
+description = "case-insensitive text; fallback fragments split on ASCII whitespace"
 
 [[params]]
 name = "limit"

@@ -374,10 +374,39 @@ let search_history
     @ fst (dedup seen0 current_history)
     @ fst (dedup (snd (dedup seen0 current_history)) prev_history)
   in
-  all_candidates
-  |> List.filter (fun msg -> query <> "" && String_util.contains_all_tokens_ci msg query)
-  |> List.rev
-  |> take limit
+  if String.equal query ""
+  then []
+  else (
+    let whole_query, fragments = answering ~claim_of:Fun.id ~query all_candidates in
+    take limit (List.rev whole_query @ List.rev fragments))
+;;
+
+type all_search_match =
+  | All_fact of fact_match
+  | All_absorbed of absorbed_match
+  | All_history of string
+
+let all_search_match_text = function
+  | All_fact match_ -> match_.claim
+  | All_absorbed match_ -> match_.row.fact.claim
+  | All_history message -> message
+;;
+
+let all_search_match_to_json = function
+  | All_fact match_ -> fact_match_to_json match_
+  | All_absorbed match_ -> absorbed_match_to_json match_
+  | All_history message ->
+    `Assoc
+      [ "source", `String (memory_search_source_to_string History)
+      ; "text", `String message
+      ]
+;;
+
+let ordinary_memory_id_of_all_match = function
+  | All_fact { identity = Ordinary_memory_id memory_id; _ } -> Some memory_id
+  | All_fact { identity = Source_sha256 _; _ }
+  | All_absorbed _
+  | All_history _ -> None
 ;;
 
 (* The ordinary facts in a result set, by identity. Source-bound facts are
@@ -533,7 +562,6 @@ let keeper_memory_search_with_outcome
            (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
             | Error _ as error -> error
             | Ok (fact_matches, fact_total) ->
-              let absorbed_limit = max 0 (limit - List.length fact_matches) in
               let absorbed, unavailable =
                 match
                   search_absorbed_facts
@@ -541,43 +569,31 @@ let keeper_memory_search_with_outcome
                     ~keeper_id:meta.name
                     ~current_ids:(current_memory_ids facts)
                     ~query
-                    ~limit:absorbed_limit
+                    ~limit
                 with
                 | Ok absorbed -> absorbed, None
                 | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
               in
-                 let history_limit =
-                   max 0 (absorbed_limit - List.length absorbed.matches)
-                 in
                  let history_matches =
-                   if history_limit > 0
-                   then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
-                   else []
+                   search_history ~config ~meta ~ctx_work ~query ~limit
                  in
-                 let total_matches =
-                   List.length fact_matches
-                   + List.length absorbed.matches
-                   + List.length history_matches
+                 let candidates =
+                   List.map (fun match_ -> All_fact match_) fact_matches
+                   @ List.map (fun match_ -> All_absorbed match_) absorbed.matches
+                   @ List.map (fun message -> All_history message) history_matches
                  in
-                 let extra_matches =
-                   List.map
-                     (fun msg ->
-                        `Assoc
-                          [ "source", `String (memory_search_source_to_string History)
-                          ; "text", `String msg
-                          ])
-                     history_matches
+                 let whole_query, fragments =
+                   answering ~claim_of:all_search_match_text ~query candidates
                  in
+                 let selected = take limit (whole_query @ fragments) in
                  Ok
                    ( durable_json
-                       ~fact_jsons:
-                         (List.map fact_match_to_json fact_matches
-                          @ List.map absorbed_match_to_json absorbed.matches)
+                       ~fact_jsons:(List.map all_search_match_to_json selected)
                        ~fact_total:(fact_total + absorbed.candidates)
-                       ~total_matches
-                       ~extra_matches
+                       ~total_matches:(List.length selected)
+                       ~extra_matches:[]
                        ~absorbed_fields:(absorbed_fields ~absorbed ~unavailable)
-                   , ordinary_memory_ids fact_matches )))
+                   , List.filter_map ordinary_memory_id_of_all_match selected )))
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
            the events sidecar is about current memories (RFC-0418). *)

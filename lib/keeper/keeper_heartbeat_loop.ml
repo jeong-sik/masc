@@ -300,14 +300,33 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
    crash); the bug being fixed is that the crash was invisible to the
    scheduling/observation layer. Incrementing the registry counter routes the
    crash through the same [Turn_failed] telemetry channel as other failures. *)
-let record_crashed_cycle_failure ~base_path ~keeper_name exn =
+let set_failure_reason_exact registry_entry ~site reason =
+  Keeper_registry.update_entry_exact registry_entry (fun latest ->
+    { latest with last_failure_reason = reason })
+  |> Keeper_registry.exact_update_succeeded registry_entry ~site
+;;
+
+let record_crashed_cycle_failure
+      ~(registry_entry : Keeper_registry.registry_entry)
+      exn
+  =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
-  ignore (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
+  let base_path = registry_entry.base_path in
+  let keeper_name = registry_entry.name in
   let detail = Keeper_types_profile.short_preview (Printexc.to_string exn) in
-  Keeper_registry.set_failure_reason ~base_path keeper_name
-    (Some (Keeper_registry.Exception detail));
-  Health.record_failure ~agent_name:keeper_name ~reason:detail;
+  let current_lane =
+    set_failure_reason_exact
+      registry_entry
+      ~site:"crashed_cycle_failure"
+      (Some (Keeper_registry.Exception detail))
+  in
+  if current_lane
+  then (
+    let _turn_fail_count =
+      Keeper_turn_failure_streak.increment ~base_path ~keeper_name
+    in
+    Health.record_failure ~agent_name:keeper_name ~reason:detail);
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string CycleExceptions)
     ~labels:[ "keeper", keeper_name ]
@@ -331,13 +350,12 @@ let interrupted_cycle_outcome ~(meta : keeper_meta) =
   }
 ;;
 
-let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
+let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) exn =
   if Keeper_registry_types.is_operator_interrupt exn
   then interrupted_cycle_outcome ~meta
   else (
     record_crashed_cycle_failure
-      ~base_path
-      ~keeper_name:meta.name
+      ~registry_entry
       exn;
     { meta
     ; cycle_status = Turn_cycle_crashed
@@ -569,6 +587,7 @@ let pending_stimulus_remains ~ctx ~keeper_name =
 let run_keepalive_unified_turn
       ~wake
       ~(ctx : _ context)
+      ~(registry_entry : Keeper_registry.registry_entry)
       ~(meta_after_triage : keeper_meta)
       ~pending_board_events
       ~(stop : bool Atomic.t)
@@ -622,8 +641,7 @@ let run_keepalive_unified_turn
           )
       | None ->
         record_crashed_cycle_failure
-          ~base_path:ctx.config.base_path
-          ~keeper_name:meta_after_triage.name
+          ~registry_entry
           (Event_queue_cycle_failed message)
     in
     try
@@ -1100,7 +1118,7 @@ let run_keepalive_unified_turn
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)
       handle_cycle_exception
-        ~base_path:ctx.config.base_path
+        ~registry_entry
         ~meta:meta_after_triage
         exn))
     with
@@ -1281,11 +1299,14 @@ let run_heartbeat_loop
             ~consecutive_failures
         in
         if !consecutive_failures > 0
-        then
-          Keeper_registry.set_failure_reason
-            ~base_path:ctx.config.base_path
-            m.name
-            (Some (Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures));
+        then (
+          let _committed =
+            set_failure_reason_exact
+              registry_entry
+              ~site:"heartbeat_failure_reason"
+              (Some (Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures))
+          in
+          ());
         meta_current
       in
         let t_presence_end = Time_compat.now () in
@@ -1412,6 +1433,7 @@ let run_heartbeat_loop
             let r =
               run_keepalive_unified_turn ~wake
                 ~ctx
+                ~registry_entry
                 ~meta_after_triage
                 ~pending_board_events
                 ~stop

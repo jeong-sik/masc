@@ -830,12 +830,13 @@ let test_crashed_cycle_records_turn_failure () =
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       let meta = make_meta "crashed-cycle" in
-      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
+      let registry_entry =
+        R.For_testing.register ~base_path:config.base_path meta.name meta
+      in
       check int "no failures before crash" 0
         (R.get_turn_failures ~base_path:config.base_path meta.name);
       KHL.record_crashed_cycle_failure
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
+        ~registry_entry
         (Failure "boom");
       let count = R.get_turn_failures ~base_path:config.base_path meta.name in
       check int "crash recorded as turn failure" 1 count;
@@ -848,14 +849,38 @@ let test_crashed_cycle_records_turn_failure () =
        | _ -> fail "expected Turn_failed for crashed cycle");
       ignore (R.dispatch_event ~base_path:config.base_path meta.name event);
       (match R.get_phase ~base_path:config.base_path meta.name with
-       | Some phase ->
+      | Some phase ->
          check string "crashed cycle moves state machine to failing" "failing"
            (KSM.phase_to_string phase)
        | None -> fail "expected registered keeper phase");
       (* Clean cycle (count = 0) still maps to Turn_succeeded. *)
-      match KHL.turn_status_event ~turn_fail_count:0 with
+      (match KHL.turn_status_event ~turn_fail_count:0 with
       | KSM.Turn_succeeded -> ()
-      | _ -> fail "expected Turn_succeeded when no failures recorded")
+      | _ -> fail "expected Turn_succeeded when no failures recorded");
+      let stale_meta = make_meta "stale-crashed-cycle" in
+      let stale_entry =
+        R.For_testing.register ~base_path:config.base_path stale_meta.name stale_meta
+      in
+      R.For_testing.unregister ~base_path:config.base_path stale_meta.name;
+      let _replacement_entry =
+        R.For_testing.register ~base_path:config.base_path stale_meta.name stale_meta
+      in
+      R.set_failure_reason
+        ~base_path:config.base_path
+        stale_meta.name
+        (Some (R.Exception "replacement cause"));
+      KHL.record_crashed_cycle_failure
+        ~registry_entry:stale_entry
+        (Failure "old fiber crash");
+      check int "stale crash does not increment replacement debt" 0
+        (R.get_turn_failures ~base_path:config.base_path stale_meta.name);
+      match Option.bind (R.get ~base_path:config.base_path stale_meta.name) (fun entry ->
+        entry.R.last_failure_reason) with
+      | Some (R.Exception "replacement cause") -> ()
+      | Some reason ->
+        failf "stale crash overwrote replacement cause: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "stale crash cleared replacement cause")
 
 let test_turn_status_preserves_configuration_failure_reason () =
   let configuration_reason =
@@ -892,10 +917,10 @@ let test_operator_interrupt_skips_turn_accounting () =
       cleanup_dir base_path)
     (fun () ->
       let meta = make_meta "operator-interrupt-turn-accounting" in
-      ignore (R.For_testing.register ~base_path meta.name meta);
+      let registry_entry = R.For_testing.register ~base_path meta.name meta in
       let outcome =
         KHL.handle_cycle_exception
-          ~base_path
+          ~registry_entry
           ~meta
           (Eio.Cancel.Cancelled R.Operator_interrupt)
       in
@@ -5298,17 +5323,21 @@ let test_turn_intake_uses_only_lifecycle () =
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
   install_test_env env;
+  R.For_testing.clear ();
   let base_path = temp_dir "health-feed" in
   let keeper_name = "health-feed-keeper" in
+  let meta = make_meta keeper_name in
+  let registry_entry = R.For_testing.register ~base_path keeper_name meta in
   Health.record_success ~agent_name:keeper_name;
   for i = 1 to 3 do
     KHL.record_crashed_cycle_failure
-      ~base_path
-      ~keeper_name
+      ~registry_entry
       (Failure (Printf.sprintf "boom-%d" i))
   done;
   let summary = Health.get_summary ~agent_name:keeper_name in
-  check int "crashed cycles are observed" 3 summary.failure_count
+  check int "crashed cycles are observed" 3 summary.failure_count;
+  R.For_testing.clear ();
+  cleanup_dir base_path
 
 let test_invalid_keeper_config_revision_name_creates_no_artifact () =
   let base_path = temp_dir "invalid-config-revision-name" in

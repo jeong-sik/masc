@@ -36,28 +36,47 @@ let test_unavailable_assignment_reaches_both_keeper_surfaces () =
   | Error detail -> Alcotest.fail detail
   | Ok (_, _, [ assignment ]) ->
     (match assignment.ra_resolution with
-     | Runtime_assignment_unavailable { runtime_id; reason } ->
+     | Runtime_assignment_unavailable
+         { runtime_id; reason = Missing_catalog_model { provider_label; model_id } } ->
        Alcotest.(check string) "typed unavailable runtime" "fixture.missing" runtime_id;
        Alcotest.(check string)
-         "typed unavailable reason"
-         "Capability catalog entry unavailable"
-         reason
+         "typed unavailable provider label"
+         "Fixture"
+         provider_label;
+       Alcotest.(check string) "typed unavailable model" "missing" model_id
      | Runtime_assignment_lane _ | Runtime_assignment_missing ->
        Alcotest.fail "decoded unavailable assignment was reclassified");
     Alcotest.(check string)
       "operations preview"
-      " \xc2\xb7 target fixture.missing (unavailable: Capability catalog entry unavailable, explicit)"
+      " \xc2\xb7 target fixture.missing (not in catalog: Fixture / missing, explicit)"
       (Masc_tui_render_prim.runtime_assignment_operations_note assignment);
     Alcotest.(check string)
       "Keeper Runtime Stats"
-      "fixture.missing (unavailable: Capability catalog entry unavailable, explicit)"
-      (Masc_tui_render_prim.runtime_assignment_stats_value assignment);
+      "fixture.missing (not in catalog: Fixture / missing, explicit)"
+      (Masc_tui_render_prim.runtime_assignment_label assignment);
     Alcotest.(check string)
       "runtime picker"
-      "fixture.missing (unavailable: Capability catalog entry unavailable, explicit)"
+      "fixture.missing (not in catalog: Fixture / missing, explicit)"
       (Masc_tui_render_prim.runtime_assignment_label assignment)
   | Ok (_, _, assignments) ->
     Alcotest.failf "expected one unavailable assignment, got %d" (List.length assignments)
+;;
+
+let test_missing_assignment_does_not_target_any_runtime () =
+  let assignment =
+    { ra_keeper = "defaulted"
+    ; ra_source = Default_runtime
+    ; ra_resolution = Runtime_assignment_missing
+    }
+  in
+  Alcotest.(check bool)
+    "not grouped under the configured default"
+    false
+    (Masc_tui_render_prim.runtime_assignment_targets assignment "default.lane");
+  Alcotest.(check bool)
+    "not grouped under another runtime"
+    false
+    (Masc_tui_render_prim.runtime_assignment_targets assignment "other.runtime")
 ;;
 
 let () =
@@ -68,6 +87,10 @@ let () =
             "decoded unavailable assignment stays unavailable"
             `Quick
             test_unavailable_assignment_reaches_both_keeper_surfaces
+        ; Alcotest.test_case
+            "missing assignment targets no runtime"
+            `Quick
+            test_missing_assignment_does_not_target_any_runtime
         ] )
     ]
 ;;

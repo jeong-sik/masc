@@ -31,8 +31,13 @@ module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
 val runtime_assignment_label : runtime_assignment -> string
+(** The assignment shown in the runtime picker and Runtime Stats value. *)
+
 val runtime_assignment_operations_note : runtime_assignment -> string
-val runtime_assignment_stats_value : runtime_assignment -> string
+(** The assignment suffix shown in the Operations preview. *)
+
+val runtime_assignment_targets : runtime_assignment -> string -> bool
+(** Whether an assignment resolves to the named lane or runtime. *)
 
 type planning_tab =
   Render_schedule.planning_tab =

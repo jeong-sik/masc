@@ -46,16 +46,22 @@ module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 
 let runtime_assignment_label (assignment : runtime_assignment) =
-  let source = Terminal_text.single_line assignment.ra_source in
+  let source =
+    match assignment.ra_source with
+    | Default_runtime -> "default"
+    | Explicit_runtime -> "explicit"
+  in
   match assignment.ra_resolution with
   | Runtime_assignment_lane lane_id ->
     Printf.sprintf "%s (lane, %s)" (Terminal_text.single_line lane_id) source
   | Runtime_assignment_missing -> Printf.sprintf "- (missing, %s)" source
-  | Runtime_assignment_unavailable { runtime_id; reason } ->
+  | Runtime_assignment_unavailable
+      { runtime_id; reason = Missing_catalog_model { provider_label; model_id } } ->
     Printf.sprintf
-      "%s (unavailable: %s, %s)"
+      "%s (not in catalog: %s / %s, %s)"
       (Terminal_text.single_line runtime_id)
-      (Terminal_text.single_line reason)
+      (Terminal_text.single_line provider_label)
+      (Terminal_text.single_line model_id)
       source
 ;;
 
@@ -63,7 +69,11 @@ let runtime_assignment_operations_note assignment =
   " \xc2\xb7 target " ^ runtime_assignment_label assignment
 ;;
 
-let runtime_assignment_stats_value = runtime_assignment_label
+let runtime_assignment_targets assignment target =
+  match assignment.ra_resolution with
+  | Runtime_assignment_lane lane_id -> String.equal lane_id target
+  | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false
+;;
 
 let acting_pane_reserved_cols = ref 0
 

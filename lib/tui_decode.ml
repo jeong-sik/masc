@@ -7369,26 +7369,37 @@ let decode_keeper_turns json =
   in
   loop [] items
 
+type runtime_assignment_source =
+  | Default_runtime
+  | Explicit_runtime
+
+type runtime_unavailable_reason =
+  | Missing_catalog_model of
+      { provider_label : string
+      ; model_id : string
+      }
+
 type runtime_assignment_resolution =
   | Runtime_assignment_lane of string
   | Runtime_assignment_missing
   | Runtime_assignment_unavailable of
       { runtime_id : string
-      ; reason : string
+      ; reason : runtime_unavailable_reason
       }
 
 type runtime_assignment =
   { ra_keeper : string
-  ; ra_source : string
+  ; ra_source : runtime_assignment_source
   ; ra_resolution : runtime_assignment_resolution
   }
 
 let decode_runtime_assignment json =
   let* ra_keeper = required_string_field json "keeper" in
-  let* ra_source = required_string_field json "assignment_source" in
-  let* () =
-    match ra_source with
-    | "default" | "explicit" -> Ok ()
+  let* source = required_string_field json "assignment_source" in
+  let* ra_source =
+    match source with
+    | "default" -> Ok Default_runtime
+    | "explicit" -> Ok Explicit_runtime
     | value -> Error (Printf.sprintf "unknown runtime assignment source %S" value)
   in
   let* resolved = required_object_field json "resolved" in
@@ -7400,16 +7411,16 @@ let decode_runtime_assignment json =
     | "missing", None -> Ok Runtime_assignment_missing
     | "unavailable", Some runtime_id ->
         let* reason = required_object_field resolved "reason" in
-        let* kind = required_string_field reason "kind" in
-        let* () = match kind with
-          | "missing_catalog_model" -> Ok ()
+        let* reason_kind = required_string_field reason "kind" in
+        let* reason =
+          match reason_kind with
+          | "missing_catalog_model" ->
+              let* provider_label = required_string_field reason "provider_label" in
+              let* model_id = required_string_field reason "model_id" in
+              Ok (Missing_catalog_model { provider_label; model_id })
           | value -> Error (Printf.sprintf "unknown runtime unavailability reason %S" value)
         in
-        let* message = required_string_field reason "message" in
-        let* _provider_id = required_string_field reason "provider_id" in
-        let* _provider_label = required_string_field reason "provider_label" in
-        let* _model_id = required_string_field reason "model_id" in
-        Ok (Runtime_assignment_unavailable { runtime_id; reason = message })
+        Ok (Runtime_assignment_unavailable { runtime_id; reason })
     | "unavailable", None -> Error "unavailable runtime assignment is missing its configured id"
     | "lane", None -> Error "runtime lane assignment is missing its id"
     | "missing", Some _ -> Error "missing runtime assignment carries an id"

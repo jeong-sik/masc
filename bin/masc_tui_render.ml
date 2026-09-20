@@ -145,10 +145,7 @@ let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list
               String.equal a.ra_keeper k.k_name)
            state.runtime_assignments
        with
-       | Some a ->
-           (match a.ra_resolution with
-            | Runtime_assignment_lane target -> String.equal target lane_id
-            | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false)
+       | Some a -> runtime_assignment_targets a lane_id
        | None ->
            match default_target with
            | Some def -> String.equal def lane_id
@@ -168,10 +165,7 @@ let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keepe
               String.equal a.ra_keeper k.k_name)
            state.runtime_assignments
        with
-       | Some a ->
-           (match a.ra_resolution with
-            | Runtime_assignment_lane target -> String.equal target runtime_id
-            | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false)
+       | Some a -> runtime_assignment_targets a runtime_id
        | None ->
            match default_target with
            | Some def -> String.equal def runtime_id
@@ -6232,7 +6226,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     in
     let target_str =
       match assignment with
-      | Some a -> runtime_assignment_stats_value a
+      | Some a -> runtime_assignment_label a
       | None ->
           let def_name =
             match state.runtime_surface with

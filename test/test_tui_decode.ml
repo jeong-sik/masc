@@ -5955,7 +5955,9 @@ let test_decode_runtime_resolved () =
       (match assignments with
        | [ a ] ->
            Alcotest.(check string) "keeper" "orbiter" a.Tui_decode.ra_keeper;
-           Alcotest.(check string) "source" "explicit" a.ra_source;
+           (match a.ra_source with
+            | Explicit_runtime -> ()
+            | Default_runtime -> Alcotest.fail "explicit source decoded as default");
            (match a.ra_resolution with
             | Runtime_assignment_lane lane_id ->
               Alcotest.(check string) "resolved lane" "ollama_cloud.deepseek" lane_id
@@ -5997,9 +5999,11 @@ let test_decode_unavailable_runtime_assignment () =
    | Ok (runtimes, [assignment]) ->
        Alcotest.(check int) "healthy runtime catalog remains visible" 2 (List.length runtimes);
        (match assignment.ra_resolution with
-        | Runtime_assignment_unavailable { runtime_id; reason } ->
+        | Runtime_assignment_unavailable
+            { runtime_id; reason = Missing_catalog_model { provider_label; model_id } } ->
           Alcotest.(check string) "configured unavailable identity survives" "fixture.missing" runtime_id;
-          Alcotest.(check string) "unavailability is explicit" "Capability catalog entry unavailable" reason
+          Alcotest.(check string) "provider label survives" "fixture" provider_label;
+          Alcotest.(check string) "model id survives" "missing" model_id
         | Runtime_assignment_lane _ | Runtime_assignment_missing ->
           Alcotest.fail "unavailable assignment lost its typed resolution")
    | Ok _ -> Alcotest.fail "unavailable assignment lost"

@@ -13,7 +13,7 @@ implementation_prs: []
 
 # RFC: Tool Librarian — 도구 호출 궤적의 컴포지션 흡수 (Action Absorption)
 
-> **관측과 제안의 범위**: §1.1~§1.2.1과 §4의 실측 표는 명시된 기록 창에서 관측한 결과다. §2는 현재 Memory 구현을 설명한다. §1.3의 우려와 §3~§6의 자동 후보 생성·검증·승인 흐름은 아직 구현·효과가 검증되지 않은 제안이다. 관측 결과가 이 설계의 채택을 뜻하지는 않는다.
+> **관측과 제안의 범위**: §1.1~§1.2.1은 명시된 기록 창의 관측 결과이고, §2는 현재 Memory 구현을 설명한다. §1.3의 우려와 §3~§6의 자동 후보 생성·검증·승인·제거 규칙은 아직 구현·효과가 검증되지 않은 제안이다. §4 안의 날짜가 붙은 실측 표는 그 규칙과 구분되는 관측 자료이며, 규칙의 효과를 증명하지 않는다.
 
 ## 0. Summary
 
@@ -145,7 +145,7 @@ Memory OS의 Librarian은 관련 기억(`m1`, `m2`)을 새 claim으로 묶고, �
 - **삭제**: 현재 기억에서 뺄 ID와 이유를 `dropped`에 적는다.
 - **교정**: 옛 ID를 `dropped`에 적고, 이를 고친 새 claim의 `supersedes`에 같은 ID를 적는다. `supersedes`는 여러 기억을 묶는 필드가 아니다.
 
-흡수할 때 [현재 스냅샷 저장소](../../lib/keeper/keeper_memory_os_current.mli)는 교체 전에 재료의 전체 fact와 `memory_id`·`into`를 [흡수 기록](../../lib/keeper/keeper_memory_absorbed.mli)에 덧붙인다. 기록에 실패하면 커밋하지 않는다. 원문은 `keeper_memory_search`의 `absorbed` 또는 `all`에서 찾을 수 있다. 다만 기록을 쓴 뒤 스냅샷 교체가 실패하면 미완료 회차의 행도 남을 수 있으므로, 흡수 기록 한 줄 자체가 커밋 성공 증명은 아니다.
+흡수할 때 [현재 스냅샷 저장소](../../lib/keeper/keeper_memory_os_current.mli)는 잠금을 잡은 시점에도 현재 스냅샷에 남아 있고 이번 교체로 빠지는 재료의 전체 fact와 `memory_id`·`into`를 [흡수 기록](../../lib/keeper/keeper_memory_absorbed.mli)에 덧붙인다. 기록에 실패하면 커밋하지 않는다. 이렇게 기록된 원문은 `keeper_memory_search`의 `absorbed` 또는 `all`에서 찾을 수 있다. 모델이 답하는 동안 이미 철회된 재료는 이 회차의 흡수 기록에 추가되지 않는다. 또 기록을 쓴 뒤 스냅샷 교체가 실패하면 미완료 회차의 행도 남을 수 있으므로, 흡수 기록 한 줄 자체가 커밋 성공 증명은 아니다.
 
 완료 턴 범위의 소비 여부는 이 흡수 기록과 별개다. 현재 저장소의 `durable_range_id`와 범위 영수증이 Memory 스냅샷의 revision·SHA-256에 연결되고, [durable consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli)는 progress 쓰기 실패 후 그 범위의 커밋이 확인되면 모델을 다시 부르지 않고 진행 위치를 복구한다. 이 복구 계약도 원래 턴이나 호출 기록을 삭제한다는 뜻은 아니다.
 
@@ -162,7 +162,7 @@ Memory OS의 Librarian은 관련 기억(`m1`, `m2`)을 새 claim으로 묶고, �
 기억 흡수는 모델이 내용을 읽고 판단한다. Tool 후보는 먼저 §3.1의 구조 조건을 충족해야 하므로, 모델이 함께 묶을 만하다고 판단할 내용이라도 출력→입력 연결이 없으면 후보가 되지 못한다.
 [기존 컴포지션 7개 대조](https://github.com/jeong-sik/masc/pull/37351)에서는 3개가 이 구조 조건 밖에 있고, 출력 참조가 있는 4개도 §1.2.1의 판정에서 탈락했다. 이 대조는 같은 입력에 대한 모델 판단과 구조 조건의 비교 실험이 아니므로, 0/7을 이 차이 하나의 결과로 단정하거나 모델 판단으로 바꾸면 해결된다고 결론 내릴 수 없다.
 
-[현재 기억의 recall](../../lib/keeper/keeper_memory_os_recall.ml)은 선택된 사실을 그대로 렌더링하며, 목표 항목 수나 고정 바이트 수로 줄이지 않는다. [도구 결과의 레인별 인라인 한도](../../lib/core/common.ml)는 §3.1을 따른다.
+[현재 기억의 recall](../../lib/keeper/keeper_memory_os_recall.ml)은 선택된 사실을 그대로 렌더링하며, 목표 항목 수나 고정 바이트 수로 줄이지 않는다. 도구 결과의 인라인 한도는 §3.1의 descriptor와 실행 레인을 함께 본다.
 
 ---
 
@@ -183,7 +183,7 @@ Memory OS의 Librarian은 관련 기억(`m1`, `m2`)을 새 claim으로 묶고, �
                        ↓
  [3단계: 샌드박스 Dry-Run 검증 게이트 (필수 Invariant)]
    - 실제 격리 환경(host, microvm)에서 자동 생성된 컴포지션 실행 테스트
-   - exit code 0, timeout 미발생, §3.1의 레인별 인라인 한도 이하인지 검증
+   - exit code 0, timeout 미발생, §3.1의 각 호출에 적용되는 출력 정책과 한도 충족 여부 검증
                        ↓
  [4단계: Staged 제안 및 사람 승인 (HITL)]
    - "기록 09-12~09-18, Keeper 3명, 420회, /id → /post_id 예외 0, 한도 넘은 발생 0, Dry-run 통과"
@@ -207,9 +207,8 @@ Tool Librarian은 다음 3가지 조건을 모두 충족할 때만 컴포지션 
      `Opaque_output` 이면 `Keeper_tool_plan.create` 가 `Opaque_output_reference` 로, schema 에 없는 pointer 면 `Invalid_output_pointer` 로 거절한다.
    - 중간에 LLM의 복잡한 자연어 추론이나 분기 선택이 개입해야 하는 경우는 흡수 대상에서 제외.
 3. **크기 (Size Ceiling)**:
-   - 발생마다 노드 결과의 원래 크기(`result_bytes`) 합을 그 발생이 돈 레인의 인라인 한도와 비교한다.
-     `Official_client` 레인은 `Common.max_tool_result_wire_bytes` (16,384 bytes), `Masc_agent_core` 레인은 `Common.max_agent_core_inline_result_bytes` 다(`keeper_tools_agent_core_bundle.ml` 의 `model_projection_for_call`).
-   - 한도를 넘은 발생에서는 결과가 blob 으로 저장되고(`Store_above`), 모델이 같은 턴에 되읽어야 한다. 그 발생에서는 턴이 줄지 않는다.
+   - 발생마다 각 노드의 descriptor에 실제 적용되는 `model_output_projection`으로 결과 크기(`result_bytes`)를 판정한다. `model_projection_for_call`은 기본 `Store_above`를 `Masc_agent_core`에서 `Common.max_agent_core_inline_result_bytes`로 바꾸지만, descriptor가 지정한 `Inline_up_to`는 그대로 둔다. 예를 들어 `keeper_artifact_read`의 한도는 해당 descriptor의 `maximum_bytes`다.
+   - `Store_above`의 한도를 넘으면 결과가 blob으로 저장되어 추가 읽기가 필요하다. `Inline_up_to`의 한도를 넘으면 `Inline_budget_exceeded` 오류가 된다. 둘을 같은 결과로 세거나, 노드 크기 합이 레인 기본값 아래라는 이유만으로 모든 결과가 inline이라고 판정하지 않는다.
    - 마이너는 넘은 발생 수를 카드에 적고 절감 예상에서 뺀다. 넘지 않은 발생이 하나도 없으면 후보가 아니다.
    - 실제 결과에는 노드마다 붙는 틀(`node_id`·`schedule`·`tool_use_id`)이 더해져 이 합보다 크다. 실제 크기는 §3.2 Dry-run 이 잰다.
 

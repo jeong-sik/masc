@@ -33,6 +33,7 @@ val dos_eject : Masc_domain.tool_schema
 val dos_screen : Masc_domain.tool_schema
 val dos_step : Masc_domain.tool_schema
 val dos_press : Masc_domain.tool_schema
+val dos_click : Masc_domain.tool_schema
 val dos_type : Masc_domain.tool_schema
 val dos_peek : Masc_domain.tool_schema
 

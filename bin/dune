@@ -836,6 +836,11 @@
  (libraries masc_tui_message_layout))
 
 (library
+ (name masc_tui_layout)
+ (wrapped false)
+ (modules masc_tui_layout))
+
+(library
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
@@ -1301,7 +1306,7 @@
   masc_tui_frame
   masc_tui_message_layout
   masc_tui_observation_layout
-  masc_tui_render_schedule
+  masc_tui_layout
   masc_tui_terminal_palette
   masc_tui_theme))
 
@@ -1578,6 +1583,7 @@
   masc_tui_planning_selection
   masc_tui_planning_detail
   masc_tui_task_selection
+  masc_tui_layout
   masc_tui_render_schedule
   masc_tui_json
   masc_tui_render_tools

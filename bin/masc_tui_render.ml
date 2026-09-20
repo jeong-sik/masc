@@ -26,6 +26,7 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
+module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
@@ -2192,7 +2193,7 @@ let board_read_layout = Board_read_layout.create ()
 let draw_board_read_side buf (state : state) document ~rows ~body_cols
     ~comment_cols ~total_lines ~detail_line_count =
   let side_budget =
-    Render_schedule.allocate_board_read_side ~terminal_rows:rows
+    Layout.allocate_board_read_side ~terminal_rows:rows
       ~body_line_count:total_lines ~comment_count:detail_line_count
   in
   (* The heading spends the comment column's first row; only what is
@@ -2202,7 +2203,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
     max 0 (side_budget.comment_rows - comment_header_rows)
   in
   let scroll =
-    Render_schedule.project_board_read_scroll
+    Layout.project_board_read_scroll
       ~body_line_count:total_lines
       ~body_rows:side_budget.body_rows
       ~comment_count:detail_line_count
@@ -2327,7 +2328,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     | Board_detail.Ready (_, comments) -> comments <> []
   in
   let side_layout =
-    if has_detail_content then Render_schedule.board_read_side_layout ~cols
+    if has_detail_content then Layout.board_read_side_layout ~cols
     else None
   in
   let body_wrap_cols =
@@ -2519,13 +2520,13 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           ~comment_cols ~total_lines ~detail_line_count
     | None ->
         let row_budget =
-          Render_schedule.allocate_board_read ~terminal_rows:rows
+          Layout.allocate_board_read ~terminal_rows:rows
             ~body_line_count:total_lines ~comment_count:detail_line_count
         in
         let content_height = row_budget.body_rows in
         let comment_height = row_budget.comment_rows in
         let scroll =
-          Render_schedule.project_board_read_scroll
+          Layout.project_board_read_scroll
             ~body_line_count:total_lines ~body_rows:content_height
             ~comment_count:detail_line_count ~comment_rows:comment_height
             state.board_scroll
@@ -6292,7 +6293,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                      /. 10.0
                    in
                    let bar_width =
-                     Masc_tui_render_schedule.keeper_context_bar_width
+                     Layout.keeper_context_bar_width
                        ~inner_width:inner
                    in
                    add_row "Context:"

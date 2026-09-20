@@ -1708,7 +1708,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"
        ~binding_name:"ctx_bar"
-       ~callee:"Masc_tui_render_schedule.nonnegative_width"
+       ~callee:"Masc_tui_layout.nonnegative_width"
      = 1);
   (* [keeper_detail_pane], not [render_keeper_detail]: #30146 split the surface
      so the frame picks a narrow or a side-by-side layout and the pane draws the
@@ -1720,7 +1720,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"keeper_detail_pane"
-       ~callee:"Masc_tui_render_schedule.keeper_context_bar_width"
+       ~callee:"Layout.keeper_context_bar_width"
      = 1);
   check int "keeper detail persists one viewport-normalized scroll" 1
     (Ast_grep.count_calls_in_value_binding
@@ -1815,7 +1815,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
-       ~callee:"Render_schedule.allocate_board_read");
+       ~callee:"Layout.allocate_board_read");
   check int "board body and comments share the allocation" 2
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
@@ -1823,7 +1823,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "board read projects one scroll across body and comments" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
-       ~callee:"Render_schedule.project_board_read_scroll");
+       ~callee:"Layout.project_board_read_scroll");
   (* Position labels also read these offsets. Their number of reads does
      not change the contract: body, comments, labels, and returned scroll
      must all consume the same normalized projection. *)
@@ -1842,7 +1842,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "board rendering never bypasses normalization with raw scroll" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"board_read_pane"
-       ~callees:[ "Render_schedule.project_board_read_scroll" ]
+       ~callees:[ "Layout.project_board_read_scroll" ]
        ~fields:[ "board_scroll" ]);
   (* Two doors notice a resize and they learn of it differently: SIGWINCH
      knows only that the size changed, the loop's own ioctl already read the

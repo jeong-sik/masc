@@ -14,8 +14,6 @@ val create : min_interval_ns:int64 -> unit -> t
 val request : t -> request -> unit
 val take : t -> now_ns:int64 -> decision
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
-val nonnegative_width : int -> int
-val keeper_context_bar_width : inner_width:int -> int
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int
 
@@ -80,80 +78,6 @@ val allocate_overview :
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
-
-type board_read_allocation = {
-  body_rows : int;
-  comment_rows : int;
-}
-
-val board_read_box_rows : int
-(** The rows the read pane's box spends before any body or comment row: its
-    top and bottom, the title, two dividers, the heading and the author. *)
-
-val allocate_board_read :
-  terminal_rows:int ->
-  body_line_count:int ->
-  comment_count:int ->
-  board_read_allocation
-
-type board_read_scroll = {
-  normalized_scroll : int;
-  body_offset : int;
-  comment_offset : int;
-}
-
-val project_board_read_scroll :
-  body_line_count:int ->
-  body_rows:int ->
-  comment_count:int ->
-  comment_rows:int ->
-  int ->
-  board_read_scroll
-
-(** {1 Board read: comments beside the post}
-
-    The operator asked for the comment thread not under the post but beside
-    it, in a second column on the right (p-7784d032). A narrow terminal keeps
-    the stacked layout, so the side arrangement is something the surface asks
-    for per frame and either gets or falls back from. The scroll keeps the
-    same head-first meaning it already had stacked -- {!project_board_read_scroll}
-    windows the side columns too, body first then comments -- so opening a
-    post reads the same regardless of which layout draws it. *)
-
-val board_read_side_minimum_cols : int
-(** The pane width below which the comments stay under the post. The read
-    pane keeps a readable post column and a comment column that is more than
-    a gutter only above this. *)
-
-val board_read_side_comment_cols : int
-(** The width promised to the comment column when the thread sits beside the
-    post. *)
-
-val board_read_side_layout : cols:int -> (int * int) option
-(** [Some (body_cols, comment_cols)] when the pane is wide enough to put the
-    thread beside the post, [None] when it is not and the stacked layout
-    draws instead. The post column keeps the leftover width. *)
-
-type board_read_side_allocation = {
-  body_rows : int;
-  comment_rows : int;
-}
-(** Rows of post body and rows of comment thread the two columns show. Both
-    columns share the pane's row budget; the comment column additionally
-    spends one row on its heading. *)
-
-val allocate_board_read_side :
-  terminal_rows:int ->
-  body_line_count:int ->
-  comment_count:int ->
-  board_read_side_allocation
-(** Split the row budget between the two side-by-side columns. Each column
-    keeps at least one row when it has content, and when the thread has
-    content the heading row comes out of the comment column's own share, not
-    the post's -- so a comment column never shows a heading with nothing
-    readable under it. Windowing the two columns is {!project_board_read_scroll}
-    itself: pass the side allocation's [body_rows] and the comment column's
-    rows under its heading, and it behaves exactly as it does stacked. *)
 
 (** {1 Keeper roster columns} *)
 

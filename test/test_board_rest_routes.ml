@@ -165,7 +165,7 @@ let loopback_request_authority () =
   | Error `Malformed -> fail "failed to construct loopback request authority"
 ;;
 
-let dispatch_schedule_cancel ~router ~token ~schedule_id =
+let dispatch_json ?token ~router ~path ~extra_headers ~body () =
   Server_request_authority.with_current
     (loopback_request_authority ())
     (fun () ->
@@ -174,27 +174,30 @@ let dispatch_schedule_cancel ~router ~token ~schedule_id =
          Httpun.Server_connection.create (fun reqd ->
            Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
        in
-       let body =
-         `Assoc
-           [ "schedule_id", `String schedule_id
-           ; "cancelled_by_id", `String "forged-body-actor"
-           ; "cancelled_by_kind", `String "system"
-           ; "reason", `String "duplicate"
-           ]
-         |> Yojson.Safe.to_string
+       let extra_headers =
+         extra_headers
+         |> List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n")
+         |> String.concat ""
+       in
+       let authorization =
+         Option.fold
+           ~none:""
+           ~some:(fun token -> "Authorization: Bearer " ^ token ^ "\r\n")
+           token
        in
        let raw_request =
          Printf.sprintf
-           "POST /api/v1/tools/masc_schedule_cancel HTTP/1.1\r\n\
+           "POST %s HTTP/1.1\r\n\
             Host: 127.0.0.1:8935\r\n\
             Origin: http://127.0.0.1:8935\r\n\
-            Authorization: Bearer %s\r\n\
-            X-Masc-Agent: forged-header-actor\r\n\
+            %s%s\
             Content-Type: application/json\r\n\
             Content-Length: %d\r\n\
             \r\n\
-            %s"
-           token
+           %s"
+           path
+           authorization
+           extra_headers
            (String.length body)
            body
        in
@@ -236,8 +239,8 @@ let dispatch_schedule_cancel ~router ~token ~schedule_id =
            (String.sub raw offset (String.length raw - offset)) ))
 ;;
 
-let test_schedule_cancel_actor_is_stamped_from_auth () =
-  let base_path = Filename.temp_dir "schedule-cancel-http-actor-" "" in
+let with_authenticated_activity_router ~prefix ~agent_name f =
+  let base_path = Filename.temp_dir prefix "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
     ~finally:(fun () ->
@@ -260,32 +263,11 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
          };
        let token =
          match
-           Auth.create_token base_path ~agent_name:"credential-owner"
+           Auth.create_token base_path ~agent_name
              ~role:Masc_domain.Admin
-         with
+       with
          | Ok (token, _) -> token
          | Error error -> fail (Masc_domain.masc_error_to_string error)
-       in
-       let actor : Schedule_domain.actor =
-         { id = "test"
-         ; kind = Schedule_domain.Human_operator
-         ; display_name = None
-         }
-       in
-       let schedule =
-         match
-           Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
-             ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
-             ~due_at:200.0
-             ~payload:
-               (`Assoc
-                  [ "kind", `String "consumer.note"
-                  ; "body", `Assoc [ "text", `String "cancel me" ]
-                  ])
-             ~source:Schedule_domain.Operator_request ()
-         with
-         | Ok schedule -> schedule
-         | Error error -> fail (Schedule_service.service_error_to_string error)
        in
        let clock = Eio.Stdenv.clock env in
        let router =
@@ -294,17 +276,113 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
            ~clock
            (Http.Router.create ())
        in
-       let status, response =
-         dispatch_schedule_cancel ~router ~token ~schedule_id:schedule.schedule_id
-       in
-       let open Yojson.Safe.Util in
-       check int "cancel accepted" 200 status;
-       check string "credential owner is the canceller" "credential-owner"
-         (response |> member "data" |> member "cancelled_by" |> member "id"
-          |> to_string);
-       check string "terminal bridge uses typed human operator" "human_operator"
-         (response |> member "data" |> member "cancelled_by" |> member "kind"
-          |> to_string))
+       f ~base_path ~config ~router ~token)
+;;
+
+let test_schedule_cancel_actor_is_stamped_from_auth () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-cancel-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~router ~token ->
+  let actor : Schedule_domain.actor =
+    { id = "test"
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let schedule =
+    match
+      Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
+        ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+             [ "kind", `String "consumer.note"
+             ; "body", `Assoc [ "text", `String "cancel me" ]
+             ])
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok schedule -> schedule
+    | Error error -> fail (Schedule_service.service_error_to_string error)
+  in
+  let body =
+    `Assoc
+      [ "schedule_id", `String schedule.schedule_id
+      ; "cancelled_by_id", `String "forged-body-actor"
+      ; "cancelled_by_kind", `String "system"
+      ; "reason", `String "duplicate"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
+  in
+  let open Yojson.Safe.Util in
+  check int "cancel accepted" 200 status;
+  check string "credential owner is the canceller" "credential-owner"
+    (response |> member "data" |> member "cancelled_by" |> member "id"
+     |> to_string);
+  check string "terminal bridge uses typed human operator" "human_operator"
+    (response |> member "data" |> member "cancelled_by" |> member "kind"
+     |> to_string)
+;;
+
+let test_goal_transition_uses_authenticated_actor () =
+  with_authenticated_activity_router
+    ~prefix:"goal-transition-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~router ~token ->
+  let goal =
+    match
+      Goal_store.upsert_goal config
+        ~title:"Canonical actor transition"
+        ~metric:"transition"
+        ~target_value:"recorded"
+        ()
+    with
+    | Ok (goal, `created) -> goal
+    | Ok (_, `updated) -> fail "goal fixture unexpectedly updated an existing row"
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  let status, _ =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_goal_transition"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "goal_id", `String goal.id
+              ; "action", `String "drop"
+              ; "note", `String "route actor audit"
+              ]))
+      ()
+  in
+  check int "goal transition accepted" 200 status;
+  let events_path =
+    Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+  in
+  let events =
+    In_channel.with_open_bin events_path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+           let line = String.trim line in
+           if String.equal line "" then None else Some (Yojson.Safe.from_string line))
+  in
+  let event =
+    match events with
+    | [event] -> event
+    | [] | _ :: _ -> fail "goal transition must write one durable event"
+  in
+  let open Yojson.Safe.Util in
+  check string "goal event id" goal.id (event |> member "goal_id" |> to_string);
+  check string "goal event kind" "goal_phase"
+    (event |> member "event_type" |> to_string);
+  check string "goal event phase" "dropped"
+    (event |> member "payload" |> member "phase" |> to_string);
+  check string "goal event actor" "credential-owner"
+    (event |> member "payload" |> member "actor" |> to_string)
 ;;
 
 let test_dashboard_board_reaction_routes_registered () =
@@ -530,6 +608,8 @@ let () =
             test_schedule_write_actor_is_stamped_from_auth
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_stamped_from_auth
+        ; test_case "goal transition actor comes from auth" `Quick
+            test_goal_transition_uses_authenticated_actor
         ; test_case
             "dashboard board reaction routes registered"
             `Quick

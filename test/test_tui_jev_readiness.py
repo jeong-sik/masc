@@ -1,4 +1,5 @@
 """Render every Board JEV readiness state in the actual TUI with synthetic HTTP."""
+
 from __future__ import annotations
 
 import argparse
@@ -39,11 +40,16 @@ def run(executable: str, captures: Path | None) -> None:
         fixtures[h.STANDALONE_LANES_PATH] = (status, snapshot)
 
         def interact(
-            process: subprocess.Popen[bytes], fd: int, _slave: int,
-            output: bytearray, _base: str,
+            process: subprocess.Popen[bytes],
+            fd: int,
+            _slave: int,
+            output: bytearray,
+            _base: str,
         ) -> None:
             h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-            h.wait_for_output(process, fd, output, expected.encode(), start=0, timeout=10)
+            h.wait_for_output(
+                process, fd, output, expected.encode(), start=0, timeout=10
+            )
             h.drain_until_quiet(process, fd, output)
             screen = h.screen_text(bytes(output))
             if expected.encode() not in screen:
@@ -58,8 +64,10 @@ def run(executable: str, captures: Path | None) -> None:
             os.write(fd, b"q")
 
         h.run_terminal_scenario(
-            executable, description=f"Board JEV {state['state']}",
-            interact=interact, http_fixtures=fixtures,
+            executable,
+            description=f"Board JEV {state['state']}",
+            interact=interact,
+            http_fixtures=fixtures,
         )
 
 

@@ -88,15 +88,7 @@ let seed = function
   | None -> fail "a seed was expected"
 ;;
 
-(* A stand-in for the catalog: [read_seed] puts the question to
-   {!Front.composer_of_runtime}, pinned below on its own. *)
-let composer = function
-  | "claude_code" -> Front.Hands_over_its_own_list
-  | "gone" -> Front.Not_materialized
-  | _ -> Front.Composes_from_the_history
-;;
-
-let of_records = Front.of_records ~trace_id:"trace-1" ~composer
+let of_records = Front.of_records ~trace_id:"trace-1"
 
 let source =
   testable
@@ -128,13 +120,12 @@ let test_another_sessions_record_is_another_history () =
   check int "the newer record belongs to another session" 70
     (fst (seed (of_records records)));
   check int "and is the one that session reads" 495
-    (fst (seed (Front.of_records ~trace_id:"trace-2" ~composer records)))
+    (fst (seed (Front.of_records ~trace_id:"trace-2" records)))
 ;;
 
-(* An official client cuts the same history, so its record names a position
-   here and is read. A runtime the catalog no longer has could have counted
-   anything, so its record is not; a record with no window says nothing. *)
-let test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not () =
+(* A recorded response remains a fact after its runtime leaves the current
+   catalog. A row without a response window still says nothing about a seed. *)
+let test_a_response_survives_its_runtime_leaving_the_catalog () =
   let records =
     [ record ~turn:10 (Some (30, 100))
     ; record ~turn:13 ~runtime:"claude_code" (Some (5, 120))
@@ -143,8 +134,8 @@ let test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not () 
     ]
   in
   let first_atom, src = seed (of_records records) in
-  check int "the official client's turn 13 is the newest read" 115 first_atom;
-  check source "turn 13" (Front.Turn_record { turn = 13 }) src
+  check int "the removed runtime's response is still the newest observed range" 125 first_atom;
+  check source "turn 15" (Front.Turn_record { turn = 15 }) src
 ;;
 
 (* The newest attempted range received no response. It must not replace the
@@ -193,7 +184,7 @@ let test_restart_rows_restore_only_a_response_observed_front () =
            (Some (5, 110)))
     ]
   in
-  let read = Front.seed_read_of_rows ~composer ~trace_id:"trace-1" rows in
+  let read = Front.seed_read_of_rows ~trace_id:"trace-1" rows in
   let first_atom, src = seed read.Front.seed in
   check int "restart restores the answered range" 70 first_atom;
   check source "the refused latest row is skipped"
@@ -214,16 +205,20 @@ let test_a_response_observed_failed_turn_seeds_the_front () =
   check source "turn 13 received a response" (Front.Turn_record { turn = 13 }) src
 ;;
 
-(* The record's runtime names the runtime that was asked; the wire
-   observation names the one that measured. The history question is put to
-   the latter. *)
+(* The response keeps its own runtime/window pair. Neither the final attempt
+   nor today's catalog can rewrite what that response observed. *)
 let test_the_joined_observation_names_the_runtime () =
   let records =
     [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "deepseek")
         ~response_runtime:"gone" (Some (30, 100)) ]
   in
-  check bool "response runtime left the catalog: skipped" true
-    (Option.is_none (of_records records));
+  let read =
+    Front.seed_read_of_rows ~trace_id:"trace-1"
+      (List.map Turn_record.to_json records)
+  in
+  check bool "the current response record decodes" true (Option.is_none read.unreadable);
+  check int "the response remains a seed after its runtime leaves the catalog" 70
+    (fst (seed read.seed));
   let records =
     [ record ~turn:10 ~runtime:"gone" ~wire_runtime:(Some "gone")
         ~response_runtime:"deepseek" (Some (30, 100)) ]
@@ -393,7 +388,7 @@ let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
     ; without "keeper" (Turn_record.to_json (record ~turn:9 (Some (5, 95))))
     ]
   in
-  let read = Front.seed_read_of_rows ~composer ~trace_id:"trace-1" rows in
+  let read = Front.seed_read_of_rows ~trace_id:"trace-1" rows in
   check int "the seed is the record that decodes" 70
     (fst (seed read.Front.seed));
   match read.Front.unreadable with
@@ -404,7 +399,7 @@ let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
       (Astring.String.is_infix ~affix:"front_atom_digest" unreadable.Front.first_reason);
     check bool "every row decoding counts nothing" true
       (Option.is_none
-         (Front.seed_read_of_rows ~composer ~trace_id:"trace-1" [ current ]).Front.unreadable)
+         (Front.seed_read_of_rows ~trace_id:"trace-1" [ current ]).Front.unreadable)
 ;;
 
 let test_clamp_keeps_the_front_on_an_atom () =
@@ -441,8 +436,8 @@ let () =
     [ ( "of_records"
       , [ test_case "newest completed record on the trace" `Quick
             test_the_newest_completed_record_on_the_trace_seeds_the_front
-        ; test_case "an official client is read, an unmaterialized runtime is not" `Quick
-            test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not
+        ; test_case "a response survives runtime removal" `Quick
+            test_a_response_survives_its_runtime_leaving_the_catalog
         ; test_case "an unanswered record does not seed" `Quick
             test_an_unanswered_record_does_not_seed_the_front
         ; test_case "same-turn unanswered attempt does not replace response"

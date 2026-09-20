@@ -600,7 +600,7 @@ EOF
     # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
     # "${a[@]}" as unbound under nounset.
     local linked_ids=() linked_deps=() linked_envs=() linked_count=0
-    local python_sources=() python_count=0
+    local python_sources=() python_count=0 python_batchable=true
     local dir name verdict stanza_deps stanza_env
 
   while IFS= read -r source; do
@@ -623,6 +623,8 @@ EOF
       *.py)
         python_sources[python_count]="${source}"
         python_count=$((python_count + 1))
+        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] \
+          || python_batchable=false
         continue
         ;;
     esac
@@ -764,37 +766,80 @@ ENVS
     fi
     done
 
-  # A .py suite has no executable to build and run, so dune runs it: the rule
-  # supplies the deps and the environment its action declares. Asked for by
-  # path (@test/runtest-x, not @runtest-x) so a name that stopped existing
-  # fails here instead of matching a rule in some other directory.
-  # Measured 2026-09-13: the alias exits 0 on a pass and 1 on a planted
-  # failure, both forms, so this is a verdict and not a build line that
-  # always reports success.
-    i=0
-    while [ "${i}" -lt "${python_count}" ]; do
-    source=${python_sources[i]}
-    i=$((i + 1))
-    dir=$(dirname "${source}")
-    name=$(basename "${source}" .py)
-    if [ "$(budget_left)" -le 0 ]; then
-      failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
-      continue
-    fi
-    local own
-    own=$(suite_timeout "${source}")
-    limit=$(bounded_by_budget "${own}")
-    echo "== ${dir}/${name} (dune rule)"
-    status=0
-    timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
-    if [ "${status}" -eq 0 ]; then
-      ran=$((ran + 1))
-    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
-      failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+  # A .py suite has no executable to build and run, so dune runs its rule: the
+  # rule supplies the deps, sandbox and environment its action declares.
+  # Default-bound rules share one dune invocation, which lets DUNE_JOBS run
+  # their independent sandboxes concurrently. Before this, a broad selection
+  # paid every PTY rule serially: run 35502819681 passed 414 suites, then spent
+  # the final two seconds on the first of 15 remaining PTY rules. Directly
+  # edited rules remain their own earlier execution class, and a rule with a
+  # custom timeout stays on the one-at-a-time path below. Selection and the
+  # fail-closed step budget are unchanged.
+    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then
+      local python_targets=()
+      i=0
+      while [ "${i}" -lt "${python_count}" ]; do
+        source=${python_sources[i]}
+        dir=$(dirname "${source}")
+        name=$(basename "${source}" .py)
+        python_targets[i]="@${dir}/runtest-${name}"
+        i=$((i + 1))
+      done
+      if [ "$(budget_left)" -le 0 ]; then
+        status=124
+        limit=0
+      else
+        limit=$(bounded_by_budget "${per_suite_timeout}")
+        echo "== running ${python_count} dune-rule suites in one invocation"
+        status=0
+        timeout "${limit}" dune build "${python_targets[@]}" < /dev/null || status=$?
+      fi
+      if [ "${status}" -eq 0 ]; then
+        ran=$((ran + python_count))
+      else
+        i=0
+        while [ "${i}" -lt "${python_count}" ]; do
+          source=${python_sources[i]}
+          i=$((i + 1))
+          dir=$(dirname "${source}")
+          name=$(basename "${source}" .py)
+          if [ "${limit}" -eq 0 ]; then
+            failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+          elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
+            failed="${failed}${dir}/${name} (dune-rule batch stopped at the step budget after ${limit}s)\n"
+          else
+            failed="${failed}${dir}/${name} (dune-rule batch)\n"
+          fi
+        done
+      fi
     else
-      failed="${failed}${dir}/${name} (run)\n"
+      # Asked for by path (@test/runtest-x, not @runtest-x) so a name that
+      # stopped existing fails here instead of matching another directory.
+      i=0
+      while [ "${i}" -lt "${python_count}" ]; do
+        source=${python_sources[i]}
+        i=$((i + 1))
+        dir=$(dirname "${source}")
+        name=$(basename "${source}" .py)
+        if [ "$(budget_left)" -le 0 ]; then
+          failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+          continue
+        fi
+        local own
+        own=$(suite_timeout "${source}")
+        limit=$(bounded_by_budget "${own}")
+        echo "== ${dir}/${name} (dune rule)"
+        status=0
+        timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
+        if [ "${status}" -eq 0 ]; then
+          ran=$((ran + 1))
+        elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
+          failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+        else
+          failed="${failed}${dir}/${name} (run)\n"
+        fi
+      done
     fi
-    done
   done
 }
 
@@ -1165,6 +1210,8 @@ FAKE
     runner_check "a directly edited Python rule runs before attributed linked suites" \
       "test/test_zz_direct_broken (run);test/test_aa_slow (stopped at the step budget);" \
       0 3 test_aa_slow test/test_zz_direct_broken.py
+  runner_check "default-bound Python rules share one dune invocation" "" \
+    2 3 test/test_python_one.py test/test_python_two.py
   # The build starts with budget left and outlasts it, so the timeout on the
   # build is what ends it. With a one-second budget the budget was already
   # spent before the build began, and that case passed without the timeout.

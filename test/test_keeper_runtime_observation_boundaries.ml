@@ -483,11 +483,13 @@ let test_crashed_tick_replaces_previous_configuration_cause () =
   let config = Workspace.default_config base_path in
   let meta = make_meta "failure-cause-crash" in
   Fun.protect ~finally:(fun () -> R.For_testing.clear ()) (fun () ->
-    ignore (R.For_testing.register ~base_path meta.name meta);
+    let registry_entry = R.For_testing.register ~base_path meta.name meta in
     record_failed_turn ~config ~meta
       (Agent_core.Error.Config (MissingEnvVar { var_name = "TEST_PROVIDER_KEY" }));
     refresh_failure_reason ~base_path ~keeper_name:meta.name;
-    KHL.record_crashed_cycle_failure ~base_path ~keeper_name:meta.name (Failure "synthetic cycle crash");
+    KHL.record_crashed_cycle_failure
+      ~registry_entry
+      (Failure "synthetic cycle crash");
     refresh_failure_reason ~base_path ~keeper_name:meta.name;
     Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);
     match failure_reason ~base_path ~keeper_name:meta.name with

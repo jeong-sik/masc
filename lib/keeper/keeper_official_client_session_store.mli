@@ -171,6 +171,17 @@ val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
 
+val commit_if_input_recovery_current :
+  base_path:string ->
+  keeper_name:string ->
+  expected:Keeper_internal_error.official_client_recovery ->
+  commit:(unit -> unit) ->
+  (bool, string) result
+(** Run [commit] under the durable session lock only while the same runtime,
+    recovery id, and typed input-rejection reason are still current. [false]
+    means recovery was resolved or replaced before the commit. The callback
+    must not suspend. *)
+
 val claim_error_to_string : claim_error -> string
 val core_error_of_claim_error : claim_error -> Agent_core.Error.t
 (** Preserve an operator-held input rejection as a typed MASC recovery cause.

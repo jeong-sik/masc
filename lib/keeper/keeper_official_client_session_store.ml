@@ -800,6 +800,28 @@ let with_store_lock ~base_path ~keeper_name f =
   | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
 ;;
 
+let commit_if_input_recovery_current
+      ~base_path
+      ~keeper_name
+      ~(expected : Keeper_internal_error.official_client_recovery)
+      ~commit
+  =
+  with_store_lock ~base_path ~keeper_name (fun directory ->
+    let* current = load_path (Filename.concat directory filename) in
+    match current with
+    | Some
+        { runtime_id
+        ; phase = Recovery_required { recovery_id; failure = Input_rejected reason; _ }
+        ; _
+        }
+      when String.equal runtime_id expected.runtime_id
+           && String.equal recovery_id expected.recovery_id
+           && reason = expected.reason ->
+      commit ();
+      Ok true
+    | Some _ | None -> Ok false)
+;;
+
 let transition ~base_path ~keeper_name ~expected next =
   let* () = validate next in
   with_store_lock ~base_path ~keeper_name (fun directory ->

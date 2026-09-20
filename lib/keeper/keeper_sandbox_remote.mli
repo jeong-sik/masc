@@ -108,6 +108,16 @@ val check_preflight : ?force:bool -> t -> (unit, string) result
     roots, free disk, and per-keeper GitHub identity. Results are cached for
     [Env_config_sandbox.Preflight.ssh_ttl_sec] unless [force=true]. *)
 
+val check_endpoint_preflight : t -> (unit, string) result
+(** Uncached endpoint-root half of the OpenSSH preflight. GitHub login uses
+    this before its one fixed Keeper-workspace bootstrap. *)
+
+val check_workspace_preflight : t -> (unit, string) result
+(** Uncached Keeper-workspace structure half of the OpenSSH preflight. Call
+    only after the workspace exists. It deliberately stops before the GitHub
+    identity check so a login can repair an absent or invalid identity;
+    ordinary payloads use the full cached {!check_preflight}. *)
+
 val observe_supported : t -> bool
 (** Whether this endpoint's shim advertises the box (RFC-0422): the
     [observe] capability in its [--probe] answer. Probes the endpoint once

@@ -65,6 +65,17 @@ let exit_code_unexpected_argv = 64
 
 let stub_main () =
   let dir = Sys.argv.(2) in
+  if Array.exists (String.equal "masc-exec-shim --probe") Sys.argv
+  then (
+    save (Filename.concat dir "endpoint-probed") "ok";
+    write_all Unix.stdout
+      (Exec_ssh_protocol.render_probe
+         { name = "masc-exec-shim"
+         ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+         ; capabilities = []
+         ; release = None
+         });
+    exit 0);
   let header = read_exact Unix.stdin 8 in
   let body_len = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
   let frame = header ^ read_exact Unix.stdin body_len in
@@ -112,6 +123,28 @@ let stub_main () =
        ->
        record "probe";
        write_all Unix.stdout (probe_login ^ "\n");
+       write_all Unix.stderr (trailer 0)
+     | [ "test"; "-d"; path ] when String.equal path endpoint_remote_root ->
+       record "preflight-endpoint-root";
+       write_all Unix.stderr (trailer 0)
+     | [ "test"; "-d"; path ]
+       when String.equal path (Filename.dirname expected_gh_dir) ->
+       record "preflight-keeper-root";
+       let root_was_bootstrapped = Sys.file_exists (frame_path ~dir "mkdir-root") in
+       write_all Unix.stderr (trailer (if root_was_bootstrapped then 0 else 70))
+     | [ "git"; "--version" ] ->
+       record "preflight-git";
+       write_all Unix.stdout "git version 2.51.0\n";
+       write_all Unix.stderr (trailer 0)
+     | [ "rg"; "--version" ] ->
+       record "preflight-rg";
+       write_all Unix.stdout "ripgrep 14.1.1\n";
+       write_all Unix.stderr (trailer 0)
+     | [ "df"; "-Pk"; _ ] ->
+       record "preflight-df";
+       write_all Unix.stdout
+         "Filesystem 1024-blocks Used Available Capacity Mounted on\n\
+          /dev/test 100000000 1 99999999 1% /srv/masc/playground\n";
        write_all Unix.stderr (trailer 0)
      | [ "mkdir"; "-p"; path ] ->
        record (if String.equal path expected_gh_dir then "mkdir" else "mkdir-root");
@@ -314,6 +347,11 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with
   | Error error -> failf "remote lane was not built: %s" error
   | Ok lane ->
+    check bool "the endpoint was probed before bootstrap" true
+      (Sys.file_exists (Filename.concat dir "endpoint-probed"));
+    let endpoint_check = decoded_request (frame_path ~dir "preflight-endpoint-root") in
+    check string "endpoint preflight request root" endpoint_remote_root
+      endpoint_check.remote_root;
     let root = decoded_request (frame_path ~dir "mkdir-root") in
     check
       (list string)
@@ -321,6 +359,16 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
       [ "mkdir"; "-p"; "/srv/masc/playground/gh-lane-keeper" ]
       root.argv;
     check string "bootstrap request root" endpoint_remote_root root.remote_root;
+    let keeper_check = decoded_request (frame_path ~dir "preflight-keeper-root") in
+    check
+      (list string)
+      "the Keeper root is checked only after bootstrap"
+      [ "test"; "-d"; "/srv/masc/playground/gh-lane-keeper" ]
+      keeper_check.argv;
+    let git_check = decoded_request (frame_path ~dir "preflight-git") in
+    check string "workspace preflight request root"
+      "/srv/masc/playground/gh-lane-keeper"
+      git_check.remote_root;
     check
       (list string)
       "the lane creates the endpoint's gh directory before logging in"

@@ -1076,12 +1076,16 @@ let available_kib output =
     | _ -> None)
 ;;
 
-let perform_preflight t =
+let perform_endpoint_preflight t =
   let* (_ : Exec_ssh_protocol.major) = run_probe t in
   let* _ =
     run_endpoint_preflight_command t ~error_code:(code t "root_missing")
       [ "test"; "-d"; t.remote_root ]
   in
+  Ok ()
+;;
+
+let perform_workspace_preflight t =
   let* _ =
     run_endpoint_preflight_command t ~error_code:(code t "keeper_root_missing")
       [ "test"; "-d"; remote_keeper_root t ]
@@ -1113,6 +1117,10 @@ let perform_preflight t =
            "%s: endpoint %s returned unparseable df output"
            (code t "disk_probe_failed") t.name)
   in
+  Ok ()
+;;
+
+let perform_identity_preflight t =
   let* () =
     match github_identity_intent t with
     | No_login_configured ->
@@ -1139,6 +1147,15 @@ let perform_preflight t =
   in
   Ok ()
 ;;
+
+let perform_preflight t =
+  let* () = perform_endpoint_preflight t in
+  let* () = perform_workspace_preflight t in
+  perform_identity_preflight t
+;;
+
+let check_endpoint_preflight t = perform_endpoint_preflight t
+let check_workspace_preflight t = perform_workspace_preflight t
 
 let check_preflight ?(force = false) t =
   (* NDT-OK: wall time controls only readiness-cache freshness; it is neither

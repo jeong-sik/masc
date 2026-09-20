@@ -356,7 +356,12 @@ let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
         checkpoint_fragments := !checkpoint_fragments @ [ content ]));
     let rec read_traces remaining exact_seen fragment_seen exact_matches
         fragment_matches unreadable_rows unavailable_traces = function
-      | [] | _ when remaining = 0 ->
+      | [] ->
+        { matches = exact_matches @ take remaining fragment_matches
+        ; unreadable_rows
+        ; unavailable_traces = List.rev unavailable_traces
+        }
+      | _ when remaining = 0 ->
         { matches = exact_matches @ take remaining fragment_matches
         ; unreadable_rows
         ; unavailable_traces = List.rev unavailable_traces

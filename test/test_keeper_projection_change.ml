@@ -89,6 +89,29 @@ let test_appended () =
     (Change.Appended { kept = 0; added = 2 })
 ;;
 
+let test_signed_zero_json_is_not_memoized_as_the_same_wire () =
+  let tool_use input =
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.Assistant
+      [ Agent_core.Types.ToolUse { id = "call-zero"; name = "measure"; input } ]
+  in
+  let positive = tool_use (`Assoc [ "value", `Float 0.0 ]) in
+  let negative = tool_use (`Assoc [ "value", `Float (-0.0) ]) in
+  check_messages
+    "signed zero changes provider bytes"
+    ~previous:[ positive ]
+    ~current:[ negative ]
+    (Change.Diverged_at
+       { index = 0
+       ; previous_role = Agent_core.Types.Assistant
+       ; previous_bytes = payload_bytes positive
+       ; current_role = Agent_core.Types.Assistant
+       ; current_bytes = payload_bytes negative
+       ; previous_count = 1
+       ; current_count = 1
+       })
+;;
+
 let test_block_dropped () =
   check_messages
     "window moved past the oldest messages"
@@ -296,6 +319,8 @@ let () =
         ] )
     ; ( "message change"
       , [ test_case "appended" `Quick test_appended
+        ; test_case "signed zero JSON differs on wire" `Quick
+            test_signed_zero_json_is_not_memoized_as_the_same_wire
         ; test_case "block dropped" `Quick test_block_dropped
         ; test_case "tail removed" `Quick test_tail_removed
         ; test_case "rewritten in place" `Quick test_rewritten_in_place

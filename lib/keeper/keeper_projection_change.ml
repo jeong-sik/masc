@@ -9,16 +9,95 @@ type request_digests =
   ; messages : message_digest array
   }
 
-(* Keyed by message value, not by record: every request passes its history
-   through [Reasoning_history_projection.project], which allocates a new record
-   for every message, so no message of one request is physically the one the
-   previous request held. The key compares with [Stdlib.compare], which stops
-   at content the rebuilt record still shares, and hashes a string by a fixed
-   number of sampled bytes, so a hit costs neither the encoding nor the
-   SHA-256. Two messages that compare equal serialize to the same bytes except
-   for a float zero and its negative inside a raw JSON payload; such a pair
-   shares one digest. *)
-module Message_digest_memo = Hashtbl.Make (Agent_core.Types.Message_value)
+(* [Stdlib.compare] equates [0.0] and [-0.0], but Yojson serializes them to
+   different provider bytes. Tool inputs, structured tool results, reasoning
+   details, and metadata can all carry that raw JSON. Compare only those JSON
+   fields again with float bits preserved: the common value-equal path still
+   avoids both provider encoding and SHA-256, without calling different wire
+   bytes identical. *)
+let rec json_wire_equal left right =
+  match left, right with
+  | `Null, `Null -> true
+  | `Bool left, `Bool right -> Bool.equal left right
+  | `Int left, `Int right -> Int.equal left right
+  | `Intlit left, `Intlit right -> String.equal left right
+  | `Float left, `Float right ->
+    Int64.equal (Int64.bits_of_float left) (Int64.bits_of_float right)
+  | `String left, `String right -> String.equal left right
+  | `Assoc left, `Assoc right ->
+    List.equal
+      (fun (left_key, left_value) (right_key, right_value) ->
+         String.equal left_key right_key && json_wire_equal left_value right_value)
+      left
+      right
+  | `List left, `List right | `Tuple left, `Tuple right ->
+    List.equal json_wire_equal left right
+  | `Variant (left_tag, left_value), `Variant (right_tag, right_value) ->
+    String.equal left_tag right_tag && Option.equal json_wire_equal left_value right_value
+  | ( (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _
+      | `List _ | `Tuple _ | `Variant _)
+    , (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _
+      | `List _ | `Tuple _ | `Variant _) ) -> false
+;;
+
+let reasoning_detail_wire_equal
+      (left : Agent_core.Types.reasoning_detail)
+      (right : Agent_core.Types.reasoning_detail)
+  =
+  json_wire_equal left.raw right.raw
+;;
+
+let rec content_block_wire_equal left right =
+  match left, right with
+  | ( Agent_core.Types.ReasoningDetails { details = left; _ }
+    , Agent_core.Types.ReasoningDetails { details = right; _ } ) ->
+    List.equal reasoning_detail_wire_equal left right
+  | Agent_core.Types.ToolUse { input = left; _ }, Agent_core.Types.ToolUse { input = right; _ }
+    -> json_wire_equal left right
+  | ( Agent_core.Types.ToolResult
+        { json = left_json; content_blocks = left_blocks; _ }
+    , Agent_core.Types.ToolResult
+        { json = right_json; content_blocks = right_blocks; _ } ) ->
+    Option.equal json_wire_equal left_json right_json
+    && Option.equal (List.equal content_block_wire_equal) left_blocks right_blocks
+  | Agent_core.Types.Text _, Agent_core.Types.Text _
+  | Agent_core.Types.Thinking _, Agent_core.Types.Thinking _
+  | Agent_core.Types.RedactedThinking _, Agent_core.Types.RedactedThinking _
+  | Agent_core.Types.Image _, Agent_core.Types.Image _
+  | Agent_core.Types.Document _, Agent_core.Types.Document _
+  | Agent_core.Types.Audio _, Agent_core.Types.Audio _ -> true
+  | ( (Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+      | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _)
+    , (Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+      | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) ) ->
+    false
+;;
+
+let metadata_wire_equal left right =
+  List.equal
+    (fun (left_key, left_value) (right_key, right_value) ->
+       String.equal left_key right_key && json_wire_equal left_value right_value)
+    left
+    right
+;;
+
+module Message_wire_value = struct
+  type t = Agent_core.Types.message
+
+  let equal (left : t) (right : t) =
+    Agent_core.Types.Message_value.equal left right
+    && List.equal content_block_wire_equal left.content right.content
+    && metadata_wire_equal left.metadata right.metadata
+  ;;
+
+  let hash = Agent_core.Types.Message_value.hash
+end
+
+module Message_digest_memo = Hashtbl.Make (Message_wire_value)
 
 type digest_memo = message_digest Message_digest_memo.t
 

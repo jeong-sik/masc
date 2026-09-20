@@ -10,14 +10,25 @@
     {!Keeper_provider_input_snapshot} stores them, so there is one encoding of
     each; no digest leaves this module.
 
-    The comparison is pure and linear in the two message counts. *)
+    The comparison is pure and linear in the two message counts.
+
+    This is ongoing opt-in telemetry, not a temporary migration aid and not a
+    runtime decision input. [Appended] and [Tail_removed] isolate cache misses
+    with an unchanged shared message prefix; [Block_dropped] points to window
+    or carried-range selection; [Rewritten_in_place] points to projection or
+    demotion; [Diverged_at] gives the first still-unexplained coordinate; and
+    [tools_changed] identifies the tool surface independently. These producers
+    and provider behavior can change again, so the typed distinctions remain
+    useful after the first measured diagnosis. *)
 
 type request_digests
 (** The digests of one request. *)
 
 type digest_memo
 (** The message digests already computed in one keeper turn, keyed by message
-    value. *)
+    value and by the exact floating-point bits in its raw JSON fields. This
+    distinguishes [0.0] from [-0.0], whose provider encodings differ even
+    though [Stdlib.compare] considers them equal. *)
 
 val create_digest_memo : unit -> digest_memo
 (** One memo per keeper turn. A message's encoding does not depend on the

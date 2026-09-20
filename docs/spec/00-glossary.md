@@ -191,3 +191,6 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 Keeper가 받은 요청을 묶어 working context로 정리한다. Keeper의 판단을
   대신하지 않는다.
+  Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
+  읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
+  매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.

@@ -9,6 +9,8 @@ module Keeper_lane = Masc.Keeper_lane
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Memory_current = Masc.Keeper_memory_os_current
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
+module Queue_refresh = Masc.Keeper_librarian_queue_refresh
+module Queue_signal = Masc.Keeper_librarian_queue_signal
 
 exception Test_boom
 exception Cancel_lane_test
@@ -41,7 +43,12 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error detail -> Alcotest.failf "keeper meta fixture failed: %s" detail
 ;;
 
-let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn =
+let run_post_turn
+  ~checkpoint_owner
+  ~config
+  ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+  ~turn
+  =
   Post_turn_memory.run
     ~config
     ~meta
@@ -49,9 +56,101 @@ let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn 
     ~agent_core_turn_count:1
     ~tool_observations:[]
     ~librarian_messages:[]
+    ~checkpoint_owner
     ~post_turn_t0:(Time_compat.now ())
     ~inference_telemetry:None
     ()
+;;
+
+let test_checkpoint_owner_selects_one_librarian_producer () =
+  Lane.For_testing.reset ();
+  let root = temp_dir "test-post-turn-owner-" in
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  let previous_env = Sys.getenv_opt env_key in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_env with
+       | Some value -> Unix.putenv env_key value
+       | None -> Unix.putenv env_key "");
+      Queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+      Config_dir_resolver.reset ();
+      Lane.For_testing.reset ();
+      remove_tree root)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc_test_deps.init_eio_clock env;
+       let config = Masc.Workspace.default_config root in
+       ignore (Masc.Workspace.init config ~agent_name:None);
+       Config_dir_resolver.reset ();
+       Unix.putenv env_key "true";
+       let direct_runs = ref 0 in
+       let wakes = ref [] in
+       Queue_signal.install (fun ~base_path ~keeper_name ->
+         wakes := (base_path, keeper_name) :: !wakes);
+       let core_name = "agent-core-owner" in
+       let core_meta = make_meta core_name in
+       let core_trace_id =
+         Keeper_id.Trace_id.to_string core_meta.runtime.trace_id
+       in
+       Queue_refresh.remember_turn
+         ~base_path:config.base_path
+         ~keeper_name:core_name
+         ~trace_id:core_trace_id
+         (fun ~meta:_ _ -> incr direct_runs);
+       run_post_turn
+         ~checkpoint_owner:Runtime_execution.Masc_agent_core
+         ~config
+         ~meta:core_meta
+         ~turn:1;
+       Alcotest.(check bool)
+         "Agent Core retires the direct closure"
+         false
+         (Queue_refresh.For_testing.attempt_remembered
+            ~base_path:config.base_path
+            ~keeper_name:core_name
+            ~trace_id:core_trace_id
+            ~meta:core_meta
+            ~sources_changed:false
+            ~trigger:Librarian_runtime.Queue_changed);
+       Alcotest.(check int) "Agent Core does not run the direct producer" 0 !direct_runs;
+       Alcotest.(check (list (pair string string)))
+         "Agent Core emits one durable wake"
+         [ config.base_path, core_name ]
+         (List.rev !wakes);
+       let official_name = "official-client-owner" in
+       let official_meta = make_meta official_name in
+       (match
+          Lane.drain_and_join_librarian
+            ~base_path:config.base_path
+            ~keeper_name:official_name
+        with
+        | Ok Lane.No_librarian_work -> ()
+        | Ok Lane.Librarian_drained ->
+          Alcotest.fail "empty official-client lane reported completed work"
+        | Error error ->
+         Alcotest.fail (Lane.librarian_drain_error_to_string error));
+       run_post_turn
+         ~checkpoint_owner:Runtime_execution.Official_client
+         ~config
+         ~meta:official_meta
+         ~turn:1;
+       Unix.putenv env_key "false";
+       Alcotest.(check bool)
+         "official client retains direct evidence"
+         true
+         (Queue_refresh.For_testing.attempt_remembered
+            ~base_path:config.base_path
+            ~keeper_name:official_name
+            ~trace_id:
+              (Keeper_id.Trace_id.to_string official_meta.runtime.trace_id)
+            ~meta:official_meta
+            ~sources_changed:false
+            ~trigger:Librarian_runtime.Queue_changed);
+       Alcotest.(check (list (pair string string)))
+         "official client does not emit a durable wake"
+         [ config.base_path, core_name ]
+         (List.rev !wakes))
 ;;
 
 (* No executor switch set -> submit runs inline so no work is lost. *)
@@ -608,7 +707,11 @@ let test_finished_switch_drops_without_leak () =
      Alcotest.fail "expected Dropped, got Rejected_draining");
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 ->
-    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+    let drain () =
+      Eio_main.run (fun _env ->
+        Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1")
+    in
+    (match drain () with
      | Error (Lane.Librarian_interrupted (Keeper_lane.Failed _)) -> ()
      | Error error ->
        Alcotest.failf
@@ -624,7 +727,7 @@ let test_finished_switch_drops_without_leak () =
        Alcotest.fail
          ("finished-switch receipt prevented lifecycle reopen: "
           ^ Lane.lifecycle_open_error_to_string error));
-    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+    (match drain () with
      | Ok Lane.No_librarian_work -> ()
      | Ok Lane.Librarian_drained ->
        Alcotest.fail "reopened empty lifecycle retained stale completed work"
@@ -713,7 +816,11 @@ let test_post_turn_librarian_live_config_boundaries () =
       let expect_no_admission ~value ~keeper_name ~turn =
         Unix.putenv env_key value;
         let meta = make_meta keeper_name in
-        run_post_turn ~config ~meta ~turn;
+        run_post_turn
+          ~checkpoint_owner:Runtime_execution.Official_client
+          ~config
+          ~meta
+          ~turn;
         match
           Lane.For_testing.pending
             ~base_path:config.base_path
@@ -761,7 +868,11 @@ let test_post_turn_librarian_live_config_boundaries () =
          | Lane.Rejected_draining ->
            Alcotest.fail "Librarian blocker was not submitted");
         Eio.Promise.await started;
-        run_post_turn ~config ~meta ~turn;
+        run_post_turn
+          ~checkpoint_owner:Runtime_execution.Official_client
+          ~config
+          ~meta
+          ~turn;
         Alcotest.(check (option int))
           "one running plus one queued Librarian unit"
           (Some 2)
@@ -967,6 +1078,10 @@ let () =
         ; Alcotest.test_case
             "remembered turn replacement and cancellation"
             `Quick test_remembered_turn_replacement_and_cancellation
+        ; Alcotest.test_case
+            "checkpoint owner selects one Librarian producer"
+            `Quick
+            test_checkpoint_owner_selects_one_librarian_producer
         ; Alcotest.test_case
             "inline when uninitialized"
             `Quick

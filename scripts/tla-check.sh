@@ -59,6 +59,7 @@ run_tlc() {
     -config "$spec_dir/$cfg_file" \
     -workers auto \
     -deadlock \
+    -coverage 1 \
     "$spec_dir/$tla_file"
   echo ""
 }
@@ -80,6 +81,7 @@ run_tlc_cfg() {
     -config "$spec_dir/$cfg_file" \
     -workers auto \
     -deadlock \
+    -coverage 1 \
     "$spec_dir/$tla_file"
   echo ""
 }
@@ -105,6 +107,7 @@ run_tlc_buggy() {
     -config "$spec_dir/$cfg_file" \
     -workers auto \
     -deadlock \
+    -coverage 1 \
     "$spec_dir/$tla_file" || rc=$?
 
   if [ "$rc" -eq 12 ] || [ "$rc" -eq 13 ]; then

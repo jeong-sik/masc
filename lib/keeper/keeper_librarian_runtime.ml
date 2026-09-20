@@ -137,21 +137,27 @@ type extraction_error =
   | Cli_prompt_unavailable of
       { prior_error : extraction_error option
       }
+  | No_transport_declared
   | Domain_output_invalid of string
   | Memory_snapshot_write_failed of
       { detail : string
       ; selected_slot : string
       }
 
-let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
+let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
-  | Exact_execution_failed _
-  | Cli_slots_exhausted _
-  | Cli_prompt_unavailable _ ->
+  | Exact_execution_failed _ ->
     Exact_execution_failure
+  | Cli_slots_exhausted { prior_error = Some error; _ }
+  | Cli_prompt_unavailable { prior_error = Some error } ->
+    extraction_error_kind error
+  | Cli_slots_exhausted { prior_error = None; _ }
+  | Cli_prompt_unavailable { prior_error = None } ->
+    Exact_execution_failure
+  | No_transport_declared -> Exact_setup_failure
   | Domain_output_invalid _ -> Domain_output_invalid
   | Memory_snapshot_write_failed _ -> Memory_snapshot_write_failure
 ;;
@@ -219,6 +225,8 @@ let rec extraction_error_to_string = function
      | None -> cli_detail
      | Some error ->
        "API failure: " ^ extraction_error_to_string error ^ "; " ^ cli_detail)
+  | No_transport_declared ->
+    "librarian lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
     "librarian domain output invalid: " ^ detail
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
@@ -233,6 +241,7 @@ let selected_slot_of_extraction_error = function
   | Exact_execution_failed _
   | Cli_slots_exhausted _
   | Cli_prompt_unavailable _
+  | No_transport_declared
   | Domain_output_invalid _ ->
     None
 ;;
@@ -487,6 +496,7 @@ let cli_prompt_of_messages ~keeper_id (messages : Agent_core.Types.message list)
 ;;
 
 type cli_fallback_failure =
+  | No_cli_slots
   | Fitted_prompt_unavailable
   | Slot_failures of Keeper_lane_cli_oneshot.failure list
 
@@ -499,7 +509,7 @@ let try_cli_slots
       ~messages
   =
   match cli_slots with
-  | [] -> Error (Slot_failures [])
+  | [] -> Error No_cli_slots
   | cli_slots ->
     (match cli_prompt_of_messages ~keeper_id messages with
      | None -> Error Fitted_prompt_unavailable
@@ -531,7 +541,7 @@ let try_cli_slots
    walk's typed failures with that refusal so the run record and Memory
    journal cannot describe an answered CLI request as only API pre-flight. *)
 let with_cli_failure prior_error = function
-  | Slot_failures [] -> prior_error
+  | No_cli_slots -> prior_error
   | Slot_failures failures ->
     Cli_slots_exhausted { prior_error = Some prior_error; failures }
   | Fitted_prompt_unavailable ->
@@ -555,6 +565,7 @@ let execute_exact_output_classified
     (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
+     | Error No_cli_slots -> Error No_transport_declared
      | Error (Slot_failures failures) ->
        Error (Cli_slots_exhausted { prior_error = None; failures })
      | Error Fitted_prompt_unavailable ->

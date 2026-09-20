@@ -2037,15 +2037,16 @@ let evict_at_turn_boundary ~keeper_name ~runtime_id ~context_marks ledger =
     (match !ledger with
      | None -> ()
      | Some current ->
-       (match Keeper_carried_range.at_turn_boundary ~marks current with
+       let projected, step = Keeper_carried_range.apply_turn_boundary ~marks current in
+       ledger := Some projected;
+       (match step with
         | Keeper_carried_range.Unchanged _ -> ()
-        | Keeper_carried_range.Evicted { first_atom; front_digest; _ } as step ->
-          if move_ledger_front ledger ~first_atom ~front_digest then
-             Log.Keeper.info
-               ~keeper_name
-               "model input carried range evicted runtime=%s %s"
-               runtime_id
-               (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
+        | Keeper_carried_range.Evicted _ ->
+          Log.Keeper.info
+            ~keeper_name
+            "model input carried range evicted runtime=%s %s"
+            runtime_id
+            (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
 ;;
 
 let run_try_provider_with_carried_range_eviction

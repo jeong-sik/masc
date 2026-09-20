@@ -412,13 +412,7 @@ let candidate
           let projected =
             match marks with
             | None -> ledger
-            | Some marks ->
-              (match Keeper_carried_range.at_turn_boundary ~marks ledger with
-               | Keeper_carried_range.Unchanged _ -> ledger
-               | Keeper_carried_range.Evicted { first_atom; front_digest; _ } ->
-                 (match Keeper_model_input_ledger.move_front ledger ~first_atom ~front_digest with
-                  | Some projected -> projected
-                  | None -> ledger))
+            | Some marks -> fst (Keeper_carried_range.apply_turn_boundary ~marks ledger)
           in
           Keeper_carried_front.of_ledger projected, ledger.Keeper_model_input_ledger.total_tokens
         | Some _ | None -> seed, None

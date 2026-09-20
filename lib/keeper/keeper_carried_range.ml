@@ -100,6 +100,18 @@ let at_turn_boundary ~(marks : Runtime_schema.context_marks) (ledger : Keeper_mo
       ledger
 ;;
 
+let apply_turn_boundary ~(marks : Runtime_schema.context_marks) ledger =
+  let step = at_turn_boundary ~marks ledger in
+  match step with
+  | Unchanged _ -> ledger, step
+  | Evicted { first_atom; front_digest; _ } ->
+    (match Keeper_model_input_ledger.move_front ledger ~first_atom ~front_digest with
+     | Some moved -> moved, step
+     | None ->
+       invalid_arg
+         "Keeper_carried_range.apply_turn_boundary: eviction did not advance the ledger")
+;;
+
 let after_overflow ~(marks : Runtime_schema.context_marks option) (ledger : Keeper_model_input_ledger.t) =
   match marks, ledger.total_tokens with
   | Some marks, Some _ ->

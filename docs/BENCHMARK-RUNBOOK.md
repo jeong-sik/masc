@@ -57,20 +57,23 @@ live Keeper history or change Memory, Librarian progress, or scheduling.
 The output file is the canonical report. Choose a new output path: existing
 files, including the input dataset, are refused before model calls. The report
 is saved before any sample starts
-and after each stage, retaining provider failures and incomplete work. A nonzero
-exit means the measurement or its persistence/publication failed, not that a
-Noul score was below a threshold. Each scored sample keeps its actual response
+and after each stage, retaining provider failures and incomplete work. Exit 0
+means every sample was scored; exit 1 means some samples remain failed or
+incomplete; exit 2 means configuration, input or report persistence failed.
+No exit code depends on a Noul score threshold. Each scored sample keeps its actual response
 models, question, answer, context, criteria and raw probability. Generation
 request hashes describe prepared bytes before dispatch; they alone do not prove
 that the remote provider received a request.
 
 `--publish-base-path` is optional. It publishes the same final bytes in the
-selected server's artifact store and prints their SHA. In that server's TUI, enter
-`/measurement <sha256>` to inspect the report. The artifact is a view copy and may
-be collected when no durable consumer references it; keep the output file. The
-TUI shows scored, failed and incomplete sample counts, every raw probability,
-failure stage and report location. It does not turn a probability into a pass,
-coverage percentage or operational Librarian verdict.
+selected server's artifact store and prints their SHA. A failed copy is reported
+as `publication_error` in stdout JSON and does not change the measurement's exit
+code or its retained report. In that server's TUI, enter `/measurement <sha256>`
+to inspect the report. The artifact is a view copy and may be collected when no
+durable consumer references it; keep the output file. The TUI shows scored,
+failed and incomplete sample counts, every raw probability, failure stage and
+report location. It does not turn a probability into a pass, coverage percentage
+or operational Librarian verdict.
 
 Each case declares `question`: a fixed string skips question generation; `null`
 asks the selected runtime to generate one from the reference. The report records

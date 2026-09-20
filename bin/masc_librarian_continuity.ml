@@ -250,6 +250,7 @@ let scored (sample : R.sample) =
   | R.Answer_ready _ | R.Judge_failed _ -> false
 
 let publish options report bytes =
+  let all_scored = List.for_all scored report.R.samples in
   let published =
     match options.publish_base_path with
     | None -> Ok None
@@ -263,18 +264,18 @@ let publish options report bytes =
   let fields =
     [ "output_path", `String options.output_path
     ; "sha256", `String Digestif.SHA256.(to_hex (digest_string bytes))
-    ; "all_cases_scored", `Bool (List.for_all scored report.R.samples)
+    ; "all_cases_scored", `Bool all_scored
     ]
   in
-  let publication_fields, publication_ok =
+  let publication_fields =
     match published with
     | Ok blob ->
-        [ "blob_sha256", (match blob with None -> `Null | Some sha -> `String sha) ], true
-    | Error detail -> [ "blob_sha256", `Null; "publication_error", `String detail ], false
+        [ "blob_sha256", (match blob with None -> `Null | Some sha -> `String sha) ]
+    | Error detail -> [ "blob_sha256", `Null; "publication_error", `String detail ]
   in
   print_endline (Yojson.Safe.to_string (`Assoc (fields @ publication_fields)));
   flush stdout;
-  if publication_ok && List.for_all scored report.samples then 0 else 1
+  if all_scored then 0 else 1
 
 let run options =
   let* () = check_output options in

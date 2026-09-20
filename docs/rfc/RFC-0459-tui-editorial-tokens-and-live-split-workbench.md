@@ -1,168 +1,199 @@
 ---
 rfc: "0459"
-title: "TUI 에디토리얼 디자인 토큰 체계, 네이티브 다이어그램 엔진, 그리고 초고속 대화 워크벤치"
+title: "TUI 시맨틱 토큰과 적응형 운영 워크벤치"
 status: Draft
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 author: dancer + antigravity
 supersedes: []
 superseded_by: null
 related: ["0429", "tui-operator-ia", "tui-frame-budget"]
 ---
 
-# RFC-0459: TUI 에디토리얼 디자인 토큰 체계, 네이티브 다이어그램 엔진, 그리고 초고속 대화 워크벤치
+# RFC-0459: TUI 시맨틱 토큰과 적응형 운영 워크벤치
 
-## 0. Summary
+## 0. 결정
 
-현재 MASC TUI(`masc-tui`)는 멀티 에이전트(Keepers)의 실행과 도구 호출을 감시하는 핵심 운영 인터페이스다.
-그러나 급격한 기능 확장으로 인해 세 가지 중대한 문제에 직면해 있다.
+이 RFC는 두 가지를 정한다.
 
-1. **정보 구조 파편화와 과밀 (9/10 밀도)**: 18~23개에 달하는 서페이스가 평면 나열되어 조작 피로도가 높고, 불필요한 테두리 박스가 화면을 메워 핵심 상태가 눈에 띄지 않는다.
-2. **Mermaid 파서의 태생적 한계**: 기존 Mermaid 텍스트 변환 파서는 가로 폭이 좁거나 복잡해지면 즉시 `Too_wide` 에러를 내며 깨지고, 에이전트 핵심 역학(순환 루프, 공유 메모리 허브, 스윔레인)을 담아내지 못한다.
-3. **대화 접근 및 검증의 높은 마찰**: 키퍼와 대화하려면 로스터와 패널을 거쳐 `Meta-i`를 눌러야 하는 등 3단계를 거쳐야 하며, 도구 실행 결과 본문이 버려져 실제 에이전트 출력을 즉시 확인하기 어렵다.
+1. TUI 색과 강조를 ANSI 색 이름이 아니라 의미 역할(`text`, `border`, `surface`,
+   `status`)로 부른다. 터미널이 실제 색을 소유하므로, 지원 수준마다 명시적인
+   degradation 규칙을 둔다.
+2. 운영 화면은 **적응형 단일 주 패널(cockpit)**을 기본으로 한다. 폭이 충분할
+   때만 보조 패널을 붙이며, 고정 50:50 분할은 채택하지 않는다.
 
-이 RFC는 다음 네 가지 해결책을 확정한다:
-- **Atlassian Design System(DESIGN.md) 기반 시맨틱 토큰 모델**: 단순 ANSI 열거형을 벗어나 `text`, `bg`, `border` 의도(Intent) 및 L0~L3 표고(Elevation) 계층을 확립한다.
-- **Diagram Design 에디토리얼 비주얼 원칙 (밀도 4/10)**: 불필요한 박스를 지우고 단일 악센트 색상을 적용하여 가독성을 극대화한다.
-- **네이티브 에디토리얼 다이어그램 엔진**: 깨지기 쉬운 Mermaid를 대체하여, 터미널 UTF-8 기반의 플라이휠(The Flywheel Loop), 스윔레인(Multi-Agent Swimlane), 파이프라인 리본, 자원/락 매트릭스를 네이티브로 렌더링한다.
-- **초고속 대화 접근 및 워크벤치 아키텍처**:
-  - `i` 단축키로 어디서든 호출되는 전역 스포트라이트 퀵 대화창
-  - 진입 즉시 입력창에 포커스가 잡히는 Chat-First 모드
-  - `Alt-1`~`Alt-4` 키퍼 다이렉트 점프
-  - 안정적인 2열 분할(방향 A) 및 대화/코드 50:50 실시간 동시뷰(방향 B) 지원
+기존 Mermaid 렌더러는 교체하지 않는다. 네이티브 다이어그램은 현재 렌더러로
+표현하기 어려운 모양과 실제 사용 빈도가 측정된 뒤 별도 제안으로 판단한다.
 
----
+새 전역 대화 키도 만들지 않는다. 현재 키 레지스트리의 `Meta-i`가 이미 어느
+surface에서든 보이는 keeper의 composer에 focus를 준다. plain `i`는
+`Config_prompts`의 “input”이고 `Meta-2`는 Keepers 이동이므로 이 RFC는 `i`나
+`Alt-1..4`를 재배정하지 않는다.
 
-## 1. 배경 및 실측 결함
+## 1. current-main 기준선
 
-### 1.1 실측 결함 인벤토리 (v0.28.0 실측)
+아래 표는 2026-09-20의 `main` `508b638747becb97f0f27d0de66cff066e0854c0`
+(최근 태그 `v0.35.20`)에서 원문을 확인한 결과다. 8월의 이전 snapshot은 이
+RFC의 근거로 쓰지 않는다.
 
-| 결함 영역 | 현상 | 원인 및 문제 위치 |
+| 항목 | current-main 상태 | 이 RFC의 판단 |
 |---|---|---|
-| **도구 결과 증발** | 도구 호출 성공/실패 여부만 표시되고 반환 본문이 보이지 않음 | `Live.Tool_result`가 `{occurrence; execution_id}`만 나르고 결과 페이로드를 디코드하지 않음 |
-| **줄바꿈 제어문자 노출** | 변경 목록의 WHAT 열에 `\x0A` 여섯 글자가 그대로 출력됨 | `Terminal_text.single_line`이 줄바꿈을 제어문자로 일괄 치환 |
-| **Mermaid 폭 초과 에러** | 조금만 복잡한 도표도 터미널 폭을 넘어 깨짐 | `Too_wide of {cells; cols}` 발생 후 에러 문자열만 출력 |
-| **대화 진입 마찰** | 키퍼 대화창에 포커스를 주려면 최소 3회 키 입력 필요 | 로스터와 상세창이 분리되어 있고 기본 포커스가 로스터에 머묾 |
-| **컨텍스트 토큰 은닉** | 모델 컨텍스트 윈도우 잔여량을 보려면 모달(`Ctrl-X`)을 띄워야 함 | 상시 모니터링 게이지 부재로 토큰 오버플로우 사전 감지 불가 |
+| 도구 결과 본문 | chat의 `Live.Tool_result`는 `{ occurrence; execution_id }`만 운반하지만 Activity/Recent는 observer의 input/output preview를 표시한다 (#36245, #36255) | platform-wide “증발” 주장을 철회한다. chat inline 결과가 더 필요한지는 별도 UX 판단이다. |
+| 변경 목록의 줄바꿈 | `change_row_summary`가 `Terminal_text.preview_line`을 쓴다 (`bin/masc_tui_render.ml`) | #33482에서 해결됨. 범위에서 제거한다. |
+| Mermaid 폭 초과 | parse 뒤 layout이 `Too_wide { cells; cols; turning_it_fits }`를 반환한다 | parser 결함으로 부르지 않는다. 폭 계약 문제다. |
+| Mermaid fallback | 필요한/가용 cell 수와 회전 가능한 방향을 말한 뒤 원문을 보여 준다 (`bin/masc_tui_markdown.ml`) | 진단 한 줄만 보인다는 주장을 철회한다. |
+| composer 접근 | `Meta-i`가 전역 composer focus로 등록돼 있다 (`bin/masc_tui_keys.ml`) | “3단계 진입” 주장을 철회한다. 현재 동작을 유지한다. |
 
----
+`Too_wide`의 대체 방향 layout은 이미 계산되지만 자동 적용되지 않는다. 그래프가
+읽히는 방향은 작성자의 선택이라는 `masc_tui_mermaid.mli` 계약 때문이다. 향후
+명시적인 “제안 방향으로 보기” action은 가능하지만, 이 RFC는 방향을 몰래 바꾸지
+않는다.
 
-## 2. 디자인 토큰 및 표고 체계 (Atlassian Design System 적용)
+## 2. 범위와 비범위
 
-단순 ANSI 색상 코드를 걷어내고 `Masc_tui_token` 모듈로 시맨틱 토큰을 정의한다.
+### 범위
 
-### 2.1 시맨틱 컬러 토큰
-- `text.default`: 기본 읽기 텍스트
-- `text.subtle`: 타임스탬프, 부가 설명 (명암비 4.5:1 준수)
-- `text.brand`: 현재 활성 탭, 선택된 키퍼 식별자 (Blue)
-- `text.danger`: 실패한 검증, 게이트 거절, 치명적 에러 (Red)
-- `text.warning`: 승인 대기, 타임아웃 임박, 컨텍스트 80% 도달 (Yellow/Orange)
-- `text.success`: 도구 성공, 검증 통과, 변경 적용 완료 (Green)
-- `text.discovery`: 에이전트 자율 추론, 계획, 지식 탐색 (Purple/Magenta)
+- 의미 기반 TUI token 이름과 terminal capability별 변환 규칙
+- 실제 pane 폭을 입력으로 받는 적응형 cockpit 계약
+- 80/100/120 column PTY에서 재현 가능한 acceptance gate
+- 기존 key registry를 그대로 쓰는 chat-first focus 동작
 
-### 2.2 표고(Elevation) 및 레이어 규칙
-- **L0 Base Canvas**: 터미널 기본 배경, 탭 스트립 및 글로벌 상태 바.
-- **L1 Card / Pane**: 좌우 분할 패널 (로스터, 대화창, 실시간 인스펙터). 미세한 테두리(`border-subtle`)만 사용.
-- **L2 Floating Inspector**: 줄 메모, 호버 상세 정보. 배경 밝기 스텝업.
-- **L3 Modal Blanket**: 명령 팔레트(`Ctrl-P`), 도구 결과 전체창(`Enter`), 토큰 인스펙터(`Ctrl-X`). 뒤 배경을 Dim 처리하여 시각적 계층 분리.
+### 비범위
 
----
+- chat inline `Tool_result` payload wire 변경
+- Mermaid parser/renderer 퇴역
+- plain `i`, `Meta-1..4` 재배정
+- “밀도 9/10 → 4/10” 같은 측정 정의가 없는 목표
+- HTML preview를 terminal layout의 증거로 사용하는 일
 
-## 3. 에디토리얼 다이어그램 엔진 (Mermaid 대체)
+각 비범위 항목은 이 RFC 승인과 묶지 않는다. 싼 결함 수리 때문에 새로운
+diagram engine이나 전체 IA를 함께 승인할 필요가 없게 한다.
 
-Cathryn Lavery의 Diagram Design 철학에 따라 불필요한 박스를 지우고, 에이전트 핵심 역학을 표현하는 네이티브 렌더러를 도입한다.
+## 3. 시맨틱 토큰 계약
 
-### 3.1 4대 네이티브 에디토리얼 패턴
+렌더러는 구체 색이 아니라 다음 역할을 요청한다.
 
-#### 1) The Agent Flywheel Loop (순환 루프와 공유 메모리 허브)
-에이전트의 자기 개선 루프(Prompt → Tool Exec → Verify → Memory OS)를 표현하며, 중앙 메모리 허브에만 단일 악센트 색상을 부여한다.
+- `text.default`, `text.subtle`, `text.inverse`
+- `status.info`, `status.success`, `status.warning`, `status.danger`
+- `border.default`, `border.focused`
+- `surface.base`, `surface.raised`, `surface.modal`
 
-```text
-                      1. Context Assembly
-                    ┌─────────────────────┐
-                    │                     ▼
-              ┌───────────┐         ┌───────────┐
-              │  Memory   │         │    LLM    │
-              │ OS (Hub)  │         │ Execution │
-              └───────────┘         └───────────┘
-                    ▲                     │
-                    │   4. Writeback      ▼
-                    └┄┄┄┄┄┄┄┄┄┄┄┄┄┄ ┌───────────┐
-                                    │   Tool    │
-                         3. Verify  │ Execution │
-                                    └───────────┘
-                                          │
-                                          ▼ 2. Run
-```
+색만으로 상태를 구별하지 않는다. focus는 border glyph, 실패/경고는 label 또는
+mark, 선택 상태는 cursor와 text attribute를 함께 쓴다.
 
-#### 2) Continuous Execution Pipeline Ribbon (수평 파이프라인 리본)
-터미널 세로 공간을 절약하는 1열 컨베이어 벨트형 흐름도.
-```text
- ──▶ [1. CONTEXT] ──▶ [2. PROMPT] ──▶ [3. LLM INFER] ──▶ [4. TOOL EXEC] ──▶ [5. VERIFY] ──▶ [APPLIED]
-        ▲                                                                        │
-        └─────────────────── [FEEDBACK: Memory OS Writeback (+14 lessons)] ──────┘
-```
+### 3.1 terminal capability별 degradation
 
-#### 3) Multi-Agent Coordination Swimlane (협업 스윔레인)
-운영자, 게이트, 주 키퍼, 워커 간의 메시지 흐름과 블로킹 지점을 명확히 보여준다.
-```text
-  TIME   OPERATOR          GATEKEEPER        LEAD (keeper-03)   WORKER (keeper-01)
- ───────────────────────────────────────────────────────────────────────────────────
-  13:10  Plan "Refactor" ──▶ Policy check
-  13:11                        │ (Approved) ──▶  Split AST tasks ──▶ Run AST test
-  13:12                                             │                │ (pass 1.2s)
-  13:13  [Pending Approval] ◀────────────────────── ┴──────────────◀ Commit changes
-```
+| terminal 조건 | 변환 |
+|---|---|
+| truecolor이며 TUI가 foreground와 background를 모두 칠함 | 쌍으로 고른 token 값에 한해 normal text 4.5:1을 검증한다. |
+| 256색 | 가장 가까운 palette entry로 내리되 4.5:1을 보장한다고 쓰지 않는다. glyph/label/attribute가 의미를 보존한다. |
+| 16색 또는 unknown | terminal의 named color를 사용한다. 의미는 색이 아닌 glyph/label/attribute가 보존한다. |
+| transparent/default background | 사용자의 theme가 대비를 결정한다. 배경 밝기 방향이나 수치 대비를 주장하지 않는다. |
 
-#### 4) Multi-Agent Resource & Lock Matrix (동시성 락 감시 매트릭스)
-동시에 여러 키퍼가 구동될 때 파일 락 경합 및 메모리 동기화 지연을 감시한다.
+### 3.2 layer 규칙
 
----
+- **L0 base**: terminal default surface.
+- **L1 pane**: 한 줄 border와 focus marker로 구분한다.
+- **L2 inspector**: title과 border style로 구분한다. “배경 밝기 step-up”을
+  요구하지 않는다.
+- **L3 modal**: 명시적인 modal frame과 title을 쓴다. 전체 화면 dim은 기본
+  계약이 아니며, 도입하려면 `tui-frame-budget`의 측정 gate를 통과해야 한다.
 
-## 4. 초고속 대화 접근 및 워크벤치 아키텍처
+## 4. 선택한 layout: 적응형 cockpit
 
-### 4.1 대화 접근 초고속화 3대 메커니즘
-1. **전역 퀵 대화창 (`i` 단축키)**: 어느 화면에 있든 `i` 입력 시 상단 스포트라이트 대화 바가 열려 활성 키퍼에게 즉시 발화 가능.
-2. **Chat-First 자동 포커스**: 워크벤치 진입 시 하단 입력창에 커서가 기본 위치하여 추가 조작 없이 타이핑 시작.
-3. **키퍼 다이렉트 점프 (`Alt-1`~`Alt-4`)**: 로스터 화살표 스크롤 없이 0.1초 만에 특정 키퍼 대화로 전환.
+기존 제안의 **Direction A를 선택**하되 고정 비율을 제거한다. 한 순간에 하나의
+primary task(Chat, Diff, Context, Memory)가 읽기 폭을 소유한다. roster와
+inspector는 사용자가 요청했을 때 나타나는 secondary surface다.
 
-### 4.2 두 가지 워크벤치 레이아웃 방향 (방향 A vs 방향 B)
+Direction B의 고정 50:50 live split은 기각한다. terminal 80 columns에서 각
+pane이 약 40 columns밖에 받지 못하며, RFC 초안의 84/101-cell 예시도 담을 수
+없다. “terminal 전체 폭”과 “pane 가용 폭”을 같은 값으로 취급하지 않는다.
 
-- **방향 A (Atlassian Enterprise Cockpit)**:
-  - 좌측 로스터(25%) + 우측 4렌즈 탭(75%: Chat, Diff, Context, Memory).
-  - 안정적이고 체계적인 정보 분리.
-- **방향 B (Agent IDE Live-Split & Triage Hub)**:
-  - 상단 키퍼 칩 캐러셀 배치로 좌측 사이드바 제거 (화면 폭 100% 활용).
-  - 좌측 대화 스트림(50%)과 우측 실시간 코드 Diff/도구창(50%) 상시 병렬 배치.
-  - 대화하면서 키퍼가 변경하는 코드를 실시간으로 확인.
+### 4.1 폭 계약
 
-### 4.3 도구 실행 결과 2단계 검사 체계
-- **1단계 (인라인 요약)**: 대화창 내에 실행 상태, 경과 시간, 3줄 요약 + Head/Tail 2줄을 즉시 노출.
-- **2단계 (L3 전체 모달)**: `Enter` 키 입력 시 팝업 모달을 띄워 수십 KB에 달하는 전체 원본 출력 검토.
+layout은 terminal 폭이 아니라 decoration을 뺀 **실제 pane columns**를 자식에게
+건넨다.
 
----
+| terminal 폭 | 기본 구성 | 금지 사항 |
+|---|---|---|
+| 80 | primary pane 하나; roster/inspector는 전환형 overlay | 고정 2열 |
+| 100 | primary pane 하나와 접을 수 있는 status rail | 내용 폭을 줄이는 상시 inspector |
+| 120 이상 | 양쪽 pane이 각자의 minimum을 만족할 때만 optional secondary pane | 50:50 강제 |
 
-## 5. 단계별 구현 로드맵 (Roadmap)
+자식 renderer는 받은 `cols`보다 넓은 row를 반환하지 않는다. full 표현이 맞지
+않으면 stacked 표현, compact summary, source/text fallback 순으로 낮춘다. 어떤
+단계도 내용을 조용히 버리지 않는다.
 
-1. **Phase 1: 디자인 토큰 모듈 (`bin/masc_tui_token.ml`)**
-   - 시맨틱 색상 및 L0~L3 표고 상수 정의
-   - 기존 `masc_tui_theme.ml` 무중단 래핑
-2. **Phase 2: 네이티브 에디토리얼 다이어그램 엔진 (`bin/masc_tui_diagram.ml`)**
-   - 순환 루프(Flywheel), 스윔레인, 파이프라인 리본 렌더러 구현
-   - `masc_tui_mermaid.ml` 단계적 퇴역
-3. **Phase 3: 10탭 IA 및 워크벤치 레이아웃 개편**
-   - `surface_ring` 10탭 압축
-   - Fast-Chat(전역 `i`, Chat-First, Alt-점프) 탑재
-4. **Phase 4: 백엔드 데이터 파이프라인 연동**
-   - 도구 실행 본문 디코딩 및 SSE 이벤트 보강
-   - Memory OS 8대 카테고리 트리 노출
-5. **Phase 5: Golden Test 및 회귀 검증**
-   - 전 화면 PTY 프레임 캡처 및 자동화 회귀 검증
+### 4.2 key 계약
 
----
+- `Meta-i`: 보이는 keeper의 composer focus. 유지.
+- plain `i`: `Config_prompts`의 input 보기. 유지.
+- `Meta-2`: Keepers surface 이동. 유지.
+- 새 binding은 `masc_tui_keys.ml`의 registry와 충돌 검사를 먼저 통과해야 한다.
 
-## 6. 참고 자료 및 시안
+따라서 이 RFC의 chat acceptance는 “어디서든 `Meta-i` 한 chord로 composer에
+focus”이며 새 단축키 구현이 아니다.
 
-- 인터랙티브 프리뷰 파일: `docs/design/tui/preview/masc-tui-preview.html`
-- Atlassian Design System: `https://atlassian.design/DESIGN.md`
-- Diagram Design: `https://github.com/cathrynlavery/diagram-design`
+## 5. diagram과 폭 측정
+
+`Too_wide`는 parse failure가 아니라 layout refusal이다. 현재 fallback은
+`cells`, `cols`, `turning_it_fits`, 원문을 보존한다. renderer를 바꿔도
+`needed_cells > pane_cols`라는 물리 제약은 사라지지 않는다.
+
+state diagram 확장 #36964, #36965, #36967은 이미 merge됐다. 이 RFC는 그
+구현을 퇴역 대상으로 만들지 않고 current Mermaid capability로 유지한다.
+
+네이티브 diagram 작업을 시작하기 전 별도 instrumentation 변경으로 다음을
+측정한다.
+
+- Mermaid render attempt 수
+- `Too_wide` 수와 `too_wide / attempts` 비율
+- `cols` bucket별 `cells - cols`
+- `turning_it_fits` 존재 여부
+- diagram 문법 종류와 pane 폭(원문 내용은 기록하지 않음)
+
+baseline artifact와 측정 명령이 PR에 붙기 전에는 “Too_wide 제거”를 이 RFC의
+성공으로 주장하지 않는다. Flywheel, swimlane, ribbon, contention matrix는
+가능한 vocabulary 후보일 뿐 폐쇄된 네 패턴 engine의 근거가 아니다.
+
+향후 native renderer는 같은 `cols` 계약을 지켜야 한다.
+
+1. full pattern
+2. stacked/vertical pattern
+3. compact summary
+4. lossless text/source fallback
+
+각 단계는 display width를 재서 `row_width <= cols`를 증명한다.
+
+## 6. 전달 순서
+
+각 단계는 독립 PR이며 앞 단계가 뒤 단계의 승인 조건을 대신하지 않는다.
+
+1. **관측**: Mermaid attempt/Too_wide instrumentation과 baseline artifact.
+2. **토큰**: semantic role type, capability mapping, fallback unit tests.
+3. **cockpit**: 현재 `Meta-i`를 유지한 적응형 primary/secondary layout.
+4. **별도 UX 판단**: Activity/Recent와 별개로 chat inline tool result가 필요한지
+   검증하고, 필요할 때만 wire 변경.
+5. **선택적 diagram 제안**: 1단계 수치와 기존 Mermaid로 표현할 수 없는 실제
+   사례가 있을 때만 시작.
+
+## 7. acceptance gate
+
+구현 PR은 다음 증거를 함께 제출한다.
+
+- 80/100/120-column **실제 PTY** golden frame. HTML mockup은 증거가 아니다.
+- 모든 row의 display width가 pane `cols` 이하라는 automated assertion.
+- 16색/256색/truecolor/default-background token mapping unit tests.
+- 색을 제거해도 focus, warning, error를 구별할 수 있다는 text snapshot.
+- key registry에서 중복 binding이 없고 `Meta-i`, plain `i`, `Meta-2` 의미가
+  유지된다는 test.
+- `tui-frame-budget`이 정한 frame 예산의 before/after 측정.
+
+이 증거가 없으면 구현은 이 RFC를 충족한 것으로 보지 않는다.
+
+## 8. 참고
+
+- Atlassian Design System: <https://atlassian.design/>
+- Diagram Design: <https://github.com/cathrynlavery/diagram-design>
+- `docs/rfc/RFC-tui-frame-budget.md`
+- `docs/rfc/RFC-tui-operator-ia.md`

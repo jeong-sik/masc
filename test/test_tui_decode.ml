@@ -6967,7 +6967,17 @@ let test_decode_librarian_page_keeps_the_server_cursor () =
         (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
 let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
-    ?(completion = true) run_id =
+    ?(completion = true) ?failure run_id =
+  let completion_fields =
+    if completion then
+      [ "elapsed_s", `Float 1.25; "selected_slot", `String "qwen-primary" ]
+    else []
+  in
+  let failure_fields =
+    match failure with
+    | None -> []
+    | Some (code, detail) -> [ "code", `String code; "detail", `String detail ]
+  in
   `Assoc
     ([ "run_id", `String run_id
      ; "lane", `String lane
@@ -6975,10 +6985,8 @@ let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
      ; "started_at", `Float 100.
      ; "status", `String status
      ]
-     @
-     if completion then
-       [ "elapsed_s", `Float 1.25; "selected_slot", `String "qwen-primary" ]
-     else [])
+     @ completion_fields
+     @ failure_fields)
 
 let test_decode_lane_run_page_filters_to_one_lane () =
   let listing =
@@ -7026,6 +7034,30 @@ let test_decode_lane_run_page_running_run_has_no_completion_fields () =
            Alcotest.(check (option (pair (float 0.0) string))) "no next page"
              None page.Tui_decode.lrpg_next
        | _ -> Alcotest.fail "expected exactly one run")
+
+let test_decode_exact_lane_failure_keeps_reason () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ lane_run_summary_json
+                ~status:"failed"
+                ~failure:("missing_deadline", "target has no finite request window")
+                "lib-failed"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok { Tui_decode.lrpg_runs = [ run ]; _ } ->
+    (match run.Tui_decode.lrs_failure with
+     | Some failure ->
+       Alcotest.(check string) "failure code" "missing_deadline" failure.lrf_code;
+       Alcotest.(check string) "failure detail"
+         "target has no finite request window" failure.lrf_detail
+     | None -> Alcotest.fail "failed exact run dropped its failure")
+  | Ok _ -> Alcotest.fail "expected exactly one failed run"
 
 let test_decode_lane_run_status_is_typed () =
   let listing =
@@ -9208,6 +9240,8 @@ let () =
           test_decode_lane_run_page_filters_to_one_lane;
         Alcotest.test_case "running run has no completion fields" `Quick
           test_decode_lane_run_page_running_run_has_no_completion_fields;
+        Alcotest.test_case "exact failure keeps code and detail" `Quick
+          test_decode_exact_lane_failure_keeps_reason;
         Alcotest.test_case "status decodes to a variant, unknown preserved" `Quick
           test_decode_lane_run_status_is_typed;
         Alcotest.test_case "verifier summary keeps subject and verdict" `Quick

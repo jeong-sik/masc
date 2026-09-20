@@ -118,6 +118,10 @@ val check_workspace_preflight : t -> (unit, string) result
     identity check so a login can repair an absent or invalid identity;
     ordinary payloads use the full cached {!check_preflight}. *)
 
+val invalidate_preflight : t -> unit
+(** Forget this endpoint and Keeper's cached preflight after bootstrap or
+    login changes the remote workspace or identity. *)
+
 val observe_supported : t -> bool
 (** Whether this endpoint's shim advertises the box (RFC-0422): the
     [observe] capability in its [--probe] answer. Probes the endpoint once

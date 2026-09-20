@@ -247,9 +247,10 @@ status: reference
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
 
 **Model Input Ledger (모델 입력 원장)**
-: Keeper·runtime·trace별로 공급자 usage와 실린 Atom 범위를 기록한 프로세스 내 원장.
+: Keeper·runtime·trace별로 응답에서 확인한 Atom 범위와 제공된 usage를 기록한 프로세스 내 원장.
+  상한 판정과 거절 뒤 이동은 후보 안의 작업값에 적용하고, 응답 관측으로 원장을 갱신한다.
   원장이 아직 세지 않은 위치까지 거절이 앞을 옮길 수 있다. 이때 다음 요청은 턴이
-  보관한 Carried Front를 쓰고, 공급자 응답이 온 뒤 원장을 갱신한다.
+  보관한 Carried Front를 쓴다.
 
 **Turn Boundary**
 : 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이

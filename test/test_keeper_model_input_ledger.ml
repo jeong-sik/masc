@@ -521,45 +521,19 @@ let test_move_front_inside_a_block_restarts_the_blocks () =
     (block_digests moved)
 ;;
 
-let test_table_move_front_moves_the_pairs_ledger () =
+let test_table_observations_are_session_scoped () =
   Ledger.Table.For_testing.reset ();
   let keeper_name = "alpha" and runtime_id = "r" and session_id = "trace-1" in
-  (* No ledger yet: nothing to move, nothing written. *)
-  check bool "the move says there is no ledger" true
-    (Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:5
-       ~front_digest:(opener 5)
-     = Ledger.Table.No_pair_ledger);
-  check bool "no ledger appears from a move" true
-    (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id));
-  let (_ : Ledger.observation) =
+  let observed =
     Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
       ~digest_at:(history ~atom_count:10)
       ~request:(request ~first_atom:0 ~atom_count:10 ()) ~usage:(Some (usage 1_000))
   in
-  let (_ : Ledger.observation) =
-    Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
-      ~digest_at:(history ~atom_count:14)
-      ~request:(request ~first_atom:0 ~atom_count:14 ()) ~usage:(Some (usage 1_400))
-  in
-  (* Another session of the same keeper and runtime is another history. *)
   check bool "a recovery session reads no front from the keeper's turns" true
     (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:"recovery-1"));
-  check bool "the move says it moved" true
-    (Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:10
-       ~front_digest:(opener 10)
-     = Ledger.Table.Moved);
-  check bool "moving to the same front again says it did not" true
-    (Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:10
-       ~front_digest:(opener 10)
-     = Ledger.Table.Not_moved);
-  match Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id with
-  | None -> fail "the ledger stays"
-  | Some t ->
-    check int "the next request composes from the new front" 10 t.last.first_atom;
-    check (option int) "the cold block's size was unknown, so the total is too until the next usage"
-      None t.total_tokens;
-    check int "the measured block stays known" 400 (Ledger.known_tokens t);
-    Ledger.Table.For_testing.reset ()
+  check bool "the original session retains its response observation" true
+    (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id = Some observed.ledger);
+  Ledger.Table.For_testing.reset ()
 ;;
 
 (* The same number of atoms is not the same history. An attempt that was never
@@ -734,7 +708,7 @@ let () =
         ; test_case "over the cold block" `Quick test_move_front_over_the_cold_block_blanks_the_total
         ; test_case "not advancing" `Quick test_move_front_that_does_not_advance_changes_nothing
         ; test_case "inside a block" `Quick test_move_front_inside_a_block_restarts_the_blocks
-        ; test_case "through the table" `Quick test_table_move_front_moves_the_pairs_ledger
+        ; test_case "session-scoped observation" `Quick test_table_observations_are_session_scoped
         ] )
     ]
 ;;

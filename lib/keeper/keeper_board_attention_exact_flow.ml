@@ -822,6 +822,8 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
          in
          (match prior_error with
           | Some (Providers_exhausted { detail; _ }) -> detail ^ "; cli tail: " ^ tail
+          | Some (Domain_output_invalid detail) ->
+            "invalid_domain_output: " ^ detail ^ "; cli tail: " ^ tail
           | Some _ | None -> "cli tail: " ^ tail)
        | Flow_already_started _
        | Before_dispatch_persistence_failed _

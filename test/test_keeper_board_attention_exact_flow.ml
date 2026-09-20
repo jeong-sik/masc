@@ -704,6 +704,72 @@ let test_mixed_semantic_exhaustion_walks_cli_tail () =
       check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
 ;;
 
+let test_mixed_semantic_rejection_and_cli_failure_keep_both_causes () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-semantic-cli-failure" in
+      let rejected =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"another-candidate")))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-semantic-cli-failure-http" rejected.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed semantic failure lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        Error "client unavailable"
+      in
+      (match
+         Exact_flow.execute
+           ~cli_runner:runner
+           ~clock
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           prepared
+       with
+       | Error
+           (Exact_flow.Cli_slots_exhausted
+              { prior_error = Some (Exact_flow.Domain_output_invalid detail)
+              ; failures = [ _ ]
+              }) ->
+         Alcotest.(check bool)
+           "typed prior error keeps the semantic rejection"
+           true
+           (contains_substring ~needle:"identity mismatch" detail)
+       | Error _ -> Alcotest.fail "mixed failure lost its typed prior rejection"
+       | Ok _ -> Alcotest.fail "failed semantic and CLI walks cannot judge");
+      match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+      | Exact_lane_run_registry.Completed
+          { outcome = Exact_lane_run_registry.Failed { detail; _ }; _ } ->
+        Alcotest.(check bool)
+          "durable detail keeps the semantic rejection class"
+          true
+          (contains_substring ~needle:"invalid_domain_output" detail);
+        Alcotest.(check bool)
+          "durable detail keeps the semantic rejection payload"
+          true
+          (contains_substring ~needle:"identity mismatch" detail);
+        Alcotest.(check bool)
+          "durable detail keeps the CLI failure"
+          true
+          (contains_substring ~needle:"client unavailable" detail)
+      | Exact_lane_run_registry.Running
+      | Exact_lane_run_registry.Completed _
+      | Exact_lane_run_registry.Completion_persistence_failed _ ->
+        Alcotest.fail "mixed failure did not close with durable detail")))
+;;
+
 let test_mixed_advanceable_final_failure_walks_cli_tail () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
@@ -1689,6 +1755,10 @@ let () =
             "mixed semantic exhaustion walks the CLI tail"
             `Quick
             test_mixed_semantic_exhaustion_walks_cli_tail
+        ; Alcotest.test_case
+            "mixed semantic and CLI failures keep both causes"
+            `Quick
+            test_mixed_semantic_rejection_and_cli_failure_keep_both_causes
         ; Alcotest.test_case
             "mixed advanceable final failure walks the CLI tail"
             `Quick

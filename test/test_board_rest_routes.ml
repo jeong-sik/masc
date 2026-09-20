@@ -165,7 +165,7 @@ let loopback_request_authority () =
   | Error `Malformed -> fail "failed to construct loopback request authority"
 ;;
 
-let dispatch_schedule_cancel ~router ~token ~schedule_id =
+let dispatch_json ?token ~router ~path ~extra_headers ~body () =
   Server_request_authority.with_current
     (loopback_request_authority ())
     (fun () ->
@@ -174,27 +174,30 @@ let dispatch_schedule_cancel ~router ~token ~schedule_id =
          Httpun.Server_connection.create (fun reqd ->
            Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
        in
-       let body =
-         `Assoc
-           [ "schedule_id", `String schedule_id
-           ; "cancelled_by_id", `String "forged-body-actor"
-           ; "cancelled_by_kind", `String "system"
-           ; "reason", `String "duplicate"
-           ]
-         |> Yojson.Safe.to_string
+       let extra_headers =
+         extra_headers
+         |> List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n")
+         |> String.concat ""
+       in
+       let authorization =
+         Option.fold
+           ~none:""
+           ~some:(fun token -> "Authorization: Bearer " ^ token ^ "\r\n")
+           token
        in
        let raw_request =
          Printf.sprintf
-           "POST /api/v1/tools/masc_schedule_cancel HTTP/1.1\r\n\
+           "POST %s HTTP/1.1\r\n\
             Host: 127.0.0.1:8935\r\n\
             Origin: http://127.0.0.1:8935\r\n\
-            Authorization: Bearer %s\r\n\
-            X-Masc-Agent: forged-header-actor\r\n\
+            %s%s\
             Content-Type: application/json\r\n\
             Content-Length: %d\r\n\
             \r\n\
-            %s"
-           token
+           %s"
+           path
+           authorization
+           extra_headers
            (String.length body)
            body
        in
@@ -236,8 +239,8 @@ let dispatch_schedule_cancel ~router ~token ~schedule_id =
            (String.sub raw offset (String.length raw - offset)) ))
 ;;
 
-let test_schedule_cancel_actor_is_stamped_from_auth () =
-  let base_path = Filename.temp_dir "schedule-cancel-http-actor-" "" in
+let with_authenticated_activity_router ~prefix ~agent_name f =
+  let base_path = Filename.temp_dir prefix "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
     ~finally:(fun () ->
@@ -260,32 +263,11 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
          };
        let token =
          match
-           Auth.create_token base_path ~agent_name:"credential-owner"
+           Auth.create_token base_path ~agent_name
              ~role:Masc_domain.Admin
-         with
+       with
          | Ok (token, _) -> token
          | Error error -> fail (Masc_domain.masc_error_to_string error)
-       in
-       let actor : Schedule_domain.actor =
-         { id = "test"
-         ; kind = Schedule_domain.Human_operator
-         ; display_name = None
-         }
-       in
-       let schedule =
-         match
-           Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
-             ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
-             ~due_at:200.0
-             ~payload:
-               (`Assoc
-                  [ "kind", `String "consumer.note"
-                  ; "body", `Assoc [ "text", `String "cancel me" ]
-                  ])
-             ~source:Schedule_domain.Operator_request ()
-         with
-         | Ok schedule -> schedule
-         | Error error -> fail (Schedule_service.service_error_to_string error)
        in
        let clock = Eio.Stdenv.clock env in
        let router =
@@ -294,17 +276,197 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
            ~clock
            (Http.Router.create ())
        in
-       let status, response =
-         dispatch_schedule_cancel ~router ~token ~schedule_id:schedule.schedule_id
-       in
+       f ~base_path ~config ~router ~token)
+;;
+
+let test_schedule_cancel_actor_is_stamped_from_auth () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-cancel-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~router ~token ->
+  let actor : Schedule_domain.actor =
+    { id = "test"
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let schedule =
+    match
+      Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
+        ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+             [ "kind", `String "consumer.note"
+             ; "body", `Assoc [ "text", `String "cancel me" ]
+             ])
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok schedule -> schedule
+    | Error error -> fail (Schedule_service.service_error_to_string error)
+  in
+  let body =
+    `Assoc
+      [ "schedule_id", `String schedule.schedule_id
+      ; "cancelled_by_id", `String "forged-body-actor"
+      ; "cancelled_by_kind", `String "system"
+      ; "reason", `String "duplicate"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
+  in
        let open Yojson.Safe.Util in
        check int "cancel accepted" 200 status;
        check string "credential owner is the canceller" "credential-owner"
          (response |> member "data" |> member "cancelled_by" |> member "id"
           |> to_string);
        check string "terminal bridge uses typed human operator" "human_operator"
-         (response |> member "data" |> member "cancelled_by" |> member "kind"
-          |> to_string))
+    (response |> member "data" |> member "cancelled_by" |> member "kind"
+     |> to_string)
+;;
+
+let board_post_by_title title =
+  Masc.Board_dispatch.list_posts ~sort_by:Masc.Board_dispatch.Recent ~limit:20 ()
+  |> List.find_opt (fun (post : Masc.Board.post) -> String.equal post.title title)
+;;
+
+let test_board_write_routes_use_authenticated_actor () =
+  with_authenticated_activity_router
+    ~prefix:"board-write-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config:_ ~router ~token ->
+  let prior_base_path = Sys.getenv_opt Env_config_core.base_path_env_key in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Board_dispatch.reset_for_test ();
+      Unix.putenv Env_config_core.base_path_env_key
+        (Option.value ~default:"" prior_base_path);
+      Masc.Board.reset_global_for_test ())
+  @@ fun () ->
+  Unix.putenv Env_config_core.base_path_env_key base_path;
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ();
+  Masc.Board_dispatch.init_jsonl ();
+  let post_json path fields =
+    dispatch_json ~router ~token ~path
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
+  in
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_post"
+      [ "title", `String "canonical actor route test"
+      ; "body", `String "the bearer owner writes this post"
+      ; "author", `String "forged-body-actor"
+      ]
+  in
+  check int "post accepted" 201 status;
+  let post =
+    match board_post_by_title "canonical actor route test" with
+    | Some post -> post
+    | None -> fail "board route did not create the post"
+  in
+  let post_id = Masc.Board.Post_id.to_string post.id in
+  check string "post author" "credential-owner"
+    (Masc.Board.Agent_id.to_string post.author);
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_comment"
+      [ "post_id", `String post_id
+      ; "content", `String "canonical actor route comment"
+      ; "author", `String "forged-body-actor"
+      ]
+  in
+  check int "comment accepted" 201 status;
+  let comment =
+    match Masc.Board_dispatch.get_comments ~post_id with
+    | Ok comments ->
+      (match
+         List.find_opt
+           (fun (comment : Masc.Board.comment) ->
+              String.equal comment.content "canonical actor route comment")
+           comments
+       with
+       | Some comment -> comment
+       | None -> fail "board route did not create the comment")
+    | Error error -> fail (Masc.Board.show_board_error error)
+  in
+  let comment_id = Masc.Board.Comment_id.to_string comment.id in
+  check string "comment author" "credential-owner"
+    (Masc.Board.Agent_id.to_string comment.author);
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_vote"
+      [ "post_id", `String post_id
+      ; "direction", `String "up"
+      ; "voter", `String "forged-body-actor"
+      ]
+  in
+  check int "post vote accepted" 200 status;
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_comment_vote"
+      [ "comment_id", `String comment_id
+      ; "direction", `String "down"
+      ; "voter", `String "forged-body-actor"
+      ]
+  in
+  check int "comment vote accepted" 200 status;
+  (match
+     Masc.Board_dispatch.current_vote_for_post ~voter:"credential-owner" ~post_id
+   with
+   | Ok (Some Masc.Board.Up) -> ()
+   | Ok (Some Masc.Board.Down) | Ok None -> fail "canonical post vote was not stored"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  (match
+     Masc.Board_dispatch.current_vote_for_post ~voter:"forged-header-actor" ~post_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "forged header actor owns the post vote"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  (match
+     Masc.Board_dispatch.current_vote_for_comment
+       ~voter:"credential-owner"
+       ~comment_id
+   with
+   | Ok (Some Masc.Board.Down) -> ()
+   | Ok (Some Masc.Board.Up) | Ok None -> fail "canonical comment vote was not stored"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  (match
+     Masc.Board_dispatch.current_vote_for_comment
+       ~voter:"forged-header-actor"
+       ~comment_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "forged header actor owns the comment vote"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with
+      enabled = false
+    ; require_token = false
+    };
+  let status, _ =
+    dispatch_json ~router
+      ~path:"/api/v1/tools/masc_board_post"
+      ~extra_headers:[ "X-Masc-Agent", "local-dashboard-actor" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "title", `String "tokenless local dashboard actor"
+              ; "body", `String "same-origin local attribution remains available"
+              ; "author", `String "forged-body-actor"
+              ]))
+      ()
+  in
+  check int "tokenless same-origin dashboard post accepted" 201 status;
+  let local_post =
+    match board_post_by_title "tokenless local dashboard actor" with
+    | Some post -> post
+    | None -> fail "tokenless dashboard route did not create the post"
+  in
+  check string "tokenless local actor comes from admitted auth resolver"
+    "local-dashboard-actor"
+    (Masc.Board.Agent_id.to_string local_post.author)
 ;;
 
 let test_dashboard_board_reaction_routes_registered () =
@@ -530,6 +692,8 @@ let () =
             test_schedule_write_actor_is_stamped_from_auth
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_stamped_from_auth
+        ; test_case "board write actors come from auth" `Quick
+            test_board_write_routes_use_authenticated_actor
         ; test_case
             "dashboard board reaction routes registered"
             `Quick

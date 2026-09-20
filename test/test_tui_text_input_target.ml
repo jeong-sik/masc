@@ -15,6 +15,7 @@ let target =
     (Fmt.of_to_string (function
       | None -> "none"
       | Some Tui_types.Text_preset_name -> "preset-name"
+      | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
@@ -193,6 +194,18 @@ let test_a_board_post_being_written_claims_its_draft () =
     (resolved state)
 ;;
 
+(* A new lane's name is typed on the Runtime surface, where x, J, K and D are
+   lane edits: while the name is open the field takes them as letters. *)
+let test_a_new_lane_name_claims_typing_on_runtime () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Runtime;
+  check target "reading lanes" None (resolved state);
+  state.Tui_types.runtime_lane_name_draft <- Some "";
+  check target "naming a lane" (Some Tui_types.Text_runtime_lane_name) (resolved state);
+  state.Tui_types.view <- Tui_types.Lanes;
+  check target "another surface" None (resolved state)
+;;
+
 let test_the_palette_claims_over_a_board_draft () =
   (* The palette draws over the board pane, and its key handler runs first.
      A paste follows the characters. *)
@@ -333,7 +346,9 @@ let () =
           test_case "a board post being written claims its draft" `Quick
             test_a_board_post_being_written_claims_its_draft;
           test_case "the palette claims over a board draft" `Quick
-            test_the_palette_claims_over_a_board_draft
+            test_the_palette_claims_over_a_board_draft;
+          test_case "a new lane name claims typing on Runtime" `Quick
+            test_a_new_lane_name_claims_typing_on_runtime
         ] )
     ]
 ;;

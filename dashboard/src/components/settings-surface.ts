@@ -737,7 +737,7 @@ function RuntimeMediaFailoverEditor({
   }
 
   return html`
-    <${SetRow} label="Media failover" hint="[runtime].media_failover ordered reroute list">
+    <${SetRow} label="Media failover" hint="[runtime].media_failover vision read fleet">
       <div class="set-runtime-media" data-testid="runtime-media-failover-editor">
         <div class="set-runtime-media-list">
           ${value.length === 0
@@ -771,8 +771,8 @@ function RuntimeMediaFailoverEditor({
             `)}
         </div>
         <div class="set-hint flex flex-wrap items-center gap-2" data-testid="runtime-media-failover-reality">
-          <${StatusChip} tone="warn" uppercase=${false}>수동 reroute<//>
-          <span>provider 실패 자동 전환이 아니라 <span class="mono">runtime.toml</span>의 media lane 후보 목록입니다.</span>
+          <${StatusChip} tone="warn" uppercase=${false}>이미지 읽기<//>
+          <span>턴을 넘겨받지 않아요. lane 이 이미지를 못 받을 때 이미지를 글로 읽어 주는 런타임입니다.</span>
         </div>
         <div class="set-runtime-media-actions">
           <select

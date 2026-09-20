@@ -3,8 +3,8 @@
 
 `Model_catalog.lookup_for_provider` is exact-only. A miss falls through to the
 provider base before MASC projects runtime capabilities, so it is never a
-harmless "no catalog row" case. Compare runtime bindings with the merged
-embedded-plus-deployment catalog and make every temporary base fallback named.
+harmless "no catalog row" case. Compare runtime bindings with the embedded
+catalog and make every temporary base fallback named.
 
 The filename is retained because CI already invokes it; this check no longer
 models the provider-independent longest-prefix lookup.
@@ -18,7 +18,6 @@ import tomllib
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 EMBEDDED = REPO / "packages" / "agent_core" / "models.toml"
-OVERLAY = REPO / "config" / "agent-core-models-overlay.toml"
 RUNTIME = REPO / "config" / "runtime.toml"
 
 Model = tuple[str, str]
@@ -33,7 +32,7 @@ def read_toml(path: pathlib.Path) -> dict[str, object]:
 
 def catalog_identities() -> set[Model]:
     identities: set[Model] = set()
-    for path in (EMBEDDED, OVERLAY):
+    for path in (EMBEDDED,):
         rows = read_toml(path).get("models")
         if not isinstance(rows, list):
             raise ValueError(f"{path.relative_to(REPO)} requires [[models]] rows")

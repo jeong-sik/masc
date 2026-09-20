@@ -116,7 +116,7 @@ let test_initial_message_media_drives_reroute () =
           ~candidates:[ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ]))
 
 (* Candidate ordering is the caller's contract: with the same capable set in a
-   different order, the first listed wins. This pins media_failover precedence. *)
+   different order, the first listed wins. The keeper driver lists its lane. *)
 let test_candidate_order_is_honored () =
   check string "first listed capable wins"
     "reroute:vision_d:assigned runtime lacks image input"
@@ -670,16 +670,11 @@ supports-multimodal-inputs = true
     check bool "native image declaration remains effective" true native_caps.supports_image_input;
     check bool "native audio declaration remains effective" true native_caps.supports_audio_input)
 
-(* RFC-0440 — the media candidate set is one ordered, id-unique list: the lane
-   first, then [runtime.media_failover] resolved in declared order (ids that
-   resolve to nothing are skipped). No capability filter: a text-only lane
-   candidate stays in the set and the reroute decision passes over it.
-
-   [fixture.b] is declared and image-capable and appears in neither list, so
-   it is not a candidate for anyone. That tail used to follow media_failover,
-   and once #34720 made the set a walk rather than a single pick, it was
-   dispatching the runtimes boot deliberately does not validate (#34823). *)
-let test_media_candidates_order_dedupe_and_reroute () =
+(* The vision read fleet is [runtime.media_failover] resolved in declared
+   order: ids that resolve to nothing are skipped and a repeated id counts
+   once. [fixture.b] is declared and image-capable but not listed, so it is not
+   in the fleet. *)
+let test_media_candidates_are_the_vision_fleet () =
   let fixture =
     {|[runtime]
 default = "fixture.vision"
@@ -705,56 +700,19 @@ supports-image-input = true
       | Error error -> fail error
     in
     let vision id = { native with Runtime.id } in
-    let text =
-      { native with
-        Runtime.id = "fixture.text"
-      ; model = { native.Runtime.model with Runtime_schema.capabilities = None }
-      }
-    in
-    let a = vision "fixture.a" in
-    let b = vision "fixture.b" in
-    let c = vision "fixture.c" in
-    let d = vision "fixture.d" in
     let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
-    let runtimes = [ text; a; b; c; d ] in
-    let media_failover = [ "fixture.c"; "fixture.missing"; "fixture.a" ] in
-    let candidates ~lane =
-      Runtime_agent.media_candidates_of ~lane ~runtimes ~media_failover
-    in
+    let runtimes = [ vision "fixture.a"; vision "fixture.b"; vision "fixture.c" ] in
     check (list string)
-      "lane, then media_failover; ids unique; fixture.b is in neither"
-      [ "fixture.d"; "fixture.text"; "fixture.c"; "fixture.a" ]
-      (ids (candidates ~lane:[ d; text ]));
-    check (list string)
-      "no lane: media_failover alone, an unresolved id is skipped"
+      "declared order; an unresolved id is skipped; a repeat counts once"
       [ "fixture.c"; "fixture.a" ]
-      (ids (candidates ~lane:[]));
-    check (list string)
-      "no lane and no media_failover: nothing is a candidate"
-      []
       (ids
-         (Runtime_agent.media_candidates_of ~lane:[] ~runtimes
-            ~media_failover:[]));
-    let image =
-      Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
-    in
-    let target ~lane =
-      match
-        Runtime_agent.decide_modality_reroute_for_runtime_candidates
-          ~assigned:text ~candidates:(candidates ~lane) [ image ]
-      with
-      | Runtime_agent.Reroute { target; _ } -> target.Runtime.id
-      | Runtime_agent.No_reroute_needed ->
-        fail "a text-only head must reroute an image turn"
-      | Runtime_agent.No_capable_runtime _ ->
-        fail "the set holds an image-capable runtime"
-    in
-    check string "a capable lane candidate precedes media_failover" "fixture.d"
-      (target ~lane:[ d; text ]);
-    check string "a lane with no capable candidate reaches media_failover"
-      "fixture.c" (target ~lane:[ text ]);
-    check string "an empty lane reaches media_failover" "fixture.c"
-      (target ~lane:[]))
+         (Runtime_agent.media_candidates_of ~runtimes
+            ~media_failover:
+              [ "fixture.c"; "fixture.missing"; "fixture.a"; "fixture.c" ]));
+    check (list string)
+      "no media_failover: no vision fleet"
+      []
+      (ids (Runtime_agent.media_candidates_of ~runtimes ~media_failover:[])))
 
 (* RFC-0440 — the media walk keeps only the candidates that take every
    modality the run requires, in candidate order; a text run has no walk. *)
@@ -820,8 +778,8 @@ let () =
       , [ test_case "text turn no reroute" `Quick test_text_turn_no_reroute
         ; test_case "official transport constrains advertised model media" `Quick
             test_official_transport_caps_override_model_media_declarations
-        ; test_case "media candidates: lane, media_failover, rest, deduped" `Quick
-            test_media_candidates_order_dedupe_and_reroute
+        ; test_case "media candidates are the vision fleet" `Quick
+            test_media_candidates_are_the_vision_fleet
         ; test_case "media walk: capable candidates only, none for text" `Quick
             test_media_walk_holds_only_capable_candidates
         ; test_case "image on capable no reroute" `Quick

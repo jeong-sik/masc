@@ -388,7 +388,7 @@ jobs:
           from pathlib import Path
           files = sorted(Path('dist').glob('masc-*')) + [
               Path('scripts/install.sh'), Path('scripts/install-runtime-setup.py'),
-              Path('config/runtime.toml'), Path('config/agent-core-models-overlay.toml')]
+              Path('config/runtime.toml')]
           receipt = dict(source_commit=os.environ['GITHUB_SHA'],
                          platform=os.environ['PREFLIGHT_ARCH'],
                          run_id=os.environ['GITHUB_RUN_ID'],
@@ -410,7 +410,6 @@ jobs:
             scripts/install.sh
             scripts/install-runtime-setup.py
             config/runtime.toml
-            config/agent-core-models-overlay.toml
             native-preflight.json
 
       - name: Generate release evidence bundle
@@ -537,7 +536,6 @@ jobs:
             | sort -z \
             | xargs -0 sha256sum > SHA256SUMS
           (cd ../config && sha256sum runtime.toml) >> SHA256SUMS
-          (cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS
           # Team preset files, keyed by their repo-relative path so
           # `install.sh --team` can verify each seeded file (presets/<name>/...).
           (cd .. && for m in presets/*/manifest.txt; do

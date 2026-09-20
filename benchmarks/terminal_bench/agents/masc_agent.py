@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -70,9 +69,9 @@ class MascAgent(BaseInstalledAgent):
             raise ValueError(
                 f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
         key_env = PROVIDERS[provider]["api_key_env"]
-        key = os.environ.get(key_env)
+        key = self._get_env(key_env)
         if not key:
-            raise RuntimeError(f"{key_env} not set in harbor process env")
+            raise RuntimeError(f"{key_env} not set in Harbor agent environment")
         env = {
             key_env: key,
             # masc resolves `<provider>.<binding id>`, and the binding id is a

@@ -46,10 +46,7 @@
     - {b SSE-event row patchers}
       ({!patch_keeper_row},
       {!patch_surface_json_for_running_keepers}) —
-      pinned because [test/test_dashboard_execution]
-      tests their null-agent-shape tolerance directly
-      (test_patch_keeper_row_tolerates_null_agent_shape /
-      test_patch_surface_json_for_running_keepers_tolerates_null_agent).
+      pinned because [test/test_dashboard_http_core] drives them directly.
 
     Internal helpers stay private at this boundary
     ([shell_prewarm_timeout_s],
@@ -59,7 +56,7 @@
     [broadcast_current_successful_operator_snapshot],
     [_transport_health_cache],
     [keeper_top_level_status_opt] / [patched_keeper_status],
-    [patch_keeper_rows] SSE-event row patcher helper,
+    [patch_runtime_row] / [patch_keeper_rows] SSE-event row patcher helpers,
     [running_keeper_names],
     [patchexecution_cache_for_keeper],
     [transport_health_cache_diagnostics]). *)
@@ -292,12 +289,29 @@ val seed_execution_cache_for_test : unit -> unit
 val patch_surface_json_for_running_keepers :
   Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
 
+(** What a lifecycle event does to a published keeper list. A declaration row
+    ({!Keeper_declared_roster.row_kind_of_json}) is a Keeper the snapshot saw
+    before it ever booted. It has no diagnostic or trust to become a runtime
+    row from, so it is never patched: the surface holding it is stale. The
+    lifecycle patch of the cached execution surface then invalidates it; the
+    running-keeper reconciliation of a fresh render
+    ({!patch_surface_json_for_running_keepers}) leaves the row as its snapshot
+    described it. *)
+type 'rows row_patch =
+  | Patched of 'rows
+  | Declaration_row_is_stale
+
 val patch_keeper_row :
   keeper_name:string ->
   event:Keeper_lifecycle_events.lifecycle_event ->
   keepalive_running:bool ->
   Yojson.Safe.t ->
-  Yojson.Safe.t
+  Yojson.Safe.t row_patch
+(** A row that is not [keeper_name]'s comes back [Patched] unchanged. Raises
+    [Invalid_argument] for [keeper_name]'s row when its [declaration_only] is
+    not a boolean, and for its runtime row when [keepalive_running] is [true],
+    [event] sets no status of its own, and the row's current status is missing
+    or not a control-plane status. *)
 
 val broadcast_operator_snapshot :
   Server_dashboard_http_core_operator.operator_snapshot_publication -> unit

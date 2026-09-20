@@ -1,13 +1,17 @@
 (rule
  (alias runtest-test_dashboard_observation_quota)
  (deps test_dashboard_observation_quota.py ../bin/main_eio.exe
-  ../scripts/fixtures/release-evidence/runtime.toml
-  ../scripts/fixtures/release-evidence/agent-core-models-overlay.toml)
+  ../scripts/fixtures/release-evidence/runtime.toml)
  (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
 
 (alias
  (name runtest)
  (deps (alias runtest-test_dashboard_observation_quota)))
+
+(test
+ (name test_typesafeai)
+ (modules test_typesafeai)
+ (libraries alcotest masc masc_test_deps))
 
 (test
  (name test_keeper_peer_artifact)
@@ -132,6 +136,9 @@
    (MASC_BASE_PATH "")
    ; Avoid non-deterministic external network calls during unit tests.
    (ZAI_API_KEY "")
+   ; A key exported in the shell would turn TypeSafe AI Jev on in every
+   ; board-attention test; the cases that need it set it themselves.
+   (TYPESAFEAI_API_KEY "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false)
    ; Standard tests keep the Docker playground disabled. A dedicated
    ; regression test below pins that sandbox_profile=local still resolves
@@ -1009,7 +1016,11 @@
 (test
  (name test_keeper_checkpoint_purge)
  (modules test_keeper_checkpoint_purge)
- (libraries alcotest masc_test_deps))
+ (libraries alcotest masc_test_deps)
+ (deps ../bin/masc_checkpoint_purge.exe)
+ (action
+  (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
+   (run %{test}))))
 
 
 (test
@@ -1138,7 +1149,6 @@
  ; scripts/fixtures/<name>/runtime.toml, so a fixture added later is covered
  ; without editing this stanza.
  (deps
-  ../config/agent-core-models-overlay.toml
   ../config/runtime.toml
   (source_tree ../scripts/fixtures))
  (libraries masc_test_deps exact_output_fixture))
@@ -2029,7 +2039,7 @@
  (modules
   test_exact_output_catalog_precedence
   test_exact_output_catalog_precedence_fixture)
- (deps ../config/agent-core-models-overlay.toml ../config/runtime.toml)
+ (deps ../config/runtime.toml)
  (libraries alcotest masc_server masc_test_deps eio_main unix))
 
 
@@ -2311,6 +2321,7 @@
  (libraries masc_test_deps))
 (include stanzas/test_verification_collaboration_evidence.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
+(include stanzas/test_keeper_microvm_guest_size.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
@@ -2570,10 +2581,8 @@
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 (include stanzas/test_keeper_owned_checkpoint.inc)
-(include stanzas/test_keeper_recovery_work.inc)
 (include stanzas/test_keeper_recovery_projection.inc)
 (include stanzas/test_keeper_recovery_transmission.inc)
-(include stanzas/test_keeper_recovery_worker.inc)
 
 
 
@@ -5012,7 +5021,17 @@
 (test
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
- (libraries alcotest masc masc_tui_planning_detail))
+ (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched))
+
+(rule
+ (alias runtest-test_tui_goal_confirmation_pty)
+ (deps test_tui_goal_confirmation_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_goal_confirmation_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_goal_confirmation_pty)))
 
 (test
  (name test_tui_roster_pane)
@@ -5086,7 +5105,10 @@
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
+
+(include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
+(include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
 (include stanzas/test_keeper_gate_replay.inc)
@@ -5182,6 +5204,7 @@
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
+(include stanzas/test_tui_runtime_lane_editor.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
 (include stanzas/test_tui_mermaid.inc)
@@ -5946,7 +5969,7 @@
  (alias runtest-test_install_runtime_setup)
  (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
        ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence)
-       ../config/runtime.toml ../config/agent-core-models-overlay.toml)
+       ../config/runtime.toml)
  (action
   (run python3 %{dep:test_install_runtime_setup.py} --binary %{dep:../bin/main_eio.exe})))
 
@@ -6445,3 +6468,5 @@
  (name test_tui_fork_guard)
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
+
+(include stanzas/test_tui_keeper_current_failure_pty.inc)

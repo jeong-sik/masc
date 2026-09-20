@@ -202,8 +202,7 @@ val turn_start_argv_for :
   label_args:string list ->
   uid:int ->
   gid:int ->
-  memory:string ->
-  cpus:string option ->
+  guest_size:Keeper_microvm_guest_size.t ->
   network_args:string list ->
   mount_args:string list ->
   image:string ->

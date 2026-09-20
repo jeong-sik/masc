@@ -2,9 +2,9 @@
 # quickstart.sh — seed a local workspace, start MASC, and prepare an MCP client
 # bearer on macOS or Linux.
 #
-# It seeds the runtime config (runtime.toml / agent-core-models-overlay.toml
-# / prompts) BEFORE seeding a keeper team, because the server only backfills a
-# config root it did not create — team-first would leave runtime.toml missing.
+# It seeds the runtime config (runtime.toml / prompts) BEFORE seeding a keeper
+# team, because the server only backfills a config root it did not create —
+# team-first would leave runtime.toml missing.
 # An optional team inherits [runtime].default, so no model catalog is edited
 # and config stays coherent with runtime.toml.
 #
@@ -74,9 +74,9 @@ seed_catalogs() {
   local cfg="$base/.masc/config"
   mkdir -p "$cfg"
   # Copy-if-missing so re-runs never clobber operator edits. Order matters:
-  # these catalogs must exist before the team is seeded (see file header).
+  # this config must exist before the team is seeded (see file header).
   local f
-  for f in runtime.toml agent-core-models-overlay.toml; do
+  for f in runtime.toml; do
     if [ ! -e "$cfg/$f" ]; then cp "config/$f" "$cfg/$f"; log "seeded config/$f"; fi
   done
   if [ ! -d "$cfg/prompts" ] && [ -d "config/prompts" ]; then

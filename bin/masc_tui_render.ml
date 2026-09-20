@@ -2555,11 +2555,8 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
     , "with the completion judge - nothing to press; [c] re-arms the request" )
-  (* Named by path: "goal confirmation CLI" is not a command anyone can type.
-     This screen has no key for the step it is asking for (#35996), and the
-     row has to fit the split pane, so the path is the whole instruction. *)
   | Goal_phase.Awaiting_confirmation, _ ->
-    (Theme.warn (), "proof passed - confirm via scripts/goal-confirmation.py")
+    (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
 ;;
@@ -2981,7 +2978,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
 
 let planning_detail_pane (state : state)
-    ~(armed : Goal_phase.Public_action.t option) ~rows ~cols
+    ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols
     (goal : planning_goal) buf =
 
   let status_color = planning_phase_color goal.pg_phase in
@@ -3060,7 +3057,10 @@ let planning_detail_pane (state : state)
   box_line buf cols
     ("  Actions:  "
      ^ String.concat "   "
-         (List.map action_item Goal_phase.Public_action.all));
+         (List.map action_item Goal_phase.Public_action.all)
+     ^ (if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
+        then "   " ^ Theme.ok () ^ "[a] Confirm proof" ^ Ansi.reset
+        else ""));
   (* The goal's own timeline, dim like the Board read pane's timestamps:
      when it was opened, when it last moved, when it was last reviewed. *)
   let timestamp_lines =
@@ -3109,7 +3109,15 @@ let planning_detail_pane (state : state)
      less than the row it was opened from. They wrap, so this is what the
      surface's scroll moves through. *)
   let body =
-    Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note
+    (match confirmation with
+     | `Submitting -> [{ Planning_detail.tone = Waiting; text = "Sending proof confirmation..." }]
+     | `Inspect (Masc_tui_fetched.Ready confirmation) -> Planning_detail.confirmation_lines ~width:(cols - 6) confirmation
+     | `Inspect Loading -> [{ Planning_detail.tone = Waiting; text = "Reading the proof to confirm..." }]
+     | `Inspect (Failed detail) ->
+         Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
+           (Terminal_text.single_line detail)
+         |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
+     | `Inspect Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
     @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
         state.goal_timeline
   in
@@ -3199,7 +3207,7 @@ let planning_detail_pane (state : state)
    split width there is no room for both and the detail keeps the screen,
    which is the rule the Board read pane already follows. *)
 let render_planning_detail (state : state)
-    ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
+    ~(armed : Goal_phase.Public_action.t option) ~confirmation (goal : planning_goal) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -3207,7 +3215,7 @@ let render_planning_detail (state : state)
   let buf = Buffer.create 4096 in
   let scroll =
     if cols < keeper_split_threshold_cols then
-      planning_detail_pane state ~armed ~rows ~cols goal buf
+      planning_detail_pane state ~armed ~confirmation ~rows ~cols goal buf
     else begin
       let left_cols = keeper_roster_pane_cols in
       let goals =
@@ -3244,7 +3252,7 @@ let render_planning_detail (state : state)
         ~labels:(List.map format_sidebar_goal goals)
         ~selected;
       let scroll =
-        planning_detail_pane state ~armed ~rows ~cols:(cols - left_cols) goal
+        planning_detail_pane state ~armed ~confirmation ~rows ~cols:(cols - left_cols) goal
           right_buf
       in
       write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
@@ -4678,6 +4686,13 @@ let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
    clipping. Keep those facts in a wrapped selected-row block underneath the
    four-row matrix. The order is the execution contract: admitted catalog
    slots first, official-client runtimes only after catalog exhaustion. *)
+(* A refusal is bad news about the key pressed; a pending write is a warning
+   about what the screen shows, as is a list that may be stale
+   ([Masc_tui_types.runtime_lane_stale_lines], drawn in warn). *)
+let runtime_lane_notice_style = function
+  | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
+  | Masc_tui_types.Lane_write_pending -> Theme.warn ()
+
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
     match values with
@@ -4978,7 +4993,9 @@ let render_lanes_overview (state : state) =
    | None -> ()
    | Some lane ->
        let action_error_rows =
-         match state.lanes_action_error with None -> 0 | Some _ -> 1
+         (match state.lanes_action_error with None -> 0 | Some _ -> 1)
+         + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
+         + List.length (Masc_tui_types.runtime_lane_stale_lines state)
        in
        let available =
          max 0
@@ -5008,6 +5025,20 @@ let render_lanes_overview (state : state) =
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text detail));
+  (* The lane editor's notice is the Runtime view's too: a standalone lane's
+     slots are written from here, and a write started on either view can
+     still be out when the other is opened. *)
+  (match state.runtime_lane_notice with
+   | None -> ()
+   | Some notice ->
+       box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
+         ("  " ^ Keeper_chat.terminal_safe_text
+                   (Masc_tui_types.runtime_lane_notice_text notice)));
+  List.iter
+    (fun line ->
+       box_line_styled buf cols ~style:(Theme.warn ())
+         ("  " ^ Keeper_chat.terminal_safe_text line))
+    (Masc_tui_types.runtime_lane_stale_lines state);
   (* The failover-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
@@ -6087,6 +6118,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_row "Paused:"
       (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
        else Ansi.dim ^ "no" ^ Ansi.reset);
+    add_empty ();
+
+    (* The live roster owns this reading, including its absence after a
+       successful turn. Neither historical last_error nor the last outcome
+       can answer for the current failure. *)
+    add_section "Current failure";
+    let failure_tone, failure_text =
+      match (keeper_reading state k).Keeper_control.liveness with
+      | Keeper_control.Present runtime ->
+          (match runtime.kr_runtime_blocker_summary with
+           | Some summary -> Theme.bad (), summary
+           | None -> Ansi.dim, "none")
+      | Keeper_control.Unobserved -> Ansi.dim, "unread"
+      | Keeper_control.Absent -> Ansi.dim, "absent from live roster"
+      | Keeper_control.Invalid detail -> Theme.bad (), "config error: " ^ detail
+    in
+    let indent = "  " in
+    Message_layout.wrap_words
+      ~max_cells:(max 1 (inner - Message_layout.display_width indent))
+      (Terminal_text.single_line failure_text)
+    |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
     add_empty ();
 
     (* Gate section. Two settings with similar names decide different things,
@@ -10812,18 +10864,49 @@ let render_runtime (state : state) =
        c.push_styled ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        c.push_divider ());
-  (match state.runtime_lane_error with
+  (match state.runtime_lane_notice with
    | None -> ()
-   | Some detail ->
-       c.push_styled ~style:(Theme.bad ())
-         ("  lane write refused: " ^ Keeper_chat.terminal_safe_text detail);
+   | Some notice ->
+       c.push_styled ~style:(runtime_lane_notice_style notice)
+         ("  " ^ Keeper_chat.terminal_safe_text
+                   (Masc_tui_types.runtime_lane_notice_text notice));
+       c.push_divider ());
+  (* Counted in [runtime_surface_listing_chrome] as one row each and a
+     divider. *)
+  (match Masc_tui_types.runtime_lane_stale_lines state with
+   | [] -> ()
+   | lines ->
+       List.iter
+         (fun line ->
+            c.push_styled ~style:(Theme.warn ())
+              ("  " ^ Keeper_chat.terminal_safe_text line))
+         lines;
+       c.push_divider ());
+  (* Counted in [runtime_surface_listing_chrome] as two rows, like the refusal
+     above, so the footer keeps its row while the prompt is up. *)
+  (match Masc_tui_types.runtime_lane_prompt state with
+   | None -> ()
+   | Some (Masc_tui_types.Lane_name_prompt draft) ->
+       c.push_styled ~style:(Theme.info ())
+         (Printf.sprintf "  new lane name: %s_  — Enter pick its first runtime, Esc cancel"
+            (Terminal_text.single_line draft));
+       c.push_divider ()
+   | Some (Masc_tui_types.Lane_remove_prompt lane) ->
+       c.push_styled ~style:(Theme.warn ())
+         (Printf.sprintf "  press D again to remove lane %s"
+            (Terminal_text.single_line lane));
        c.push_divider ());
   (match runtime_picker_projection state with
    | None -> ()
    | Some picker ->
        c.push_styled ~style:(Theme.info ())
-         (Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
-            (Terminal_text.single_line picker.rlp_lane));
+         (match picker.rlp_pick with
+          | Masc_tui_types.Pick_new_lane lane ->
+              Printf.sprintf "  first runtime of new lane %s — j/k move, Enter create, e cancel"
+                (Terminal_text.single_line lane)
+          | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
+              Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+                (Terminal_text.single_line lane));
        if picker.rlp_choices = [] then
          c.push_styled ~style:(Theme.recede ()) "  (runtime catalogue unread)"
        else
@@ -14285,8 +14368,16 @@ let render_surface (state : state) =
            let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
            match List.find_opt (fun g -> g.pg_id = goal_id) goals with
            | Some goal ->
+               let confirmation =
+                 match state.goal_confirmation with
+                 | Planning_detail.Inspecting read ->
+                     `Inspect (Masc_tui_fetched.view_for ~equal:String.equal read ~key:goal_id)
+                 | Planning_detail.Submitting (submitted_goal, _)
+                   when String.equal submitted_goal goal_id -> `Submitting
+                 | Planning_detail.Submitting _ -> `Inspect Absent
+               in
                render_planning_detail state
-                 ~armed:(goal_action_armed_for state goal_id) goal
+                 ~armed:(goal_action_armed_for state goal_id) ~confirmation goal
            | None -> render_planning_list state)
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
       render_question_reader state

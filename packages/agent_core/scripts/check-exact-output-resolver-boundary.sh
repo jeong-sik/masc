@@ -606,7 +606,7 @@ done
 
 # Provider_config.capabilities_for_config_model is deliberately allowed: it
 # reads only the capability snapshot already frozen into the selected config.
-ambient_forbidden='Provider_catalog|Provider_runtime_binding|Provider_registry\.default|Model_catalog\.(global|set_global|set_global_overlay|clear_global|load_default|load_file)|Capability_manifest|(Capabilities|Caps)\.(for_[[:alnum:]_]+|[[:alnum:]_]+_for_(model_id|provider_id|config_model))|Sys\.getenv(_opt)?|Unix\.getenv(_opt)?|select_target|Marshal'
+ambient_forbidden='Provider_catalog|Provider_runtime_binding|Provider_registry\.default|Model_catalog\.(global|set_global|clear_global|load_default|load_file)|Capability_manifest|(Capabilities|Caps)\.(for_[[:alnum:]_]+|[[:alnum:]_]+_for_(model_id|provider_id|config_model))|Sys\.getenv(_opt)?|Unix\.getenv(_opt)?|select_target|Marshal'
 scan_code \
   "global, legacy, ambient, or representation-dependent lookup found" \
   "$ambient_forbidden" \

@@ -181,7 +181,14 @@ val review
     declaration order: a slot that fails or returns no valid verdict tool call
     yields to the next slot, and the terminal result describes the last
     attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
-    failover. *)
+    failover.
+
+    The prompt carries the typed [question.evidence_posture] and the lookup's
+    initial success state. Every completed lookup is returned to the judge as
+    an object with [evidence_lookup_succeeded = true] and the original payload
+    under [lookup_result]. Failed and deferred lookups are unchanged. The judge
+    owns the verdict; this projection is never parsed back into a local verdict
+    override (RFC-0417 section 4.3). *)
 
 (** Render the review prompt {!Prompt_names.verification} with the sections
     the [question] and the [lookup] surface supply.

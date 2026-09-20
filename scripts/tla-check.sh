@@ -276,4 +276,21 @@ if [ -d "$BUG_MODELS_DIR" ]; then
   done
 fi
 
+# The loop above reaches every LibrarianRead cfg whose name ends in buggy.cfg.
+# This one names a guard that holds rather than a way to be wrong, so it ends
+# in .cfg and no glob above takes it: <spec>.cfg is already spoken for by
+# LibrarianRead.cfg. It is named here, and expects no violation.
+#
+# The directory is written out rather than held in a variable because
+# check-tla-harness-coverage.sh reads this file as text and looks for the
+# literal "$REPO_ROOT/<dir>". A variable held the same path here until
+# a319b74b6a, and the gate called this cfg unrun while the harness ran it
+# once. That gate reports the wrong reason for a variable; masc#37048.
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-purge-trim-at-end.cfg" "purge-trim-at-end"
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-live-without-bad-lines.cfg" "live-without-bad-lines"
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-purge-trim-at-end-live.cfg" "purge-trim-at-end-live"
+
 echo "All TLA+ checks passed."

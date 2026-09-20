@@ -259,7 +259,10 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     | Some value -> value
     | None ->
       invalid_arg
-        (Printf.sprintf "dashboard continuity: unknown keeper health %S" raw)
+        (Printf.sprintf
+           "dashboard continuity: keeper %S has unknown health %S"
+           name
+           raw)
   in
   let paused =
     match Json_util.assoc_member_opt "paused" keeper with
@@ -477,12 +480,22 @@ let build_worker_support_briefs ~(now_ts : float) ~(tasks : Masc_domain.task lis
          if by_tone <> 0 then by_tone
          else Float.compare right.last_signal_ts left.last_signal_ts)
 
+(* A declaration row is a Keeper that has never booted: it has no runtime
+   health for [continuity_row_of_keeper] to read, so it has no continuity. The
+   health guard there stays strict for every runtime row. *)
 let build_continuity_briefs ~(now_ts : float) keepers : continuity_context list =
   keepers
   |> List.filter_map (fun keeper ->
          let name = string_field "name" keeper in
          if name = "" then None
-         else Some (continuity_row_of_keeper ~now_ts keeper))
+         else
+           match Keeper_declared_roster.row_kind_of_json keeper with
+           | Ok Keeper_declared_roster.Declaration_row -> None
+           | Ok Keeper_declared_roster.Runtime_row ->
+             Some (continuity_row_of_keeper ~now_ts keeper)
+           | Error detail ->
+             invalid_arg
+               (Printf.sprintf "dashboard continuity: keeper %S: %s" name detail))
   |> List.sort (fun (left : continuity_context) (right : continuity_context) ->
          let by_tone = Int.compare right.tone_rank left.tone_rank in
          if by_tone <> 0 then by_tone

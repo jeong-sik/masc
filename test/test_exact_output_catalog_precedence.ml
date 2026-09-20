@@ -62,25 +62,25 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   List.iter
     (fun name -> mkdir_p (Filename.concat config_root name))
     [ "keepers"; "prompts" ];
-  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
+  let deployment_path = Filename.concat config_root "deployment-models.toml" in
   let replacement_path = Filename.concat root "replacement-models.toml" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
-  write_file overlay_path overlay_catalog;
+  write_file deployment_path deployment_catalog;
   write_file replacement_path replacement_catalog;
 
-  let overlay_snapshot =
+  let deployment_snapshot =
     load_control_snapshot
-      (Exact_output.Embedded_with_overlay
-         { source = overlay_path; contents = overlay_catalog })
+      (Exact_output.Full_replacement
+         { source = deployment_path; contents = deployment_catalog })
   in
-  require_admitted overlay_snapshot overlay_target;
+  require_admitted deployment_snapshot deployment_target;
   let replacement_snapshot =
     load_control_snapshot
       (Exact_output.Full_replacement
          { source = replacement_path; contents = replacement_catalog })
   in
   require_admitted replacement_snapshot replacement_target;
-  require_not_admitted replacement_snapshot overlay_target;
+  require_not_admitted replacement_snapshot deployment_target;
 
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Unix.putenv "AGENT_CORE_MODEL_CATALOG" replacement_path;
@@ -141,7 +141,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   require_missing_mandatory_lane_rejected
     ~lane_id:"board_attention_exact"
     (runtime_toml ~include_board_attention:false replacement_target);
-  require_bootstrap_rejected "overlay target is suppressed" overlay_target;
+  require_bootstrap_rejected "deployment target is suppressed" deployment_target;
 
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();
@@ -726,7 +726,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   write_file
     runtime_path
     (runtime_toml
-       ~auxiliary_slots:[ overlay_target; replacement_target ]
+       ~auxiliary_slots:[ deployment_target; replacement_target ]
        replacement_target);
   create_server_state ();
   let degraded_optional_registry =
@@ -744,7 +744,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
        "auxiliary_exact"
        rejected.lane_id;
      Alcotest.(check int) "rejected position" 1 rejected.position;
-     Alcotest.(check string) "rejected slot" overlay_target rejected.slot_id
+     Alcotest.(check string) "rejected slot" deployment_target rejected.slot_id
    | rejected ->
      Alcotest.failf
        "expected one typed rejected slot, got %d"
@@ -911,25 +911,17 @@ let test_repo_seed_board_attention_lane_admits () =
   let repo_root = Masc_test_deps.find_project_root () in
   let source_config = Filename.concat repo_root "config" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
-  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
   write_file
     runtime_path
     (Fs_compat.load_file (Filename.concat source_config "runtime.toml"));
-  write_file
-    overlay_path
-    (Fs_compat.load_file
-       (Filename.concat source_config "agent-core-models-overlay.toml"));
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Unix.putenv "AGENT_CORE_MODEL_CATALOG" "";
   (* This case represents a fresh process. Earlier bootstrap cases install
      explicit global replacements, which unsetting the environment does not
-     clear. Follow production startup: embedded catalog, deployment overlay,
-     then runtime loading; the seed relies on overlay context declarations. *)
+     clear. Follow production startup: embedded catalog, then runtime
+     loading. *)
   Llm_provider.Model_catalog.clear_global ();
   ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env ());
-  ignore
-    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-       ~config_root ());
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);
@@ -984,25 +976,12 @@ let test_repo_seed_board_attention_lane_admits () =
            lanes
        in
        List.iter (fun credential_env -> Unix.putenv credential_env "") credential_envs;
-       require_published_seed "credential-free repo config plus deployment overlay";
+       require_published_seed "credential-free repo config";
        List.iter
          (fun credential_env ->
             Unix.putenv credential_env "exact-output-seed-test")
          credential_envs;
-       require_published_seed "credential-populated repo config plus deployment overlay";
-       let overlay_without_pricing =
-         Fs_compat.load_file
-           (Filename.concat source_config "agent-core-models-overlay.toml")
-         |> String.split_on_char '\n'
-         |> List.filter (fun line ->
-           let line = String.trim line in
-           not
-             (String.starts_with ~prefix:"input_per_million =" line
-              || String.starts_with ~prefix:"output_per_million =" line))
-         |> String.concat "\n"
-       in
-       write_file overlay_path overlay_without_pricing;
-       require_published_seed "pricing-free deployment overlay")
+       require_published_seed "credential-populated repo config")
 ;;
 
 (* An assignment whose target left the frozen catalog does not fail a lane
@@ -1011,22 +990,96 @@ let test_repo_seed_board_attention_lane_admits () =
    them. The classifier must name exactly those, and only those. *)
 let test_catalog_absent_assignments_names_only_retired_targets () =
   with_temp_dir "catalog-absent-assignments" @@ fun root ->
-  let overlay_path = Filename.concat root "agent-core-models-overlay.toml" in
-  write_file overlay_path overlay_catalog;
+  let deployment_path = Filename.concat root "deployment-models.toml" in
+  write_file deployment_path deployment_catalog;
   let snapshot =
     load_control_snapshot
-      (Exact_output.Embedded_with_overlay
-         { source = overlay_path; contents = overlay_catalog })
+      (Exact_output.Full_replacement
+         { source = deployment_path; contents = deployment_catalog })
   in
-  require_admitted snapshot overlay_target;
+  require_admitted snapshot deployment_target;
   Alcotest.(check (list (pair string string)))
     "only the catalog-absent assignment is named"
     [ ("keeper-ghost", "ghost_provider.retired-model") ]
     (Registry.catalog_absent_assignments snapshot
        ~assignments:
-         [ ("keeper-live", overlay_target)
+         [ ("keeper-live", deployment_target)
          ; ("keeper-ghost", "ghost_provider.retired-model")
          ])
+;;
+
+(* The Lanes view lists only the slots the registry admitted. An append reads
+   the slots the file declares, so a slot the registry dropped is still
+   declared after it, and the replaced registry still drops it rather than
+   losing it from the file. *)
+let test_an_append_keeps_a_slot_the_registry_dropped () =
+  with_temp_dir "exact-append-dropped" @@ fun root ->
+  let saved = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore saved;
+      ignore (Registry.unpublish ()))
+  @@ fun () ->
+  let path = Filename.concat root "runtime.toml" in
+  let dropped = "not-in-frozen-catalog" in
+  write_file path
+    (runtime_toml ~include_board_attention:false replacement_target
+     ^ Printf.sprintf
+         "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S, %S]\n"
+         dropped
+         replacement_target);
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "runtime initialization failed: %s" detail);
+  let declared () =
+    match Runtime_toml.parse_string (Fs_compat.load_file path) with
+    | Error _ -> Alcotest.fail "the written runtime.toml does not parse"
+    | Ok config -> config.Runtime_schema.exact_output_lane_decls
+  in
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "append-dropped"; contents = replacement_catalog })
+  in
+  let dropped_on_board registry =
+    Registry.rejected_slots registry
+    |> List.filter_map (fun (slot : Registry.rejected_slot) ->
+      if String.equal slot.lane_id "board_attention_exact" then Some slot.slot_id else None)
+  in
+  (match Runtime.publish_exact_output_registry ~lanes:(declared ()) snapshot with
+   | Ok registry ->
+     Alcotest.(check (list string)) "the registry drops the unknown slot" [ dropped ]
+       (dropped_on_board registry)
+   | Error detail -> Alcotest.failf "publication failed: %s" detail);
+  (match
+     Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+       ~lane:Runtime.Board_attention ~slot:replacement_secondary_target ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "append failed: %s" detail);
+  (match
+     List.find_opt
+       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+          String.equal lane.id "board_attention_exact")
+       (declared ())
+   with
+   | Some lane ->
+     Alcotest.(check (list string)) "the dropped slot is still declared, in front"
+       [ dropped; replacement_target; replacement_secondary_target ] lane.slot_ids
+   | None -> Alcotest.fail "the append lost the lane");
+  match Registry.current () with
+  | Error error -> Alcotest.failf "no registry after the append: %s"
+                     (Registry.publication_error_to_string error)
+  | Ok registry ->
+    Alcotest.(check (list string)) "the replaced registry still drops it" [ dropped ]
+      (dropped_on_board registry);
+    (match Registry.resolve_lane registry ~lane_id:"board_attention_exact" with
+     | Ok { selected_slots; _ } ->
+       Alcotest.(check (list string)) "the appended slot is admitted after the kept one"
+         [ replacement_target; replacement_secondary_target ]
+         (List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) selected_slots)
+     | Error error -> Alcotest.failf "the lane does not resolve: %s"
+                        (Registry.lane_resolution_error_to_string error))
 ;;
 
 let () =
@@ -1048,7 +1101,7 @@ let () =
             `Quick
             test_offline_runtime_save_converges_by_write_stage
         ; Alcotest.test_case
-            "full replacement suppresses overlay targets"
+            "full replacement suppresses deployment targets"
             `Quick
             (test_full_replacement_precedence
                ~clock
@@ -1087,12 +1140,16 @@ let () =
             `Quick
             test_runtime_after_rename_converges_state
         ; Alcotest.test_case
-            "repo config and deployment overlay admit the Board attention seed lane"
+            "repo config admits the Board attention seed lane"
             `Quick
             test_repo_seed_board_attention_lane_admits
         ; Alcotest.test_case
             "cli slots survive resolution and keep a lane alive"
             `Quick
             test_cli_slots_survive_resolution_and_keep_a_lane_alive
+        ; Alcotest.test_case
+            "an append keeps a slot the registry dropped"
+            `Quick
+            test_an_append_keeps_a_slot_the_registry_dropped
         ] ) ]
 ;;

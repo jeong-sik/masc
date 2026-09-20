@@ -1006,9 +1006,8 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
      the same Ollama_think/Enable_not_encodable defect as qwen3.5:397b
      (#28748) — declaring Ollama's native /api/chat think toggle on a model
      served through the OpenAI-compat /v1/chat/completions path, which cannot
-     encode it. Each is independently confirmed by a live probe recorded in
-     the overlay (~/me/.masc/config/agent-core-models-overlay.toml,
-     2026-07-20 audit + 2026-08-04 per-model probes): reasoning is inherent
+     encode it. Each is independently confirmed by a live probe
+     (2026-07-20 audit + 2026-08-04 per-model probes): reasoning is inherent
      and unconditional, and the response streams it back on a plain "reasoning"
      field (not Ollama's native "thinking" field). kimi-k2.6 is covered
      separately by test_lookup_kimi_k2_native_cloud_suffix, which already

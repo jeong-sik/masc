@@ -1779,7 +1779,7 @@ let execution_failure_may_advance (error : execution_error) =
     , _ ) -> false
 ;;
 
-let candidate_rejection_may_advance receipt =
+let candidate_rejection_may_advance (receipt : candidate_rejection_receipt) =
   receipt.measurement.dispatch = No_measurement_dispatch
 ;;
 

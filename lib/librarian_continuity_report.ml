@@ -191,6 +191,22 @@ let of_yojson json =
   else
     let* () = validate_cases (List.map (fun sample -> sample.case) report.samples) in
     let validate_sample sample =
+      let validate_question question =
+        match sample.case.question, question with
+        | None, Generated _ -> Ok ()
+        | Some expected, Provided actual when String.equal expected actual -> Ok ()
+        | Some _, Provided _ ->
+            Error "Continuity question text does not match its provided question"
+        | None, Provided _ | Some _, Generated _ ->
+            Error "Continuity question origin does not match its sample"
+      in
+      let* () =
+        match sample.progress with
+        | Question_ready question | Answer_failed (question, _)
+        | Answer_ready { question; _ } | Judge_failed { question; _ }
+        | Scored { question; _ } -> validate_question question
+        | Not_started | Question_failed _ -> Ok ()
+      in
       match sample.progress with
       | Scored { judgment; _ } ->
           if not (String.equal judgment.request.question_id sample.case.id) then

@@ -6,18 +6,28 @@ import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from render_configs import TASK_SKILL_SOURCE_ID, task_skill_names
+from render_configs import (
+    TASK_SKILL_SOURCE_ID,
+    TASK_SKILLS_RUNTIME_PATH,
+    task_skill_names,
+)
 
 SKILL_CATALOG_PATH = "/api/v1/skills"
+SKILL_CATALOG_SCHEMA = "masc.skill-snapshot/v1"
 
 
 def validate_task_skill_catalog(catalog: object, expected_names: list[str]) -> None:
     """Reject a bootstrap that silently omitted a Harbor task Skill."""
-    if not isinstance(catalog, dict) or catalog.get("state") != "ready":
+    if not isinstance(catalog, dict) or catalog.get("schema") != SKILL_CATALOG_SCHEMA:
+        raise RuntimeError("task Skill catalog has an unsupported schema")
+    if catalog.get("state") != "ready":
         raise RuntimeError("task Skill catalog is not ready")
     snapshot = catalog.get("snapshot")
     if not isinstance(snapshot, dict):
         raise RuntimeError("task Skill catalog has no snapshot")
+    config = snapshot.get("config")
+    if not isinstance(config, dict) or config.get("kind") != "configured":
+        raise RuntimeError("task Skill catalog configuration is not ready")
 
     sources = snapshot.get("sources")
     task_sources = [source for source in sources
@@ -27,10 +37,12 @@ def validate_task_skill_catalog(catalog: object, expected_names: list[str]) -> N
     if len(task_sources) != 1:
         raise RuntimeError("task Skill source is missing or duplicated")
     observation = task_sources[0].get("observation")
-    if (task_sources[0].get("access") != "read-only"
+    if (task_sources[0].get("anchor") != "base-path"
+            or task_sources[0].get("path") != TASK_SKILLS_RUNTIME_PATH
+            or task_sources[0].get("access") != "read-only"
             or not isinstance(observation, dict)
             or observation.get("kind") != "ready"):
-        raise RuntimeError("task Skill source is not ready and read-only")
+        raise RuntimeError("task Skill source does not match its ready read-only path")
 
     rejections = snapshot.get("rejections")
     task_rejections = [row for row in rejections

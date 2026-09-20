@@ -11,6 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents.keeper_tools_agent import KeeperToolsAgent  # noqa: E402
 from harbor.models.agent.context import AgentContext  # noqa: E402
+from masc_task_skills import SKILL_CATALOG_SCHEMA  # noqa: E402
+from render_configs import (  # noqa: E402
+    TASK_SKILL_SOURCE_ID,
+    TASK_SKILLS_RUNTIME_PATH,
+)
 
 
 class FakeEnv:
@@ -221,10 +226,12 @@ def test_arm_k_gives_task_skills_to_the_keeper_pool(tmp_path, monkeypatch):
     remote.mkdir(parents=True)
     (remote / "SKILL.md").write_text(
         "---\nname: task-guide\ndescription: Task guide.\n---\nBody\n")
-    identity = {"source_id": "terminal-bench-task", "package_id": "task-guide",
+    identity = {"source_id": TASK_SKILL_SOURCE_ID, "package_id": "task-guide",
                 "name": "task-guide"}
-    catalog = {"state": "ready", "snapshot": {
-        "sources": [{"id": "terminal-bench-task", "access": "read-only",
+    catalog = {"schema": SKILL_CATALOG_SCHEMA, "state": "ready", "snapshot": {
+        "config": {"kind": "configured", "revision": "fixture"},
+        "sources": [{"id": TASK_SKILL_SOURCE_ID, "access": "read-only",
+                     "anchor": "base-path", "path": TASK_SKILLS_RUNTIME_PATH,
                      "observation": {"kind": "ready"}}],
         "skills": [{"identity": identity}], "effective_skills": [identity],
         "shadows": [], "rejections": []}}

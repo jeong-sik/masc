@@ -10,8 +10,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents.masc_agent import MascAgent  # noqa: E402
-from masc_task_skills import validate_task_skill_catalog  # noqa: E402
-from render_configs import TASK_SKILL_SOURCE_ID  # noqa: E402
+from masc_task_skills import (  # noqa: E402
+    SKILL_CATALOG_SCHEMA,
+    validate_task_skill_catalog,
+)
+from render_configs import (  # noqa: E402
+    TASK_SKILL_SOURCE_ID,
+    TASK_SKILLS_RUNTIME_PATH,
+)
 import masc_dist  # noqa: E402
 
 
@@ -97,12 +103,14 @@ def write_task_skill(root, name="task-guide"):
 def task_catalog(name="task-guide"):
     identity = {"source_id": TASK_SKILL_SOURCE_ID, "package_id": name, "name": name}
     return {
+        "schema": SKILL_CATALOG_SCHEMA,
         "state": "ready",
         "snapshot": {
+            "config": {"kind": "configured", "revision": "fixture"},
             "sources": [{
                 "id": TASK_SKILL_SOURCE_ID,
                 "anchor": "base-path",
-                "path": ".masc/task-skills",
+                "path": TASK_SKILLS_RUNTIME_PATH,
                 "access": "read-only",
                 "observation": {"kind": "ready"},
             }],
@@ -213,6 +221,22 @@ def test_task_skill_catalog_failures_are_not_silent(failure):
         }]
     else:
         snapshot["effective_skills"] = []
+    with pytest.raises(RuntimeError):
+        validate_task_skill_catalog(catalog, ["task-guide"])
+
+
+@pytest.mark.parametrize("failure", ["missing_schema", "wrong_schema", "wrong_anchor", "wrong_path"])
+def test_task_skill_catalog_refuses_a_different_public_contract(failure):
+    catalog = task_catalog()
+    source = catalog["snapshot"]["sources"][0]
+    if failure == "missing_schema":
+        del catalog["schema"]
+    elif failure == "wrong_schema":
+        catalog["schema"] = "masc.skill-snapshot/v2"
+    elif failure == "wrong_anchor":
+        source["anchor"] = "user-home"
+    else:
+        source["path"] = ".masc/other-skills"
     with pytest.raises(RuntimeError):
         validate_task_skill_catalog(catalog, ["task-guide"])
 

@@ -1511,6 +1511,8 @@ let execute_prepared_flow_with_queue_ops_current
        | Exact_output.Non_advanceable_terminal ->
          handle_flow_error ~queue_ops prepared cause
        | Exact_output.Advanceable_candidates_exhausted ->
+         (* [flow_execution_terminal_kind] admits only [Flow_candidates_exhausted]
+            and [Flow_exact_execution_failed]; both matches below rely on that pair. *)
          let bound =
            match cause with
            | Exact_output.Flow_exact_execution_failed { candidate; _ } ->

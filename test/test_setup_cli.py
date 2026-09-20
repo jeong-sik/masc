@@ -216,10 +216,13 @@ class Setup(unittest.TestCase):
                              'type = "env"\n'
                              'key = "MASC_SETUP_TEST_KEY"\n')
                 text = runtime.read_text()
-                if inline in text:
-                    text = text.replace(inline, env_block)
-                else:
-                    text = text + '\n' + env_block
+                if inline not in text:
+                    raise AssertionError(
+                        'setup fixture no longer declares the inline credentials '
+                        'block this test swaps. Update this test together with '
+                        'scripts/fixtures/release-evidence/runtime.toml.'
+                    )
+                text = text.replace(inline, env_block)
                 runtime.write_text(text)
             manifest = config / 'keepers/imp.toml'
             original = manifest.read_bytes()

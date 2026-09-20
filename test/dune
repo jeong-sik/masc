@@ -1971,6 +1971,17 @@
  (modules test_cancel_safe)
  (libraries alcotest masc_cancel_safe eio eio_main))
 
+; The metric store is on the same contract: a counter bumped inside a
+; cancelled fiber must not turn the cancellation into a warning (#37349).
+; The AST cases read the store's source, so it is a dep -- without it dune
+; caches a pass and never re-runs them when the store changes.
+
+(test
+ (name test_otel_metric_store_cancel)
+ (modules test_otel_metric_store_cancel)
+ (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
+ (libraries alcotest ast_grep otel_metric_store eio eio_main))
+
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library
  (name exact_output_fixture)
@@ -5220,6 +5231,7 @@
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
+(include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)

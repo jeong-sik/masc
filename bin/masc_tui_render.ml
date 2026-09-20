@@ -5528,6 +5528,27 @@ let lane_run_split_line buf cols ~left_width ~left ~right =
     (styled left_width left ^ Theme.recede () ^ divider ^ Ansi.reset
      ^ styled right_width right)
 
+let lane_run_payload_heights ~rows ~cols ~summary_rows ~error_rows =
+  (* Top, header, two dividers, bottom and footer surround the payload.
+     The split panes also use one payload row for their window titles. *)
+  let payload_rows = max 0 (rows - summary_rows - 6 - error_rows) in
+  let title_rows = if cols >= keeper_split_threshold_cols then 1 else 0 in
+  payload_rows, max 0 (payload_rows - title_rows)
+
+let lane_run_detail_content_height (state : state) =
+  match state.lanes_mode, state.lane_run_detail with
+  | Lanes_run_detail (_, run_id), Some detail
+    when String.equal detail.Tui_decode.lrd_run_id run_id ->
+      let terminal_rows, cols = get_terminal_size () in
+      let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+      let _, height =
+        lane_run_payload_heights ~rows ~cols
+          ~summary_rows:(List.length (lane_run_summary_lines detail))
+          ~error_rows:(if Option.is_some state.lane_run_detail_error then 1 else 0)
+      in
+      height
+  | _ -> 0
+
 let render_lane_run_detail (state : state) ~run_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -5578,6 +5599,10 @@ let render_lane_run_detail (state : state) ~run_id =
       0, None
     | Some detail, (Some _ | None) ->
       let summary = lane_run_summary_lines detail in
+      let payload_rows, content_height =
+        lane_run_payload_heights ~rows ~cols ~summary_rows:(List.length summary)
+          ~error_rows
+      in
       List.iter
         (fun (style, line) -> box_line_styled buf cols ~style line)
         summary;
@@ -5591,13 +5616,9 @@ let render_lane_run_detail (state : state) ~run_id =
           lane_run_input_lines ~width:left_width detail
         in
         let output_lines = lane_run_output_lines ~width:right_width detail in
-        let payload_rows =
-          max 0 (rows - List.length summary - 6 - error_rows)
-        in
         if payload_rows = 0
         then 0, None
         else begin
-          let content_height = payload_rows - 1 in
           let input_max_scroll =
             if content_height = 0
             then 0
@@ -5645,9 +5666,6 @@ let render_lane_run_detail (state : state) ~run_id =
       else begin
         let lines =
           lane_run_stacked_lines ~width:(max 1 (cols - 8)) detail
-        in
-        let content_height =
-          max 0 (rows - List.length summary - 6 - error_rows)
         in
         let max_scroll =
           if content_height = 0

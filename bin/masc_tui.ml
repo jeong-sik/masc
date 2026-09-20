@@ -20922,6 +20922,10 @@ and is loaded on demand through keeper_skill.
              | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
+                     let page =
+                       Masc_tui_scroll.page_step
+                         ~height:(lane_run_detail_content_height state)
+                     in
                      state.lane_run_detail_scroll <-
                        (if direction > 0 then
                      Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:page

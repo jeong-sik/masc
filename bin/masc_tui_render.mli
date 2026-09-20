@@ -102,6 +102,8 @@ val render_tools :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 val code_pane_content_height : Masc_tui_types.state -> int
 val config_content_height : Masc_tui_types.state -> int
+val lane_run_detail_content_height : Masc_tui_types.state -> int
+(** Payload rows visible after the run summary, error and panel titles. *)
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
 val keeper_deletions_viewport : Masc_tui_types.state -> int * int

@@ -107,17 +107,17 @@ let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : kee
    leaving a stale heartbeat blocker or clearing both observations. *)
 let settle_recovered_heartbeat_reason ~(ctx : _ context) ~(meta : keeper_meta) =
   let base_path = ctx.config.base_path in
-  match Keeper_registry.get ~base_path meta.name with
-  | Some { last_failure_reason = Some (Keeper_registry.Heartbeat_consecutive_failures _); _ }
-    ->
-    let turn_failures = Keeper_registry.get_turn_failures ~base_path meta.name in
-    let recovered =
-      if turn_failures > 0
-      then Some (Keeper_registry.Turn_consecutive_failures turn_failures)
-      else None
-    in
-    Keeper_registry.set_failure_reason ~base_path meta.name recovered
-  | Some _ | None -> ()
+  let turn_failures = Keeper_registry.get_turn_failures ~base_path meta.name in
+  let recovered =
+    if turn_failures > 0
+    then Some (Keeper_registry.Turn_consecutive_failures turn_failures)
+    else None
+  in
+  ignore
+    (Keeper_registry.replace_heartbeat_failure_reason
+       ~base_path
+       meta.name
+       recovered)
 ;;
 
 let sync_keeper_presence

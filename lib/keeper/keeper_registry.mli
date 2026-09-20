@@ -205,6 +205,11 @@ val clear_error : base_path:string -> string -> unit
 (** Set the structured failure reason for cohort detection. *)
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
 
+(** Atomically replace a heartbeat failure observation. Returns [false] and
+    leaves the entry untouched if a newer cause has already replaced it. *)
+val replace_heartbeat_failure_reason :
+  base_path:string -> string -> failure_reason option -> bool
+
 
 (** Store the AGENT_CORE Event_bus [correlation_id] from the most recent turn. *)
 val set_last_correlation_id : base_path:string -> string -> string -> unit

@@ -1731,6 +1731,59 @@ let () =
      && Yojson.Safe.Util.member "degraded_retry_deferred" neither = `Null)
 ;;
 
+(* The compact projection the dashboard composite reads. The receipt store has
+   no version partition and [latest_json] hands back the newest row whatever
+   its shape, so a keeper that has not taken a turn since the deploy is read
+   here in its older shape: one bool under [degraded_retry_applied], and no
+   [degraded_retry_deferred] at all. [json_member] answers `Null for a key that
+   is not there, so reading the two fields on their own would mark the first
+   unreadable and report the second as "this turn deferred no lane" -- a claim
+   the old row cannot support. One shape verdict covers both fields. *)
+let () =
+  let compact runtime =
+    Server_dashboard_compact_receipt_json.compact_receipt_runtime_json
+      (`Assoc [ "runtime", runtime ])
+  in
+  let field json key name = Json_util.get_string (Yojson.Safe.Util.member key json) name in
+  let unreadable json key =
+    Yojson.Safe.Util.member "unreadable" (Yojson.Safe.Util.member key json)
+  in
+  let older_shape =
+    compact
+      (`Assoc
+         [ "name", `String "runtime-1"
+         ; "degraded_retry_applied", `Bool true
+         ; "degraded_retry_runtime", `String "runtime-2"
+         ; "fallback_reason", `String "rate_limit"
+         ])
+  in
+  check
+    "a row older than the split says its applied lane is unreadable"
+    (unreadable older_shape "degraded_retry_applied" = `Bool true);
+  check
+    "and says the same of the field that did not exist yet"
+    (unreadable older_shape "degraded_retry_deferred" = `Bool true);
+  check
+    "so the missing sibling never reads as an absent lane"
+    (Yojson.Safe.Util.member "degraded_retry_deferred" older_shape <> `Null);
+  let split_shape =
+    compact
+      (`Assoc
+         [ "name", `String "runtime-1"
+         ; ( "degraded_retry_applied"
+           , `Assoc [ "runtime", `String "runtime-2"; "reason", `String "rate_limit" ] )
+         ; "degraded_retry_deferred", `Null
+         ])
+  in
+  check
+    "a row of this generation reads the lane it took up"
+    (field split_shape "degraded_retry_applied" "runtime" = Some "runtime-2"
+     && field split_shape "degraded_retry_applied" "reason" = Some "rate_limit");
+  check
+    "and an absent lane on such a row stays absent"
+    (Yojson.Safe.Util.member "degraded_retry_deferred" split_shape = `Null)
+;;
+
 (* #29929 gave [Terminal_effect_failed] its own operator disposition, but the
    wire it arrives on carries the call's parameters after the kind, and
    [wire_kind_of_string] compared the whole string. The reason decoded as

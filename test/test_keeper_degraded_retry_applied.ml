@@ -112,7 +112,17 @@ let test_no_hint_is_never_applied () =
 
 (* The same question on the receipt side. [Keeper_unified_turn_execution] used
    to answer it for the receipt with [Option.is_some hint], with no condition
-   on the turn having run at all. *)
+   on the turn having run at all.
+
+   Of the five cases below, one discriminates against that rule: the first,
+   where a lane was handed to a turn that reached no provider. The rest hold
+   under both rules and are here for what they pin, not for what they catch --
+   that a lane reported at all is the one the turn was handed, that it carries
+   its own reason rather than the other lane's, that no lane means no report,
+   and that the driver walks a deferred lane from its head. The reason half of
+   #37108 is not a verdict at all: the two lanes no longer share a runtime and
+   reason slot, so no rule can put one lane's reason beside the other's
+   runtime. [test_keeper_terminal_reason_typed] pins that shape on the wire. *)
 
 let taken_up ?(provider_reached = Receipt_finalize.Provider_attempt_observed) ~hint () =
   Receipt_finalize.degraded_retry_taken_up ~hint ~provider_reached

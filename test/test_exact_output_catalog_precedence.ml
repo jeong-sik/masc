@@ -522,7 +522,9 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
         readiness one. with_configured_verifier_cli materializes this official
         client, so here readiness has to accept it... *)
      (match Runtime.verifier_exact_lane_readiness () with
-      | Ok () -> ()
+      | Ok [] -> ()
+      | Ok (_ :: _) ->
+        Alcotest.fail "readiness rejected a cli slot the runtime table admits"
       | Error detail ->
         Alcotest.failf "readiness refused a configured official client: %s" detail));
   (* ...and refuse the same lane once its cli slot names nothing in the runtime
@@ -540,7 +542,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
           "readiness names the cli slot that resolves to no runtime"
           true
           (String_util.contains_substring detail unmaterialized)
-      | Ok () ->
+      | Ok _ ->
         Alcotest.fail "readiness accepted a cli slot with no materialized runtime"));
   (match Registry.publish
       ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = [] } ] snapshot with

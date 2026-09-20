@@ -508,25 +508,56 @@ val verifier_cli_slot_admission : runtime_id:string -> (unit, string) result
     expanding any same-named Keeper lane. Lane-only IDs, Agent Core runtimes,
     and clients without native-tool suppression are refused. *)
 
-val verifier_exact_lane_slot_ids : unit -> (string list, string) result
-(** Admitted API slot ids followed by declared official-client slot ids from the
-    published exact-output registry — the single provider-selection SSOT for
-    completion-authority judgement calls. [Error] names why the lane cannot
-    judge (registry not published, lane unconfigured, or no admitted slots);
-    there is no fallback to another route. Declared official-client ids are
-    carried as declared; {!verifier_exact_lane_readiness} is what asks the
-    runtime table whether they resolve. *)
+type verifier_cli_slot_rejection =
+  { position : int
+  ; slot_id : string
+  ; detail : string
+  }
+(** One declared [verifier_exact] cli slot the lane cannot judge through.
+    [position] counts from 1 across the whole lane declaration, catalog slots
+    first, matching the registry's own rejected-slot report. *)
 
-val verifier_exact_lane_readiness : unit -> (unit, string) result
+type verifier_exact_lane_slots =
+  { catalog_slot_ids : string list
+  ; admitted_cli_slot_ids : string list
+  ; cli_slot_rejections : verifier_cli_slot_rejection list
+  }
+
+val verifier_cli_slot_rejection_to_string : verifier_cli_slot_rejection -> string
+
+val verifier_cli_slots_admission
+  :  catalog_slot_count:int
+  -> string list
+  -> string list * verifier_cli_slot_rejection list
+(** Split one lane's declared cli ids into what the runtime table can judge
+    through and what it cannot. [catalog_slot_count] only sets where the
+    reported positions start, so they count across the whole lane declaration
+    the way the registry's rejected-slot report does. *)
+
+val verifier_exact_lane_resolution : unit -> (verifier_exact_lane_slots, string) result
+(** The published [verifier_exact] lane split into what can judge and what
+    cannot. The registry carries cli ids verbatim because only this module
+    holds the runtime table that answers admission; a rejected cli slot leaves
+    its siblings usable instead of failing the lane (#37179). *)
+
+val verifier_exact_lane_slot_ids : unit -> (string list, string) result
+(** Admitted API slot ids followed by the official-client slot ids this lane can
+    judge through — the single provider-selection SSOT for completion-authority
+    judgement calls. [Error] names why the lane cannot judge (registry not
+    published, lane unconfigured, no admitted slots, or every declared slot
+    rejected); there is no fallback to another route. *)
+
+val verifier_exact_lane_readiness
+  :  unit
+  -> (verifier_cli_slot_rejection list, string) result
 (** Whether the [verifier_exact] lane has a slot that can be dispatched now,
     for a caller that reports authority readiness rather than walking the lane.
-    [Ok ()] needs one admitted API route with a materialized candidate that
-    takes both the verdict tool and a system prompt, or one cli slot naming a materialized official-client runtime
-    that can supply the verdict tool with native tools disabled.
-    [Error] names incompatible slots, which
-    {!verifier_exact_lane_slot_ids} cannot: it carries declared
-    ids verbatim, so a typo there reads as a configured judge until the review
-    reaches dispatch. *)
+    [Ok] needs one admitted API route with a materialized candidate that takes
+    both the verdict tool and a system prompt, or one cli slot naming a
+    materialized official-client runtime that can supply the verdict tool with
+    native tools disabled; it carries the declared cli slots the lane cannot
+    judge through, so a short lane says why it is short. [Error] names every
+    incompatible slot. *)
 
 val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
 (** Validate one configured direct slot. A declared CLI slot retains its

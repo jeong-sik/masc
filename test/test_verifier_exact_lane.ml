@@ -520,6 +520,224 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
        Alcotest.failf "expected one rejected slot, got %d" (List.length slots))
 ;;
 
+(* ------------------------------------------------------------ *)
+(* A cli slot that cannot judge (#37179)                        *)
+(* ------------------------------------------------------------ *)
+
+(* [verifier_exact] dispatches each slot as a judge, so a cli slot naming a
+   client that cannot suppress native tools is unusable there. It used to load
+   and then fail every review with Evaluator_unavailable, one per attempt,
+   because the first rejected id failed the whole lane — and first-run setup
+   in v0.35.15-20 wrote exactly such a slot. *)
+let mixed_client_config =
+  {|[providers.official]
+protocol = "claude-code"
+command = "fixture-not-executed"
+is-non-interactive = true
+[providers.native_only]
+protocol = "codex-app-server"
+command = "fixture-not-executed"
+is-non-interactive = true
+[models.verifier]
+api-name = "verifier-fixture"
+max-context = 400000
+tools-support = true
+[official.verifier]
+[native_only.verifier]
+[runtime]
+default = "official.verifier"
+|}
+;;
+
+let judging_client = "official.verifier"
+let native_only_client = "native_only.verifier"
+
+let with_mixed_verifier_clients ?(config = mixed_client_config) f =
+  let saved = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "verifier-mixed-clients-" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore saved;
+      Sys.remove path)
+    (fun () ->
+       Out_channel.with_open_bin path (fun out -> output_string out config);
+       (match Runtime.init_default ~config_path:path with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       f path)
+;;
+
+let publish_verifier_lane ~slot_ids ~cli_slot_ids =
+  match
+    Runtime.publish_exact_output_registry
+      ~lanes:[ { Runtime_schema.id = "verifier_exact"; slot_ids; cli_slot_ids } ]
+      (load_verifier_snapshot ())
+  with
+  | Ok _ -> ()
+  | Error detail -> Alcotest.failf "lane publication failed: %s" detail
+;;
+
+(* The Lanes projection an operator reads. Going through [snapshot_json] keeps
+   the assertion on the surface that is actually served. *)
+let verifier_lane_projection () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Server_standalone_lane_projection.snapshot_json ()
+  |> Yojson.Safe.Util.member "lanes"
+  |> Yojson.Safe.Util.to_list
+  |> List.find (fun lane ->
+    String.equal
+      (Yojson.Safe.Util.(lane |> member "lane_id" |> to_string))
+      Runtime.verifier_exact_lane_id)
+;;
+
+let projected_strings lane key =
+  Yojson.Safe.Util.(lane |> member key |> to_list |> List.map to_string)
+;;
+
+let test_rejected_cli_slot_leaves_the_lane_usable () =
+  with_mixed_verifier_clients
+  @@ fun _path ->
+  publish_verifier_lane
+    ~slot_ids:[ "verifier-a" ]
+    ~cli_slot_ids:[ native_only_client; judging_client ];
+  (match Runtime.verifier_exact_lane_slot_ids () with
+   | Error detail ->
+     Alcotest.failf "one unusable cli slot must not fail the lane: %s" detail
+   | Ok slots ->
+     Alcotest.(check (list string))
+       "the lane keeps its catalog slot and the cli slot that can judge"
+       [ "verifier-a"; judging_client ]
+       slots);
+  let lane = verifier_lane_projection () in
+  Alcotest.(check (list string))
+    "the projection shows only the cli slot that can judge"
+    [ judging_client ]
+    (projected_strings lane "cli_slots");
+  Alcotest.(check (list string))
+    "the unusable cli slot is shown as dropped"
+    [ native_only_client ]
+    (projected_strings lane "dropped_slots");
+  Alcotest.(check string)
+    "a lane with a usable slot stays ready"
+    "ready"
+    Yojson.Safe.Util.(lane |> member "configuration_state" |> to_string)
+;;
+
+let test_readiness_names_the_cli_slot_that_cannot_judge () =
+  with_mixed_verifier_clients
+  @@ fun _path ->
+  publish_verifier_lane
+    ~slot_ids:[ "verifier-a" ]
+    ~cli_slot_ids:[ native_only_client; judging_client ];
+  match Runtime.verifier_exact_lane_readiness () with
+  | Error detail ->
+    Alcotest.failf "readiness refused a lane that still has a judge: %s" detail
+  | Ok [] -> Alcotest.fail "readiness hid the cli slot the lane cannot judge through"
+  | Ok [ rejection ] ->
+    Alcotest.(check string)
+      "readiness names the slot"
+      native_only_client
+      rejection.Runtime.slot_id;
+    Alcotest.(check int)
+      "the position counts across the whole lane declaration"
+      2
+      rejection.Runtime.position;
+    Alcotest.(check bool)
+      "the reason names native-tool suppression"
+      true
+      (String_util.contains_substring
+         rejection.Runtime.detail
+         "native-tool suppression")
+  | Ok rejections ->
+    Alcotest.failf "expected one rejection, got %d" (List.length rejections)
+;;
+
+let test_lane_with_no_judge_refuses_before_dispatch () =
+  with_mixed_verifier_clients
+  @@ fun _path ->
+  publish_verifier_lane ~slot_ids:[] ~cli_slot_ids:[ native_only_client ];
+  (match Runtime.verifier_exact_lane_slot_ids () with
+   | Ok slots ->
+     Alcotest.failf
+       "a lane with no judge must not hand out slots: %s"
+       (String.concat ", " slots)
+   | Error detail ->
+     Alcotest.(check bool)
+       "the refusal names the slot that cannot judge"
+       true
+       (String_util.contains_substring detail native_only_client));
+  (match Runtime.verifier_exact_lane_readiness () with
+   | Ok _ -> Alcotest.fail "readiness accepted a lane with no judge"
+   | Error _ -> ());
+  let lane = verifier_lane_projection () in
+  Alcotest.(check (list string))
+    "no cli slot survives"
+    []
+    (projected_strings lane "cli_slots");
+  Alcotest.(check (list string))
+    "the declared slot is shown as dropped"
+    [ native_only_client ]
+    (projected_strings lane "dropped_slots");
+  Alcotest.(check string)
+    "the lane reads as degraded"
+    "degraded"
+    Yojson.Safe.Util.(lane |> member "configuration_state" |> to_string);
+  Alcotest.(check bool)
+    "the projection says why"
+    true
+    (match Yojson.Safe.Util.(lane |> member "admission_error") with
+     | `String detail -> String_util.contains_substring detail native_only_client
+     | `Null
+     | `Bool _
+     | `Int _
+     | `Float _
+     | `List _
+     | `Assoc _
+     | `Intlit _ -> false)
+;;
+
+(* First-run setup used to write the chosen client into every lane that takes
+   a cli tail. For a Codex-only or Antigravity-only install that wrote a
+   verifier_exact the operator could not repair from inside MASC. *)
+let setup_config =
+  mixed_client_config
+  ^ Printf.sprintf
+      "[runtime.exact_output_lanes.verifier_exact]\nslots = [%S, %S]\ncli_slots = []\n"
+      judging_client
+      native_only_client
+;;
+
+let test_setup_never_writes_a_verifier_slot_that_cannot_judge () =
+  with_mixed_verifier_clients ~config:setup_config
+  @@ fun path ->
+  (match
+     Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:native_only_client ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "first-run setup failed: %s" detail);
+  match Runtime_toml.parse_file path with
+  | Error _ -> Alcotest.fail "the config setup wrote must still parse"
+  | Ok (config : Runtime_schema.config) ->
+    (match
+       List.find_opt
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            String.equal lane.id Runtime.verifier_exact_lane_id)
+         config.exact_output_lane_decls
+     with
+     | None -> Alcotest.fail "setup dropped the verifier_exact lane declaration"
+     | Some lane ->
+       Alcotest.(check (list string))
+         "the client that cannot judge is not written as a cli slot"
+         []
+         lane.cli_slot_ids;
+       Alcotest.(check (list string))
+         "the declared slots keep only what can judge"
+         [ judging_client ]
+         lane.slot_ids)
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -575,6 +793,24 @@ let () =
             "rejected slot diagnosis names a runtime id"
             `Quick
             test_rejected_slot_diagnosis_names_a_runtime_id
+        ] )
+    ; ( "cli slots that cannot judge"
+      , [ Alcotest.test_case
+            "one unusable cli slot leaves the rest of the lane usable"
+            `Quick
+            test_rejected_cli_slot_leaves_the_lane_usable
+        ; Alcotest.test_case
+            "readiness names the cli slot that cannot judge"
+            `Quick
+            test_readiness_names_the_cli_slot_that_cannot_judge
+        ; Alcotest.test_case
+            "a lane with no judge refuses before dispatch"
+            `Quick
+            test_lane_with_no_judge_refuses_before_dispatch
+        ; Alcotest.test_case
+            "first-run setup never writes a verifier slot that cannot judge"
+            `Quick
+            test_setup_never_writes_a_verifier_slot_that_cannot_judge
         ] )
     ]
 ;;

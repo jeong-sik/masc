@@ -86,6 +86,22 @@ let test_deferred_lane_authorizes_empty_intake () =
        ~event_queue_intake_error:None)
 ;;
 
+let test_deferred_lane_remains_visible_with_reactive_input () =
+  let wake =
+    Keeper_heartbeat_loop.For_testing.cycle_wake
+      ~periodic_due:false
+      ~deferred_runtime_lane:(Some deferred_lane)
+  in
+  let scheduling = decide wake [ WO.Workspace_message_stimulus ] in
+  check bool "the reactive input and deferred suffix schedule one turn"
+    true scheduling.should_run_turn;
+  check string "the reactive source keeps its channel"
+    "turn" scheduling.channel;
+  check (list string) "both dispatch facts remain observable"
+    [ "workspace_message_pending"; "deferred_runtime_lane_pending" ]
+    scheduling.verdict_reasons
+;;
+
 let test_cadence_change_and_initial_warmup () =
   let cadence = Signal.consume_periodic ~now:0. in
   check (float 0.) "new interval uses previous periodic boundary" 480.
@@ -100,4 +116,5 @@ let () =
     [ "authority", [ test_case "empty hints neither run nor starve" `Quick test_empty_hints_keep_periodic_boundary
     ; test_case "durable attention remains immediate" `Quick test_durable_attention_remains_immediate
     ; test_case "deferred lane authorizes empty intake" `Quick test_deferred_lane_authorizes_empty_intake
+    ; test_case "deferred lane remains visible with reactive input" `Quick test_deferred_lane_remains_visible_with_reactive_input
     ; test_case "cadence updates and warmup" `Quick test_cadence_change_and_initial_warmup ] ]

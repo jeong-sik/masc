@@ -1688,6 +1688,7 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
+  let deferred_runtime_lane_pending = wake = Deferred_runtime_lane in
   (* A scheduler wake delivered through the event queue is a scheduled
      stimulus, not a reactive one. Routing it through the reactive trigger
      list ran the turn with [channel = Reactive], which applied the
@@ -1797,7 +1798,6 @@ let keeper_cycle_decision
         scheduled_due_from_queue
         || observation.scheduled_automation.due_ready_count > 0
       in
-      let deferred_runtime_lane_pending = wake = Deferred_runtime_lane in
       if
         not proactive_gate_enabled
         && not requested_schedule_due
@@ -1854,6 +1854,11 @@ let keeper_cycle_decision
     in
     match reactive_triggers with
     | first :: rest when reactive_gate_enabled ->
+      let rest =
+        if deferred_runtime_lane_pending
+        then rest @ [ Deferred_runtime_lane_pending ]
+        else rest
+      in
       { should_run = true
       ; channel = Reactive
       ; verdict = Run { reasons = first, rest }

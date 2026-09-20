@@ -184,6 +184,21 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
          false));
   check int "the deferred path does not inspect the Event Queue" 0 !pending_calls;
   List.iter
+    (fun (label, after_failure) ->
+       check bool
+         label
+         false
+         (Loop.For_testing.next_cycle_starts_now
+            ~after_failure
+            ~stimuli_acked:false
+            ~pending_stimulus:(fun () ->
+              incr pending_calls;
+              true)))
+    [ "a resting path with unacked stimuli keeps sleeping", waiting
+    ; "ordinary cadence with unacked stimuli keeps sleeping", None
+    ];
+  check int "unacked outcomes do not inspect the Event Queue" 0 !pending_calls;
+  List.iter
     (fun (label, after_failure, stimuli_acked, pending_stimulus, expected) ->
        check bool
          label

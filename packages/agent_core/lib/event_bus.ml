@@ -431,3 +431,5 @@ let stats bus =
   in
   ({ subscriber_count = List.length subs; subscriptions } : bus_stats)
 ;;
+
+let dropped_total (sub : subscription) = Atomic.get sub.dropped_total

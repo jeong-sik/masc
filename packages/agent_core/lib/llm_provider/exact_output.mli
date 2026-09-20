@@ -269,10 +269,14 @@ type execution_error_cause =
   | Clock_required_for_timeout
   | Frozen_request_mismatch
   | Completion_failed
-      (** No response was received: the failure landed before dispatch, or the
-          transport produced no HTTP status to classify. A failure that DID
-          carry a status is {!Provider_response_refused} — folding the two
-          together discards the status and the refusal kind. *)
+      (** A failure without a more specific Exact cause. The receipt may
+          already contain response headers, for example when provider parsing
+          fails. This cause alone does not authorize a dispatched retry. *)
+  | Response_body_deadline_exceeded
+      (** Successful HTTP response headers arrived, but the explicitly declared
+          total deadline expired before its body completed. No complete body,
+          provider trace or accepted domain result exists. The one dispatch
+          remains recorded; remote cancellation or billing is not implied. *)
   | Provider_response_refused of
       { http_status : int
       ; refusal : provider_refusal

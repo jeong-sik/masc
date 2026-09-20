@@ -3600,6 +3600,133 @@ let test_server_refusal_advances_once_to_successor status =
       | _ -> fail "HTTP server refusal lost its typed cause")
 ;;
 
+let check_body_deadline_transcript success =
+  let durable =
+    match EO.snapshot_validated_flow_evidence
+      ~project_accepted:(fun id -> Ok (`String id))
+      ~project_rejection:(fun _ -> Ok `Null) success with
+    | Ok durable -> durable
+    | Error _ -> fail "body deadline advance did not produce truthful durable evidence"
+  in
+  let encoded = EO.validated_flow_evidence_to_string durable in
+  (match EO.validated_flow_evidence_of_string encoded with
+   | Ok decoded -> check string "body deadline evidence round trip"
+       (EO.validated_flow_evidence_sha256 durable)
+       (EO.validated_flow_evidence_sha256 decoded)
+   | Error error -> fail (EO.validated_flow_evidence_decode_error_to_string error));
+  let open Yojson.Safe.Util in
+  let document = Yojson.Safe.from_string encoded in
+  let steps = document |> member "steps" |> to_list in
+  check int "transcript retains the deadline and its accepted successor" 2
+    (List.length steps);
+  let first, rest = match steps with
+    | first :: rest -> first, rest
+    | [] -> fail "body deadline transcript has no steps"
+  in
+  check string "deadline has its own evidence kind" "response_body_deadline_exceeded"
+    (first |> member "outcome" |> member "failure" |> member "kind" |> to_string);
+  check bool "deadline invents no raw body hash" true
+    ((first |> member "attempt" |> member "raw_response_sha256") = `Null);
+  check bool "deadline invents no provider trace" true
+    ((first |> member "attempt" |> member "provider_trace_sha256") = `Null);
+  let replace key replacement = function
+    | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+        name, if String.equal name key then replacement else value) fields)
+    | _ -> fail "expected evidence object"
+  in
+  let encode_with_integrity value =
+    let payload = match value with
+      | `Assoc fields -> List.filter (fun (key, _) -> key <> "integrity_sha256") fields
+      | _ -> fail "expected evidence document"
+    in
+    let digest = `Assoc payload |> Yojson.Safe.to_string
+      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    `Assoc (payload @ ["integrity_sha256", `String digest]) |> Yojson.Safe.to_string
+  in
+  check string "mutation helper preserves valid canonical evidence"
+    encoded (encode_with_integrity document);
+  List.iter (fun (label, field, value) ->
+    let mutated_step = replace "attempt"
+      (replace field value (member "attempt" first)) first in
+    let encoded = replace "steps" (`List (mutated_step :: rest)) document
+      |> encode_with_integrity in
+    match EO.validated_flow_evidence_of_string encoded with
+    | Error _ -> ()
+    | Ok _ -> fail ("accepted contradictory body deadline evidence: " ^ label))
+    [ "missing status", "http_status", `Null
+    ; "refusing status", "http_status", `Int 503
+    ; "not dispatched", "dispatch_count", `Int 0
+    ; "multiple dispatches", "dispatch_count", `Int 2
+    ; "no response headers", "phase", `String "before_dispatch"
+    ; "completed response", "phase", `String "terminal"
+    ; "invented body hash", "raw_response_sha256", `String (String.make 64 'a')
+    ; "invented provider trace", "provider_trace_sha256", `String (String.make 64 'b') ]
+;;
+
+let test_body_deadline_advances_after_settlement ~http_status ~settle () =
+  let first_id = "body-deadline" in
+  let next_id = "body-deadline-successor" in
+  let (result, replay, observed_failure, validated_ids, evidence), posts =
+    with_server
+      ~first_stalled_response:(Cohttp.Code.status_of_code http_status, {|{"choices":[|})
+      ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~body_timeout_s:1.0 ~id:first_id ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:next_id ~base_url ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [first_id; next_id]) in
+    let observed_failure = ref None in
+    let validated_ids = ref [] in
+    let result = execute_with_validator ~net ~clock
+      ~before_advance:(fun ~failed ~next ->
+        let failed_candidate, failure = flow_execution_failure failed in
+        check string "settlement is for the timed-out candidate" first_id
+          (candidate_id failed_candidate);
+        check string "settlement names the configured successor" next_id
+          next.identity.candidate_id;
+        observed_failure := Some failure;
+        if settle then Ok () else Error "durable release failed")
+      ~validate:(fun success ->
+        let id = candidate_id (EO.flow_success_candidate success) in
+        validated_ids := id :: !validated_ids;
+        EO.Accept id)
+      flow in
+    result, execute_ok ~net ~clock flow, !observed_failure, !validated_ids,
+    EO.flow_attempt_evidence flow
+  in
+  (match observed_failure with
+   | Some failure ->
+     check bool "deadline cause is preserved" true
+       (failure.EO.cause = EO.Response_body_deadline_exceeded);
+     check bool "received headers remain evidence" true
+       (EO.receipt_phase failure.receipt = EO.Response_received);
+     check (option int) "received successful HTTP status is retained" (Some http_status)
+       (EO.receipt_http_status failure.receipt);
+     check int "timed-out request keeps its dispatch" 1
+       (EO.receipt_dispatch_count failure.receipt);
+     check bool "no fabricated complete body" true (Option.is_none failure.raw_response);
+     check bool "no fabricated provider trace" true
+       (Option.is_none (EO.receipt_provider_trace failure.receipt))
+   | None -> fail "body deadline never reached the settlement callback");
+  check int "only settled successor dispatches; replay adds none"
+    (if settle then 2 else 1) posts;
+  check (list string) "validator sees only a complete successor result"
+    (if settle then [next_id] else []) validated_ids;
+  check int "only durable settlement records an advance"
+    (if settle then 1 else 0) (List.length evidence.advances);
+  (match replay with
+   | Error (EO.Flow_attempt_already_started _) -> ()
+   | Ok _ | Error _ -> fail "body deadline flow was replayable");
+  match settle, result with
+  | true, Ok success ->
+    check string "configured successor supplies the accepted output" next_id success.accepted;
+    check_body_deadline_transcript success
+  | false, Error (EO.Flow_execution_terminal
+      { cause = EO.Flow_before_advance_callback_failed _; _ }) -> ()
+  | _, (Ok _ | Error _) -> fail "body deadline did not respect durable settlement"
+;;
+
 let test_stalled_server_refusal_body_does_not_advance () =
   let refused_id = "stalled-refusal" in
   let successor_id = "stalled-refusal-successor" in
@@ -3760,6 +3887,7 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
     | Ok _ | Error _ -> fail (label ^ " did not remain terminal")
   in
   run ~abort_completion:true "partial" "unused";
+  run "provider-parser" "not-provider-json";
   (* A definite server refusal advances; an authentication failure still
      requires configuration repair and remains terminal. *)
   run ~status:`Unauthorized "response" "authentication failed";
@@ -4437,6 +4565,12 @@ let () =
             (fun () -> test_server_refusal_advances_once_to_successor 520)
         ; test_case "HTTP 529 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 529)
+        ; test_case "HTTP 200 body deadline advances with truthful evidence" `Quick
+            (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:true)
+        ; test_case "HTTP 201 body deadline uses the same successor contract" `Quick
+            (test_body_deadline_advances_after_settlement ~http_status:201 ~settle:true)
+        ; test_case "body deadline cannot bypass a failed settlement callback" `Quick
+            (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:false)
         ; test_case
             "HTTP 503 with a stalled body does not advance"
             `Quick

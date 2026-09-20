@@ -183,6 +183,8 @@ let failure_json = function
   | Candidate_rejected -> `Assoc [ "kind", `String "candidate_rejected" ]
   | Completion_failed_before_dispatch ->
     `Assoc [ "kind", `String "completion_failed_before_dispatch" ]
+  | Response_body_deadline_exceeded ->
+    `Assoc [ "kind", `String "response_body_deadline_exceeded" ]
   | Serialized_request_refused { http_status } ->
     `Assoc
       [ "kind", `String "serialized_request_refused"; "http_status", `Int http_status ]

@@ -288,11 +288,9 @@ describe('fleetBand', () => {
   // Lock the remaining offline-trigger status strings in fleetBand's
   // production code. `'offline'` has an active producer
   // (historical dashboard monitor producer, dashboard_mission_agents.ml:206,
-  // keeper_status_runtime.ml:276/353); `'unbooted'` is defensive (no
-  // current OCaml producer, but the production check is load-bearing
-  // for non-OCaml producers or future runtime states). Per
-  // feedback_dead_defensive_cleanup_must_check_test_lock memory, lock
-  // the defensive arm explicitly rather than treating it as dead.
+  // keeper_status_runtime.ml:276/353). `'unbooted'` is the status of a
+  // Keeper declared in config that has never booted
+  // (Keeper_declared_roster.to_json, keeper_declared_roster.ml).
   it.each([
     'offline',
     'unbooted',
@@ -422,9 +420,8 @@ describe('statusClass', () => {
   })
 
   // Lock the remaining offline-trigger status strings in statusClass.
-  // Mirrors the fleetBand offline-trigger set (5 statuses); the
-  // 'unbooted' arm is defensive (no current OCaml producer) per the
-  // feedback_dead_defensive_cleanup_must_check_test_lock memory pattern.
+  // Mirrors the fleetBand offline-trigger set (5 statuses); 'unbooted' comes
+  // from Keeper_declared_roster.to_json for a Keeper that has never booted.
   it.each([
     'offline',
     'unbooted',

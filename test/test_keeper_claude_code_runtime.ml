@@ -43,6 +43,29 @@ let prompt_too_long_statusless_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
 ;;
 
+(* CLI 2.1.278 refuses to send when its count reaches the window minus 3000:
+   it emits a synthetic API-error assistant message and ends the loop with
+   [terminal_reason = "blocking_limit"] and no API status. Seen live on
+   2026-09-19 as "terminal subtype=success api_status=unknown
+   reason=blocking_limit: Prompt is too long". *)
+let blocking_limit_diagnostic =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-blocking-limit-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}|}
+;;
+
+let blocking_limit_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-blocking-limit-1","result":"Prompt is too long","terminal_reason":"blocking_limit"}|}
+;;
+
+(* The same CLI context_limit stop cause, with a different diagnostic. The
+   typed terminal reason, not either sentence, selects the shrink path. *)
+let rapid_refill_breaker_diagnostic =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-rapid-refill-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Autocompact is thrashing"}]}}|}
+;;
+
+let rapid_refill_breaker_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rapid-refill-1","result":"Autocompact is thrashing","terminal_reason":"rapid_refill_breaker"}|}
+;;
+
 let mcp_initialize =
   {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
@@ -939,7 +962,10 @@ let history_uses_current_schema history =
     history
 ;;
 
-let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=false) () =
+let test_keeper_shrinks_history_after_statusless_context_error
+    ?(native_gate=false)
+    ?(overflow_frames = [ prompt_too_long_statusless_result ])
+    () =
   let base_path = temp_workspace () in
   let first_system_marker = Filename.concat base_path "full-system.txt" in
   let second_system_marker = Filename.concat base_path "shrunk-system.txt" in
@@ -978,7 +1004,7 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
          ~first_system_marker ~second_system_marker
          ~first_prompt_marker
          ~second_prompt_marker
-         [ Emit prompt_too_long_statusless_result ]
+         (List.map (fun frame -> Emit frame) overflow_frames)
          [ Emit (assistant ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ; Emit (result ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ]
@@ -1671,6 +1697,31 @@ let repeated_tool () =
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
 ;;
 
+(* A context-limit refusal and an empty history leave no smaller view to try,
+   so the attempt ends on the overflow. No answer or tool activity was
+   observed, so the attempt must report no effect: that is what lets
+   the lane move to its next runtime instead of fencing the turn. *)
+let test_unshrinkable_context_limit_reports_no_effect ~overflow_frames () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture (List.map (fun frame -> Emit frame) overflow_frames)
+         (fun cli_path ->
+            let attempt =
+              run_direct_attempt ~base_path ~cli_path ~goal:"BLOCKED" ~tools:[] ()
+            in
+            (match attempt.result with
+             | Error (Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)) -> ()
+             | Error error -> fail (Agent_core.Error.to_string error)
+             | Ok _ -> fail "a context-limit refusal completed the attempt");
+            check
+              string
+              "a refusal without observed activity has no effect"
+              "no_effect_observed"
+              (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)))
+;;
+
 (* A blank composition must not reach [Runtime_claude_code.config.system_prompt]
    as [None]. [None] means "omit --system-prompt", which since #33072 hands the
    turn Claude Code's built-in coding-agent prompt while masc's tool set and
@@ -1899,6 +1950,16 @@ let () =
         ; test_case "native Gate retains its session across overflow shrink" `Quick
             (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:true)
         ; test_case
+            "shrinks history after the CLI's blocking_limit refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "shrinks history after the CLI's rapid_refill_breaker refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
+        ; test_case
             "projects typed tool history and lifecycle"
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
@@ -1952,6 +2013,16 @@ let () =
             "unbounded turn keeps subscription probe bounded"
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case
+            "unshrinkable blocking_limit reports no effect"
+            `Quick
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "unshrinkable rapid_refill_breaker without activity reports no effect"
+            `Quick
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
         ; test_case
             "blank system prompt is refused not defaulted"
             `Quick

@@ -1911,8 +1911,8 @@ let planning_phase_label = function
    Actions and ARMED rows say it with. The Actions row called [c] "Complete"
    beside a Next line saying [c] submits the goal for verification, and the
    ARMED row called it "Request Completion": the key sends the goal to the
-   completion judge, and completing it is a confirmation this screen does not
-   offer. *)
+   completion judge. The separate operator confirmation reads and binds the
+   exact proof through the admin route. *)
 let planning_action_key = function
   | Goal_phase.Public_action.Request_complete -> "c"
   | Goal_phase.Public_action.Drop -> "x"

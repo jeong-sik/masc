@@ -84,7 +84,9 @@ let test_append_is_owner_only_and_durable () =
       | rows ->
         Alcotest.failf "expected one readable row, got %d" (List.length rows))
 
-let test_incomplete_tail_fails_closed_without_rewrite () =
+(* A crash mid-append leaves a last row with no newline. The next append cuts
+   it back to the last complete row and commits; the rows before it stay. *)
+let test_incomplete_tail_is_cut_before_the_next_append () =
   let base_dir = temp_base_path "keeper-chat-store-incomplete" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
@@ -95,23 +97,26 @@ let test_incomplete_tail_fails_closed_without_rewrite () =
       in
       Alcotest.(check bool) "seed append succeeds" true (Result.is_ok initial);
       let path = persisted_path base_dir in
-      let corrupt = "{\"role\":\"assistant\"" in
-      let output = open_out_bin path in
-      output_string output corrupt;
+      let output =
+        open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path
+      in
+      output_string output "{\"role\":\"assistant\"";
       close_out output;
       let result =
         S.append_assistant_message_result ~base_dir ~keeper_name
-          ~content:"must not append" ()
+          ~content:"after the torn row" ()
       in
       Alcotest.(check bool)
-        "incomplete tail is explicit" true (Result.is_error result);
-      let input = open_in_bin path in
-      let persisted = really_input_string input (in_channel_length input) in
-      close_in input;
-      Alcotest.(check string)
-        "incomplete bytes remain untouched"
-        corrupt
-        persisted)
+        "the append after a torn row commits" true (Result.is_ok result);
+      match S.load ~base_dir ~keeper_name with
+      | [ seed; after ] ->
+        Alcotest.(check string)
+          "the complete row before the fragment stays" "seed" seed.content;
+        Alcotest.(check string)
+          "the new row follows it" "after the torn row" after.content
+      | rows ->
+        Alcotest.failf "expected the seed row and the new one, got %d"
+          (List.length rows))
 
 let () =
   Alcotest.run "keeper_chat_store_append_result"
@@ -123,7 +128,7 @@ let () =
             test_error_when_path_under_a_file;
           Alcotest.test_case "owner-only durable append" `Quick
             test_append_is_owner_only_and_durable;
-          Alcotest.test_case "incomplete tail fails closed" `Quick
-            test_incomplete_tail_fails_closed_without_rewrite;
+          Alcotest.test_case "incomplete tail is cut before the next append"
+            `Quick test_incomplete_tail_is_cut_before_the_next_append;
         ] );
     ]

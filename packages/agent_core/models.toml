@@ -955,9 +955,14 @@ supports_reasoning = true
 # (2026-08-15, closes #28749); confirmed by a live probe of this row on
 # 2026-08-04: message keys ['role','content','reasoning'].
 reasoning_streaming_format = "delta:reasoning"
-# Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
-# recommended on all turns). Without this, the base replay policy is no_replay.
-reasoning_replay = "preserve_always"
+# Kimi K2 docs ask for reasoning content to be replayed: required on tool
+# turns, recommended on all turns. That is Moonshot's own API rule. This row
+# rides Ollama's /v1 wire, where the boundary is the one the deepseek-v4-flash
+# row above states: the active tool-call sequence, not every prior turn. This
+# value keeps the reasoning of the latest user turn's tool calls, so the model
+# still sees what it just called inside a turn (#31424), and drops the
+# thinking of completed turns. The kimi-k3 row on this provider does the same.
+reasoning_replay = "latest_user_turn_tool_calls"
 supports_response_format_json = true
 supports_multimodal_inputs = true
 supports_image_input = true
@@ -2335,6 +2340,9 @@ capabilities_base = "openai_chat_extended"
 
 [[providers]]
 id = "claude"
+# 2026-09-19: documented request suppression, independent of model capability.
+# https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use
+supports_parallel_tool_suppression = true
 kind = "anthropic"
 base_url = "https://api.anthropic.com"
 request_path = "/v1/messages"
@@ -2369,6 +2377,9 @@ capabilities_base = "openai_chat"
 
 [[providers]]
 id = "openai-responses"
+# 2026-09-19: documented request suppression, independent of model capability.
+# https://developers.openai.com/api/docs/guides/function-calling#parallel-function-calling
+supports_parallel_tool_suppression = true
 kind = "openai_compat"
 base_url = "https://api.openai.com"
 request_path = "/v1/responses"

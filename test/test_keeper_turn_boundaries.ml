@@ -54,6 +54,21 @@ let history_restarted ?(trace_id = "trace") () : Boundaries.record =
 
 let atom_history = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "digest" }
 
+(* The compiler keeps the two lists below honest. A constructor added to either
+   type makes one of these matches inexhaustive and the build stops, so a list
+   named for every kind cannot quietly hold fewer than every kind. Without them
+   the round-trip test keeps its name and covers one case less. *)
+let _every_position_is_listed : Boundaries.position -> unit = function
+  | Boundaries.Atom_history _
+  | Boundaries.Empty_atom_history
+  | Boundaries.No_atom_history
+  | Boundaries.Stale_noop -> ()
+;;
+
+let _every_history_at_start_is_listed : Boundaries.history_at_start -> unit = function
+  | Boundaries.Fresh_history | Boundaries.Continued_history -> ()
+;;
+
 let every_position =
   [ atom_history
   ; Boundaries.Empty_atom_history
@@ -400,8 +415,19 @@ let test_purge_plan_removes_the_turn_boundary_log () =
     (List.exists (fun entry -> entry = Shutdown.Keeper_turn_boundaries_artifact) plan)
 ;;
 
-(* A store whose last append never completed: it ends mid-line, and refuses
-   every append until process-start recovery truncates the torn tail. *)
+(* A store no append can open: a directory sits where the file goes. *)
+let block_the_store ~keepers_dir =
+  Fs_compat.mkdir_p keepers_dir;
+  Unix.mkdir (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id) 0o700
+;;
+
+let the_store_is_still_blocked ~keepers_dir =
+  let path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  check bool "the refused line changed the store" true
+    (Sys.is_directory path && Array.length (Sys.readdir path) = 0)
+;;
+
+(* A store whose last append never completed: it ends mid-line. *)
 let plant_torn_tail ~keepers_dir =
   let torn = {|{"kind":"turn_ended"|} in
   Fs_compat.mkdir_p keepers_dir;
@@ -554,20 +580,35 @@ let test_a_superseded_clear_writes_nothing () =
     (List.length (read_lines ~keepers_dir))
 ;;
 
-(* A store that ends mid-line refuses every append. The history is emptied all
-   the same, so the outcome has to say the line is missing: the turns that
-   follow are refused their lines as well, so until the torn tail is repaired
-   nothing explains why the history started over. *)
+(* The history is emptied even when the store refuses the line, so the outcome
+   has to say the line is missing: until a later turn writes it, nothing in the
+   store explains why the history started over. *)
 let test_a_clear_whose_line_is_refused_says_so () =
   with_saved_history ~turn_count:3
   @@ fun ~keepers_dir ~base_dir ~session context ->
-  plant_torn_tail ~keepers_dir;
+  block_the_store ~keepers_dir;
   (match clear ~keepers_dir ~session context with
    | Clear.Cleared { cleared_message_count = _; marker = Error _ } -> ()
    | (Clear.Cleared { marker = Ok (); _ } | Clear.Superseded _ | Clear.Save_unconfirmed _) as
      other -> failf "expected a cleared history with no line: %s" (describe_outcome other));
   check bool "the history was emptied" true
     (List.for_all is_system (saved_messages ~base_dir))
+;;
+
+(* A crash part way through an append leaves the store ending mid-line. The
+   clear's line still lands: the append cuts the fragment and writes after the
+   last complete line. *)
+let test_a_torn_tail_does_not_cost_the_clear_its_line () =
+  with_saved_history ~turn_count:3
+  @@ fun ~keepers_dir ~base_dir:_ ~session context ->
+  plant_torn_tail ~keepers_dir;
+  (match clear ~keepers_dir ~session context with
+   | Clear.Cleared { cleared_message_count = _; marker = Ok () } -> ()
+   | (Clear.Cleared { marker = Error _; _ } | Clear.Superseded _ | Clear.Save_unconfirmed _)
+     as other -> failf "expected a cleared history and its line: %s" (describe_outcome other));
+  match read_lines ~keepers_dir with
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted _ }) ] -> ()
+  | lines -> failf "expected the restart line alone, read %d" (List.length lines)
 ;;
 
 (* {1 The start of a turn} *)
@@ -599,7 +640,7 @@ let describe_notice = function
 
 (* A reader may act on a restart line as soon as it sees it, so the line must
    not be ahead of the restart. A turn that knows the saved history holds no
-   atom can say so at once. A turn whose checkpoint could not be loaded has not
+   atom can say so at once. A turn whose checkpoint version was superseded has not
    seen the saved history, which may still hold atoms: if it said so at its
    start, a reader could re-read the old history, pass the line, and have no
    line left when a save of that turn then replaces the history. *)
@@ -612,7 +653,7 @@ let test_the_notice_follows_what_the_turn_saw () =
     Run_context.Saved_history_loaded "at turn start";
   expect "nothing is saved" Boundaries.Fresh_history Run_context.Saved_history_absent
     "at turn start";
-  expect "the load failed" Boundaries.Fresh_history Run_context.Saved_history_unread
+  expect "the checkpoint version was superseded" Boundaries.Fresh_history Run_context.Saved_history_superseded
     "after the first accepted save";
   expect "a history with atoms" Boundaries.Continued_history
     Run_context.Saved_history_loaded "none";
@@ -620,7 +661,7 @@ let test_the_notice_follows_what_the_turn_saw () =
      are listed so that the function is total without a wildcard. *)
   expect "continued, absent" Boundaries.Continued_history Run_context.Saved_history_absent
     "none";
-  expect "continued, unread" Boundaries.Continued_history Run_context.Saved_history_unread
+  expect "continued, superseded" Boundaries.Continued_history Run_context.Saved_history_superseded
     "none"
 ;;
 
@@ -660,7 +701,7 @@ let test_a_restart_is_recorded_from_either_site () =
 let test_a_refused_line_does_not_stop_the_turn () =
   with_workspace
   @@ fun ~config ~keepers_dir ->
-  plant_torn_tail ~keepers_dir;
+  block_the_store ~keepers_dir;
   List.iter
     (fun site ->
        let before = restart_failures site in
@@ -670,9 +711,7 @@ let test_a_refused_line_does_not_stop_the_turn () =
          (before +. 1.0)
          (restart_failures site))
     [ Turn_helpers.At_turn_start; Turn_helpers.After_first_save ];
-  match Boundaries.read ~keepers_dir ~keeper_id with
-  | Ok [ (1, Error Boundaries.Incomplete_line) ] -> ()
-  | Ok _ | Error _ -> fail "the refused line changed the store"
+  the_store_is_still_blocked ~keepers_dir
 ;;
 
 (* Every pair. The one that is easy to get wrong is a turn whose finalize save
@@ -733,6 +772,8 @@ let () =
             test_a_superseded_clear_writes_nothing
         ; test_case "a clear whose line is refused says so" `Quick
             test_a_clear_whose_line_is_refused_says_so
+        ; test_case "a torn tail does not cost the clear its line" `Quick
+            test_a_torn_tail_does_not_cost_the_clear_its_line
         ] )
     ; ( "restart notice"
       , [ test_case "the notice follows what the turn saw" `Quick

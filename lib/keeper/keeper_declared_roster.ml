@@ -24,6 +24,25 @@ let missing ~base_path ~persisted_names =
     in
     { name; requirements })
 
+let declaration_only_key = "declaration_only"
+
+type row_kind = Declaration_row | Runtime_row
+
+(* A keeper list mixes the rows [to_json] builds with the runtime rows built
+   from persisted metadata. Only [to_json] writes [declaration_only], always
+   [true]; a runtime row does not carry the key. [false] says the same thing as
+   the key being absent. *)
+let row_kind_of_json json =
+  match Json_util.assoc_member_opt declaration_only_key json with
+  | None | Some (`Bool false) -> Ok Runtime_row
+  | Some (`Bool true) -> Ok Declaration_row
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "keeper row %s is not a boolean: %s"
+         declaration_only_key
+         (Yojson.Safe.to_string other))
+
 let to_json row =
   `Assoc
     [ "name", `String row.name
@@ -32,7 +51,7 @@ let to_json row =
     ; "phase", `String "Offline"
     ; "registered", `Bool false
     ; "keepalive_running", `Bool false
-    ; "declaration_only", `Bool true
+    ; declaration_only_key, `Bool true
     ; "preparation_requirements", `List (List.map (fun requirement ->
         `String (requirement_code requirement)) row.requirements)
     ]

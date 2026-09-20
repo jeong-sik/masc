@@ -52,11 +52,11 @@ let () =
             ~wire:None
             ~allow_bare_fallback:true
             ~provider_label:label
-            ~model_id:row.id_prefix
+            ~model_id:(Llm_provider.Model_identifiers.Id_prefix.to_string row.id_prefix)
         in
         Printf.printf
           "%s\t%s\t%s\t%s\n"
-          row.id_prefix
+          (Llm_provider.Model_identifiers.Id_prefix.to_string row.id_prefix)
           label
           (match row.accepted_reasoning_efforts with
            | None -> "-"

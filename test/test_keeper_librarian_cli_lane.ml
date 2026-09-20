@@ -312,6 +312,42 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
       (Runtime.For_testing.classified_error_detail error)
 ;;
 
+let test_invalid_provider_response_does_not_run_cli ?(requires_token_measurement = false) () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  let server =
+    Fixture.start_server ~sw ~net ~clock (Fixture.Reply "not-provider-json")
+  in
+  ignore
+    (Fixture.publish_registry
+       ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+       ~lane_id:"librarian_exact"
+       ~slot_ids:[ "librarian-invalid-provider-response" ]
+       (Fixture.resolver_snapshot
+          ~requires_token_measurement
+          ~source:"librarian non-advanceable terminal"
+          [ { Fixture.id = "librarian-invalid-provider-response"
+            ; base_url = server.base_url
+            } ])
+      : Runtime_exact_output_registry.t);
+  let cli_calls = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr cli_calls;
+    Ok (Yojson.Safe.to_string valid_selection_json)
+  in
+  let result = execute ~net ~clock ~base_path ~runner in
+  check int "provider response came from one HTTP request" 1 (Fixture.post_count server);
+  if requires_token_measurement then
+    check (list string) "only token measurement reached HTTP; generation did not start"
+      [ "/v1/messages/count_tokens" ] (Fixture.request_paths server);
+  check int "a non-advanceable terminal does not run CLI" 0 !cli_calls;
+  match result with
+  | Ok _ -> fail "a CLI answer must not replace the invalid provider response"
+  | Error error ->
+    check bool "the original execution failure is preserved" true
+      (Runtime.For_testing.classified_error_kind error = Current.Exact_execution_failure)
+;;
+
 let test_failure_reaches_journal
       ~cli_only
       ~cli_slot_ids
@@ -573,6 +609,12 @@ let () =
               ~kind:Current.Exact_setup_failure ~calls:1 ())
         ; test_case "API domain failure kind survives failed CLI fallback" `Quick
             test_domain_failure_kind_survives_failed_cli_slot
+        ; test_case "an invalid provider response does not run CLI" `Quick
+            (fun () -> test_invalid_provider_response_does_not_run_cli ())
+        ; test_case "a dispatched measurement failure does not run CLI" `Quick
+            (fun () ->
+              test_invalid_provider_response_does_not_run_cli
+                ~requires_token_measurement:true ())
         ; test_case "CLI execution failure reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false
               ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Error "synthetic bridge failure")

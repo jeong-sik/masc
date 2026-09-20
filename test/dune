@@ -35,7 +35,18 @@
 (test
  (name test_librarian_continuity_report)
  (modules test_librarian_continuity_report)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc yojson digestif))
+
+(rule
+ (alias runtest-test_librarian_continuity_cli)
+ (deps test_librarian_continuity_cli.py ../bin/masc_librarian_continuity.exe
+  ../scripts/fixtures/release-evidence/runtime.toml)
+ (action (run python3 %{dep:test_librarian_continuity_cli.py}
+  --binary %{dep:../bin/masc_librarian_continuity.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_librarian_continuity_cli)))
 
 (test
  (name test_keeper_peer_artifact)
@@ -4193,6 +4204,15 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
 
+(rule
+ (alias runtest-test_tui_fixture_shutdown)
+ (deps test_tui_fixture_shutdown.py test_tui_keyboard_input.py)
+ (action (run python3 %{dep:test_tui_fixture_shutdown.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_fixture_shutdown)))
+
 ; The harness decides what runs from --list, --scenario and the family name
 ; before a terminal opens, and no rule here passes either flag. This suite
 ; drives that choice with a stand-in binary, and holds the harness's family
@@ -5034,7 +5054,9 @@
 (test
  (name test_tui_footer_status_items)
  (modules test_tui_footer_status_items)
- (libraries alcotest str masc_tui_footer masc_tui_message_layout))
+ (libraries alcotest str unix
+  masc_tui_footer masc_tui_message_layout
+  masc_tui_keys masc_tui_render_prim masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_answering)

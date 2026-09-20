@@ -5,9 +5,11 @@ val remember_turn : base_path:string -> keeper_name:string -> trace_id:string ->
     and never call this function. *)
 
 val forget_turn : base_path:string -> keeper_name:string -> unit
-(** Remove a direct official-client closure when the same Keeper resumes on an
-    Agent-Core checkpoint. The durable range is then the only conversation
-    producer for that Keeper. *)
+(** Retire an already-attempted direct official-client closure when the same
+    Keeper resumes on an Agent-Core checkpoint. A pending closure may already
+    be queued behind another memory-lane unit and is retained until that unit
+    can attempt its evidence, then retired by that exact-identity attempt.
+    An exception leaves it retryable. *)
 val install : unit -> unit
 (** Install after the detached memory executor. Queue producers never wait for
     this extraction; source selection happens when the latest unit runs. *)

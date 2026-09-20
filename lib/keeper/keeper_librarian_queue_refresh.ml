@@ -7,7 +7,10 @@ let policy_equal left right =
   String.equal left.instructions right.instructions
   && Option.equal Keeper_id.Task_id.equal left.task_id right.task_id
 
-type attempt_state = Pending | Attempted of policy
+type attempt_state =
+  | Pending
+  | Pending_retire_after_attempt
+  | Attempted of policy
 
 type remembered =
   { trace_id : string
@@ -29,7 +32,14 @@ let remember_turn ~base_path ~keeper_name ~trace_id process =
 let forget_turn ~base_path ~keeper_name =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   Stdlib.Mutex.protect mu (fun () ->
-    Atomic.set remembered (List.remove_assoc key (Atomic.get remembered)))
+    match List.assoc_opt key (Atomic.get remembered) with
+    | Some ({ attempt_state = Pending; _ } as evidence) ->
+      Atomic.set remembered
+        ( (key, { evidence with attempt_state = Pending_retire_after_attempt })
+        :: List.remove_assoc key (Atomic.get remembered) )
+    | Some { attempt_state = Pending_retire_after_attempt; _ } -> ()
+    | Some { attempt_state = Attempted _; _ } | None ->
+      Atomic.set remembered (List.remove_assoc key (Atomic.get remembered)))
 ;;
 
 let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed ~trigger =
@@ -38,7 +48,7 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
   | Some evidence when String.equal evidence.trace_id trace_id ->
     (match evidence.attempt_state, sources_changed with
      | Attempted policy, false when policy_equal policy (policy_of_meta meta) -> ()
-     | Pending, _ | Attempted _, _ ->
+     | Pending, _ | Pending_retire_after_attempt, _ | Attempted _, _ ->
        evidence.process ~meta trigger;
        (* Unit return only proves an attempt. In particular run_best_effort can
           return without committing. Exceptions, including cancellation, leave
@@ -46,9 +56,13 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
        Stdlib.Mutex.protect mu (fun () ->
          match List.assoc_opt key (Atomic.get remembered) with
          | Some latest when latest.identity == evidence.identity ->
-           Atomic.set remembered
-             ((key, {latest with attempt_state = Attempted (policy_of_meta meta)}) ::
-              List.remove_assoc key (Atomic.get remembered))
+           (match latest.attempt_state with
+            | Pending_retire_after_attempt ->
+              Atomic.set remembered (List.remove_assoc key (Atomic.get remembered))
+            | Pending | Attempted _ ->
+              Atomic.set remembered
+                ( (key, { latest with attempt_state = Attempted (policy_of_meta meta) })
+                :: List.remove_assoc key (Atomic.get remembered) ))
          | Some _ | None -> ()));
     true
   | Some _ | None -> false

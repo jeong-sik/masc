@@ -1139,7 +1139,8 @@ let test_purge_plan_removes_memory_sidecars () =
 ;;
 
 let durable_range_id : Current.durable_range_id =
-  { trace_id = "trace"
+  { receipt_scope = "runtime-cluster-a"
+  ; trace_id = "trace"
   ; history_start_boundary_line = 1
   ; start_atom = 1
   ; end_atom = 2
@@ -1150,14 +1151,24 @@ let durable_range_id : Current.durable_range_id =
 ;;
 
 let require_no_committed_range ~keepers_dir label =
-  match Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper" with
+  match
+    Current.committed_durable_range
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope
+  with
   | Ok None -> ()
   | Ok (Some _) -> fail label
   | Error detail -> fail detail
 ;;
 
 let require_committed_range ~keepers_dir label =
-  match Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper" with
+  match
+    Current.committed_durable_range
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope
+  with
   | Ok (Some range_id) -> range_id
   | Ok None -> fail label
   | Error detail -> fail detail
@@ -1238,6 +1249,42 @@ let test_committed_range_receipt_survives_retract_and_replace () =
     (require_committed_range
        ~keepers_dir
        "replace erased the committed range receipt")
+;;
+
+let test_committed_range_receipts_are_scoped_per_runtime_cluster () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let cluster_a = durable_range_id in
+  let cluster_b =
+    { durable_range_id with
+      receipt_scope = "runtime-cluster-b"
+    ; trace_id = "trace-b"
+    ; end_atom = 3
+    ; last_atom_digest = String.make 64 'b'
+    ; end_boundary_line = 3
+    ; boundary_lines_seen = 3
+    }
+  in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_a () |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_b () |> require_ok);
+  let read scope =
+    match
+      Current.committed_durable_range
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~receipt_scope:scope
+    with
+    | Ok (Some range_id) -> range_id
+    | Ok None -> failf "cluster receipt %s was replaced" scope
+    | Error detail -> fail detail
+  in
+  check string
+    "cluster A receipt survives cluster B commit"
+    cluster_a.trace_id
+    (read cluster_a.receipt_scope).trace_id;
+  check string
+    "cluster B has its own receipt"
+    cluster_b.trace_id
+    (read cluster_b.receipt_scope).trace_id
 ;;
 
 let test_stale_replace_rejects_concurrent_explicit_write () =
@@ -2356,6 +2403,10 @@ let () =
             "range receipt survives retract and replace"
             `Quick
             test_committed_range_receipt_survives_retract_and_replace
+        ; test_case
+            "range receipts are scoped per runtime cluster"
+            `Quick
+            test_committed_range_receipts_are_scoped_per_runtime_cluster
         ; test_case
             "journal recreated after purge sequence"
             `Quick

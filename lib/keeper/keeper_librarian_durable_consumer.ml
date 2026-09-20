@@ -127,14 +127,36 @@ let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest li
   | Some (line, recorded_at, turn_ref) -> Some (line, recorded_at, turn_ref)
 ;;
 
+let has_history_start_witness ~trace_id lines =
+  List.exists
+    (fun (_, decoded) ->
+       match decoded with
+       | Ok { B.event = B.History_restarted { trace_id = restarted }; _ } ->
+         String.equal restarted trace_id
+       | Ok
+           { B.event =
+               B.Turn_ended
+                 { turn_ref
+                 ; history_at_start = B.Fresh_history
+                 ; position = _
+                 }
+           ; _
+           } ->
+         String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+       | Ok _ | Error _ -> false)
+    lines
+;;
+
 let range_id_for_selection
+      ~receipt_scope
       ~trace_id
       ~(range : R.range)
       ~end_boundary_line
       ~boundary_lines_seen
   : Keeper_memory_os_current.durable_range_id
   =
-  { trace_id
+  { receipt_scope
+  ; trace_id
   ; history_start_boundary_line = range.history_start_boundary_line
   ; start_atom = range.start_atom
   ; end_atom = range.end_atom
@@ -315,18 +337,70 @@ let consume_one_with_extent ~write_progress_store ~extent ~config ~keeper_name ~
       Error (Keeper_meta_unreadable detail)
     | Error detail -> Error (Keeper_meta_unreadable detail)
   in
-  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  if not (R.may_have_unread ~trace_id ~lines ~progress)
+  let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let progress_is_current =
+    match progress with
+    | None -> true
+    | Some { P.position; _ } -> String.equal position.trace_id current_trace_id
+  in
+  if
+    progress_is_current
+    && not (R.may_have_unread ~trace_id:current_trace_id ~lines ~progress)
   then Ok Nothing_to_read
   else
-  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
-  let* checkpoint =
+  let load_checkpoint trace_id =
+    let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
     Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id)
-    |> Result.map_error (fun error -> Checkpoint_unreadable error)
   in
-  let messages = checkpoint.Agent_core.Checkpoint.messages in
-  let selection = R.select ~trace_id ~lines ~progress ~messages extent in
+  let current_selection ?progress () =
+    let* checkpoint =
+      load_checkpoint current_trace_id
+      |> Result.map_error (fun error -> Checkpoint_unreadable error)
+    in
+    let messages = checkpoint.Agent_core.Checkpoint.messages in
+    Ok
+      ( current_trace_id
+      , progress
+      , messages
+      , R.select ~trace_id:current_trace_id ~lines ~progress ~messages extent )
+  in
+  let current_selection_after_prior position =
+    if has_history_start_witness ~trace_id:current_trace_id lines
+    then current_selection ()
+    else Error (Position_in_other_trace position)
+  in
+  let* trace_id, selection_progress, messages, selection =
+    match progress with
+    | Some ({ P.position; _ } as previous)
+      when not (String.equal position.trace_id current_trace_id) ->
+      (match load_checkpoint position.trace_id with
+       | Ok checkpoint ->
+         let messages = checkpoint.Agent_core.Checkpoint.messages in
+         let selection =
+           R.select
+             ~trace_id:position.trace_id
+             ~lines
+             ~progress:(Some previous)
+             ~messages
+             extent
+         in
+         (match selection with
+          | R.Nothing_to_read -> current_selection_after_prior position
+          | R.Read _
+          | R.Baseline _
+          | R.Position_in_other_trace _
+          | R.Stop _ ->
+            Ok (position.trace_id, Some previous, messages, selection))
+       | Error Keeper_checkpoint_store.Not_found ->
+         (* A removed owner/session cannot finish its old trace. The current
+            trace's own fresh/restart boundary is the typed authority to read
+            from atom zero; without one the old position remains authoritative. *)
+         current_selection_after_prior position
+       | Error error -> Error (Checkpoint_unreadable error))
+    | None -> current_selection ()
+    | Some current -> current_selection ~progress:current ()
+  in
   match selection with
   | R.Nothing_to_read -> Ok Nothing_to_read
   | R.Position_in_other_trace position -> Error (Position_in_other_trace position)
@@ -355,6 +429,7 @@ let consume_one_with_extent ~write_progress_store ~extent ~config ~keeper_name ~
     in
     let selected_range_id =
       range_id_for_selection
+        ~receipt_scope:runtime_keepers_dir
         ~trace_id
         ~range
         ~end_boundary_line
@@ -364,16 +439,34 @@ let consume_one_with_extent ~write_progress_store ~extent ~config ~keeper_name ~
       Keeper_memory_os_current.committed_durable_range
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir
       |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
+    in
+    let recovery_range, recovery_boundary_line, recovery_boundary_lines_seen =
+      match R.select ~trace_id ~lines ~progress:selection_progress ~messages R.All_unread with
+      | R.Read { range; boundary_lines_seen } ->
+        (match
+           turn_boundary_for_position
+             ~trace_id
+             ~end_atom:range.end_atom
+             ~last_atom_digest:range.last_atom_digest
+             lines
+         with
+         | Some (line, _, _) -> range, line, boundary_lines_seen
+         | None -> range, end_boundary_line, boundary_lines_seen)
+      | R.Nothing_to_read
+      | R.Baseline _
+      | R.Position_in_other_trace _
+      | R.Stop _ -> range, end_boundary_line, boundary_lines_seen
     in
     (match committed_range with
      | Some committed
        when is_committed_prefix
               committed
               ~trace_id
-              ~selected:range
-              ~selected_end_boundary_line:end_boundary_line
-              ~selected_boundary_lines_seen:boundary_lines_seen
+              ~selected:recovery_range
+              ~selected_end_boundary_line:recovery_boundary_line
+              ~selected_boundary_lines_seen:recovery_boundary_lines_seen
               ~messages
               lines ->
       let next = progress_of_range_id committed in
@@ -385,7 +478,7 @@ let consume_one_with_extent ~write_progress_store ~extent ~config ~keeper_name ~
         (fun progress -> Progress_advanced progress)
      | Some _ | None ->
     let* after =
-      match progress with
+      match selection_progress with
       | None -> Ok None
       | Some { P.position; boundary_lines_seen } ->
         (match
@@ -403,17 +496,20 @@ let consume_one_with_extent ~write_progress_store ~extent ~config ~keeper_name ~
     let* current, expected_revision = current_memory ~keepers_dir:memory_keepers_dir ~keeper_name in
     let* () =
       match after with
-      | Some after when after >= ended_at ->
+      | Some after when after > ended_at ->
         Error (Counterpart_interval_non_monotone { after; before = ended_at })
       | None | Some _ -> Ok ()
     in
     let* counterpart_observations =
-      Keeper_librarian_input_sources.counterpart_observations_between_offloaded
-        ~base_dir:config.Workspace.base_path
-        ~keeper_name
-        ~after
-        ~before:ended_at
-      |> Result.map_error (fun error -> Counterpart_observations_unreadable error)
+      match after with
+      | Some after when Float.equal after ended_at -> Ok []
+      | None | Some _ ->
+        Keeper_librarian_input_sources.counterpart_observations_between_offloaded
+          ~base_dir:config.Workspace.base_path
+          ~keeper_name
+          ~after
+          ~before:ended_at
+        |> Result.map_error (fun error -> Counterpart_observations_unreadable error)
     in
     let input : Keeper_librarian.input =
       { turn_ref

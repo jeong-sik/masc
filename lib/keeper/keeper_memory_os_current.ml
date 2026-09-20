@@ -103,11 +103,13 @@ let durable_range_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ durable_range_receipt_suffix)
 ;;
 
-(* schema-compat: the removed [progress] receipt field existed only in the
-   unmerged #37208 head b0e7d3b4e1; no released binary wrote this new sidecar,
-   so [range_id] is its first deployable schema. *)
+(* schema-compat: the removed [progress] field and the earlier singleton
+   receipt both existed only on unmerged #37208 heads; no released binary
+   wrote this sidecar. [receipt_scope] and the ledger wrapper are therefore
+   still its first deployable schema. *)
 type durable_range_id =
-  { trace_id : string
+  { receipt_scope : string
+  ; trace_id : string
   ; history_start_boundary_line : int
   ; start_atom : int
   ; end_atom : int
@@ -130,7 +132,8 @@ type durable_range_receipt =
 
 let durable_range_id_to_json range_id =
   `Assoc
-    [ "trace_id", `String range_id.trace_id
+    [ "receipt_scope", `String range_id.receipt_scope
+    ; "trace_id", `String range_id.trace_id
     ; "history_start_boundary_line", `Int range_id.history_start_boundary_line
     ; "start_atom", `Int range_id.start_atom
     ; "end_atom", `Int range_id.end_atom
@@ -144,7 +147,8 @@ let durable_range_id_of_json = function
   | `Assoc fields ->
     let* () =
       exact_field_names_result
-        [ "trace_id"
+        [ "receipt_scope"
+        ; "trace_id"
         ; "history_start_boundary_line"
         ; "start_atom"
         ; "end_atom"
@@ -154,6 +158,7 @@ let durable_range_id_of_json = function
         ]
         fields
     in
+    let* receipt_scope = wire_string_field "receipt_scope" fields in
     let* trace_id = wire_string_field "trace_id" fields in
     let* history_start_boundary_line =
       wire_int_field "history_start_boundary_line" fields
@@ -163,6 +168,11 @@ let durable_range_id_of_json = function
     let* last_atom_digest = wire_string_field "last_atom_digest" fields in
     let* end_boundary_line = wire_int_field "end_boundary_line" fields in
     let* boundary_lines_seen = wire_int_field "boundary_lines_seen" fields in
+    let* () =
+      if String.equal (String.trim receipt_scope) ""
+      then wire_fail [ Wire_field "receipt_scope" ] Blank_string
+      else Ok ()
+    in
     let* () =
       if String.equal (String.trim trace_id) ""
       then wire_fail [ Wire_field "trace_id" ] Blank_string
@@ -198,7 +208,8 @@ let durable_range_id_of_json = function
       then Ok ()
       else wire_fail [ Wire_field "boundary_lines_seen" ] Not_positive
     in
-    { trace_id
+    { receipt_scope
+    ; trace_id
     ; history_start_boundary_line
     ; start_atom
     ; end_atom
@@ -261,15 +272,33 @@ let durable_range_receipt_of_json = function
     wire_here Expected_object
 ;;
 
-let read_durable_range_receipt ~keepers_dir ~keeper_id =
+let durable_range_receipts_to_json receipts =
+  `Assoc [ "receipts", `List (List.map durable_range_receipt_to_json receipts) ]
+;;
+
+let durable_range_receipts_of_json = function
+  | `Assoc fields ->
+    let* () = exact_field_names_result [ "receipts" ] fields in
+    let* receipts = wire_list_field "receipts" fields in
+    List.fold_right
+      (fun json accumulated ->
+         let* accumulated = accumulated in
+         let+ receipt = durable_range_receipt_of_json json in
+         receipt :: accumulated)
+      receipts
+      (Ok [])
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
+;;
+
+let read_durable_range_receipts ~keepers_dir ~keeper_id =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
   match Fs_compat.load_file_opt path with
-  | None -> Ok None
+  | None -> Ok []
   | Some content ->
     (match Yojson.Safe.from_string content with
      | json ->
-       durable_range_receipt_of_json json
-       |> Result.map (fun receipt -> Some receipt)
+       durable_range_receipts_of_json json
        |> Result.map_error (fun error ->
          Printf.sprintf
            "durable Librarian range receipt rejected path=%s: %s"
@@ -290,11 +319,10 @@ let read_durable_range_receipt ~keepers_dir ~keeper_id =
          (Printexc.to_string exn))
 ;;
 
-let write_durable_range_receipt ~keepers_dir ~keeper_id receipt =
+let write_durable_range_receipts ~keepers_dir ~keeper_id receipts =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
-  Fs_compat.save_file_atomic_strict
-    path
-    (Yojson.Safe.to_string (durable_range_receipt_to_json receipt))
+  Fs_compat.save_file_atomic_strict path
+    (Yojson.Safe.to_string (durable_range_receipts_to_json receipts))
   |> Result.map_error (fun message ->
     Printf.sprintf
       "durable Librarian range receipt write failed path=%s: %s"
@@ -302,7 +330,7 @@ let write_durable_range_receipt ~keepers_dir ~keeper_id receipt =
       message)
 ;;
 
-let remove_durable_range_receipt ~keepers_dir ~keeper_id =
+let remove_durable_range_receipts ~keepers_dir ~keeper_id =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
   match Sys.remove path with
   | () -> Ok ()
@@ -317,40 +345,55 @@ let remove_durable_range_receipt ~keepers_dir ~keeper_id =
 
 let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
 
-let reconcile_durable_range_receipt
+let receipt_range_id = function
+  | Prepared { range_id; _ } | Committed { range_id; _ } -> range_id
+;;
+
+let upsert_durable_range_receipt receipts receipt =
+  let scope = (receipt_range_id receipt).receipt_scope in
+  receipt
+  :: List.filter
+       (fun prior ->
+          not (String.equal (receipt_range_id prior).receipt_scope scope))
+       receipts
+;;
+
+let reconcile_durable_range_receipts
       ~keepers_dir
       ~keeper_id
       ~snapshot
   =
-  let* receipt = read_durable_range_receipt ~keepers_dir ~keeper_id in
-  match receipt with
-  | None -> Ok None
-  | Some (Prepared { range_id; snapshot_revision; snapshot_sha256 }) ->
-    if
-      match snapshot with
-      | Some (current, content) ->
-        Int.equal current.revision snapshot_revision
-        && String.equal (sha256 content) snapshot_sha256
-      | None -> false
-    then (
-      let committed = Committed { range_id; snapshot_revision; snapshot_sha256 } in
-      let+ () = write_durable_range_receipt ~keepers_dir ~keeper_id committed in
-      Some committed)
-    else
-      let+ () = remove_durable_range_receipt ~keepers_dir ~keeper_id in
-      None
-  | Some (Committed { range_id; snapshot_revision; snapshot_sha256 }) ->
-    let committed = Committed { range_id; snapshot_revision; snapshot_sha256 } in
-    (match snapshot with
-     | Some (current, _content) when current.revision > snapshot_revision ->
-       Ok (Some committed)
-     | Some (current, content)
-       when Int.equal current.revision snapshot_revision
-            && String.equal (sha256 content) snapshot_sha256 ->
-       Ok (Some committed)
-     | None | Some _ ->
-       let+ () = remove_durable_range_receipt ~keepers_dir ~keeper_id in
-       None)
+  let* receipts = read_durable_range_receipts ~keepers_dir ~keeper_id in
+  let reconciled =
+    List.filter_map
+      (function
+        | Prepared { range_id; snapshot_revision; snapshot_sha256 } ->
+          (match snapshot with
+           | Some (current, content)
+             when Int.equal current.revision snapshot_revision
+                  && String.equal (sha256 content) snapshot_sha256 ->
+             Some (Committed { range_id; snapshot_revision; snapshot_sha256 })
+           | None | Some _ -> None)
+        | Committed ({ snapshot_revision; snapshot_sha256; _ } as committed) ->
+          (match snapshot with
+           | Some (current, _content) when current.revision > snapshot_revision ->
+             Some (Committed committed)
+           | Some (current, content)
+             when Int.equal current.revision snapshot_revision
+                  && String.equal (sha256 content) snapshot_sha256 ->
+             Some (Committed committed)
+           | None | Some _ -> None))
+      receipts
+  in
+  if receipts = reconciled
+  then Ok reconciled
+  else if reconciled = []
+  then
+    let+ () = remove_durable_range_receipts ~keepers_dir ~keeper_id in
+    []
+  else
+    let+ () = write_durable_range_receipts ~keepers_dir ~keeper_id reconciled in
+    reconciled
 ;;
 
 let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename
@@ -1437,8 +1480,8 @@ let update_locked_with_error
            | None, None -> None
            | Some _, None | None, Some _ -> None
          in
-         let* (_ : durable_range_receipt option) =
-           reconcile_durable_range_receipt
+         let* durable_range_receipts =
+           reconcile_durable_range_receipts
              ~keepers_dir
              ~keeper_id
              ~snapshot
@@ -1469,14 +1512,16 @@ let update_locked_with_error
            match durable_range_id with
            | None -> Ok ()
            | Some range_id ->
-             write_durable_range_receipt
+             write_durable_range_receipts
                ~keepers_dir
                ~keeper_id
-               (Prepared
-                  { range_id
-                  ; snapshot_revision = next.revision
-                  ; snapshot_sha256
-                  })
+               (upsert_durable_range_receipt
+                  durable_range_receipts
+                  (Prepared
+                     { range_id
+                     ; snapshot_revision = next.revision
+                     ; snapshot_sha256
+                     }))
              |> Result.map_error store_error
          in
          match Fs_compat.save_file_atomic snapshot_path content with
@@ -1492,14 +1537,16 @@ let update_locked_with_error
             | None -> ()
             | Some range_id ->
               (match
-                 write_durable_range_receipt
+                 write_durable_range_receipts
                    ~keepers_dir
                    ~keeper_id
-                   (Committed
-                      { range_id
-                      ; snapshot_revision = next.revision
-                      ; snapshot_sha256
-                      })
+                   (upsert_durable_range_receipt
+                      durable_range_receipts
+                      (Committed
+                         { range_id
+                         ; snapshot_revision = next.revision
+                         ; snapshot_sha256
+                         }))
                with
                | Ok () -> ()
                | Error detail ->
@@ -1558,7 +1605,7 @@ let update_locked
     build
 ;;
 
-let committed_durable_range ~keepers_dir ~keeper_id =
+let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
   try
     Fs_compat.mkdir_p keepers_dir;
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -1571,16 +1618,20 @@ let committed_durable_range ~keepers_dir ~keeper_id =
             let+ current = parse snapshot_path content in
             Some (current, content)
         in
-        let* receipt =
-          reconcile_durable_range_receipt
+        let* receipts =
+          reconcile_durable_range_receipts
             ~keepers_dir
             ~keeper_id
             ~snapshot
         in
         Ok
-          (match receipt with
-           | Some (Committed { range_id; _ }) -> Some range_id
-           | None | Some (Prepared _) -> None)))
+          (List.find_map
+             (function
+               | Committed { range_id; _ }
+                 when String.equal range_id.receipt_scope receipt_scope ->
+                 Some range_id
+               | Committed _ | Prepared _ -> None)
+             receipts)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

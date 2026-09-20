@@ -555,6 +555,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                | Checkpoints.Purge_keeper_not_found _ -> `Not_found
                | Purge_keeper_active _
                | Purge_checkpoint_invalid _
+               | Purge_librarian_coordinates_present
                | Purge_source_changed -> `Conflict
                | Purge_checkpoint_unavailable _
                | Purge_backup_failed _

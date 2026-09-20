@@ -540,9 +540,10 @@ val load_all_result :
   base_dir:string -> keeper_name:string -> (chat_message list, string) result
 (** Fail-closed whole-transcript reader for consumers whose durable cursor
     advances past the returned rows. Unlike {!load_all}, one unreadable row or
-    an unknown typed [speaker_authority], an incomplete final row, or a store
-    read failure is an error rather than a silently shorter history. Missing
-    authority remains valid for rows written without speaker provenance. *)
+    an unknown typed [speaker_authority], speaker identity without its
+    authority, an incomplete final row, or a store read failure is an error
+    rather than a silently shorter history. Missing authority remains valid
+    only for rows written without any speaker provenance. *)
 
 type page = { messages : chat_message list; has_more : bool }
 

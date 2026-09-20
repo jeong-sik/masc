@@ -190,6 +190,18 @@ let test_load_all_result_speaker_authority_contract () =
        | Ok messages ->
          Alcotest.failf "expected two strict rows, got %d" (List.length messages));
       write_file path
+        ({|{"id":"missing-authority","role":"user","content":"identified","ts":3.0,"speaker_id":"speaker-7"}|}
+         ^ "\n");
+      (match K.load_all_result ~base_dir ~keeper_name with
+       | Ok _ -> Alcotest.fail "strict load accepted speaker identity without authority"
+       | Error detail ->
+         Alcotest.(check string)
+           "identity requires typed authority"
+           (Printf.sprintf
+              "%s:1 speaker_id/speaker_name without speaker_authority"
+              path)
+           detail);
+      write_file path
         ({|{"id":"valid-before","role":"user","content":"before","ts":3.0,"speaker_authority":"owner"}|}
          ^ "\n"
          ^ {|{"id":"unknown-authority","role":"user","content":"unknown","ts":4.0,"speaker_authority":"admin"}|}

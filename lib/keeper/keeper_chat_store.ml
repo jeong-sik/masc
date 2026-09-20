@@ -1920,6 +1920,7 @@ let append_user_message_once
 
 type strict_decode_error =
   | Unknown_speaker_authority of string
+  | Missing_speaker_authority
 
 type parsed_line =
   { message : chat_message option
@@ -1992,15 +1993,15 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
               None, Some (Unknown_speaker_authority label))
       | None ->
           (match speaker_id, speaker_name with
-           | None, None -> ()
+           | None, None -> None, None
            | _ ->
                (* id/name without an authority class never comes from our
                   writer; report so the producer gets fixed. *)
                report_persistence_read_drop
                  ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
-                 ~detail:"speaker_id/speaker_name without speaker_authority");
-          None, None
+                 ~detail:"speaker_id/speaker_name without speaker_authority";
+               None, Some Missing_speaker_authority)
     in
     let audio =
       match Json_util.assoc_member_opt "audio" json with
@@ -2579,6 +2580,12 @@ let parse_transcript_row_strict ~path ~redaction ~line_no line =
            path
            line_no
            label)
+    | { strict_decode_error = Some Missing_speaker_authority; _ } ->
+      `Unreadable
+        (Printf.sprintf
+           "%s:%d speaker_id/speaker_name without speaker_authority"
+           path
+           line_no)
     | { message = Some message; strict_decode_error = None } ->
       `Message (redact_message redaction message)
     | { message = None; strict_decode_error = None } ->

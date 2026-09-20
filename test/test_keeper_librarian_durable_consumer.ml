@@ -203,6 +203,55 @@ let establish_progress config ~trace_id first =
   | Consumer.Memory_not_committed -> fail "initial range did not advance"
 ;;
 
+let test_agent_core_handoff_retains_pending_official_evidence () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-official-to-agent-core" in
+  let attempts = ref 0 in
+  Queue_refresh.remember_turn
+    ~base_path:config.Workspace.base_path
+    ~keeper_name
+    ~trace_id
+    (fun ~meta:_ _trigger ->
+      incr attempts;
+      if !attempts = 1 then raise Exit);
+  Queue_refresh.forget_turn
+    ~base_path:config.Workspace.base_path
+    ~keeper_name;
+  (match
+     Queue_refresh.For_testing.attempt_remembered
+       ~base_path:config.Workspace.base_path
+       ~keeper_name
+       ~trace_id
+       ~meta:(meta trace_id)
+       ~sources_changed:false
+       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
+   with
+   | _ -> fail "cancelled official evidence attempt did not escape"
+   | exception Exit -> ());
+  check int "cancelled attempt retains its evidence" 1 !attempts;
+  let handled =
+    Queue_refresh.For_testing.attempt_remembered
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      ~trace_id
+      ~meta:(meta trace_id)
+      ~sources_changed:false
+      ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
+  in
+  check bool "pending official evidence survives Agent-Core handoff" true handled;
+  check int "pending official evidence succeeds on retry" 2 !attempts;
+  check bool
+    "handoff evidence retires immediately after its attempt"
+    false
+    (Queue_refresh.For_testing.attempt_remembered
+       ~base_path:config.Workspace.base_path
+       ~keeper_name
+       ~trace_id
+       ~meta:(meta trace_id)
+       ~sources_changed:false
+       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed)
+;;
+
 let test_n_tick_reads_every_intermediate_turn () =
   with_workspace @@ fun config ->
   let trace_id = "trace-n-tick" in
@@ -327,6 +376,7 @@ let test_committed_range_recovers_after_progress_write_failure () =
       Current.committed_durable_range
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
+        ~receipt_scope:(Workspace.keepers_runtime_dir config)
     with
     | Ok receipt -> receipt
     | Error detail -> fail detail
@@ -356,6 +406,7 @@ let test_committed_range_recovers_after_progress_write_failure () =
      Current.committed_durable_range
        ~keepers_dir:memory_keepers_dir
        ~keeper_id:keeper_name
+       ~receipt_scope:(Workspace.keepers_runtime_dir config)
    with
    | Ok (Some range_id) ->
      check int "explicit write preserves range A" committed_a.end_atom range_id.end_atom
@@ -396,6 +447,68 @@ let test_committed_range_recovers_after_progress_write_failure () =
     "model sees A once and then only B"
     [ [ "commit-a" ]; [ "commit-b" ] ]
     !committed_inputs
+;;
+
+let test_committed_wide_range_recovers_before_retry_narrowing () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-wide-receipt-recovery" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let first_three = first_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 first_three;
+  save_checkpoint config ~trace_id first_three 3;
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  let commits = ref 0 in
+  let commit ~expected_revision:_ ~range_id input =
+    incr commits;
+    match
+      Current.apply_disposition
+        ~durable_range_id:range_id
+        ~absorbed:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:(Float.of_int !commits)
+        ~source:
+          { kind = Current.Librarian
+          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
+          }
+        ~new_claims:[]
+        ()
+    with
+    | Ok _ -> true
+    | Error detail -> fail detail
+  in
+  let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
+    Error
+      (Progress.Write_failed
+         { path = "injected-progress-write"; message = "post-commit failure" })
+  in
+  (match
+     Consumer.For_testing.consume_one_with_progress_writer
+       ~write_progress_store:fail_progress
+       ~config
+       ~keeper_name
+       ~commit
+   with
+   | Error (Consumer.Progress_write_failed _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "wide committed range did not hit progress failure");
+  check int "wide range committed once" 1 !commits;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ _ ->
+         fail "narrow retry recommitted the already committed wide range")
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "receipt repairs the wide endpoint" 3 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "wide receipt was not recovered before narrowing");
+  check int "receipt recovery performs no second Memory commit" 1 !commits
 ;;
 
 let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
@@ -646,7 +759,7 @@ let test_unchanged_boundaries_do_not_require_checkpoint () =
   | Consumer.Progress_advanced _ -> fail "unchanged boundaries did not stop before checkpoint"
 ;;
 
-let test_trace_change_is_not_hidden_by_preflight () =
+let test_caught_up_prior_trace_transitions_to_current_trace () =
   with_workspace @@ fun config ->
   let trace_a = "trace-preflight-a" in
   establish_progress config ~trace_id:trace_a "a";
@@ -668,16 +781,109 @@ let test_trace_change_is_not_hidden_by_preflight () =
    | Error error -> fail (Progress.write_error_to_string error));
   write_meta config trace_b;
   save_checkpoint config ~trace_id:trace_b messages_b 1;
+  let carried = ref [] in
   match
     Consumer.consume_one
       ~config
       ~keeper_name
-      ~commit:(fun ~expected_revision:_ ~range_id:_ _ -> fail "trace mismatch called commit")
+      ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
+        carried := text_markers input;
+        true)
   with
-  | Error (Consumer.Position_in_other_trace position) ->
-    check string "prior trace remains visible" trace_a position.trace_id
   | Error error -> fail (Consumer.error_to_string error)
-  | Ok _ -> fail "trace change was hidden as no unread range"
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "progress transitions to current trace" trace_b progress.position.trace_id;
+    check (list string) "current trace starts at its fresh boundary" [ "b" ] !carried
+  | Ok _ -> fail "caught-up prior trace did not transition"
+;;
+
+let test_absent_prior_checkpoint_transitions_to_current_trace () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-removed-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let old_session_dir = Masc.Keeper_fs.keeper_session_dir config trace_a in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:old_session_dir ~session_id:trace_a);
+  let trace_b = "trace-removed-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  let carried = ref [] in
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
+        carried := text_markers input;
+        true)
+  with
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "removed trace is retired" trace_b progress.position.trace_id;
+    check (list string) "new trace remains readable" [ "b" ] !carried
+  | Ok _ -> fail "missing prior checkpoint left progress on the old trace"
+;;
+
+let test_absent_prior_checkpoint_requires_current_history_start () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-unwitnessed-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let old_session_dir = Masc.Keeper_fs.keeper_session_dir config trace_a in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:old_session_dir ~session_id:trace_a);
+  let trace_b = "trace-unwitnessed-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary
+    ~history_at_start:Boundaries.Continued_history
+    config
+    ~trace_id:trace_b
+    ~turn:1
+    ~recorded_at:2.0
+    messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ _ ->
+         fail "unwitnessed trace transition called commit")
+   with
+   | Error (Consumer.Position_in_other_trace position) ->
+     check string "old trace stays authoritative" trace_a position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "continued-only trace silently retired the old cursor");
+  match read_progress config with
+  | Some progress -> check string "old progress is unchanged" trace_a progress.position.trace_id
+  | None -> fail "unwitnessed transition removed progress"
+;;
+
+let test_unread_prior_trace_finishes_before_current_trace () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-unread-a" in
+  establish_progress config ~trace_id:trace_a "a-1";
+  let messages_a = [ message "a-1"; message "a-2" ] in
+  append_boundary config ~trace_id:trace_a ~turn:2 ~recorded_at:2.0 messages_a;
+  save_checkpoint config ~trace_id:trace_a messages_a 2;
+  let trace_b = "trace-unread-b" in
+  let messages_b = [ message "b-1" ] in
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:3.0 messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  let carried = ref [] in
+  let commit ~expected_revision:_ ~range_id:_ input =
+    carried := !carried @ [ text_markers input ];
+    true
+  in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "prior trace remains first" trace_a progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "unread prior trace did not advance");
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "current trace follows" trace_b progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "current trace did not follow prior trace");
+  check (list (list string))
+    "each trace is carried once in order"
+    [ [ "a-2" ]; [ "b-1" ] ]
+    !carried
 ;;
 
 let test_failed_long_range_retries_only_oldest_cut_point () =
@@ -793,6 +999,46 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
   | None -> fail "rejected interval removed progress"
 ;;
 
+let test_equal_boundary_timestamps_form_an_empty_counterpart_interval () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-equal-counterpart-boundary" in
+  write_meta config trace_id;
+  let first = [ message "turn-1" ] in
+  save_checkpoint config ~trace_id first 1;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:20.0 first;
+  (match consume config (fun ~expected_revision:_ ~range_id:_ _ -> true) with
+   | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Memory_not_committed -> fail "fixture progress did not advance");
+  let messages = first @ [ message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:20.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let chat_path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname chat_path);
+  Fs_compat.save_file
+    chat_path
+    ({|{"id":"outside-empty-interval","role":"user","content":"must not be read","ts":19.0,"speaker_authority":"unknown"}|}
+     ^ "\n");
+  let observed = ref None in
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
+         observed := Some input.Masc.Keeper_librarian.counterpart_observations;
+         true)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "equal interval advances" 2 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "equal interval did not advance");
+  match !observed with
+  | Some observations -> check int "equal interval is empty" 0 (List.length observations)
+  | None -> fail "equal interval did not reach commit"
+;;
+
 let test_unknown_speaker_authority_does_not_advance_progress () =
   with_workspace @@ fun config ->
   let trace_id = "trace-unknown-speaker-authority" in
@@ -837,6 +1083,46 @@ let test_unknown_speaker_authority_does_not_advance_progress () =
       1
       progress.position.end_atom
   | None -> fail "unreadable counterpart row removed progress"
+;;
+
+let test_missing_speaker_authority_does_not_advance_progress () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-missing-speaker-authority" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let chat_path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname chat_path);
+  (match
+     Fs_compat.save_file_atomic_strict
+       chat_path
+       ({|{"id":"missing-authority","role":"user","content":"do not lose me","ts":1.5,"speaker_id":"speaker-7"}|}
+        ^ "\n")
+   with
+   | Ok () -> ()
+   | Error detail -> failf "write chat fixture: %s" detail);
+  let commit_called = ref false in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ _ ->
+         commit_called := true;
+         true)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.Chat_store_unreadable _)) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "missing speaker authority advanced as absent evidence");
+  check bool "memory commit is not attempted" false !commit_called;
+  check_progress_end config 1
 ;;
 
 let test_torn_external_tail_retries_the_same_range_once () =
@@ -1242,6 +1528,82 @@ let test_same_name_clusters_keep_independent_ranges () =
           ~keeper_id:keeper_name))
 ;;
 
+let test_same_name_clusters_keep_independent_commit_receipts () =
+  with_workspace @@ fun default ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let a = config_in_cluster default "Receipt/A" in
+  let b = config_in_cluster default "Receipt/B" in
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:default.Workspace.base_path
+  in
+  let prepare config trace_id marker =
+    establish_progress config ~trace_id (marker ^ "-before");
+    let messages = [ message (marker ^ "-before"); message marker ] in
+    append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+    save_checkpoint config ~trace_id messages 2
+  in
+  prepare a "trace-receipt-a" "cluster-a";
+  prepare b "trace-receipt-b" "cluster-b";
+  let commits = ref 0 in
+  let commit ~expected_revision:_ ~range_id input =
+    incr commits;
+    match
+      Current.apply_disposition
+        ~durable_range_id:range_id
+        ~absorbed:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:(Float.of_int !commits)
+        ~source:
+          { kind = Current.Librarian
+          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
+          }
+        ~new_claims:[]
+        ()
+    with
+    | Ok _ -> true
+    | Error detail -> fail detail
+  in
+  let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
+    Error
+      (Progress.Write_failed
+         { path = "injected-progress-write"; message = "post-commit failure" })
+  in
+  let commit_without_progress config trace_id =
+    write_meta config trace_id;
+    match
+      Consumer.For_testing.consume_one_with_progress_writer
+        ~write_progress_store:fail_progress
+        ~config
+        ~keeper_name
+        ~commit
+    with
+    | Error (Consumer.Progress_write_failed _) -> ()
+    | Error error -> fail (Consumer.error_to_string error)
+    | Ok _ -> fail "cluster commit did not reach injected progress failure"
+  in
+  commit_without_progress a "trace-receipt-a";
+  commit_without_progress b "trace-receipt-b";
+  check int "both clusters committed Memory once" 2 !commits;
+  let recover config trace_id =
+    write_meta config trace_id;
+    match
+      Consumer.consume_one ~config ~keeper_name
+        ~commit:(fun ~expected_revision:_ ~range_id:_ _ ->
+          fail "cluster receipt recovery replayed Memory commit")
+    with
+    | Ok (Consumer.Progress_advanced progress) -> progress
+    | Error error -> fail (Consumer.error_to_string error)
+    | Ok _ -> fail "cluster receipt did not repair progress"
+  in
+  let a_progress = recover a "trace-receipt-a" in
+  let b_progress = recover b "trace-receipt-b" in
+  check string "A recovers its own receipt" "trace-receipt-a" a_progress.position.trace_id;
+  check string "B recovers its own receipt" "trace-receipt-b" b_progress.position.trace_id;
+  check int "receipt recovery performs no replay commits" 2 !commits
+;;
+
 let test_selected_range_bypasses_recent_window () =
   let messages = List.init 80 (fun index -> message (string_of_int index)) in
   let input : Masc.Keeper_librarian.input =
@@ -1474,32 +1836,48 @@ let () =
     [ ( "range lifecycle"
       , [ test_case "N ticks retain intermediate turns" `Quick
             test_n_tick_reads_every_intermediate_turn
+        ; test_case "Agent-Core handoff retains pending official evidence" `Quick
+            test_agent_core_handoff_retains_pending_official_evidence
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
         ; test_case "committed range repairs failed progress after restart" `Quick
             test_committed_range_recovers_after_progress_write_failure
+        ; test_case "committed wide range repairs before retry narrowing" `Quick
+            test_committed_wide_range_recovers_before_retry_narrowing
         ; test_case "receipt does not cross a restarted repeated endpoint" `Quick
             test_receipt_does_not_cross_restarted_history_with_repeated_endpoint
         ; test_case "historical range does not borrow current task" `Quick
             test_historical_range_does_not_borrow_the_current_task
         ; test_case "unchanged boundaries skip checkpoint" `Quick
             test_unchanged_boundaries_do_not_require_checkpoint
-        ; test_case "trace change is not hidden by preflight" `Quick
-            test_trace_change_is_not_hidden_by_preflight
+        ; test_case "caught-up prior trace transitions to current trace" `Quick
+            test_caught_up_prior_trace_transitions_to_current_trace
+        ; test_case "absent prior checkpoint transitions to current trace" `Quick
+            test_absent_prior_checkpoint_transitions_to_current_trace
+        ; test_case "absent prior checkpoint requires current history start" `Quick
+            test_absent_prior_checkpoint_requires_current_history_start
+        ; test_case "unread prior trace finishes before current trace" `Quick
+            test_unread_prior_trace_finishes_before_current_trace
         ; test_case "failed growing range retries oldest cut" `Quick
             test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick
             test_last_matching_boundary_wins_when_clock_moves_backward
         ; test_case "distinct backward clocks do not erase counterpart evidence" `Quick
             test_distinct_boundaries_reject_non_monotone_counterpart_interval
+        ; test_case "equal boundary clocks make an empty interval" `Quick
+            test_equal_boundary_timestamps_form_an_empty_counterpart_interval
         ; test_case "unknown speaker authority keeps durable progress" `Quick
             test_unknown_speaker_authority_does_not_advance_progress
+        ; test_case "missing speaker authority keeps durable progress" `Quick
+            test_missing_speaker_authority_does_not_advance_progress
         ; test_case "torn external tail retries the same range once" `Quick
             test_torn_external_tail_retries_the_same_range_once
         ; test_case "torn chat tail retries the same range once" `Quick
             test_torn_chat_tail_retries_the_same_range_once
         ; test_case "same-name clusters isolate range progress" `Quick
             test_same_name_clusters_keep_independent_ranges
+        ; test_case "same-name clusters isolate commit receipts" `Quick
+            test_same_name_clusters_keep_independent_commit_receipts
         ; test_case "selected range bypasses recent window" `Quick
             test_selected_range_bypasses_recent_window
         ; test_case "counterpart range exceeds recent windows" `Quick

@@ -54,8 +54,11 @@ val consume_one
     Without a newly observed restart, its [end_atom] is strictly greater than
     the position read by this call. A newer restart instead increases
     [boundary_lines_seen] and starts from atom zero: the resulting [end_atom]
-    may equal or precede the old one. A position from another trace is an
-    error, not an advance.
+    may equal or precede the old one. When metadata moves to another trace,
+    an available prior checkpoint is drained first. Once it is exhausted, or
+    when owner/session removal made it unavailable, the current trace's own
+    fresh/restart boundary authorizes the transition instead of leaving the
+    old cursor as a permanent stop.
 
     Under the progress store's single-writer contract, a fixed boundary
     snapshot and checkpoint therefore cannot select the same range again
@@ -64,9 +67,10 @@ val consume_one
 
     The Memory WAL sidecar stores the exact [range_id] passed to a successful
     [commit]. If the separate progress write then fails, the next pass first
-    recovers a committed prefix and advances only to its endpoint without
-    calling [commit] again. Later Memory writers preserve the receipt until a
-    newer durable range replaces it. *)
+    checks the original all-unread selection, before process-local retry
+    narrowing, and advances to the committed endpoint without calling [commit]
+    again. Later Memory writers preserve every runtime cluster's receipt until
+    a newer durable range in that same cluster replaces it. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)

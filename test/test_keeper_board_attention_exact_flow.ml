@@ -878,19 +878,25 @@ let test_persistence_failure_does_not_walk_the_cli_tail () =
       | Ok _ -> Alcotest.fail "a persistence failure must not become a judgment")))
 ;;
 
-(* The four AGENT_CORE bookkeeping failures all stay on the typed terminal
-   side of the transport decision. One real measurement failure supplies the
-   opaque visit, receipt, and evidence values needed to construct the closed
-   input variants without a test-only production hook. *)
+(* The four AGENT_CORE bookkeeping constructors all stay on the typed terminal
+   side of the transport decision. A successful measurement followed by a
+   failed dispatch callback supplies the opaque visit, receipt, and evidence
+   values needed to construct them without a test-only production hook. *)
 let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
   run_eio (fun ~sw ~net ~clock ->
     let id = "board-attention-bookkeeping-classification" in
-    let base_url = reserved_non_listening_loopback_base_url ~sw in
+    let server =
+      Fixture.start_server
+        ~sw
+        ~net
+        ~clock
+        (Fixture.Reply {|{"input_tokens":1}|})
+    in
     let snapshot =
       Fixture.resolver_snapshot
         ~requires_token_measurement:true
         ~source:"Board attention bookkeeping classification"
-        [ target id base_url ]
+        [ target id server.base_url ]
     in
     let admitted_target =
       Exact_output.admit_target_ref snapshot id |> Result.get_ok
@@ -903,7 +909,7 @@ let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
         ~schema:Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
         ~minimum_guarantee:Exact_output.Json_syntax
     in
-    let flow =
+    let start_flow () =
       Exact_output.snapshot_flow
         ~first:flow_candidate
         ~rest:[]
@@ -913,58 +919,69 @@ let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
       |> Exact_output.start_flow
       |> Result.get_ok
     in
-    let raw_failure =
+    let measurement = ref None in
+    let captured_failure =
       Exact_output.execute_flow_once
         ~net
         ~clock
-        ~before_measurement_dispatch:(fun _ -> Error "measurement intent")
+        ~before_measurement_dispatch:(fun receipt ->
+          measurement := Some receipt;
+          Ok ())
         ~on_measurement_terminal:(fun _ -> Ok ())
-        ~before_dispatch:(fun _ -> Alcotest.fail "measurement failure reached dispatch")
+        ~before_dispatch:(fun _ -> Error "capture admitted candidate")
         ~before_advance:(fun ~failed:_ ~next:_ ->
-          Alcotest.fail "measurement failure advanced")
-        ~validate:(fun _ -> Alcotest.fail "measurement failure reached validation")
-        flow
+          Alcotest.fail "dispatch callback failure advanced")
+        ~validate:(fun _ -> Alcotest.fail "dispatch callback failure reached validation")
+        (start_flow ())
     in
-    match raw_failure with
+    match captured_failure, !measurement with
     | Error
         (Exact_output.Flow_execution_terminal
            { cause =
-               (Exact_output.Flow_before_measurement_dispatch_callback_failed
-                  { measurement; evidence; _ } as before_measurement)
+               Exact_output.Flow_before_dispatch_callback_failed
+                 { candidate; evidence; _ }
            ; _
-           }) ->
-      let visit =
-        match evidence.admissions with
-        | Exact_output.Candidate_admitted admitted :: _ -> admitted.visit
-        | Exact_output.Candidate_rejected _ :: _ | [] ->
-          Alcotest.fail "measurement failure lost its admitted visit"
-      in
+           }), Some measurement ->
+      let visit = candidate.visit in
       let failures =
-        [ Exact_output.Flow_attempt_start_failed
-            { candidate = visit
-            ; cause = Exact_output.Call_id_generation_failed "call id"
-            ; evidence
-            }
-        ; Exact_output.Flow_measurement_start_failed
-            { candidate = visit
-            ; cause =
-                Exact_output.Measurement_operation_id_generation_failed "operation id"
-            ; evidence
-            }
-        ; before_measurement
-        ; Exact_output.Flow_measurement_terminal_callback_failed
-            { measurement; cause = "measurement terminal"; evidence }
+        [ ( Exact_output.Flow_attempt_start_failed
+              { candidate = visit
+              ; cause = Exact_output.Call_id_generation_failed "call id"
+              ; evidence
+              }
+          , Some "call_id_generation_failed detail=\"call id\"" )
+        ; ( Exact_output.Flow_measurement_start_failed
+              { candidate = visit
+              ; cause =
+                  Exact_output.Measurement_operation_id_generation_failed "operation id"
+              ; evidence
+              }
+          , Some "operation_id_generation_failed detail=\"operation id\"" )
+        ; ( Exact_output.Flow_before_measurement_dispatch_callback_failed
+              { measurement; cause = "measurement intent"; evidence }
+          , None )
+        ; ( Exact_output.Flow_measurement_terminal_callback_failed
+              { measurement; cause = "measurement terminal"; evidence }
+          , None )
         ]
       in
       List.iter
-        (fun failure ->
+        (fun (failure, expected_cause) ->
            match Exact_flow.terminal_of_flow_error failure with
-           | Exact_flow.Flow_bookkeeping_failed _ -> ()
+           | Exact_flow.Flow_bookkeeping_failed { detail; _ } ->
+             Option.iter
+               (fun expected ->
+                  Alcotest.(check bool)
+                    "bookkeeping cause reaches the durable detail"
+                    true
+                    (contains_substring ~needle:expected detail))
+               expected_cause
            | Exact_flow.Providers_exhausted _ ->
              Alcotest.fail "bookkeeping failure was classified as provider exhaustion"
            | _ -> Alcotest.fail "bookkeeping failure lost its typed terminal")
         failures
-    | Ok _ | Error _ -> Alcotest.fail "fixture did not reach measurement bookkeeping")
+    | Ok _, _ | Error _, _ ->
+      Alcotest.fail "fixture did not retain measurement and admitted candidate")
 ;;
 
 (* Jev goes out through the pooled client, which needs a pool on this domain;

@@ -20,6 +20,8 @@ SOURCE_MODULES = (
     "lib/keeper/keeper_librarian_absorb_gate.ml",
     "lib/keeper/keeper_librarian_absorb_gate.mli",
     "lib/keeper/keeper_librarian_runtime.ml",
+    "lib/typesafeai/typesafeai_config.ml",
+    "lib/typesafeai/typesafeai_config.mli",
 )
 
 
@@ -70,19 +72,28 @@ def run_case(executable: str, fixture_path: Path) -> None:
         for needle in (b"absorb_gate", gate["status"].encode(), b"RUN  " + status):
             if needle not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {needle!r}")
-        if scenario != "disabled":
+        if gate["status"] != "skipped":
             boundary = f'"conveyed_boundary": {gate["conveyed_boundary"]}'.encode()
             if boundary not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {boundary!r}")
         if detail_reads != [run_id]:
             raise AssertionError(f"wrong detail reads: {detail_reads!r}")
 
-        if scenario == "disabled":
-            needles = [b"not_enabled"]
+        if gate["status"] == "skipped":
+            needles = [cast(str, gate["reason"]).encode()]
         elif scenario == "http-failure":
-            needles = [b"HTTP 503", b"fixture unavailable"]
+            needles = [
+                b"HTTP 503",
+                b"fixture unavailable",
+                b"configured-request-fixture",
+            ]
         else:
-            needles = [b"jev-fixture", b'"s0_0": 1.0', b'"s1_0": 0.0']
+            needles = [
+                b"jev-fixture",
+                b"configured-request-fixture",
+                b'"s0_0": 1.0',
+                b'"s1_0": 0.0',
+            ]
             if scenario == "memory-write-failure":
                 needles.append(cast(str, run["detail"]).encode())
         seen = first_screen
@@ -93,7 +104,9 @@ def run_case(executable: str, fixture_path: Path) -> None:
                 break
             h.read_available(fd, output)
             start = len(output)
-            os.write(fd, b"\x1b[6~")
+            # Visit each row: the compare pane's PageDown step can exceed its
+            # visible body, skipping request metadata between page windows.
+            os.write(fd, b"j")
             h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
             h.drain_until_quiet(process, fd, output)
             seen += b"\n" + h.screen_text(bytes(output))
@@ -156,7 +169,14 @@ def main() -> None:
             check=True,
             timeout=120,
         )
-        for scenario in ("judged", "disabled", "http-failure", "memory-write-failure"):
+        for scenario in (
+            "judged",
+            "disabled",
+            "lane-disabled",
+            "missing-key",
+            "http-failure",
+            "memory-write-failure",
+        ):
             run_case(executable, Path(directory, scenario + ".json"))
     print("Librarian absorb gate durable evidence reaches the TUI: PASS")
 

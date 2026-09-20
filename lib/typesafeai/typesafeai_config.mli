@@ -7,6 +7,12 @@
 val default_endpoint : string
 val default_model : string
 
+type unavailable_reason = Lane_disabled | Missing_api_key | Absorb_gate_disabled
+
+val absorb_gate_api_key : unit -> (string, unavailable_reason) result
+(** One snapshot for evaluation or its skip reason, in the existing precedence:
+    global switch, trimmed key, then the absorb-gate switch. *)
+
 val is_enabled : unit -> bool
 (** [true] when [TYPESAFEAI_API_KEY] holds a non-blank value and
     [MASC_TYPESAFEAI_ENABLED] does not say otherwise. The variable can turn the

@@ -137,6 +137,7 @@ type outcome =
       { reason : string
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
+      ; conveyed : source_verdict list
       ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
       }
   | Judged of judged
@@ -420,16 +421,18 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
       { reason
       ; absorbed = answer_without (unjudgeable @ List.map of_verdict acc.left)
       ; left = acc.left
+      ; conveyed = acc.conveyed
       ; unjudgeable
       }
 ;;
 
 (* --- Entry point --- *)
 
-type skip_reason = No_absorptions | Not_enabled
+type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { state : Yojson.Safe.t
+  { model : string
+  ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, string) result
   }
@@ -450,7 +453,7 @@ let absorbed_of_run = function
   | Evaluated { outcome = Judged { absorbed; _ }; _ } -> absorbed
 ;;
 
-let evaluation_to_yojson { state; questions; result } =
+let evaluation_to_yojson { model; state; questions; result } =
   let response =
     match result with
     | Error reason -> [ "status", `String "failed"; "reason", `String reason ]
@@ -485,7 +488,8 @@ let evaluation_to_yojson { state; questions; result } =
      body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
     @ [ "request", `Assoc
-          [ "state", state
+          [ "model", `String model
+          ; "state", state
           ; "questions", `Assoc
               (List.map (fun (id, question) -> id, Typesafeai_types.question_to_yojson question)
                  questions)
@@ -506,16 +510,21 @@ let run_result_to_yojson result =
     match result with
     | Skipped { reason; absorbed } ->
       [ "status", `String "skipped"
-      ; "reason", `String (match reason with No_absorptions -> "no_absorptions" | Not_enabled -> "not_enabled")
+      ; "reason", `String (match reason with
+          | No_absorptions -> "no_absorptions"
+          | Unavailable Typesafeai_config.Lane_disabled -> "lane_disabled"
+          | Unavailable Typesafeai_config.Missing_api_key -> "missing_api_key"
+          | Unavailable Typesafeai_config.Absorb_gate_disabled -> "absorb_gate_disabled")
       ; "applied_absorptions", absorptions absorbed
       ]
     | Evaluated { outcome; evaluations } ->
       let status, disposition =
         match outcome with
-        | Open { reason; absorbed; left; unjudgeable } ->
+        | Open { reason; absorbed; left; conveyed; unjudgeable } ->
           ([ "status", `String "open"; "reason", `String reason ],
            [ "applied_absorptions", absorptions absorbed
-           ; "left", verdicts left; "unjudgeable", absorptions unjudgeable ])
+           ; "left", verdicts left; "conveyed", verdicts conveyed
+           ; "unjudgeable", absorptions unjudgeable ])
         | Judged judged ->
           ([ "status", `String "judged" ],
            [ "applied_absorptions", absorptions judged.absorbed
@@ -534,25 +543,22 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
   match absorbed with
   | [] -> Skipped { reason = No_absorptions; absorbed }
   | _ :: _ ->
-    (match
-       if Typesafeai_config.is_absorb_gate_enabled ()
-       then Typesafeai_config.api_key ()
-       else None
-     with
-     | None ->
+    (match Typesafeai_config.absorb_gate_api_key () with
+     | Error reason ->
        Log.Keeper.info
          ~keeper_name:keeper_id
          "librarian absorb gate off (no key, or a switch): %d absorption(s) applied as answered"
          (List.length absorbed);
-       Skipped { reason = Not_enabled; absorbed }
-     | Some api_key ->
+       Skipped { reason = Unavailable reason; absorbed }
+     | Ok api_key ->
        (* The sha256 of each request body, as the client computed it, so the
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
        let evaluate ~state ~questions =
-         let result = Typesafeai_client.evaluate ?clock ~api_key ~state ~questions () in
-         evaluations := { state; questions; result } :: !evaluations;
+         let model = Typesafeai_config.model () in
+         let result = Typesafeai_client.evaluate ?clock ~model ~api_key ~state ~questions () in
+         evaluations := { model; state; questions; result } :: !evaluations;
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
        in
        let outcome = judge ~evaluate ~facts ~new_claims ~absorbed in
@@ -562,7 +568,7 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
            | Ok evaluated -> Some evaluated.Typesafeai_client.request_body_sha256
            | Error _ -> None) evaluations) in
        (match outcome with
-        | Open { reason; absorbed = applied; left; unjudgeable } ->
+        | Open { reason; absorbed = applied; left; unjudgeable; _ } ->
           Log.Keeper.warn
             ~keeper_name:keeper_id
             "librarian absorb gate open: %s; %d of %d absorption(s) applied as answered (%d \

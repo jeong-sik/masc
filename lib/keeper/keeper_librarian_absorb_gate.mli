@@ -67,13 +67,15 @@ type outcome =
       { reason : string
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
+      ; conveyed : source_verdict list
       ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
       }
       (** the model stopped answering. What the gate had decided by then
           stays decided: [unjudgeable] (too large to ask,
           {!request_bytes_limit}) and [left] (a completed answer showed a
           statement not conveyed) stay current; [absorbed] is the answer's
-          list without them, applied as answered. [reason] is for the log. *)
+          list without them, applied as answered. [conveyed] retains completed
+          positive verdicts separately from fail-open absorptions. *)
   | Judged of judged
 
 val conveyed_boundary : float
@@ -123,10 +125,11 @@ val judge
 
 (** {1 Entry point} *)
 
-type skip_reason = No_absorptions | Not_enabled
+type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { state : Yojson.Safe.t
+  { model : string
+  ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, string) result
   }
@@ -147,7 +150,8 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     Librarian run's existing output payload. Valid Noul values are preserved
     without rounding and the applied [conveyed_boundary] is recorded;
     rejected answers retain their decoder diagnostic.
-    A request failure has no fabricated response model or request receipt. *)
+    The requested model is captured before dispatch; a request failure has no
+    fabricated response model or request receipt. *)
 
 val run
   :  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t

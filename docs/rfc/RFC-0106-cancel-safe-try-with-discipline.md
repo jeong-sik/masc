@@ -3,7 +3,7 @@ rfc: "0106"
 title: "Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation)"
 status: Active
 created: 2026-05-17
-updated: 2026-05-21
+updated: 2026-09-21
 author: vincent
 supersedes: []
 superseded_by: null
@@ -20,8 +20,8 @@ remain.
 |-------|--------|------|
 | P0 helper module + canary | ✅ | `lib/cancel_safe/cancel_safe.{ml,mli}` exists; 1-site canary migration landed across the first 6 implementation_prs |
 | P1 high-risk subsystem | ⏳ in flight | Recent batch: #16949 (`masc_http_client/pool` re-raise) + #16951 (`fd_accountant` re-raise) added two more violation fixes |
-| P2 observability / dashboard / governance callbacks | ❌ | not started |
-| P3 ppxlib AST lint | ❌ | `scripts/lint/cancel-guard-ast*` absent; only the regex variant exists |
+| P2 observability / dashboard / governance callbacks | ⏳ in flight | 2026-09-21: #37371 moved `Otel_metric_store.best_effort` onto `Cancel_safe.observe` — the metric store was the one catch-all every counter in the tree passed through. `lib/inference_inflight_observation.ml` (#37373) and the dashboard/governance callbacks are still open |
+| P3 ppxlib AST lint | ❌ | `scripts/lint/cancel-guard-ast*` absent; only the regex variant exists. 2026-09-21: the regex variant also misses a `try ... with` whose handler arm is on the next line (#37372), which is how the P2 site above stayed invisible |
 | P4 regex lint deprecation | ❌ | `scripts/lint-cancel-guard.sh` still active; deprecation blocked on P3 |
 
 ### implementation_prs reconciliation

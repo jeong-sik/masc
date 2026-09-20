@@ -38,9 +38,9 @@ Librarian 답을 받아들이기 전에, 묶이는 원문마다 **묶은 claim �
 1. `execute_exact_output_classified` 가 `selection` 을 돌려준다(`new_claims`, `absorbed : {absorbed; into}`, `facts`).
 2. `absorbed` 를 `into` 별로 묶는다. `into` 의 claim 본문은 `new_claims` 에서, 원문 본문은 해당 회차가 읽은 입력 스냅숏의 `current.facts` 에서 id 로 찾는다. `selection.facts` 는 이미 흡수될 원문을 뺀 결과이므로 검사 재료로 쓰지 않는다.
 3. 원문마다 문장으로 자른다(줄바꿈 → 문장 끝 `. ! ? 다.` `;` ` — `, 마크업 제거, 20자 미만 조각은 다음 조각에 붙임). 문장 경계는 #37079 의 채점기와 같고, 표집 없이 모든 문장을 검사한다. 요청은 64개 질문씩 나눈다.
-4. `into` 하나당 Jev 요청 하나: `state` = 묶은 claim, `questions` = 그 `into` 에 묶이는 모든 원문의 모든 문장, 각각 `noul`
+4. `into` 별로 질문을 모아 최대 64개씩 Jev 요청으로 나눈다: `state` = 묶은 claim, `questions` = 해당 묶음에 속한 원문 문장, 각각 `noul`
    "The claim under review conveys this statement, in any wording." + criteria(true: 읽는 이가 claim 만으로 그 문장을 알 수 있다 / false: claim 이 말하지 않거나 더 막연하게만 말한다).
-   질문은 한 요청 안에서 병렬로 평가되므로 문장 수는 지연에 거의 영향이 없다(fan-out).
+   한 요청 안의 질문은 병렬로 평가된다(fan-out). 전체 문장은 빠짐없이 검사하며, 나뉜 요청들은 순서대로 실행한다. 회차 전체 지연은 이 요청 수와 입력 크기에 따라 달라진다.
 5. 문장의 `noul < 0.5` 이면 "전하지 못함". 원문 하나에 그런 문장이 하나라도 있으면 그 원문의 `absorbed` 항목을 뺀다.
    0.5 는 조정한 값이 아니라 yes/no 확률의 경계다. #37079 에서 목록 자와의 문장 단위 일치 88% 를 잰 경계도 이것이다.
 6. 걸러진 `absorbed` 로 `apply_disposition` 을 부른다. 나머지 흐름(dropped, working_contexts, 이벤트)은 그대로.

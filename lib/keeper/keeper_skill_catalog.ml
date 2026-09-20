@@ -221,6 +221,19 @@ let parse_skill ~directory content =
   | Loaded document -> parse_document document
 ;;
 
+type authored_source_error =
+  | Source_too_large of { bytes : int; max_bytes : int }
+  | Invalid_document of error
+
+let validate_authored_source ~directory source_text =
+  (* The existing Editor authoring limit, shared with artifact validation. *)
+  let max_bytes = 1_048_576 in
+  let bytes = String.length source_text in
+  if bytes > max_bytes
+  then Error (Source_too_large { bytes; max_bytes })
+  else parse_skill ~directory source_text |> Result.map_error (fun error -> Invalid_document error)
+;;
+
 let empty = []
 
 let partition_documents documents =

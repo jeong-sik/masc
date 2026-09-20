@@ -2,6 +2,7 @@ import { currentDashboardActor, get, post, del, put, runRequest, defaultBoardVot
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
+import type { KeeperChatOperationState } from './keeper'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
@@ -30,12 +31,11 @@ export type BoardContextInferenceTargetSource = 'explicit_target' | 'post_author
 
 export interface BoardContextInferenceSubmission {
   ok: true
-  requestId: string
+  operationId: string
   keeperName: string
   postId: string
-  status: string
+  state: KeeperChatOperationState['kind']
   targetSource?: BoardContextInferenceTargetSource
-  message?: string
 }
 
 function toIsoTimestamp(value: unknown): string | null {
@@ -902,20 +902,20 @@ function normalizeBoardContextInferenceTargetSource(raw: unknown): BoardContextI
 
 export function normalizeBoardContextInferenceSubmission(raw: unknown): BoardContextInferenceSubmission | null {
   if (!isRecord(raw) || raw.ok !== true) return null
-  const requestId = asString(raw.request_id, '').trim()
+  const operationId = asString(raw.operation_id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const postId = asString(raw.post_id, '').trim()
-  const status = asString(raw.status, '').trim()
-  if (!requestId || !keeperName || !postId || !status) return null
-  const message = asString(raw.message, '').trim()
+  const state = raw.state
+  if (!operationId || !keeperName || !postId) return null
+  if (state !== 'queued' && state !== 'running' && state !== 'succeeded'
+    && state !== 'failed' && state !== 'cancelled') return null
   return {
     ok: true,
-    requestId,
+    operationId,
     keeperName,
     postId,
-    status,
+    state,
     targetSource: normalizeBoardContextInferenceTargetSource(raw.target_source),
-    message: message || undefined,
   }
 }
 

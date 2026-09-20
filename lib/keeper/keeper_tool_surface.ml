@@ -288,9 +288,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
            | Some wctx ->
              Clear_attempted
                (Keeper_history_clear.clear
-                  ~keepers_dir:
-                    (Config_dir_resolver.keepers_dir_for_base_path
-                       ~base_path:config.base_path)
+                  ~keepers_dir:(Workspace.keepers_runtime_dir config)
                   ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                   ~keeper_name:meta.name
                   ~session
@@ -519,6 +517,16 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_
   tool_result_with_tool_name
     ~tool_name:name
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx message)
+;;
+
+let submit_keeper_msg ~submitted_by ?continuation_channel ctx ~message =
+  let name = Keeper_tool_name.(to_string Keeper_msg) in
+  let ctx = resolve_ctx ctx ~name in
+  Keeper_tool_surface_ops.submit_keeper_msg
+    ?continuation_channel ~submitted_by ctx message
+  |> Result.map_error (fun error ->
+         tool_result_of_handler_error error
+         |> tool_result_with_tool_name ~tool_name:name)
 ;;
 
 let dispatch_keeper_msg_stream_admitted

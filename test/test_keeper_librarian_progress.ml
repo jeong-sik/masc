@@ -114,6 +114,8 @@ let write ~keepers_dir value =
 ;;
 
 let plant ~keepers_dir content =
+  Fs_compat.mkdir_p (Filename.dirname
+    (Progress.path_for_keepers_dir ~keepers_dir ~keeper_id));
   Out_channel.with_open_bin
     (Progress.path_for_keepers_dir ~keepers_dir ~keeper_id)
     (fun channel -> Out_channel.output_string channel content)
@@ -144,7 +146,7 @@ let test_a_written_position_reads_back_and_is_replaced () =
    | Ok None -> fail "the replaced file was not found"
    | Error error -> fail (Progress.read_error_to_string error));
   check string "file name"
-    "keeper.librarian-progress.json"
+    "librarian-progress.json"
     (Filename.basename (Progress.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
@@ -189,6 +191,8 @@ let test_purge_plan_removes_the_progress_file () =
   let has artifact = List.exists (fun entry -> entry = artifact) plan in
   check bool "plan removes the progress file" true
     (has Shutdown.Keeper_librarian_progress_artifact);
+  check bool "plan removes the committed-range receipt" true
+    (has Shutdown.Keeper_librarian_range_receipt_artifact);
   check bool "and the log it is a position in" true
     (has Shutdown.Keeper_turn_boundaries_artifact)
 ;;

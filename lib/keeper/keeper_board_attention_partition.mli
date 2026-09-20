@@ -64,8 +64,14 @@ type blocked_reason =
   | Exact_setup_unavailable of string
   | Exact_flow_replayed
   | Exact_execution_terminal
-  | Domain_output_invalid of string
-  | Execution_provenance_mismatch of string
+  | Domain_output_invalid of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Execution_provenance_mismatch of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Unexpected_worker_failure of string
   | Exact_execution_quarantined of running_progress
 

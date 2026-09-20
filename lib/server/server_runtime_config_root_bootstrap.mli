@@ -14,11 +14,10 @@ val seed_missing_from_embedded : dst:string -> int
     never overwritten. *)
 
 val backfill_startup_required_from_embedded : config_root:string -> int
-(** Write the config files whose absence stops startup — runtime.toml and the
-    model catalog overlay — into an existing config root from the embedded
-    assets when they are missing, and return how many were written. Narrower
-    than {!seed_missing_from_embedded} on purpose: an existing root is
-    operator-owned, and these two are not a preference. *)
+(** Write [runtime.toml] into an existing config root from the embedded assets
+    when it is missing, and return how many files were written. Narrower than
+    {!seed_missing_from_embedded} on purpose: an existing root is operator-owned,
+    while the runtime configuration is required for startup. *)
 
 val bootstrap_base_path_config_root : base_path:string -> unit
 

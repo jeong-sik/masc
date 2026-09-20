@@ -11,6 +11,16 @@ type stream_production =
   | Streaming_done
   | Streaming_unknown
 
+let stream_production_label = function
+  | Streaming_answer -> "streaming_answer"
+  | Streaming_thinking -> "streaming_thinking"
+  | Streaming_tool_call -> "streaming_tool_call"
+  | Streaming_heartbeat -> "streaming_heartbeat"
+  | Streaming_substrate -> "streaming_substrate"
+  | Streaming_done -> "streaming_done"
+  | Streaming_unknown -> "streaming_unknown"
+;;
+
 let stream_production_of_label = function
   | "streaming_answer" -> Some Streaming_answer
   | "streaming_thinking" -> Some Streaming_thinking
@@ -30,11 +40,24 @@ type timeout_phase =
   | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
-  | Caller_budget
   | Wall_clock
   | Capacity_backpressure
   | Queue
   | Unknown_timeout
+
+let timeout_phase_label = function
+  | First_token -> "first_token"
+  | Http_operation -> "http_operation"
+  | Non_streaming_body -> "non_streaming_body"
+  | Stream_body -> "stream_body"
+  | Stream_idle production -> "stream_idle:" ^ stream_production_label production
+  | Provider_step -> "provider_step"
+  | Cli_stdout_idle -> "cli_stdout_idle"
+  | Wall_clock -> "wall_clock"
+  | Capacity_backpressure -> "capacity_backpressure"
+  | Queue -> "queue"
+  | Unknown_timeout -> "unknown_timeout"
+;;
 
 let timeout_phase_of_label label =
   let normalize label =
@@ -63,7 +86,6 @@ let timeout_phase_of_label label =
     | "stream_idle" -> Some (Stream_idle Streaming_unknown)
     | "provider_step" -> Some Provider_step
     | "cli_stdout_idle" -> Some Cli_stdout_idle
-    | "caller_budget" -> Some Caller_budget
     | "wall_clock" | "wall_clock_timeout" | "wall_exceeded" | "max_execution_time" ->
       Some Wall_clock
     | "capacity_backpressure" | "client_capacity" | "client_capacity_full" ->
@@ -73,7 +95,7 @@ let timeout_phase_of_label label =
     | _ -> None
 ;;
 
-type timeout_source =
+type timeout_source = Keeper_turn_terminal_code.timeout_source =
   | Agent_core_api
   | Agent_core_provider
 
@@ -181,9 +203,9 @@ let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () 
      consulted. The prefix parse below survives only for records rehydrated
      from persisted wire, where the string is all that remains. *)
   match agent_core_timeout with
-  | Some { Keeper_turn_terminal_code.phase } ->
+  | Some { Keeper_turn_terminal_code.source; phase } ->
     Provider_timeout
-      { source = Agent_core_provider
+      { source
       ; phase = Option.map timeout_phase_of_agent_core_phase phase
       }
   | None ->
@@ -264,8 +286,9 @@ let classify_core_error (err : Agent_core.Error.t) : t =
   | Some _ as internal_error -> classify_masc_internal_error internal_error
   | None ->
     (match err with
-     | Agent_core.Error.Api (Timeout _) ->
-       provider_timeout ~source:Agent_core_api ~phase:None
+     | Agent_core.Error.Api (Timeout { phase; _ }) ->
+       provider_timeout ~source:Agent_core_api
+         ~phase:(Option.map timeout_phase_of_agent_core_phase phase)
      | Agent_core.Error.Provider provider_error ->
        classify_provider_error provider_error
      | Agent_core.Error.Api (NetworkError _ | Overloaded _ | ServerError _

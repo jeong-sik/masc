@@ -140,6 +140,12 @@ val start_keeper_loops :
     Synchronous startup failure is retained in the lifecycle and raised as
     [Keeper_persistence_start_failed]. *)
 
+exception Keeper_lifecycle_surfaces_partly_dropped of string list
+(** A keeper lifecycle refresh came back naming cache prefixes it could not
+    drop ({!Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh}).
+    The listener raises it so a partial refresh and a raising one reach the
+    batch the same way. *)
+
 (** What the Keeper lifecycle listener did with one event it took off its
     subscription. *)
 type keeper_lifecycle_refresh =
@@ -206,6 +212,12 @@ module For_testing : sig
     keeper_name:string ->
     Keeper_lifecycle_events.lifecycle_event ->
     unit
+
+  val raise_if_surfaces_partly_dropped :
+    Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh -> unit
+  (** [()] for a refresh that dropped every cache it owns, and
+      {!Keeper_lifecycle_surfaces_partly_dropped} for one that did not. This is
+      the step that puts a partial refresh on the batch's failure path. *)
 
   val handle_keeper_lifecycle_batch :
     refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->

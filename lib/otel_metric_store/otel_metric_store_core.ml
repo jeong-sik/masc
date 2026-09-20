@@ -40,12 +40,9 @@ let with_lock f =
 
 (** Best-effort wrapper: never crash the caller fiber for a metrics update.
     Metrics are advisory; losing one sample must not take down the OTel tick
-    fiber or the keeper turn. Cancellation is not a failed sample — it is the
-    switch taking the fiber down, so it leaves through this wrapper instead of
-    becoming a warning the caller continues past. *)
+    fiber or the keeper turn. *)
 let best_effort f =
   try f () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Metrics.warn "Otel_metric_store update failed (non-fatal): %s"
       (Printexc.to_string exn)

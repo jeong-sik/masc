@@ -3930,6 +3930,40 @@ let test_keeper_lifecycle_drop_and_failure_invalidate_once () =
       1
       !invalidations)
 
+(* A refresh that came back naming caches it could not drop is a failed
+   refresh, not a success: the row it was meant to change is still in a cache
+   somewhere, so the batch drops every keeper-dependent cache. *)
+let test_keeper_lifecycle_partial_refresh_invalidates_every_keeper_cache () =
+  with_lifecycle_subscription ~capacity:4 (fun subscription ->
+    publish_keeper_started "keeper-a";
+    let invalidations = ref 0 in
+    let results =
+      Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+        ~refresh:(fun ~keeper_name:_ _event ->
+          Server_bootstrap_loops.For_testing.raise_if_surfaces_partly_dropped
+            (Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_partly_dropped
+               [ "execution dashboard" ]))
+        ~invalidate_all:(fun () -> incr invalidations)
+        (Runtime_event_bus.drain_reporting_drops subscription)
+    in
+    (match results with
+     | [ Server_bootstrap_loops.Lifecycle_refresh_failed
+           { keeper_name = "keeper-a"
+           ; error =
+               Server_bootstrap_loops.Keeper_lifecycle_surfaces_partly_dropped
+                 [ "execution dashboard" ]
+           ; _
+           }
+       ] -> ()
+     | _ ->
+       Alcotest.fail "expected keeper-a to fail with the undropped cache prefix");
+    Alcotest.(check int)
+      "a partial refresh invalidates every keeper cache once"
+      1
+      !invalidations;
+    Server_bootstrap_loops.For_testing.raise_if_surfaces_partly_dropped
+      Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_refreshed)
+
 (* The listener fiber's own turn: drain, refresh, broadcast. The fiber body
    is this call plus the sleep, so a turn that stops draining or stops
    broadcasting fails here. *)
@@ -5540,6 +5574,10 @@ let () =
             "keeper lifecycle drop and failure invalidate once"
             `Quick
             test_keeper_lifecycle_drop_and_failure_invalidate_once;
+          Alcotest.test_case
+            "keeper lifecycle partial refresh invalidates every keeper cache"
+            `Quick
+            test_keeper_lifecycle_partial_refresh_invalidates_every_keeper_cache;
           Alcotest.test_case
             "keeper lifecycle listener turn refreshes and broadcasts"
             `Quick

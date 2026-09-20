@@ -1149,19 +1149,22 @@ let () =
 
 (* A refresh that could not drop one of its prefixes leaves entries this event
    was meant to remove, and it reports the prefixes rather than only warning.
-   The batch below counts that as a failed refresh, so the whole
-   keeper-dependent cache is invalidated instead of the surface keeping a row
-   the event already changed (#37175). *)
-let refresh_dashboard_for_keeper_lifecycle ~config ~keeper_name event =
-  match
-    Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces
-      ~config
-      ~name:keeper_name
-      event
-  with
+   It reaches the batch as the same failure a raising refresh does, so the
+   listener keeps one notion of "this refresh did not happen" and one recovery
+   for it: the whole keeper-dependent cache is invalidated instead of the
+   surface keeping a row the event already changed (#37175). *)
+let raise_if_surfaces_partly_dropped = function
   | Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_refreshed -> ()
   | Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_partly_dropped prefixes ->
     raise (Keeper_lifecycle_surfaces_partly_dropped prefixes)
+;;
+
+let refresh_dashboard_for_keeper_lifecycle ~config ~keeper_name event =
+  raise_if_surfaces_partly_dropped
+    (Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces
+       ~config
+       ~name:keeper_name
+       event)
 ;;
 
 (* What the lifecycle listener did with one event it took off its
@@ -2210,6 +2213,7 @@ module For_testing = struct
   let finish_keeper_loops_start = finish_keeper_loops_start
   let refresh_dashboard_for_keeper_lifecycle =
     refresh_dashboard_for_keeper_lifecycle
+  let raise_if_surfaces_partly_dropped = raise_if_surfaces_partly_dropped
   let handle_keeper_lifecycle_batch = handle_keeper_lifecycle_batch
   let refresh_keeper_lifecycle_once = refresh_keeper_lifecycle_once
 end

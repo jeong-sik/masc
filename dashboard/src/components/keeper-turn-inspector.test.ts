@@ -895,6 +895,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
   it.each([
     { scope: 'per_request', label: '요청별', context: '25.0%', cost: '$0.070' },
+    { scope: 'turn_total', label: '클라이언트 턴 합계', context: '미상', cost: '미상' },
     { scope: 'conversation_cumulative', label: '대화 누적', context: '미상', cost: '미상' },
     { scope: 'unavailable', label: '범위 미상', context: '미상', cost: '미상' },
   ] as const)('shows $scope usage without changing its meaning', async ({ scope, label, context, cost }) => {
@@ -933,6 +934,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     const record = response.entries[1]!.record
     delete record.input_tokens
     delete record.output_tokens
+    delete record.context_window
     fetchKeeperTurnRecordsMock.mockResolvedValue(response)
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -956,6 +958,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(tokenBar?.textContent).toContain('측정 없음')
     expect(tokenBar?.textContent).toContain('입력 미상')
     expect(tokenBar?.textContent).toContain('출력 미상')
+    expect(tokenBar?.querySelector('.ctxpct')?.textContent).toBe('컨텍스트 미상')
     expect(tokenBar?.querySelector('.seg-in')).toBeNull()
     expect(tokenBar?.querySelector('.seg-out')).toBeNull()
   })

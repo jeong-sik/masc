@@ -1809,9 +1809,10 @@ let run_turn
                    : Keeper_agent_prompt_metrics.ctx_composition_metrics
                    =
                    let actual_input_tokens =
-                     if usage.input_tokens > 0
-                     then Some usage.input_tokens
-                     else None
+                     match result.runtime_observation with
+                     | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
+                       when usage.input_tokens > 0 -> Some usage.input_tokens
+                     | Some _ | None -> None
                    in
                    (* Absent evidence and unresolved provenance are recorded
                       as what they are. Writing a zero here is what let a

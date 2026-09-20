@@ -3227,32 +3227,30 @@ let context_composition_lines ~cols ~turn_back
           ("No body was serialized here: the runtime client assembled the \
             request itself" ^ handed ^ ".")
   in
+  let non_request_token_lines count_label =
+    match record.usage.input_tokens, record.context_window with
+    | Some tokens, Some maximum when maximum > 0 ->
+        [ Printf.sprintf
+            "  %s %s  %s(this request's own share was not reported)%s"
+            (Inspector.format_tokens tokens) count_label Ansi.dim Ansi.reset
+        ; Printf.sprintf "  %sWindow %s tokens; no per-request figure to place in it%s"
+            Ansi.dim (Inspector.format_tokens maximum) Ansi.reset
+        ]
+    | Some tokens, (None | Some _) ->
+        [ Printf.sprintf "  %s %s  %s(window not observed)%s"
+            (Inspector.format_tokens tokens) count_label Ansi.dim Ansi.reset
+        ]
+    | None, _ -> [ "  Context usage was not reported for this turn" ]
+  in
   let token_lines =
     match record.usage.scope with
-    (* A cumulative counter covers the conversation, not this request, so
-       dividing it by the window states an occupancy nobody measured. On
-       2026-09-01 every turn whose reported input exceeded its own window --
-       642 of them -- carried this scope, without a single exception. *)
-    | Runtime_usage_scope.Conversation_cumulative -> (
-        match record.usage.input_tokens, record.context_window with
-        | Some tokens, Some maximum when maximum > 0 ->
-            [ Printf.sprintf
-                "  %s tokens counted across the conversation  %s(this \
-                 request's own share was not reported)%s"
-                (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
-            ; Printf.sprintf "  %sWindow %s tokens; no per-request figure to \
-                              place in it%s"
-                Ansi.dim (Inspector.format_tokens maximum) Ansi.reset
-            ]
-        | Some tokens, (None | Some _) ->
-            [ Printf.sprintf
-                "  %s tokens counted across the conversation  %s(window not \
-                 observed)%s"
-                (Inspector.format_tokens tokens) Ansi.dim Ansi.reset
-            ]
-        | None, _ -> [ "  Context usage was not reported for this turn" ])
-    | Runtime_usage_scope.Per_request
-    | Runtime_usage_scope.Usage_scope_unavailable -> (
+    | Runtime_usage_scope.Turn_total ->
+        non_request_token_lines "tokens counted across the client turn"
+    | Runtime_usage_scope.Conversation_cumulative ->
+        non_request_token_lines "tokens counted across the conversation"
+    | Runtime_usage_scope.Usage_scope_unavailable ->
+        non_request_token_lines "tokens reported with unknown scope"
+    | Runtime_usage_scope.Per_request -> (
         match record.usage.input_tokens, record.context_window with
         (* A figure above the window is not one request's input: a request
            that size would have been refused. Drawing it as an occupancy
@@ -3297,9 +3295,10 @@ let context_composition_lines ~cols ~turn_back
     in
     let label =
       match record.usage.scope with
+      | Runtime_usage_scope.Turn_total -> "client turn total  "
       | Runtime_usage_scope.Conversation_cumulative -> "cumulative  "
-      | Runtime_usage_scope.Per_request
-      | Runtime_usage_scope.Usage_scope_unavailable -> ""
+      | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown  "
+      | Runtime_usage_scope.Per_request -> ""
     in
     match parts with
     | [] -> []
@@ -3578,6 +3577,14 @@ let context_composition_lines ~cols ~turn_back
          scope -- which the record owns -- decides. *)
       let marker = if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " " in
       match recent.scope, recent.input_tokens with
+      | Runtime_usage_scope.Turn_total, _ ->
+          [ marker ^ Ansi.dim
+            ^ Printf.sprintf " #%-4d %s  client turn total, not per request" recent.turn ts
+            ^ Ansi.reset ]
+      | Runtime_usage_scope.Usage_scope_unavailable, _ ->
+          [ marker ^ Ansi.dim
+            ^ Printf.sprintf " #%-4d %s  usage scope unknown" recent.turn ts
+            ^ Ansi.reset ]
       | Runtime_usage_scope.Conversation_cumulative, _ ->
           [ marker
             ^ Ansi.dim

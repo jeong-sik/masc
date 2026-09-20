@@ -2267,6 +2267,10 @@ type context_unavailable_reason =
       { raw_input_tokens : int option
       ; context_window : int option
       }
+  | Context_turn_total_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
   | Context_usage_scope_unavailable of
       { raw_input_tokens : int option
       ; context_window : int option

@@ -950,6 +950,7 @@ let () =
         ~default:
           (match usage_scope with
            | Runtime_usage_scope.Per_request -> Masc.Keeper_usage_resolution.Per_request
+           | Runtime_usage_scope.Turn_total -> Masc.Keeper_usage_resolution.Turn_total
            | Runtime_usage_scope.Conversation_cumulative
            | Runtime_usage_scope.Usage_scope_unavailable ->
              Masc.Keeper_usage_resolution.Unavailable)

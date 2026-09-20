@@ -78,7 +78,7 @@ export type TurnRawTraceRunRef = {
 }
 
 // Wire tokens owned by Runtime_usage_scope.to_string.
-const TURN_USAGE_SCOPES = ['per_request', 'conversation_cumulative', 'unavailable'] as const
+export const TURN_USAGE_SCOPES = ['per_request', 'turn_total', 'conversation_cumulative', 'unavailable'] as const
 
 export type TurnRecordEntry = {
   execution_ids: string[]

@@ -207,6 +207,13 @@ val find_latest_entry_result :
     match. Malformed rows are delivered to the callback. Missing stores return
     [Ok None]; layout and I/O failures remain explicit. *)
 
+val find_latest_entry_in_file_result :
+  string -> (recent_entry -> 'a option) -> ('a option, read_error) result
+(** Single-file reverse scan using the same chunked reader as
+    {!find_latest_entry_result}. Calls the callback newest-first until it
+    selects a value or the file ends. Malformed rows reach the callback;
+    missing or non-regular files and I/O failures are errors. *)
+
 val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)

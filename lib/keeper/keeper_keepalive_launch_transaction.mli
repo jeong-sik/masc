@@ -38,8 +38,8 @@ val run
       Keeper_registry.registry_entry ->
       'a)
   -> ('a, 'registration_error error) result
-(** Own durable intake across registry admission, Librarian lifecycle open, and
-    the launch callback. A caller that already owns intake may lend its exact
+(** Own durable intake across registry admission, Librarian lifecycle open,
+    durable catch-up submission, and the launch callback. A caller that already owns intake may lend its exact
     token; otherwise this transaction acquires one and fails closed when
     shutdown owns admission.
 

@@ -22,8 +22,8 @@
     - {b Vote log persistence}: [append_vote_log],
       [save_vote_log_jsonl], [record_vote_side_effect].
     - {b Persistence loaders}: [load_persisted_posts],
-      [load_persisted_comments], [load_persisted_votes],
-      [recalculate_reply_counts].
+      [load_persisted_comments], [load_persisted_votes], reactions,
+      sub-boards, and [recalculate_reply_counts].
     - {b Global store}: [global_lazy] ref.
     - {b Flair extractor internals}: [flair_tag_re],
       [extract_flair]. *)
@@ -185,8 +185,8 @@ val delete_post :
 
 val global : unit -> store
 (** Lazy singleton.  First call constructs the store via
-    {!create_store}, then runs the four loaders
-    ([load_persisted_posts] / [_comments] / [_votes] +
+    {!create_store}, then runs the five loaders
+    ([load_persisted_posts] / [_comments] / [_votes] / reactions / sub-boards +
     [recalculate_reply_counts]) under
     [Eio.Lazy.from_fun ~cancel:`Protect] so a cancelled
     fiber cannot leave the singleton half-initialised. *)

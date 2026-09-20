@@ -81,6 +81,34 @@ let test_multiple_subs_same_purpose_coexist () =
     I.unsubscribe bus a;
     I.unsubscribe bus b)
 
+let payload_kinds events =
+  List.map
+    (fun (event : Agent_core.Event_bus.event) ->
+       Agent_core.Event_bus.payload_kind event.payload)
+    events
+
+let test_drain_reporting_drops_reports_each_drop_once () =
+  run_eio (fun ~sw:_ ~env:_ ->
+    let bus = mk_bus () in
+    let h = I.subscribe ~purpose:"drop_report" bus in
+    List.iter
+      (fun tag -> I.publish bus (mk_custom_event tag))
+      [ "a"; "b"; "c"; "d"; "e" ];
+    let { I.events; overflow_loss } = I.drain_reporting_drops h in
+    check (list string) "the newest three survive"
+      [ "custom:c"; "custom:d"; "custom:e" ] (payload_kinds events);
+    (match overflow_loss with
+     | I.Dropped 2 -> ()
+     | I.Dropped count -> failf "expected two drops, got %d" count
+     | I.Nothing_dropped -> fail "the drops were not reported");
+    I.publish bus (mk_custom_event "f");
+    let { I.events; overflow_loss } = I.drain_reporting_drops h in
+    check (list string) "the next batch" [ "custom:f" ] (payload_kinds events);
+    (match overflow_loss with
+     | I.Nothing_dropped -> ()
+     | I.Dropped count -> failf "the earlier drops were reported again (%d)" count);
+    I.unsubscribe bus h)
+
 let () =
   run "runtime_event_bus" [
     ("backpressure", [
@@ -92,5 +120,7 @@ let () =
         test_drain_decrements_depth;
       test_case "multiple subs same purpose coexist" `Quick
         test_multiple_subs_same_purpose_coexist;
+      test_case "drain reporting drops reports each drop once" `Quick
+        test_drain_reporting_drops_reports_each_drop_once;
     ])
   ]

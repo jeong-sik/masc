@@ -100,7 +100,10 @@ class KeeperToolsOpenCode(MascSidecar, OpenCode):
         """
         if self.announce_pool:
             instruction = f"{pool_prompt(self.pool_names)}\n\n{instruction}"
-        await super().run(instruction, environment, context)
+        try:
+            await super().run(instruction, environment, context)
+        finally:
+            self.record_dist_identity(context)
         # What the keepers spent is not in what opencode reports, and the arm is
         # compared on cost.
         await merge_keeper_usage(self, environment, context)

@@ -91,10 +91,12 @@ let get_package_preview request reqd =
         else Error "manifest_path must name a file inside the workspace" in
       let* package = Eio_unix.run_in_systhread (fun () -> Lane_addon_manifest.load ~path)
           |> Result.map_error Lane_addon_manifest.error_to_string in
-      let inspection = match state.Mcp_server.proc_mgr with
-        | None -> Error "Server process manager unavailable; image inspection was not performed"
-        | Some mgr -> Lane_addon_worker.inspect_image ~mgr ~package ()
-            |> Result.map_error Lane_addon_worker.error_to_string in
+      let inspection = match state.Mcp_server.proc_mgr, Eio_context.get_clock () with
+        | None, _ -> Error "Server process manager unavailable; image inspection was not performed"
+        | Some _, Error message -> Error message
+        | Some mgr, Ok clock -> Lane_addon_worker.inspect_image
+            ~clock ~control_timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
+            ~mgr ~package () |> Result.map_error Lane_addon_worker.error_to_string in
       let image = match inspection with
         | Ok digest -> `Assoc ["state",`String "available";"digest",`String digest]
         | Error detail -> `Assoc ["state",`String "unverified";"detail",`String detail] in

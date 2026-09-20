@@ -18,6 +18,14 @@ Librarian이 남기는 `validated_approach`·`lesson`과 `absorbs`는 Memory OS�
 파일을 읽어 발행하며, TUI·Dashboard의 생성·저장은 `CanAdmin` 편집기 API를 쓴다
 (`Server_skill_editor`, `Server_routes_http_routes_dashboard`).
 
+Keeper는 새 `SKILL.md`를 `keeper_artifact_transfer`로 export한 뒤, 반환된 정확한
+`artifact` 객체와 제안하는 package 디렉터리 이름 `package_id`를
+`keeper_skill_validate`에 전달할 수 있다. 기존 문서·composition 계획 parser와
+편집기의 크기 제한으로 원문 bytes를 읽기 전용 검증한다. 결과의 artifact와
+package 이름은 검증한 입력을 가리키며, 발행된 Skill Reference가 아니다.
+정적 검증은 실행 성공이나 안전성을 증명하지 않고 source·snapshot도 변경하지
+않는다. 발행은 기존 관리자 편집기 경로를 따른다.
+
 Keeper가 직접 발행하는 `keeper_skill_publish`와 `keeper_compose_save`는 각각
 [self-authored-skills](rfc/RFC-keeper-self-authored-skills.md)와
 [writes-own-compositions](rfc/RFC-keeper-writes-own-compositions.md)의 제안이다.

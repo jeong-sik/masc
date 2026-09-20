@@ -18,6 +18,8 @@ let origin_sentence = function
       Printf.sprintf "front from turn #%d's record; nothing counted since the server started" turn
   | Inspector.Carried_halved_after_refusal { retry } ->
       Printf.sprintf "front halved after a refusal (retry %d)" retry
+  | Inspector.Carried_evicted_after_refusal { retry } ->
+      Printf.sprintf "front evicted after a refusal (retry %d)" retry
   | Inspector.Carried_whole_history -> "no front to start from: the whole history"
 ;;
 

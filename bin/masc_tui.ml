@@ -5215,11 +5215,13 @@ let launch_all_memory_facts_load state ~mailbox =
                      ; mss_facts = []
                      ; mss_invalidations = []
                      }
+               ; mfs_events_read_error = None
                } ))
     else
       let all_ord_facts = ref [] in
       let all_src_facts = ref [] in
       let all_invals = ref [] in
+      let all_event_read_errors = ref [] in
       List.iter
         (fun (k : Tui_decode.memory_keeper_health) ->
           let keeper_name = k.Tui_decode.mkh_keeper_id in
@@ -5229,6 +5231,12 @@ let launch_all_memory_facts_load state ~mailbox =
             | _ -> Error "failed"
           with
           | Ok snap ->
+              (match snap.Tui_decode.mfs_events_read_error with
+               | None -> ()
+               | Some detail ->
+                 all_event_read_errors :=
+                   Printf.sprintf "%s: %s" keeper_name detail
+                   :: !all_event_read_errors);
               (match snap.Tui_decode.mfs_ordinary with
                | Tui_decode.Memory_store_present store ->
                    let tagged =
@@ -5288,6 +5296,10 @@ let launch_all_memory_facts_load state ~mailbox =
               ; mss_facts = !all_src_facts
               ; mss_invalidations = !all_invals
               }
+        ; mfs_events_read_error =
+            (match List.rev !all_event_read_errors with
+             | [] -> None
+             | errors -> Some (String.concat "; " errors))
         }
       in
       enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))

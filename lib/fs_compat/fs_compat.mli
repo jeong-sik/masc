@@ -306,9 +306,10 @@ val read_dir : string -> string list
 val load_file : string -> string
 
 (** Load entire file as string, or [None] when the file is missing.
-    Option-returning sibling of {!load_file} (which raises on a missing
-    path). Other I/O failures of an existing file propagate as
-    [Sys_error]. *)
+    A file that vanishes before it is opened is also absent. Other I/O
+    failures, including denied or non-directory parents, raise [Sys_error].
+    This preserves {!load_file}'s opened-descriptor read across a concurrent
+    atomic replacement; the path need not keep naming that descriptor. *)
 val load_file_opt : string -> string option
 
 (** Save string to file (overwrite). *)

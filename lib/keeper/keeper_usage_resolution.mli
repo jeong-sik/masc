@@ -2,6 +2,7 @@ type cumulative_position = Fresh | Resumed
 
 type basis =
   | Per_request
+  | Turn_total
   | Conversation_counter of
       { runtime_id : string
       ; conversation_id : string

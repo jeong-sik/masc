@@ -147,6 +147,11 @@ type try_provider_ctx =
             summary of it. Never invoked when the projection refuses: the turn
             carries a typed budget error instead, and reporting a cut that was
             never dispatched would fabricate evidence. *)
+  ; on_response_observed_model_input :
+      (Turn_record.response_observed_model_input -> unit) option
+        (** Called only when [AfterTurn] joins a typed provider response to the
+            exact Agent Core request range that produced it. Later unanswered
+            attempts do not replace this fact. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
@@ -493,6 +498,7 @@ module For_testing : sig
     request_view
 
   val carried_front :
+    ledger:Keeper_model_input_ledger.t option ref ->
     keeper_name:string ->
     runtime_id:string ->
     session_id:string ->
@@ -501,14 +507,26 @@ module For_testing : sig
     cold:(unit -> Keeper_carried_front.seed option) ->
     Keeper_carried_front.seed option * Keeper_model_input_ledger.t option
   (** The front a request composes from, [digest_at] being the lookup over
-      the history it composes from: the pair's ledger front while that
-      history holds the ledger ({!Keeper_model_input_ledger.holds}), advanced
+      the history it composes from: the candidate's working ledger front
+      while that history holds the ledger ({!Keeper_model_input_ledger.holds}), advanced
       by a valid later [after_refusal] front. With neither, [cold ()]. A ledger
-      that does not hold is removed from the table and returned second. *)
+      that does not hold is returned second; the current table entry is
+      independently checked before discarding or adopting it. *)
+
+  val move_ledger_front :
+    Keeper_model_input_ledger.t option ref ->
+    first_atom:int -> front_digest:string -> bool
+  (** Move only the candidate's working value. *)
+
+  val evict_at_turn_boundary :
+    keeper_name:string -> runtime_id:string ->
+    context_marks:Runtime_schema.context_marks option ->
+    Keeper_model_input_ledger.t option ref -> unit
+  (** Apply this runtime's declared marks to its candidate's working value. *)
 
   val halve_front :
     digest_at:(int -> string option) option ->
-    move_ledger:(first_atom:int -> front_digest:string -> Keeper_model_input_ledger.Table.move) ->
+    move_ledger:(first_atom:int -> front_digest:string -> bool) ->
     hold:(Keeper_carried_front.seed -> unit) ->
     first_atom:int ->
     retry:int ->

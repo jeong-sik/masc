@@ -1191,16 +1191,16 @@ let build_agent_spans_json ~events ~events_store_total ~limit =
          | None -> ());
         (match span_end_classification e.kind with
          | Some (ek, status) ->
-             (* RFC-0323 G-3: on approve-produced completion the event actor
-                is the VERIFIER, but the span was opened by the ASSIGNEE, who
-                rides the payload (emitted since G-3). Close the assignee's
-                span and attribute it to them; fall back to the actor for
-                pre-G-3 events — mirrors the works_on-edge routing in
-                [Activity_graph_reducer]. *)
+             (* Verdicts retain their authority as actor. Their producer
+                owns the span; direct cancellations use the acting owner. *)
              let closing_aid =
                match e.kind with
-               | "task.approved" ->
-                   (match Json_util.assoc_member_opt "assignee" e.payload with
+               | "task.approved" | "task.cancelled" ->
+                   (match
+                      Json_util.assoc_member_opt
+                        Event_kind.Task.producer_payload_key
+                        e.payload
+                    with
                     | Some (`String name) when String.trim name <> "" -> name
                     | Some _ | None -> aid)
                | _ -> aid

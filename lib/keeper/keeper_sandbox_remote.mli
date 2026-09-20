@@ -75,14 +75,22 @@ val name : t -> string
 (** Endpoint name for logs and error codes: the registry key for OpenSSH,
     the container name for a guest. *)
 
-val remote_root : t -> string
-val remote_keeper_root : t -> string
-(** [<remote_root>/<sanitized keeper name>]. *)
+val endpoint_root : t -> string
+(** The configured endpoint-wide root for OpenSSH/a microVM; Docker already
+    receives its resolved workdir in the same field. *)
+
+val workspace_root : t -> string
+(** The exact request jail/default cwd used by ordinary payloads. *)
+
+val keeper_control_root : t -> string
+(** OpenSSH [<endpoint_root>/<sanitized keeper name>], currently both its
+    workspace and Keeper-scoped GitHub control root. The separate name
+    prevents callers from inferring either role from the endpoint root. *)
 
 val gh_config_dir : t -> string
 (** Where this endpoint's [gh] keeps the Keeper's identity, and the value the
     lane injects as [GH_CONFIG_DIR] on every request:
-    [<remote_keeper_root>/.config/gh] for OpenSSH, the mounted snapshot path
+    [<keeper_control_root>/.config/gh] for OpenSSH, the mounted snapshot path
     for a guest. *)
 
 val transport : t -> transport
@@ -216,11 +224,13 @@ val runner :
     [on_receipt] receives only this runner call's response evidence. The caller
     owns its collection; endpoint-wide [last_dispatch] is never consulted. *)
 
-val bootstrap_keeper_workspace :
+val bootstrap_keeper_control_root :
   timeout_sec:float -> t -> Masc_exec.Sandbox_target.run_outcome
-(** Create an OpenSSH Keeper's workspace with one fixed [mkdir] request rooted
-    at the endpoint base. Ordinary payloads cannot select this wider root.
-    Other transports are already provisioned by their runtime and fail here. *)
+(** Create an OpenSSH Keeper's control root with one fixed [mkdir] request
+    rooted at the endpoint base. Under the current per-Keeper layout this is
+    also its workspace. Ordinary payloads cannot select the wider endpoint
+    root. Other transports are already provisioned by their runtime and fail
+    here. *)
 
 module For_testing : sig
   val clear_preflight_cache : unit -> unit

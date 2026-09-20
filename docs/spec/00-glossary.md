@@ -13,9 +13,14 @@ status: reference
   OCaml/Eio 서버.
 
 **agent core**
-: `packages/agent_core`에 담긴 재사용 모델 실행 계층. Agent 구성, tool turn,
-  provider 요청, typed response와 실패를 소유하고, MASC는 제품 조율을 소유한다.
-  Agent Core는 MASC coordinator 라이브러리에 의존하지 않는다.
+: `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를
+  참조하지 않아 MASC 없이도 쓸 수 있다. Agent 구성, tool turn, typed response와
+  실패의 타입은 모든 레인이 여기 것을 쓴다. Provider 요청을 실제로 보내는 것은
+  agent core 레인뿐이고, 공식 클라이언트 레인은 자기 프로세스가 보낸다.
+
+**Official Client Lane**
+: Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
+  provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
 
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
@@ -32,7 +37,8 @@ status: reference
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Keeper Turn**
-: 하나의 Keeper 작업 시도를 위해 MASC가 agent core Agent run을 실행하는 단위.
+: 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
+  레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한

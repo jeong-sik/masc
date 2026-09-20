@@ -37,7 +37,7 @@ type choice_answer =
 
 type score_answer =
   { score : float
-  ; probabilities : float list
+  ; probabilities : (int * float) list
   ; confidence : float
   }
 

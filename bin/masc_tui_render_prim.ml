@@ -405,13 +405,15 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
      Expired here rather than cleared by the setter: the setter is a key
      handler that has already returned, and nothing runs on a timer to come
      back for it. *)
-  let hints =
+  (* The footer keeps action text separate from hints and search status so
+     a long outcome cannot drop a confirmation or identity warning. *)
+  let action_text =
     match state.last_action with
     | Some (text, set_at)
       when Unix.gettimeofday () -. set_at
            <= Masc_tui_types.last_action_window_s ->
-      text ^ "  " ^ hints
-    | Some _ | None -> hints
+      Some text
+    | Some _ | None -> None
   in
   let identity =
     match state.server_identity with
@@ -523,7 +525,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line ?literal_prefix
+  Masc_tui_footer.line ?literal_prefix ?action_text
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 

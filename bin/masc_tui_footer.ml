@@ -499,19 +499,52 @@ let rec fit_with_conflicts ?literal_prefix ~max_cells ~conflicts ~hints ~omissio
    status list and the whole key row again. Shrinking in one pass left a row
    carrying only [q:quit  ...?] where the refresh interval, the answering badge
    and the port all fit once the notice was gone. *)
-let rec fit_body ?literal_prefix ~max_cells ~conflicts ~hints ~omissions statuses =
-  match fit_with_conflicts ?literal_prefix ~max_cells ~conflicts ~hints ~omissions statuses with
+let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omissions statuses =
+  let displayed_prefix, displayed_hints =
+    match action_text with
+    | None | Some "" -> literal_prefix, hints
+    | Some action ->
+      let shown, mark_omission =
+        match conflicts with
+        | [] -> action, false
+        | _ :: _ ->
+          (* Existing warnings, search status and pinned keys keep their
+             space. Only the action uses the remaining cells. *)
+          let reserved action_parts =
+            body (String.concat "  "
+              (List.map (fun conflict -> conflict.text) conflicts
+               @ Option.to_list literal_prefix @ action_parts @ undroppable_keys hints)) []
+            ^ "  " ^ cut_marker in
+          (* An empty action item includes its real separator in the row. *)
+          let room = max 0 (max_cells
+            - Masc_tui_message_layout.display_width (reserved [ "" ])) in
+          let shown =
+            if Masc_tui_message_layout.display_width action <= room then action
+            else Masc_tui_message_layout.fit_width action room in
+          shown, (shown = ""
+            && Masc_tui_message_layout.display_width (reserved []) <= max_cells)
+      in
+      let prefix = match Option.to_list literal_prefix
+          @ (if shown = "" then [] else [ shown ]) with
+        | [] -> None
+        | parts -> Some (String.concat "  " parts) in
+      (* Mark a wholly omitted action when the marker itself fits; a marker
+         must not displace the warning or its pinned keys either. *)
+      prefix, (if mark_omission then hints ^ "  " ^ cut_marker else hints)
+  in
+  match fit_with_conflicts ?literal_prefix:displayed_prefix ~max_cells ~conflicts
+          ~hints:displayed_hints ~omissions statuses with
   | Some fitted -> fitted
   | None ->
     (match conflicts with
      | _ :: _ ->
-       fit_body ?literal_prefix ~max_cells
+       fit_body ?literal_prefix ?action_text ~max_cells
          ~conflicts:(without_a_blocking_conflict ?literal_prefix ~max_cells ~hints conflicts)
          ~hints ~omissions statuses
      | [] ->
        (* Never cell-cut a conflict into a different path or diagnosis. Only
           surface hints can use the last-resort text truncation. *)
-       let rendered = body (with_literal_prefix literal_prefix hints) [] in
+       let rendered = body (with_literal_prefix displayed_prefix displayed_hints) [] in
        let room = max_cells - Masc_tui_message_layout.display_width more_key in
        if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
        else Masc_tui_message_layout.fit_width rendered room ^ more_key)
@@ -522,6 +555,10 @@ let rec fit_body ?literal_prefix ~max_cells ~conflicts ~hints ~omissions statuse
 
     [literal_prefix] carries surface status such as a search query. Its spaces
     are preserved while the separately supplied hints are split into items.
+    [action_text] is a transient outcome of an operator action. Existing
+    conflicts, search status and pinned keys retain their space before that
+    outcome is cell-cut. With no conflicts, it follows the existing literal
+    prefix fallback, so it cannot disappear as a droppable key hint.
     Key hints retain the row before status facts do. When the facts do not fit,
     whole typed items are omitted in this order: refresh interval, build, base
     path, live turn activity, port. Only an overlong surface-owned hint uses
@@ -530,7 +567,7 @@ let rec fit_body ?literal_prefix ~max_cells ~conflicts ~hints ~omissions statuse
     A conflict notice is the exception: it is rendered in front of the hints
     ({!leads_the_row}) rather than left in the tail, so it outlives the keys
     instead of going before them. *)
-let line ?literal_prefix ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
+let line ?literal_prefix ?action_text ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
   let statuses =
     List.filter_map status_item_projection (status @ [ Port port ])
   in
@@ -540,7 +577,7 @@ let line ?literal_prefix ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
       (ordered_conflicts conflicts)
   in
   let fitted =
-    fit_body ?literal_prefix ~max_cells:(max 0 max_cells) ~conflicts ~hints ~omissions:omission_order
+    fit_body ?literal_prefix ?action_text ~max_cells:(max 0 max_cells) ~conflicts ~hints ~omissions:omission_order
       statuses
   in
   Printf.sprintf "%s%s%s\n" dim fitted reset

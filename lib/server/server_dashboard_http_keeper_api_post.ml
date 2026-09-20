@@ -915,7 +915,11 @@ let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event 
   Dashboard_cache.invalidate_prefix
     (Printf.sprintf "dashboard:fleet-composite:%s" config.base_path);
   match runtime_event with
-  | Some event -> refresh_keeper_execution_surfaces ~config ~name event
+  | Some event ->
+      (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+      ignore
+        (refresh_keeper_execution_surfaces ~config ~name event
+          : Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh)
   | None -> invalidate_keeper_execution_surfaces ~config ()
 
 let respond_config_sync_error
@@ -1637,11 +1641,14 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             directive;
           (match plain_directive with
            | Plain_pause ->
-             refresh_keeper_execution_surfaces
-               ~config
-               ~name
-               (Keeper_lifecycle_events.Phase_event
-                  Keeper_state_machine.Paused)
+             (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+             ignore
+               (refresh_keeper_execution_surfaces
+                  ~config
+                  ~name
+                  (Keeper_lifecycle_events.Phase_event
+                     Keeper_state_machine.Paused)
+                 : Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh)
            | Plain_wakeup ->
              invalidate_keeper_execution_surfaces ~config ());
           Http.Response.json_value ~compress:true ~request:req

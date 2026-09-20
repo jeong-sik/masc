@@ -1911,7 +1911,7 @@ type async_msg =
   | Lane_run_detail_loaded of
       string * int * (Masc.Tui_decode.lane_run_detail, string) result
   | Measurement_artifact_loaded of
-      string * int * (Masc.Librarian_continuity_report.t, string) result
+      string * int * (Measurement.t, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -6037,7 +6037,11 @@ let launch_measurement_artifact_load state ~mailbox ~sha256 =
   let host = server_peer_host in
   let port = state.port in
   let run () =
-    let result = Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256 in
+    let result =
+      try Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256 with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
     enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result))
   in
   match Eio_context.get_switch_opt () with

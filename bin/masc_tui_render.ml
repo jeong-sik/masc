@@ -5512,12 +5512,14 @@ module Continuity_report = Masc.Librarian_continuity_report
 
 type run_inspection =
   | Inspection_lane of Tui_decode.lane_run_detail
-  | Inspection_measurement of string * Continuity_report.t
+  | Inspection_measurement of string * Measurement.t
 
 let measurement_summary_lines (report : Continuity_report.t) =
   let counts = Measurement.counts report in
+  let provenance = match report.provenance with
+    | Continuity_report.Synthetic -> "SYNTHETIC INPUT" in
   [ Ansi.reset, "  MEANING PRESERVATION  " ^ Terminal_text.single_line report.run_id
-  ; Ansi.dim, "  SYNTHETIC INPUT  ·  " ^ Terminal_text.single_line report.started_at
+  ; Ansi.dim, "  " ^ provenance ^ "  ·  " ^ Terminal_text.single_line report.started_at
   ; Ansi.reset,
     Printf.sprintf "  SAMPLES  %d  ·  SCORED %d  ·  FAILED %d  ·  INCOMPLETE %d"
       (List.length report.samples) counts.scored counts.failed counts.incomplete
@@ -5533,7 +5535,8 @@ let measurement_text_lines ~width lines =
         |> List.map (fun line -> style, line)))
     lines
 
-let measurement_input_lines ~width ~sha256 (report : Continuity_report.t) =
+let measurement_input_lines ~width ~sha256 (measurement : Measurement.t) =
+  let report = measurement.report in
   let module R = Continuity_report in
   let metadata =
     [ "AUTHORITATIVE FILE  " ^ report.output_path
@@ -5545,13 +5548,34 @@ let measurement_input_lines ~width ~sha256 (report : Continuity_report.t) =
     ]
     @ (match report.binary_commit with None -> [] | Some value -> [ "BINARY COMMIT  " ^ value ])
     @ (match report.executable_sha256 with None -> [] | Some value -> [ "EXECUTABLE SHA256  " ^ value ])
-    @ List.map (fun (sample : R.sample) ->
-        "CONTEXT SHA256  " ^ sample.case.id ^ "  "
-        ^ R.sha256 (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context))) report.samples
+    @ List.map (fun (id, sha256) ->
+        "CONTEXT SHA256  " ^ id ^ "  " ^ sha256) measurement.context_hashes
   in
   measurement_text_lines ~width (List.map (fun text -> Ansi.dim, text) metadata)
   @ lane_run_payload_lines ~width
       (`List (List.map (fun (sample : R.sample) -> R.case_to_yojson sample.case) report.samples))
+
+(* Apply the same byte ceiling as exact lane payloads before wrapping. The
+   report and its full score distribution remain intact; only text is a preview. *)
+let measurement_output_preview ~width ~output_path lines =
+  let rec take remaining reversed = function
+    | [] -> List.rev reversed, false
+    | (style, text) :: rest ->
+      let bytes = String.length text + 1 in
+      if bytes <= remaining then take (remaining - bytes) ((style, text) :: reversed) rest
+      else
+        let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) text in
+        List.rev ((style, prefix) :: reversed), true
+  in
+  let preview, truncated = take lane_run_render_max_bytes [] lines in
+  let notice =
+    if truncated then
+      [ Theme.warn (), Printf.sprintf
+          "PREVIEW · output truncated at %d bytes; full report: %s"
+          lane_run_render_max_bytes output_path ]
+    else []
+  in
+  measurement_text_lines ~width (notice @ preview)
 
 let measurement_output_lines ~width (report : Continuity_report.t) =
   let module R = Continuity_report in
@@ -5568,6 +5592,10 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
     ; value.response.text
     ] @ prepared value.request
   in
+  let question_lines = function
+    | R.Provided text -> [ "QUESTION PROVIDED"; text ]
+    | R.Generated value -> generation "QUESTION GENERATED" value
+  in
   let failed_generation label (value : R.failed_generation) =
     [ label ^ " FAILED  " ^ value.error
     ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
@@ -5578,7 +5606,7 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
   in
   let values =
     List.filter_map (fun (sample : R.sample) -> match sample.progress with
-      | R.Scored (_, _, judgment) -> Some (judgment.probability, sample.case.id)
+      | R.Scored { judgment; _ } -> Some (judgment.probability, sample.case.id)
       | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
       | R.Answer_ready _ | R.Judge_failed _ -> None) report.samples
     |> List.sort (fun (a, id_a) (b, id_b) ->
@@ -5595,17 +5623,17 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
       let style, status, lines = match sample.progress with
         | R.Not_started -> Theme.muted (), "NOT STARTED", []
         | R.Question_failed failed -> Theme.bad (), "QUESTION FAILED", failed_generation "QUESTION" failed
-        | R.Question_ready question -> Theme.info (), "INCOMPLETE · QUESTION READY", generation "QUESTION" question
+        | R.Question_ready question -> Theme.info (), "INCOMPLETE · QUESTION READY", question_lines question
         | R.Answer_failed (question, failed) -> Theme.bad (), "ANSWER FAILED",
-            generation "QUESTION" question @ failed_generation "ANSWER" failed
-        | R.Answer_ready (question, answer) -> Theme.info (), "INCOMPLETE · ANSWER READY",
-            generation "QUESTION" question @ generation "ANSWER" answer
-        | R.Judge_failed (question, answer, failed) -> Theme.bad (), "JUDGE FAILED",
-            generation "QUESTION" question @ generation "ANSWER" answer
-            @ [ "JUDGE REQUESTED  " ^ failed.request.model ^ "  ·  " ^ failed.request.endpoint
-              ; "JUDGE FAILED  " ^ failed.error ]
-        | R.Scored (question, answer, judgment) -> Ansi.reset, "SCORED",
-            generation "QUESTION" question @ generation "ANSWER" answer
+            question_lines question @ failed_generation "ANSWER" failed
+        | R.Answer_ready { question; answer } -> Theme.info (), "INCOMPLETE · ANSWER READY",
+            question_lines question @ generation "ANSWER" answer
+        | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
+            question_lines question @ generation "ANSWER" answer
+            @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
+              ; "JUDGE FAILED  " ^ failure.error ]
+        | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
+            question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
               ; "Noul  " ^ Yojson.Safe.to_string (`Float judgment.probability)
               ; "TRUE  " ^ judgment.request.true_criteria
@@ -5615,15 +5643,18 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
       [ Ansi.dim, ""; style, sample.case.id ^ "  ·  " ^ status ]
       @ List.map (fun line -> Ansi.reset, line) lines) report.samples
   in
-  measurement_text_lines ~width (probabilities @ samples)
+  measurement_output_preview ~width ~output_path:report.output_path (probabilities @ samples)
 
 let inspection_summary_lines = function
   | Inspection_lane detail -> lane_run_summary_lines detail
-  | Inspection_measurement (_, report) -> measurement_summary_lines report
+  | Inspection_measurement (_, measurement) -> measurement_summary_lines measurement.report
 
 let inspection_panel_titles = function
   | Inspection_lane detail -> lane_run_panel_titles detail
-  | Inspection_measurement _ -> "INPUT · SYNTHETIC CASES", "OBSERVATIONS · NO VERDICT"
+  | Inspection_measurement (_, measurement) ->
+    (match measurement.report.provenance with
+     | Continuity_report.Synthetic -> "INPUT · SYNTHETIC CASES"),
+    "OBSERVATIONS · NO VERDICT"
 
 let inspection_input_lines ~width = function
   | Inspection_lane detail -> lane_run_input_lines ~width detail
@@ -5631,7 +5662,7 @@ let inspection_input_lines ~width = function
 
 let inspection_output_lines ~width = function
   | Inspection_lane detail -> lane_run_output_lines ~width detail
-  | Inspection_measurement (_, report) -> measurement_output_lines ~width report
+  | Inspection_measurement (_, measurement) -> measurement_output_lines ~width measurement.report
 
 let lane_run_stacked_lines ~width detail =
   let input_title, output_title = inspection_panel_titles detail in

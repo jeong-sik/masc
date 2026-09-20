@@ -1580,6 +1580,8 @@ type lanes_mode =
 module Measurement = struct
   module R = Masc.Librarian_continuity_report
 
+  type t = { report : R.t; context_hashes : (string * string) list }
+
   type counts = { scored : int; failed : int; incomplete : int }
 
   let counts (report : R.t) =
@@ -1602,15 +1604,30 @@ module Measurement = struct
         | `Assoc fields -> List.assoc_opt name fields
         | _ -> None in
       (match field "sha256", field "bytes", field "content" with
-       | Some (`String actual), Some (`Int bytes), Some (`String content)
-         when String.equal actual sha256
-              && bytes = String.length content
-              && String.equal (R.sha256 content) sha256 ->
-         (match Yojson.Safe.from_string content with
-          | report -> R.of_yojson report
-          | exception Yojson.Json_error detail ->
-            Error ("Measurement artifact is not JSON: " ^ detail))
-       | _ -> Error "Measurement artifact does not match the requested SHA and bytes")
+       | Some (`String actual), Some (`Int bytes), Some (`String content) ->
+         if not (String.equal actual sha256) then
+           Error ("Measurement artifact SHA " ^ actual ^ " differs from requested " ^ sha256)
+         else if bytes <> String.length content then
+           Error (Printf.sprintf "Measurement artifact declares %d bytes but carries %d"
+                    bytes (String.length content))
+         else
+           let content_sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
+           if not (String.equal content_sha256 sha256) then
+             Error ("Measurement artifact content hashes to " ^ content_sha256
+                    ^ ", expected " ^ sha256)
+           else
+             (match Yojson.Safe.from_string content with
+              | json ->
+                Result.map (fun (report : R.t) ->
+                  let context_hashes = List.map (fun (sample : R.sample) ->
+                    sample.case.id,
+                    Digestif.SHA256.(to_hex (digest_string
+                      (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context)))))
+                    report.samples in
+                  { report; context_hashes }) (R.of_yojson json)
+              | exception Yojson.Json_error detail ->
+                Error ("Measurement artifact is not JSON: " ^ detail))
+       | _ -> Error "Measurement artifact response requires sha256, bytes and content fields")
 end
 
 (** One authority for the Fusion surface's list/detail state. The top-level
@@ -5266,7 +5283,7 @@ type state = {
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
-  mutable measurement_report: Masc.Librarian_continuity_report.t option;
+  mutable measurement_report: Measurement.t option;
   mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;

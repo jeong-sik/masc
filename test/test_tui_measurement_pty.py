@@ -38,8 +38,15 @@ def generation(text: str) -> dict[str, Any]:
     }
 
 
-def sample(identity: str, stage: str, probability: float = 0.875) -> dict[str, Any]:
-    question = generation("What is the cabinet code?")
+def sample(
+    identity: str, stage: str, probability: float = 0.875, *, provided: bool = False
+) -> dict[str, Any]:
+    question_text = "What is the cabinet code?"
+    question = (
+        ["Provided", question_text]
+        if provided
+        else ["Generated", generation(question_text)]
+    )
     answer = generation(
         "ORCHID-731" if identity == "retained" else "Information unavailable."
     )
@@ -48,7 +55,7 @@ def sample(identity: str, stage: str, probability: float = 0.875) -> dict[str, A
         "model": "requested-judge",
         "question_id": identity,
         "reference": "The cabinet code is ORCHID-731.",
-        "question": question["response"]["text"],
+        "question": question_text,
         "answer": answer["response"]["text"],
         "instructions": "Does this answer recover the reference?",
         "true_criteria": "The requested information is accurately recovered.",
@@ -57,31 +64,39 @@ def sample(identity: str, stage: str, probability: float = 0.875) -> dict[str, A
     if stage == "Scored":
         progress = [
             stage,
-            question,
-            answer,
             {
-                "request": request,
-                "response_model": "actual-judge-model",
-                "request_body_sha256": "b" * 64,
-                "probability": probability,
+                "question": question,
+                "answer": answer,
+                "judgment": {
+                    "request": request,
+                    "response_model": "actual-judge-model",
+                    "request_body_sha256": "b" * 64,
+                    "probability": probability,
+                },
             },
         ]
     elif stage == "Judge_failed":
         progress = [
             stage,
-            question,
-            answer,
-            {"request": request, "error": "synthetic provider HTTP 503"},
+            {
+                "question": question,
+                "answer": answer,
+                "failure": {
+                    "request": request,
+                    "error": "synthetic provider HTTP 503",
+                },
+            },
         ]
     elif stage == "Question_ready":
         progress = [stage, question]
     elif stage == "Answer_ready":
-        progress = [stage, question, answer]
+        progress = [stage, {"question": question, "answer": answer}]
     else:
         raise ValueError(stage)
     return {
         "case": {
             "id": identity,
+            "question": question_text if provided else None,
             "source": {
                 "trace_id": "synthetic-source",
                 "turn": 1,
@@ -103,7 +118,8 @@ def sample(identity: str, stage: str, probability: float = 0.875) -> dict[str, A
 
 def report(identity: str, samples: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "schema": "masc.librarian-continuity.synthetic.v1",
+        "schema": "masc.librarian-continuity.v1",
+        "provenance": ["Synthetic"],
         "run_id": identity,
         "started_at": "2026-09-21T00:00:00Z",
         "input_path": "synthetic.json",
@@ -136,7 +152,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
     values = {
         "contexts": report(
             "two-contexts",
-            [sample("retained", "Scored"), sample("absent", "Scored", 0.125)],
+            [
+                sample("retained", "Scored", provided=True),
+                sample("absent", "Scored", 0.125, provided=True),
+            ],
         ),
         "incomplete": report(
             "incomplete-stages",
@@ -147,11 +166,22 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         "missing": report("must-not-render", [sample("missing", "Scored")]),
         "stale": report("old-result", [sample("old-sample", "Scored")]),
     }
+    if scenario == "large":
+        large = sample("large", "Scored", provided=True)
+        answer_text = "synthetic answer " * 80_000
+        large["progress"][1]["answer"]["response"]["text"] = answer_text
+        large["progress"][1]["judgment"]["request"]["answer"] = answer_text
+        values[scenario] = report(
+            "large-valid-report",
+            [large, sample("after-large", "Scored", 0.125, provided=True)],
+        )
+    elif scenario == "malformed":
+        values[scenario] = report("must-not-render", [sample("malformed", "Scored")])
     sha, response = artifact(values[scenario])
     if scenario == "integrity":
         response = copy.deepcopy(response)
         assert isinstance(response[1], dict)
-        response[1]["content"] += " "
+        response[1]["content"] = "x" + response[1]["content"][1:]
     if scenario == "missing":
         response = (404, {"error": "artifact not found"})
     delayed = (
@@ -160,6 +190,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         else None
     )
     fixtures["/api/v1/artifacts/" + sha] = response if delayed is None else delayed
+    if scenario == "malformed":
+        fixtures["/api/v1/artifacts/" + sha] = h.RawHttpResponse(
+            200, b"{", content_type="application/json"
+        )
     new_sha, new_response = artifact(
         report("new-result", [sample("new-sample", "Answer_ready")])
     )
@@ -186,9 +220,11 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             "contexts": b"SCORED 2",
             "incomplete": b"INCOMPLETE 2",
             "failed": b"FAILED 1",
-            "integrity": b"does not match",
+            "integrity": b"content hashes to",
             "missing": b"artifact not found",
             "stale": b"loading measurement",
+            "large": b"SCORED 2",
+            "malformed": b"not JSON",
         }[scenario]
         h.wait_for_output(process, master, output, expected, start=0, timeout=5.0)
         if delayed is not None:
@@ -201,8 +237,8 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             process,
             master,
             output,
-            rows=50,
-            columns=200,
+            rows=70 if scenario == "large" else 50,
+            columns=90 if scenario == "large" else 200,
             needle=b"MASC Measurement",
             controls=(h.FULL_REDRAW,),
         )
@@ -215,7 +251,21 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         start = output.rfind(h.FRAME_START, before, redraw)
         assert start >= 0
         screen = h.screen_text(bytes(output[start:end]))
-        if scenario == "contexts":
+        if scenario == "large":
+            assert b"SCORED 2" in screen and b"INCOMPLETE 0" in screen, screen
+            for needle in (
+                b"output truncated",
+                b"full report:",
+                b"measurement-result.json",
+                b"after-large",
+                b"0.125",
+                b"0.875",
+                b"SCORED 2",
+            ):
+                assert needle in screen, (needle, screen)
+            # A bounded display remains interactive after the large response.
+            h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
+        elif scenario == "contexts":
             for needle in (
                 b"SCORED 2",
                 b"FAILED 0",
@@ -228,6 +278,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 b"AUTHORITATIVE FILE",
                 b"measurement-result.json",
                 b"BLOB SHA256",
+                b"QUESTION PROVIDED",
             ):
                 assert needle in screen, (needle, screen)
             assert b"APPROVED" not in screen and b"librarian_exact" not in screen, (
@@ -251,10 +302,12 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 b"synthetic provider HTTP 503",
             ):
                 assert needle in screen, (needle, screen)
+        elif scenario == "malformed":
+            assert b"not JSON" in screen and b"must-not-render" not in screen, screen
         elif scenario == "integrity":
-            assert b"does not match" in screen and b"must-not-render" not in screen, (
-                screen
-            )
+            assert (
+                b"content hashes to" in screen and b"must-not-render" not in screen
+            ), screen
         elif scenario == "missing":
             assert (
                 b"artifact not found" in screen and b"must-not-render" not in screen
@@ -291,6 +344,15 @@ if __name__ == "__main__":
     parser.add_argument("executable")
     parser.add_argument("--evidence-dir", type=Path)
     args = parser.parse_args()
-    for name in ("contexts", "incomplete", "failed", "integrity", "missing", "stale"):
+    for name in (
+        "contexts",
+        "incomplete",
+        "failed",
+        "integrity",
+        "missing",
+        "stale",
+        "large",
+        "malformed",
+    ):
         run(os.path.abspath(args.executable), name, args.evidence_dir)
-    print("TUI Noul measurement: 6 scenarios PASS")
+    print("TUI Noul measurement: 8 scenarios PASS")

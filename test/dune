@@ -3552,7 +3552,7 @@
 (test
  (name test_tui_measurement)
  (modules test_tui_measurement)
- (libraries alcotest masc masc_tui_types yojson))
+ (libraries alcotest digestif masc masc_tui_types yojson))
 
 (test
  (name test_tui_command)

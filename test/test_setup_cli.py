@@ -219,8 +219,9 @@ class Setup(unittest.TestCase):
                 if inline not in text:
                     raise AssertionError(
                         'setup fixture no longer declares the inline credentials '
-                        'block this test swaps. Update this test together with '
-                        'scripts/fixtures/release-evidence/runtime.toml.'
+                        'block this test swaps, or its provider is no longer named '
+                        'ollama_cloud (see the rename above). Update this test '
+                        'together with scripts/fixtures/release-evidence/runtime.toml.'
                     )
                 text = text.replace(inline, env_block)
                 runtime.write_text(text)

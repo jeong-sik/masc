@@ -4,9 +4,16 @@
   ../scripts/fixtures/release-evidence/runtime.toml)
  (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
 
+(rule
+ (alias runtest-tool-call-sequence-miner)
+ (deps test_tool_call_sequence_miner.py ../scripts/tool-call-sequence-miner.py)
+ (action (run python3 %{dep:test_tool_call_sequence_miner.py})))
+
 (alias
  (name runtest)
- (deps (alias runtest-test_dashboard_observation_quota)))
+ (deps
+  (alias runtest-test_dashboard_observation_quota)
+  (alias runtest-tool-call-sequence-miner)))
 
 (test
  (name test_typesafeai)

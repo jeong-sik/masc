@@ -57,4 +57,30 @@ for required_flag in '-w +32' '+69' '-warn-error +a'; do
     || fail "root dune env must set ${required_flag} in dev and release, found it in ${present} of 2"
 done
 
-echo "OCaml compile authority: PASS (root dune sets -w +32, +69 and -warn-error +a in dev and release)"
+vendor_warning_override_is_valid() {
+  local lines="$1"
+  local line_count correct_count bare_count
+  line_count="$(grep -c . <<<"${lines}" || true)"
+  correct_count="$(grep -Fc -- '(:standard -w -69)' <<<"${lines}" || true)"
+  bare_count="$(grep -Fc -- '(:standard -69)' <<<"${lines}" || true)"
+  [ "${line_count}" -eq 2 ] \
+    && [ "${correct_count}" -eq 2 ] \
+    && [ "${bare_count}" -eq 0 ]
+}
+
+vendor_flag_lines="$(
+  awk '
+    /^\(subdir vendor$/ { in_vendor = 1; next }
+    in_vendor && /^\(/ { exit }
+    in_vendor && index($0, "(flags ") { print }
+  ' "${dune_root}"
+)"
+vendor_warning_override_is_valid "${vendor_flag_lines}" \
+  || fail "vendor dev and release must append (:standard -w -69)"
+
+bare_warning_fixture=$'  (dev (flags (:standard -69)))\n  (release (flags (:standard -69)))'
+if vendor_warning_override_is_valid "${bare_warning_fixture}"; then
+  fail "self-test accepted bare -69 without the -w warning selector"
+fi
+
+echo "OCaml compile authority: PASS (root warnings are strict; vendor disables warning 69 through -w)"

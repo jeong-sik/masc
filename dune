@@ -41,8 +41,8 @@
 ; the vendored dune files or weakening warning 32 in the rest of the tree.
 (subdir vendor
  (env
-  (dev (flags (:standard -69)))
-  (release (flags (:standard -69)))))
+  (dev (flags (:standard -w -69)))
+  (release (flags (:standard -w -69)))))
 
 (install
  (package masc)

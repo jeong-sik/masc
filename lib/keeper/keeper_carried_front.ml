@@ -46,28 +46,21 @@ let composer_to_string = function
   | Not_materialized -> "not_materialized"
 ;;
 
-(* An official client's record is read too. Its window is measured where the
-   Agent Core path measures its own: the three official-client runtimes count
-   atoms of the message list masc handed the agent and name the front with
-   that list's opening digest (keeper_claude_code_runtime.ml:85-99,
-   keeper_codex_runtime.ml:116-127, keeper_antigravity_runtime.ml:158-181),
-   and that list is the keeper's checkpoint history — the projection runs over
-   [agent.state.messages] (pipeline_stage_prepare.ml:148-154). What it cannot
-   answer is a runtime the catalog no longer has, because nothing then says
-   which list was counted. Skipping the official ones cost a keeper that had
-   run 20 turns on claude_code the whole history on its first Agent Core turn
-   after them (2026-09-18: code-reviewer turn 4059, 13 MB per candidate). *)
-let of_records ~composer ~trace_id (records : Turn_record.t list) =
+(* The response-observed field certifies this range at the producer. A
+   runtime can leave today's catalog without changing that historical fact;
+   [for_history] checks whether its opening position still names this history.
+   Historical motivation: #36997 records a 2026-09-18 incident where skipping
+   official-client records resent 13 MB per candidate on Agent Core turn 4059,
+   after 20 claude_code turns. Preserve that response evidence, subject to the
+   same history-position check. *)
+let of_records ~trace_id (records : Turn_record.t list) =
   List.fold_left
     (fun newest (record : Turn_record.t) ->
        match
          record.Turn_record.response_observed_model_input
        with
        | Some observed
-         when String.equal record.Turn_record.trace_id trace_id
-              && (match composer observed.Turn_record.runtime_profile with
-                  | Composes_from_the_history | Hands_over_its_own_list -> true
-                  | Not_materialized -> false) ->
+         when String.equal record.Turn_record.trace_id trace_id ->
          let turn = record.Turn_record.absolute_turn in
          (match newest with
           | Some (newest_turn, _) when newest_turn >= turn -> newest
@@ -104,7 +97,7 @@ let no_seed_read = { seed = None; unreadable = None }
    counted: "no record" and "records that could not be decoded" are different
    answers to why a turn started without a front. A line that is not JSON at
    all never reaches here; [Dated_jsonl.read_recent] skips it uncounted. *)
-let seed_read_of_rows ~composer ~trace_id rows =
+let seed_read_of_rows ~trace_id rows =
   let records_rev, unreadable =
     List.fold_left
       (fun (records, unreadable) json ->
@@ -119,13 +112,12 @@ let seed_read_of_rows ~composer ~trace_id rows =
       ([], None)
       rows
   in
-  { seed = of_records ~composer ~trace_id (List.rev records_rev); unreadable }
+  { seed = of_records ~trace_id (List.rev records_rev); unreadable }
 ;;
 
 let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   seed_read_of_rows
-    ~composer:(fun runtime_id -> composer_of_runtime (Runtime.get_runtime_by_id runtime_id))
     ~trace_id
     (Dated_jsonl.read_recent store records_read)
 ;;

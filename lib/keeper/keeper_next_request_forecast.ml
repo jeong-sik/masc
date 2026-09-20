@@ -467,8 +467,6 @@ let forecast ~config ~keeper_name =
        let readings = readings_of_records records in
        let seed =
          Keeper_carried_front.of_records
-           ~composer:(fun runtime_id ->
-             Keeper_carried_front.composer_of_runtime (Runtime.get_runtime_by_id runtime_id))
            ~trace_id
            records
        in

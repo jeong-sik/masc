@@ -133,7 +133,10 @@ or scheduler state.
 The Librarian returns changes: `new_claims`, explicit `dropped` statements,
 and `working_contexts`. A new claim may name a `supersedes` identity or
 `absorbs` identities. Unmentioned facts are retained subject to derivation
-support; there is no per-fact retain response. Superseded identities must also be dropped; absorbed
+support. A fact removed because its derivation lost all support is recorded in
+`change.invalidated` with its missing premise identities, the same support
+fixed point that `keeper_memory_retract` records. There is no per-fact retain
+response. Superseded identities must also be dropped; absorbed
 identities must not be dropped. Unknown identities, duplicate dispositions,
 and invalid schema values reject the answer (`Keeper_librarian`).
 

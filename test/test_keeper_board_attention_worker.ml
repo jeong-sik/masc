@@ -1219,7 +1219,7 @@ let test_flow_already_started_blocks_unbound_without_hot_retry () =
   Alcotest.(check int) "one affine-flow replay observation" 1 !calls
 ;;
 
-let test_domain_error_quarantines_bound_progress_without_hot_retry () =
+let test_domain_error_preserves_classification_and_bound_progress () =
   with_temp_base "board-attention-worker-domain-invalid" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "domain-invalid" in
@@ -1236,7 +1236,11 @@ let test_domain_error_quarantines_bound_progress_without_hot_retry () =
    with
    | W.Partition_blocked
        { candidate_id
-       ; reason = P.Exact_execution_quarantined (P.Bound durable)
+       ; reason =
+           P.Domain_output_invalid
+             { detail = "singleton candidate identity mismatch"
+             ; progress = Some (P.Bound durable)
+             }
        }
      when String.equal candidate_id persisted.candidate_id
           && same_provenance durable exact -> ()
@@ -1277,25 +1281,36 @@ let test_cli_exhaustion_preserves_prior_domain_rejection () =
        (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
    with
    | W.Partition_blocked
-       { candidate_id; reason = P.Domain_output_invalid observed }
+       { candidate_id
+       ; reason =
+           P.Domain_output_invalid
+             { detail = observed; progress = Some (P.Bound durable) }
+       }
      when String.equal candidate_id persisted.candidate_id
-          && String.equal observed detail ->
+          && String.equal observed detail
+          && same_provenance durable exact ->
      ()
    | _ -> Alcotest.fail "CLI exhaustion replaced its prior domain rejection");
   (match (load_one_partition ~base_path).state with
-   | P.Blocked { reason = P.Domain_output_invalid observed; _ }
-     when String.equal observed detail ->
+   | P.Blocked
+       { reason =
+           P.Domain_output_invalid
+             { detail = observed; progress = Some (P.Bound durable) }
+       ; _
+       }
+     when String.equal observed detail && same_provenance durable exact ->
      ()
    | _ -> Alcotest.fail "partition lost the prior domain rejection");
   (match (load_one_candidate ~base_path).status with
    | A.Quarantine
        { quarantine =
            { failure_category = A.Domain_output_invalid
-           ; attempt_provenance = None
+           ; attempt_provenance = Some durable
            ; _
            }
        ; phase = A.Quarantined
-       } ->
+       }
+     when same_candidate_provenance durable exact ->
      ()
    | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
      Alcotest.fail "candidate lost the prior domain rejection classification");
@@ -1306,6 +1321,76 @@ let test_cli_exhaustion_preserves_prior_domain_rejection () =
    with
    | W.Idle -> ()
    | _ -> Alcotest.fail "quarantined CLI/domain failure became claimable");
+  Alcotest.(check int) "one exact execution" 1 !calls
+;;
+
+let test_cli_exhaustion_preserves_prior_provenance_mismatch () =
+  with_temp_base "board-attention-worker-cli-prior-provenance-mismatch"
+  @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "cli-prior-provenance-mismatch" in
+  let detail = "final response provenance does not match the bound attempt" in
+  let calls = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind mismatched HTTP response" (before_dispatch exact);
+    Error
+      (E.Cli_slots_exhausted
+         { prior_error = Some (E.Provenance_mismatch detail)
+         ; failures =
+             [ Masc.Keeper_lane_cli_oneshot.Execution_failed
+                 { runtime_id = "claude_code.claude-sonnet-5"
+                 ; detail = "client unavailable"
+                 }
+             ]
+         })
+  in
+  (match
+     ok
+       "CLI exhaustion after provenance mismatch"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Execution_provenance_mismatch
+             { detail = observed; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && String.equal observed detail
+          && same_provenance durable exact ->
+     ()
+   | _ -> Alcotest.fail "CLI exhaustion replaced its prior provenance mismatch");
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked
+       { reason =
+           P.Execution_provenance_mismatch
+             { detail = observed; progress = Some (P.Bound durable) }
+       ; _
+       }
+     when String.equal observed detail && same_provenance durable exact ->
+     ()
+   | _ -> Alcotest.fail "partition lost the provenance mismatch evidence");
+  (match (load_one_candidate ~base_path).status with
+   | A.Quarantine
+       { quarantine =
+           { failure_category = A.Execution_provenance_mismatch
+           ; attempt_provenance = Some durable
+           ; _
+           }
+       ; phase = A.Quarantined
+       }
+     when same_candidate_provenance durable exact ->
+     ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "candidate lost the provenance mismatch classification");
+  (match
+     ok
+       "provenance mismatch with exhausted CLI is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "quarantined CLI/provenance failure became claimable");
   Alcotest.(check int) "one exact execution" 1 !calls
 ;;
 
@@ -2707,13 +2792,17 @@ let () =
             `Quick
             test_flow_already_started_blocks_unbound_without_hot_retry
         ; Alcotest.test_case
-            "domain error quarantines Bound without retry"
+            "domain error preserves classification and Bound"
             `Quick
-            test_domain_error_quarantines_bound_progress_without_hot_retry
+            test_domain_error_preserves_classification_and_bound_progress
         ; Alcotest.test_case
             "CLI exhaustion preserves prior domain rejection"
             `Quick
             test_cli_exhaustion_preserves_prior_domain_rejection
+        ; Alcotest.test_case
+            "CLI exhaustion preserves prior provenance mismatch"
+            `Quick
+            test_cli_exhaustion_preserves_prior_provenance_mismatch
         ; Alcotest.test_case
             "Bound cancellation is prompt and process-recoverable"
             `Quick

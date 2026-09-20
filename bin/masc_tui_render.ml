@@ -5613,7 +5613,7 @@ let lane_run_split_line buf cols ~left_width ~left ~right =
 
 (* Top, header, its divider, bottom and footer. A loaded run also draws
    the divider beneath its summary. Split panes use one payload row for titles. *)
-let lane_run_chrome_rows_without_summary = 5
+let lane_run_chrome_rows_without_summary = framed_chrome_rows
 let lane_run_chrome_rows = lane_run_chrome_rows_without_summary + 1
 
 let render_lane_run_detail (state : state) ~run_id =
@@ -5653,14 +5653,14 @@ let render_lane_run_detail (state : state) ~run_id =
   let scroll, position, content_height =
     match detail, state.lane_run_detail_error with
     | None, error ->
-      let content_height = max 1 (rows - lane_run_chrome_rows_without_summary - chrome_rows_for_error) in
+      let filler_rows = max 1 (rows - lane_run_chrome_rows_without_summary - chrome_rows_for_error) in
       let line =
         match error with
         | None -> Ansi.dim, "  (loading exact run record)"
         | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
-      for _ = 2 to content_height do
+      for _ = 2 to filler_rows do
         box_empty buf cols
       done;
       0, None, 0

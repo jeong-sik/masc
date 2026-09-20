@@ -20,6 +20,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render.mli",
     "bin/masc_tui_types.ml",
+    "bin/masc_tui_scroll.ml",
     "bin/masc_tui_scroll.mli",
 )
 
@@ -87,6 +88,28 @@ def assert_page(before: Window, after: Window, *, down: bool) -> None:
             f"{direction} skipped the visible boundary or lost its one-row overlap: "
             f"{before} -> {after}"
         )
+
+
+def turn_page(
+    process: subprocess.Popen[bytes],
+    master: int,
+    output: bytearray,
+    before: Window,
+    *,
+    split: bool,
+    down: bool,
+) -> Window:
+    # An unrelated refresh can finish after the key is sent. Wait for the
+    # completed screen's window to move, not a marker that every frame has.
+    h.write_all(master, output, b"\x1b[6~" if down else b"\x1b[5~")
+
+    def moved() -> bool:
+        first = visible_window(output, split=split).first
+        return first > before.first if down else first < before.first
+
+    if not h.wait_for_fixture_state(process, master, output, moved, timeout=3.0):
+        raise AssertionError(f"page key did not move the completed window: {before}")
+    return visible_window(output, split=split)
 
 
 def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> None:
@@ -190,14 +213,9 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
         seen = set(current.payload_rows)
         for down in (True, False):
             while (current.last < current.total) if down else (current.first > 1):
-                h.send_and_wait(
-                    process,
-                    master,
-                    output,
-                    b"\x1b[6~" if down else b"\x1b[5~",
-                    h.WINDOW_TEXT_RE,
+                following = turn_page(
+                    process, master, output, current, split=split, down=down
                 )
-                following = visible_window(output, split=split)
                 assert_page(current, following, down=down)
                 windows.append(following)
                 seen.update(following.payload_rows)
@@ -226,11 +244,13 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
         resized = visible_window(output, split=split)
         if resized.first != initial.first or resized.height >= initial.height:
             raise AssertionError(f"resize did not shrink the payload: {resized}")
-        h.send_and_wait(process, master, output, b"\x1b[6~", h.WINDOW_TEXT_RE)
-        resized_down = visible_window(output, split=split)
+        resized_down = turn_page(
+            process, master, output, resized, split=split, down=True
+        )
         assert_page(resized, resized_down, down=True)
-        h.send_and_wait(process, master, output, b"\x1b[5~", h.WINDOW_TEXT_RE)
-        resized_up = visible_window(output, split=split)
+        resized_up = turn_page(
+            process, master, output, resized_down, split=split, down=False
+        )
         assert_page(resized_down, resized_up, down=False)
         if resized_up != resized:
             raise AssertionError(

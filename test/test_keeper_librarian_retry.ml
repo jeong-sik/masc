@@ -1418,14 +1418,14 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
         Yojson.Safe.Util.(basis |> member "kind" |> to_string);
       let proofs = Yojson.Safe.Util.(basis |> member "derivations" |> to_list) in
       check int "both alternative proofs remain visible" 2 (List.length proofs);
-      let premises rule_id =
-        List.find (fun proof ->
-          Yojson.Safe.Util.(proof |> member "rule_id" |> to_string) = rule_id) proofs
-        |> Yojson.Safe.Util.member "premise_ids"
-      in
-      check bool "missing premise stays explicit" true (premises "primary" = `List [`Null]);
+      List.iter (fun proof ->
+        check bool "opaque rule identities are not prompt context" false
+          Yojson.Safe.Util.(proof |> member "rule_id" <> `Null)) proofs;
+      let premises = List.map Yojson.Safe.Util.(member "premise_ids") proofs in
+      check bool "missing premise stays explicit" true
+        (List.mem (`List [`Null]) premises);
       check bool "current premise uses its input surrogate" true
-        (premises "emergency" = `List [`String expected_premise]);
+        (List.mem (`List [`String expected_premise]) premises);
       let current_memory = List.assoc "current_memory" (Librarian.prompt_variables input) in
       (match Runtime.messages_for_librarian input with
        | Error detail -> fail detail

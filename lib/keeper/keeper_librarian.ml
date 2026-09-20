@@ -149,8 +149,7 @@ let basis_for_prompt ~by_identity = function
         `List (List.map (fun proof ->
           let proof = normalize_derivation proof in
           `Assoc
-            [ wire_field_rule_id, `String proof.rule_id
-            ; wire_field_premise_ids,
+            [ wire_field_premise_ids,
               `List (List.map (fun identity ->
                 String_map.find_opt identity by_identity
                 |> Json_util.string_opt_to_json) proof.premise_ids)

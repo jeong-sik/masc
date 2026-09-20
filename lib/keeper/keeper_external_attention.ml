@@ -260,6 +260,72 @@ let report_read_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop_counted
     ~surface:persistence_surface ~reason ~path ~detail
 
+type malformed_line_error =
+  | Json_syntax_error of string
+  | Invalid_payload of string
+
+type read_error =
+  | Malformed_line of
+      { path : string
+      ; line_no : int
+      ; cause : malformed_line_error
+      }
+  | Incomplete_tail of
+      { path : string
+      ; rows_end : int
+      ; end_offset : int
+      }
+  | Io_failed of
+      { path : string
+      ; cause : exn
+      }
+  | Settlement_failed of
+      { path : string
+      ; primary_cause : exn option
+      ; cleanup_failure : Fs_compat.private_jsonl_operation_failure
+      }
+
+let malformed_line_error_to_string = function
+  | Json_syntax_error detail -> "JSON parse failed: " ^ detail
+  | Invalid_payload detail -> "decode failed: " ^ detail
+;;
+
+let read_error_to_string = function
+  | Malformed_line { path; line_no; cause } ->
+    Printf.sprintf
+      "%s:%d external attention %s"
+      path
+      line_no
+      (malformed_line_error_to_string cause)
+  | Incomplete_tail { path; rows_end; end_offset } ->
+    Printf.sprintf
+      "%s external attention incomplete tail: complete rows end at byte %d, file ends at byte %d"
+      path
+      rows_end
+      end_offset
+  | Io_failed { path; cause } ->
+    Printf.sprintf
+      "%s external attention read failed: %s"
+      path
+      (Printexc.to_string cause)
+  | Settlement_failed { path; primary_cause; cleanup_failure } ->
+    let cleanup =
+      Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure
+    in
+    (match primary_cause with
+     | None ->
+       Printf.sprintf
+         "%s external attention read succeeded but transaction settlement failed: %s"
+         path
+         cleanup
+     | Some cause ->
+       Printf.sprintf
+         "%s external attention read failed: %s; transaction settlement also failed: %s"
+         path
+         (Printexc.to_string cause)
+         cleanup)
+;;
+
 let parse_line_result ~file_path ~line_no line =
   try
     match event_of_json (Yojson.Safe.from_string line) with
@@ -269,11 +335,8 @@ let parse_line_result ~file_path ~line_no line =
           ~reason:Read_drop_reason.Invalid_payload
           ~path:file_path ~detail;
         Error
-          (Printf.sprintf
-             "%s:%d external attention decode failed: %s"
-             file_path
-             line_no
-             detail)
+          (Malformed_line
+             { path = file_path; line_no; cause = Invalid_payload detail })
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error detail ->
@@ -281,67 +344,129 @@ let parse_line_result ~file_path ~line_no line =
         ~reason:Read_drop_reason.Json_syntax_error
         ~path:file_path ~detail;
       Error
-        (Printf.sprintf
-           "%s:%d external attention JSON parse failed: %s"
-           file_path
-           line_no
-           detail)
+        (Malformed_line
+           { path = file_path; line_no; cause = Json_syntax_error detail })
 
 let parse_line ~file_path line =
   match parse_line_result ~file_path ~line_no:0 line with
   | Ok event -> Some event
-  | Error msg ->
-      Log.Keeper.warn "keeper_external_attention: %s" msg;
+  | Error error ->
+      Log.Keeper.warn
+        "keeper_external_attention: %s"
+        (read_error_to_string error);
       None
+
+type loaded_events =
+  { events : event list
+  ; incomplete_tail : (int * int) option
+  }
+
+let events_of_rows ~path rows =
+  rows
+  |> String.split_on_char '\n'
+  |> List.fold_left
+       (fun state line ->
+          let ( let* ) = Result.bind in
+          let* events_rev, line_no = state in
+          let line_no = line_no + 1 in
+          let line = String.trim line in
+          if String.equal line ""
+          then Ok (events_rev, line_no)
+          else
+            let* event = parse_line_result ~file_path:path ~line_no line in
+            Ok (event :: events_rev, line_no))
+       (Ok ([], 0))
+  |> Result.map (fun (events_rev, _line_no) -> List.rev events_rev)
+;;
+
+let load_events_snapshot ~base_path ~keeper_name =
+  let path = attention_path ~base_path ~keeper_name in
+  let of_rows = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing ->
+      Ok { events = []; incomplete_tail = None }
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
+      events_of_rows ~path rows
+      |> Result.map (fun events ->
+        { events
+        ; incomplete_tail =
+            (if rows_end < end_offset
+             then Some (rows_end, end_offset)
+             else None)
+        })
+  in
+  let io_failed cause =
+    report_read_drop
+      ~reason:Read_drop_reason.Entry_load_error
+      ~path
+      ~detail:(Printexc.to_string cause);
+    Error (Io_failed { path; cause })
+  in
+  let settlement_failed ?primary_cause cleanup_failure =
+    report_read_drop
+      ~reason:Read_drop_reason.Entry_load_error
+      ~path
+      ~detail:
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    Error (Settlement_failed { path; primary_cause; cleanup_failure })
+  in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded rows -> of_rows rows
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure
+      { value = _; cleanup_failure } ->
+    settlement_failed cleanup_failure
+  | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Io_failed cause) ->
+    io_failed cause
+  | Fs_compat.Private_file_failed_with_cleanup_failure
+      { error = Fs_compat.Private_jsonl_rows.Io_failed cause; cleanup_failure } ->
+    settlement_failed ~primary_cause:cause cleanup_failure
+;;
 
 let load_events_result ~base_path ~keeper_name =
   let path = attention_path ~base_path ~keeper_name in
-  if not (Sys.file_exists path) then Ok []
-  else
-    try
-      let (events_rev, _line_no), _boundary =
-        Fs_compat.fold_appended_lines ~path ~from:0 ~init:(Ok [], 0)
-          ~f:(fun (events, line_no) line ->
-            let line_no = line_no + 1 in
-            let line = String.trim line in
-            if line = "" then events, line_no
-            else
-              match events with
-              | Error _ -> events, line_no
-              | Ok acc -> (
-                  match parse_line_result ~file_path:path ~line_no line with
-                  | Ok event -> Ok (event :: acc), line_no
-                  | Error _ as error -> error, line_no))
-      in
-      Result.map List.rev events_rev
-    with
-    | Sys_error detail ->
-        report_read_drop
-          ~reason:Read_drop_reason.Entry_load_error
-          ~path ~detail;
-        Error (Printf.sprintf "%s external attention read failed: %s" path detail)
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Error
-          (Printf.sprintf
-             "%s external attention load failed for %s: %s"
-             path
-             (sanitize_name keeper_name)
-             (Printexc.to_string exn))
+  let ( let* ) = Result.bind in
+  let* loaded = load_events_snapshot ~base_path ~keeper_name in
+  match loaded.incomplete_tail with
+  | None -> Ok loaded.events
+  | Some (rows_end, end_offset) ->
+    let error = Incomplete_tail { path; rows_end; end_offset } in
+    report_read_drop
+      ~reason:Read_drop_reason.Invalid_payload
+      ~path
+      ~detail:(read_error_to_string error);
+    Error error
 
 let load_events ~base_path ~keeper_name =
-  match load_events_result ~base_path ~keeper_name with
-  | Ok events -> events
-  | Error msg ->
-      Log.Keeper.warn "keeper_external_attention: %s" msg;
+  match load_events_snapshot ~base_path ~keeper_name with
+  | Ok loaded -> loaded.events
+  | Error error ->
+      Log.Keeper.warn
+        "keeper_external_attention: %s"
+        (read_error_to_string error);
       []
 
 let append_event ~base_path ~keeper_name event =
   try
     ensure_attention_dir ~base_path;
     let path = attention_path ~base_path ~keeper_name in
-    Fs_compat.append_file path (Yojson.Safe.to_string (event_to_json event) ^ "\n");
-    Ok ()
+    let line = Yojson.Safe.to_string (event_to_json event) ^ "\n" in
+    (match Fs_compat.append_private_jsonl_durable_locked_result path line with
+     | Fs_compat.Private_file_succeeded () -> Ok ()
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure
+         { value = (); cleanup_failure } ->
+       Log.Keeper.warn
+         "keeper_external_attention: append committed with transaction settlement failure path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+       Ok ()
+     | Fs_compat.Private_file_failed error ->
+       Error (Fs_compat.private_jsonl_append_error_to_string error)
+     | Fs_compat.Private_file_failed_with_cleanup_failure
+         { error; cleanup_failure } ->
+       Error
+         (Printf.sprintf
+            "%s; transaction settlement also failed: %s"
+            (Fs_compat.private_jsonl_append_error_to_string error)
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -439,4 +564,4 @@ let record ~base_path (item : item) =
 let store_read_error ~base_path ~keeper_name =
   match load_events_result ~base_path ~keeper_name with
   | Ok _ -> None
-  | Error detail -> Some detail
+  | Error error -> Some (read_error_to_string error)

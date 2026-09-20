@@ -50,6 +50,16 @@ type config =
   }
 
 val default_config : config
+
+val rewrite_invalidates_librarian_coordinates
+  :  coordinates_present:bool
+  -> before:Agent_core.Types.message list
+  -> after:Agent_core.Types.message list
+  -> (bool, string) result
+(** [true] exactly when a rewrite changes the typed History endpoint while a
+    turn-boundary or Librarian-progress artifact exists. Callers must refuse
+    that install until a crash-safe typed rebase protocol can advance both
+    coordinates with the checkpoint. *)
 (** [{ dup_threshold = 3; keep_recent_messages = 20; strip_thinking = true;
       clear_tool_results = true }] — the rule set measured on a live Keeper
     checkpoint (1,315 -> 579 messages, -28.0% bytes, next-turn input

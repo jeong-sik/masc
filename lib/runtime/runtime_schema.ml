@@ -70,6 +70,7 @@ type capabilities =
     startup does not use it for admission. [headers] is retained for
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
+let exact_body_timeout_s_key = "exact-body-timeout-s"
 
 type antigravity_effort =
   | Antigravity_low
@@ -118,6 +119,11 @@ type provider =
       On an exact-output lane a target with neither this key nor a body
       budget is rejected at plan admission (Missing_deadline, #36979): the
       wire would otherwise carry no deadline at all. *)
+  ; exact_body_timeout_s : float option
+    (** Explicit total HTTP request deadline for Exact-output calls through
+        this provider, including connection, response headers and the full
+        response body. [None] declares no body deadline. This does not replace
+        [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)

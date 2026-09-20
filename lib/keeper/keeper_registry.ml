@@ -322,6 +322,25 @@ let exact_update_succeeded entry ~site = function
     false
 ;;
 
+let replace_heartbeat_failure_reason expected replacement =
+  let replaced = ref false in
+  let result =
+    update_entry_exact expected (fun latest ->
+      match latest.last_failure_reason with
+      | Some (Heartbeat_consecutive_failures _) ->
+        replaced := true;
+        { latest with last_failure_reason = replacement }
+      | Some _ | None ->
+        replaced := false;
+        latest)
+  in
+  exact_update_succeeded
+    expected
+    ~site:"heartbeat_failure_reason_recovery"
+    result
+  && !replaced
+;;
+
 let started_at ~base_path name =
   match get ~base_path name with
   | Some entry -> Some entry.started_at

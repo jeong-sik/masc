@@ -38,9 +38,11 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
-**Heartbeat**
-: Workspace에서 Agent의 `last_seen`을 갱신하는 명시적 liveness 작업. 성공은
-  `Heartbeat_updated`일 때만 뜻하며, 잘못된 Agent 파일이나 없는 Agent는 생존 증거가 아니다.
+**Workspace Heartbeat**
+: `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
+  `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
+  `keeper_heartbeat` SSE나 MCP·transport activity 같은 별도 liveness signal의 부재를
+  뜻하지 않으며, 해당 신호는 이 Workspace 쓰기가 갱신되지 않아도 발생할 수 있다.
   → [Workspace_gc.heartbeat](../../lib/workspace/workspace_gc.mli)
 
 **Agent**
@@ -63,6 +65,12 @@ status: reference
 : 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
   레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
+**Keeper Chat Operation**
+: Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
+  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
+  제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
+  접수 응답은 실행 완료를 뜻하지 않는다.
+
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
@@ -74,6 +82,13 @@ status: reference
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Usage Scope**
+: Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
+  요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
+  `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
+  합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
+  않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
@@ -144,8 +159,9 @@ status: reference
   구간의 소유자다.
 
 **Evidence**
-: 관찰·검증·전환이 실제 근거에 연결되었음을 나타내는 typed reference. `evidence_refs`
-  같은 필드로 전달하며, 설명 문장만으로 근거를 대신하지 않는다.
+: 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
+  `note:<text>`는 허용된 서술형 근거이며, Task handoff summary와 completion notes도 이
+  형식으로 정규화된다. Note evidence는 artifact나 collaboration source의 증명은 아니다.
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
@@ -360,6 +376,7 @@ status: reference
   전체가 안 읽은 것으로 보인다.
   이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
   cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
+  Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
@@ -414,3 +431,4 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
+  History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.

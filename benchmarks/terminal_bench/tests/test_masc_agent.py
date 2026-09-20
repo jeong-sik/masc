@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import shutil
 import sys
@@ -34,6 +35,7 @@ class FakeEnv:
         self.commands = []
         self.exec_kwargs = []
         self.uploads = []
+        self.uploaded_bytes = {}
         self.downloads = []
         self.remote_dirs = remote_dirs or {}
         self.skill_catalog = skill_catalog
@@ -42,6 +44,7 @@ class FakeEnv:
 
     async def upload_file(self, src, dst):
         self.uploads.append(("file", str(src), dst))
+        self.uploaded_bytes[dst] = Path(src).read_bytes()
 
     async def upload_dir(self, src, dst):
         self.uploads.append(("dir", str(src), dst))
@@ -74,15 +77,42 @@ def _provider_key(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
 
 
-def fake_bench(tmp_path, dist_dir="linux-x64", names=("masc", "masc-exec-shim"),
+SOURCE_COMMIT = "a" * 40
+
+
+def write_dist_manifest(root, version):
+    architectures = {}
+    machines = {"linux-x64": ("x86_64", "linux/amd64"),
+                "linux-arm64": ("aarch64", "linux/arm64")}
+    for directory, (machine, platform) in machines.items():
+        dist_dir = root / "dist" / directory
+        if not dist_dir.exists():
+            continue
+        binaries = {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in dist_dir.iterdir()
+            if path.name in masc_dist.KNOWN_BINARIES
+        }
+        architectures[directory] = {
+            "machine": machine, "platform": platform, "binaries": binaries}
+    (root / "dist" / masc_dist.MANIFEST_FILE).write_text(json.dumps({
+        "schema": masc_dist.MANIFEST_SCHEMA,
+        "release_version": version.strip(),
+        "source_commit": SOURCE_COMMIT,
+        "architectures": architectures,
+    }))
+
+
+def fake_bench(tmp_path, dist_dir="linux-x64",
+               names=("masc", "masc-exec-shim", "gh"),
                version=None):
     root = tmp_path / "bench"
     (root / "dist" / dist_dir).mkdir(parents=True)
     for name in names:
         (root / "dist" / dist_dir / name).write_text("")
-    # image/fetch_masc.sh records the release it fetched; the floor by default.
+    # image/fetch_masc.sh commits the release it fetched; the floor by default.
     fetched = masc_dist.MIN_VERSION_FILE.read_text() if version is None else version
-    (root / "dist" / ".version").write_text(fetched)
+    write_dist_manifest(root, fetched)
     (root / "driver").mkdir()
     return root
 
@@ -294,16 +324,12 @@ def test_claude_code_lane_requires_oauth_token(tmp_path, monkeypatch):
 
 
 def install_into(tmp_path, monkeypatch, root, env):
-    """{remote path: the local file uploaded there last}."""
+    """{remote path: bytes uploaded there last}."""
     import agents.masc_agent as m
 
     monkeypatch.setattr(m, "BENCH_ROOT", root)
     asyncio.run(make_agent(tmp_path, arm="b").install(env))
-    final = {}
-    for kind, src, dst in env.uploads:
-        if kind == "file":
-            final[dst] = src
-    return final
+    return env.uploaded_bytes
 
 
 def test_gh_is_uploaded_only_for_a_run_that_gives_a_github_login(tmp_path, monkeypatch):
@@ -311,7 +337,8 @@ def test_gh_is_uploaded_only_for_a_run_that_gives_a_github_login(tmp_path, monke
     assert "/opt/masc-bench/bin/gh" not in install_into(tmp_path, monkeypatch, root, FakeEnv())
     monkeypatch.setenv("GH_TOKEN", "test-gh-token")
     uploads = install_into(tmp_path, monkeypatch, root, FakeEnv())
-    assert uploads["/opt/masc-bench/bin/gh"] == str(root / "dist" / "linux-x64" / "gh")
+    assert uploads["/opt/masc-bench/bin/gh"] == (
+        root / "dist" / "linux-x64" / "gh").read_bytes()
 
 
 # --- the binaries follow the task container's architecture -----------------
@@ -324,14 +351,17 @@ def test_gh_is_uploaded_only_for_a_run_that_gives_a_github_login(tmp_path, monke
 
 def both_architectures(tmp_path):
     root = fake_bench(tmp_path, dist_dir="linux-arm64")
+    for name in ("masc", "masc-exec-shim", "gh"):
+        (root / "dist" / "linux-arm64" / name).write_text("arm64:" + name)
     (root / "dist" / "linux-x64").mkdir()
-    for name in ("masc", "masc-exec-shim"):
-        (root / "dist" / "linux-x64" / name).write_text("")
+    for name in ("masc", "masc-exec-shim", "gh"):
+        (root / "dist" / "linux-x64" / name).write_text("x64:" + name)
+    write_dist_manifest(root, masc_dist.MIN_VERSION_FILE.read_text())
     return root
 
 
 def expected(root, dist_dir):
-    return {f"/opt/masc-bench/bin/{name}": str(root / "dist" / dist_dir / name)
+    return {f"/opt/masc-bench/bin/{name}": (root / "dist" / dist_dir / name).read_bytes()
             for name in ("masc", "masc-exec-shim")}
 
 
@@ -366,8 +396,8 @@ def test_a_missing_architecture_names_the_fetch_step(tmp_path, monkeypatch):
 #
 # An older shim refuses the bootstrap's env_file= per command, after install
 # and keeper_up have passed, so the task would score zero instead of the run
-# being refused. The check reads dist/.version before anything reaches the
-# container.
+# being refused. The committed manifest is checked before anything reaches
+# the container.
 
 
 @pytest.mark.parametrize("version, reason", [
@@ -393,11 +423,20 @@ def test_a_task_that_names_its_agent_user_is_refused_before_upload(tmp_path, mon
     assert env.uploads == []
 
 
-def test_a_dist_without_a_recorded_release_names_the_fetch_step(tmp_path, monkeypatch):
+def test_a_dist_without_a_committed_manifest_names_the_fetch_step(tmp_path, monkeypatch):
     root = fake_bench(tmp_path)
-    (root / "dist" / ".version").unlink()
+    (root / "dist" / masc_dist.MANIFEST_FILE).unlink()
     env = FakeEnv()
     with pytest.raises(RuntimeError, match="fetch_masc.sh"):
+        install_into(tmp_path, monkeypatch, root, env)
+    assert env.uploads == []
+
+
+def test_a_matching_version_file_cannot_hide_changed_binary_bytes(tmp_path, monkeypatch):
+    root = fake_bench(tmp_path)
+    (root / "dist" / "linux-x64" / "masc").write_text("changed after commit")
+    env = FakeEnv()
+    with pytest.raises(RuntimeError, match="sha256 does not match"):
         install_into(tmp_path, monkeypatch, root, env)
     assert env.uploads == []
 
@@ -448,6 +487,51 @@ def test_the_image_variables_the_keepers_lacked_reach_harbor_metadata(tmp_path):
     context = SimpleNamespace(metadata=None)
     make_agent(tmp_path).populate_context_post_run(context)
     assert context.metadata["endpoint_env_left_out"] == left_out
+
+
+def test_validated_dist_identity_reaches_harbor_metadata(tmp_path, monkeypatch):
+    import agents.masc_agent as m
+
+    root = fake_bench(tmp_path)
+    monkeypatch.setattr(m, "BENCH_ROOT", root)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    agent = make_agent(logs)
+    asyncio.run(agent.install(FakeEnv()))
+    write_result(logs)
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    identity = context.metadata["masc_dist"]
+    assert identity["source_commit"] == SOURCE_COMMIT
+    assert identity["binary_sha256"] == hashlib.sha256(
+        (root / "dist" / "linux-x64" / "masc").read_bytes()).hexdigest()
+
+
+def test_concurrent_dist_replacement_cannot_mix_one_upload_snapshot(
+        tmp_path, monkeypatch):
+    root = fake_bench(tmp_path)
+    active = root / "dist" / "linux-x64"
+    replacement = root / "dist" / "replacement"
+    replacement.mkdir()
+    for name in ("masc", "masc-exec-shim", "gh"):
+        (replacement / name).write_text("new:" + name)
+    original_copy = masc_dist.shutil.copy2
+    replaced = False
+
+    def replace_between_copies(source, destination):
+        nonlocal replaced
+        result = original_copy(source, destination)
+        if not replaced:
+            replaced = True
+            active.rename(root / "dist" / "old-linux-x64")
+            replacement.rename(active)
+        return result
+
+    monkeypatch.setattr(masc_dist.shutil, "copy2", replace_between_copies)
+    with pytest.raises(RuntimeError, match="snapshot sha256 does not match"):
+        asyncio.run(masc_dist.container_distribution(
+            make_agent(tmp_path), FakeEnv(), root, tmp_path / "snapshot",
+            with_gh=False))
 
 
 def test_cost_prices_each_token_class_at_its_own_rate(tmp_path, monkeypatch):

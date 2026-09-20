@@ -374,6 +374,60 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                        invalid_arg "event_capture requires event_bus"))))))
 ;;
 
+let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
+    ~cache_read_input_tokens () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture frames (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"USAGE_SCOPE" () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok turn ->
+           (match turn.response.usage with
+            | None -> fail "known CLI usage was dropped"
+            | Some usage ->
+              check int "inclusive input preserved" input_tokens usage.input_tokens;
+              check int "output preserved" output_tokens usage.output_tokens;
+              check int "cache read preserved" cache_read_input_tokens
+                usage.cache_read_input_tokens;
+              check int "absent cache creation remains zero" 0
+                usage.cache_creation_input_tokens);
+           (match turn.runtime_observation with
+            | None -> fail "runtime observation was dropped"
+            | Some observation ->
+              check string "scope follows the usage producer" expected_scope
+                (Runtime_usage_scope.to_string observation.usage_scope))))
+;;
+
+let result_with_aggregate_usage =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage","result":"USAGE_OK","api_error_status":null,"usage":{"input_tokens":123456,"output_tokens":789,"cache_read_input_tokens":42}}|}
+;;
+
+let test_result_only_usage_keeps_client_turn_scope () =
+  check_usage_scope
+    ~frames:
+      [ Emit (assistant ~turn_id:"usage" "USAGE_OK")
+      ; Emit result_with_aggregate_usage
+      ]
+    ~expected_scope:"turn_total"
+    ~input_tokens:123498 ~output_tokens:789 ~cache_read_input_tokens:42 ()
+;;
+
+let test_latest_request_usage_outranks_client_turn_total () =
+  let counted_assistant =
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-counted","message":{"id":"msg-counted","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"USAGE_OK"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
+  in
+  check_usage_scope
+    ~frames:
+      [ Emit counted_assistant
+      ; Emit (assistant ~turn_id:"uncounted" "USAGE_OK")
+      ; Emit result_with_aggregate_usage
+      ]
+    ~expected_scope:"per_request"
+    ~input_tokens:205 ~output_tokens:20 ~cache_read_input_tokens:5 ()
+;;
+
 let checkpoint_with_messages
       (messages : Agent_core.Types.message list)
   : Agent_core.Checkpoint.t
@@ -2160,6 +2214,12 @@ let () =
   run
     "keeper_claude_code_runtime"
     [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    ; ( "usage scope"
+      , [ test_case "result-only usage keeps client-turn scope" `Quick
+            test_result_only_usage_keeps_client_turn_scope
+        ; test_case "latest request outranks client-turn total" `Quick
+            test_latest_request_usage_outranks_client_turn_total
+        ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case

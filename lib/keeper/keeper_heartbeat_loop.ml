@@ -555,6 +555,15 @@ let cycle_wake ~periodic_due ~deferred_runtime_lane =
     else Keeper_world_observation.Attention_wake
 ;;
 
+(* Wake labels choose why this turn runs; cadence accounting answers whether
+   the already-due boundary was served. A deferred suffix wins the label but
+   must not leave the same periodic boundary due for the next cycle. *)
+let periodic_cadence_after_cycle ~periodic_due ~now cadence =
+  if periodic_due
+  then Keeper_keepalive_signal.consume_periodic ~now
+  else cadence
+;;
+
 let run_keepalive_unified_turn
       ~wake
       ~(ctx : _ context)
@@ -1515,8 +1524,11 @@ let run_heartbeat_loop
            that cut it short re-ran the same refused call (183 failed turns in
            41 minutes, 2026-09-09, #34653). The queue keeps the stimulus; the
            wakeup is consumed when the wait ends. *)
-        if periodic_due then periodic_cadence :=
-          Keeper_keepalive_signal.consume_periodic ~now:(cadence_now ());
+        periodic_cadence :=
+          periodic_cadence_after_cycle
+            ~periodic_due
+            ~now:(cadence_now ())
+            !periodic_cadence;
         (match turn_outcome.after_failure with
          | Some (Continue_on_deferred_lane { next_runtime_id }) ->
            Log.Keeper.info
@@ -1599,4 +1611,5 @@ module For_testing = struct
   let after_failure = after_failure
   let next_cycle_starts_now = next_cycle_starts_now
   let cycle_wake = cycle_wake
+  let periodic_cadence_after_cycle = periodic_cadence_after_cycle
 end

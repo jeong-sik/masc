@@ -102,6 +102,30 @@ let test_deferred_lane_remains_visible_with_reactive_input () =
     scheduling.verdict_reasons
 ;;
 
+let test_deferred_lane_consumes_a_simultaneously_due_cadence () =
+  let now = 600. and interval = 600. in
+  let cadence = Signal.consume_periodic ~now:0. in
+  let periodic_due = Signal.periodic_is_due ~now ~interval cadence in
+  check bool "the periodic boundary is due" true periodic_due;
+  let wake =
+    Keeper_heartbeat_loop.For_testing.cycle_wake
+      ~periodic_due
+      ~deferred_runtime_lane:(Some deferred_lane)
+  in
+  check bool "the unfinished suffix keeps the wake label" true
+    (wake = WO.Deferred_runtime_lane);
+  let cadence =
+    Keeper_heartbeat_loop.For_testing.periodic_cadence_after_cycle
+      ~periodic_due
+      ~now
+      cadence
+  in
+  check bool "the served boundary is not due again" false
+    (Signal.periodic_is_due ~now ~interval cadence);
+  check (float 0.) "the next boundary remains one interval away" interval
+    (Signal.periodic_remaining ~now ~interval cadence)
+;;
+
 let test_cadence_change_and_initial_warmup () =
   let cadence = Signal.consume_periodic ~now:0. in
   check (float 0.) "new interval uses previous periodic boundary" 480.
@@ -117,4 +141,6 @@ let () =
     ; test_case "durable attention remains immediate" `Quick test_durable_attention_remains_immediate
     ; test_case "deferred lane authorizes empty intake" `Quick test_deferred_lane_authorizes_empty_intake
     ; test_case "deferred lane remains visible with reactive input" `Quick test_deferred_lane_remains_visible_with_reactive_input
+    ; test_case "deferred lane consumes a simultaneously due cadence" `Quick
+        test_deferred_lane_consumes_a_simultaneously_due_cadence
     ; test_case "cadence updates and warmup" `Quick test_cadence_change_and_initial_warmup ] ]

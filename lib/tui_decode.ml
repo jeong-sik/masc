@@ -1644,6 +1644,14 @@ let optional_string_field json key =
   | `Null -> Ok None
   | bad -> field_type_error key "a string or null" bad
 
+let required_nullable_nonblank_string_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> missing_field key
+  | Some `Null -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some (`String _) -> Error (Printf.sprintf "field '%s' must not be blank" key)
+  | Some bad -> field_type_error key "a non-empty string or null" bad
+
 let optional_bool_field json key =
   match member key json with
   | `Bool value -> Ok (Some value)
@@ -8434,9 +8442,16 @@ let decode_lane_run_summary json =
   let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
   let* lrs_started_at = require_float_field json "started_at" in
-  let* lrs_status = required_string_field json "status" in
+  let* status_raw = required_string_field json "status" in
+  let lrs_status = lane_run_status_of_string status_raw in
   let* lrs_elapsed_s = optional_float_field json "elapsed_s" in
-  let* lrs_selected_slot = optional_string_field json "selected_slot" in
+  let* lrs_selected_slot =
+    match lrs_status, Json_util.assoc_member_opt "selected_slot" json with
+    | Lane_run_running, None -> Ok None
+    | Lane_run_running, Some _ ->
+      Error "running lane run must not report selected_slot"
+    | _, _ -> required_nullable_nonblank_string_field json "selected_slot"
+  in
   Ok
     { lrs_run_id
     ; lrs_run_kind =
@@ -8447,7 +8462,7 @@ let decode_lane_run_summary json =
     ; lrs_subject_id
     ; lrs_actor
     ; lrs_started_at
-    ; lrs_status = lane_run_status_of_string lrs_status
+    ; lrs_status
     ; lrs_elapsed_s
     ; lrs_selected_slot
     }
@@ -8515,9 +8530,23 @@ let decode_lane_run_detail json =
     let board_attention_lane =
       Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
     in
-    match summary.lrs_status, lrd_output with
-    | Lane_run_succeeded, Some output
-      when String.equal summary.lrs_lane board_attention_lane ->
+    let is_board_attention = String.equal summary.lrs_lane board_attention_lane in
+    let* answer_succeeded =
+      match summary.lrs_status with
+      | Lane_run_succeeded -> Ok true
+      | (Lane_run_completion_persistence_failed
+        | Lane_run_completion_durability_unknown)
+        when is_board_attention ->
+        let* intended_status = required_string_field run "intended_status" in
+        (match intended_status with
+         | "succeeded" -> Ok true
+         | "cancelled" | "failed" -> Ok false
+         | other ->
+           Error (Printf.sprintf "unknown intended lane run status %S" other))
+      | _ -> Ok false
+    in
+    match is_board_attention, answer_succeeded, lrd_output with
+    | true, true, Some output ->
       let* judgment =
         Keeper_board_attention_candidate.judgment_of_yojson output
       in
@@ -8541,7 +8570,7 @@ let decode_lane_run_detail json =
          Error "Board answer slot_id must match selected_slot"
        | Keeper_board_attention_candidate.Vendor_system_one _, _ ->
          Error "Vendor System One answer must not have selected_slot")
-    | _, _ -> Ok None
+    | _, _, _ -> Ok None
   in
   let* lrd_tool_evidence =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind

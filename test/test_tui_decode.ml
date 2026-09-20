@@ -7194,6 +7194,69 @@ let test_decode_board_answer_source_rejects_invented_selected_slot () =
     true
     (Result.is_error (Tui_decode.decode_lane_run_detail json))
 
+let board_persistence_detail_json status persistence_state =
+  match lane_run_detail_json ("cmp-" ^ status) with
+  | `Assoc [ "run", `Assoc fields ] ->
+    let replaced = [ "status" ] in
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            ([ "status", `String status
+             ; "intended_status", `String "succeeded"
+             ; "persistence_error", `String "completion append did not settle"
+             ; "persistence_state", `String persistence_state
+             ]
+             @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) )
+      ]
+  | _ -> Alcotest.fail "invalid Board persistence fixture"
+;;
+
+let test_decode_board_answer_source_survives_persistence_failure () =
+  [ "completion_persistence_failed", "not_persisted"
+  ; "completion_durability_unknown", "durability_unknown"
+  ]
+  |> List.iter (fun (status, persistence_state) ->
+    match
+      Tui_decode.decode_lane_run_detail
+        (board_persistence_detail_json status persistence_state)
+    with
+    | Error detail -> Alcotest.failf "%s did not decode: %s" status detail
+    | Ok detail ->
+      (match detail.Tui_decode.lrd_answer_source with
+       | Some
+           (Tui_decode.Lane_run_answer_vendor_system_one
+              { model = "jev-latest"; _ }) ->
+         ()
+       | _ ->
+         Alcotest.failf "%s lost its Vendor System One answer source" status))
+;;
+
+let test_decode_terminal_lane_run_requires_selected_slot_field () =
+  let json =
+    match lane_run_detail_json "cmp-missing-selected-slot" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc [ "run", `Assoc (List.remove_assoc "selected_slot" fields) ]
+    | _ -> Alcotest.fail "invalid Board detail fixture"
+  in
+  Alcotest.(check bool)
+    "terminal selected_slot omission is not intentional Vendor attribution"
+    true
+    (Result.is_error (Tui_decode.decode_lane_run_detail json))
+;;
+
+let test_decode_running_lane_run_rejects_selected_slot_field () =
+  let json =
+    match lane_run_detail_json ~output:false "cmp-running-selected-slot" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc [ "run", `Assoc (("selected_slot", `Null) :: fields) ]
+    | _ -> Alcotest.fail "invalid running detail fixture"
+  in
+  Alcotest.(check bool)
+    "running selected_slot must be absent"
+    true
+    (Result.is_error (Tui_decode.decode_lane_run_detail json))
+;;
+
 let test_decode_lane_run_detail_running_has_no_output () =
   match
     Tui_decode.decode_lane_run_detail (lane_run_detail_json ~output:false "cmp-live")
@@ -9239,6 +9302,12 @@ let () =
           test_decode_lane_run_detail_carries_prompt_and_output;
         Alcotest.test_case "Board answer source rejects an invented selected slot" `Quick
           test_decode_board_answer_source_rejects_invented_selected_slot;
+        Alcotest.test_case "Board answer source survives persistence failure" `Quick
+          test_decode_board_answer_source_survives_persistence_failure;
+        Alcotest.test_case "terminal lane run requires selected_slot field" `Quick
+          test_decode_terminal_lane_run_requires_selected_slot_field;
+        Alcotest.test_case "running lane run rejects selected_slot field" `Quick
+          test_decode_running_lane_run_rejects_selected_slot_field;
         Alcotest.test_case "running detail has no output" `Quick
           test_decode_lane_run_detail_running_has_no_output;
         Alcotest.test_case "HITL advisory is not Gate resolution" `Quick

@@ -123,13 +123,24 @@ describe('InternalAgentsMonitor', () => {
     expect(rawApi.fetchKeeperRawTraces).not.toHaveBeenCalled()
   })
 
-  it('shows Vendor System One as the Board answer source without inventing a slot', async () => {
+  it.each([
+    ['succeeded', null],
+    ['completion_persistence_failed', 'not_persisted'],
+    ['completion_durability_unknown', 'durability_unknown'],
+  ] as const)('shows Vendor System One as the Board answer source for %s', async (status, persistenceState) => {
+    const persistence = persistenceState === null
+      ? {}
+      : {
+          intended_status: 'succeeded',
+          persistence_error: 'completion append did not settle',
+          persistence_state: persistenceState,
+        }
     const run = parseExactLaneRunResponse({
       generated_at: '2026-09-20T00:00:00Z',
       run: {
         run_id: 'jev-board-answer', run_kind: 'exact_output', lane: 'board_attention_exact',
         subject_id: 'board-candidate-1', actor: 'keeper-a', started_at: 1,
-        status: 'succeeded', elapsed_s: 0.1, selected_slot: null,
+        status, elapsed_s: 0.1, selected_slot: null, ...persistence,
         skill_evidence: { state: 'no_keeper_skills' },
         payload_availability: { input: { state: 'available' }, output: { state: 'available' } },
         input: { kind: 'exact', payload: { candidate_id: 'board-candidate-1' } },
@@ -160,6 +171,9 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('답변 출처 Vendor System One · jev-latest · exact-flow receipt 없음')
     expect(container.textContent).not.toContain('선택 slot 미기록')
     expect(container.textContent).toContain('기록된 Board 후보만 판단')
+    if (persistenceState !== null) {
+      expect(container.textContent).toContain(`persistence ${persistenceState}`)
+    }
   })
 
   it('shows configured, running, and no-retained-observation lanes without controlling them', async () => {

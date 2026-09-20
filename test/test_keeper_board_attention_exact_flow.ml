@@ -1258,12 +1258,6 @@ let execute_behind_jev ~name ~jev_choice =
               ; selected_slot
               ; output
               ; _
-              }
-          | Exact_lane_run_registry.Completion_persistence_failed
-              { intended_outcome = Exact_lane_run_registry.Succeeded
-              ; selected_slot
-              ; output
-              ; _
               } ->
             selected_slot, output
           | Exact_lane_run_registry.Running

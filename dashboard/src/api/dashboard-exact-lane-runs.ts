@@ -291,7 +291,7 @@ function parseRun(
   const payloads = withPayloads ? parsePayloads(raw, status, context) : undefined
   const answerSource = withPayloads
     && lane === 'board_attention_exact'
-    && status === 'succeeded'
+    && (status === 'succeeded' || intendedStatus === 'succeeded')
     && payloads?.payloadAvailability.output?.state === 'available'
     ? parseBoardAnswerSource(payloads.output, selectedSlot, `${context}.output`)
     : undefined

@@ -390,7 +390,10 @@ function exactAnswerSource(run: ExactLaneRunRecord) {
   if (source?.kind === 'exact_attempt') {
     return html` · 답변 출처 <code>Exact · ${source.slotId}</code>`
   }
-  if (run.lane === 'board_attention_exact' && run.status === 'succeeded') {
+  if (
+    run.lane === 'board_attention_exact'
+    && (run.status === 'succeeded' || run.intendedStatus === 'succeeded')
+  ) {
     return html` · 답변 출처 <code>원문 사용 불가</code>`
   }
   return run.selectedSlot === undefined

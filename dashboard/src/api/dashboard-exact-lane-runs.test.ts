@@ -252,6 +252,28 @@ describe('parseExactLaneRunResponse', () => {
     })
   })
 
+  it.each([
+    ['completion_persistence_failed', 'not_persisted'],
+    ['completion_durability_unknown', 'durability_unknown'],
+  ] as const)('keeps the intended Vendor answer across %s', (status, persistenceState) => {
+    const run = parseExactLaneRunResponse(detailFixture({
+      lane: 'board_attention_exact',
+      status,
+      intended_status: 'succeeded',
+      persistence_error: 'completion append did not settle',
+      persistence_state: persistenceState,
+      selected_slot: null,
+      output: boardJudgment({
+        kind: 'vendor_system_one',
+        endpoint: 'https://jev.invalid/v1/judge',
+        model: 'jev-latest',
+        request_body_sha256: 'a'.repeat(64),
+      }, 'jev-latest'),
+    }))
+    expect(run.answerSource).toMatchObject({ kind: 'vendor_system_one', model: 'jev-latest' })
+    expect(run.persistenceState).toBe(persistenceState)
+  })
+
   it('rejects answer-source attribution that disagrees with selected_slot', () => {
     expect(() => parseExactLaneRunResponse(detailFixture({
       lane: 'board_attention_exact',

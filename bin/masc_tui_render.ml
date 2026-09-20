@@ -4713,7 +4713,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   let output_meaning, evidence_contract =
     if exact_lane Masc.Exact_lane_run_registry.Board_attention then
       ( "Output meaning: the accepted candidate judgment JSON."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output and outcome. HTTP/CLI attribution uses selected slot; Vendor System One provenance stays in Output." )
     else if exact_lane Masc.Exact_lane_run_registry.Hitl_auto_judge then
       ( "Output meaning: the validated and durably settled approval-context judgment summary."
       , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )

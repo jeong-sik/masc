@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import threading
 from typing import Any
 
 import test_tui_keyboard_input as h
@@ -165,6 +166,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         "integrity": report("must-not-render", [sample("tampered", "Scored")]),
         "missing": report("must-not-render", [sample("missing", "Scored")]),
         "stale": report("old-result", [sample("old-sample", "Scored")]),
+        "overlay": report("overlay-origin", [sample("overlay-context", "Scored")]),
+        "overlay-lanes": report(
+            "overlay-origin", [sample("overlay-context", "Scored")]
+        ),
     }
     if scenario == "large":
         large = sample("large", "Scored", provided=True)
@@ -198,14 +203,38 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         report("new-result", [sample("new-sample", "Answer_ready")])
     )
     fixtures["/api/v1/artifacts/" + new_sha] = new_response
+    status_requested = threading.Event()
+    if scenario in ("overlay", "overlay-lanes"):
+        status_response: h.HttpResponse = (
+            200,
+            {
+                "scope": {"kind": "project"},
+                "changes": [
+                    {
+                        "path": "overlay-file.ml",
+                        "staged": False,
+                        "unstaged": True,
+                        "untracked": False,
+                        "conflicted": False,
+                    }
+                ],
+                "total": 1,
+            },
+        )
+
+        def read_status() -> h.HttpResponse:
+            status_requested.set()
+            return status_response
+
+        fixtures["/api/v1/git/status"] = read_status
 
     def interact(process, master, _slave, output, _base):
         h.send_and_wait(process, master, output, b"2", b"MASC Keepers")
         h.select_keeper_row(process, master, output, b"alpha")
 
-        def open_artifact(selected: str, needle: bytes) -> None:
+        def submit_command(text: str, needle: bytes) -> None:
             h.send_and_wait(process, master, output, b"i", b"Ctrl-Y to speak")
-            command = ("/measurement " + selected).encode()
+            command = text.encode()
             h.send_and_wait(
                 process,
                 master,
@@ -215,7 +244,15 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             )
             h.send_and_wait(process, master, output, b"\r", needle)
 
-        open_artifact(sha, b"MASC Measurement")
+        if scenario == "overlay-lanes":
+            h.palette_go(process, master, output, b"go lanes", b"MASC Lanes")
+        if scenario in ("overlay", "overlay-lanes"):
+            submit_command(
+                "/diff",
+                h.FRAME_START if scenario == "overlay-lanes" else b"overlay-file.ml",
+            )
+            assert status_requested.wait(2.0), "repository changes were not requested"
+        submit_command("/measurement " + sha, b"MASC Measurement")
         expected = {
             "contexts": b"SCORED 2",
             "incomplete": b"INCOMPLETE 2",
@@ -225,11 +262,13 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             "stale": b"loading measurement",
             "large": b"SCORED 2",
             "malformed": b"not JSON",
+            "overlay": b"SCORED 1",
+            "overlay-lanes": b"SCORED 1",
         }[scenario]
         h.wait_for_output(process, master, output, expected, start=0, timeout=5.0)
         if delayed is not None:
             assert delayed.requested.wait(2.0), "old artifact was not requested"
-            open_artifact(new_sha, b"new-result")
+            submit_command("/measurement " + new_sha, b"new-result")
             delayed.release.set()
             assert delayed.completed.wait(2.0), "old artifact was not released"
         before = len(output)
@@ -315,6 +354,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         elif scenario == "stale":
             assert b"new-result" in screen and b"old-result" not in screen, screen
             assert b"INCOMPLETE 1" in screen and b"SCORED 0" in screen, screen
+        elif scenario in ("overlay", "overlay-lanes"):
+            assert b"overlay-origin" in screen and b"SCORED 1" in screen, screen
+            closed = h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
+            assert b"MASC Measurement" not in h.screen_text(closed), closed
         if evidence is not None:
             evidence.mkdir(parents=True, exist_ok=True)
             (evidence / (scenario + ".pty")).write_bytes(output)
@@ -353,6 +396,8 @@ if __name__ == "__main__":
         "stale",
         "large",
         "malformed",
+        "overlay",
+        "overlay-lanes",
     ):
         run(os.path.abspath(args.executable), name, args.evidence_dir)
-    print("TUI Noul measurement: 8 scenarios PASS")
+    print("TUI Noul measurement: 10 scenarios PASS")

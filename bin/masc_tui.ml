@@ -6052,7 +6052,6 @@ let launch_measurement_artifact_load state ~mailbox ~sha256 =
          (sha256, generation, Error "Eio switch is unavailable"))
 
 let open_measurement_artifact state ~mailbox ~sha256 =
-  state.view <- Lanes;
   state.lanes_mode <- Lanes_measurement_detail sha256;
   state.measurement_report <- None;
   state.lane_run_detail_error <- None;
@@ -9188,6 +9187,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            notice ~role:Message_error (Tool_blob_store.invalid_sha256_to_string error)
        | Ok () ->
            Buffer.clear state.msg_input;
+           close_repository_changes state;
+           goto_surface state ~mailbox Lanes;
            open_measurement_artifact state ~mailbox ~sha256)
   | Masc_tui_command.View_image path ->
       Buffer.clear state.msg_input;

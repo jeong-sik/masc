@@ -1506,6 +1506,11 @@ let execute_prepared_flow_with_queue_ops_current
         success.transport_success
         success.accepted;
       Executed
+    | Error (Exact_output.Flow_execution_terminal { cause; _ })
+      when Exact_output.flow_execution_terminal_kind cause
+           = Exact_output.Non_advanceable_terminal ->
+      handle_flow_error ~queue_ops prepared cause;
+      Executed
     | Error
         (Exact_output.Flow_execution_terminal
            { cause = (Exact_output.Flow_candidates_exhausted _ as cause); _ }) ->
@@ -1541,11 +1546,8 @@ let execute_prepared_flow_with_queue_ops_current
                Exact_output.Flow_exact_execution_failed { candidate; _ } as cause
            ; _
            }) ->
-      (* The last candidate failed post-dispatch with no successor left —
-         provider exhaustion in a different coat (a single-slot lane lands
-         here, never in Flow_candidates_exhausted). Infrastructure causes
-         (callback/measurement failures) stay below: a cli slot answers for
-         missing providers, not for a broken flow. *)
+      (* The final HTTP failure permits advancement, but no HTTP successor
+         remains. Non-advanceable failures were settled above. *)
       (match
          try_cli_slots
            ~queue_ops

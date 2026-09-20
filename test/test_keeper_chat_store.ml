@@ -136,6 +136,101 @@ let test_load_records_malformed_row_drops () =
         1.0
         (drop_value invalid_payload -. before_invalid_payload))
 
+let test_load_all_result_rejects_malformed_row () =
+  let base_dir = temp_base_path "keeper-chat-store-strict-load" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-strict-load" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "id", `String "valid-user"
+              ; "role", `String "user"
+              ; "content", `String "hello"
+              ; "ts", `Float 1.0
+              ])
+         ^ "\n{not-json\n");
+      match K.load_all_result ~base_dir ~keeper_name with
+      | Ok _ -> Alcotest.fail "strict load accepted a malformed row"
+      | Error detail ->
+        Alcotest.(check string)
+          "error identifies the unreadable row"
+          (Printf.sprintf "%s:2 unreadable chat row" path)
+          detail)
+;;
+
+let test_load_all_result_speaker_authority_contract () =
+  let base_dir = temp_base_path "keeper-chat-store-strict-authority" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-strict-authority" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"id":"valid-authority","role":"user","content":"owned","ts":1.0,"speaker_authority":"owner"}|}
+         ^ "\n"
+         ^ {|{"id":"missing-authority","role":"user","content":"historical","ts":2.0}|}
+         ^ "\n");
+      (match K.load_all_result ~base_dir ~keeper_name with
+       | Error detail -> Alcotest.failf "strict load rejected valid rows: %s" detail
+       | Ok [ valid; historical ] ->
+         (match valid.K.speaker with
+          | Some speaker ->
+            Alcotest.(check string)
+              "known authority remains typed"
+              "owner"
+              (K.authority_label speaker.K.speaker_authority)
+          | None -> Alcotest.fail "known authority lost its speaker");
+         Alcotest.(check bool)
+           "missing authority remains compatible"
+           true
+           (Option.is_none historical.K.speaker)
+       | Ok messages ->
+         Alcotest.failf "expected two strict rows, got %d" (List.length messages));
+      write_file path
+        ({|{"id":"missing-authority","role":"user","content":"identified","ts":3.0,"speaker_id":"speaker-7"}|}
+         ^ "\n");
+      (match K.load_all_result ~base_dir ~keeper_name with
+       | Ok _ -> Alcotest.fail "strict load accepted speaker identity without authority"
+       | Error detail ->
+         Alcotest.(check string)
+           "identity requires typed authority"
+           (Printf.sprintf
+              "%s:1 speaker_id/speaker_name without speaker_authority"
+              path)
+           detail);
+      write_file path
+        ({|{"id":"valid-before","role":"user","content":"before","ts":3.0,"speaker_authority":"owner"}|}
+         ^ "\n"
+         ^ {|{"id":"unknown-authority","role":"user","content":"unknown","ts":4.0,"speaker_authority":"admin"}|}
+         ^ "\n"
+         ^ {|{"id":"valid-after","role":"user","content":"after","ts":5.0,"speaker_authority":"external"}|}
+         ^ "\n");
+      (match K.load_all ~base_dir ~keeper_name with
+       | [ before; unknown; after ] ->
+         Alcotest.(check (list string))
+           "permissive load keeps every row"
+           [ "before"; "unknown"; "after" ]
+           [ before.K.content; unknown.K.content; after.K.content ];
+         Alcotest.(check bool)
+           "unknown authority stays unresolved"
+           true
+           (Option.is_none unknown.K.speaker)
+       | messages ->
+         Alcotest.failf
+           "permissive load dropped a mixed row: got %d"
+           (List.length messages));
+      match K.load_all_result ~base_dir ~keeper_name with
+      | Ok _ -> Alcotest.fail "strict load accepted unknown speaker authority"
+      | Error detail ->
+        Alcotest.(check string)
+          "mixed strict load fails at the typed authority error"
+          (Printf.sprintf "%s:2 unknown speaker_authority %S" path "admin")
+          detail)
+;;
+
 let roles messages =
   List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
 
@@ -3373,6 +3468,10 @@ let () =
         [
           Alcotest.test_case "malformed rows increment drop metrics" `Quick
             test_load_records_malformed_row_drops;
+          Alcotest.test_case "strict load rejects malformed rows" `Quick
+            test_load_all_result_rejects_malformed_row;
+          Alcotest.test_case "strict load checks speaker authority" `Quick
+            test_load_all_result_speaker_authority_contract;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
           Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick

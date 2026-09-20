@@ -492,6 +492,7 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
       ; provider_ref = "deepseek"
       ; model_id = "deepseek-v4-pro"
       ; enable_thinking = None
+      ; reasoning_effort = None
       ; connect_timeout_s = Some 30.0
       ; body_timeout_s = None
       ; api_key_env = None

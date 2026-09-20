@@ -83,9 +83,7 @@ let record_turn_boundary
     in
     (match
        Keeper_turn_boundaries.append
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:meta.name
          record
      with
@@ -371,6 +369,7 @@ let finalize
       ~agent_core_turn_count:result.turns
       ~tool_observations:librarian_tool_observations
       ~librarian_messages
+      ~checkpoint_owner
       ~post_turn_t0
       ~inference_telemetry:result.response.telemetry
       ();
@@ -398,6 +397,8 @@ let finalize
            | None, _ -> Keeper_usage_resolution.Unavailable
            | Some _, Some { usage_scope = Runtime_usage_scope.Per_request; _ } ->
              Keeper_usage_resolution.Per_request
+           | Some _, Some { usage_scope = Runtime_usage_scope.Turn_total; _ } ->
+             Keeper_usage_resolution.Turn_total
            | ( Some _
              , Some
                  { usage_scope = Runtime_usage_scope.Conversation_cumulative

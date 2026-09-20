@@ -10,12 +10,16 @@ open Alcotest
 
 (* The digest a record written by a turn whose front was atom [atom] carries;
    the records below are never checked against a history. *)
-let recorded_digest atom = Printf.sprintf "front-%d" atom
+let recorded_digest atom =
+  Digestif.SHA256.digest_string (Printf.sprintf "front-%d" atom)
+  |> Digestif.SHA256.to_hex
 
 let record
       ?(runtime = "glm")
       ?(wire_runtime = None)
       ?(finish = Some "completed")
+      ?(response_observed = true)
+      ?response_runtime
       ?(trace = "trace-1")
       ~turn
       window
@@ -52,6 +56,20 @@ let record
            ; front_atom_digest = recorded_digest (total_atoms - transmitted_atoms)
            })
         window
+  ; response_observed_model_input =
+      (match response_observed, window with
+       | true, Some (transmitted_atoms, total_atoms) ->
+         Some
+           { runtime_profile = Option.value response_runtime ~default:runtime
+           ; window =
+               { Turn_record.transmitted_atoms
+               ; total_atoms
+               ; measurement = Turn_record.Wire_shape
+               ; front_atom_digest =
+                   recorded_digest (total_atoms - transmitted_atoms)
+               }
+           }
+       | true, None | false, _ -> None)
   ; raw_trace_run_ref = None
   ; sampling = { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
   ; usage =
@@ -70,15 +88,7 @@ let seed = function
   | None -> fail "a seed was expected"
 ;;
 
-(* A stand-in for the catalog: [read_seed] puts the question to
-   {!Front.composer_of_runtime}, pinned below on its own. *)
-let composer = function
-  | "claude_code" -> Front.Hands_over_its_own_list
-  | "gone" -> Front.Not_materialized
-  | _ -> Front.Composes_from_the_history
-;;
-
-let of_records = Front.of_records ~trace_id:"trace-1" ~composer
+let of_records = Front.of_records ~trace_id:"trace-1"
 
 let source =
   testable
@@ -110,13 +120,38 @@ let test_another_sessions_record_is_another_history () =
   check int "the newer record belongs to another session" 70
     (fst (seed (of_records records)));
   check int "and is the one that session reads" 495
-    (fst (seed (Front.of_records ~trace_id:"trace-2" ~composer records)))
+    (fst (seed (Front.of_records ~trace_id:"trace-2" records)))
 ;;
 
-(* An official client cuts the same history, so its record names a position
-   here and is read. A runtime the catalog no longer has could have counted
-   anything, so its record is not; a record with no window says nothing. *)
-let test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not () =
+(* A turn that carried the whole history names no front: its opening atom is
+   the oldest one because nothing was skipped. The Codex lane hands its list
+   over whole every turn, so reading its record as a seed would send the next
+   official-client start back to the oldest atom, which is #37123 again
+   (#37350). The narrower front from the turn before it stands. *)
+let test_a_whole_history_record_does_not_unseat_a_carried_front () =
+  let records =
+    [ record ~turn:20 ~runtime:"claude_code" (Some (40, 1000))
+    ; record ~turn:21 ~runtime:"codex" (Some (1010, 1010))
+    ]
+  in
+  let first_atom, src = seed (of_records records) in
+  check int "the carried front of turn 20 stands" 960 first_atom;
+  check source "and names that turn" (Front.Turn_record { turn = 20 }) src
+;;
+
+(* Alone, such a record seeds nothing. Carrying its oldest atom and carrying
+   everything are the same range, so there is nothing for a seed to say. *)
+let test_a_whole_history_record_alone_seeds_nothing () =
+  check
+    bool
+    "a record that skipped no atom gives no seed"
+    true
+    (Option.is_none (of_records [ record ~turn:21 ~runtime:"codex" (Some (1010, 1010)) ]))
+;;
+
+(* A recorded response remains a fact after its runtime leaves the current
+   catalog. A row without a response window still says nothing about a seed. *)
+let test_a_response_survives_its_runtime_leaving_the_catalog () =
   let records =
     [ record ~turn:10 (Some (30, 100))
     ; record ~turn:13 ~runtime:"claude_code" (Some (5, 120))
@@ -125,43 +160,96 @@ let test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not () 
     ]
   in
   let first_atom, src = seed (of_records records) in
-  check int "the official client's turn 13 is the newest read" 115 first_atom;
-  check source "turn 13" (Front.Turn_record { turn = 13 }) src
+  check int "the removed runtime's response is still the newest observed range" 125 first_atom;
+  check source "turn 15" (Front.Turn_record { turn = 15 }) src
 ;;
 
-(* A turn that never finished still measured what it sent, and that range is
-   a position in the same history. Skipping it is what kept five keepers
-   sending the whole history every turn on 2026-09-18, because the halving a
-   refusal forces lived only inside the attempt. It is read, named apart from
-   a completed seed so a reader can tell which turn reached that position. *)
-let test_an_unfinished_record_is_read_and_named_apart () =
-  let records = [ record ~turn:10 (Some (30, 100)); record ~turn:12 ~finish:None (Some (5, 110)) ] in
+(* The newest attempted range received no response. It must not replace the
+   older response-observed range after the process loses its warm ledger. *)
+let test_an_unanswered_record_does_not_seed_the_front () =
+  let records =
+    [ record ~turn:10 (Some (30, 100))
+    ; record ~turn:12 ~finish:None ~response_observed:false (Some (5, 110))
+    ]
+  in
   let first_atom, src = seed (of_records records) in
-  check int "total minus transmitted of turn 12" 105 first_atom;
-  check source "named apart from a completed seed" (Front.Unfinished_turn { turn = 12 }) src
+  check int "the last response-observed front survives" 70 first_atom;
+  check source "turn 10 supplied the response" (Front.Turn_record { turn = 10 }) src
 ;;
 
-(* Acceptance is the newer evidence: a completed turn after an unfinished one
-   says that range served, so it names the front and the older one does not. *)
-let test_a_completed_record_after_an_unfinished_one_seeds_the_front () =
-  let records = [ record ~turn:12 ~finish:None (Some (5, 110)); record ~turn:13 (Some (40, 115)) ] in
+let test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response () =
+  let attempted = record ~turn:12 ~finish:None (Some (5, 110)) in
+  let record =
+    { attempted with
+      Turn_record.response_observed_model_input =
+        Some
+          { runtime_profile = "deepseek"
+          ; window =
+              { transmitted_atoms = 30
+              ; total_atoms = 100
+              ; measurement = Wire_shape
+              ; front_atom_digest = recorded_digest 70
+              }
+          }
+    }
+  in
+  let first_atom, src = seed (of_records [ record ]) in
+  check int "the answered request starts at atom 70" 70 first_atom;
+  check source "the response belongs to this failed turn"
+    (Front.Turn_record { turn = 12 }) src
+;;
+
+let test_restart_rows_restore_only_a_response_observed_front () =
+  let rows =
+    [ Turn_record.to_json (record ~turn:10 (Some (30, 100)))
+    ; Turn_record.to_json
+        (record
+           ~turn:12
+           ~finish:None
+           ~response_observed:false
+           (Some (5, 110)))
+    ]
+  in
+  let read = Front.seed_read_of_rows ~trace_id:"trace-1" rows in
+  let first_atom, src = seed read.Front.seed in
+  check int "restart restores the answered range" 70 first_atom;
+  check source "the refused latest row is skipped"
+    (Front.Turn_record { turn = 10 }) src;
+  check bool "both current rows decoded" true
+    (Option.is_none read.Front.unreadable)
+;;
+
+(* A response-observed range remains valid even when the whole turn later
+   failed and therefore wrote no finish reason. *)
+let test_a_response_observed_failed_turn_seeds_the_front () =
+  let records =
+    [ record ~turn:12 (Some (40, 110))
+    ; record ~turn:13 ~finish:None (Some (40, 115))
+    ]
+  in
   let _, src = seed (of_records records) in
-  check source "turn 13 completed" (Front.Turn_record { turn = 13 }) src
+  check source "turn 13 received a response" (Front.Turn_record { turn = 13 }) src
 ;;
 
-(* The record's runtime names the runtime that was asked; the wire
-   observation names the one that measured. The history question is put to
-   the latter. *)
-let test_the_wire_observation_names_the_runtime_when_present () =
+(* The response keeps its own runtime/window pair. Neither the final attempt
+   nor today's catalog can rewrite what that response observed. *)
+let test_the_joined_observation_names_the_runtime () =
   let records =
-    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "gone") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "deepseek")
+        ~response_runtime:"gone" (Some (30, 100)) ]
   in
-  check bool "measured by a runtime the catalog lost: skipped" true
-    (Option.is_none (of_records records));
+  let read =
+    Front.seed_read_of_rows ~trace_id:"trace-1"
+      (List.map Turn_record.to_json records)
+  in
+  check bool "the current response record decodes" true (Option.is_none read.unreadable);
+  check int "the response remains a seed after its runtime leaves the catalog" 70
+    (fst (seed read.seed));
   let records =
-    [ record ~turn:10 ~runtime:"gone" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"gone" ~wire_runtime:(Some "gone")
+        ~response_runtime:"deepseek" (Some (30, 100)) ]
   in
-  check int "measured by deepseek: read" 70 (fst (seed (of_records records)))
+  check int "deepseek answered: read" 70 (fst (seed (of_records records)))
 ;;
 
 let test_no_record_means_no_seed () =
@@ -269,6 +357,35 @@ let dropped =
 
 let kept_or_dropped = result (of_pp (fun fmt (s : Front.seed) -> Format.pp_print_int fmt s.first_atom)) dropped
 
+(* A response observed by a runtime that later leaves the catalog was still
+   measured over this trace's checkpoint history. Selection keeps the record;
+   the exact atom index and opening-message digest then prove that its axis is
+   the current history's before the seed is used. *)
+let test_a_removed_runtimes_response_names_the_current_history () =
+  let history = exchanges 6 in
+  let digest_at = Window.atom_opening_digest history in
+  let front_digest =
+    match digest_at 8 with Some digest -> digest | None -> fail "fixture atom missing"
+  in
+  let recorded = record ~runtime:"gone" ~turn:15 (Some (4, 12)) in
+  let recorded =
+    match recorded.Turn_record.response_observed_model_input with
+    | None -> fail "the fixture response has no observed window"
+    | Some observation ->
+      { recorded with
+        Turn_record.response_observed_model_input =
+          Some
+            { observation with
+              window = { observation.window with front_atom_digest = front_digest }
+            }
+      }
+  in
+  let selected = Option.get (of_records [ recorded ]) in
+  check kept_or_dropped "the removed runtime's exact position still opens this history"
+    (Ok selected)
+    (Front.for_history ~digest_at selected)
+;;
+
 (* 2026-09-17, msx-retro-mania: the attempt that measured the front added one
    atom it never saved, so the next turn's history was one atom shorter than
    the one the front was measured on. The front's atom opens with the same
@@ -326,7 +443,7 @@ let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
     ; without "keeper" (Turn_record.to_json (record ~turn:9 (Some (5, 95))))
     ]
   in
-  let read = Front.seed_read_of_rows ~composer ~trace_id:"trace-1" rows in
+  let read = Front.seed_read_of_rows ~trace_id:"trace-1" rows in
   check int "the seed is the record that decodes" 70
     (fst (seed read.Front.seed));
   match read.Front.unreadable with
@@ -337,7 +454,123 @@ let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
       (Astring.String.is_infix ~affix:"front_atom_digest" unreadable.Front.first_reason);
     check bool "every row decoding counts nothing" true
       (Option.is_none
-         (Front.seed_read_of_rows ~composer ~trace_id:"trace-1" [ current ]).Front.unreadable)
+         (Front.seed_read_of_rows ~trace_id:"trace-1" [ current ]).Front.unreadable)
+;;
+
+let with_turn_record_store f =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Masc.Workspace.default_config base_path in
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config "alpha" in
+  Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
+  f config store
+;;
+
+(* A retained response can be older than every row in the reader's former
+   200-row window. Exercise the production store reader, rather than passing
+   an already selected list to [seed_read_of_rows]. The observed front is
+   inside persisted history and still holds when the next turn appends input. *)
+let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
+  with_turn_record_store @@ fun config store ->
+  let persisted = exchanges 5 in
+  let _, total_atoms = Window.annotate persisted in
+  check int "ten persisted atoms" 10 total_atoms;
+  let window : Turn_record.model_input_window =
+    { transmitted_atoms = total_atoms - 8
+    ; total_atoms
+    ; measurement = Turn_record.Wire_shape
+    ; front_atom_digest = (seed_at persisted 8).front_digest
+    }
+  in
+  let observed =
+    { (record ~turn:1 None) with
+      model_input_window = Some window
+    ; response_observed_model_input = Some { runtime_profile = "glm"; window }
+    }
+  in
+  let observed_json = Turn_record.to_json observed in
+  Dated_jsonl.append store observed_json;
+  let unobserved_rows = 200 in
+  for index = 1 to unobserved_rows do
+    let unobserved =
+      { (record ~turn:(index + 1) ~finish:None ~response_observed:false None) with
+        model_input_window = Some window
+      }
+    in
+    Dated_jsonl.append store (Turn_record.to_json unobserved)
+  done;
+  let stored_rows = Dated_jsonl.read_recent store (unobserved_rows + 1) in
+  check int "all rows are still stored" (unobserved_rows + 1) (List.length stored_rows);
+  check bool "the observed row was not pruned" true
+    (List.exists (Yojson.Safe.equal observed_json) stored_rows);
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "every visited record decodes" true (Option.is_none read.Front.unreadable);
+  check (option int) "the retained response supplies front 8" (Some 8)
+    (Option.map (fun (front : Front.seed) -> front.first_atom) read.Front.seed);
+  let front = Option.get read.Front.seed in
+  check string "the front names the same persisted atom" window.front_atom_digest
+    front.front_digest;
+  check source "the observed turn supplies the seed" (Front.Turn_record { turn = 1 })
+    front.source;
+  let next_tick = persisted @ [ text_message Types.User "next tick" ] in
+  check kept_or_dropped "the front still holds on the next tick" (Ok front)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest next_tick) front);
+  let carried =
+    Masc.Keeper_next_request_forecast.carry
+      ~measure:(Masc.Keeper_context_core.message_measurer ())
+      ~front:read.Front.seed
+      ~counted_tokens:None
+      next_tick
+  in
+  check int "the next request retains the observed front" 8 carried.first_atom;
+  check int "two retained atoms plus the next tick" 3 carried.kept_atoms
+;;
+
+let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
+  with_turn_record_store @@ fun config store ->
+  let records =
+    [ record ~turn:10 ~finish:None (Some (30, 100))
+    ; record ~turn:10 (Some (15, 100))
+    ; record ~turn:10 ~finish:None ~response_observed:false (Some (5, 100))
+    ; record ~turn:11 ~trace:"another-trace" (Some (1, 100))
+    ]
+  in
+  List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check int "the latest response on this trace supplies front 85" 85
+    (fst (seed read.Front.seed));
+  check int "the chronological row reader resolves the same turn the same way" 85
+    (fst (seed (of_records records)))
+;;
+
+let test_read_seed_counts_only_unreadable_rows_visited_before_the_response () =
+  with_turn_record_store @@ fun config store ->
+  let current = Turn_record.to_json (record ~turn:10 (Some (30, 100))) in
+  let without key =
+    match current with
+    | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | other -> other
+  in
+  let older_refusal = without "front_atom_digest" in
+  List.iter (Dated_jsonl.append store)
+    [ `Null; current; older_refusal; without "keeper" ];
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check int "unreadable rows do not hide the response" 70
+    (fst (seed read.Front.seed));
+  match read.Front.unreadable, Turn_record.of_json older_refusal with
+  | Some unreadable, Error reason ->
+    check int "only the two newer unreadable rows were visited" 2 unreadable.count;
+    check string "the oldest visited decoder refusal is retained" reason
+      unreadable.first_reason
+  | _ -> fail "the two invalid records must be counted"
 ;;
 
 let test_clamp_keeps_the_front_on_an_atom () =
@@ -361,8 +594,6 @@ let test_origin_json_names_its_kind () =
   in
   check string "ledger" "ledger" (kind (Front.Carried Front.Ledger));
   check string "turn record" "turn_record" (kind (Front.Carried (Front.Turn_record { turn = 3 })));
-  check string "unfinished turn" "unfinished_turn"
-    (kind (Front.Carried (Front.Unfinished_turn { turn = 7 })));
   check string "halved" "halved_after_refusal"
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
   check string "evicted" "evicted_after_refusal"
@@ -376,23 +607,41 @@ let () =
     [ ( "of_records"
       , [ test_case "newest completed record on the trace" `Quick
             test_the_newest_completed_record_on_the_trace_seeds_the_front
-        ; test_case "an official client is read, an unmaterialized runtime is not" `Quick
-            test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not
-        ; test_case "an unfinished record is read and named apart" `Quick
-            test_an_unfinished_record_is_read_and_named_apart
-        ; test_case "a completed record after an unfinished one seeds" `Quick
-            test_a_completed_record_after_an_unfinished_one_seeds_the_front
-        ; test_case "wire observation names the runtime" `Quick
-            test_the_wire_observation_names_the_runtime_when_present
+        ; test_case "a whole-history record does not unseat a carried front"
+            `Quick
+            test_a_whole_history_record_does_not_unseat_a_carried_front
+        ; test_case "a whole-history record alone seeds nothing" `Quick
+            test_a_whole_history_record_alone_seeds_nothing
+        ; test_case "a response survives runtime removal" `Quick
+            test_a_response_survives_its_runtime_leaving_the_catalog
+        ; test_case "an unanswered record does not seed" `Quick
+            test_an_unanswered_record_does_not_seed_the_front
+        ; test_case "same-turn unanswered attempt does not replace response"
+            `Quick
+            test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response
+        ; test_case "restart rows restore only response-observed front" `Quick
+            test_restart_rows_restore_only_a_response_observed_front
+        ; test_case "a response-observed failed turn seeds" `Quick
+            test_a_response_observed_failed_turn_seeds_the_front
+        ; test_case "joined observation names the runtime" `Quick
+            test_the_joined_observation_names_the_runtime
         ; test_case "no record" `Quick test_no_record_means_no_seed
         ; test_case "another session" `Quick test_another_sessions_record_is_another_history
         ; test_case "composer from the execution kind" `Quick
             test_the_composer_is_read_from_the_execution_kind
         ; test_case "undecodable rows counted with the first reason" `Quick
             test_rows_that_do_not_decode_are_counted_with_the_first_reason
+        ; test_case "stored response survives a window of unobserved rows" `Quick
+            test_read_seed_keeps_a_response_beyond_unobserved_rows
+        ; test_case "a retry reusing the turn keeps the latest stored response" `Quick
+            test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn
+        ; test_case "only visited unreadable rows are counted" `Quick
+            test_read_seed_counts_only_unreadable_rows_visited_before_the_response
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front
+        ; test_case "a removed runtime's response names the current history" `Quick
+            test_a_removed_runtimes_response_names_the_current_history
         ; test_case "one unsaved atom shorter keeps the front" `Quick
             test_a_history_one_unsaved_atom_shorter_keeps_the_front
         ; test_case "a purge drops the front with its reason" `Quick

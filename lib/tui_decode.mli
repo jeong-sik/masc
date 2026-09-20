@@ -1813,15 +1813,33 @@ val decode_keeper_turns :
     registered keeper. Unknown schema, status, or lane is an error, not a
     silently defaulted row. *)
 
-(** Where one keeper points today. [ra_source] is the server's word:
-    ["default"] rides the fleet default, ["explicit"] was assigned. *)
-type runtime_assignment = {
-  ra_keeper : string;
-  ra_source : string;
-  ra_target_id : string option;
-  ra_unavailable_reason : string option;
-      (** Resolved lane id, or [None] when the assignment is missing. *)
-}
+type runtime_assignment_source =
+  | Default_runtime
+  | Explicit_runtime
+(** Whether the keeper rides the fleet default or has an explicit assignment. *)
+
+type runtime_unavailable_reason =
+  | Missing_catalog_model of
+      { provider_label : string
+      ; model_id : string
+      }
+(** The server's closed [reason.kind] sum for an unavailable assignment. *)
+
+type runtime_assignment_resolution =
+  | Runtime_assignment_lane of string
+  | Runtime_assignment_missing
+  | Runtime_assignment_unavailable of
+      { runtime_id : string
+      ; reason : runtime_unavailable_reason
+      }
+(** The server's closed [resolved.kind] sum. Consumers match this value directly;
+    membership in a separately projected lane catalogue does not reclassify it. *)
+
+type runtime_assignment =
+  { ra_keeper : string
+  ; ra_source : runtime_assignment_source
+  ; ra_resolution : runtime_assignment_resolution
+  }
 
 val decode_runtime_resolved_full :
   Yojson.Safe.t ->
@@ -2186,6 +2204,11 @@ type lane_run_gate_judgment =
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
+type lane_run_failure =
+  { lrf_code : string
+  ; lrf_detail : string
+  }
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
@@ -2196,6 +2219,7 @@ type lane_run_summary =
   ; lrs_status : lane_run_status
   ; lrs_elapsed_s : float option
   ; lrs_selected_slot : string option
+  ; lrs_failure : lane_run_failure option
   }
 
 type lane_run_page =
@@ -2203,6 +2227,17 @@ type lane_run_page =
   ; lrpg_next : (float * string) option
   ; lrpg_total : int option
   }
+
+type lane_run_answer_source =
+  | Lane_run_answer_exact_attempt of string
+  | Lane_run_answer_cli_slot of string
+  | Lane_run_answer_vendor_system_one of
+      { model : string
+      ; endpoint : string
+      }
+(** The typed source of a successful Board-attention answer. This is separate
+    from [lrd_selected_slot]: Vendor System One answers before a slot runs and
+    therefore has no exact-flow receipt or selected slot. *)
 
 type lane_run_detail =
   { lrd_run_id : string
@@ -2214,6 +2249,8 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_answer_source : lane_run_answer_source option
+  ; lrd_failure : lane_run_failure option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
@@ -2269,6 +2306,10 @@ type context_unavailable_reason =
   | Context_turn_record_without_usage
   | Context_turn_record_trace_mismatch
   | Context_conversation_cumulative_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_turn_total_usage of
       { raw_input_tokens : int option
       ; context_window : int option
       }

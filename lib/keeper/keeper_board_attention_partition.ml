@@ -74,8 +74,14 @@ type blocked_reason =
   | Exact_setup_unavailable of string
   | Exact_flow_replayed
   | Exact_execution_terminal
-  | Domain_output_invalid of string
-  | Execution_provenance_mismatch of string
+  | Domain_output_invalid of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Execution_provenance_mismatch of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Unexpected_worker_failure of string
   | Exact_execution_quarantined of running_progress
 
@@ -187,12 +193,23 @@ let blocked_reason_to_yojson = function
   | Exact_flow_replayed -> `Assoc [ "kind", `String "exact_flow_replayed" ]
   | Exact_execution_terminal ->
     `Assoc [ "kind", `String "exact_execution_terminal" ]
-  | Domain_output_invalid detail ->
-    `Assoc [ "kind", `String "domain_output_invalid"; "detail", `String detail ]
-  | Execution_provenance_mismatch detail ->
+  | Domain_output_invalid { detail; progress } ->
+    `Assoc
+      [ "kind", `String "domain_output_invalid"
+      ; "detail", `String detail
+      ; ( "progress"
+        , match progress with
+          | Some progress -> running_progress_to_yojson progress
+          | None -> `Null )
+      ]
+  | Execution_provenance_mismatch { detail; progress } ->
     `Assoc
       [ "kind", `String "execution_provenance_mismatch"
       ; "detail", `String detail
+      ; ( "progress"
+        , match progress with
+          | Some progress -> running_progress_to_yojson progress
+          | None -> `Null )
       ]
   | Unexpected_worker_failure detail ->
     `Assoc [ "kind", `String "unexpected_worker_failure"; "detail", `String detail ]
@@ -420,15 +437,33 @@ let blocked_reason_of_yojson json =
     let* () = exact_fields ~context [ "kind" ] fields in
     Ok Exact_execution_terminal
   | "domain_output_invalid" ->
-    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
     let* detail_json = field ~context "detail" fields in
     let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    Ok (Domain_output_invalid detail)
+    let* progress_json = field ~context "progress" fields in
+    let* progress =
+      match progress_json with
+      | `Null -> Ok None
+      | json -> running_progress_of_yojson json |> Result.map Option.some
+    in
+    (match progress with
+     | Some Unbound -> Error "classified execution failure cannot retain unbound progress"
+     | Some (Bound _ | Advancing _) | None ->
+       Ok (Domain_output_invalid { detail; progress }))
   | "execution_provenance_mismatch" ->
-    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
     let* detail_json = field ~context "detail" fields in
     let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    Ok (Execution_provenance_mismatch detail)
+    let* progress_json = field ~context "progress" fields in
+    let* progress =
+      match progress_json with
+      | `Null -> Ok None
+      | json -> running_progress_of_yojson json |> Result.map Option.some
+    in
+    (match progress with
+     | Some Unbound -> Error "classified execution failure cannot retain unbound progress"
+     | Some (Bound _ | Advancing _) | None ->
+       Ok (Execution_provenance_mismatch { detail; progress }))
   | "unexpected_worker_failure" ->
     let* () = exact_fields ~context [ "kind"; "detail" ] fields in
     let* detail_json = field ~context "detail" fields in
@@ -1116,25 +1151,9 @@ let judgment_provenance (judgment : Candidate.judgment) =
       }
 ;;
 
-let validate_blocked_reason = function
-  | Candidate_membership_conflict detail ->
-    nonempty "candidate membership conflict detail" detail
-  | Durable_partition_invariant detail ->
-    nonempty "durable partition invariant detail" detail
-  | Exact_setup_unavailable detail ->
-    nonempty "exact setup unavailable detail" detail
-  | Exact_flow_replayed -> Ok ()
-  | Exact_execution_terminal -> Ok ()
-  | Domain_output_invalid detail ->
-    nonempty "domain output invalid detail" detail
-  | Execution_provenance_mismatch detail ->
-    nonempty "execution provenance mismatch detail" detail
-  | Unexpected_worker_failure detail ->
-    nonempty "unexpected worker failure detail" detail
-  | Exact_execution_quarantined (Bound provenance) ->
-    validate_exact_provenance provenance
-  | Exact_execution_quarantined
-      (Advancing { execution_anchor; last_from; next }) ->
+let validate_durable_progress = function
+  | Bound provenance -> validate_exact_provenance provenance
+  | Advancing { execution_anchor; last_from; next } ->
     let* () =
       match execution_anchor with
       | Some provenance -> validate_exact_provenance provenance
@@ -1152,8 +1171,32 @@ let validate_blocked_reason = function
       | _ -> Ok ()
     in
     validate_candidate_visit next
-  | Exact_execution_quarantined Unbound ->
-    Error "unbound execution cannot be quarantined"
+  | Unbound -> Error "unbound execution cannot retain durable progress"
+;;
+
+let validate_classified_failure detail progress =
+  let* () = nonempty "classified execution failure detail" detail in
+  match progress with
+  | Some progress -> validate_durable_progress progress
+  | None -> Ok ()
+;;
+
+let validate_blocked_reason = function
+  | Candidate_membership_conflict detail ->
+    nonempty "candidate membership conflict detail" detail
+  | Durable_partition_invariant detail ->
+    nonempty "durable partition invariant detail" detail
+  | Exact_setup_unavailable detail ->
+    nonempty "exact setup unavailable detail" detail
+  | Exact_flow_replayed -> Ok ()
+  | Exact_execution_terminal -> Ok ()
+  | Domain_output_invalid { detail; progress } ->
+    validate_classified_failure detail progress
+  | Execution_provenance_mismatch { detail; progress } ->
+    validate_classified_failure detail progress
+  | Unexpected_worker_failure detail ->
+    nonempty "unexpected worker failure detail" detail
+  | Exact_execution_quarantined progress -> validate_durable_progress progress
 ;;
 
 let advance_state partition state =

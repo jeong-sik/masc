@@ -215,6 +215,56 @@ let test_v1_requires_reset_and_v2_usage_state_roundtrips () =
       (meta.runtime.last_usage_resolution = Some resolution)
 ;;
 
+let test_client_turn_totals_do_not_use_the_conversation_cursor () =
+  let module Usage = Keeper_usage_resolution in
+  let sample : Usage.sample =
+    { input_tokens = 160; output_tokens = 20
+    ; cache_creation_input_tokens = 4; cache_read_input_tokens = 100
+    ; cost_usd = None
+    }
+  in
+  let prior : Usage.cursor option =
+    Some
+      { runtime_id = "cumulative-runtime"; conversation_id = "conversation-1"
+      ; cumulative = { sample with input_tokens = 1000; output_tokens = 200 }
+      }
+  in
+  let first, cursor =
+    Usage.resolve ~cursor:prior ~basis:Usage.Turn_total
+      ~observation:(Some sample) ~observed_at:1.
+  in
+  check bool "first client-turn total is its exact delta" true
+    (first.observation = Some sample && first.delta = Some sample
+     && first.status = Usage.Exact_cost_unavailable);
+  check bool "a client turn leaves the conversation cursor alone" true (cursor = prior);
+  let smaller = { sample with input_tokens = 120; output_tokens = 10 } in
+  let second, cursor =
+    Usage.resolve ~cursor ~basis:Usage.Turn_total
+      ~observation:(Some smaller) ~observed_at:2.
+  in
+  check bool "next smaller client turn is not a counter regression or subtraction" true
+    (second.observation = Some smaller && second.delta = Some smaller
+     && second.status = Usage.Exact_cost_unavailable);
+  check bool "next client turn still preserves the unrelated cursor" true (cursor = prior);
+  let json =
+    current_json ()
+    |> replace_field "usage_cursor"
+         (Option.fold ~none:`Null ~some:Usage.cursor_to_json cursor)
+    |> replace_field "last_usage_resolution" (Usage.to_json second)
+  in
+  (match Keeper_meta_json_parse.meta_of_json json with
+   | Error detail -> failf "client-turn accounting state rejected: %s" detail
+   | Ok meta ->
+     check bool "typed client-turn resolution roundtrips" true
+       (meta.runtime.last_usage_resolution = Some second);
+     check bool "conversation cursor roundtrips unchanged" true
+       (meta.runtime.usage_cursor = prior));
+  let inconsistent = { second with delta = Some sample } in
+  (match Usage.of_json (Usage.to_json inconsistent) with
+   | Error _ -> ()
+   | Ok _ -> fail "a client-turn delta differing from its observation was accepted")
+;;
+
 let () =
   run
     "keeper_meta_current_schema"
@@ -241,6 +291,8 @@ let () =
             test_current_writer_rejects_non_finite_values
         ; test_case "v1 cut and v2 usage state roundtrip" `Quick
             test_v1_requires_reset_and_v2_usage_state_roundtrips
+        ; test_case "client-turn totals preserve the conversation cursor" `Quick
+            test_client_turn_totals_do_not_use_the_conversation_cursor
         ] )
     ]
 ;;

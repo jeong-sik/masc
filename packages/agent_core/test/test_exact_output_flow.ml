@@ -1030,7 +1030,12 @@ let test_provider_schema_still_requires_native_capability () =
       (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
     (match EO.candidate_rejection_disposition rejection with
      | EO.Output_requirement_rejected -> ()
-     | _ -> fail "provider-schema rejection lost its typed disposition")
+     | _ -> fail "provider-schema rejection lost its typed disposition");
+    check
+      string
+      "provider-schema rejection keeps its original cause"
+      "provider_schema_unavailable"
+      (EO.candidate_rejection_reason rejection)
   | Ok _ | Error _ -> fail "missing native schema support was not rejected pre-dispatch"
 ;;
 
@@ -1216,7 +1221,7 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
-          ~api_key_env:"MISSING_FLOW_KEY"
+          ~api_key_env:"MISSING_FLOW_KEY\nSECOND_LINE"
           ~id:"credential-missing"
           ~base_url
           ~native:true
@@ -1275,7 +1280,7 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
     0
     (List.length evidence.attempts);
   check int "all credential outcomes remain ordered" 3 (List.length evidence.admissions);
-  let check_rejection ~id ~visit rejection =
+  let check_rejection ~id ~visit ~reason_prefix rejection =
     check
       string
       "credential rejection identity"
@@ -1286,18 +1291,44 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
       "credential rejection visit is exact"
       visit
       (EO.flow_visit_ordinal_to_int (EO.candidate_rejection_visit rejection).ordinal);
-    match EO.candidate_rejection_disposition rejection with
-    | EO.Runtime_slot_unavailable -> ()
-    | _ -> fail "credential rejection leaked a non-neutral disposition"
+    (match EO.candidate_rejection_disposition rejection with
+     | EO.Runtime_slot_unavailable -> ()
+     | _ -> fail "credential rejection leaked a non-neutral disposition");
+    let reason = EO.candidate_rejection_reason rejection in
+    check
+      bool
+      "credential rejection reason keeps the typed credential kind"
+      true
+      (String.starts_with
+         ~prefix:(reason_prefix ^ "(")
+         reason);
+    check bool "rejection reason has no newline" false (String.contains reason '\n');
+    check
+      bool
+      "rejection reason has no carriage return"
+      false
+      (String.contains reason '\r')
   in
   (match evidence.admissions with
    | [ EO.Candidate_rejected missing
      ; EO.Candidate_rejected invalid
      ; EO.Candidate_rejected read_failed
      ] ->
-     check_rejection ~id:"credential-missing" ~visit:1 missing;
-     check_rejection ~id:"credential-invalid" ~visit:2 invalid;
-     check_rejection ~id:"credential-read-failed" ~visit:3 read_failed
+     check_rejection
+       ~id:"credential-missing" ~visit:1 ~reason_prefix:"missing_target_credential" missing;
+     check_rejection
+       ~id:"credential-invalid" ~visit:2 ~reason_prefix:"target_credential_invalid" invalid;
+     check_rejection
+       ~id:"credential-read-failed"
+       ~visit:3
+       ~reason_prefix:"target_credential_read_failed"
+       read_failed;
+     check
+       string
+       "invalid credential reason contains identity, never the credential value"
+       "target_credential_invalid(target_ref=\"credential-invalid\" \
+        environment_variable=\"INVALID_FLOW_KEY\")"
+       (EO.candidate_rejection_reason invalid)
    | _ -> fail "credential evidence did not retain three typed rejections");
   match result with
   | Error

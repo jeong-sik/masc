@@ -11,6 +11,20 @@ val post_of_yojson : Yojson.Safe.t -> post option
 val comment_of_yojson : Yojson.Safe.t -> comment option
 (** Accepts only the exact current {!comment_to_yojson} wire shape. *)
 
+val load_source_rows :
+  string ->
+  decode:(Yojson.Safe.t -> 'a option) ->
+  accept:('a -> unit) ->
+  (unit, string * exn) result
+(** Read every nonempty JSONL line, retaining the first invalid JSON or schema
+    error with its line number instead of silently dropping that row. *)
+
+val record_load_result :
+  ((unit, string) result -> unit) ->
+  ('a, string * exn) result ->
+  ('a, string * exn) result
+(** Store the last full-load outcome while returning the caller's count. *)
+
 val load_persisted_posts : store -> (int, string * exn) result
 (** Load posts from disk into [store].  Returns [Ok loaded_count] on success
     (including when the persistence file is absent: [Ok 0]).  Returns

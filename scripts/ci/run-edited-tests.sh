@@ -858,6 +858,24 @@ self_test() {
     local allow_additional=true
     check "$@"
   }
+  check_direct() {
+    local label="$1" want="$2"
+    shift 2
+    changed=$(printf '%s\n' "$@")
+    local got=""
+    if select_sources > /dev/null 2>&1; then
+      got=$(printf '%s\n' "${direct_sources}" | grep -v '^[[:space:]]*$' \
+        | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')
+    fi
+    if [ "${got}" = "${want}" ]; then
+      echo "ok   ${label}"
+    else
+      echo "FAIL ${label}"
+      echo "     want: ${want:-<nothing>}"
+      echo "     got:  ${got:-<nothing>}"
+      failures=$((failures + 1))
+    fi
+  }
 
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.
@@ -1036,6 +1054,9 @@ self_test() {
   # holds and which --scenario picks is checked there without a terminal.
   check "an edited terminal scenario is selected" \
     "test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py" \
+    "test/test_tui_keyboard_input.py"
+  check_direct "an edited suite stays direct before attribution expands selection" \
+    "test/test_tui_keyboard_input.py" \
     "test/test_tui_keyboard_input.py"
   # tui_browser names five suites, over the per-module cap, so the name
   # mapping attributes nothing to this interface. What is left is the

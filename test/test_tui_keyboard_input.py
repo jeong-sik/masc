@@ -1279,6 +1279,7 @@ def keeper_runtime_http_fixtures(
                     "keepalive_running": True,
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
+                    "runtime_blocker_summary": None,
                 },
                 {
                     "runtime_class": "keeper",
@@ -1291,6 +1292,7 @@ def keeper_runtime_http_fixtures(
                     "keepalive_running": True,
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
+                    "runtime_blocker_summary": None,
                 },
             ],
         },

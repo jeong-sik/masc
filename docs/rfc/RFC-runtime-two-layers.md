@@ -3,11 +3,11 @@ rfc: "runtime-two-layers"
 title: "런타임 설정을 두 층으로 — 카탈로그는 무엇인지 말하고, 배포는 무엇을 쓰는지만 말한다"
 status: Draft
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0206", "0342", "AC-040", "one-provider-two-wires", "0390"]
+related: ["0206", "0342", "AC-040", "one-provider-two-wires", "0390", "keeper-context-window-in-tokens"]
 implementation_prs: []
 ---
 
@@ -164,7 +164,7 @@ goo-yang-bong = "librarian_exact"
 | 1 | 레인 슬롯이 선언된 바인딩을 가리키지 않음 → 레인·슬롯 이름을 댄다 | 있다. `validate_lanes`(`runtime.ml:665`)가 `Lane_candidate_unresolved` 로 거절한다 |
 | 2 | 바인딩이 카탈로그의 provider·모델 쌍을 가리키지 않고 능력 표도 없음 → 쌍을 댄다 | 있다. 부팅 때 `missing_runtime_model_capabilities`(`runtime.ml:1068`)가 찾는다. 서버는 그 바인딩을 빼고 degraded 로 뜬다(`init_default_degraded_report`, `runtime.ml:1565`) |
 | 3 | exact-output 레인 슬롯이 가리키는 바인딩의 provider 가 `connect-timeout-s` 를 선언하지 않음 → 레인·슬롯·provider 이름을 댄다 | 없다. 요청마다 `Missing_deadline` 으로 거절된다 |
-| 4 | 바인딩의 `max-context` 가 카탈로그 값보다 큼 → 낮추기만 가능 | 없다. 지금은 조용히 카탈로그 값으로 깎는다(`Override_clamped_by_capability`, `runtime.ml:932`) |
+| 4 | 바인딩의 `max-context` 가 카탈로그 값보다 큼 → 낮추기만 가능 | 없다. 지금은 조용히 카탈로그 값으로 깎는다(`Override_clamped_by_capability`, `runtime.ml:932`). `RFC-keeper-context-window-in-tokens` §13.8의 clamp 제거안은 이 규칙이 대체한다. 그 절의 overlay 8행은 카탈로그가 참값을 가지면 사라지고, 근거로 든 1,048,576 / 1,000,000은 둘 다 카탈로그 상한보다 낮은 값이라 이 규칙을 통과한다. |
 
 **규칙 3 이 exact-output 슬롯에만 걸리는 이유.** exact-output 슬롯의 타깃은 바인딩에서 만들어진다. 타깃은 provider 의 `connect-timeout-s` 를 그대로 받고 body 마감은 비워 둔다(`server_runtime_bootstrap.ml:428-429`). 두 마감이 다 없으면 plan admission 이 `Missing_deadline` 으로 거절한다(`exact_output_plan.ml:144`). 대신 들어갈 기본값은 없다. HTTP 클라이언트는 마감이 없으면 무제한으로 둔다(`http_client.ml:290`). 상한 없는 요청은 실패하지 않고 기다리기만 해서 failover 가 뛰지 않는다(#36979: curator 최대 13.3시간).
 

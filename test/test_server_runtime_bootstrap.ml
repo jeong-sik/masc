@@ -3884,6 +3884,84 @@ let test_keeper_lifecycle_undecodable_invalidates_every_keeper_cache () =
     1
     !invalidations
 
+let test_keeper_lifecycle_cancellation_is_not_a_refresh_failure () =
+  with_lifecycle_subscription ~capacity:4 (fun subscription ->
+    publish_keeper_started "keeper-a";
+    let invalidations = ref 0 in
+    match
+      Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+        ~refresh:(fun ~keeper_name:_ _event ->
+          raise (Eio.Cancel.Cancelled (Failure "listener cancelled")))
+        ~invalidate_all:(fun () -> incr invalidations)
+        (Runtime_event_bus.drain_reporting_drops subscription)
+    with
+    | (_ : Server_bootstrap_loops.keeper_lifecycle_refresh list) ->
+      Alcotest.fail "cancellation must leave the batch, not become a result"
+    | exception Eio.Cancel.Cancelled _ ->
+      Alcotest.(check int)
+        "a cancelled batch invalidates nothing"
+        0
+        !invalidations)
+
+let test_keeper_lifecycle_drop_and_failure_invalidate_once () =
+  with_lifecycle_subscription ~capacity:2 (fun subscription ->
+    List.iter publish_keeper_started [ "keeper-a"; "keeper-b"; "keeper-c" ];
+    let refreshed = ref [] in
+    let invalidations = ref 0 in
+    let results =
+      Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+        ~refresh:(fun ~keeper_name _event ->
+          if String.equal keeper_name "keeper-b" then failwith "refresh failed";
+          refreshed := keeper_name :: !refreshed)
+        ~invalidate_all:(fun () -> incr invalidations)
+        (Runtime_event_bus.drain_reporting_drops subscription)
+    in
+    Alcotest.(check (list string))
+      "the event after the failing one is still refreshed"
+      [ "keeper-c" ]
+      (List.rev !refreshed);
+    (match results with
+     | [ Server_bootstrap_loops.Lifecycle_refresh_failed { keeper_name = "keeper-b"; _ }
+       ; Server_bootstrap_loops.Lifecycle_refreshed
+       ] -> ()
+     | _ -> Alcotest.fail "expected keeper-b failed, then keeper-c refreshed");
+    Alcotest.(check int)
+      "a dropped event and a failed refresh invalidate once, not twice"
+      1
+      !invalidations)
+
+(* The listener fiber's own turn: drain, refresh, broadcast. The fiber body
+   is this call plus the sleep, so a turn that stops draining or stops
+   broadcasting fails here. *)
+let test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts () =
+  with_lifecycle_subscription ~capacity:4 (fun subscription ->
+    let refreshed = ref [] in
+    let invalidations = ref 0 in
+    let broadcasts = ref 0 in
+    let turn () =
+      Server_bootstrap_loops.For_testing.refresh_keeper_lifecycle_once
+        ~subscription
+        ~refresh:(fun ~keeper_name _event -> refreshed := keeper_name :: !refreshed)
+        ~invalidate_all:(fun () -> incr invalidations)
+        ~broadcast:(fun () -> incr broadcasts)
+    in
+    (match turn () with
+     | [] -> ()
+     | _ :: _ -> Alcotest.fail "an idle subscription has no events to refresh");
+    Alcotest.(check int) "an idle turn broadcasts nothing" 0 !broadcasts;
+    List.iter publish_keeper_started [ "keeper-a"; "keeper-b" ];
+    (match turn () with
+     | [ Server_bootstrap_loops.Lifecycle_refreshed
+       ; Server_bootstrap_loops.Lifecycle_refreshed
+       ] -> ()
+     | _ -> Alcotest.fail "expected both published events refreshed");
+    Alcotest.(check (list string))
+      "both keepers refreshed, in the order they were published"
+      [ "keeper-a"; "keeper-b" ]
+      (List.rev !refreshed);
+    Alcotest.(check int) "a turn that carried events broadcasts once" 1 !broadcasts;
+    Alcotest.(check int) "a turn that lost nothing invalidates nothing" 0 !invalidations)
+
 let test_startup_state_json () =
   Server_startup_state.reset ();
   Server_startup_state.mark_state_ready ()
@@ -5454,6 +5532,18 @@ let () =
             "keeper lifecycle overflow invalidates every keeper cache"
             `Quick
             test_keeper_lifecycle_overflow_invalidates_every_keeper_cache;
+          Alcotest.test_case
+            "keeper lifecycle cancellation is not a refresh failure"
+            `Quick
+            test_keeper_lifecycle_cancellation_is_not_a_refresh_failure;
+          Alcotest.test_case
+            "keeper lifecycle drop and failure invalidate once"
+            `Quick
+            test_keeper_lifecycle_drop_and_failure_invalidate_once;
+          Alcotest.test_case
+            "keeper lifecycle listener turn refreshes and broadcasts"
+            `Quick
+            test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts;
           Alcotest.test_case
             "keeper lifecycle undecodable invalidates every keeper cache"
             `Quick

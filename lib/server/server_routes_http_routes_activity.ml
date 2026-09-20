@@ -702,37 +702,24 @@ let resolve_board_context_inference_target ~config (post : Board.post) target_ke
                    author
                    msg)))
 
-let non_empty_json_string_member field json =
-  match json_assoc_member field json with
-  | Some (`String value) ->
-      let value = String.trim value in
-      if value = "" then None else Some value
-  | _ -> None
-
 let board_context_inference_submission_json
       ~post_id
-      ~target_keeper
+      ~keeper_name
       ~target_source
-      tool_data
+      (acceptance : Keeper_owner.operation_acceptance)
   =
-  match
-    ( non_empty_json_string_member "operation_id" tool_data,
-      non_empty_json_string_member "state" tool_data )
-  with
-  | Some request_id, Some status ->
-      let fields =
-        [
-          ("ok", `Bool true);
-          ("request_id", `String request_id);
-          ("keeper_name", `String target_keeper);
-          ("post_id", `String post_id);
-          ("status", `String status);
-          ( "target_source",
-            `String (board_context_inference_target_source_to_string target_source) );
-        ]
-      in
-      Ok (`Assoc fields)
-  | _ -> Error "masc_keeper_msg returned a malformed queue submission"
+  `Assoc
+    [ "ok", `Bool true
+    ; "operation_id",
+      `String
+        (Keeper_chat_operation.Operation_id.to_string
+           acceptance.operation.operation_id)
+    ; "keeper_name", `String keeper_name
+    ; "post_id", `String post_id
+    ; "state", `String (Keeper_chat_operation.state_to_string acceptance.operation.state)
+    ; "target_source",
+      `String (board_context_inference_target_source_to_string target_source)
+    ]
 
 let dispatch_board_context_inference ~state ~sw ~clock ~submitted_by ~target_keeper
     ~target_source ~(post : Board.post) ~comments =
@@ -767,24 +754,20 @@ let dispatch_board_context_inference ~state ~sw ~clock ~submitted_by ~target_kee
       (`Bad_request
          (Keeper_invocation_contract.request_error_to_string error))
   | Ok message ->
-    let result =
-      Keeper_tool_surface.dispatch_keeper_msg
+    (match
+      Keeper_tool_surface.submit_keeper_msg
         ~submitted_by
         keeper_ctx
         ~message
-    in
-    if Tool_result.is_success result
-    then
-      (match
-         board_context_inference_submission_json
+    with
+    | Ok (keeper_name, acceptance) ->
+      Ok
+        (board_context_inference_submission_json
            ~post_id
-           ~target_keeper
+           ~keeper_name
            ~target_source
-           (Tool_result.data result)
-       with
-       | Ok json -> Ok json
-       | Error msg -> Error (`Internal_server_error msg))
-    else Error (`Bad_request (Tool_result.message result))
+           acceptance)
+    | Error error -> Error (`Bad_request (Tool_result.message error)))
 
 let respond_board_context_inference_error request reqd ~status ~message =
   respond_json_value_with_cors ~status request reqd

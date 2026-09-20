@@ -521,6 +521,16 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx message)
 ;;
 
+let submit_keeper_msg ~submitted_by ?continuation_channel ctx ~message =
+  let name = Keeper_tool_name.(to_string Keeper_msg) in
+  let ctx = resolve_ctx ctx ~name in
+  Keeper_tool_surface_ops.submit_keeper_msg
+    ?continuation_channel ~submitted_by ctx message
+  |> Result.map_error (fun error ->
+         tool_result_of_handler_error error
+         |> tool_result_with_tool_name ~tool_name:name)
+;;
+
 let dispatch_keeper_msg_stream_admitted
       ~operation_id
       ~admission_token

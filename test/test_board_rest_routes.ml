@@ -324,14 +324,14 @@ let with_authenticated_activity_router ~prefix ~agent_name f =
            ~clock
            (Http.Router.create ())
        in
-       f ~base_path ~config ~state ~sw ~router ~token)
+       f ~base_path ~config ~state ~sw ~clock ~router ~token)
 ;;
 
 let test_schedule_cancel_actor_is_stamped_from_auth () =
   with_authenticated_activity_router
     ~prefix:"schedule-cancel-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~router ~token ->
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   let actor : Schedule_domain.actor =
     { id = "test"
     ; kind = Schedule_domain.Human_operator
@@ -402,7 +402,7 @@ let test_board_write_routes_use_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"board-write-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~router ~token ->
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   with_board_store ~base_path
   @@ fun () ->
   let post_json path fields =
@@ -527,7 +527,7 @@ let test_sub_board_routes_use_authenticated_owner () =
   with_authenticated_activity_router
     ~prefix:"sub-board-http-owner-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~router ~token ->
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -588,7 +588,7 @@ let test_goal_transition_uses_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"goal-transition-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~router ~token ->
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   let goal =
     match
       Goal_store.upsert_goal config
@@ -640,7 +640,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
   with_authenticated_activity_router
     ~prefix:"board-context-inference-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path ~config ~state:_ ~sw ~router ~token ->
+  @@ fun ~base_path ~config ~state ~sw ~clock ~router ~token ->
   with_board_store ~base_path
   @@ fun () ->
   let keeper_name = "context-inference-target" in
@@ -712,10 +712,14 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
   check string "resolved target keeper" keeper_name
     (response |> member "keeper_name" |> to_string);
   check string "current Owner state is projected" "queued"
-    (response |> member "status" |> to_string);
-  let request_id = response |> member "request_id" |> to_string in
+    (response |> member "state" |> to_string);
+  check bool "response uses only the operation id name" false
+    (List.mem_assoc "request_id" (to_assoc response));
+  check bool "response uses the operation state name" false
+    (List.mem_assoc "status" (to_assoc response));
+  let operation_id_raw = response |> member "operation_id" |> to_string in
   let operation_id =
-    match Keeper_chat_operation.Operation_id.of_string request_id with
+    match Keeper_chat_operation.Operation_id.of_string operation_id_raw with
     | Ok operation_id -> operation_id
     | Error error -> fail error
   in
@@ -732,7 +736,60 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
       fail (Masc.Keeper_owner_registry.command_error_to_string error)
   in
   check string "credential owner is the durable submitter" "credential-owner"
-    (operation.source |> member "submitted_by" |> to_string)
+    (operation.source |> member "submitted_by" |> to_string);
+  let keeper_ctx : _ Masc.Keeper_tool_surface.context =
+    { config
+    ; agent_name = "credential-owner"
+    ; sw
+    ; clock
+    ; proc_mgr = state.Masc.Mcp_server.proc_mgr
+    ; net = state.Masc.Mcp_server.net
+    ; publication_recovery_provider =
+        Masc.Mcp_server.publication_recovery_availability_provider state
+    }
+  in
+  let message =
+    match
+      Masc.Keeper_invocation_contract.direct_message
+        ~keeper_name ~prompt:"Shared submission contract" ~direct_reply:true
+        ~channel:"" ~user_blocks:[] ~attachments:[] ()
+    with
+    | Ok message -> message
+    | Error error -> fail (Masc.Keeper_invocation_contract.request_error_to_string error)
+  in
+  let submissions =
+    [ "MCP message", 2, (fun () ->
+        match Masc.Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg"
+                ~args:(`Assoc [ "name", `String keeper_name; "message", `String "MCP submission" ]) with
+        | Some result -> result
+        | None -> fail "masc_keeper_msg was not dispatched")
+    ; "lane evidence adapter", 3, (fun () ->
+        Masc.Keeper_tool_surface.dispatch_keeper_msg
+          ~submitted_by:"credential-owner" keeper_ctx ~message)
+    ]
+  in
+  List.iter
+    (fun (label, queued_count, submit) ->
+       let result = submit () in
+       check bool (label ^ " accepted") true (Tool_result.is_success result);
+       let data = Tool_result.data result in
+       check string (label ^ " state") "queued" (data |> member "state" |> to_string);
+       check int (label ^ " queued count") queued_count
+         (data |> member "queued_count" |> to_int);
+       check bool (label ^ " is a new operation") false (data |> member "existing" |> to_bool);
+       let id =
+         match Keeper_chat_operation.Operation_id.of_string
+                 (data |> member "operation_id" |> to_string) with
+         | Ok id -> id
+         | Error error -> fail error
+       in
+       match Masc.Keeper_owner_registry.exact_operation ~base_path ~keeper_name id with
+       | Ok (Some stored) ->
+         check string (label ^ " durable submitter") "credential-owner"
+           (stored.source |> member "submitted_by" |> to_string)
+       | Ok None -> fail (label ^ " did not persist its operation")
+       | Error error -> fail (Masc.Keeper_owner_registry.command_error_to_string error))
+    submissions
 ;;
 
 let test_dashboard_board_reaction_routes_registered () =

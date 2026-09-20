@@ -49,6 +49,12 @@ status: reference
 : 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
   레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
+**Keeper Chat Operation**
+: Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
+  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
+  제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
+  접수 응답은 실행 완료를 뜻하지 않는다.
+
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고

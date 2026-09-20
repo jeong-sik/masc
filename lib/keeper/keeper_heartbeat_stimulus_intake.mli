@@ -174,12 +174,11 @@ val reconcile_spent_selection
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events] reads one exact durable queue snapshot in queue
-    order, projecting batches of at most the configured admission limit.
-    A batch with no admitted source and no hard error yields to the next
-    batch in that snapshot. The first productive batch or hard error ends
-    intake; the earliest transient diagnostic is kept across skipped batches.
+    order, until the configured number of sources is admitted, a hard error
+    occurs, or the snapshot ends. Transient Board reads do not spend an
+    admission slot; the earliest transient diagnostic is kept.
     Retiring a permanently absent Board source or a spent grant does not
-    admit work into the turn, so it does not end this search.
+    admit work into the turn, so it does not spend an admission slot either.
 
     RFC-0377's routing boundary remains: only members of the first ready
     [Connector_attention] conversation are eligible, and only the selected

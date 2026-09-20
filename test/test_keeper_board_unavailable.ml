@@ -416,7 +416,7 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
 ;;
 
 (* Actual Board and durable queue stores, with only transient reads controlled.
-   The configured admission limit still bounds each productive chunk. Explicit
+   The configured admission limit bounds the sources carried by one turn. Explicit
    ACKs below settle the selected source between ticks; these cases do not run
    a provider or claim that a full Keeper turn completed. *)
 let with_intake_sources ~max_events f =
@@ -536,7 +536,7 @@ let test_transient_head_does_not_block_the_entry_behind_it () =
     (Option.is_none third_tick.event_queue_intake_error)
 ;;
 
-let test_all_transient_chunks_finish_without_changing_pending () =
+let test_all_transient_reads_finish_without_changing_pending () =
   with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
   let first = seed_board "first unavailable source" in
   let (_ : string) = seed_board "second unavailable source" in
@@ -544,7 +544,7 @@ let test_all_transient_chunks_finish_without_changing_pending () =
   let before = pending () in
   Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 3;
   let failed = intake () in
-  check (list string) "all unavailable chunks return without admission" [] (admitted_ids failed);
+  check (list string) "all unavailable sources return without admission" [] (admitted_ids failed);
   check_withdrawn_head first failed;
   check bool "every exact pending selection is unchanged" true (before = pending ());
   (* All three forced failures were consumed by one finite snapshot walk.
@@ -556,39 +556,44 @@ let test_all_transient_chunks_finish_without_changing_pending () =
     (Option.is_none recovered.event_queue_intake_error)
 ;;
 
-let test_partly_consumed_chunk_does_not_fill_from_the_next () =
+let test_transient_sources_do_not_spend_the_admission_limit () =
   with_intake_sources ~max_events:2 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
   let first = seed_board "first source unavailable" in
   let second = seed_board "second source readable" in
-  let (_ : string) = seed_board "outside the selected chunk" in
+  let third = seed_board "third source readable" in
+  let (_ : string) = seed_board "fourth source waits for the next admission" in
   Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
   let selected = intake () in
-  check (list string) "one admitted source stops scanning after its own chunk"
-    [ second ] (admitted_ids selected);
+  check (list string) "readable sources fill the existing admission limit"
+    [ second; third ] (admitted_ids selected);
+  check (list string) "only admitted sources are projected"
+    [ second; third ]
+    (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
+       selected.pending_board_events);
   check_withdrawn_head first selected;
-  check int "all three sources remain pending until their own ACK" 3 (List.length (pending ()))
+  check int "all four sources remain pending until their own ACK" 4 (List.length (pending ()))
 ;;
 
-let test_empty_observation_source_still_owns_its_chunk () =
+let test_empty_observation_source_still_spends_an_admission_slot () =
   with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending:_ ~ack:_ ->
   let bootstrap =
     { (poison_board_signal_stimulus ()) with
-      post_id = "bootstrap-chunk"; payload = Keeper_event_queue.Bootstrap }
+      post_id = "bootstrap-limit"; payload = Keeper_event_queue.Bootstrap }
   in
   seed bootstrap;
-  let (_ : string) = seed_board "must not join the bootstrap chunk" in
+  let (_ : string) = seed_board "must not join the Bootstrap turn at limit1" in
   let selected = intake () in
   check (list string) "Bootstrap is admitted despite producing no Board observation"
     [ bootstrap.post_id ] (admitted_ids selected);
-  check int "the next chunk was not rendered" 0 (List.length selected.pending_board_events)
+  check int "the later source was not rendered" 0 (List.length selected.pending_board_events)
 ;;
 
-let test_permanent_only_chunk_continues_to_readable_source () =
+let test_permanent_absence_does_not_spend_an_admission_slot () =
   with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
   seed (poison_board_signal_stimulus ());
   let readable = seed_board "readable source after permanently absent post" in
   let selected = intake () in
-  check (list string) "a retired poison does not block the next chunk"
+  check (list string) "a retired poison does not block a readable source"
     [ readable ] (admitted_ids selected);
   check int "only permanent absence is ACKed during intake" 1 (List.length (pending ()))
 ;;
@@ -790,14 +795,14 @@ let () =
             "a transient head does not block the entry behind it"
             `Quick
             test_transient_head_does_not_block_the_entry_behind_it
-        ; test_case "all transient chunks finish and retain exact pending sources" `Quick
-            test_all_transient_chunks_finish_without_changing_pending
-        ; test_case "a productive chunk does not fill from the next" `Quick
-            test_partly_consumed_chunk_does_not_fill_from_the_next
-        ; test_case "an empty-observation source still owns its chunk" `Quick
-            test_empty_observation_source_still_owns_its_chunk
-        ; test_case "a permanent-only chunk reaches the readable source" `Quick
-            test_permanent_only_chunk_continues_to_readable_source
+        ; test_case "all transient reads finish and retain exact pending sources" `Quick
+            test_all_transient_reads_finish_without_changing_pending
+        ; test_case "transient sources do not spend the admission limit" `Quick
+            test_transient_sources_do_not_spend_the_admission_limit
+        ; test_case "an empty-observation source still spends an admission slot" `Quick
+            test_empty_observation_source_still_spends_an_admission_slot
+        ; test_case "permanent absence does not spend an admission slot" `Quick
+            test_permanent_absence_does_not_spend_an_admission_slot
         ] )
     ; ( "replies after own comment"
       , [ test_case

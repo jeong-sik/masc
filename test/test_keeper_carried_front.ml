@@ -21,6 +21,7 @@ let record
       ?(response_observed = true)
       ?response_runtime
       ?(trace = "trace-1")
+      ?(ts = 0.)
       ~turn
       window
   : Turn_record.t
@@ -79,7 +80,7 @@ let record
       ; cache_read_input_tokens = None
       ; scope = Runtime_usage_scope.Per_request
       }
-  ; ts = 0.
+  ; ts
   }
 ;;
 
@@ -547,6 +548,38 @@ let test_read_seed_counts_only_unreadable_rows_visited_before_the_response () =
   | _ -> fail "the two invalid records must be counted"
 ;;
 
+let test_read_seed_stops_at_history_restart () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~turn:1 ~ts:1. (Some (30, 100))));
+  Keeper_turn_boundaries.append
+    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+    ~keeper_id:"alpha"
+    { recorded_at = 2.
+    ; event = Keeper_turn_boundaries.History_restarted { trace_id = "trace-1" }
+    }
+  |> Result.get_ok;
+  Dated_jsonl.append store
+    (Turn_record.to_json
+       (record ~turn:2 ~ts:3. ~finish:None ~response_observed:false None));
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "the pre-clear response is not a seed" true (Option.is_none read.Front.seed)
+;;
+
+let test_read_seed_stops_at_previous_trace () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store `Null;
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~trace:"trace-0" ~turn:9 (Some (30, 100))));
+  Dated_jsonl.append store
+    (Turn_record.to_json
+       (record ~turn:10 ~finish:None ~response_observed:false None));
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "the prior trace does not supply a seed" true (Option.is_none read.Front.seed);
+  check bool "rows older than the trace boundary are not decoded" true
+    (Option.is_none read.Front.unreadable)
+;;
+
 let test_clamp_keeps_the_front_on_an_atom () =
   check int "below zero" 0 (Front.clamp ~atom_count:5 (-2));
   check int "past the newest" 4 (Front.clamp ~atom_count:5 9);
@@ -606,6 +639,10 @@ let () =
             test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn
         ; test_case "only visited unreadable rows are counted" `Quick
             test_read_seed_counts_only_unreadable_rows_visited_before_the_response
+        ; test_case "history restart fences older responses" `Quick
+            test_read_seed_stops_at_history_restart
+        ; test_case "previous trace fences older retained rows" `Quick
+            test_read_seed_stops_at_previous_trace
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

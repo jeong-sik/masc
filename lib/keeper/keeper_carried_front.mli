@@ -133,13 +133,16 @@ val read_seed
   -> keeper_name:string
   -> trace_id:string
   -> seed_read
-(** The last stored response observation on the trace, scanning newest first
-    until a match or the end of the retained store. Unobserved rows do not
-    hide an older seed. Storage order also resolves direct retries that
+(** The last stored response observation in the current history generation,
+    scanning newest first until a match, a different trace, or the latest
+    [History_restarted] boundary. Unobserved rows do not hide an older seed
+    within that generation. Storage order also resolves direct retries that
     reuse a turn number. Unreadable rows visited before the match are counted;
-    rows older than the match are not read. Reads the record files on the
-    calling fiber; the turn driver calls it once per provider attempt, and
-    only while the pair has no ledger. *)
+    rows older than the match or generation boundary are not read. A boundary
+    store read failure returns no seed and is reported as unreadable rather
+    than admitting a possibly stale front. Reads on the calling fiber; the
+    turn driver calls it once per provider attempt, and only while the pair
+    has no ledger. *)
 
 (** Why {!for_history} dropped a seed. *)
 type dropped_front =

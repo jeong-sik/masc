@@ -113,27 +113,70 @@ let seed_read_of_rows ~trace_id rows =
   { seed = of_records ~trace_id (List.rev records_rev); unreadable }
 ;;
 
+let latest_history_restart_at ~config ~keeper_name ~trace_id =
+  Keeper_turn_boundaries.read
+    ~keepers_dir:(Workspace.keepers_runtime_dir config)
+    ~keeper_id:keeper_name
+  |> Result.bind (fun lines ->
+    List.fold_left
+      (fun latest (line, decoded) ->
+         match latest, decoded with
+         | Error _ as error, _ -> error
+         | Ok _, Error error ->
+           Error
+             (Printf.sprintf
+                "turn boundary line %d: %s"
+                line
+                (Keeper_turn_boundaries.read_error_to_string error))
+         | ( Ok _,
+             Ok
+               { Keeper_turn_boundaries.recorded_at
+               ; event = Keeper_turn_boundaries.History_restarted { trace_id = restarted }
+               } )
+           when String.equal restarted trace_id ->
+           Ok (Some recorded_at)
+         | Ok latest, Ok _ -> Ok latest)
+      (Ok None)
+      lines)
+;;
+
 let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  let unreadable = ref None in
-  (* Count observations, not intervening rows. A direct retry may reuse its
-     turn number, so the last stored response is the latest observation.
-     The callback runs newest first; keep the oldest visited refusal as
-     [seed_read_of_rows] does for a chronological input. *)
-  let seeds =
-    Dated_jsonl.collect_matching store 1 ~f:(fun json ->
-      match Turn_record.of_json json with
-      | Ok record -> of_records ~trace_id [ record ]
-      | Error first_reason ->
-        let count =
-          match !unreadable with
-          | None -> 1
-          | Some (seen : unreadable_records) -> seen.count + 1
-        in
-        unreadable := Some { count; first_reason };
-        None)
-  in
-  { seed = List.nth_opt seeds 0; unreadable = !unreadable }
+  match latest_history_restart_at ~config ~keeper_name ~trace_id with
+  | Error detail ->
+    { seed = None
+    ; unreadable = Some { count = 1; first_reason = "turn boundary read failed: " ^ detail }
+    }
+  | Ok restarted_at ->
+    let unreadable = ref None in
+    let exception Trace_boundary in
+    (* Count observations, not intervening rows. A direct retry may reuse its
+       turn number, so the last stored response is the latest observation.
+       A different trace is the durable generation boundary; a history
+       restart is the same-trace boundary after an operator clear. *)
+    let seeds =
+      try
+        Dated_jsonl.collect_matching store 1 ~f:(fun json ->
+          match Turn_record.of_json json with
+          | Ok record when not (String.equal record.Turn_record.trace_id trace_id) ->
+            raise_notrace Trace_boundary
+          | Ok record
+            when (match restarted_at with
+                  | Some at -> record.Turn_record.ts <= at
+                  | None -> false) ->
+            raise_notrace Trace_boundary
+          | Ok record -> of_records ~trace_id [ record ]
+          | Error first_reason ->
+            let count =
+              match !unreadable with
+              | None -> 1
+              | Some (seen : unreadable_records) -> seen.count + 1
+            in
+            unreadable := Some { count; first_reason };
+            None)
+      with Trace_boundary -> []
+    in
+    { seed = List.nth_opt seeds 0; unreadable = !unreadable }
 ;;
 
 type dropped_front =

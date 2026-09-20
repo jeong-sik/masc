@@ -1105,32 +1105,37 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
              if day_is_in_range m d
              then begin
                let path = Filename.concat month_path d in
-               let input = open_in_bin path in
-               Fun.protect
-                 ~finally:(fun () -> close_in_noerr input)
-                 (fun () ->
-                    ignore
-                      (find_latest_decoded_from_channel
-                         input
-                         ~decode:(fun line ->
-                           try Some (Yojson.Safe.from_string line)
-                           with Yojson.Json_error _ -> None)
-                         (fun parsed ->
-                         match parsed with
-                         | None -> None
-                         | Some json ->
-                           (match f json with
-                            | None -> None
-                            | Some value ->
-                              if !skip > 0
-                              then (
-                                decr skip;
-                                None)
-                              else begin
-                                collected := value :: !collected;
-                                incr count;
-                                if !count >= n then Some () else None
-                              end))))
+               match open_in_bin path with
+               | exception Sys_error _ as exn ->
+                 (* Retention snapshots names before reading them. A later
+                    day may disappear after a newer day's callback yields. *)
+                 if Sys.file_exists path then raise exn
+               | input ->
+                 Fun.protect
+                   ~finally:(fun () -> close_in_noerr input)
+                   (fun () ->
+                      ignore
+                        (find_latest_decoded_from_channel
+                           input
+                           ~decode:(fun line ->
+                             try Some (Yojson.Safe.from_string line)
+                             with Yojson.Json_error _ -> None)
+                           (fun parsed ->
+                           match parsed with
+                           | None -> None
+                           | Some json ->
+                             (match f json with
+                              | None -> None
+                              | Some value ->
+                                if !skip > 0
+                                then (
+                                  decr skip;
+                                  None)
+                                else begin
+                                  collected := value :: !collected;
+                                  incr count;
+                                  if !count >= n then Some () else None
+                                end))))
              end)
              days
          end

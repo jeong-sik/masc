@@ -1,13 +1,13 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { KeeperTurnInspector } from './keeper-turn-inspector'
+import { KeeperTurnInspector, type TurnAnchor } from './keeper-turn-inspector'
 
 /**
  * Right-side drawer hosting {@link KeeperTurnInspector}. Shared by the keeper
  * chat workspace (anchored to a chat entry's turn) and the board post detail
  * (anchored to a post's origin turn_ref, RFC-0233 §7). KeeperTurnInspector
  * self-fetches the keeper's turn records by `keeperName`, so a caller only
- * supplies the anchor (`initialTurnRef`/`initialTurnTimestamp`) and chrome.
+ * supplies a typed anchor and chrome.
  *
  * `testId` namespaces the drawer/close data-testids per surface so existing
  * surface tests keep their stable selectors (`${testId}-drawer`/`-close`).
@@ -15,8 +15,7 @@ import { KeeperTurnInspector } from './keeper-turn-inspector'
 export function TurnInspectorDrawer({
   keeperName,
   subtitle,
-  initialTurnRef,
-  initialTurnTimestamp,
+  anchor,
   open,
   onClose,
   testId,
@@ -24,8 +23,7 @@ export function TurnInspectorDrawer({
   keeperName: string
   // Header secondary line; falls back to keeperName when null/undefined.
   subtitle?: string | null
-  initialTurnRef?: string | null
-  initialTurnTimestamp?: string | null
+  anchor: TurnAnchor
   open: boolean
   onClose: () => void
   testId: string
@@ -59,8 +57,7 @@ export function TurnInspectorDrawer({
         </div>
         <${KeeperTurnInspector}
           keeperName=${keeperName}
-          initialTurnRef=${initialTurnRef ?? null}
-          initialTurnTimestamp=${initialTurnTimestamp ?? null}
+          anchor=${anchor}
         />
       </div>
     </div>

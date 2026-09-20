@@ -42,6 +42,10 @@ server holding `--port=8937` had to be killed to bring the workspace back.
 - Wrapper success proves only the named benchmark phase and emitted evidence.
 - Local benchmark output is not exact-head CI proof.
 - Deployment proof requires a separately identified running binary and commit.
+- A Terminal-Bench task's `skills_dir` is common benchmark input, not a MASC
+  Skill-treatment arm. The adapter snapshots it into the separate read-only
+  `terminal-bench-task` source and refuses missing, rejected, or shadowed task
+  packages before the episode. Arm b still excludes MASC seed Skills.
 
 ## E0 Campaign Scoreboard
 

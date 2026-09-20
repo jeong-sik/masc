@@ -418,9 +418,11 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
    tail an exhausted pool stops Board attention outright.
 
    The walk runs inside [execute_current], which also closes the lane's run
-   record, so the record names the slot that answered (RFC §3: [selected_slot]
-   is the runtime id). The judgment says [Cli_lane_slot], so the durable
-   record never claims an AGENT_CORE attempt that was not allocated. *)
+   record, after semantic exhaustion or a typed advanceable final failure.
+   The record therefore names the slot that answered (RFC §3:
+   [selected_slot] is the runtime id). The judgment says [Cli_lane_slot], so
+   the durable record never claims an AGENT_CORE attempt that was not
+   allocated. *)
 type cli_tail_error =
   | Tail_no_slots
   | Tail_failures of Keeper_lane_cli_oneshot.failure list
@@ -659,7 +661,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
        failed HTTP slot; the slot that answered is the CLI one. *)
     let selected_slot =
       match !cli_selected_slot, !bound with
-      | Some _, _ -> !cli_selected_slot
+      | Some slot_id, _ -> Some slot_id
       | None, Some (provenance : attempt_provenance) -> Some provenance.slot_id
       | None, None -> None
     in
@@ -708,6 +710,28 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
     | Ok judgment -> Exact_output.Accept judgment
     | Error rejection -> Exact_output.Reject_and_advance rejection
   in
+  let run_cli_after_http prior_error =
+    match
+      run_cli_tail
+        ?runner:cli_runner
+        ~base_path:prepared.base_path
+        prepared
+    with
+    | Ok (slot_id, judgment) ->
+      Log.Keeper.info
+        "board_attention_cli_tail_judged keeper=%s slot=%s"
+        prepared.candidate.keeper_name
+        slot_id;
+      cli_selected_slot := Some slot_id;
+      Ok judgment
+    | Error Tail_no_slots -> Error prior_error
+    | Error (Tail_failures failures as error) ->
+      Log.Keeper.warn
+        "board_attention_cli_tail_failed keeper=%s reason=%s"
+        prepared.candidate.keeper_name
+        (cli_tail_error_to_string error);
+      Error (Cli_slots_exhausted { prior_error = Some prior_error; failures })
+  in
   let jev_first, result =
     try
       let jev_first = ask_jev ~clock prepared in
@@ -748,48 +772,11 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
               with
               | Ok success -> Ok success.accepted
               | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-                (* Provider exhaustion is the one terminal a second transport
-                   can answer. The persistence and provenance arms say the
-                   durable record is in doubt, and asking another model does
-                   not settle that; a domain-invalid answer is a contract
-                   failure, not an unreachable provider. Every arm is written
-                   out so a new terminal has to be classified here rather than
-                   silently inheriting the fallback. *)
-                (match terminal_of_flow_error cause with
-                 | ( Flow_already_started _
-                   | Before_dispatch_persistence_failed _
-                   | Before_advance_persistence_failed _
-                   | Flow_bookkeeping_failed _
-                   | Cli_slots_exhausted _
-                   | Provenance_mismatch _
-                   | Domain_output_invalid _ ) as terminal ->
-                   Error terminal
-                 | Providers_exhausted { attempts; detail } as exhausted ->
-                   (match
-                      run_cli_tail
-                        ?runner:cli_runner
-                        ~base_path:prepared.base_path
-                        prepared
-                    with
-                    | Ok (slot_id, judgment) ->
-                      Log.Keeper.info
-                        "board_attention_cli_tail_judged keeper=%s slot=%s"
-                        prepared.candidate.keeper_name
-                        slot_id;
-                      cli_selected_slot := Some slot_id;
-                      Ok judgment
-                    | Error Tail_no_slots -> Error exhausted
-                    | Error (Tail_failures failures as error) ->
-                      Log.Keeper.warn
-                        "board_attention_cli_tail_failed keeper=%s reason=%s"
-                        prepared.candidate.keeper_name
-                        (cli_tail_error_to_string error);
-                      Error
-                        (Cli_slots_exhausted
-                           { prior_error =
-                               Some (Providers_exhausted { attempts; detail })
-                           ; failures
-                           })))
+                let terminal = terminal_of_flow_error cause in
+                (match Exact_output.flow_execution_terminal_kind cause with
+                 | Exact_output.Advanceable_candidates_exhausted ->
+                   run_cli_after_http terminal
+                 | Exact_output.Non_advanceable_terminal -> Error terminal)
               | Error
                   (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
                 let rejection =
@@ -798,7 +785,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
                     rejections.first
                     rejections.rest
                 in
-                Error rejection.rejection))
+                run_cli_after_http rejection.rejection))
       in
       jev_first, result
     with

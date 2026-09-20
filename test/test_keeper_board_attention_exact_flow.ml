@@ -601,6 +601,376 @@ let prepared_with_cli_tail ~net ~cli_slot_ids candidate =
   | Error _ -> Alcotest.fail "board attention flow did not prepare"
 ;;
 
+let openai_text_response text =
+  let encoded_content = Yojson.Safe.to_string (`String text) in
+  Printf.sprintf
+    {|{"id":"masc-conformance","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+    encoded_content
+;;
+
+let board_attention_run_ids () =
+  Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+  |> List.filter_map (fun (run : Exact_lane_run_registry.run) ->
+    if run.lane = Exact_lane_run_registry.Board_attention
+    then Some run.run_id
+    else None)
+;;
+
+let new_board_attention_run ~before =
+  Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+  |> List.find_opt (fun (run : Exact_lane_run_registry.run) ->
+    run.lane = Exact_lane_run_registry.Board_attention
+    && not (List.mem run.run_id before))
+  |> function
+  | Some run -> run
+  | None -> Alcotest.fail "board attention exact run was not recorded"
+;;
+
+let check_cli_run_selected ~before ~slot_id =
+  match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+  | Exact_lane_run_registry.Completed
+      { outcome = Exact_lane_run_registry.Succeeded; selected_slot; _ }
+  | Exact_lane_run_registry.Completion_persistence_failed
+      { intended_outcome = Exact_lane_run_registry.Succeeded; selected_slot; _ } ->
+    Alcotest.(check (option string))
+      "the exact run names the CLI slot that answered"
+      (Some slot_id)
+      selected_slot
+  | Exact_lane_run_registry.Running
+  | Exact_lane_run_registry.Completed _
+  | Exact_lane_run_registry.Completion_persistence_failed _ ->
+    Alcotest.fail "the mixed exact run did not close as a CLI success"
+;;
+
+let cli_success_runner candidate calls =
+  fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    incr calls;
+    Ok
+      (Yojson.Safe.to_string
+         (judgment_output ~candidate_id:candidate.Candidate.candidate_id))
+;;
+
+let test_mixed_semantic_exhaustion_walks_cli_tail () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-semantic" in
+      let rejected =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"another-candidate")))
+      in
+      let http = target "board-attention-semantic-http" rejected.base_url in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [ http ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed semantic lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let dispatches = ref [] in
+      let cli_calls = ref 0 in
+      let result =
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~before_dispatch:(fun provenance ->
+            dispatches := provenance :: !dispatches;
+            Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ ->
+            Alcotest.fail "semantic rejection must not fabricate an HTTP advance callback")
+          prepared
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "CLI answered after semantic exhaustion"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id
+       | Error _ -> Alcotest.fail "semantic exhaustion did not reach the CLI tail");
+      Alcotest.(check int) "HTTP candidate dispatched once" 1 (Fixture.post_count rejected);
+      Alcotest.(check int) "CLI candidate dispatched once" 1 !cli_calls;
+      (match !dispatches with
+       | [ provenance ] ->
+         Alcotest.(check string)
+           "the prior HTTP receipt remains observable"
+           http.id
+           provenance.slot_id
+       | _ -> Alcotest.fail "mixed semantic flow lost its HTTP dispatch evidence");
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
+;;
+
+let test_mixed_advanceable_final_failure_walks_cli_tail () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-invalid-json" in
+      let invalid =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (openai_text_response "not json"))
+      in
+      let http = target "board-attention-invalid-json-http" invalid.base_url in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [ http ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed invalid-JSON lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let dispatches = ref [] in
+      let cli_calls = ref 0 in
+      let result =
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~before_dispatch:(fun provenance ->
+            dispatches := provenance :: !dispatches;
+            Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ ->
+            Alcotest.fail "the exhausted final HTTP candidate has no HTTP successor")
+          prepared
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "CLI answered after advanceable execution failure"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id
+       | Error _ -> Alcotest.fail "advanceable final failure did not reach the CLI tail");
+      Alcotest.(check int) "invalid HTTP candidate dispatched once" 1 (Fixture.post_count invalid);
+      Alcotest.(check int) "CLI candidate dispatched once" 1 !cli_calls;
+      (match !dispatches with
+       | [ provenance ] ->
+         Alcotest.(check string) "HTTP evidence keeps its slot" http.id provenance.slot_id
+       | _ -> Alcotest.fail "advanceable failure lost its HTTP dispatch evidence");
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
+;;
+
+let test_mixed_non_advanceable_terminal_stops_before_cli () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-terminal" in
+      let aborted = Fixture.start_server ~sw ~net ~clock Fixture.Abort_after_request in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-terminal-http" aborted.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed terminal lane did not prepare"
+      in
+      let cli_calls = ref 0 in
+      match
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      with
+      | Error (Exact_flow.Providers_exhausted { attempts; _ }) ->
+        Alcotest.(check int) "terminal keeps one HTTP receipt" 1 (List.length attempts);
+        Alcotest.(check int) "non-advanceable failure does not dispatch CLI" 0 !cli_calls
+      | Error _ -> Alcotest.fail "non-advanceable execution failure changed category"
+      | Ok _ -> Alcotest.fail "non-advanceable HTTP failure must remain terminal")))
+;;
+
+let test_mixed_before_advance_failure_stops_before_cli () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-persistence" in
+      let invalid =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (openai_text_response "not json"))
+      in
+      let successor =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-persistence-first" invalid.base_url
+        ; target "board-attention-persistence-second" successor.base_url
+        ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed persistence lane did not prepare"
+      in
+      let cli_calls = ref 0 in
+      match
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> Error "disk")
+          prepared
+      with
+      | Error (Exact_flow.Before_advance_persistence_failed { cause; _ }) ->
+        Alcotest.(check string) "persistence cause retained" "disk" cause;
+        Alcotest.(check int) "persistence failure does not dispatch CLI" 0 !cli_calls;
+        Alcotest.(check int) "successor is not dispatched" 0 (Fixture.post_count successor)
+      | Error _ -> Alcotest.fail "before-advance failure changed category"
+      | Ok _ -> Alcotest.fail "before-advance failure must remain terminal")))
+;;
+
+let test_mixed_before_dispatch_failure_stops_before_cli () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-bind-persistence" in
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-bind-persistence-http" server.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed bind-persistence lane did not prepare"
+      in
+      let cli_calls = ref 0 in
+      match
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~before_dispatch:(fun _ -> Error "disk")
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      with
+      | Error (Exact_flow.Before_dispatch_persistence_failed { cause; _ }) ->
+        Alcotest.(check string) "bind persistence cause retained" "disk" cause;
+        Alcotest.(check int) "bind persistence failure does not dispatch HTTP" 0
+          (Fixture.post_count server);
+        Alcotest.(check int) "bind persistence failure does not dispatch CLI" 0 !cli_calls
+      | Error _ -> Alcotest.fail "before-dispatch failure changed category"
+      | Ok _ -> Alcotest.fail "before-dispatch failure must remain terminal")))
+;;
+
+let test_mixed_cli_failure_keeps_http_evidence () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-cli-failure" in
+      let invalid =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (openai_text_response "not json"))
+      in
+      let http = target "board-attention-cli-failure-http" invalid.base_url in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [ http ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed CLI-failure lane did not prepare"
+      in
+      let cli_calls = ref 0 in
+      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        incr cli_calls;
+        Error "client unavailable"
+      in
+      match
+        Exact_flow.execute
+          ~cli_runner:runner
+          ~clock
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      with
+      | Error
+          (Exact_flow.Cli_slots_exhausted
+             { prior_error = Some (Exact_flow.Providers_exhausted { attempts = [ provenance ]; _ })
+             ; failures = [ _ ]
+             }) ->
+        Alcotest.(check string)
+          "CLI failure retains the exhausted HTTP receipt"
+          http.id
+          provenance.slot_id;
+        Alcotest.(check int) "the declared CLI slot was tried once" 1 !cli_calls
+      | Error _ -> Alcotest.fail "CLI failure did not retain the HTTP execution failure"
+      | Ok _ -> Alcotest.fail "a failed CLI tail must not produce a judgment")))
+;;
+
+let test_mixed_cli_cancellation_propagates_once () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-cli-cancel" in
+      let rejected =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"another-candidate")))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
+        [ target "board-attention-cancel-http" rejected.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed cancellation lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let cli_calls = ref 0 in
+      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        incr cli_calls;
+        raise (Eio.Cancel.Cancelled (Failure "synthetic cli cancellation"))
+      in
+      let propagated =
+        match
+          Exact_flow.execute
+            ~cli_runner:runner
+            ~clock
+            ~before_dispatch:(fun _ -> Ok ())
+            ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+            prepared
+        with
+        | exception Eio.Cancel.Cancelled _ -> true
+        | Ok _ | Error _ -> false
+      in
+      Alcotest.(check bool) "CLI cancellation propagates" true propagated;
+      Alcotest.(check int) "cancellation stops the CLI walk" 1 !cli_calls;
+      match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+      | Exact_lane_run_registry.Completed
+          { outcome = Exact_lane_run_registry.Cancelled; _ }
+      | Exact_lane_run_registry.Completion_persistence_failed
+          { intended_outcome = Exact_lane_run_registry.Cancelled; _ } ->
+        ()
+      | Exact_lane_run_registry.Running
+      | Exact_lane_run_registry.Completed _
+      | Exact_lane_run_registry.Completion_persistence_failed _ ->
+        Alcotest.fail "cancelled CLI tail did not close the exact run as cancelled")))
+;;
+
 let test_cli_only_executes_without_http_provenance () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
@@ -1316,6 +1686,34 @@ let () =
         ] )
     ; ( "cli tail"
       , [ Alcotest.test_case
+            "mixed semantic exhaustion walks the CLI tail"
+            `Quick
+            test_mixed_semantic_exhaustion_walks_cli_tail
+        ; Alcotest.test_case
+            "mixed advanceable final failure walks the CLI tail"
+            `Quick
+            test_mixed_advanceable_final_failure_walks_cli_tail
+        ; Alcotest.test_case
+            "mixed non-advanceable terminal stops before CLI"
+            `Quick
+            test_mixed_non_advanceable_terminal_stops_before_cli
+        ; Alcotest.test_case
+            "mixed persistence failure stops before CLI"
+            `Quick
+            test_mixed_before_advance_failure_stops_before_cli
+        ; Alcotest.test_case
+            "mixed bind persistence failure stops before CLI"
+            `Quick
+            test_mixed_before_dispatch_failure_stops_before_cli
+        ; Alcotest.test_case
+            "mixed CLI failure keeps HTTP evidence"
+            `Quick
+            test_mixed_cli_failure_keeps_http_evidence
+        ; Alcotest.test_case
+            "mixed CLI cancellation propagates once"
+            `Quick
+            test_mixed_cli_cancellation_propagates_once
+        ; Alcotest.test_case
             "a cli slot judges under its own provenance"
             `Quick
             test_cli_tail_judges_with_its_own_provenance

@@ -2,17 +2,18 @@ import { h } from 'preact'
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
+import type { TurnAnchor } from './keeper-turn-inspector'
 
 // Stub KeeperTurnInspector so the drawer can be tested without the inner
 // component's self-fetch of turn records. Surfaces its anchor props as data
 // attributes for assertion.
 vi.mock('./keeper-turn-inspector', () => ({
-  KeeperTurnInspector: ({ keeperName, initialTurnRef, initialTurnTimestamp }: any) =>
+  KeeperTurnInspector: ({ keeperName, anchor }: { keeperName: string; anchor: TurnAnchor }) =>
     h('div', {
       'data-testid': 'turn-inspector-inner',
       'data-keeper': keeperName,
-      'data-initial-turn-ref': initialTurnRef ?? '',
-      'data-initial-turn-timestamp': initialTurnTimestamp ?? '',
+      'data-initial-turn-ref': anchor.kind === 'ref' ? anchor.value : '',
+      'data-missing-reference': String(anchor.kind === 'unreferenced'),
     }),
 }))
 
@@ -26,7 +27,7 @@ afterEach(() => {
 describe('TurnInspectorDrawer', () => {
   it('renders nothing when closed', () => {
     const { container } = render(
-      h(TurnInspectorDrawer, { keeperName: 'echo', open: false, onClose: () => {}, testId: 'x' }),
+      h(TurnInspectorDrawer, { keeperName: 'echo', anchor: { kind: 'no-origin' }, open: false, onClose: () => {}, testId: 'x' }),
     )
     expect(container.querySelector('[data-testid="x-drawer"]')).toBeNull()
   })
@@ -36,7 +37,7 @@ describe('TurnInspectorDrawer', () => {
       h(TurnInspectorDrawer, {
         keeperName: 'echo',
         subtitle: '원본 턴 · trace-a#9',
-        initialTurnRef: 'trace-a#9',
+        anchor: { kind: 'ref', value: 'trace-a#9' },
         open: true,
         onClose: () => {},
         testId: 'board-post-turn-inspector',
@@ -50,14 +51,22 @@ describe('TurnInspectorDrawer', () => {
   })
 
   it('falls back to keeperName in the header when no subtitle is given', () => {
-    render(h(TurnInspectorDrawer, { keeperName: 'echo', open: true, onClose: () => {}, testId: 'x' }))
+    render(h(TurnInspectorDrawer, { keeperName: 'echo', anchor: { kind: 'no-origin' }, open: true, onClose: () => {}, testId: 'x' }))
     // The header secondary line shows the keeper name when subtitle is absent.
     expect(screen.getByText('echo')).toBeInTheDocument()
+    expect(screen.getByTestId('turn-inspector-inner').getAttribute('data-missing-reference')).toBe('false')
+  })
+
+  it('preserves an explicit missing origin reference', () => {
+    render(h(TurnInspectorDrawer, {
+      keeperName: 'echo', anchor: { kind: 'unreferenced' }, open: true, onClose: () => {}, testId: 'x',
+    }))
+    expect(screen.getByTestId('turn-inspector-inner').getAttribute('data-missing-reference')).toBe('true')
   })
 
   it('invokes onClose from the close button (testId-namespaced)', () => {
     const onClose = vi.fn()
-    render(h(TurnInspectorDrawer, { keeperName: 'echo', open: true, onClose, testId: 'x' }))
+    render(h(TurnInspectorDrawer, { keeperName: 'echo', anchor: { kind: 'no-origin' }, open: true, onClose, testId: 'x' }))
     fireEvent.click(screen.getByTestId('x-close'))
     expect(onClose).toHaveBeenCalledTimes(1)
   })

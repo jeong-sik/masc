@@ -365,6 +365,8 @@ let test_origin_json_names_its_kind () =
     (kind (Front.Carried (Front.Unfinished_turn { turn = 7 })));
   check string "halved" "halved_after_refusal"
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
+  check string "evicted" "evicted_after_refusal"
+    (kind (Front.Carried (Front.Evicted_after_refusal { retry = 1 })));
   check string "whole" "whole_history" (kind Front.Whole_history)
 ;;
 

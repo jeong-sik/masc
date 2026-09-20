@@ -1013,6 +1013,194 @@ let test_invalid_write_is_proven_pre_effect () =
      = Tool_result.Proven_pre_effect)
 ;;
 
+let with_history_search ?(additional_traces = []) ~checkpoint_texts ~current_texts ~previous_texts check =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "history-search" in
+  let previous_trace = "trace-history-search-previous" in
+  let meta =
+    { meta with runtime =
+        { meta.runtime with trace_history = previous_trace :: List.map fst additional_traces } }
+  in
+  let user text =
+    Agent_core.Types.make_message ~role:Agent_core.Types.User [ Agent_core.Types.Text text ]
+  in
+  let persist trace texts =
+    let session =
+      Masc.Keeper_context_runtime.create_session
+        ~session_id:trace
+        ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config)
+    in
+    List.iter
+      (fun text ->
+         Masc.Keeper_context_runtime.persist_message session (user text);
+         Masc.Keeper_context_runtime.persist_message session
+           (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+              [ Agent_core.Types.Text "Recorded." ]))
+      texts;
+    if texts <> [] then
+      Alcotest.(check int) "all fixture messages remain in History"
+        (2 * List.length texts)
+        (In_channel.with_open_bin
+           (Masc.Keeper_types_support.keeper_history_path config trace)
+           (fun input -> List.length (In_channel.input_lines input)))
+  in
+  persist (Keeper_id.Trace_id.to_string meta.runtime.trace_id) current_texts;
+  persist previous_trace previous_texts;
+  List.iter (fun (trace, texts) -> persist trace texts) additional_traces;
+  let ctx_work =
+    List.fold_left
+      (fun context text -> Masc.Keeper_context_runtime.append context (user text))
+      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      checkpoint_texts
+  in
+  let search ?(limit = 10) query =
+    let result =
+      Runtime.keeper_memory_search_json
+        ~config ~meta ~ctx_work
+        ~args:(`Assoc [ "source", `String "history"; "query", `String query; "limit", `Int limit ])
+      |> Yojson.Safe.from_string
+    in
+    Alcotest.(check bool) "a clean search has no read-error warning"
+      true (Yojson.Safe.Util.member "history_read_errors" result = `Null);
+    string_list_field "matches" result
+  in
+  check search
+;;
+
+let history_search_prefix =
+  "The warehouse migration checklist records the database, region, approval, and rollback prerequisites before the final endpoint setting: "
+;;
+
+let test_history_search_preserves_distinct_message_endings () =
+  let checkpoint_text = history_search_prefix ^ "checkpoint-east" in
+  let current_text = history_search_prefix ^ "current-west" in
+  let previous_text = history_search_prefix ^ "previous-north" in
+  with_history_search ~checkpoint_texts:[ checkpoint_text ]
+    ~current_texts:[ current_text ] ~previous_texts:[ previous_text ]
+  @@ fun search ->
+  Alcotest.(check (list string))
+    "different messages from all three stores survive a shared prefix"
+    (List.sort String.compare [ checkpoint_text; current_text; previous_text ])
+    (List.sort String.compare (search "warehouse"));
+  Alcotest.(check (list string))
+    "current history remains searchable by its distinct ending"
+    [ current_text ] (search "current-west");
+  Alcotest.(check (list string))
+    "previous trace remains searchable by its distinct ending"
+    [ previous_text ] (search "previous-north")
+;;
+
+let test_history_search_deduplicates_identical_messages () =
+  let text = history_search_prefix ^ "shared-endpoint" in
+  with_history_search ~checkpoint_texts:[ text ] ~current_texts:[ text ]
+    ~previous_texts:[ text ]
+  @@ fun search ->
+  Alcotest.(check (list string))
+    "the same complete message appears once across stores"
+    [ text ] (search "shared-endpoint")
+;;
+
+let history_search_noise count =
+  List.init count (fun index -> Printf.sprintf "Routine deployment note %d" index)
+;;
+
+let check_retained_history_match ~checkpoint_texts ~current_texts ~previous_texts () =
+  with_history_search ~checkpoint_texts ~current_texts ~previous_texts
+  @@ fun search ->
+  Alcotest.(check (list string)) "the retained matching message is searchable"
+    [ "Migration prerequisite: amber database" ]
+    (search ~limit:1 "amber");
+  Alcotest.(check (list string)) "an absent query has no matches"
+    [] (search "absent-query")
+;;
+
+let test_history_search_limits_distinct_matches () =
+  with_history_search ~checkpoint_texts:[] ~previous_texts:[]
+    ~current_texts:
+      ([ "amber database"; "amber cluster" ] @ List.init 12 (fun _ -> "amber database"))
+  @@ fun search ->
+  Alcotest.(check (list string)) "duplicate messages do not fill the result limit"
+    [ "amber cluster"; "amber database" ]
+    (List.sort String.compare (search ~limit:2 "amber"))
+;;
+
+let test_history_search_order () =
+  with_history_search
+    ~checkpoint_texts:[ "amber checkpoint older"; "amber checkpoint newer" ]
+    ~current_texts:[ "amber current older"; "amber current newer"; "amber checkpoint newer" ]
+    ~previous_texts:[ "amber previous older"; "amber previous newer"; "amber current newer" ]
+    ~additional_traces:
+      [ "trace-a-recorded-second",
+        [ "amber second trace older"; "amber second trace newer"; "amber previous newer" ] ]
+  @@ fun search ->
+  Alcotest.(check (list string)) "each source is newest-first, with exact cross-source duplicates removed"
+    [ "amber checkpoint newer"; "amber checkpoint older"
+    ; "amber current newer"; "amber current older"
+    ; "amber previous newer"; "amber previous older"
+    ; "amber second trace newer"; "amber second trace older"
+    ]
+    (search ~limit:8 "amber");
+  Alcotest.(check (list string)) "the caller limit applies to the selected result order"
+    [ "amber checkpoint newer"; "amber checkpoint older"; "amber current newer" ]
+    (search ~limit:3 "amber")
+;;
+
+let test_history_search_reports_read_errors ~malformed () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "history-read-errors" in
+  let previous_trace = "trace-history-read-errors-previous" in
+  let meta = { meta with runtime = { meta.runtime with trace_history = [ previous_trace ] } } in
+  let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  List.iter
+    (fun trace ->
+       let session = Masc.Keeper_context_runtime.create_session
+           ~session_id:trace ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config) in
+       Masc.Keeper_context_runtime.persist_message session
+         (Agent_core.Types.make_message ~role:Agent_core.Types.User
+            [ Agent_core.Types.Text "amber database" ]))
+    [ current_trace; previous_trace ];
+  let path = Masc.Keeper_types_support.keeper_history_path config current_trace in
+  if malformed then
+    Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600 path
+      (fun output -> output_string output "{invalid JSON}\n")
+  else (Sys.remove path; Unix.mkdir path 0o700);
+  let ctx_work = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"" in
+  List.iter
+    (fun source ->
+       List.iter
+         (fun query ->
+            let result = Runtime.keeper_memory_search_json ~config ~meta ~ctx_work
+                ~args:(`Assoc [ "source", `String source; "query", `String query ])
+                |> Yojson.Safe.from_string in
+            let open Yojson.Safe.Util in
+            Alcotest.(check int) "readable matches survive an incomplete search"
+              (if query = "amber" then 1 else 0)
+              (member "match_count" result |> to_int);
+            Alcotest.(check bool) "an incomplete empty search is not no_match"
+              true (member "no_match" result = `Null);
+            let errors = member "history_read_errors" result in
+            Alcotest.(check int) "visited undecodable rows are reported"
+              (if malformed then 1 else 0)
+              (member "unreadable_rows" errors |> to_int);
+            let unavailable = member "unavailable_traces" errors |> to_list in
+            Alcotest.(check int) "unreadable files are reported by trace"
+              (if malformed then 0 else 1) (List.length unavailable);
+            if not malformed then
+              match unavailable with
+              | [ error ] ->
+                Alcotest.(check string) "the failed trace is named" current_trace
+                  (member "trace_id" error |> to_string);
+                Alcotest.(check string) "the failure has a bounded error class" "io_error"
+                  (member "error_kind" error |> to_string)
+              | _ -> Alcotest.fail "missing failed trace")
+         [ "absent-query"; "amber" ])
+    [ "history"; "all" ]
+;;
+
 let test_search_filters_exact_substring_without_ranking () =
   with_temp_dir
   @@ fun base_path ->
@@ -1838,6 +2026,37 @@ let () =
             "tools isolate config BasePath from ambient decoy"
             `Quick
             test_tools_isolate_workspace_base_path_from_ambient_decoy
+        ; Alcotest.test_case
+            "history search preserves distinct message endings"
+            `Quick
+            test_history_search_preserves_distinct_message_endings
+        ; Alcotest.test_case
+            "history search deduplicates identical messages"
+            `Quick
+            test_history_search_deduplicates_identical_messages
+        ; Alcotest.test_case "history search reaches retained current messages" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~previous_texts:[]
+               ~current_texts:("Migration prerequisite: amber database" :: history_search_noise 75))
+        ; Alcotest.test_case "history search reaches retained previous messages" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~current_texts:[]
+               ~previous_texts:("Migration prerequisite: amber database" :: history_search_noise 30))
+        ; Alcotest.test_case "history search includes the newest current message" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~previous_texts:[]
+               ~current_texts:(history_search_noise 50 @ [ "Migration prerequisite: amber database" ]))
+        ; Alcotest.test_case "history search includes the newest previous message" `Quick
+            (check_retained_history_match ~checkpoint_texts:[] ~current_texts:[]
+               ~previous_texts:(history_search_noise 20 @ [ "Migration prerequisite: amber database" ]))
+        ; Alcotest.test_case "history search reaches all working-context messages" `Quick
+            (check_retained_history_match ~current_texts:[] ~previous_texts:[]
+               ~checkpoint_texts:("Migration prerequisite: amber database" :: history_search_noise 100))
+        ; Alcotest.test_case "history search limits distinct matches" `Quick
+            test_history_search_limits_distinct_matches
+        ; Alcotest.test_case "history search orders selected messages" `Quick
+            test_history_search_order
+        ; Alcotest.test_case "history search reports malformed rows" `Quick
+            (test_history_search_reports_read_errors ~malformed:true)
+        ; Alcotest.test_case "history search reports unreadable files" `Quick
+            (test_history_search_reports_read_errors ~malformed:false)
         ; Alcotest.test_case
             "search filters exact substring without ranking"
             `Quick

@@ -123,13 +123,13 @@ val execute :
   ( Keeper_board_attention_candidate.judgment
   , 'callback_error execution_error )
   result
-(** Execute the prepared affine flow exactly once. Domain identity and
-    provenance failures are terminal results and never request AGENT_CORE
-    advancement. When every HTTP slot is exhausted ([Providers_exhausted]),
-    the lane's declared official clients are walked as one-shots
-    ([cli_runner], default the real client) before this returns; a CLI-only
-    lane walks them directly. The run record is closed after that walk and
-    names the slot that answered. Cancellation is not caught. The caller's durable callback
+(** Execute the prepared affine flow exactly once. After semantic exhaustion
+    or a typed advanceable final HTTP failure, walk the same frozen lane's
+    declared official clients as one-shots ([cli_runner], default the real
+    client). Persistence, replay, cancellation, and non-advanceable execution
+    failures remain terminal; a CLI-only lane walks its slots directly. The
+    run record is closed after the complete lane and names the slot that
+    answered. Cancellation is not caught. The caller's durable callback
     progress is the sole terminalization authority and must be quarantined
     under cancellation protection; no AGENT_CORE receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.

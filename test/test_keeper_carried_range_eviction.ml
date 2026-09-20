@@ -107,6 +107,7 @@ let run
       ~ledger:(fun () -> ledger_of trace.attempts)
       ~last_request
       ~marks
+      ~hold_front:(fun _ -> ())
       ~evict:(function
         | Range.Evicted { first_atom; _ } ->
           trace.evictions <- first_atom :: trace.evictions;
@@ -213,6 +214,7 @@ let test_without_a_ledger_the_range_halves_until_it_fits () =
       ~ledger:(fun () -> None)
       ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
       ~marks:None
+      ~hold_front:(fun _ -> ())
       ~evict:(fun _ -> false)
       ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
         front := first_atom;
@@ -240,6 +242,7 @@ let test_halving_ends_at_one_atom_when_every_request_is_refused () =
       ~ledger:(fun () -> None)
       ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
       ~marks:None
+      ~hold_front:(fun _ -> ())
       ~evict:(fun _ -> false)
       ~halve:(fun ~first_atom ~atom_count:_ ~retry:_ ->
         front := first_atom;
@@ -267,6 +270,7 @@ let test_a_halving_that_cannot_name_its_front_ends_the_sequence () =
       ~ledger:(fun () -> None)
       ~last_request:(fun () -> Some (request ~first_atom:0 ~atom_count:16))
       ~marks:None
+      ~hold_front:(fun _ -> ())
       ~evict:(fun _ -> false)
       ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> false)
       ~last_resort:(fun ~retry:_ -> false)
@@ -375,6 +379,7 @@ let test_an_eviction_that_did_not_move_ends_the_sequence () =
       ~ledger:(fun () -> Some four_blocks)
       ~last_request:(fun () -> None)
       ~marks:None
+      ~hold_front:(fun _ -> ())
       ~evict:(fun _ -> false)
       ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> fail "nothing halves after an eviction step")
       ~last_resort:(fun ~retry:_ -> false)
@@ -402,13 +407,13 @@ let test_a_halving_answers_whether_the_retry_moves () =
       ~retry:1
   in
   check bool "no history to name the front: no retry" false
-    (halve ~digest_at:None Ledger.Table.No_pair_ledger);
+    (halve ~digest_at:None false);
   check bool "no atom at the front: no retry" false
-    (halve ~digest_at:(Some (fun _ -> None)) Ledger.Table.No_pair_ledger);
-  check bool "a ledger that did not move: no retry" false (halve Ledger.Table.Not_moved);
-  check bool "nothing held for a ledger" true (Option.is_none !held);
-  check bool "a ledger that moved: retry" true (halve Ledger.Table.Moved);
-  check bool "no ledger: retry from the held seed" true (halve Ledger.Table.No_pair_ledger);
+    (halve ~digest_at:(Some (fun _ -> None)) false);
+  check bool "an older ledger cannot prevent the held front moving" true (halve false);
+  check bool "the turn holds the front without a ledger move" true (Option.is_some !held);
+  check bool "a ledger that moved: retry" true (halve true);
+  check bool "no ledger: retry from the held seed" true (halve false);
   match !held with
   | Some (seed : Front.seed) ->
     check int "held at the halved front" 8 seed.first_atom;
@@ -473,6 +478,7 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
       ~usage:(Some { Ledger.input_tokens = 50_000; cache_read_input_tokens = 0 })
   in
   let attempt_cap = 20 in
+  let working = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
   let attempts = ref 0 in
   let halved = ref None in
   let last = ref None in
@@ -481,18 +487,18 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
   let outcome =
     Try_provider.carried_range_eviction_sequence
       ~same_run_retry_authorized:(fun () -> !attempts < attempt_cap)
-      ~ledger:(fun () -> Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id)
+      ~ledger:(fun () -> !working)
       ~last_request:(fun () -> Option.map fst !last)
       ~marks:None
+      ~hold_front:(fun seed -> halved := Some seed)
       ~evict:(function
         | Range.Evicted { first_atom; front_digest; _ } ->
-          Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom ~front_digest
-          = Ledger.Table.Moved
+          Try_provider.For_testing.move_ledger_front working ~first_atom ~front_digest
         | Range.Unchanged _ -> false)
       ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
         Try_provider.For_testing.halve_front
           ~digest_at:(Option.map snd !last)
-          ~move_ledger:(Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id)
+          ~move_ledger:(Try_provider.For_testing.move_ledger_front working)
           ~hold:(fun seed -> halved := Some seed)
           ~first_atom
           ~retry)
@@ -502,11 +508,13 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
         incr attempts;
         let front, stale =
           Try_provider.For_testing.carried_front
+            ~ledger:working
             ~keeper_name
             ~runtime_id
             ~session_id
             ~digest_at
-            ~cold:(fun () -> !halved)
+            ~after_refusal:!halved
+            ~cold:(fun () -> None)
         in
         if Option.is_some stale then incr dropped;
         let composed =
@@ -545,6 +553,184 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
   Ledger.Table.For_testing.reset ()
 ;;
 
+(* A refusal moves the front on a candidate with counted usage. Its fallback
+   must carry that range both with and without a ledger of its own. A second
+   refusal must advance the actual request, even if the fallback's ledger
+   still contains blocks behind it. *)
+let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~blocks ~warm_fallback () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "lane-front" and session_id = "trace-front" in
+  let history = exchanges ~from:0 8 in
+  let digest_at = Window.atom_opening_digest history in
+  let observe runtime_id atom_count =
+    let (_ : Ledger.observation) =
+      Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
+        ~request:
+          { (request ~first_atom:0 ~atom_count) with
+            ends = ends_from digest_at ~first_atom:0 ~atom_count }
+        ~usage:(Some { Ledger.input_tokens = atom_count * 100; cache_read_input_tokens = 0 })
+    in
+    ()
+  in
+  if blocks then observe "a" 8;
+  observe "a" 16;
+  if warm_fallback then (
+    observe "b" (fallback_atoms / 2);
+    observe "b" fallback_atoms);
+  let accepted_a = Ledger.Table.lookup ~keeper_name ~runtime_id:"a" ~session_id in
+  let held = ref None in
+  let run_candidate runtime_id final =
+    let working = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
+    let fronts = ref [] and last = ref None in
+    let outcome =
+      Try_provider.carried_range_eviction_sequence
+        ~same_run_retry_authorized:(fun () -> true)
+        ~ledger:(fun () -> !working)
+        ~last_request:(fun () -> !last)
+        ~marks:None
+        ~hold_front:(fun seed -> held := Some seed)
+        ~evict:(function
+          | Range.Evicted { first_atom; front_digest; _ } ->
+            Try_provider.For_testing.move_ledger_front working ~first_atom ~front_digest
+          | Range.Unchanged _ -> false)
+        ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
+          Try_provider.For_testing.halve_front
+            ~digest_at:(Some digest_at)
+            ~move_ledger:(Try_provider.For_testing.move_ledger_front working)
+            ~hold:(fun seed -> held := Some seed)
+            ~first_atom ~retry)
+        ~last_resort:(fun ~retry:_ -> false)
+        ~on_retry:(fun ~retry:_ _ -> ())
+        ~attempt:(fun () ->
+          let front, _ =
+            Try_provider.For_testing.carried_front
+              ~ledger:working
+              ~keeper_name ~runtime_id ~session_id ~digest_at
+              ~after_refusal:!held ~cold:(fun () -> None)
+          in
+          let composed =
+            Try_provider.For_testing.compose_carried_model_input
+              ~measure_message_bytes:(fun _ -> 1) ~front
+              ~history_digest_at:digest_at ~last_resort:false
+              ~base_path:"" ~demote_before:0 history
+          in
+          let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
+          last := Some (request ~first_atom ~atom_count:16);
+          let first = !fronts = [] in
+          fronts := first_atom :: !fronts;
+          if first then Error overflow else final)
+        ()
+    in
+    outcome, List.rev !fronts
+  in
+  let first_result, first_fronts = run_candidate "a" (Error unrelated) in
+  check bool "the first candidate failed after shrinking" true (Result.is_error first_result);
+  check (list int) "the first candidate moved its front" [ 0; 8 ] first_fronts;
+  check bool "a refused candidate preserves the complete accepted ledger" true
+    (accepted_a = Ledger.Table.lookup ~keeper_name ~runtime_id:"a" ~session_id);
+  let next_turn_front, _ =
+    Try_provider.For_testing.carried_front
+      ~ledger:(ref (Ledger.Table.lookup ~keeper_name ~runtime_id:"a" ~session_id))
+      ~keeper_name ~runtime_id:"a" ~session_id ~digest_at
+      ~after_refusal:None ~cold:(fun () -> None)
+  in
+  check (option int) "the next turn starts from the last accepted front" (Some 0)
+    (Option.map (fun (front : Front.seed) -> front.first_atom) next_turn_front);
+  let next_result, next_fronts = run_candidate "b" (Ok "answer") in
+  check (result string reject) "the fallback answers" (Ok "answer") next_result;
+  check (list int) "the fallback keeps the front and advances on its own refusal"
+    [ 8; 12 ] next_fronts;
+  held := None;
+  let refused, refused_fronts = run_candidate "a" (Error unattributed_refusal) in
+  check bool "every narrower request can be refused" true (Result.is_error refused);
+  check (list int) "refusals reach the newest atom within their turn"
+    [ 0; 8; 12; 14; 15 ] refused_fronts;
+  check bool "all refusals still preserve the accepted blocks and total" true
+    (accepted_a = Ledger.Table.lookup ~keeper_name ~runtime_id:"a" ~session_id);
+  Ledger.Table.For_testing.reset ()
+;;
+
+let test_boundary_moves_and_cancellation_preserve_the_observed_ledger () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "boundary-front" and runtime_id = "a" and session_id = "trace-boundary" in
+  let history = exchanges ~from:0 8 in
+  let digest_at = Window.atom_opening_digest history in
+  List.iter
+    (fun atom_count ->
+      ignore
+        (Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
+           ~request:
+             { (request ~first_atom:0 ~atom_count) with
+               ends = ends_from digest_at ~first_atom:0 ~atom_count }
+           ~usage:(Some { Ledger.input_tokens = atom_count * 100; cache_read_input_tokens = 0 })))
+    [ 8; 16 ];
+  let observed = Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id in
+  let marks : Runtime_schema.context_marks =
+    { high_water_tokens = 1_200; low_water_tokens = 900 }
+  in
+  let working = ref observed and other_candidate = ref observed in
+  Try_provider.For_testing.evict_at_turn_boundary
+    ~keeper_name ~runtime_id ~context_marks:(Some marks) working;
+  Try_provider.For_testing.evict_at_turn_boundary
+    ~keeper_name ~runtime_id:"b" ~context_marks:None other_candidate;
+  let first ledger = Option.map (fun (value : Ledger.t) -> value.last.first_atom) !ledger in
+  check (option int) "declared marks move this candidate" (Some 8) (first working);
+  check (option int) "another candidate's marks remain independent" (Some 0) (first other_candidate);
+  let cancelled =
+    try
+      Eio.Cancel.sub (fun cancellation ->
+        let moved =
+          Try_provider.For_testing.move_ledger_front working
+            ~first_atom:12
+            ~front_digest:(match digest_at 12 with Some digest -> digest | None -> fail "fixture atom missing")
+        in
+        check bool "the candidate can narrow again" true moved;
+        Eio.Cancel.cancel cancellation Exit;
+        Eio.Fiber.yield ());
+      false
+    with Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "the candidate's scope was cancelled" true cancelled;
+  check bool "no cancellation rollback is needed for the full observed ledger" true
+    (observed = Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id);
+  let next_candidate = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
+  check (option int) "next turn without marks retains the observed front" (Some 0)
+    (first next_candidate);
+  Try_provider.For_testing.evict_at_turn_boundary
+    ~keeper_name ~runtime_id ~context_marks:(Some marks) next_candidate;
+  check (option int) "same marks can intentionally narrow again next turn" (Some 8)
+    (first next_candidate);
+  Ledger.Table.For_testing.reset ()
+;;
+
+let test_stale_working_value_preserves_a_newer_table_observation () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "replaced-front" and runtime_id = "a" and session_id = "trace-replaced" in
+  let observe digest_at =
+    Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
+      ~request:
+        { (request ~first_atom:0 ~atom_count:16) with
+          ends = ends_from digest_at ~first_atom:0 ~atom_count:16 }
+      ~usage:None
+  in
+  let old = observe (Window.atom_opening_digest (exchanges ~from:100 8)) in
+  let working = ref (Some old.ledger) in
+  let digest_at = Window.atom_opening_digest (exchanges ~from:0 8) in
+  let current = observe digest_at in
+  let front, dropped =
+    Try_provider.For_testing.carried_front ~ledger:working
+      ~keeper_name ~runtime_id ~session_id ~digest_at
+      ~after_refusal:None ~cold:(fun () -> fail "the current observation is valid")
+  in
+  check (option int) "the valid observed front is adopted" (Some 0)
+    (Option.map (fun (front : Front.seed) -> front.first_atom) front);
+  check bool "the stale local value is reported" true (dropped = Some old.ledger);
+  check bool "the current observation remains in the table" true
+    (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id = Some current.ledger);
+  check bool "the working value now follows that observation" true (!working = Some current.ledger);
+  Ledger.Table.For_testing.reset ()
+;;
+
 (* The pair table sits behind an Eio mutex. *)
 let () =
   Eio_main.run
@@ -553,6 +739,10 @@ let () =
     "keeper_carried_range_eviction"
     [ ( "sequence"
       , [ test_case "success asks once" `Quick test_success_asks_once
+        ; test_case "boundary and cancellation preserve observed ledger" `Quick
+            test_boundary_moves_and_cancellation_preserve_the_observed_ledger
+        ; test_case "stale candidate preserves current observation" `Quick
+            test_stale_working_value_preserves_a_newer_table_observation
         ; test_case "unrelated error" `Quick test_an_unrelated_error_never_retries
         ; test_case "overflow evicts and asks again" `Quick
             test_an_overflow_evicts_the_oldest_block_and_asks_again
@@ -582,6 +772,17 @@ let () =
             test_a_halving_answers_whether_the_retry_moves
         ; test_case "a stale ledger does not steer the retries" `Quick
             test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries
+        ; test_case "halving survives a cold fallback" `Quick
+            (test_a_refused_front_survives_candidate_changes ~blocks:false ~warm_fallback:false)
+        ; test_case "halving survives a warm fallback" `Quick
+            (test_a_refused_front_survives_candidate_changes ~blocks:false ~warm_fallback:true)
+        ; test_case "block eviction survives a cold fallback" `Quick
+            (test_a_refused_front_survives_candidate_changes ~blocks:true ~warm_fallback:false)
+        ; test_case "block eviction survives a warm fallback" `Quick
+            (test_a_refused_front_survives_candidate_changes ~blocks:true ~warm_fallback:true)
+        ; test_case "the actual request can advance beyond the fallback ledger" `Quick
+            (test_a_refused_front_survives_candidate_changes
+               ~fallback_atoms:8 ~blocks:true ~warm_fallback:true)
         ] )
     ]
 ;;

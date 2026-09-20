@@ -1956,7 +1956,6 @@ let run
 ;;
 
 module For_testing = struct
-
   type nonrec rearm_scheduler = rearm_scheduler
 
   let reconcile_quarantines = reconcile_quarantines

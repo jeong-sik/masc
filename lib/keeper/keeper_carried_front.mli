@@ -89,9 +89,12 @@ val of_records
   :  trace_id:string
   -> Turn_record.t list
   -> seed option
-(** The highest turn of [trace_id] carrying [response_observed_model_input],
-    in any input order. Equal turns use the last observation in the list;
-    direct retries can reuse a turn number, so ties must be chronological.
+(** The highest [absolute_turn] of [trace_id] carrying
+    [response_observed_model_input]. Different turn numbers may be in any
+    input order. Input order affects ties: observations sharing a turn number
+    must be chronological, oldest first, and the last entry wins. A direct
+    retry can reuse a turn number. {!read_seed} passes singleton lists while
+    traversing storage newest first, so it uses storage order instead.
     The producer joined this range to a response; the
     runtime can be removed or redefined in the current catalog without
     changing that fact. The joined runtime remains attribution, not a lookup

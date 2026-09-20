@@ -2020,6 +2020,8 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
   match Option.bind digest_at (fun digest_at -> digest_at first_atom) with
   | None -> false
   | Some front_digest ->
+    (* The ledger may have nothing to move, while halving still succeeds by
+       holding this front for the next attempt (RFC section 10.3). *)
     let (_ : bool) = move_ledger ~first_atom ~front_digest in
     hold
       { Keeper_carried_front.first_atom

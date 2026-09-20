@@ -4,12 +4,13 @@ let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
 let notify_state_change_observer ~keeper_name =
-  try (Atomic.get state_change_observer) () with
-  | exn ->
-    Log.Keeper.warn
-      "keeper Owner state-change observer failed keeper=%s: %s"
-      keeper_name
-      (Printexc.to_string exn)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "keeper Owner state-change observer failed keeper=%s: %s"
+        keeper_name
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ())
 ;;
 
 type store =
@@ -451,12 +452,13 @@ let notify_turn_slot_released t =
     if Option.is_none (Atomic.get t.turn_in_flight) && !(t.autonomous_lost_slot)
     then (
       t.autonomous_lost_slot := false;
-      try notify () with
-      | exn ->
-        Log.Keeper.routine
-          ~keeper_name:t.keeper_name
-          "turn slot release listener raised: %s"
-          (Printexc.to_string exn))
+      Cancel_safe.observe
+        ~on_exn:(fun exn ->
+          Log.Keeper.routine
+            ~keeper_name:t.keeper_name
+            "turn slot release listener raised: %s"
+            (Printexc.to_string exn))
+        notify)
 ;;
 
 let turn_lane_to_string = function

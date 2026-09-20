@@ -328,7 +328,7 @@ let save_pieces_durable_atomic_core
         match !temp_path with
         | Some temp when not !renamed && Sys.file_exists temp ->
           (try Sys.remove temp with
-           | exn ->
+           | exn -> (* cancel-guard-ok: Sys.remove performs no Eio operation, so Cancelled cannot originate in this body. *)
              Log.Keeper.error
                "filesystem_runtime: strict atomic temp cleanup failed path=%s error=%s"
                temp

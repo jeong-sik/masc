@@ -2461,7 +2461,7 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
              match callback request_id with
              | Ok () -> Ok ()
              | Error _ as error -> error
-             | exception exn -> Error (Printexc.to_string exn))
+             | exception exn -> Error (Printexc.to_string exn)) (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
        in
        (match acceptance_result with
         | Error reason ->
@@ -2482,7 +2482,7 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                 match callback reason with
                 | Ok () -> Ok ()
                 | Error detail -> Error detail
-                | exception exn ->
+                | exception exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string LifecycleCallbackFailures)
                     ~labels:[ "callback", "keeper_msg_async_on_worker_aborted" ]

@@ -379,7 +379,7 @@ let collect_own_recent_board_posts ~(meta : keeper_meta) : Board.post list =
         ~limit:max_posts
         ()
     with
-    | exn ->
+    | exn -> (* cancel-guard-ok: this arm ends by re-raising the same exception eleven lines down, past the guard's eight-line lookahead. *)
       (* Same fail-loud contract as board event collection: counted, warned,
          re-raised — never an empty list on a storage failure. *)
       Otel_metric_store.inc_counter

@@ -1237,7 +1237,11 @@ let build_agent_spans_json ~events ~events_store_total ~limit =
              let closing_aid =
                match e.kind with
                | "task.approved" | "task.cancelled" ->
-                   (match Json_util.assoc_member_opt "producer" e.payload with
+                   (match
+                      Json_util.assoc_member_opt
+                        Event_kind.Task.producer_payload_key
+                        e.payload
+                    with
                     | Some (`String name) when String.trim name <> "" -> name
                     | Some _ | None -> aid)
                | _ -> aid

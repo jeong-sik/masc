@@ -150,7 +150,7 @@ let reduce_event ~nodes ~edges (value : event) =
     (* A verdict's actor is its authority; the committed task's producer
        owns the work. Direct transitions use their actor. *)
     let producer_id =
-      match payload_string "producer" value.payload with
+      match payload_string Event_kind.Task.producer_payload_key value.payload with
       | Some name ->
           Some (ensure_entity_node nodes { kind = "agent"; id = name }
             ~fallback_status:Active ~ts_iso:value.ts_iso ~meta:value.payload)

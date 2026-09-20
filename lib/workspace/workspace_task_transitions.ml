@@ -589,9 +589,10 @@ let transition_task_outcome_r
            | Masc_domain.AwaitingVerification { intent; _ } ->
              let claim_fields =
                match intent with
-               | Masc_domain.Complete_task -> []
+               | Masc_domain.Complete_task -> [ "intent", `String "complete" ]
                | Masc_domain.Cancel_task ->
-                 [ "reason", (match stated_reason with
+                 [ "intent", `String "cancel"
+                 ; "reason", (match stated_reason with
                      | None -> `Null
                      | Some reason -> `String reason) ]
              in
@@ -1100,7 +1101,7 @@ let commit_verdict_r
              [ "task_id", `String task_id
              ; "authority_kind", `String authority_kind
              ; "authority_actor", `String authority_actor
-             ; "producer", `String producer
+             ; Event_kind.Task.producer_payload_key, `String producer
              ; "verification_id", `String verification_id
              ]
              @ evaluator_runtime_field

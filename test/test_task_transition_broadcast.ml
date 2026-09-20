@@ -547,7 +547,24 @@ let test_verdict_activity_tracks_the_committed_terminal () =
                 | None -> false) () in
             Alcotest.(check (list string)) "events describe committed states"
               [ "task.claimed"; "task.started"; "task.submit_for_verification"; terminal_kind ]
-              (List.map (fun (event : Activity_graph.event) -> event.kind) events))))
+              (List.map (fun (event : Activity_graph.event) -> event.kind) events);
+            let submitted =
+              List.find
+                (fun (event : Activity_graph.event) ->
+                   String.equal event.kind "task.submit_for_verification")
+                events
+            in
+            let expected_intent =
+              match action with
+              | D.Cancel -> "cancel"
+              | D.Submit_for_verification -> "complete"
+              | D.Claim | D.Start | D.Done_action | D.Release ->
+                Alcotest.fail "fixture action did not submit a verdict claim"
+            in
+            Alcotest.(check string)
+              "submission records its typed intent"
+              expected_intent
+              Yojson.Safe.Util.(submitted.payload |> member "intent" |> to_string))))
     [ D.Cancel, D.Verdict_approved, "cancelled", "cancelled", false, "task.cancelled"
     ; D.Submit_for_verification, D.Verdict_approved, "done", "completed", false, "task.approved"
     ; D.Cancel, D.Verdict_rejected { reason = "the work is still needed" },

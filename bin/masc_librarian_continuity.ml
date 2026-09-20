@@ -55,6 +55,15 @@ let read_dataset path =
   with
   | Sys_error detail | Yojson.Json_error detail -> Error detail
 
+let check_output options =
+  if String.equal options.input_path options.output_path then
+    Error "--output must differ from --input"
+  else
+    match Fs_compat.exact_path_kind ~follow:false options.output_path with
+    | Fs_compat.Exact_missing -> Ok ()
+    | Fs_compat.Exact_kind _ -> Error ("Output already exists: " ^ options.output_path)
+    | Fs_compat.Exact_unknown -> Error ("Cannot inspect output path: " ^ options.output_path)
+
 let prepare_runtime options =
   let* observation =
     try
@@ -175,28 +184,51 @@ let save_report (report : R.t) =
   in
   bytes
 
+let create_report ~fs (report : R.t) =
+  let bytes = Yojson.Safe.pretty_to_string (R.to_yojson report) ^ "\n" in
+  try
+    let directory = Filename.dirname report.output_path in
+    let (_ : string) = Masc.Keeper_fs.ensure_dir directory in
+    let+ () =
+      Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun parent ->
+        Fs_compat.create_capability_file_exclusive ~parent
+          ~leaf:(Filename.basename report.output_path) ~permissions:0o600 bytes)
+      |> Result.map_error Fs_compat.capability_write_error_to_string
+    in
+    bytes
+  with
+  | Sys_error detail -> Error detail
+  | Eio.Io _ as error -> Error (Printexc.to_string error)
+
 let measure_case ~generate ~clock ~save (case : R.case) =
-  match generate (R.question_prompt case.source) with
+  let question =
+    match case.question with
+    | Some question -> Ok (R.Provided question)
+    | None -> Result.map (fun generation -> R.Generated generation)
+        (generate (R.question_prompt case.source))
+  in
+  match question with
   | Error failed -> save (R.Question_failed failed)
   | Ok question ->
       let* _ = save (R.Question_ready question) in
-      (match generate (R.answer_prompt ~question:question.response.text case.context) with
+      let question_text = R.question_text question in
+      (match generate (R.answer_prompt ~question:question_text case.context) with
        | Error failed -> save (R.Answer_failed (question, failed))
        | Ok answer ->
-           let* _ = save (R.Answer_ready (question, answer)) in
+           let* _ = save (R.Answer_ready { question; answer }) in
            let request =
              R.judge_request
                ~endpoint:(Masc.Typesafeai_config.endpoint ())
                ~model:(Masc.Typesafeai_config.model ()) case
-               ~question:question.response.text ~answer:answer.response.text
+               ~question:question_text ~answer:answer.response.text
            in
            match judge ~clock request with
-           | Ok judgment -> save (R.Scored (question, answer, judgment))
+           | Ok judgment -> save (R.Scored { question; answer; judgment })
            | Error error ->
-               save (R.Judge_failed (question, answer, { request; error })))
+               save (R.Judge_failed { question; answer; failure = { request; error } }))
 
-let measure ~generate ~clock (report : R.t) =
-  let* initial_bytes = save_report report in
+let measure ~fs ~generate ~clock (report : R.t) =
+  let* initial_bytes = create_report ~fs report in
   let rec loop completed bytes = function
     | [] -> Ok ({ report with samples = List.rev completed }, bytes)
     | (sample : R.sample) :: rest ->
@@ -230,7 +262,7 @@ let publish options report bytes =
   in
   let fields =
     [ "output_path", `String options.output_path
-    ; "sha256", `String (R.sha256 bytes)
+    ; "sha256", `String Digestif.SHA256.(to_hex (digest_string bytes))
     ; "all_cases_scored", `Bool (List.for_all scored report.R.samples)
     ]
   in
@@ -245,15 +277,17 @@ let publish options report bytes =
   if publication_ok && List.for_all scored report.samples then 0 else 1
 
 let run options =
+  let* () = check_output options in
   let* input_bytes, dataset = read_dataset options.input_path in
   let* config_revision, provider_cfg = prepare_runtime options in
   let identity = Masc.Build_identity.current () in
   let report : R.t =
     { schema = R.schema
+    ; provenance = dataset.provenance
     ; run_id = identity.runtime_instance_id
     ; started_at = identity.started_at
     ; input_path = options.input_path
-    ; input_sha256 = R.sha256 input_bytes
+    ; input_sha256 = Digestif.SHA256.(to_hex (digest_string input_bytes))
     ; output_path = options.output_path
     ; config_revision
     ; binary_commit = identity.binary_commit
@@ -271,7 +305,8 @@ let run options =
       Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
         let generate = generate ~sw ~net:(Eio.Stdenv.net env)
             ~runtime_id:options.runtime_id ~provider_cfg in
-        let+ report, bytes = measure ~generate ~clock:(Eio.Stdenv.clock env) report in
+        let+ report, bytes = measure ~fs:(Eio.Stdenv.fs env)
+            ~generate ~clock:(Eio.Stdenv.clock env) report in
         publish options report bytes)))
 
 let () =

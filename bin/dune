@@ -1778,4 +1778,4 @@
  (package masc)
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
-  masc.agent_core masc.agent_core.llm_provider masc.masc_log eio eio_main yojson))
+  masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat digestif eio eio_main yojson))

@@ -54,7 +54,9 @@ and endpoint configuration selects the judge. This command supports Agent Core
 API runtimes. CLI runtime transports are rejected explicitly. It does not read
 live Keeper history or change Memory, Librarian progress, or scheduling.
 
-The output file is the canonical report. It is saved before any sample starts
+The output file is the canonical report. Choose a new output path: existing
+files, including the input dataset, are refused before model calls. The report
+is saved before any sample starts
 and after each stage, retaining provider failures and incomplete work. A nonzero
 exit means the measurement or its persistence/publication failed, not that a
 Noul score was below a threshold. Each scored sample keeps its actual response
@@ -67,10 +69,25 @@ selected server's artifact store and prints their SHA. The artifact is a view
 copy and may be collected when no durable consumer references it; keep the
 output file.
 
-The checked-in cases contain one synthetic fact present/absent from the answer
-context. Questions are generated separately for each case; inspect their actual
-wording before comparing scores. A live model observation is not a guarantee of
-semantic preservation across a fleet or a long-running Keeper.
+Each case declares `question`: a fixed string skips question generation; `null`
+asks the selected runtime to generate one from the reference. The report records
+provided and generated questions as different types; a provided question has no
+invented model response metadata. Keep fixed questions unchanged when comparing
+models or context snapshots. A rerun writes a new report; it does not resume an
+old run.
+
+The checked-in catalog has two controls (verbatim fact present/absent), three
+semantic cases, and one generated-question example. The controls check whether
+the measurement distinguishes available and unavailable information. The
+semantic cases retain a rule in different words, retain its duration while
+losing its temperature condition, or retain the complete rule only in unread
+text. They test whether the same fixed question remains answerable from each
+snapshot. A partial context need not produce a middle probability: Noul judges
+the complete stated proposition, not the fraction of facts retained.
+
+These synthetic cases do not establish continuity across a live Keeper's
+Librarian updates or long-running fleet behavior. That requires separately
+chosen snapshots and operational evidence.
 
 [Source: official Noul contract](https://docs.typesafe.ai/primitives/noul),
 checked 2026-09-21 KST: Noul is the probability that the stated proposition is

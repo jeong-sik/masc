@@ -535,12 +535,12 @@ def main() -> int:
                     "MASC Lane Run",
                     "DECISION  NOT A VERDICT",
                     "TOOLS  none",
-                    "INPUT · PROMPT PAYLOAD",
-                    "OUTPUT · MODEL RESPONSE",
+                    "INPUT · RUN INPUT",
+                    "OUTPUT · RUN RESULT",
                     "j/k:compare",
                 )
                 require_split_heading(
-                    exact_detail, "INPUT · PROMPT PAYLOAD", "OUTPUT · MODEL RESPONSE"
+                    exact_detail, "INPUT · RUN INPUT", "OUTPUT · RUN RESULT"
                 )
                 page.wait_for_timeout(500)
                 saved.append(capture(page, pairs, args.out, "03-lane-run-detail"))

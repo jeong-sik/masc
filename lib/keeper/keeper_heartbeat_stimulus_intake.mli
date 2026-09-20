@@ -179,6 +179,9 @@ val reconcile_spent_selection
     admission slot; the earliest transient diagnostic is kept.
     Retiring a permanently absent Board source or a spent grant does not
     admit work into the turn, so it does not spend an admission slot either.
+    The admission limit does not bound read attempts: when every eligible source
+    is transiently unavailable, intake scans all of them. The Connector ID limit
+    bounds requested IDs, not bytes read from the attention store.
 
     RFC-0377's routing boundary remains: only members of the first ready
     [Connector_attention] conversation are eligible, and only the selected

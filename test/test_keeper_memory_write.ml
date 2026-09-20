@@ -1013,6 +1013,73 @@ let test_invalid_write_is_proven_pre_effect () =
      = Tool_result.Proven_pre_effect)
 ;;
 
+let with_history_search ~checkpoint_text ~current_text ~previous_text check =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "history-search" in
+  let previous_trace = "trace-history-search-previous" in
+  let meta =
+    { meta with runtime = { meta.runtime with trace_history = [ previous_trace ] } }
+  in
+  let user text =
+    Agent_core.Types.make_message ~role:Agent_core.Types.User [ Agent_core.Types.Text text ]
+  in
+  let persist trace text =
+    let session =
+      Masc.Keeper_context_runtime.create_session
+        ~session_id:trace
+        ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config)
+    in
+    Masc.Keeper_context_runtime.persist_message session (user text)
+  in
+  persist (Keeper_id.Trace_id.to_string meta.runtime.trace_id) current_text;
+  persist previous_trace previous_text;
+  let ctx_work =
+    Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:""
+    |> fun context -> Masc.Keeper_context_runtime.append context (user checkpoint_text)
+  in
+  let search query =
+    Runtime.keeper_memory_search_json
+      ~config ~meta ~ctx_work
+      ~args:(`Assoc [ "source", `String "history"; "query", `String query; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+    |> string_list_field "matches"
+  in
+  check search
+;;
+
+let history_search_prefix =
+  "The warehouse migration checklist records the database, region, approval, and rollback prerequisites before the final endpoint setting: "
+;;
+
+let test_history_search_preserves_distinct_message_endings () =
+  let checkpoint_text = history_search_prefix ^ "checkpoint-east" in
+  let current_text = history_search_prefix ^ "current-west" in
+  let previous_text = history_search_prefix ^ "previous-north" in
+  with_history_search ~checkpoint_text ~current_text ~previous_text
+  @@ fun search ->
+  Alcotest.(check (list string))
+    "different messages from all three stores survive a shared prefix"
+    (List.sort String.compare [ checkpoint_text; current_text; previous_text ])
+    (List.sort String.compare (search "warehouse"));
+  Alcotest.(check (list string))
+    "current history remains searchable by its distinct ending"
+    [ current_text ] (search "current-west");
+  Alcotest.(check (list string))
+    "previous trace remains searchable by its distinct ending"
+    [ previous_text ] (search "previous-north")
+;;
+
+let test_history_search_deduplicates_identical_messages () =
+  let text = history_search_prefix ^ "shared-endpoint" in
+  with_history_search ~checkpoint_text:text ~current_text:text ~previous_text:text
+  @@ fun search ->
+  Alcotest.(check (list string))
+    "the same complete message appears once across stores"
+    [ text ] (search "shared-endpoint")
+;;
+
 let test_search_filters_exact_substring_without_ranking () =
   with_temp_dir
   @@ fun base_path ->
@@ -1838,6 +1905,14 @@ let () =
             "tools isolate config BasePath from ambient decoy"
             `Quick
             test_tools_isolate_workspace_base_path_from_ambient_decoy
+        ; Alcotest.test_case
+            "history search preserves distinct message endings"
+            `Quick
+            test_history_search_preserves_distinct_message_endings
+        ; Alcotest.test_case
+            "history search deduplicates identical messages"
+            `Quick
+            test_history_search_deduplicates_identical_messages
         ; Alcotest.test_case
             "search filters exact substring without ranking"
             `Quick

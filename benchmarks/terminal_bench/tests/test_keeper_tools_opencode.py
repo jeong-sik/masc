@@ -7,6 +7,8 @@ baseline run rather than as a broken arm, and the comparison the arm exists
 to make is quietly answered with the wrong number.
 """
 import asyncio
+import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -16,12 +18,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents.keeper_tools_opencode import KeeperToolsOpenCode  # noqa: E402
 from harbor.models.agent.context import AgentContext  # noqa: E402
+from masc_task_skills import SKILL_CATALOG_SCHEMA  # noqa: E402
+from render_configs import (  # noqa: E402
+    TASK_SKILL_SOURCE_ID,
+    TASK_SKILLS_RUNTIME_PATH,
+)
 
 
 class FakeEnv:
-    def __init__(self):
+    def __init__(self, remote_dirs=None, skill_catalog=None):
         self.commands = []
         self.uploads = []
+        self.downloads = []
+        self.remote_dirs = remote_dirs or {}
+        self.skill_catalog = skill_catalog
         self.default_user = None
 
     async def upload_file(self, src, dst):
@@ -30,19 +40,33 @@ class FakeEnv:
     async def upload_dir(self, src, dst):
         self.uploads.append(("dir", str(src), dst))
 
+    async def download_dir(self, src, dst):
+        self.downloads.append((src, str(dst)))
+        shutil.copytree(self.remote_dirs[src], dst)
+
+    async def is_dir(self, path, user=None):
+        return path in self.remote_dirs
+
     async def exec(self, command, **kw):
         self.commands.append(command)
 
+        stdout = (
+            json.dumps(self.skill_catalog)
+            if "/api/v1/skills" in command and self.skill_catalog is not None
+            else ("bash: warning: setlocale: LC_ALL: cannot change locale\n"
+                  "MASC_UNAME_M=x86_64\n" if "uname -m" in command else "")
+        )
+
         class R:
             # The container architecture masc_dist.container_binaries reads.
-            stdout = (
-                "bash: warning: setlocale: LC_ALL: cannot change locale\n"
-                "MASC_UNAME_M=x86_64\n" if "uname -m" in command else "")
+            pass
             stderr = ""
             returncode = 0
             return_code = 0
 
-        return R()
+        result = R()
+        result.stdout = stdout
+        return result
 
 
 @pytest.fixture(autouse=True)
@@ -169,6 +193,79 @@ def test_install_adds_masc_on_top_of_opencode(tmp_path, monkeypatch):
     assert any("bootstrap.sh" in c for c in env.commands)
     # The other arms drive keepers from a script; here the model does.
     assert not any("run_episode.sh" in c for c in env.commands)
+
+
+def test_opencode_sidecar_gives_task_skills_to_the_keeper_pool(tmp_path, monkeypatch):
+    events = []
+
+    async def fake_super_install(self, environment):
+        events.append("opencode")
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.opencode.OpenCode.install", fake_super_install)
+    import masc_dist
+    import masc_sidecar
+
+    fake_root = tmp_path / "bench-root"
+    (fake_root / "dist" / "linux-x64").mkdir(parents=True)
+    (fake_root / "driver").mkdir()
+    for name in ("masc", "masc-exec-shim"):
+        (fake_root / "dist" / "linux-x64" / name).write_bytes(b"")
+    (fake_root / "dist" / ".version").write_text(masc_dist.MIN_VERSION_FILE.read_text())
+    monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
+
+    remote = tmp_path / "remote-skills" / "task-guide"
+    (remote / "references").mkdir(parents=True)
+    (remote / "SKILL.md").write_text(
+        "---\nname: task-guide\ndescription: Task guide.\n---\nBody\n")
+    (remote / "references" / "guide.md").write_text("nested resource\n")
+    identity = {"source_id": TASK_SKILL_SOURCE_ID, "package_id": "task-guide",
+                "name": "task-guide"}
+    catalog = {"schema": SKILL_CATALOG_SCHEMA, "state": "ready", "snapshot": {
+        "config": {"kind": "configured", "revision": "fixture"},
+        "sources": [{"id": TASK_SKILL_SOURCE_ID, "anchor": "base-path",
+                     "path": TASK_SKILLS_RUNTIME_PATH, "access": "read-only",
+                     "observation": {"kind": "ready"}}],
+        "skills": [{"identity": identity}], "effective_skills": [identity],
+        "shadows": [], "rejections": []}}
+
+    class CapturingEnv(FakeEnv):
+        def __init__(self):
+            super().__init__(remote_dirs={"/task/skills": remote.parent},
+                             skill_catalog=catalog)
+            self.config_copy = tmp_path / "uploaded-config"
+
+        async def download_dir(self, src, dst):
+            events.append("download")
+            await super().download_dir(src, dst)
+
+        async def upload_dir(self, src, dst):
+            await super().upload_dir(src, dst)
+            if dst == "/opt/masc-bench/config":
+                events.append("upload-config")
+                shutil.copytree(src, self.config_copy)
+
+        async def exec(self, command, **kw):
+            if "bootstrap.sh" in command:
+                events.append("bootstrap")
+            elif "/api/v1/skills" in command:
+                events.append("catalog")
+            return await super().exec(command, **kw)
+
+    async def go():
+        agent = make_agent(tmp_path / "logs", skills_dir="/task/skills")
+        env = CapturingEnv()
+        await agent.install(env)
+        return env
+
+    env = asyncio.run(go())
+    assert events == ["download", "upload-config", "bootstrap", "catalog", "opencode"]
+    assert env.downloads[0][0] == "/task/skills"
+    resource = env.config_copy / "task-skills/task-guide/references/guide.md"
+    assert resource.read_text() == "nested resource\n"
+    runtime = (env.config_copy / "runtime.toml").read_text()
+    assert 'id = "terminal-bench-task"' in runtime
+    assert f'path = "{TASK_SKILLS_RUNTIME_PATH}"' in runtime
 
 
 def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):

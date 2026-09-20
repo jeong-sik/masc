@@ -5109,6 +5109,7 @@
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
 (include stanzas/test_keeper_librarian_range.inc)
+(include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
 (include stanzas/test_keeper_gate_replay.inc)
@@ -5743,7 +5744,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule

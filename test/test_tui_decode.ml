@@ -5906,6 +5906,7 @@ let picker_default_runtime =
     ; ("effective_max_context", `Int 200000)
     ; ("max_context_source", `String "override_clamped_by_capability")
     ; ("max_output_tokens", `Int 8192)
+    ; ("declared_reasoning_effort", `String "high")
     ; ("is_local", `Bool false)
     ; ("is_default", `Bool false)
     ]
@@ -5926,6 +5927,7 @@ let runtime_resolved_json =
               ; ("effective_max_context", `Int 8192)
               ; ("max_context_source", `String "capability")
               ; ("max_output_tokens", `Null)
+              ; ("declared_reasoning_effort", `Null)
               ; ("is_local", `Bool true)
               ; ("is_default", `Bool false)
               ]
@@ -5967,8 +5969,16 @@ let test_decode_runtime_resolved () =
            Alcotest.(check string) "context provenance" "override_clamped_by_capability"
              (Tui_decode.runtime_context_source_label first.ro_max_context_source);
            Alcotest.(check (option int)) "max output" (Some 8192) first.ro_max_output_tokens;
+           Alcotest.(check (option string)) "reasoning effort" (Some "high")
+             (Option.map Tui_decode.runtime_reasoning_effort_label
+                first.ro_declared_reasoning_effort);
            Alcotest.(check bool) "locality" false first.ro_is_local
        | [] -> Alcotest.fail "no runtimes");
+      (match runtimes with
+       | [ _; second ] ->
+           Alcotest.(check bool) "null effort is unset" true
+             (Option.is_none second.Tui_decode.ro_declared_reasoning_effort)
+       | _ -> Alcotest.fail "second runtime missing");
       (match assignments with
        | [ a ] ->
            Alcotest.(check string) "keeper" "orbiter" a.Tui_decode.ra_keeper;
@@ -6100,6 +6110,7 @@ let resolved_runtime id provider model =
     ; "effective_max_context", `Int 200000
     ; "max_context_source", `String "capability"
     ; "max_output_tokens", `Int 8192
+    ; "declared_reasoning_effort", `Null
     ; "is_local", `Bool false
     ; "is_default", `Bool false
     ]
@@ -6315,7 +6326,11 @@ let test_runtime_limits_reject_unknown_or_invalid_values () =
     | Ok _ -> Alcotest.fail "invalid runtime limit/provenance accepted")
     [replace "max_context_source" (`String "guessed") picker_default_runtime;
      replace "effective_max_context" (`Int 0) picker_default_runtime;
-     replace "max_output_tokens" (`Int (-1)) picker_default_runtime]
+     replace "max_output_tokens" (`Int (-1)) picker_default_runtime;
+     replace "declared_reasoning_effort" (`String "turbo") picker_default_runtime;
+     (match picker_default_runtime with
+      | `Assoc fields -> `Assoc (List.remove_assoc "declared_reasoning_effort" fields)
+      | json -> json)]
 
 let test_runtime_default_limits_must_match_listed_row () =
   let replace key value = function
@@ -6332,6 +6347,7 @@ let test_runtime_default_limits_must_match_listed_row () =
     ["effective_max_context", `Int 100000;
      "max_context_source", `String "capability";
      "max_output_tokens", `Null;
+     "declared_reasoning_effort", `String "low";
      "is_local", `Bool true]
 
 let test_runtime_surface_keeps_resolved_rows_without_a_probe () =

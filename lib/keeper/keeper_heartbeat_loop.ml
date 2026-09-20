@@ -534,6 +534,36 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     false
 ;;
 
+(* A serving deferred suffix is the failed turn's unfinished input. It does
+   not need a second Event Queue row to authorize the next cycle. Path waits
+   and ordinary cadence keep the existing acknowledged-pending-stimulus rule;
+   in particular this does not let a wake cut short #34653's resting-path
+   wait. *)
+let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
+  match after_failure with
+  | Some (Continue_on_deferred_lane _) -> true
+  | Some (Wait_for_path_release _) | None ->
+    stimuli_acked && pending_stimulus ()
+;;
+
+let cycle_wake ~periodic_due ~deferred_runtime_lane =
+  match deferred_runtime_lane with
+  | Some _ -> Keeper_world_observation.Deferred_runtime_lane
+  | None ->
+    if periodic_due
+    then Keeper_world_observation.Periodic_tick
+    else Keeper_world_observation.Attention_wake
+;;
+
+(* Wake labels choose why this turn runs; cadence accounting answers whether
+   the already-due boundary was served. A deferred suffix wins the label but
+   must not leave the same periodic boundary due for the next cycle. *)
+let periodic_cadence_after_cycle ~periodic_due ~now cadence =
+  if periodic_due
+  then Keeper_keepalive_signal.consume_periodic ~now
+  else cadence
+;;
+
 let run_keepalive_unified_turn
       ~wake
       ~(ctx : _ context)
@@ -1340,8 +1370,8 @@ let run_heartbeat_loop
             ~now:(cadence_now ())
             ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
             !periodic_cadence in
-        let wake = if periodic_due then Keeper_world_observation.Periodic_tick
-          else Keeper_world_observation.Attention_wake in
+        let deferred_runtime_lane = !deferred_runtime_lane_ref in
+        let wake = cycle_wake ~periodic_due ~deferred_runtime_lane in
         let turn_outcome =
           if not admitted_turn
           then
@@ -1365,7 +1395,6 @@ let run_heartbeat_loop
               | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
                 false
             in
-            let deferred_runtime_lane = !deferred_runtime_lane_ref in
             let on_deferred_runtime_consumed () =
               Option.iter
                 (fun expected ->
@@ -1495,8 +1524,11 @@ let run_heartbeat_loop
            that cut it short re-ran the same refused call (183 failed turns in
            41 minutes, 2026-09-09, #34653). The queue keeps the stimulus; the
            wakeup is consumed when the wait ends. *)
-        if periodic_due then periodic_cadence :=
-          Keeper_keepalive_signal.consume_periodic ~now:(cadence_now ());
+        periodic_cadence :=
+          periodic_cadence_after_cycle
+            ~periodic_due
+            ~now:(cadence_now ())
+            !periodic_cadence;
         (match turn_outcome.after_failure with
          | Some (Continue_on_deferred_lane { next_runtime_id }) ->
            Log.Keeper.info
@@ -1547,12 +1579,11 @@ let run_heartbeat_loop
               !periodic_cadence
         in
         let next_cycle_now =
-          match turn_outcome.after_failure with
-          | Some (Continue_on_deferred_lane _) ->
-            pending_stimulus_remains ~ctx ~keeper_name:m.name
-          | Some (Wait_for_path_release _) | None ->
-            turn_outcome.stimuli_acked
-            && pending_stimulus_remains ~ctx ~keeper_name:m.name
+          next_cycle_starts_now
+            ~after_failure:turn_outcome.after_failure
+            ~stimuli_acked:turn_outcome.stimuli_acked
+            ~pending_stimulus:(fun () ->
+              pending_stimulus_remains ~ctx ~keeper_name:m.name)
         in
         last_wake_source :=
           (if next_cycle_now
@@ -1578,4 +1609,7 @@ module For_testing = struct
   ;;
 
   let after_failure = after_failure
+  let next_cycle_starts_now = next_cycle_starts_now
+  let cycle_wake = cycle_wake
+  let periodic_cadence_after_cycle = periodic_cadence_after_cycle
 end

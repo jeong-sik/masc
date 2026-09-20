@@ -267,6 +267,31 @@ let test_historical_row_without_usage_scope_is_unavailable () =
       (decoded.usage.scope = Runtime_usage_scope.Usage_scope_unavailable)
 ;;
 
+(* The Dashboard decoder reads the same unmodified writer output. Keep it
+   checked against the current strict codec instead of a frontend-only snapshot. *)
+let test_dashboard_writer_fixture_roundtrip () =
+  let lines =
+    In_channel.with_open_text
+      "../dashboard/src/api/fixtures/turn-record-writer-main.jsonl"
+      In_channel.input_lines
+  in
+  let scopes =
+    List.mapi
+      (fun index line ->
+        let json = Yojson.Safe.from_string line in
+        match Turn_record.of_json json with
+        | Error error -> failf "writer fixture row %d: %s" index error
+        | Ok record ->
+          check bool "writer fixture keeps its exact JSON shape" true
+            (Yojson.Safe.equal json (Turn_record.to_json record));
+          Runtime_usage_scope.to_string record.usage.scope)
+      lines
+  in
+  check (list string) "fixture covers the current usage scopes"
+    (List.map Runtime_usage_scope.to_string
+       Runtime_usage_scope.all)
+    scopes
+
 let test_codec_roundtrip () =
   let record = sample_record () in
   match Turn_record.of_json (Turn_record.to_json record) with
@@ -991,6 +1016,8 @@ let () =
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
+        ; test_case "Dashboard writer fixture uses the current strict codec" `Quick
+            test_dashboard_writer_fixture_roundtrip
         ; test_case "cache counts round-trip and stay optional" `Quick
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "historical row without usage scope is unavailable" `Quick

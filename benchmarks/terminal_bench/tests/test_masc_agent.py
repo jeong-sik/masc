@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents.masc_agent import MascAgent  # noqa: E402
+from masc_task_skills import (  # noqa: E402
+    SKILL_CATALOG_SCHEMA,
+    validate_task_skill_catalog,
+)
+from render_configs import (  # noqa: E402
+    TASK_SKILL_SOURCE_ID,
+    TASK_SKILLS_RUNTIME_PATH,
+)
 import masc_dist  # noqa: E402
 
 
@@ -21,10 +30,13 @@ class FakeResult:
 
 
 class FakeEnv:
-    def __init__(self):
+    def __init__(self, remote_dirs=None, skill_catalog=None):
         self.commands = []
         self.exec_kwargs = []
         self.uploads = []
+        self.downloads = []
+        self.remote_dirs = remote_dirs or {}
+        self.skill_catalog = skill_catalog
         self.default_user = None
         self.machine = "x86_64"
 
@@ -33,6 +45,13 @@ class FakeEnv:
 
     async def upload_dir(self, src, dst):
         self.uploads.append(("dir", str(src), dst))
+
+    async def download_dir(self, src, dst):
+        self.downloads.append((src, str(dst)))
+        shutil.copytree(self.remote_dirs[src], dst)
+
+    async def is_dir(self, path, user=None):
+        return path in self.remote_dirs
 
     async def exec(self, command, **kw):
         self.commands.append(command)
@@ -44,6 +63,8 @@ class FakeEnv:
         if "cat /opt/masc-bench/result.json" in command:
             return FakeResult('{"state":"Succeeded","duration_ms":1234,'
                               '"tool_calls":17,"duplicate_tool_calls":2,"final":{}}')
+        if "/api/v1/skills" in command and self.skill_catalog is not None:
+            return FakeResult(json.dumps(self.skill_catalog))
         return FakeResult("")
 
 
@@ -68,6 +89,37 @@ def fake_bench(tmp_path, dist_dir="linux-x64", names=("masc", "masc-exec-shim"),
 
 def make_agent(tmp_path, **kw):
     return MascAgent(logs_dir=tmp_path, model_name="anthropic/claude-fable-5", **kw)
+
+
+def write_task_skill(root, name="task-guide"):
+    package = root / name
+    (package / "references").mkdir(parents=True)
+    (package / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Task guide.\n---\n\nRead the reference.\n")
+    (package / "references" / "guide.md").write_text("nested resource\n")
+    return root
+
+
+def task_catalog(name="task-guide"):
+    identity = {"source_id": TASK_SKILL_SOURCE_ID, "package_id": name, "name": name}
+    return {
+        "schema": SKILL_CATALOG_SCHEMA,
+        "state": "ready",
+        "snapshot": {
+            "config": {"kind": "configured", "revision": "fixture"},
+            "sources": [{
+                "id": TASK_SKILL_SOURCE_ID,
+                "anchor": "base-path",
+                "path": TASK_SKILLS_RUNTIME_PATH,
+                "access": "read-only",
+                "observation": {"kind": "ready"},
+            }],
+            "skills": [{"identity": identity}],
+            "effective_skills": [identity],
+            "shadows": [],
+            "rejections": [],
+        },
+    }
 
 
 def test_runtime_id_from_model(tmp_path):
@@ -102,6 +154,108 @@ def test_install_uploads_binary_driver_config(tmp_path, monkeypatch):
     assert ("dir", "/opt/masc-bench/driver") in kinds
     assert ("dir", "/opt/masc-bench/config") in kinds
     assert any("bootstrap.sh" in c for c in env.commands)
+
+
+def test_install_snapshots_remote_task_skills_and_checks_catalog(tmp_path, monkeypatch):
+    import agents.masc_agent as m
+
+    root = fake_bench(tmp_path)
+    remote = write_task_skill(tmp_path / "remote-skills")
+
+    class CapturingEnv(FakeEnv):
+        def __init__(self):
+            super().__init__(remote_dirs={"/task/skills": remote},
+                             skill_catalog=task_catalog())
+            self.config_copy = tmp_path / "uploaded-config"
+
+        async def upload_dir(self, src, dst):
+            await super().upload_dir(src, dst)
+            if dst == "/opt/masc-bench/config":
+                shutil.copytree(src, self.config_copy)
+
+    async def go():
+        monkeypatch.setattr(m, "BENCH_ROOT", root)
+        agent = make_agent(tmp_path / "logs", arm="b", skills_dir="/task/skills")
+        env = CapturingEnv()
+        await agent.install(env)
+        return env
+
+    env = asyncio.run(go())
+    assert env.downloads and env.downloads[0][0] == "/task/skills"
+    resource = env.config_copy / "task-skills/task-guide/references/guide.md"
+    assert resource.read_text() == "nested resource\n"
+    assert any("/api/v1/skills" in command for command in env.commands)
+
+
+def test_install_refuses_a_missing_task_skills_directory(tmp_path, monkeypatch):
+    import agents.masc_agent as m
+
+    root = fake_bench(tmp_path)
+
+    async def go():
+        monkeypatch.setattr(m, "BENCH_ROOT", root)
+        agent = make_agent(tmp_path / "logs", arm="b", skills_dir="/missing")
+        env = FakeEnv()
+        with pytest.raises(RuntimeError, match="not a directory"):
+            await agent.install(env)
+        return env
+
+    env = asyncio.run(go())
+    assert not any("bootstrap.sh" in command for command in env.commands)
+
+
+@pytest.mark.parametrize("failure", ["rejection", "shadow", "missing_effective"])
+def test_task_skill_catalog_failures_are_not_silent(failure):
+    catalog = task_catalog()
+    snapshot = catalog["snapshot"]
+    identity = snapshot["effective_skills"][0]
+    if failure == "rejection":
+        snapshot["rejections"] = [
+            {"source_id": TASK_SKILL_SOURCE_ID,
+             "reason": {"kind": "document_rejected"}}]
+    elif failure == "shadow":
+        snapshot["shadows"] = [{
+            "winner": identity,
+            "shadowed": {"source_id": "project-masc", "package_id": "task-guide",
+                         "name": "task-guide"},
+        }]
+    else:
+        snapshot["effective_skills"] = []
+    with pytest.raises(RuntimeError):
+        validate_task_skill_catalog(catalog, ["task-guide"])
+
+
+@pytest.mark.parametrize("field", ["rejections", "shadows"])
+def test_task_skill_catalog_requires_diagnostic_lists(field):
+    catalog = task_catalog()
+    del catalog["snapshot"][field]
+    with pytest.raises(RuntimeError, match=field):
+        validate_task_skill_catalog(catalog, ["task-guide"])
+
+
+@pytest.mark.parametrize("field", ["rejections", "shadows"])
+@pytest.mark.parametrize("value", [None, {}, "not-a-list"])
+def test_task_skill_catalog_refuses_non_list_diagnostics(field, value):
+    catalog = task_catalog()
+    catalog["snapshot"][field] = value
+    with pytest.raises(RuntimeError, match=field):
+        validate_task_skill_catalog(catalog, ["task-guide"])
+
+
+@pytest.mark.parametrize("failure", ["missing_schema", "wrong_schema", "wrong_anchor", "wrong_path"])
+def test_task_skill_catalog_refuses_a_different_public_contract(failure):
+    catalog = task_catalog()
+    source = catalog["snapshot"]["sources"][0]
+    if failure == "missing_schema":
+        del catalog["schema"]
+    elif failure == "wrong_schema":
+        catalog["schema"] = "masc.skill-snapshot/v2"
+    elif failure == "wrong_anchor":
+        source["anchor"] = "user-home"
+    else:
+        source["path"] = ".masc/other-skills"
+    with pytest.raises(RuntimeError):
+        validate_task_skill_catalog(catalog, ["task-guide"])
 
 
 def test_run_populates_context(tmp_path):

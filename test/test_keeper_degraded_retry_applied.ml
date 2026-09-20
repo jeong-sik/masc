@@ -1,4 +1,7 @@
-(** [degraded_retry_applied_for_turn] tests.
+(** Degraded-retry "applied" tests, on both surfaces that report it: the
+    decision record ([Keeper_unified_turn_types.degraded_retry_applied_for_turn])
+    and the execution receipt
+    ([Keeper_agent_run_receipt.degraded_retry_taken_up]).
 
     Reproduces the observed defect. The receipt field [degraded_retry_applied]
     was computed as [Option.is_some turn_state.degraded_retry_info], and that
@@ -24,6 +27,8 @@ open Alcotest
 module Types = Masc.Keeper_unified_turn_types
 module EC = Masc.Keeper_error_classify
 module Budget = Masc.Keeper_turn_runtime_budget
+module Receipt_finalize = Masc.Keeper_agent_run_receipt
+module Receipt = Masc.Keeper_execution_receipt
 
 let deferred_lane_to next_runtime =
   Some { EC.next_runtime; fallback_reason = EC.Rate_limit }
@@ -102,6 +107,86 @@ let test_no_hint_is_never_applied () =
        ~last_execution:None)
 ;;
 
+(* The same question on the receipt side, where the turn knows the runtime its
+   lane walk started on. [Keeper_unified_turn_execution] used to answer it for
+   the receipt with [Option.is_some hint]; the answer is now read here. *)
+
+let taken_up ?(runtime_outcome = Receipt.Runtime_failed) ~hint ~dispatched () =
+  Receipt_finalize.degraded_retry_taken_up
+    ~hint
+    ~dispatched_runtime_id:dispatched
+    ~runtime_outcome
+;;
+
+let lane_runtime = Alcotest.option Alcotest.string
+
+let runtime_of = Option.map (fun (retry : EC.degraded_retry) -> retry.next_runtime)
+
+(* The filed case. The turn carries a hint toward ollama and dispatched on
+   glm. On main the receipt read "retry applied" here. *)
+let test_receipt_pending_hint_on_another_runtime_is_not_taken_up () =
+  check
+    lane_runtime
+    "a hint toward a lane this turn did not dispatch on is pending, not applied"
+    None
+    (runtime_of
+       (taken_up
+          ~hint:(deferred_lane_to "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
+          ~dispatched:"glm-coding.glm-5-turbo"
+          ()))
+;;
+
+let test_receipt_hint_the_turn_dispatched_on_is_taken_up () =
+  check
+    lane_runtime
+    "the turn started on the runtime the hint named, so the retry ran"
+    (Some "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
+    (runtime_of
+       (taken_up
+          ~hint:(deferred_lane_to "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
+          ~dispatched:"ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+          ()))
+;;
+
+(* A turn that fails before it reaches a provider ran nothing, whatever its
+   assignment said. *)
+let test_receipt_hint_without_a_dispatch_is_not_taken_up () =
+  check
+    lane_runtime
+    "a turn that never reached a provider applied no retry"
+    None
+    (runtime_of
+       (taken_up
+          ~runtime_outcome:Receipt.Runtime_not_dispatched
+          ~hint:(deferred_lane_to "glm-coding.glm-5-turbo")
+          ~dispatched:"glm-coding.glm-5-turbo"
+          ()))
+;;
+
+let test_receipt_no_hint_is_never_taken_up () =
+  check
+    lane_runtime
+    "with no deferred lane there is no retry to apply"
+    None
+    (runtime_of (taken_up ~hint:None ~dispatched:"glm-coding.glm-5-turbo" ()))
+;;
+
+(* The reason travels with the lane it belongs to, so a receipt cannot print
+   one turn's failure label beside another turn's runtime. *)
+let test_receipt_keeps_the_hints_own_reason () =
+  check
+    (Alcotest.option Alcotest.string)
+    "the applied lane carries the reason it was deferred for"
+    (Some "rate_limit")
+    (Option.map
+       (fun (retry : EC.degraded_retry) ->
+          EC.degraded_retry_reason_to_string retry.fallback_reason)
+       (taken_up
+          ~hint:(deferred_lane_to "glm-coding.glm-5-turbo")
+          ~dispatched:"glm-coding.glm-5-turbo"
+          ()))
+;;
+
 let () =
   run
     "keeper_degraded_retry_applied"
@@ -119,6 +204,28 @@ let () =
             `Quick
             test_hint_without_an_execution_is_not_applied
         ; test_case "no hint is never applied" `Quick test_no_hint_is_never_applied
+        ] )
+    ; ( "receipt"
+      , [ test_case
+            "a pending hint toward another runtime is not on the receipt"
+            `Quick
+            test_receipt_pending_hint_on_another_runtime_is_not_taken_up
+        ; test_case
+            "the hint the turn dispatched on is on the receipt"
+            `Quick
+            test_receipt_hint_the_turn_dispatched_on_is_taken_up
+        ; test_case
+            "a hint on a turn that never dispatched is not on the receipt"
+            `Quick
+            test_receipt_hint_without_a_dispatch_is_not_taken_up
+        ; test_case
+            "no hint puts nothing on the receipt"
+            `Quick
+            test_receipt_no_hint_is_never_taken_up
+        ; test_case
+            "the applied lane keeps its own reason"
+            `Quick
+            test_receipt_keeps_the_hints_own_reason
         ] )
     ]
 ;;

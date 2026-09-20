@@ -87,16 +87,18 @@ function snapshot(
 }
 
 describe('fsm-hub derived state', () => {
-  it('shows queued and applied deferred runtime targets from the receipt SSOT', () => {
-    const execution = {
+  const receiptWithLanes = (
+    applied: { runtime: string; reason: string } | null,
+    deferred: { runtime: string; reason: string } | null,
+  ) =>
+    ({
       latest_receipt_present: true,
       outcome: 'receipt_failed',
       terminal_reason_code: 'provider_error',
       duration_ms: 1200,
       runtime: {
-        degraded_retry_applied: false,
-        degraded_retry_runtime: 'runtime.b',
-        fallback_reason: 'deferred_runtime_lane',
+        degraded_retry_applied: applied,
+        degraded_retry_deferred: deferred,
       },
       claim_attempt: {
         present: false,
@@ -106,14 +108,44 @@ describe('fsm-hub derived state', () => {
         claimed_task_id: null,
         claimed_goal_id: null,
       },
-    } as KeeperCompositeSnapshot['execution']
+    }) as KeeperCompositeSnapshot['execution']
+
+  it('says queued, not applied, for a lane this turn only deferred', () => {
+    const execution = receiptWithLanes(null, {
+      runtime: 'runtime.b',
+      reason: 'deferred_runtime_lane',
+    })
 
     expect(executionReceiptLabel(execution)).toContain('retry queued -> runtime.b')
-    expect(executionReceiptTitle(execution)).toContain('retry: queued -> runtime.b')
+    expect(executionReceiptLabel(execution)).not.toContain('retry applied')
+    expect(executionReceiptTitle(execution)).toContain(
+      'retry queued: runtime.b (deferred_runtime_lane)',
+    )
+    expect(executionReceiptTitle(execution)).not.toContain('retry applied')
+  })
 
-    if (execution?.runtime) execution.runtime.degraded_retry_applied = true
+  it('says applied for the lane the turn dispatched on', () => {
+    const execution = receiptWithLanes(
+      { runtime: 'runtime.b', reason: 'rate_limit' },
+      null,
+    )
+
     expect(executionReceiptLabel(execution)).toContain('retry applied -> runtime.b')
-    expect(executionReceiptTitle(execution)).toContain('retry: applied -> runtime.b')
+    expect(executionReceiptLabel(execution)).not.toContain('retry queued')
+    expect(executionReceiptTitle(execution)).toContain('retry applied: runtime.b (rate_limit)')
+  })
+
+  // The shape the old bool could not express: a turn that took up one lane and
+  // then deferred another. It used to print one runtime under one label.
+  it('shows both lanes when a turn took one up and deferred another', () => {
+    const execution = receiptWithLanes(
+      { runtime: 'runtime.b', reason: 'rate_limit' },
+      { runtime: 'runtime.c', reason: 'server_error' },
+    )
+
+    const label = executionReceiptLabel(execution)
+    expect(label).toContain('retry applied -> runtime.b')
+    expect(label).toContain('retry queued -> runtime.c')
   })
 
   it('skips duplicate observations when tracked fields are unchanged', () => {

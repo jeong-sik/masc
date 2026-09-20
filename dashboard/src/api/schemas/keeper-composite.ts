@@ -144,6 +144,13 @@ const KeeperCompositeClaimAttemptSchema = object({
   claimed_goal_id: nullable(string()),
 })
 
+// One deferred runtime lane: the runtime it names, and why the failure that
+// deferred it is continuable.
+const DegradedRetryLaneSchema = object({
+  runtime: nullable(string()),
+  reason: nullable(string()),
+})
+
 const KeeperCompositeExecutionSchema = object({
   latest_receipt_present: boolean(),
   recorded_at: nullable(string()),
@@ -168,9 +175,13 @@ const KeeperCompositeExecutionSchema = object({
       attempt_count: nullable(number()),
       fallback_applied: nullable(boolean()),
       outcome: nullable(string()),
-      degraded_retry_applied: nullable(boolean()),
-      degraded_retry_runtime: nullable(string()),
-      fallback_reason: nullable(string()),
+      // Two lanes, never one field. `applied` is the lane an earlier turn
+      // deferred to and that this turn dispatched on; `deferred` is the lane
+      // this turn leaves for a later one. They used to share one bool and one
+      // runtime string, so the label could read "retry applied" beside a
+      // runtime nothing had run on yet (masc#37108).
+      degraded_retry_applied: nullable(DegradedRetryLaneSchema),
+      degraded_retry_deferred: nullable(DegradedRetryLaneSchema),
     }),
   ),
   claim_attempt: KeeperCompositeClaimAttemptSchema,

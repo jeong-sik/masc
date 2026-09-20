@@ -103,30 +103,33 @@ export function executionReceiptLabel(execution: KeeperCompositeExecution | unde
   if (!execution.latest_receipt_present) return 'receipt 없음'
   const terminal = shortText(execution.terminal_reason_code, 32)
   const elapsed = formatMs(execution.duration_ms)
-  const deferredRuntime = shortText(execution.runtime?.degraded_retry_runtime, 32)
-  const deferredRetry = deferredRuntime
-    ? `${execution.runtime?.degraded_retry_applied ? 'retry applied' : 'retry queued'} -> ${deferredRuntime}`
-    : ''
+  // Separate lanes, so both can show on one turn: it took up a deferred lane
+  // and then deferred another.
+  const appliedRuntime = shortText(execution.runtime?.degraded_retry_applied?.runtime, 32)
+  const deferredRuntime = shortText(execution.runtime?.degraded_retry_deferred?.runtime, 32)
   return [
     execution.outcome ?? 'unknown',
     terminal,
     elapsed,
-    deferredRetry,
+    appliedRuntime ? `retry applied -> ${appliedRuntime}` : '',
+    deferredRuntime ? `retry queued -> ${deferredRuntime}` : '',
   ].filter(Boolean).join(' · ')
 }
 
 export function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
   if (!execution?.latest_receipt_present) return '아직 execution receipt 없음'
-  const deferredRuntime = execution.runtime?.degraded_retry_runtime
-  const deferredRetry = deferredRuntime
-    ? `retry: ${execution.runtime?.degraded_retry_applied ? 'applied' : 'queued'} -> ${deferredRuntime}`
-    : ''
+  const applied = execution.runtime?.degraded_retry_applied
+  const deferred = execution.runtime?.degraded_retry_deferred
+  // Each lane carries the reason it was deferred for, so the reason sits with
+  // its own runtime instead of standing alone beside whichever one printed.
+  const laneLine = (label: string, lane: { runtime: string | null; reason: string | null } | null | undefined) =>
+    lane?.runtime ? `retry ${label}: ${lane.runtime}${lane.reason ? ` (${lane.reason})` : ''}` : ''
   return [
     execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
     execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
     execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
-    deferredRetry,
-    execution.runtime?.fallback_reason ? `fallback: ${execution.runtime.fallback_reason}` : '',
+    laneLine('applied', applied),
+    laneLine('queued', deferred),
     execution.error?.kind ? `error: ${execution.error.kind}` : '',
     execution.error?.message_preview ? execution.error.message_preview : '',
   ].filter(Boolean).join('\n')

@@ -17,6 +17,7 @@
       is caught here. *)
 
 module R = Masc.Keeper_execution_receipt
+module EC = Masc.Keeper_error_classify
 module C = Masc.Keeper_contract_classifier
 module Tr = Keeper_terminal_reason
 module UTS = Masc.Keeper_unified_turn_success.For_testing
@@ -216,7 +217,8 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_operator_action_required, R.Reason_preflight_config_error
   else if
     provider_runtime_failure
-    && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
+    && (Option.is_some receipt.degraded_retry_applied
+        || Option.is_some receipt.degraded_retry_deferred)
   then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
   else if
     provider_runtime_failure
@@ -235,7 +237,9 @@ let frozen_operator_disposition (receipt : R.t)
     || String.equal terminal_reason "internal_bridge_exception"
     || String.equal terminal_reason "internal_contract_rejected"
   then R.Disp_fail_open_next_runtime, R.Reason_internal_error
-  else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+  else if
+    Option.is_some receipt.degraded_retry_applied
+    || Option.is_some receipt.degraded_retry_deferred
   then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
   else if
     receipt.runtime_fallback_applied
@@ -289,9 +293,8 @@ let base_receipt : R.t =
   ; runtime_fallback_applied = false
   ; runtime_outcome = R.Runtime_completed
   ; agent_core_internal_runtime_allowed = true
-  ; degraded_retry_applied = false
-  ; degraded_retry_runtime = None
-  ; fallback_reason = None
+  ; degraded_retry_applied = None
+  ; degraded_retry_deferred = None
   ; stop_reason = None
   ; error_kind = None
   ; error_message = None
@@ -526,7 +529,32 @@ let error_kinds =
   ; Some (R.error_kind_of_string "io")
   ]
 
-let degraded_bools = [ false; true ]
+(* The receipt carries the two degraded-retry lanes separately: the one an
+   earlier turn deferred to and that this turn dispatched on, and the one this
+   turn leaves behind. Either puts the turn on a degraded-retry disposition,
+   so the axis walks each alone; a receipt holding both reaches the same
+   branch as one holding only the first. *)
+let degraded_lane_label = function
+  | `Neither -> "neither"
+  | `Applied -> "applied"
+  | `Deferred -> "deferred"
+;;
+
+let degraded_lanes_of_case = function
+  | `Neither -> None, None
+  | `Applied ->
+    ( Some
+        { EC.next_runtime = "runtime-2"; fallback_reason = EC.Rate_limit }
+    , None )
+  | `Deferred ->
+    ( None
+    , Some
+        { EC.next_runtime = "runtime-3"
+        ; fallback_reason = EC.Deferred_runtime_lane
+        } )
+;;
+
+let degraded_cases = [ `Neither; `Applied; `Deferred ]
 let fallback_bools = [ false; true ]
 
 let runtime_outcomes =
@@ -605,11 +633,15 @@ let () =
                              (fun tcr ->
                                 List.iter
                                   (fun outcome ->
+                                     let degraded_retry_applied, degraded_retry_deferred =
+                                       degraded_lanes_of_case degraded
+                                     in
                                      let receipt =
                                        { base_receipt with
                                          terminal_reason_code = code
                                        ; error_kind
-                                       ; degraded_retry_applied = degraded
+                                       ; degraded_retry_applied
+                                       ; degraded_retry_deferred
                                        ; runtime_fallback_applied = fallback
                                        ; runtime_outcome
                                        ; completion_contract_result = tcr
@@ -630,7 +662,7 @@ let () =
                                        then
                                          check
                                            (Printf.sprintf
-                                              "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s deg=%b fb=%b want=%s got=%s"
+                                              "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s deg=%s fb=%b want=%s got=%s"
                                               code
                                               (match error_kind with
                                                | None -> "none"
@@ -639,7 +671,7 @@ let () =
                                               (R.runtime_outcome_to_string
                                                  runtime_outcome)
                                               (R.completion_contract_result_to_string tcr)
-                                              degraded
+                                              (degraded_lane_label degraded)
                                               fallback
                                               (disp_pair_to_string want)
                                               (disp_pair_to_string got))
@@ -648,7 +680,7 @@ let () =
                              completion_contract_results)
                         runtime_outcomes)
                    fallback_bools)
-              degraded_bools)
+              degraded_cases)
          error_kinds)
     codes;
   Printf.printf

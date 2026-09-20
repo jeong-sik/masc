@@ -10,41 +10,43 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let degraded_retry_runtime_of_wire ~keeper_name raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None
-  else
-    let normalized_declared =
-      try String.trim trimmed with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | _ -> trimmed
-    in
-    let candidates =
-      [ trimmed
-      ; normalized_declared
-      ; "route." ^ trimmed
-      ]
-    in
-    (* RFC-0206: a runtime id is a raw string (no runtime-name prefix
-       validation / re-qualification). Accept the first non-empty candidate. *)
-    let rec first_valid = function
-      | [] -> None
-      | candidate :: rest ->
-        if String.trim candidate = "" then first_valid rest else Some candidate
-    in
-    match first_valid candidates with
-    | Some _ as parsed -> parsed
-    | None ->
-      Log.Keeper.warn ~keeper_name:keeper_name
-          "execution_receipt degraded_retry_runtime %S is not a \
-           qualified or re-qualifiable runtime name; dropping receipt field"
-          raw;
-      None
-
 let lane_attempt_facts ~turn_succeeded ~last_attempt_index =
   let lane_attempt_count = max 1 (last_attempt_index + 1) in
   let lane_failover_applied = turn_succeeded && last_attempt_index > 0 in
   lane_attempt_count, lane_failover_applied
+;;
+
+(** The lane an earlier turn deferred to, when this turn is the one that took
+    it up. Empty when no lane was deferred, when the turn started on another
+    runtime, or when it never reached a provider.
+
+    [dispatched_runtime_id] is the head [Keeper_turn_driver.run_named] walks
+    from, so a hint was taken up exactly when it named that head. Where the
+    walk travelled afterwards is [runtime_fallback_applied]'s fact.
+
+    The receipt used to take this as a bool from its caller, and the unified
+    path handed it [Option.is_some hint] — true on every turn that merely
+    carried a pending lane, which is what an operator then read as "retry
+    applied" (#37108). The decision cannot be made by a caller: only here is
+    the runtime the turn started on in scope. *)
+let degraded_retry_taken_up
+      ~(hint : Keeper_error_classify.degraded_retry option)
+      ~(dispatched_runtime_id : string)
+      ~(runtime_outcome : Keeper_execution_receipt.runtime_outcome)
+  =
+  let dispatched_to_a_provider =
+    match runtime_outcome with
+    | Keeper_execution_receipt.Runtime_not_dispatched -> false
+    | Keeper_execution_receipt.Runtime_passed_to_next_model
+    | Keeper_execution_receipt.Runtime_completed
+    | Keeper_execution_receipt.Runtime_failed
+    | Keeper_execution_receipt.Runtime_not_observed -> true
+  in
+  if not dispatched_to_a_provider
+  then None
+  else
+    Option.bind hint (fun (lane : Keeper_error_classify.degraded_retry) ->
+      if String.equal lane.next_runtime dispatched_runtime_id then Some lane else None)
 ;;
 
 let finalize
@@ -56,9 +58,9 @@ let finalize
     ~receipt_started_at
     ~runtime_manifest_context
     ~(acc : Keeper_run_tools.hook_accumulator)
-    ~degraded_retry_applied
-    ~degraded_retry_runtime
-    ~fallback_reason
+    ~(degraded_retry_hint : Keeper_error_classify.degraded_retry option)
+    ~(dispatched_runtime_id : string)
+    ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
     ~turn_result
     ~receipt_agent_core_turn_count_ref
     ~receipt_stop_reason_ref
@@ -122,6 +124,17 @@ let finalize
   let extra_system_context_injected_size =
     acc.Keeper_run_tools.extra_system_context_size
   in
+  let runtime_outcome =
+    Keeper_agent_error.runtime_outcome_of_observation
+      ~lane_failover_applied
+      runtime_observation
+  in
+  let degraded_retry_applied =
+    degraded_retry_taken_up
+      ~hint:degraded_retry_hint
+      ~dispatched_runtime_id
+      ~runtime_outcome
+  in
   let receipt =
     { Keeper_execution_receipt.keeper_name = meta.name
     ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
@@ -158,19 +171,13 @@ let finalize
          than the number routed, and the turn already has it. *)
     ; runtime_lane_attempt_count = lane_attempt_count
     ; runtime_fallback_applied = lane_failover_applied
-    ; runtime_outcome =
-        Keeper_agent_error.runtime_outcome_of_observation
-          ~lane_failover_applied
-          runtime_observation
+    ; runtime_outcome
     ; agent_core_internal_runtime_allowed =
         (match runtime_observation with
          | Some obs -> obs.agent_core_internal_runtime_allowed
          | None -> false)
     ; degraded_retry_applied
-    ; degraded_retry_runtime =
-        Option.bind degraded_retry_runtime
-          (degraded_retry_runtime_of_wire ~keeper_name:meta.name)
-    ; fallback_reason
+    ; degraded_retry_deferred
     ; stop_reason = !receipt_stop_reason_ref
     ; error_kind
     ; error_message

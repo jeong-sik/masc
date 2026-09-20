@@ -41,6 +41,20 @@ let compact_receipt_error_json receipt =
   | _ -> `Null
 ;;
 
+(* A deferred lane travels as one object so the runtime and the reason it was
+   deferred for cannot be split apart on the way to the dashboard. Absent
+   stays absent: a receipt that took up no lane says so with `Null, not with
+   an object holding empty strings. *)
+let compact_degraded_retry_json lane =
+  match lane with
+  | `Assoc _ ->
+    `Assoc
+      [ "runtime", Json_util.string_opt_to_json (json_string "runtime" lane)
+      ; "reason", Json_util.string_opt_to_json (json_string "reason" lane)
+      ]
+  | _ -> `Null
+;;
+
 let compact_receipt_runtime_json receipt =
   match json_member "runtime" receipt with
   | `Assoc _ as runtime ->
@@ -54,11 +68,9 @@ let compact_receipt_runtime_json receipt =
         , Json_util.bool_opt_to_json (json_bool "fallback_applied" runtime) )
       ; "outcome", Json_util.string_opt_to_json (json_string "outcome" runtime)
       ; ( "degraded_retry_applied"
-        , Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" runtime) )
-      ; ( "degraded_retry_runtime"
-        , Json_util.string_opt_to_json (json_string "degraded_retry_runtime" runtime) )
-      ; ( "fallback_reason"
-        , Json_util.string_opt_to_json (json_string "fallback_reason" runtime) )
+        , compact_degraded_retry_json (json_member "degraded_retry_applied" runtime) )
+      ; ( "degraded_retry_deferred"
+        , compact_degraded_retry_json (json_member "degraded_retry_deferred" runtime) )
       ]
   | _ -> `Null
 ;;

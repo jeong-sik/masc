@@ -1008,6 +1008,80 @@ let test_catalog_absent_assignments_names_only_retired_targets () =
          ])
 ;;
 
+(* The Lanes view lists only the slots the registry admitted. An append reads
+   the slots the file declares, so a slot the registry dropped is still
+   declared after it, and the replaced registry still drops it rather than
+   losing it from the file. *)
+let test_an_append_keeps_a_slot_the_registry_dropped () =
+  with_temp_dir "exact-append-dropped" @@ fun root ->
+  let saved = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore saved;
+      ignore (Registry.unpublish ()))
+  @@ fun () ->
+  let path = Filename.concat root "runtime.toml" in
+  let dropped = "not-in-frozen-catalog" in
+  write_file path
+    (runtime_toml ~include_board_attention:false replacement_target
+     ^ Printf.sprintf
+         "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S, %S]\n"
+         dropped
+         replacement_target);
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "runtime initialization failed: %s" detail);
+  let declared () =
+    match Runtime_toml.parse_string (Fs_compat.load_file path) with
+    | Error _ -> Alcotest.fail "the written runtime.toml does not parse"
+    | Ok config -> config.Runtime_schema.exact_output_lane_decls
+  in
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "append-dropped"; contents = replacement_catalog })
+  in
+  let dropped_on_board registry =
+    Registry.rejected_slots registry
+    |> List.filter_map (fun (slot : Registry.rejected_slot) ->
+      if String.equal slot.lane_id "board_attention_exact" then Some slot.slot_id else None)
+  in
+  (match Runtime.publish_exact_output_registry ~lanes:(declared ()) snapshot with
+   | Ok registry ->
+     Alcotest.(check (list string)) "the registry drops the unknown slot" [ dropped ]
+       (dropped_on_board registry)
+   | Error detail -> Alcotest.failf "publication failed: %s" detail);
+  (match
+     Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+       ~lane:Runtime.Board_attention ~slot:replacement_secondary_target ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "append failed: %s" detail);
+  (match
+     List.find_opt
+       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+          String.equal lane.id "board_attention_exact")
+       (declared ())
+   with
+   | Some lane ->
+     Alcotest.(check (list string)) "the dropped slot is still declared, in front"
+       [ dropped; replacement_target; replacement_secondary_target ] lane.slot_ids
+   | None -> Alcotest.fail "the append lost the lane");
+  match Registry.current () with
+  | Error error -> Alcotest.failf "no registry after the append: %s"
+                     (Registry.publication_error_to_string error)
+  | Ok registry ->
+    Alcotest.(check (list string)) "the replaced registry still drops it" [ dropped ]
+      (dropped_on_board registry);
+    (match Registry.resolve_lane registry ~lane_id:"board_attention_exact" with
+     | Ok { selected_slots; _ } ->
+       Alcotest.(check (list string)) "the appended slot is admitted after the kept one"
+         [ replacement_target; replacement_secondary_target ]
+         (List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) selected_slots)
+     | Error error -> Alcotest.failf "the lane does not resolve: %s"
+                        (Registry.lane_resolution_error_to_string error))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1073,5 +1147,9 @@ let () =
             "cli slots survive resolution and keep a lane alive"
             `Quick
             test_cli_slots_survive_resolution_and_keep_a_lane_alive
+        ; Alcotest.test_case
+            "an append keeps a slot the registry dropped"
+            `Quick
+            test_an_append_keeps_a_slot_the_registry_dropped
         ] ) ]
 ;;

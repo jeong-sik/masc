@@ -44,6 +44,7 @@ type turn_reason =
   | Task_outcome_pending
   | Task_cancellation_pending
   | Workspace_message_pending
+  | Deferred_runtime_lane_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of

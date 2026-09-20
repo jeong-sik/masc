@@ -1815,6 +1815,10 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let wizard_default_result =
     typed_find "a boolean" path tbl "wizard-default" Otoml.get_boolean
   in
+  let disable_parallel_tool_use_result =
+    typed_find_or "a boolean" path tbl "disable-parallel-tool-use"
+      Otoml.get_boolean ~default:false
+  in
   let max_concurrent_result =
     match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
     | Ok None -> Ok None
@@ -1926,6 +1930,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     (* DET-OK: omitted means not selected for install wizard. *)
   in
   let* max_concurrent = max_concurrent_result in
+  let* disable_parallel_tool_use = disable_parallel_tool_use_result in
   let* context_marks = context_marks_result in
   let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
@@ -1942,6 +1947,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; is_default
     ; wizard_default
     ; max_concurrent
+    ; disable_parallel_tool_use
     ; context_marks
     ; max_tokens
     ; price_input
@@ -1964,6 +1970,7 @@ let binding_keys =
   ; "is-default"
   ; "wizard-default"
   ; "max-concurrent"
+  ; "disable-parallel-tool-use"
   ; "context-high-water-tokens"
   ; "context-low-water-tokens"
   ; "max-tokens"

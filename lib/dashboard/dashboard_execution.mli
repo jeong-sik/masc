@@ -87,4 +87,11 @@ module For_test : sig
   (** The window {!json} renders under: the render's result whenever it
       finished, even in the scheduler pass the window closed; [`Timeout] only
       when it had not. *)
+
+  val enrich_keeper_with_diagnostic :
+    config:Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
+  (** The per-row enrichment {!json} runs on each snapshot keeper row. A
+      declaration row comes back without a diagnostic or trust even when the
+      Keeper's metadata exists by now: the row still describes a Keeper that
+      had not booted when the snapshot was taken. *)
 end

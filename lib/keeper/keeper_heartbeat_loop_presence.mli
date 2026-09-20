@@ -12,7 +12,11 @@ val keeper_agent_status : Keeper_meta_contract.keeper_meta -> Masc_domain.agent_
 
 val sync_keeper_presence :
   ctx:'a Keeper_types_profile.context ->
+  registry_entry:Keeper_registry.registry_entry ->
   meta_current:Keeper_meta_contract.keeper_meta ->
   consecutive_failures:int ref ->
   Keeper_meta_contract.keeper_meta
-(** Publish keeper heartbeat presence and update failure counters. *)
+(** Publish keeper heartbeat presence and update failure counters. A successful
+    sync clears the typed heartbeat failure reason; existing turn-failure debt
+    is restored as its own typed count. Recovery is conditional on the
+    originating registry lane still owning the name. *)

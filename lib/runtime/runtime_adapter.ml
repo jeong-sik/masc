@@ -467,12 +467,6 @@ let http_protocol_metadata provider =
       (provider_kind_for_http_provider ?registry_entry provider)
 ;;
 
-let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spec) =
-  match spec.capabilities with
-  | Some capabilities -> Some capabilities.supports_tool_choice
-  | None -> None
-;;
-
 let agent_core_thinking_control_format = function
   | Runtime_schema.No_thinking_control ->
     Llm_provider.Capabilities.No_thinking_control
@@ -621,15 +615,44 @@ let effective_max_context_of_model_spec
 ;;
 
 (* --- provider × model spec → Provider_config.t --- *)
+let validate_parallel_tool_policy (provider : Runtime_schema.provider)
+    ~(model_id : string) ~disable_parallel_tool_use =
+  match provider.api_format, disable_parallel_tool_use with
+  | (Runtime_schema.Codex_app_server_runtime | Antigravity_cli_runtime
+    | Claude_code_runtime | Ollama_api | Gemini_api | Vertex_gemini_api), true ->
+    Error
+      (Printf.sprintf
+         "binding %s.%s declares disable-parallel-tool-use = true, but \
+          protocol %s cannot carry that request policy"
+         provider.id model_id provider.protocol)
+  | (Messages_api | Chat_completions_api), true ->
+    let declared =
+      Option.bind (Llm_provider.Model_catalog.global ()) (fun catalog ->
+        Llm_provider.Model_catalog.provider_entry_for_label catalog provider.id)
+    in
+    (match declared with
+     | Some entry when entry.supports_parallel_tool_suppression -> Ok ()
+     | Some _ | None ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares disable-parallel-tool-use = true, but provider %S has no catalog-declared parallel tool suppression contract"
+            provider.id model_id provider.id))
+  | (Messages_api | Chat_completions_api), false
+  | (Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
+    | Ollama_api | Gemini_api | Vertex_gemini_api), false -> Ok ()
+;;
+
 let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
+    ~disable_parallel_tool_use
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (Llm_provider.Provider_config.t, string) result =
   let ( let* ) = Result.bind in
+  let* () = validate_parallel_tool_policy provider ~model_id:spec.id
+      ~disable_parallel_tool_use in
   let registry_entry = find_registry_entry provider.id in
-  let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -700,8 +723,8 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~credential_source
             ~headers
             ~request_path
+            ~disable_parallel_tool_use
             ?max_context
-            ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature
             ?top_p:spec.top_p
@@ -754,10 +777,10 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~provider_id:provider.id
             ~model_id:spec.api_name
             ~base_url:""
+            ~disable_parallel_tool_use
             ~api_key
             ~headers:(Option.value ~default:[] provider.headers)
             ?max_context
-            ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature
             ?top_p:spec.top_p
@@ -813,6 +836,7 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?repeat_last_n:binding.repeat_last_n
          ?return_progress:binding.return_progress
          ?max_concurrent_requests:binding.max_concurrent
+         ~disable_parallel_tool_use:binding.disable_parallel_tool_use
          ?max_tokens:binding.max_tokens
          provider
          spec)
@@ -962,6 +986,9 @@ let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
+       let ( let* ) = Result.bind in
+       let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
+           ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
        (match provider.api_format with
         | Runtime_schema.Codex_app_server_runtime ->
           codex_app_server_execution provider spec

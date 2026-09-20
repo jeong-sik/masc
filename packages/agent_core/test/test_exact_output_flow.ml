@@ -249,10 +249,35 @@ let missing_output_response =
   {|{"id":"resp-missing","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"{\"name\":\"answer-routed-into-reasoning\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
 ;;
 
+module Stalling_response_body = struct
+  type t = { mutable pending : string option }
+
+  let read_methods = []
+
+  let single_read t dst =
+    match t.pending with
+    | Some bytes ->
+      t.pending <- None;
+      let len = min (String.length bytes) (Cstruct.length dst) in
+      Cstruct.blit_from_string bytes 0 dst 0 len;
+      if len < String.length bytes
+      then t.pending <- Some (String.sub bytes len (String.length bytes - len));
+      len
+    | None -> Eio.Fiber.await_cancel ()
+  ;;
+end
+
+let stalling_response_body bytes =
+  Eio.Resource.T
+    ( { Stalling_response_body.pending = Some bytes }
+    , Eio.Flow.Pi.source (module Stalling_response_body) )
+;;
+
 let with_server
       ?response_delay_s
       ?(status = `OK)
       ?first_response
+      ?first_stalled_response
       ?(abort_completion = false)
       ~response
       f
@@ -271,12 +296,19 @@ let with_server
       let post_index = Atomic.fetch_and_add completion_posts 1 in
       if abort_completion then raise Exit;
       Option.iter (Eio.Time.sleep clock) response_delay_s;
-      let response_status, response_body =
-        match first_response, post_index with
-        | Some first, 0 -> first
-        | Some _, _ | None, _ -> status, response
-      in
-      Cohttp_eio.Server.respond_string ~status:response_status ~body:response_body ()
+      match first_stalled_response, post_index with
+      | Some (response_status, first_bytes), 0 ->
+        Cohttp_eio.Server.respond
+          ~status:response_status
+          ~body:(stalling_response_body first_bytes)
+          ()
+      | Some _, _ | None, _ ->
+        let response_status, response_body =
+          match first_response, post_index with
+          | Some first, 0 -> first
+          | Some _, _ | None, _ -> status, response
+        in
+        Cohttp_eio.Server.respond_string ~status:response_status ~body:response_body ()
     in
     let socket =
       Eio.Net.listen
@@ -3526,7 +3558,13 @@ let test_context_window_400_prose_remains_terminal () =
       true
       (failure.cause.cause
        = EO.Provider_response_refused
-           { http_status = 400; refusal = EO.Invalid_request })
+           { http_status = 400; refusal = EO.Invalid_request });
+    check
+      bool
+      "HTTP 400 prose is a non-advanceable terminal"
+      true
+      (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
+       = EO.Non_advanceable_terminal)
   | Ok _ | Error _ -> fail "HTTP 400 prose did not remain terminal"
 ;;
 
@@ -3555,6 +3593,211 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
       | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited } ->
         ()
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
+;;
+
+let test_server_refusal_advances_once_to_successor status =
+  assert_typed_capacity_refusal_advances_once
+    ~label:(Printf.sprintf "server-refusal-%d" status)
+    ~first_response:(Cohttp.Code.status_of_code status, {|{"error":"unavailable"}|})
+    ~assert_cause:(function
+      | EO.Provider_response_refused { http_status; refusal }
+        when http_status = status
+             && refusal = (if status = 529 then EO.Overloaded else EO.Server_error) -> ()
+      | _ -> fail "HTTP server refusal lost its typed cause")
+;;
+
+let check_body_deadline_transcript success =
+  let durable =
+    match EO.snapshot_validated_flow_evidence
+      ~project_accepted:(fun id -> Ok (`String id))
+      ~project_rejection:(fun _ -> Ok `Null) success with
+    | Ok durable -> durable
+    | Error _ -> fail "body deadline advance did not produce truthful durable evidence"
+  in
+  let encoded = EO.validated_flow_evidence_to_string durable in
+  (match EO.validated_flow_evidence_of_string encoded with
+   | Ok decoded -> check string "body deadline evidence round trip"
+       (EO.validated_flow_evidence_sha256 durable)
+       (EO.validated_flow_evidence_sha256 decoded)
+   | Error error -> fail (EO.validated_flow_evidence_decode_error_to_string error));
+  let open Yojson.Safe.Util in
+  let document = Yojson.Safe.from_string encoded in
+  let steps = document |> member "steps" |> to_list in
+  check int "transcript retains the deadline and its accepted successor" 2
+    (List.length steps);
+  let first, rest = match steps with
+    | first :: rest -> first, rest
+    | [] -> fail "body deadline transcript has no steps"
+  in
+  check string "deadline has its own evidence kind" "response_body_deadline_exceeded"
+    (first |> member "outcome" |> member "failure" |> member "kind" |> to_string);
+  check bool "deadline invents no raw body hash" true
+    ((first |> member "attempt" |> member "raw_response_sha256") = `Null);
+  check bool "deadline invents no provider trace" true
+    ((first |> member "attempt" |> member "provider_trace_sha256") = `Null);
+  let replace key replacement = function
+    | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+        name, if String.equal name key then replacement else value) fields)
+    | _ -> fail "expected evidence object"
+  in
+  let encode_with_integrity value =
+    let payload = match value with
+      | `Assoc fields -> List.filter (fun (key, _) -> key <> "integrity_sha256") fields
+      | _ -> fail "expected evidence document"
+    in
+    let digest = `Assoc payload |> Yojson.Safe.to_string
+      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    `Assoc (payload @ ["integrity_sha256", `String digest]) |> Yojson.Safe.to_string
+  in
+  check string "mutation helper preserves valid canonical evidence"
+    encoded (encode_with_integrity document);
+  List.iter (fun (label, field, value) ->
+    let mutated_step = replace "attempt"
+      (replace field value (member "attempt" first)) first in
+    let encoded = replace "steps" (`List (mutated_step :: rest)) document
+      |> encode_with_integrity in
+    match EO.validated_flow_evidence_of_string encoded with
+    | Error _ -> ()
+    | Ok _ -> fail ("accepted contradictory body deadline evidence: " ^ label))
+    [ "missing status", "http_status", `Null
+    ; "refusing status", "http_status", `Int 503
+    ; "not dispatched", "dispatch_count", `Int 0
+    ; "multiple dispatches", "dispatch_count", `Int 2
+    ; "no response headers", "phase", `String "before_dispatch"
+    ; "completed response", "phase", `String "terminal"
+    ; "invented body hash", "raw_response_sha256", `String (String.make 64 'a')
+    ; "invented provider trace", "provider_trace_sha256", `String (String.make 64 'b') ]
+;;
+
+let test_body_deadline_advances_after_settlement ~http_status ~settle () =
+  let first_id = "body-deadline" in
+  let next_id = "body-deadline-successor" in
+  let (result, replay, observed_failure, validated_ids, evidence), posts =
+    with_server
+      ~first_stalled_response:(Cohttp.Code.status_of_code http_status, {|{"choices":[|})
+      ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~body_timeout_s:1.0 ~id:first_id ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:next_id ~base_url ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [first_id; next_id]) in
+    let observed_failure = ref None in
+    let validated_ids = ref [] in
+    let result = execute_with_validator ~net ~clock
+      ~before_advance:(fun ~failed ~next ->
+        let failed_candidate, failure = flow_execution_failure failed in
+        check string "settlement is for the timed-out candidate" first_id
+          (candidate_id failed_candidate);
+        check string "settlement names the configured successor" next_id
+          next.identity.candidate_id;
+        observed_failure := Some failure;
+        if settle then Ok () else Error "durable release failed")
+      ~validate:(fun success ->
+        let id = candidate_id (EO.flow_success_candidate success) in
+        validated_ids := id :: !validated_ids;
+        EO.Accept id)
+      flow in
+    result, execute_ok ~net ~clock flow, !observed_failure, !validated_ids,
+    EO.flow_attempt_evidence flow
+  in
+  (match observed_failure with
+   | Some failure ->
+     check bool "deadline cause is preserved" true
+       (failure.EO.cause = EO.Response_body_deadline_exceeded);
+     check bool "received headers remain evidence" true
+       (EO.receipt_phase failure.receipt = EO.Response_received);
+     check (option int) "received successful HTTP status is retained" (Some http_status)
+       (EO.receipt_http_status failure.receipt);
+     check int "timed-out request keeps its dispatch" 1
+       (EO.receipt_dispatch_count failure.receipt);
+     check bool "no fabricated complete body" true (Option.is_none failure.raw_response);
+     check bool "no fabricated provider trace" true
+       (Option.is_none (EO.receipt_provider_trace failure.receipt))
+   | None -> fail "body deadline never reached the settlement callback");
+  check int "only settled successor dispatches; replay adds none"
+    (if settle then 2 else 1) posts;
+  check (list string) "validator sees only a complete successor result"
+    (if settle then [next_id] else []) validated_ids;
+  check int "only durable settlement records an advance"
+    (if settle then 1 else 0) (List.length evidence.advances);
+  (match replay with
+   | Error (EO.Flow_attempt_already_started _) -> ()
+   | Ok _ | Error _ -> fail "body deadline flow was replayable");
+  match settle, result with
+  | true, Ok success ->
+    check string "configured successor supplies the accepted output" next_id success.accepted;
+    check_body_deadline_transcript success
+  | false, Error (EO.Flow_execution_terminal
+      { cause = EO.Flow_before_advance_callback_failed _; _ }) -> ()
+  | _, (Ok _ | Error _) -> fail "body deadline did not respect durable settlement"
+;;
+
+let test_stalled_server_refusal_body_does_not_advance () =
+  let refused_id = "stalled-refusal" in
+  let successor_id = "stalled-refusal-successor" in
+  let ((result, advances, evidence), posts) =
+    with_server
+      ~first_stalled_response:
+        (Cohttp.Code.status_of_code 503, {|{"error":"unfinished|})
+      ~response:(openai_response {|{"name":"must-not-run"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry
+          ~body_timeout_s:0.05
+          ~id:refused_id
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ; catalog_entry
+          ~id:successor_id
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ refused_id; successor_id ]) in
+    let advances = ref 0 in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          incr advances;
+          Ok ())
+        flow
+    in
+    result, !advances, EO.flow_attempt_evidence flow
+  in
+  check int "stalled refusal dispatched only the first candidate" 1 posts;
+  check int "stalled refusal requested no advance" 0 advances;
+  check int "stalled refusal recorded no advance" 0 (List.length evidence.advances);
+  check
+    int
+    "stalled refusal records one dispatch"
+    1
+    (EO.generation_receipt_snapshot_dispatch_count
+       (attempt_for evidence refused_id).receipt);
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "stalled refusal body remains unread"
+      true
+      (Option.is_none failure.cause.raw_response);
+    check
+      bool
+      "stalled refusal is not promoted to a server refusal"
+      true
+      (failure.cause.cause
+       = EO.Provider_response_refused
+           { http_status = 503; refusal = EO.Refusal_body_not_received })
+  | Ok _ | Error _ -> fail "stalled refusal did not remain a typed terminal failure"
 ;;
 
 let test_generic_400_remains_terminal_without_advance () =
@@ -3587,17 +3830,22 @@ let test_generic_400_remains_terminal_without_advance () =
   check int "generic 400 leaves successor unprepared" 1 (List.length evidence.attempts);
   match result with
   | Error
-      (EO.Flow_exact_execution_failed
-         { candidate
-         ; cause =
-             { cause =
-                 EO.Provider_response_refused
-                   { http_status = 400; refusal = EO.Invalid_request }
-             ; _
-             }
-         ; _
-         }) ->
-    check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate)
+      ((EO.Flow_exact_execution_failed
+          { candidate
+          ; cause =
+              { cause =
+                  EO.Provider_response_refused
+                    { http_status = 400; refusal = EO.Invalid_request }
+              ; _
+              }
+          ; _
+          }) as terminal) ->
+    check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate);
+    check
+      bool
+      "generic 400 is a non-advanceable terminal"
+      true
+      (EO.flow_execution_terminal_kind terminal = EO.Non_advanceable_terminal)
   | Ok _ | Error _ -> fail "generic 400 did not remain a typed invalid request"
 ;;
 
@@ -3650,11 +3898,10 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
     | Ok _ | Error _ -> fail (label ^ " did not remain terminal")
   in
   run ~abort_completion:true "partial" "unused";
-  (* A 429 used to sit here, pinning the behaviour of the era when every
-     unclassified HTTP failure became [Completion_failed]. It advances now and
-     is covered by its own case; 500 keeps a post-dispatch response failure
-     under this assertion. *)
-  run ~status:`Internal_server_error "response" "server error";
+  run "provider-parser" "not-provider-json";
+  (* A definite server refusal advances; an authentication failure still
+     requires configuration repair and remains terminal. *)
+  run ~status:`Unauthorized "response" "authentication failed";
   run "tool" tool_response
 ;;
 
@@ -4321,6 +4568,24 @@ let () =
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
+        ; test_case "HTTP 500 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 500)
+        ; test_case "HTTP 503 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 503)
+        ; test_case "HTTP 520 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 520)
+        ; test_case "HTTP 529 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 529)
+        ; test_case "HTTP 200 body deadline advances with truthful evidence" `Quick
+            (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:true)
+        ; test_case "HTTP 201 body deadline uses the same successor contract" `Quick
+            (test_body_deadline_advances_after_settlement ~http_status:201 ~settle:true)
+        ; test_case "body deadline cannot bypass a failed settlement callback" `Quick
+            (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:false)
+        ; test_case
+            "HTTP 503 with a stalled body does not advance"
+            `Quick
+            test_stalled_server_refusal_body_does_not_advance
         ; test_case
             "generic 400 remains terminal"
             `Quick

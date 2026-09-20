@@ -34,6 +34,7 @@ import asyncio
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -53,7 +54,15 @@ from render_configs import (  # noqa: E402
     effective_runtime_id,
     render_arm,
 )
-from masc_dist import container_binaries  # noqa: E402
+from masc_dist import (  # noqa: E402
+    DistIdentity,
+    container_distribution,
+    identity_metadata,
+)
+from masc_task_skills import (  # noqa: E402
+    preflight_task_skill_catalog,
+    task_skills_snapshot,
+)
 
 REMOTE = "/opt/masc-bench"
 TOKEN_PATH = f"{REMOTE}/token"
@@ -121,6 +130,8 @@ class MascSidecar:
     pool_names: list[str]
     keeper_runtime_id: str
     keeper_effort: str
+    skills_dir: str | None
+    _dist_identity: DistIdentity | None
 
     if TYPE_CHECKING:
         # Supplied by the harbor agent this is mixed into. Declared so the
@@ -161,29 +172,42 @@ class MascSidecar:
 
     async def install_masc(self, environment: BaseEnvironment) -> None:
         container_env = self.masc_container_env()
-        binaries = await container_binaries(
-            self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
-        # A lane may read provider limits over the network while rendering;
-        # harbor installs every trial in one event loop.
-        config_dir = await asyncio.to_thread(
-            render_arm, self.arm, self.keeper_runtime_id, self.keeper_effort)
-        await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
-        for binary in binaries:
-            await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
-        await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
-        try:
-            await environment.upload_dir(config_dir, f"{REMOTE}/config")
-        finally:
-            # render_arm hands back a directory of its own so that concurrent
-            # trials of one arm cannot delete each other's config mid-upload.
-            # Whoever asked for it removes it.
-            shutil.rmtree(config_dir, ignore_errors=True)
+        async with task_skills_snapshot(self, environment) as (task_skills_dir, task_skills):
+            with tempfile.TemporaryDirectory(prefix="masc-bench-dist-") as snapshot:
+                distribution = await container_distribution(
+                    self, environment, BENCH_ROOT, Path(snapshot),
+                    with_gh="GH_TOKEN" in container_env)
+                self._dist_identity = distribution.identity
+                # A lane may read provider limits over the network while rendering;
+                # harbor installs every trial in one event loop.
+                config_dir = await asyncio.to_thread(
+                    render_arm, self.arm, self.keeper_runtime_id, self.keeper_effort,
+                    task_skills_dir=task_skills_dir)
+                await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
+                for binary in distribution.binaries:
+                    await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
+            await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
+            try:
+                await environment.upload_dir(config_dir, f"{REMOTE}/config")
+            finally:
+                # render_arm hands back a directory of its own so that concurrent
+                # trials of one arm cannot delete each other's config mid-upload.
+                # Whoever asked for it removes it.
+                shutil.rmtree(config_dir, ignore_errors=True)
         await self.exec_as_root(
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
             env=container_env,
         )
+        await preflight_task_skill_catalog(self, environment, task_skills)
+
+    def record_dist_identity(self, context: AgentContext) -> None:
+        """Preserve the validated binary identity even when the parent run fails."""
+        if context.metadata is None:
+            context.metadata = {}
+        context.metadata.update(
+            identity_metadata(getattr(self, "_dist_identity", None)))
 
 
 async def merge_keeper_usage(
@@ -214,7 +238,7 @@ async def merge_keeper_usage(
         f"find {KEEPER_COSTS} -name '*.jsonl' -type f -exec cat {{}} +"
     )
     if ledger.return_code != 0:
-        context.metadata["keeper_usage"] = {"read_failed": ledger.stderr[-400:]}
+        context.metadata["keeper_usage"] = {"read_failed": (ledger.stderr or "")[-400:]}
         return
     totals = {"input": 0, "output": 0, "cache": 0}
     cost = 0.0
@@ -224,7 +248,7 @@ async def merge_keeper_usage(
     unparseable = 0
     raw_observations = 0
     without_projection = 0
-    for line in ledger.stdout.splitlines():
+    for line in (ledger.stdout or "").splitlines():
         line = line.strip()
         if not line:
             continue

@@ -506,6 +506,11 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1000000
+# Last prompt size proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
+# Keepers later reached 21-48 MB and failed before their first turn (#37123).
+# This conservative ceiling is a measured success point, not the CLI maximum
+# or a tokenizer estimate; raise it only after a larger end-to-end probe.
+max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -556,10 +561,12 @@ streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
 # This runtime rides AGENT_CORE native Ollama /api/chat, which does not serialize
-# tool_choice (agent_core backend_ollama.ml:24). Declaring true here would override
-# agent_core models.toml's supports_tool_choice=false (provider_runtime_binding.ml
-# applies this override last) while the transport silently drops forced tool
-# choice. Do not re-enable without a serializer path + model-side proof.
+# tool_choice (agent_core backend_ollama.ml:24). The catalog row for this model
+# names no supports_tool_choice, so the ollama preset's false is what reaches the
+# wire. A supports-tool-choice line in this block would not change that: for a
+# model the catalog names, runtime_adapter reads only thinking-control-format,
+# reasoning-streaming-format and max-output-tokens from here. Re-enabling needs a
+# serializer path + model-side proof, written on the catalog row.
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
 supports-top-k = true

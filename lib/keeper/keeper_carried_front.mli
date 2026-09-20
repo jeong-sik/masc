@@ -9,17 +9,17 @@
     While the process holds a ledger for the (keeper, runtime) pair, the
     front is the ledger's: the last request's front as every eviction since
     moved it. Without one, the first turn after a boot or the first on this
-    runtime, the seed is the range the newest completed turn record on the
-    trace measured, whichever runtime measured it — an official client's
+    runtime, the seed is the range the newest turn record joined to an actual
+    provider response, whichever runtime observed it — an official client's
     record counts the same history as an Agent Core one — read as
     [total_atoms - transmitted_atoms]; a lane walking to its next candidate
-    starts from the range the last completed turn carried rather than from
+    starts from the range the last answered request carried rather than from
     the whole history.
-    With neither, the range an unfinished turn on the same trace reached
-    ({!Unfinished_turn}); with none of the three the caller has no atom to
-    start from and carries the whole history; the provider judges it, and the turn driver owns the one move a
-    refusal forces before any usage has been counted, which
-    {!Halved_after_refusal} names.
+    With neither, the caller has no atom to start from and carries the whole
+    history; the provider judges it, and the turn driver owns the one move a
+    refusal forces, which {!Halved_after_refusal} and
+    {!Evicted_after_refusal} name. These positions belong to the turn and
+    take precedence over an older front in a later candidate's ledger.
 
     A front is a position: the atom index and the digest of the message that
     opens that atom
@@ -32,25 +32,15 @@
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
   | Turn_record of { turn : int }
-      (** The newest completed turn record on the trace that measured its
-          carried atoms, whichever runtime ran it. *)
-  | Unfinished_turn of { turn : int }
-      (** The newest turn record on the trace that wrote no stop
-          reason: the narrowest range that turn tried, since every candidate
-          of a turn shares the front a refusal moves. The record says the
-          turn ended before a stop reason was written
-          ({!Turn_record.finish_reason}) and never why, so this names a
-          position and claims no cause. The composition starts there, at the
-          position the turn reached, and moves no further on its own — a turn
-          ends for reasons that say nothing about size, and those repeat
-          ({!Keeper_turn_driver_try_provider.compose_carried_model_input}).
-          Without this record a keeper whose seeds are gone repeats the whole
-          history every turn: the halving a refusal forces lives only inside
-          the turn, and the record that carries it forward was skipped for
-          having no finish reason (2026-09-18: five keepers). *)
+      (** The newest turn record on the trace with a request range joined to
+          an actual provider response, whichever runtime ran it. The whole
+          turn may still have ended in error after that response. *)
   | Halved_after_refusal of { retry : int }
-      (** A provider or wire refusal before any usage: the range was halved
-          toward the newest atom, [retry] times so far. *)
+      (** A provider or wire refusal with no block ahead to evict: the range
+          was halved toward the newest atom on retry [retry]. *)
+  | Evicted_after_refusal of { retry : int }
+      (** A provider or wire refusal moved the front past measured blocks.
+          The turn shares this position with its later candidates. *)
 
 type seed =
   { first_atom : int
@@ -100,11 +90,10 @@ val of_records
   -> trace_id:string
   -> Turn_record.t list
   -> seed option
-(** The newest record of session [trace_id] carrying a [model_input_window]
-    whose runtime the catalog materializes, in any order, tagged
-    {!Turn_record} when the turn recorded a stop reason and
-    {!Unfinished_turn} when it did not. Both name a range of the same
-    history, and so does an official client's record
+(** The newest record of session [trace_id] carrying a
+    [response_observed_model_input] whose joined runtime the catalog
+    materializes, in any order. It names a range of the same history, and so
+    does an official client's record
     ({!Hands_over_its_own_list}). A record of another session measured
     another history, and one whose runtime is {!Not_materialized} is not
     read, since nothing says which list it counted. *)
@@ -189,5 +178,5 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [unfinished_turn] with [turn], [halved_after_refusal] with [retry], or
-    [whole_history]. *)
+    [halved_after_refusal] or
+    [evicted_after_refusal] with [retry], or [whole_history]. *)

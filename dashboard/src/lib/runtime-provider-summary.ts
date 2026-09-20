@@ -138,9 +138,6 @@ export function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapsh
     format ? `format:${format}` : null,
     request.has_output_schema ? 'output-schema' : null,
     request.cache_system_prompt ? 'cache-system' : null,
-    typeof request.supports_tool_choice_override === 'boolean'
-      ? `tool-override:${request.supports_tool_choice_override ? 'on' : 'off'}`
-      : null,
     typeof request.supports_structured_output_override === 'boolean'
       ? `schema-override:${request.supports_structured_output_override ? 'on' : 'off'}`
       : null,

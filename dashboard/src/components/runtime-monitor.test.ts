@@ -118,13 +118,12 @@ describe('RuntimeMonitor', () => {
             response_format: { kind: 'json_schema', has_schema: true },
             has_output_schema: true,
             cache_system_prompt: true,
-            supports_tool_choice_override: true,
             supports_structured_output_override: false,
             has_model_capabilities_override: true,
             keep_alive: '30m',
             internal_model_rotation_count: 2,
             num_ctx: 131072,
-            seed: 42,
+            seed: 1234567,
             has_previous_response_id: true,
             connect_timeout_s: 120.125,
           },
@@ -453,6 +452,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('131,072')
     expect(parameterValue(container, 'effective · max context')).toBe('131,072')
     expect(parameterValue(container, 'declared model · temperature')).toBe('0.65')
+    expect(parameterValue(container, 'request · seed')).toBe('1234567')
     expect(parameterValue(container, 'request · connect timeout')).toBe('120.125')
     expect(parameterValue(container, 'declared provider · connect timeout')).toBe('120.375')
     expect(parameterValue(container, 'declared provider · Exact timeout (s)')).toBe('0.125')

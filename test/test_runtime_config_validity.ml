@@ -783,6 +783,7 @@ let declared_targets_of_config (config : Runtime_schema.config) =
             ; provider_ref = provider.id
             ; model_id = model.api_name
             ; enable_thinking = model.thinking_support
+            ; reasoning_effort = model.reasoning_effort
             ; connect_timeout_s = provider.connect_timeout_s
             ; body_timeout_s = provider.exact_body_timeout_s
             ; api_key_env =
@@ -1741,13 +1742,14 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
     fixtures
 ;;
 
-(* release-evidence.sh boots the installed binary in a credential-less CI job,
+(* release-evidence.sh boots the installed binary with no environment secret,
    so the second startup gate (require_usable_mandatory_exact_output_lanes,
    which calls resolve_lane) only passes if the fixture's lane slots are
-   admitted and resolved with no environment secret at all. getenv returns
-   Ok None for every name here, which is stricter than CI: any fixture slot that
-   grows an api_key_env fails this test instead of failing a push to main. *)
-let test_release_evidence_fixture_lanes_resolve_without_credentials () =
+   admitted and resolved from the fixture's synthetic inline credential. getenv
+   returns Ok None for every name here, which is stricter than CI: any fixture
+   slot that grows an api_key_env fails this test instead of failing a push to
+   main. *)
+let test_release_evidence_fixture_lanes_resolve_without_environment_credentials () =
   let fixture_dir = release_evidence_fixture_dir () in
   let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
   match
@@ -1758,25 +1760,61 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
       "release-evidence smoke runtime.toml should load: %s"
       (render_runtime_toml_errors errors)
   | Ok (config : Runtime_schema.config) ->
+    let provider =
+      match
+        List.find_opt
+          (fun (provider : Runtime_schema.provider) ->
+             String.equal provider.id "ollama_cloud")
+          config.providers
+      with
+      | Some provider -> provider
+      | None -> fail "release-evidence smoke must declare its loopback provider"
+    in
+    (match provider.transport with
+     | Runtime_schema.Http endpoint ->
+       check string "release-evidence provider stays isolated" "http://127.0.0.1:9/v1" endpoint
+     | Runtime_schema.Cli _ -> fail "release-evidence provider must use the loopback HTTP fixture");
+    (match provider.credentials with
+     | Some (Runtime_schema.Inline "release-evidence-loopback") -> ()
+     | _ -> fail "release-evidence provider must own its synthetic inline credential");
     let snapshot = snapshot_of_config ~io ~label:"release-evidence smoke" config in
     let default_runtime_id =
       match config.default_runtime_id with
       | Some runtime_id -> runtime_id
       | None -> fail "release-evidence smoke runtime.toml must declare a default runtime"
     in
-    (match
-       List.find_opt
-         (fun (binding : Runtime_schema.binding) ->
-            String.equal
-              (Runtime_schema.binding_key binding)
-              default_runtime_id)
-         config.bindings
-     with
-     | Some (_ : Runtime_schema.binding) -> ()
-     | None ->
+    let binding =
+      match
+        List.find_opt
+          (fun (binding : Runtime_schema.binding) ->
+             String.equal
+               (Runtime_schema.binding_key binding)
+               default_runtime_id)
+          config.bindings
+      with
+      | Some binding -> binding
+      | None ->
+        failf
+          "release-evidence smoke default runtime %s must resolve to a binding"
+          default_runtime_id
+    in
+    let runtime =
+      match Runtime.of_binding config binding with
+      | Ok runtime -> runtime
+      | Error reason ->
+        failf
+          "release-evidence smoke default runtime must materialize: %s"
+          (Runtime.string_of_drop_reason reason)
+    in
+    let provider_config = agent_core_provider_config runtime in
+    check bool "synthetic credential reaches dispatch" false
+      (Llm_provider.Secret.is_empty provider_config.api_key);
+    (match Runtime.validate_dispatch_credential ~provider_config runtime with
+     | Ok () -> ()
+     | Error error ->
        failf
-         "release-evidence smoke default runtime %s must resolve to a binding"
-         default_runtime_id);
+         "release-evidence smoke dispatch credential must be usable: %s"
+         (Runtime.dispatch_credential_error_to_string error));
     List.iter
       (fun lane_id ->
          match
@@ -3381,6 +3419,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; is_default = false
     ; wizard_default = false
     ; max_concurrent = None
+    ; disable_parallel_tool_use = false
     ; context_marks = None
     ; max_tokens = None
     ; price_input = None
@@ -5225,8 +5264,8 @@ let () =
             "every discovered boot-path fixture declares the mandatory exact-output lanes"
             `Quick test_boot_path_fixtures_declare_mandatory_exact_output_lanes;
           test_case
-            "release-evidence smoke lanes resolve with no credential present"
-            `Quick test_release_evidence_fixture_lanes_resolve_without_credentials
+            "release-evidence smoke lanes resolve with no environment credential"
+            `Quick test_release_evidence_fixture_lanes_resolve_without_environment_credentials
         ; test_case
             "reasoning-effort parses into the typed variant"
             `Quick test_model_reasoning_effort_parses_into_the_typed_variant

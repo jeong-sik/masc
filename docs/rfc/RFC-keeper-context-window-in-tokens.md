@@ -3,9 +3,9 @@ rfc: "keeper-context-window-in-tokens"
 title: "Carry the Keeper window from where the Librarian absorbed; the provider judges request size"
 status: Active
 created: 2026-09-15
-updated: 2026-09-19
+updated: 2026-09-20
 author: vincent
-related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context"]
+related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context", "runtime-two-layers"]
 ---
 
 # RFC: Keeper 창은 Librarian 이 흡수한 지점부터 싣고, 요청이 너무 큰지는 공급자가 판정한다
@@ -22,7 +22,7 @@ related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-o
 2. 요청이 너무 큰지는 공급자가 판정한다. masc 는 바이트 상한을 선언하지도, 요청을 보내기 전에 재지도 않는다. 거절은 오류로 올리고, 범위를 좁혀 다시 보내지 않는다. 시작할 자리를 모를 때 이력 전체를 보내지 않는다(§13.3, §13.4).
 3. masc 에는 컴팩션(LLM 요약)이 없다. librarian 이 수시로 기억을 정리하고, 창은 최근 원문만 담는다. 그래서 librarian 이 창 밖으로 밀려난 것 중 무엇이 살아남을지를 결정한다.
 4. 입력할 자료 자체가 많은 경우를 빼면, 턴마다 보내는 컨텍스트는 가능한 한 줄인다. 컨텍스트가 커질수록 효율이 급격히 떨어진다고 본다. 근거는 §6.2~6.4 에 있다. 증거가 받쳐 주는 형태는 "관련 없는 것은 빼고, 필요한 것은 넣는다"이다. 모든 과제에 맞는 길이 기준은 증거에 없다.
-5. 한 사실은 한 곳에만 적는다. 같은 사실이 두 곳 이상에 있으면 두 번째부터 지운다(§13.0). 이 배포가 쓰는 모델 창은 `runtime.toml` 바인딩의 `max-context` 한 곳에 적고, `agent-core-models-overlay.toml` 은 비운다(§13.8).
+5. 한 사실은 한 곳에만 적는다. 같은 사실이 두 곳 이상에 있으면 두 번째부터 지운다(§13.0). 모델의 창 상한은 카탈로그에 적고, 배포 바인딩의 `max-context` 는 그보다 좁은 선택만 적는다. 둘의 로드 규칙은 `RFC-runtime-two-layers` 규칙 4 한 곳이 정한다. `agent-core-models-overlay.toml` 은 두 값을 복제하지 않는다(§13.8).
 6. 1·2 를 코드에 넣기 시작하는 때는 Librarian 생명주기 RFC(`RFC-librarian-lifecycle.md`) §7 (라)가 정하고, 그 전에 밀림 표시(같은 RFC 의 I4)가 화면에 떠 있어야 한다(§13.7).
 
 ## 2. 사고와 측정
@@ -303,6 +303,7 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 ## 10. 설계 (2026-09-16 개정)
 
 - 2026-09-15 의 §10 은 선언한 창 W 를 실측 밀도(토큰/바이트)로 바이트로 바꿔 자르는 설계였다. 밀도 외삽, 첫 턴 규칙, overflow 반감이 전부 추정이었고, 시드에 85,000 을 적는 데까지 갔다. 2026-09-16 에 운영자가 그 흐름 전체를 휴리스틱으로 판정해 걷어냈다. #36716 은 닫았고, #36709 로 main 에 들어간 밀도는 §11 1단계에서 뺀다.
+- 2026-09-19 개정으로 이 절의 반 자르기·`Whole_history`·`last_resort` 는 폐기됐다(§1 의 2, §13.3·§13.4). main 이 아직 돌리고 있어 구현 기록으로 남기며, 코드를 지우는 PR 에서 그 문단과 코드의 §10 참조를 같이 지운다.
 - 개정의 축은 셋이다. 공급자가 센 수만 쓴다. 이력은 덧붙이기만 하고 비우는 것은 묶음 단위로 드물게 한다. 창에서 빠진 원문은 Librarian 이 선 밖에서 읽고 Keeper 가 도구로 연다.
 - 설계 스케치(그림 셋): https://claude.ai/artifact/81g3o74R9vW2V9zoqL5sqB
 
@@ -527,8 +528,8 @@ origin/main `64ef87af83` 의 원장은 T 를 실은 usage 로도 전체와 묶�
 
 | 관측 | 값 |
 |---|---|
-| `origin=whole_history` | 288회 |
-| `halved_after_refusal` | 101회 (`#1` 56 · `#2` 44 · `#3` 1) |
+| `origin=whole_history` | 288회. 당시 전체 조립 횟수를 같은 스냅숏으로 보존하지 않아 비율로 쓰지 않는다 |
+| `halved_after_refusal` | 거절 연쇄 56개에서 재조립 101회, 연쇄당 1.80회 (`#1` 56 · `#2` 44 · `#3` 1) |
 | 한 요청 최대 조립 | 22,737,531 B (`atoms=8487/8487`) |
 | CLI 턴 조립 최대 | 45,331,049 B (`msx-retro-mania`) |
 | CLI 턴 조립 중앙값 | 131 B |
@@ -613,45 +614,20 @@ type origin =
 
 조건이 하나 더 있다. 밀림 표시(같은 RFC 의 I4)가 창이 그 위치에 기대기 전에 화면에 떠 있어야 한다. Librarian 이 서면 이력은 자라고 요청은 결국 provider 한도에서 거절되는데(§13.9), 표시가 없으면 화면에는 실패한 턴만 보이고 원인은 보이지 않는다.
 
-### 13.8 overlay 를 비운다
+### 13.8 overlay 를 비우고 `max-context` 결정을 한 곳에 둔다
 
-`agent-core-models-overlay.toml` 은 183줄에 세 종류가 섞여 있다. 세 종류 모두 두 번째 벌이다.
+2026-09-18 당시 `agent-core-models-overlay.toml` 은 모델 사실, provider 선언, 배포 레인 배선을 `runtime.toml`·카탈로그와 중복해서 들고 있었다. #37016 이 `[[models]]` 를 카탈로그로, `[[providers]]`·`[[targets]]` 를 `runtime.toml` 로 옮기고 overlay 파일을 지웠다. 행 수와 섹션 수는 움직이는 중간 상태였으므로 이 RFC 가 다시 고정하지 않는다.
 
-| 섹션 | 개수 | 첫 번째 벌은 어디 |
-|---|---|---|
-| `[[models]]` | 8 | 모델 사실은 카탈로그, 이 배포가 쓰는 창은 `runtime.toml max-context` |
-| `[[providers]]` | 1 | `runtime.toml [providers.*]` |
-| `[[targets]]` | 2 | 이 배포의 레인 배선. 가리키는 `exact_output_lanes` 가 `runtime.toml` 에 있다 |
+남은 질문은 바인딩의 `max-context` 와 카탈로그 상한이 다를 때 누가 이기는가다. 이 RFC 는 그 규칙을 정하지 않는다. `RFC-runtime-two-layers` 규칙 4가 한 곳에서 정한다.
 
-`[[models]]` 8행이 존재하는 이유는 파일 머리 주석이 적어 둔 한 문장이다 — "행이 없으면 provider 기본 프리셋의 context(OpenAI 호환 128K 추정값)가 `runtime.toml max-context` 를 잘라낸다."
+- 카탈로그는 모델의 창 상한을 소유한다.
+- 배포 바인딩의 `max-context` 는 더 좁은 창을 선택할 수 있다.
+- 바인딩이 카탈로그보다 큰 값을 적으면 조용히 clamp 하거나 선언을 이기게 하지 않고 로드에서 거절한다.
 
-그 추정값은 코드에 더 이상 없다. `openai_compat_chat_capabilities` 는 `max_context_tokens = None` 이고, 주석이 이유까지 적어 두었다 — *"A family-level guess becomes the limit of every catalog-silent model ... Unknown means unknown."* **설정 파일의 경고만 옛날 것으로 남아 있다.**
-
-남은 것은 clamp 다.
-
-```ocaml
-(* runtime.ml:931-935 *)
-match rt.model.max_context, capability_cap with
-| Some o, Some c when o > c -> Some (c, Override_clamped_by_capability)
-| Some o, (Some _ | None)   -> Some (o, Override)
-| None,   Some c            -> Some (c, Capability)
-| None,   None              -> None
-```
-
-배포가 선언한 창이 카탈로그가 아는 값보다 크면 **선언이 진다.** 그래서 배포는 카탈로그 값을 자기 값과 같게 맞춰 두는 수밖에 없었고, 그것이 8행이다. 방패를 없애려면 clamp 를 먼저 없애야 한다.
-
-**순서**
-
-1. clamp 제거. 첫 줄을 `Some (o, Override)` 로 바꾼다 — 선언이 이기고, 카탈로그는 선언이 없을 때만 답한다. `None, None` 이 로드 실패인 것은 그대로 둔다(RFC-0206 §2.1, 조용한 fallback 없음).
-2. `[[models]]` 8행 삭제.
-3. `[[providers]]` · `[[targets]]` 를 `runtime.toml` 로 옮긴다.
-4. overlay 파일 삭제.
-
-`max-context` 는 모델 사실의 복사본이 아니라 **바인딩의 선택**이다. 라이브가 이미 그렇게 쓰고 있다 — `glm-5.3-flash` 하나를 로컬 이름 둘로 잡아 창을 1,048,576 과 1,000,000 로 다르게 준다. 같은 모델을 좁은 창으로 쓰고 싶으면 바인딩을 하나 더 만드는 것이 답이고, overlay 행을 고치는 것이 아니다.
+따라서 이 절의 옛 clamp 제거 순서는 폐기한다. `runtime.ml` 의 `Override_clamped_by_capability` 를 어떻게 걷어낼지도 `RFC-runtime-two-layers` 의 구현이 소유한다. 이 RFC 의 구현은 그 줄을 반대 방향으로 바꾸지 않는다.
 
 ### 13.9 §1 이 닫지 않는 것
 
 - 이력을 빼고 남는 부분(`pinned` 메시지: 매 턴 새로 붙는 system·facts·브리핑 블록)이 혼자 provider 한도를 넘는 경우. 13.2 가 바이트 창을 없애면 이것을 알려 주는 것은 provider 의 typed 거절뿐이다. 턴은 그 오류로 끝나고(13.6), 다음 사이클도 같은 요청으로 같은 거절을 받는다. §1 에는 그 반복을 멈추는 장치가 없다. 줄일 것은 이력이 아니라 그 부분이고, facts 는 Librarian 의 `absorbs`·`dropped` 가 줄인다(Librarian RFC §6).
   - `critic` 의 30턴(13.2)은 이 경우가 아니었다. 거절한 쪽은 provider 가 아니라 `antigravity_subscription.gemini-3-8-flash-high` 레인의 masc 바이트 창(`max-prompt-bytes` 131,072)이었고, 그 모델의 `max-context` 는 1,048,576 토큰이다(`<base-path>/.masc/config/runtime.toml` 의 `[models.gemini-3-8-flash-high]`). 그 레인은 지금 이력을 자르지 않고 넘긴다(§4 의 5번).
-- Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자라고, 좁혀 다시 보내는 길은 13.3 이 지웠다. 그래서 요청은 끝내 provider 한도에서 거절되고 턴마다 오류로 끝난다. 이 대가와 원인별로 푸는 방법은 Librarian RFC §4.10 에 있다. 밀림 표시를 먼저 띄우는 조건은 §1 의 6 과 §13.7 에 있다.
-- `#36984` 이 요구하는 deadline 을 `[[targets]]` 두 슬롯이 선언하지 않은 문제(#37004). 13.8 의 3번에서 같이 정리된다.
+- Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자라고, 좁혀 다시 보내는 길은 13.3 이 지웠다. 그래서 요청은 끝내 provider 한도에서 거절되고 턴마다 오류로 끝난다. 시간 상한은 두지 않는다. 실패한 Librarian 은 타이머 재시도 없이 다음 신호를 기다리고, 원인별로 푸는 방법은 Librarian RFC §4.3·§4.10 이 소유한다. 이 fail-closed 대가를 바꾸는 결정도 그 RFC 에만 적는다. 밀림 표시를 먼저 띄우는 조건은 §1 의 6 과 §13.7 에 있다.

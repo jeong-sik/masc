@@ -34,6 +34,7 @@ import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
+import { USAGE_SCOPE_LABELS } from './common/turn-usage-scope'
 
 const EMPTY_TURN_RECORD_ROWS: TurnRecordRow[] = []
 
@@ -358,8 +359,7 @@ type TurnDetail = {
   traceId: string
   tokIn: number | null
   tokOut: number | null
-  // RFC-0233 §8 — null when context_window/price are absent on the record
-  // (runtime unknown or operator left runtime.toml unset); render "미상".
+  // RFC-0233 §8: unknown when usage is not per-request or required facts are absent.
   ctxPct: number | null
   contextWindow: number | null
   cost: number | null
@@ -480,15 +480,15 @@ function buildTurnDetail(
   const traceId = record.turn_ref
   const tokIn = record.input_tokens ?? null
   const tokOut = record.output_tokens ?? null
-  // RFC-0233 §8 — ctx-fill% and cost grounded in runtime.toml-declared facts.
-  // context_window is the keeper-resolved effective budget (replaces the
-  // hardcoded 200K); prices are USD/1M from the binding (replace Claude $3/$15).
-  // Either is null when the record lacks the fact — the view renders "미상".
+  // RFC-0233 §8: only per-request usage can describe this request's context fill and cost.
+  // Preserve cumulative/unknown-scope counts without reinterpreting them.
+  const perRequest = record.usage_scope === 'per_request'
   const ctxPct =
-    tokIn != null && record.context_window != null && record.context_window > 0
+    perRequest && tokIn != null && record.context_window != null && record.context_window > 0
       ? (tokIn / record.context_window) * 100
       : null
   const cost =
+    perRequest &&
     tokIn != null &&
       tokOut != null &&
       record.price_input_per_million != null &&
@@ -798,11 +798,12 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">selected model</span><span class="v">${record.selected_model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
         <span class="k">fsm.state</span><span class="v">n/a</span>
+        <span class="k">usage scope</span><span class="v">${USAGE_SCOPE_LABELS[record.usage_scope]}</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn?.toLocaleString() ?? '미상'}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache read tokens</span><span class="v">${record.cache_read_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache write tokens</span><span class="v">${record.cache_creation_input_tokens?.toLocaleString() ?? '미상'}</span>
-        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${record.context_window?.toLocaleString() ?? '미상'}` : '미상'}</span>
+        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'} / ${record.context_window?.toLocaleString() ?? '미상'}</span>
         <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
         <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>
         <span class="k">thinking</span><span class="v">${thinkingStateLabel(record)}</span>
@@ -954,8 +955,8 @@ function TurnDetailDrawer({
 
         <div class="ti-tok" data-testid="turn-token-bar">
           <div class="ti-tok-top">
-            <span class="lbl">토큰 경제</span>
-            <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(t.contextWindow)}` : '컨텍스트 미상'}</span>
+            <span class="lbl">토큰 사용량 · ${USAGE_SCOPE_LABELS[row.record.usage_scope]}</span>
+            <span class="ctxpct">컨텍스트 ${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'}${t.contextWindow != null ? ` / ${formatCtxWindowK(t.contextWindow)}` : ''}</span>
           </div>
           <div class="ti-tok-bar">
             ${tokenCounts != null && tokenCounts.total > 0
@@ -1013,7 +1014,7 @@ function TurnRow({
   const record = row.record
   const tokens =
     record.input_tokens != null || record.output_tokens != null
-      ? `${record.input_tokens ?? '?'}→${record.output_tokens ?? '?'} tok`
+      ? `${record.input_tokens ?? '?'}→${record.output_tokens ?? '?'} tok · ${USAGE_SCOPE_LABELS[record.usage_scope]}`
       : null
   const sampling = [
     record.temperature != null ? `t=${record.temperature}` : null,

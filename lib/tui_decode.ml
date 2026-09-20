@@ -580,6 +580,10 @@ type context_unavailable_reason =
       { raw_input_tokens : int option
       ; context_window : int option
       }
+  | Context_turn_total_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
   | Context_usage_scope_unavailable of
       { raw_input_tokens : int option
       ; context_window : int option
@@ -1264,6 +1268,8 @@ let context_unavailable_reason_of_json json raw =
     Ok (Context_conversation_cumulative_usage { raw_input_tokens; context_window })
   | "usage_scope_unavailable" when usage_scope = Some "unavailable" ->
     Ok (Context_usage_scope_unavailable { raw_input_tokens; context_window })
+  | "turn_total_usage" when usage_scope = Some "turn_total" ->
+    Ok (Context_turn_total_usage { raw_input_tokens; context_window })
   | "context_tokens_exceed_window" ->
     (match usage_scope, raw_input_tokens, context_window with
      | Some "per_request", Some raw_input_tokens, Some context_window ->
@@ -1291,6 +1297,11 @@ let context_unavailable_reason_to_string = function
   | Context_usage_scope_unavailable { raw_input_tokens; context_window } ->
     Printf.sprintf
       "usage scope unavailable (input %s, window %s)"
+      (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
+      (Option.fold ~none:"unknown" ~some:string_of_int context_window)
+  | Context_turn_total_usage { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "client turn total %s tokens (window %s); occupancy not observed"
       (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
       (Option.fold ~none:"unknown" ~some:string_of_int context_window)
   | Context_tokens_exceed_window { raw_input_tokens; context_window } ->

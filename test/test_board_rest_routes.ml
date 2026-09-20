@@ -201,7 +201,7 @@ let loopback_request_authority () =
   | Error `Malformed -> fail "failed to construct loopback request authority"
 ;;
 
-let dispatch_json ?token ~router ~path ~extra_headers ~body () =
+let dispatch_json ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () =
   Server_request_authority.with_current
     (loopback_request_authority ())
     (fun () ->
@@ -223,14 +223,15 @@ let dispatch_json ?token ~router ~path ~extra_headers ~body () =
        in
        let raw_request =
          Printf.sprintf
-           "POST %s HTTP/1.1\r\n\
+           "%s %s HTTP/1.1\r\n\
             Host: 127.0.0.1:8935\r\n\
             Origin: http://127.0.0.1:8935\r\n\
             %s%s\
             Content-Type: application/json\r\n\
             Content-Length: %d\r\n\
             \r\n\
-           %s"
+            %s"
+           meth
            path
            authorization
            extra_headers
@@ -365,12 +366,12 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
      |> to_string)
 ;;
 
-let test_board_context_inference_uses_current_owner_contract_and_actor () =
-  init_runtime_default_for_tests ();
-  with_authenticated_activity_router
-    ~prefix:"board-context-inference-http-actor-"
-    ~agent_name:"credential-owner"
-  @@ fun ~base_path ~config ~state ~sw ~clock ~router ~token ->
+let board_post_by_title title =
+  Masc.Board_dispatch.list_posts ~sort_by:Masc.Board_dispatch.Recent ~limit:20 ()
+  |> List.find_opt (fun (post : Masc.Board.post) -> String.equal post.title title)
+;;
+
+let with_board_store ~base_path f =
   Fun.protect ~finally:Masc.Board.reset_global_for_test
   @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
@@ -380,6 +381,203 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
   Masc.Board_dispatch.init_jsonl ();
+  f ()
+;;
+
+let test_board_write_routes_use_authenticated_actor () =
+  with_authenticated_activity_router
+    ~prefix:"board-write-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let post_json path fields =
+    dispatch_json ~router ~token ~path
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
+  in
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_post"
+      [ "title", `String "canonical actor route test"
+      ; "body", `String "the bearer owner writes this post"
+      ; "author", `String "forged-body-actor"
+      ]
+  in
+  check int "post accepted" 201 status;
+  let post =
+    match board_post_by_title "canonical actor route test" with
+    | Some post -> post
+    | None -> fail "board route did not create the post"
+  in
+  let post_id = Masc.Board.Post_id.to_string post.id in
+  check string "post author" "credential-owner"
+    (Masc.Board.Agent_id.to_string post.author);
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_comment"
+      [ "post_id", `String post_id
+      ; "content", `String "canonical actor route comment"
+      ; "author", `String "forged-body-actor"
+      ]
+  in
+  check int "comment accepted" 201 status;
+  let comment =
+    match Masc.Board_dispatch.get_comments ~post_id with
+    | Ok comments ->
+      (match
+         List.find_opt
+           (fun (comment : Masc.Board.comment) ->
+              String.equal comment.content "canonical actor route comment")
+           comments
+       with
+       | Some comment -> comment
+       | None -> fail "board route did not create the comment")
+    | Error error -> fail (Masc.Board.show_board_error error)
+  in
+  let comment_id = Masc.Board.Comment_id.to_string comment.id in
+  check string "comment author" "credential-owner"
+    (Masc.Board.Agent_id.to_string comment.author);
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_vote"
+      [ "post_id", `String post_id
+      ; "direction", `String "up"
+      ; "voter", `String "forged-body-actor"
+      ]
+  in
+  check int "post vote accepted" 200 status;
+  let status, _ =
+    post_json "/api/v1/tools/masc_board_comment_vote"
+      [ "comment_id", `String comment_id
+      ; "direction", `String "down"
+      ; "voter", `String "forged-body-actor"
+      ]
+  in
+  check int "comment vote accepted" 200 status;
+  (match
+     Masc.Board_dispatch.current_vote_for_post ~voter:"credential-owner" ~post_id
+   with
+   | Ok (Some Masc.Board.Up) -> ()
+   | Ok (Some Masc.Board.Down) | Ok None -> fail "canonical post vote was not stored"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  (match
+     Masc.Board_dispatch.current_vote_for_post ~voter:"forged-header-actor" ~post_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "forged header actor owns the post vote"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  (match
+     Masc.Board_dispatch.current_vote_for_comment
+       ~voter:"credential-owner"
+       ~comment_id
+   with
+   | Ok (Some Masc.Board.Down) -> ()
+   | Ok (Some Masc.Board.Up) | Ok None -> fail "canonical comment vote was not stored"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  (match
+     Masc.Board_dispatch.current_vote_for_comment
+       ~voter:"forged-header-actor"
+       ~comment_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "forged header actor owns the comment vote"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with
+      enabled = false
+    ; require_token = false
+    };
+  let status, _ =
+    dispatch_json ~router
+      ~path:"/api/v1/tools/masc_board_post"
+      ~extra_headers:[ "X-Masc-Agent", "local-dashboard-actor" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "title", `String "tokenless local dashboard actor"
+              ; "body", `String "same-origin local attribution remains available"
+              ; "author", `String "forged-body-actor"
+              ]))
+      ()
+  in
+  check int "tokenless same-origin dashboard post accepted" 201 status;
+  let local_post =
+    match board_post_by_title "tokenless local dashboard actor" with
+    | Some post -> post
+    | None -> fail "tokenless dashboard route did not create the post"
+  in
+  check string "tokenless local actor comes from admitted auth resolver"
+    "local-dashboard-actor"
+    (Masc.Board.Agent_id.to_string local_post.author)
+;;
+
+let test_sub_board_routes_use_authenticated_owner () =
+  with_authenticated_activity_router
+    ~prefix:"sub-board-http-owner-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let request ?meth path fields =
+    dispatch_json ?meth ~router ~token ~path
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
+  in
+  let status, created =
+    request "/api/v1/board/sub-boards"
+      [ "slug", `String "canonical-owner"
+      ; "name", `String "Canonical owner"
+      ; "description", `String "created through the authenticated route"
+      ; "members", `List []
+      ]
+  in
+  let open Yojson.Safe.Util in
+  check int "sub-board create accepted" 200 status;
+  check string "sub-board owner" "credential-owner"
+    (created |> member "owner" |> to_string);
+  let sub_board_id = created |> member "id" |> to_string in
+  let status, updated =
+    request ~meth:"PUT" ("/api/v1/board/sub-boards/" ^ sub_board_id)
+      [ "name", `String "Canonical owner updated" ]
+  in
+  check int "canonical owner can update despite forged header" 200 status;
+  check string "sub-board update applied" "Canonical owner updated"
+    (updated |> member "name" |> to_string);
+  let foreign =
+    match
+      Masc.Board_dispatch.create_sub_board
+        ~slug:"forged-header-owned"
+        ~name:"Foreign owner"
+        ~description:"must remain foreign"
+        ~owner:"forged-header-actor"
+        ~members:[]
+        ()
+    with
+    | Ok sub_board -> sub_board
+    | Error error -> fail (Board_tool.board_error_to_string error)
+  in
+  let foreign_id = Masc.Board.Sub_board_id.to_string foreign.id in
+  let status, _ =
+    request ~meth:"DELETE" ("/api/v1/board/sub-boards/" ^ foreign_id) []
+  in
+  check int "forged owner cannot delete a foreign sub-board" 403 status;
+  (match Masc.Board_dispatch.get_sub_board ~sub_board_id:foreign_id with
+   | Ok _ -> ()
+   | Error error -> fail (Board_tool.board_error_to_string error));
+  let status, deleted =
+    request ~meth:"DELETE" ("/api/v1/board/sub-boards/" ^ sub_board_id) []
+  in
+  check int "canonical owner can delete despite forged header" 200 status;
+  check bool "own sub-board deleted" true
+    (deleted |> member "deleted" |> to_bool)
+;;
+
+let test_board_context_inference_uses_current_owner_contract_and_actor () =
+  init_runtime_default_for_tests ();
+  with_authenticated_activity_router
+    ~prefix:"board-context-inference-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config ~state ~sw ~clock ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
   let keeper_name = "context-inference-target" in
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path
@@ -772,6 +970,10 @@ let () =
             test_schedule_write_actor_is_stamped_from_auth
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_stamped_from_auth
+        ; test_case "board write actors come from auth" `Quick
+            test_board_write_routes_use_authenticated_actor
+        ; test_case "sub-board owner comes from auth" `Quick
+            test_sub_board_routes_use_authenticated_owner
         ; test_case "context inference uses typed Owner receipt and authenticated actor" `Quick
             test_board_context_inference_uses_current_owner_contract_and_actor
         ; test_case

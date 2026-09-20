@@ -5739,7 +5739,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc.agent_core masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule

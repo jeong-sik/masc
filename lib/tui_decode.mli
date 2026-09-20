@@ -729,7 +729,7 @@ type runtime_option = {
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
-  ro_reasoning_effort : Llm_provider.Reasoning_effort.t option;
+  ro_declared_reasoning_effort : Llm_provider.Reasoning_effort.t option;
       (** The effort a request on this runtime carries; [None] is unset. *)
   ro_is_local : bool;
   ro_is_default : bool;

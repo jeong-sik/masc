@@ -5889,7 +5889,7 @@ let picker_default_runtime =
     ; ("effective_max_context", `Int 200000)
     ; ("max_context_source", `String "override_clamped_by_capability")
     ; ("max_output_tokens", `Int 8192)
-    ; ("reasoning_effort", `String "high")
+    ; ("declared_reasoning_effort", `String "high")
     ; ("is_local", `Bool false)
     ; ("is_default", `Bool false)
     ]
@@ -5910,7 +5910,7 @@ let runtime_resolved_json =
               ; ("effective_max_context", `Int 8192)
               ; ("max_context_source", `String "capability")
               ; ("max_output_tokens", `Null)
-              ; ("reasoning_effort", `Null)
+              ; ("declared_reasoning_effort", `Null)
               ; ("is_local", `Bool true)
               ; ("is_default", `Bool false)
               ]
@@ -5954,13 +5954,13 @@ let test_decode_runtime_resolved () =
            Alcotest.(check (option int)) "max output" (Some 8192) first.ro_max_output_tokens;
            Alcotest.(check (option string)) "reasoning effort" (Some "high")
              (Option.map Tui_decode.runtime_reasoning_effort_label
-                first.ro_reasoning_effort);
+                first.ro_declared_reasoning_effort);
            Alcotest.(check bool) "locality" false first.ro_is_local
        | [] -> Alcotest.fail "no runtimes");
       (match runtimes with
        | [ _; second ] ->
            Alcotest.(check bool) "null effort is unset" true
-             (Option.is_none second.Tui_decode.ro_reasoning_effort)
+             (Option.is_none second.Tui_decode.ro_declared_reasoning_effort)
        | _ -> Alcotest.fail "second runtime missing");
       (match assignments with
        | [ a ] ->

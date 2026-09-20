@@ -7,12 +7,12 @@ import '@testing-library/jest-dom'
 // component's self-fetch of turn records. Surfaces its anchor props as data
 // attributes for assertion.
 vi.mock('./keeper-turn-inspector', () => ({
-  KeeperTurnInspector: ({ keeperName, initialTurnRef, initialTurnTimestamp }: any) =>
+  KeeperTurnInspector: ({ keeperName, initialTurnRef }: { keeperName: string; initialTurnRef?: string | null }) =>
     h('div', {
       'data-testid': 'turn-inspector-inner',
       'data-keeper': keeperName,
       'data-initial-turn-ref': initialTurnRef ?? '',
-      'data-initial-turn-timestamp': initialTurnTimestamp ?? '',
+      'data-missing-reference': String(initialTurnRef === null),
     }),
 }))
 
@@ -53,6 +53,14 @@ describe('TurnInspectorDrawer', () => {
     render(h(TurnInspectorDrawer, { keeperName: 'echo', open: true, onClose: () => {}, testId: 'x' }))
     // The header secondary line shows the keeper name when subtitle is absent.
     expect(screen.getByText('echo')).toBeInTheDocument()
+    expect(screen.getByTestId('turn-inspector-inner').getAttribute('data-missing-reference')).toBe('false')
+  })
+
+  it('preserves an explicit missing origin reference', () => {
+    render(h(TurnInspectorDrawer, {
+      keeperName: 'echo', initialTurnRef: null, open: true, onClose: () => {}, testId: 'x',
+    }))
+    expect(screen.getByTestId('turn-inspector-inner').getAttribute('data-missing-reference')).toBe('true')
   })
 
   it('invokes onClose from the close button (testId-namespaced)', () => {

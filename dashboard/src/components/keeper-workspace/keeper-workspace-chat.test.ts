@@ -109,16 +109,16 @@ async function loadChat() {
   vi.doMock('../keeper-turn-inspector', () => ({
     KeeperTurnInspector: ({
       keeperName,
-      initialTurnTimestamp,
+      initialTurnRef,
     }: {
       keeperName: string
-      initialTurnTimestamp?: string | null
+      initialTurnRef?: string | null
     }) =>
       html`
         <div
           data-testid="kw-turn-inspector"
           data-keeper=${keeperName}
-          data-initial-turn-timestamp=${initialTurnTimestamp ?? ''}
+          data-missing-reference=${String(initialTurnRef === null)}
         >TurnInspector</div>
       `,
   }))
@@ -457,7 +457,7 @@ describe('KeeperWorkspaceChat', () => {
     expect(drawer?.textContent).toContain('메시지 sangsu')
     expect(drawer?.textContent).toContain('2026-03-24T00:02:00.000Z')
     expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-keeper')).toBe('sangsu')
-    expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-initial-turn-timestamp')).toBe('2026-03-24T00:02:00.000Z')
+    expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-missing-reference')).toBe('true')
   })
 
   it('renders mobile roster and context controls when mobile mode is enabled', async () => {

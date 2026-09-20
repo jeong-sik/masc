@@ -65,6 +65,12 @@ status: reference
 : 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
   레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
+**Keeper Chat Operation**
+: Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
+  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
+  제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
+  접수 응답은 실행 완료를 뜻하지 않는다.
+
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
@@ -76,6 +82,13 @@ status: reference
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Usage Scope**
+: Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
+  요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
+  `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
+  합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
+  않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
@@ -322,6 +335,9 @@ status: reference
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
 
+  저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
+  지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.
+
 **Model Input Ledger (모델 입력 원장)**
 : Keeper·runtime·trace별로 응답에서 확인한 Atom 범위와 제공된 usage를 기록한 프로세스 내 원장.
   상한 판정과 거절 뒤 이동은 후보 안의 작업값에 적용하고, 응답 관측으로 원장을 갱신한다.
@@ -357,6 +373,7 @@ status: reference
   전체가 안 읽은 것으로 보인다.
   이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
   cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
+  Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
@@ -411,3 +428,4 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
+  History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.

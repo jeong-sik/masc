@@ -5146,6 +5146,7 @@
 
 (include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)
+(include stanzas/test_exact_output_runtime_deadline.inc)
 
 ; The tool-call quality benchmark reads its case set and evidence fixture from
 ; repo-root JSON (benchmarks/data, test/fixtures) rather than from sandbox

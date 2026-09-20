@@ -145,6 +145,22 @@ endpoint = "https://ollama.com/v1"
 # default: omit it and no connect budget applies. Key spelling is mirrored by
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
+# Providers may separately declare `exact-body-timeout-s` as a positive finite
+# float in seconds. This is the caller-owned total HTTP request deadline for
+# Exact-output lanes: connection, response headers and the full response body.
+# It does not change connect-timeout-s or ordinary Keeper per-call deadlines.
+# Omission remains None; no value is inferred from the connect deadline. A
+# connect-only declaration still leaves an Exact response body unbounded.
+# Bootstrap applies it to AGENT_CORE targets derived from these bindings.
+# The deployment operator owns the value in the resolved runtime.toml's
+# [providers.<id>] table. Saving that file does not rebuild existing Exact
+# targets: the value takes effect when server bootstrap rebuilds the registry.
+# This seed intentionally supplies no numeric body deadline.
+# Each visited Exact candidate retains its own deadline. Their HTTP wait can
+# accumulate across sequential candidates; this is not a deadline for the
+# whole Librarian pass, its CLI tail, or Memory processing.
+# AGENT_CORE_MODEL_CATALOG replacements keep their own target body_timeout_s;
+# this key does not set an official-client CLI timeout.
 
 [providers.ollama_cloud.healthcheck]
 path = "/models"

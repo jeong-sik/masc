@@ -1162,6 +1162,9 @@ self_test() {
 # "broken" does not link, "failing" exits 1, "slow" outlasts any budget here.
 [ "$1" = build ] || exit 2
 shift
+if [ -n "${FAKE_DUNE_CALLS_FILE:-}" ]; then
+  printf '%s\n' "$*" >> "${FAKE_DUNE_CALLS_FILE}"
+fi
 sleep "${FAKE_DUNE_BUILD_SECONDS}"
 status=0
 for target in "$@"; do
@@ -1194,6 +1197,9 @@ FAKE
     : > "${work}/reader.py"
     PATH="${work}/bin:${PATH}"
     export FAKE_DUNE_BUILD_SECONDS="${build_seconds}"
+    if [ -n "${RUNNER_DUNE_CALLS_FILE:-}" ]; then
+      export FAKE_DUNE_CALLS_FILE="${RUNNER_DUNE_CALLS_FILE}"
+    fi
     scope_tool="${work}/scope.py"
     stanza_reader="${work}/reader.py"
     repo_root="${work}/root"
@@ -1228,6 +1234,23 @@ FAKE
       failures=$((failures + 1))
     fi
   }
+  runner_invocation_check() {
+    local label="$1" want_call="$2"
+    shift 2
+    local calls got recorded_call
+    calls=$(mktemp)
+    got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
+    recorded_call=$(cat "${calls}")
+    rm -f "${calls}"
+    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_call}" ]; then
+      echo "ok   ${label}"
+    else
+      echo "FAIL ${label}"
+      echo "     want: no failures, one dune invocation: ${want_call}"
+      echo "     got:  ${got:-<nothing>}, dune invocation(s): ${recorded_call:-<nothing>}"
+      failures=$((failures + 1))
+    fi
+  }
   runner_check "suites within the budget all run" "" 0 30 \
     test_ok test_ok_too
   runner_check "the budget stops a slow suite and names the suites after it" \
@@ -1251,8 +1274,12 @@ FAKE
     runner_check "a parallel wave that spends the budget names every remainder" \
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
-  runner_check "default-bound Python rules share one dune invocation" "" \
-    2 3 test/test_python_one.py test/test_python_two.py
+  # Count the call instead of inferring one call from whether two-second
+  # stand-in builds fit inside a three-second wall-clock budget. On a loaded
+  # runner the setup could consume that one-second margin before dune began.
+  runner_invocation_check "default-bound Python rules share one dune invocation" \
+    "@test/runtest-test_python_one @test/runtest-test_python_two" \
+    0 30 test/test_python_one.py test/test_python_two.py
   # The build starts with budget left and outlasts it, so the timeout on the
   # build is what ends it. With a one-second budget the budget was already
   # spent before the build began, and that case passed without the timeout.

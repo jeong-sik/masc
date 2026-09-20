@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,6 +43,12 @@ const keeper: MemoryKeeper = {
 }
 
 const memoryId = (digit: string) => `sha256:${digit.repeat(64)}`
+
+// The same unchanged actual writer output is checked by the OCaml codec suite.
+const writerRows: Record<string, unknown>[] = readFileSync(
+  resolve(__dirname, '../api/fixtures/turn-record-writer-main.jsonl'),
+  'utf8',
+).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
 
 function fact(
   memoryId: string,
@@ -167,6 +175,43 @@ afterEach(() => {
 })
 
 describe('MemoryInspector current snapshot', () => {
+  it.each(writerRows)('keeps actual writer usage scope $usage_scope in the memory view', async record => {
+    const payload = turnRecordsPayload()
+    const fixtureKeeper: MemoryKeeper = { id: String(record.keeper), status: 'run' }
+    const ts = Number(record.ts)
+    // Only the HTTP envelope is synthetic; the stored record is unchanged.
+    stubFetch({
+      ...payload,
+      keeper: fixtureKeeper.id,
+      durable_store: `.masc/keepers/${fixtureKeeper.id}/turn-records`,
+      latest_ts_unix: ts,
+      latest_ts_iso: new Date(Math.floor(ts) * 1000).toISOString().replace('.000Z', 'Z'),
+      memory_os: {
+        ...payload.memory_os,
+        keeper: fixtureKeeper.id,
+        snapshot_store: `.masc/keepers/${fixtureKeeper.id}.memory-current.json`,
+      },
+      entries: [{ record, diff_vs_prev: null }],
+    })
+    const { container } = render(
+      html`<${MemoryInspector} keeper=${fixtureKeeper} keepers=${[fixtureKeeper]} onClose=${vi.fn()} />`,
+    )
+    await waitFor(() => expect(container.querySelector('.mem-compo-sub')).toBeTruthy())
+
+    const text = container.querySelector('.mem-compo-sub')?.textContent ?? ''
+    expect(text).toContain('18.0k provider tok')
+    expect(text).toContain('131.1k')
+    expect(text).toContain(String(record.request_runtime_profile))
+    if (record.usage_scope === 'per_request') {
+      expect(text).toContain('14%')
+      expect(text).toContain('요청별')
+    } else {
+      expect(text).not.toContain('%')
+      expect(text).toContain('점유율 미상')
+      expect(text).toContain(record.usage_scope === 'conversation_cumulative' ? '대화 누적' : '범위 미상')
+    }
+  })
+
   it('renders exact provider composition and the current snapshot delta', async () => {
     stubFetch()
     const { container } = render(

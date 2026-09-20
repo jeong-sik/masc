@@ -34,14 +34,10 @@ import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
+import { USAGE_SCOPE_LABELS } from './common/turn-usage-scope'
 
 const INITIAL_TURN_MATCH_WINDOW_SEC = 30 * 60
 const EMPTY_TURN_RECORD_ROWS: TurnRecordRow[] = []
-const USAGE_SCOPE_LABELS: Record<TurnRecordEntry['usage_scope'], string> = {
-  per_request: '요청별',
-  conversation_cumulative: '대화 누적',
-  unavailable: '범위 미상',
-}
 
 export function initialTurnRowForTimestamp(
   rows: TurnRecordRow[],

@@ -183,7 +183,6 @@ let test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response () 
 ;;
 
 let test_restart_rows_restore_only_a_response_observed_front () =
-  Ledger.Table.For_testing.reset ();
   let rows =
     [ Turn_record.to_json (record ~turn:10 (Some (30, 100)))
     ; Turn_record.to_json

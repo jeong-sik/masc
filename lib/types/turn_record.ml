@@ -653,6 +653,15 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         match response_observed_model_input_json with
         | `Null -> Ok None
         | `Assoc observed_fields ->
+          let require_observed name =
+            match require name observed_fields with
+            | Ok _ as value -> value
+            | Error _ ->
+              Error
+                (Printf.sprintf
+                   "turn_record: missing field %S"
+                   ("response_observed_model_input." ^ name))
+          in
           let* () =
             if
               fields_are_unique_known
@@ -668,38 +677,32 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
               Error
                 "turn_record: response_observed_model_input fields are not exact"
           in
-          let* runtime_profile_json = require "runtime_profile" observed_fields in
+          let* runtime_profile_json = require_observed "runtime_profile" in
           let* runtime_profile =
             as_nonempty_string
               "response_observed_model_input.runtime_profile"
               runtime_profile_json
           in
-          let* transmitted_atoms_json =
-            require "transmitted_atoms" observed_fields
-          in
+          let* transmitted_atoms_json = require_observed "transmitted_atoms" in
           let* transmitted_atoms =
             as_nonnegative_int
               "response_observed_model_input.transmitted_atoms"
               transmitted_atoms_json
           in
-          let* total_atoms_json = require "total_atoms" observed_fields in
+          let* total_atoms_json = require_observed "total_atoms" in
           let* total_atoms =
             as_nonnegative_int
               "response_observed_model_input.total_atoms"
               total_atoms_json
           in
-          let* measurement_json =
-            require "model_input_measurement" observed_fields
-          in
+          let* measurement_json = require_observed "model_input_measurement" in
           let* measurement_raw =
             as_nonempty_string
               "response_observed_model_input.model_input_measurement"
               measurement_json
           in
           let* measurement = model_input_measurement_of_string measurement_raw in
-          let* front_atom_digest_json =
-            require "front_atom_digest" observed_fields
-          in
+          let* front_atom_digest_json = require_observed "front_atom_digest" in
           let* front_atom_digest =
             as_sha256_digest
               "response_observed_model_input.front_atom_digest"

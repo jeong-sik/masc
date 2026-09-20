@@ -38,9 +38,11 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
-**Heartbeat**
-: Workspace에서 Agent의 `last_seen`을 갱신하는 명시적 liveness 작업. 성공은
-  `Heartbeat_updated`일 때만 뜻하며, 잘못된 Agent 파일이나 없는 Agent는 생존 증거가 아니다.
+**Workspace Heartbeat**
+: `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
+  `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
+  `keeper_heartbeat` SSE나 MCP·transport activity 같은 별도 liveness signal의 부재를
+  뜻하지 않으며, 해당 신호는 이 Workspace 쓰기가 갱신되지 않아도 발생할 수 있다.
   → [Workspace_gc.heartbeat](../../lib/workspace/workspace_gc.mli)
 
 **Agent**
@@ -144,8 +146,9 @@ status: reference
   구간의 소유자다.
 
 **Evidence**
-: 관찰·검증·전환이 실제 근거에 연결되었음을 나타내는 typed reference. `evidence_refs`
-  같은 필드로 전달하며, 설명 문장만으로 근거를 대신하지 않는다.
+: 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
+  `note:<text>`는 허용된 서술형 근거이며, Task handoff summary와 completion notes도 이
+  형식으로 정규화된다. Note evidence는 artifact나 collaboration source의 증명은 아니다.
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,

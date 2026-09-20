@@ -798,6 +798,41 @@ let with_store_lock ~base_path ~keeper_name f =
   | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
 ;;
 
+let clear ~base_path ~keeper_name =
+  let* directory = state_dir ~base_path ~keeper_name in
+  let directory_state =
+    try
+      Fs_compat.inspect_owned_directory_chain
+        ~ownership_root:directory
+        directory
+      |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  match directory_state with
+  | Error _ as error -> error
+  | Ok Fs_compat.Owned_directory_missing -> Ok ()
+  | Ok (Fs_compat.Owned_directory _) ->
+    with_store_lock ~base_path ~keeper_name (fun directory ->
+      let state_path = Filename.concat directory filename in
+      let* current = load_path state_path in
+      match current with
+      | Some
+          { phase =
+              ( Start { owner_epoch; _ }
+              | Active { owner_epoch; _ }
+              | Turn_inflight { owner_epoch; _ } )
+          ; _
+          }
+        when not (String.equal owner_epoch (process_epoch ())) ->
+        Error "official-client session is held by another process"
+      | None | Some _ ->
+        (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
+         | Ok () -> Ok ()
+         | Error error -> Error (Keeper_fs.durable_remove_error_to_string error)))
+;;
+
 let transition ~base_path ~keeper_name ~expected next =
   let* () = validate next in
   with_store_lock ~base_path ~keeper_name (fun directory ->

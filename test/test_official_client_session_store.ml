@@ -77,6 +77,45 @@ let claim_new ~base_path ~keeper_name ~client_kind ~runtime_id ~owner_epoch ~at 
   |> Result.get_ok
 ;;
 
+let test_clear_missing_state_does_not_create_store () =
+  with_workspace "masc-clear-missing-session-" (fun base_path ->
+    let keeper_name = "missing-session" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    check bool "store starts absent" false (Sys.file_exists (Filename.dirname state_path));
+    (match clear ~base_path ~keeper_name with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    check bool
+      "clear does not create an absent store"
+      false
+      (Sys.file_exists (Filename.dirname state_path)))
+;;
+
+let test_clear_refuses_foreign_active_claim () =
+  with_workspace "masc-clear-foreign-session-" (fun base_path ->
+    let keeper_name = "foreign-session" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    (match clear ~base_path ~keeper_name with
+     | Error detail ->
+       check string
+         "foreign owner refusal"
+         "official-client session is held by another process"
+         detail
+     | Ok () -> fail "clear removed another process's active claim");
+    check bool
+      "foreign active claim stays durable"
+      true
+      (load ~base_path ~keeper_name = Ok (Some claimed)))
+;;
+
 let test_roundtrip_and_settlement () =
   with_workspace "masc-official-client-store-roundtrip-" (fun base_path ->
     let keeper_name = "roundtrip" in
@@ -1294,6 +1333,10 @@ let () =
     "official client session store"
     [ ( "durable owner"
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "clear missing state without creating store" `Quick
+            test_clear_missing_state_does_not_create_store
+        ; test_case "clear refuses foreign active claim" `Quick
+            test_clear_refuses_foreign_active_claim
         ; test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement
         ; test_case
             "duplicate claim and CAS fail closed"

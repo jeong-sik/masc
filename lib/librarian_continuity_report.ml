@@ -205,7 +205,11 @@ let of_yojson json =
         | Question_ready question | Answer_failed (question, _)
         | Answer_ready { question; _ } | Judge_failed { question; _ }
         | Scored { question; _ } -> validate_question question
-        | Not_started | Question_failed _ -> Ok ()
+        | Not_started -> Ok ()
+        | Question_failed _ ->
+            (match sample.case.question with
+             | None -> Ok ()
+             | Some _ -> Error "A provided question cannot have a generation failure")
       in
       match sample.progress with
       | Scored { judgment; _ } ->

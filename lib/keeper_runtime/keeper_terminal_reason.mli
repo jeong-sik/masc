@@ -79,6 +79,11 @@ type t =
       {!Keeper_internal_error.incomplete_tool_transcript_kind}. Provider
       dispatch did not occur; automatic retry is forbidden until an operator
       resets the corrupted checkpoint. *)
+  | Official_client_recovery_required of string
+  (** Exact canonical wire
+      {!Keeper_internal_error.official_client_recovery_required_kind}. The
+      durable official-client session refused a local claim before provider
+      dispatch and remains held until an operator resolves its recovery. *)
   | Provider_attempt_effect_fenced of string
   (** Exact canonical wire
       {!Keeper_internal_error.provider_attempt_effect_fenced_kind}. A provider

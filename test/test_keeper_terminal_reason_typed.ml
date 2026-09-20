@@ -90,6 +90,7 @@ let roundtrip_corpus =
     "runtime_exhausted"
   ; Keeper_internal_error.capacity_backpressure_kind
   ; Keeper_internal_error.incomplete_tool_transcript_kind
+  ; Keeper_internal_error.official_client_recovery_required_kind
   ; Keeper_internal_error.provider_attempt_effect_fenced_kind
   ; Keeper_internal_error.tool_correction_lost_kind
     (* The rest of what [kind_of_masc_internal_error] emits. The corpus used
@@ -202,6 +203,12 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
   then R.Disp_unknown, R.Reason_transcript_corruption
+  else if
+    String.equal
+      terminal_reason
+      Keeper_internal_error.official_client_recovery_required_kind
+  then
+    R.Disp_operator_action_required, R.Reason_official_client_recovery_required
   else if
     String.equal
       terminal_reason
@@ -348,6 +355,35 @@ let () =
   check
     "transcript corruption emits operator broadcast"
     (R.needs_operator_broadcast (fst transcript_corruption));
+  let official_client_recovery =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code =
+          Keeper_internal_error.official_client_recovery_required_kind
+      ; runtime_outcome = R.Runtime_not_dispatched
+      }
+  in
+  check
+    "official-client recovery requires operator action without a runtime claim"
+    (official_client_recovery
+     = ( R.Disp_operator_action_required
+       , R.Reason_official_client_recovery_required ));
+  check
+    "official-client recovery emits an operator broadcast"
+    (R.needs_operator_broadcast (fst official_client_recovery));
+  check
+    "official-client recovery reason keeps the canonical producer wire"
+    (String.equal
+       (R.operator_disposition_reason_to_string (snd official_client_recovery))
+       Keeper_internal_error.official_client_recovery_required_kind);
+  check
+    "official-client recovery wire decodes to its closed terminal variant"
+    (match
+       Tr.of_wire Keeper_internal_error.official_client_recovery_required_kind
+     with
+     | Tr.Official_client_recovery_required wire ->
+       String.equal wire Keeper_internal_error.official_client_recovery_required_kind
+     | _ -> false);
   let fenced_error =
     Keeper_internal_error.Provider_attempt_effect_fenced
       { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"

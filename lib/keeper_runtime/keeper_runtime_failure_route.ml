@@ -28,6 +28,7 @@ type fence_disposition =
 type terminal_class =
   | Deterministic_request
   | Context_overflow
+  | Session_claim_refused
   | Contract_violation
   | Protocol_error
   | Config_mismatch
@@ -144,8 +145,9 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   | Keeper_internal_error.Runtime_connection_closed _ ->
     observe_retry Server_error
   (* A local claim refuses the durable session before a provider attempt.
-     Keep the turn exhausted without implying a new attempted effect. *)
-  | Keeper_internal_error.Official_client_recovery_required _
+     Keep the turn exhausted without implying a response or attempted effect. *)
+  | Keeper_internal_error.Official_client_recovery_required _ ->
+    exhaust_failure Session_claim_refused
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
     exhaust_failure Contract_violation
   | Keeper_internal_error.Terminal_effect_failed
@@ -397,6 +399,7 @@ let rotate_class_label = function
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
   | Context_overflow -> "context_overflow"
+  | Session_claim_refused -> "session_claim_refused"
   | Contract_violation -> "contract_violation"
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
@@ -481,6 +484,9 @@ let response_observed = function
      (* invalid request or input capacity: refused before any generation. *)
      | Context_overflow
      (* the request did not fit the window: no generation. *)
+     | Session_claim_refused
+     (* the durable local session claim was refused before dispatch; the
+        model did not see the turn input or its replay evidence. *)
      | Protocol_error
      (* an MCP protocol failure; whether an answer arrived is not on the
         route. *)
@@ -565,6 +571,7 @@ let route_resumes_on_same_path = function
     (match terminal with
      | Deterministic_request
      | Context_overflow
+     | Session_claim_refused
      | Contract_violation
      | Protocol_error
      | Config_mismatch

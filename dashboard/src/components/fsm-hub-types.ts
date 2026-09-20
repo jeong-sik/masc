@@ -366,6 +366,7 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
   transcript_corruption: '도구 호출 기록이 끊김 - 재기동 때 자동 복구',
+  official_client_recovery_required: '공식 클라이언트 세션 복구 필요',
   provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
   // tool_correction_lost has been a backend reason since #29038 and was
   // missing here, so the table fell back to printing the raw wire string.

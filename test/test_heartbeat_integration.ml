@@ -581,7 +581,9 @@ let test_fresh_presence_preserves_turn_failures () =
         }
       in
       let meta = make_meta "fresh-presence-turn-failure" in
-      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
+      let registry_entry =
+        R.For_testing.register ~base_path:config.base_path meta.name meta
+      in
       R.increment_turn_failures ~base_path:config.base_path meta.name;
       ignore
         (R.dispatch_event
@@ -594,6 +596,7 @@ let test_fresh_presence_preserves_turn_failures () =
       ignore
         (Masc.Keeper_heartbeat_loop.sync_keeper_presence
            ~ctx
+           ~registry_entry
            ~meta_current:meta
            ~consecutive_failures:(ref 0));
       check int
@@ -627,7 +630,7 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
-      let recover meta failures =
+      let recover registry_entry meta failures =
         R.set_failure_reason
           ~base_path
           meta.Keeper_meta_contract.name
@@ -640,12 +643,15 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
         ignore
           (Masc.Keeper_heartbeat_loop.sync_keeper_presence
              ~ctx
+             ~registry_entry
              ~meta_current:meta
              ~consecutive_failures:(ref failures))
       in
       let heartbeat_only = make_meta "heartbeat-only-recovery" in
-      ignore (R.For_testing.register ~base_path heartbeat_only.name heartbeat_only);
-      recover heartbeat_only 2;
+      let heartbeat_only_entry =
+        R.For_testing.register ~base_path heartbeat_only.name heartbeat_only
+      in
+      recover heartbeat_only_entry heartbeat_only 2;
       let heartbeat_only_reason =
         Option.bind (R.get ~base_path heartbeat_only.name) (fun entry ->
           entry.R.last_failure_reason)
@@ -653,29 +659,80 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
       check bool "healthy heartbeat clears its stale reason" true
         (Option.is_none heartbeat_only_reason);
       let with_turn_debt = make_meta "heartbeat-with-turn-debt" in
-      ignore (R.For_testing.register ~base_path with_turn_debt.name with_turn_debt);
+      let with_turn_debt_entry =
+        R.For_testing.register ~base_path with_turn_debt.name with_turn_debt
+      in
       ignore
         (Masc.Keeper_turn_failure_streak.increment
            ~base_path
            ~keeper_name:with_turn_debt.name);
-      recover with_turn_debt 3;
+      recover with_turn_debt_entry with_turn_debt 3;
       Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
-        ~base_path
-        ~keeper_name:with_turn_debt.name
+        ~registry_entry:with_turn_debt_entry
         ~turn_fail_count:(R.get_turn_failures ~base_path with_turn_debt.name);
+      (match
+         Option.bind (R.get ~base_path with_turn_debt.name) (fun entry ->
+           entry.R.last_failure_reason)
+       with
+       | Some (R.Turn_consecutive_failures 1 as reason) ->
+         (match Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+          | Some surface -> check string "public blocker follows remaining turn debt"
+              "turn_failures" surface.blocker_class
+          | None -> fail "remaining turn debt has no public blocker")
+       | Some reason ->
+         failf "heartbeat recovery left the wrong reason: %s"
+           (R.failure_reason_to_string reason)
+      | None -> fail "heartbeat recovery cleared remaining turn debt");
+      let raced = make_meta "heartbeat-recovery-race" in
+      let raced_entry = R.For_testing.register ~base_path raced.name raced in
+      R.set_failure_reason ~base_path raced.name (Some (R.Heartbeat_consecutive_failures 2));
+      check bool "heartbeat observation is replaced" true
+        (R.replace_heartbeat_failure_reason
+           raced_entry
+           (Some (R.Turn_consecutive_failures 1)));
+      R.set_failure_reason ~base_path raced.name (Some (R.Exception "newer failure"));
+      check bool "newer cause rejects stale heartbeat recovery" false
+        (R.replace_heartbeat_failure_reason raced_entry None);
+      (match Option.bind (R.get ~base_path raced.name) (fun entry -> entry.R.last_failure_reason) with
+      | Some (R.Exception "newer failure") -> ()
+      | Some reason ->
+        failf "heartbeat recovery overwrote the newer reason: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "heartbeat recovery cleared the newer reason");
+      R.For_testing.unregister ~base_path raced.name;
+      let _replacement_entry = R.For_testing.register ~base_path raced.name raced in
+      R.set_failure_reason
+        ~base_path
+        raced.name
+        (Some (R.Heartbeat_consecutive_failures 7));
+      check bool "old lane cannot clear replacement heartbeat" false
+        (R.replace_heartbeat_failure_reason raced_entry None);
+      (match Option.bind (R.get ~base_path raced.name) (fun entry -> entry.R.last_failure_reason) with
+      | Some (R.Heartbeat_consecutive_failures 7) -> ()
+      | Some reason ->
+        failf "old lane changed replacement reason: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "old lane cleared replacement heartbeat reason");
+      let stale_turn = make_meta "post-turn-reason-race" in
+      let stale_turn_entry =
+        R.For_testing.register ~base_path stale_turn.name stale_turn
+      in
+      R.set_failure_reason
+        ~base_path
+        stale_turn.name
+        (Some (R.Exception "newer turn failure"));
+      Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+        ~registry_entry:stale_turn_entry
+        ~turn_fail_count:4;
       match
-        Option.bind (R.get ~base_path with_turn_debt.name) (fun entry ->
+        Option.bind (R.get ~base_path stale_turn.name) (fun entry ->
           entry.R.last_failure_reason)
       with
-      | Some (R.Turn_consecutive_failures 1 as reason) ->
-        (match Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
-         | Some surface -> check string "public blocker follows remaining turn debt"
-             "turn_failures" surface.blocker_class
-         | None -> fail "remaining turn debt has no public blocker")
+      | Some (R.Exception "newer turn failure") -> ()
       | Some reason ->
-        failf "heartbeat recovery left the wrong reason: %s"
+        failf "stale post-turn refresh overwrote the newer reason: %s"
           (R.failure_reason_to_string reason)
-      | None -> fail "heartbeat recovery cleared remaining turn debt")
+      | None -> fail "stale post-turn refresh cleared the newer reason")
 
 let test_turn_failure_streak_survives_registry_restart () =
   Eio_main.run @@ fun env ->

@@ -524,15 +524,25 @@ let failure_reason_after_turn_status ~turn_fail_count current =
         | Keeper_registry.Operator_interrupt ) -> current
 ;;
 
-let refresh_failure_reason_after_turn ~base_path ~keeper_name ~turn_fail_count =
+let refresh_failure_reason_after_turn ~registry_entry ~turn_fail_count =
   if turn_fail_count > 0
   then (
-    let current =
-      Option.bind (Keeper_registry.get ~base_path keeper_name) (fun entry ->
-        entry.last_failure_reason)
+    let result =
+      Keeper_registry.update_entry_exact registry_entry (fun latest ->
+        { latest with
+          last_failure_reason =
+            failure_reason_after_turn_status
+              ~turn_fail_count
+              latest.last_failure_reason
+        })
     in
-    Keeper_registry.set_failure_reason ~base_path keeper_name
-      (failure_reason_after_turn_status ~turn_fail_count current))
+    let _committed =
+      Keeper_registry.exact_update_succeeded
+        registry_entry
+        ~site:"post_turn_failure_reason_refresh"
+        result
+    in
+    ())
 ;;
 
 (* Whether the event queue still holds any pending entry. Read errors are
@@ -1170,6 +1180,7 @@ let record_keepalive_stage_timing = Keeper_heartbeat_loop_snapshot_timing.record
 
 let run_heartbeat_loop
       ~proactive_warmup_sec
+      ~(registry_entry : Keeper_registry.registry_entry)
       (ctx : _ context)
       (m : keeper_meta)
       (stop : bool Atomic.t)
@@ -1265,6 +1276,7 @@ let run_heartbeat_loop
         let meta_current =
           sync_keeper_presence
             ~ctx
+            ~registry_entry
             ~meta_current
             ~consecutive_failures
         in
@@ -1453,8 +1465,7 @@ let run_heartbeat_loop
                (turn_status_event
                   ~turn_fail_count);
              refresh_failure_reason_after_turn
-               ~base_path:ctx.config.base_path
-               ~keeper_name:m.name
+               ~registry_entry
                ~turn_fail_count;
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.

@@ -12,6 +12,7 @@ val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
 
 val sync_keeper_presence :
   ctx:'a context ->
+  registry_entry:Keeper_registry.registry_entry ->
   meta_current:keeper_meta ->
   consecutive_failures:int ref ->
   keeper_meta
@@ -233,8 +234,10 @@ val failure_reason_after_turn_status :
     when a new failure occurs. *)
 
 val refresh_failure_reason_after_turn :
-  base_path:string -> keeper_name:string -> turn_fail_count:int -> unit
+  registry_entry:Keeper_registry.registry_entry -> turn_fail_count:int -> unit
 (** Refresh the registry cause after the loop dispatches turn status.
+    The exact originating lane is updated from its latest immutable entry, so
+    a concurrent cause is preserved and a same-name replacement is untouched.
     A nonpositive turn-failure count does not write a reason. *)
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
@@ -297,7 +300,8 @@ val record_keepalive_stage_timing :
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
+  proactive_warmup_sec:int -> registry_entry:Keeper_registry.registry_entry ->
+  'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig

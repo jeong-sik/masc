@@ -13,19 +13,30 @@ import math
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Sequence
 
 
 SCHEMA_VERSION = "masc.tool-call-sequence-miner/v1"
 VALID_RECORD_KINDS = {"tool_call", "composition_run"}
+VALID_DISPOSITIONS = {"completed", "deferred", "failed"}
+VALID_EXECUTION_MODES = {"serial", "concurrent"}
 
 
 class RowError(ValueError):
     """One JSONL row cannot be interpreted without guessing."""
 
 
-@dataclass(frozen=True)
+class CallOutcome(Enum):
+    COMPLETED = "completed"
+    DEFERRED = "deferred"
+    FAILED = "failed"
+    LEGACY_UNKNOWN = "legacy_unknown"
+    CONFLICT = "disposition_success_conflict"
+
+
+@dataclass(frozen=True, slots=True)
 class Source:
     file: str
     line: int
@@ -34,13 +45,14 @@ class Source:
         return {"file": self.file, "line": self.line}
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Call:
     source: Source
     ts: int | float
     keeper: str
     tool: str
     success: bool
+    outcome: CallOutcome
     trace_id: str | None
     keeper_turn_id: int | None
     execution_id: str | None
@@ -49,6 +61,8 @@ class Call:
     batch_index: int | None
     batch_size: int | None
     execution_mode: str | None
+    turn: int | None
+    ambiguous_concurrent: bool
     descriptor_id: str | None
     runtime_profile: str | None
     result_bytes: int | None
@@ -74,17 +88,32 @@ class Call:
             "descriptor_id": self.descriptor_id,
             "runtime_profile": self.runtime_profile,
             "success": self.success,
+            "outcome": self.outcome.value,
             "result_bytes": self.result_bytes,
             "coverage_gaps": list(self.gaps),
+            "turn": self.turn,
         }
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
+class CompactCall:
+    ts: int | float
+    source_file: str
+    source_line: int
+    tool: str
+    outcome: CallOutcome
+    ambiguous_concurrent: bool
+
+
+@dataclass(slots=True)
 class NgramAggregate:
     occurrence_count: int = 0
-    failure_count: int = 0
+    outcome_counts: Counter[CallOutcome] = field(default_factory=Counter)
     keepers: set[str] = field(default_factory=set)
     occurrences: list[tuple[tuple[str, str, int], tuple[Call, ...]]] | None = None
+
+
+LoadedCall = Call | CompactCall
 
 
 def _required_string(row: dict[str, Any], name: str) -> str:
@@ -110,6 +139,60 @@ def _optional_nonnegative_int(row: dict[str, Any], name: str) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise RowError(f"{name} must be a non-negative integer when present")
     return value
+
+
+def _execution_schedule(
+    row: dict[str, Any], gaps: set[str]
+) -> tuple[int | None, int | None, int | None, int | None, str | None, bool]:
+    names = ("turn", "planned_index", "batch_index", "batch_size", "execution_mode")
+    present = tuple(name in row and row[name] is not None for name in names)
+    if not any(present):
+        gaps.add("missing_execution_schedule")
+        return None, None, None, None, None, False
+    if not all(present):
+        raise RowError("execution schedule fields must be all present or all absent")
+
+    turn = _optional_nonnegative_int(row, "turn")
+    planned_index = _optional_nonnegative_int(row, "planned_index")
+    batch_index = _optional_nonnegative_int(row, "batch_index")
+    batch_size = _optional_nonnegative_int(row, "batch_size")
+    execution_mode = _optional_string(row, "execution_mode")
+    assert turn is not None
+    assert planned_index is not None
+    assert batch_index is not None
+    assert batch_size is not None
+    assert execution_mode is not None
+    if batch_size == 0:
+        raise RowError("batch_size must be positive")
+    if execution_mode not in VALID_EXECUTION_MODES:
+        raise RowError("execution_mode must be serial or concurrent")
+    return (
+        turn,
+        planned_index,
+        batch_index,
+        batch_size,
+        execution_mode,
+        execution_mode == "concurrent" and batch_size > 1,
+    )
+
+
+def _call_outcome(row: dict[str, Any], success: bool, gaps: set[str]) -> CallOutcome:
+    if "disposition" not in row:
+        gaps.add("missing_disposition")
+        return CallOutcome.LEGACY_UNKNOWN
+    disposition = row["disposition"]
+    if not isinstance(disposition, str) or disposition not in VALID_DISPOSITIONS:
+        raise RowError("disposition must be completed, deferred, or failed")
+    if (disposition == "completed" and not success) or (
+        disposition == "failed" and success
+    ):
+        gaps.add("disposition_success_conflict")
+        return CallOutcome.CONFLICT
+    if disposition == "completed":
+        return CallOutcome.COMPLETED
+    if disposition == "deferred":
+        return CallOutcome.DEFERRED
+    return CallOutcome.FAILED
 
 
 def _runtime_identity(
@@ -218,6 +301,7 @@ def _call_from_row(row: dict[str, Any], source: Source) -> Call | None:
         raise RowError("output is required")
 
     gaps: set[str] = set()
+    outcome = _call_outcome(row, success, gaps)
     input_value = row["input"]
     if _contains_truncation_marker(input_value):
         gaps.add("truncated_input")
@@ -259,20 +343,31 @@ def _call_from_row(row: dict[str, Any], source: Source) -> Call | None:
         gaps.add("missing_tool_use_id")
 
     descriptor_id = _descriptor(row, gaps)
+    (
+        turn,
+        planned_index,
+        batch_index,
+        batch_size,
+        execution_mode,
+        ambiguous_concurrent,
+    ) = _execution_schedule(row, gaps)
     return Call(
         source=source,
         ts=ts,
         keeper=keeper,
         tool=tool,
         success=success,
+        outcome=outcome,
         trace_id=trace_id,
         keeper_turn_id=keeper_turn_id,
         execution_id=execution_id,
         tool_use_id=tool_use_id,
-        planned_index=_optional_nonnegative_int(row, "planned_index"),
-        batch_index=_optional_nonnegative_int(row, "batch_index"),
-        batch_size=_optional_nonnegative_int(row, "batch_size"),
-        execution_mode=_optional_string(row, "execution_mode"),
+        planned_index=planned_index,
+        batch_index=batch_index,
+        batch_size=batch_size,
+        execution_mode=execution_mode,
+        turn=turn,
+        ambiguous_concurrent=ambiguous_concurrent,
         descriptor_id=descriptor_id,
         runtime_profile=_optional_string(row, "runtime_profile"),
         result_bytes=result_bytes,
@@ -296,27 +391,49 @@ def _load_json(line: str) -> dict[str, Any]:
 
 
 def _ngram_report(
-    turns: dict[tuple[str, str, int], list[Call]],
+    turns: dict[tuple[str, str, int], list[LoadedCall]],
     size: int,
     *,
-    include_evidence: bool,
+    evidence_sequences: frozenset[tuple[str, ...]],
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, ...], NgramAggregate] = {}
     for turn_key in sorted(turns):
-        calls = turns[turn_key]
-        for start in range(0, len(calls) - size + 1):
-            occurrence = tuple(calls[start : start + size])
+        directed_segment: list[LoadedCall] = []
+        for call in turns[turn_key]:
+            if call.ambiguous_concurrent or call.outcome is CallOutcome.CONFLICT:
+                directed_segment.clear()
+                continue
+            directed_segment.append(call)
+            if len(directed_segment) < size:
+                continue
+            occurrence = tuple(directed_segment[-size:])
             tools = tuple(call.tool for call in occurrence)
             aggregate = grouped.get(tools)
             if aggregate is None:
-                aggregate = NgramAggregate(occurrences=[] if include_evidence else None)
+                aggregate = NgramAggregate(
+                    occurrences=[] if tools in evidence_sequences else None
+                )
                 grouped[tools] = aggregate
             aggregate.occurrence_count += 1
             aggregate.keepers.add(turn_key[0])
-            if any(not call.success for call in occurrence):
-                aggregate.failure_count += 1
+            outcomes = {call.outcome for call in occurrence}
+            if CallOutcome.FAILED in outcomes:
+                aggregate.outcome_counts[CallOutcome.FAILED] += 1
+            elif CallOutcome.DEFERRED in outcomes:
+                aggregate.outcome_counts[CallOutcome.DEFERRED] += 1
+            elif CallOutcome.LEGACY_UNKNOWN in outcomes:
+                aggregate.outcome_counts[CallOutcome.LEGACY_UNKNOWN] += 1
+            else:
+                aggregate.outcome_counts[CallOutcome.COMPLETED] += 1
             if aggregate.occurrences is not None:
-                aggregate.occurrences.append((turn_key, occurrence))
+                full_occurrence = tuple(
+                    call for call in occurrence if isinstance(call, Call)
+                )
+                if len(full_occurrence) != len(occurrence):
+                    raise AssertionError(
+                        "evidence report requires full call identities"
+                    )
+                aggregate.occurrences.append((turn_key, full_occurrence))
 
     report = []
     for tools in sorted(grouped):
@@ -326,10 +443,14 @@ def _ngram_report(
             "occurrence_count": aggregate.occurrence_count,
             "keeper_count": len(aggregate.keepers),
             "keepers": sorted(aggregate.keepers),
-            "successful_occurrence_count": (
-                aggregate.occurrence_count - aggregate.failure_count
-            ),
-            "failed_occurrence_count": aggregate.failure_count,
+            "completed_occurrence_count": aggregate.outcome_counts[
+                CallOutcome.COMPLETED
+            ],
+            "deferred_occurrence_count": aggregate.outcome_counts[CallOutcome.DEFERRED],
+            "failed_occurrence_count": aggregate.outcome_counts[CallOutcome.FAILED],
+            "legacy_unknown_occurrence_count": aggregate.outcome_counts[
+                CallOutcome.LEGACY_UNKNOWN
+            ],
         }
         if aggregate.occurrences is not None:
             item["occurrences"] = [
@@ -347,93 +468,113 @@ def _ngram_report(
     return report
 
 
-def analyze(tool_calls_dir: Path, *, include_evidence: bool = False) -> dict[str, Any]:
+def analyze(
+    tool_calls_dir: Path,
+    *,
+    evidence_sequences: frozenset[tuple[str, ...]] = frozenset(),
+) -> dict[str, Any]:
     root = tool_calls_dir.resolve()
     if not root.is_dir():
         raise RowError(f"tool calls directory does not exist: {root}")
     files = sorted(path for path in root.rglob("*.jsonl") if path.is_file())
+    for sequence in evidence_sequences:
+        if len(sequence) not in {2, 3} or any(not tool for tool in sequence):
+            raise RowError("evidence sequences must contain two or three tool names")
+    evidence_tools = {tool for sequence in evidence_sequences for tool in sequence}
 
-    calls: list[Call] = []
+    turns: dict[tuple[str, str, int], list[LoadedCall]] = defaultdict(list)
     rows_read = 0
+    selected_tool_calls = 0
+    grouped_tool_calls = 0
+    ungrouped_count = 0
     ignored_non_tool_records = 0
     excluded_composition_nodes = 0
     excluded_pre_schema_rows = 0
-    pre_schema_rows: list[dict[str, Any]] | None = [] if include_evidence else None
-    diagnostics: list[str] = []
+    excluded_ambiguous_concurrent_calls = 0
+    excluded_conflicting_calls = 0
+    ambiguous_concurrent_groups: set[tuple[tuple[str, str, int], int, int]] = set()
+    gap_counts: Counter[str] = Counter()
+    outcome_counts: Counter[CallOutcome] = Counter()
+    schema_seen = False
     for path in files:
         relative = path.relative_to(root).as_posix()
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            handle = path.open("r", encoding="utf-8")
         except (OSError, UnicodeError) as exc:
-            diagnostics.append(f"{relative}: cannot read UTF-8 JSONL: {exc}")
-            continue
-        for line_number, line in enumerate(lines, start=1):
-            rows_read += 1
-            source = Source(relative, line_number)
-            try:
-                row = _load_json(line)
-                kind = row.get("record_kind")
-                if kind is None:
-                    excluded_pre_schema_rows += 1
-                    if pre_schema_rows is not None:
-                        pre_schema_rows.append({"source": source.json()})
-                    continue
-                has_composition_run_id = "composition_run_id" in row
-                call = _call_from_row(row, source)
-                if call is None:
-                    if kind == "tool_call" and has_composition_run_id:
-                        excluded_composition_nodes += 1
-                    else:
-                        ignored_non_tool_records += 1
-                else:
-                    calls.append(call)
-            except RowError as exc:
-                diagnostics.append(f"{relative}:{line_number}: {exc}")
-    if diagnostics:
-        raise RowError("\n".join(diagnostics))
+            raise RowError(f"{relative}: cannot read UTF-8 JSONL: {exc}") from exc
+        try:
+            with handle:
+                for line_number, line in enumerate(handle, start=1):
+                    rows_read += 1
+                    source = Source(relative, line_number)
+                    try:
+                        row = _load_json(line)
+                        if "record_kind" not in row:
+                            if schema_seen:
+                                raise RowError(
+                                    "record_kind is missing after the schema boundary"
+                                )
+                            excluded_pre_schema_rows += 1
+                            gap_counts["pre_schema_missing_record_kind"] += 1
+                            continue
+                        schema_seen = True
+                        kind = row["record_kind"]
+                        has_composition_run_id = "composition_run_id" in row
+                        call = _call_from_row(row, source)
+                        if call is None:
+                            if kind == "tool_call" and has_composition_run_id:
+                                excluded_composition_nodes += 1
+                            else:
+                                ignored_non_tool_records += 1
+                            continue
 
-    turns: dict[tuple[str, str, int], list[Call]] = defaultdict(list)
-    ungrouped_count = 0
-    ungrouped: list[dict[str, Any]] | None = [] if include_evidence else None
-    for call in calls:
-        turn_key = call.turn_key
-        if turn_key is None:
-            ungrouped_count += 1
-            if ungrouped is not None:
-                ungrouped.append(
-                    {
-                        "source": call.source.json(),
-                        "keeper": call.keeper,
-                        "tool": call.tool,
-                        "execution_id": call.execution_id,
-                        "tool_use_id": call.tool_use_id,
-                        "coverage_gaps": list(call.gaps),
-                    }
-                )
-        else:
-            turns[turn_key].append(call)
+                        selected_tool_calls += 1
+                        gap_counts.update(call.gaps)
+                        outcome_counts[call.outcome] += 1
+
+                        turn_key = call.turn_key
+                        if turn_key is None:
+                            ungrouped_count += 1
+                            continue
+
+                        grouped_tool_calls += 1
+                        if call.ambiguous_concurrent:
+                            excluded_ambiguous_concurrent_calls += 1
+                            assert call.turn is not None
+                            assert call.batch_index is not None
+                            ambiguous_concurrent_groups.add(
+                                (turn_key, call.turn, call.batch_index)
+                            )
+                        if call.outcome is CallOutcome.CONFLICT:
+                            excluded_conflicting_calls += 1
+                        if call.tool in evidence_tools:
+                            turns[turn_key].append(call)
+                        else:
+                            turns[turn_key].append(
+                                CompactCall(
+                                    ts=call.ts,
+                                    source_file=call.source.file,
+                                    source_line=call.source.line,
+                                    tool=call.tool,
+                                    outcome=call.outcome,
+                                    ambiguous_concurrent=call.ambiguous_concurrent,
+                                )
+                            )
+                    except RowError as exc:
+                        raise RowError(f"{relative}:{line_number}: {exc}") from exc
+        except UnicodeError as exc:
+            raise RowError(f"{relative}: cannot read UTF-8 JSONL: {exc}") from exc
 
     for turn_calls in turns.values():
-        turn_calls.sort(key=lambda call: (call.ts, call.source.file, call.source.line))
-
-    gap_counts = Counter(gap for call in calls for gap in call.gaps)
-    gap_counts["pre_schema_missing_record_kind"] += excluded_pre_schema_rows
-    coverage_rows = None
-    if include_evidence:
-        coverage_rows = [
-            {
-                "source": call.source.json(),
-                "keeper": call.keeper,
-                "tool": call.tool,
-                "execution_id": call.execution_id,
-                "tool_use_id": call.tool_use_id,
-                "gaps": list(call.gaps),
-            }
-            for call in calls
-            if call.gaps
-        ]
-    pairs = _ngram_report(turns, 2, include_evidence=include_evidence)
-    triplets = _ngram_report(turns, 3, include_evidence=include_evidence)
+        turn_calls.sort(
+            key=lambda call: (
+                call.ts,
+                call.source.file if isinstance(call, Call) else call.source_file,
+                call.source.line if isinstance(call, Call) else call.source_line,
+            )
+        )
+    pairs = _ngram_report(turns, 2, evidence_sequences=evidence_sequences)
+    triplets = _ngram_report(turns, 3, evidence_sequences=evidence_sequences)
     report = {
         "schema": SCHEMA_VERSION,
         "source": {
@@ -445,45 +586,46 @@ def analyze(tool_calls_dir: Path, *, include_evidence: bool = False) -> dict[str
         "summary": {
             "files_read": len(files),
             "rows_read": rows_read,
-            "selected_tool_calls": len(calls),
+            "selected_tool_calls": selected_tool_calls,
             "excluded_composition_nodes": excluded_composition_nodes,
             "excluded_pre_schema_rows": excluded_pre_schema_rows,
             "ignored_non_tool_records": ignored_non_tool_records,
-            "grouped_tool_calls": sum(len(value) for value in turns.values()),
+            "grouped_tool_calls": grouped_tool_calls,
             "ungrouped_tool_calls": ungrouped_count,
+            "excluded_ambiguous_concurrent_calls": excluded_ambiguous_concurrent_calls,
+            "ambiguous_concurrent_groups": len(ambiguous_concurrent_groups),
+            "excluded_conflicting_calls": excluded_conflicting_calls,
             "turns": len(turns),
             "pair_occurrences": sum(item["occurrence_count"] for item in pairs),
             "triplet_occurrences": sum(item["occurrence_count"] for item in triplets),
             "coverage_gap_counts": dict(sorted(gap_counts.items())),
+            "call_outcome_counts": {
+                outcome.value: outcome_counts[outcome] for outcome in CallOutcome
+            },
         },
         "evidence": {
-            "included": include_evidence,
-            "request_flag": "--include-evidence",
-            "omitted": (
-                []
-                if include_evidence
-                else [
-                    "coverage_gaps",
-                    "ungrouped_calls",
-                    "pre_schema_rows",
-                    "pairs[].occurrences",
-                    "triplets[].occurrences",
-                ]
-            ),
+            "included": bool(evidence_sequences),
+            "request_flag": "--evidence-sequence TOOL,TOOL[,TOOL]",
+            "target_sequences": [
+                list(sequence) for sequence in sorted(evidence_sequences)
+            ],
+            "omitted": [
+                "row-level coverage gaps",
+                "ungrouped call identities",
+                "pre-schema row identities",
+                "occurrences for sequences not explicitly requested",
+            ],
         },
         "pairs": pairs,
         "triplets": triplets,
         "limits": [
             "No frequency threshold or candidate verdict is inferred.",
+            "Calls in multi-call concurrent batches and disposition/success conflicts are barriers, not directed sequence edges.",
             "No JSON Pointer data-flow mapping is inferred from truncated, blob-only, opaque, or descriptor-less evidence.",
             "Lane-specific inline size eligibility is not inferred because tool-call rows do not carry the typed runtime execution owner.",
             "Skill visibility, N_u adoption, dry-run safety, and Skill publication are outside this read-only report.",
         ],
     }
-    if include_evidence:
-        report["coverage_gaps"] = coverage_rows
-        report["ungrouped_calls"] = ungrouped
-        report["pre_schema_rows"] = pre_schema_rows
     return report
 
 
@@ -501,11 +643,25 @@ def _parser() -> argparse.ArgumentParser:
         "--tool-calls-dir", type=Path, help="explicit tool_calls directory"
     )
     parser.add_argument(
-        "--include-evidence",
-        action="store_true",
-        help="include every occurrence and row identity; omitted by default",
+        "--evidence-sequence",
+        action="append",
+        default=[],
+        metavar="TOOL,TOOL[,TOOL]",
+        help="include exact occurrence identities for one pair or triplet; repeatable",
     )
     return parser
+
+
+def _parse_evidence_sequences(values: Sequence[str]) -> frozenset[tuple[str, ...]]:
+    sequences: set[tuple[str, ...]] = set()
+    for value in values:
+        sequence = tuple(tool.strip() for tool in value.split(","))
+        if len(sequence) not in {2, 3} or any(not tool for tool in sequence):
+            raise RowError(
+                "--evidence-sequence must contain two or three comma-separated tool names"
+            )
+        sequences.add(sequence)
+    return frozenset(sequences)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -516,7 +672,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else args.base_path / ".masc" / "tool_calls"
     )
     try:
-        report = analyze(tool_calls_dir, include_evidence=args.include_evidence)
+        evidence_sequences = _parse_evidence_sequences(args.evidence_sequence)
+        report = analyze(tool_calls_dir, evidence_sequences=evidence_sequences)
     except RowError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

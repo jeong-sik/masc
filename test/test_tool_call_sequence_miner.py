@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Sequence
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,8 @@ def fixture_call(
     turn_id: int | None = 7,
     suffix: str = "",
     success: bool = True,
+    disposition: str | None = None,
+    turn: int = 1,
 ) -> dict[str, Any]:
     runtime_contract: dict[str, Any] = {"keeper_name": keeper}
     if trace_id is not None:
@@ -44,6 +47,7 @@ def fixture_call(
         "input": {},
         "output": "{}",
         "success": success,
+        "disposition": disposition or ("completed" if success else "failed"),
         "runtime_contract": runtime_contract,
         "route_evidence": {
             "descriptor_id": f"descriptor.{tool}",
@@ -52,6 +56,7 @@ def fixture_call(
         "execution_id": f"exec-{tool}{suffix}",
         "tool_use_id": f"use-{tool}{suffix}",
         "planned_index": 0,
+        "turn": turn,
         "batch_index": 0,
         "batch_size": 1,
         "execution_mode": "serial",
@@ -83,29 +88,29 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
                 "ts": 16.0,
             }
             pre_schema = {"tool": "legacy", "ts": 5.0}
-            null_schema = {"record_kind": None, "tool": "legacy-null", "ts": 6.0}
             write_rows(
                 root / "2026-09" / "01.jsonl",
-                [first, second, tie_a, pre_schema],
+                [pre_schema, first, second, tie_a],
             )
             write_rows(
                 root / "2026-09" / "02.jsonl",
-                [tie_b, composition_node, aggregate, null_schema],
+                [tie_b, composition_node, aggregate],
             )
 
-            report = MINER.analyze(root, include_evidence=True)
+            report = MINER.analyze(
+                root, evidence_sequences=frozenset({("tie-a", "tie-b")})
+            )
 
             self.assertEqual(report["summary"]["selected_tool_calls"], 4)
             self.assertEqual(report["summary"]["excluded_composition_nodes"], 1)
-            self.assertEqual(report["summary"]["excluded_pre_schema_rows"], 2)
+            self.assertEqual(report["summary"]["excluded_pre_schema_rows"], 1)
             self.assertEqual(
                 report["summary"]["coverage_gap_counts"][
                     "pre_schema_missing_record_kind"
                 ],
-                2,
+                1,
             )
             self.assertEqual(report["summary"]["ignored_non_tool_records"], 1)
-            self.assertEqual(len(report["pre_schema_rows"]), 2)
             pairs = {tuple(item["tools"]): item for item in report["pairs"]}
             self.assertEqual(
                 set(pairs),
@@ -153,10 +158,10 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertEqual(sequence["occurrence_count"], 2)
             self.assertEqual(sequence["keeper_count"], 2)
             self.assertEqual(sequence["failed_occurrence_count"], 1)
+            self.assertEqual(sequence["completed_occurrence_count"], 1)
             self.assertEqual(sequence["keepers"], ["keeper-a", "keeper-b"])
             self.assertNotIn("occurrences", sequence)
             self.assertFalse(report["evidence"]["included"])
-            self.assertIn("pairs[].occurrences", report["evidence"]["omitted"])
             self.assertNotIn("coverage_gaps", report)
             self.assertNotIn("ungrouped_calls", report)
 
@@ -180,7 +185,9 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             ungrouped = fixture_call("ungrouped", 3.0, trace_id=None)
             write_rows(root / "calls.jsonl", [truncated, blob, ungrouped])
 
-            report = MINER.analyze(root, include_evidence=True)
+            report = MINER.analyze(
+                root, evidence_sequences=frozenset({("truncated", "blob")})
+            )
             gaps = report["summary"]["coverage_gap_counts"]
 
             self.assertEqual(gaps["truncated_input"], 1)
@@ -191,10 +198,14 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertEqual(gaps["missing_execution_id"], 1)
             self.assertEqual(gaps["missing_runtime_identity"], 1)
             self.assertEqual(report["summary"]["ungrouped_tool_calls"], 1)
-            self.assertEqual(report["ungrouped_calls"][0]["tool"], "ungrouped")
             self.assertEqual(report["summary"]["pair_occurrences"], 1)
             self.assertTrue(report["evidence"]["included"])
-            self.assertEqual(report["evidence"]["omitted"], [])
+            pair = report["pairs"][0]
+            self.assertEqual(pair["tools"], ["truncated", "blob"])
+            self.assertEqual(
+                pair["occurrences"][0]["calls"][0]["execution_id"],
+                "exec-truncated",
+            )
 
     def test_cli_is_deterministic_and_base_path_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -221,7 +232,7 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertNotIn("coverage_gaps", compact)
 
             expanded = subprocess.run(
-                command + ["--include-evidence"],
+                command + ["--evidence-sequence", "one,two"],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -229,7 +240,6 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertEqual(expanded.returncode, 0, expanded.stderr)
             evidence = json.loads(expanded.stdout)
             self.assertIn("occurrences", evidence["pairs"][0])
-            self.assertIn("coverage_gaps", evidence)
             self.assertTrue(evidence["evidence"]["included"])
 
             help_result = subprocess.run(
@@ -238,7 +248,94 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            self.assertIn("--include-evidence", help_result.stdout)
+            self.assertIn("--evidence-sequence", help_result.stdout)
+
+    def test_streams_each_jsonl_file_instead_of_reading_it_whole(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_rows(
+                root / "calls.jsonl",
+                [fixture_call("one", 1.0), fixture_call("two", 2.0)],
+            )
+
+            with mock.patch.object(
+                Path,
+                "read_text",
+                side_effect=AssertionError("whole-file read is forbidden"),
+            ):
+                report = MINER.analyze(root)
+
+            self.assertEqual(report["summary"]["rows_read"], 2)
+            self.assertEqual(report["summary"]["pair_occurrences"], 1)
+
+    def test_reports_deferred_separately_from_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_rows(
+                root / "calls.jsonl",
+                [
+                    fixture_call("start", 1.0),
+                    fixture_call("wait", 2.0, disposition="deferred"),
+                ],
+            )
+
+            report = MINER.analyze(root)
+            pair = report["pairs"][0]
+
+            self.assertEqual(pair["completed_occurrence_count"], 0)
+            self.assertEqual(pair["deferred_occurrence_count"], 1)
+            self.assertEqual(pair["failed_occurrence_count"], 0)
+            self.assertEqual(report["summary"]["call_outcome_counts"]["deferred"], 1)
+
+    def test_conflicting_disposition_is_counted_and_breaks_adjacency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            conflict = fixture_call(
+                "conflict", 2.0, success=False, disposition="completed"
+            )
+            write_rows(
+                root / "calls.jsonl",
+                [fixture_call("before", 1.0), conflict, fixture_call("after", 3.0)],
+            )
+
+            report = MINER.analyze(root)
+
+            self.assertEqual(report["summary"]["excluded_conflicting_calls"], 1)
+            self.assertEqual(
+                report["summary"]["call_outcome_counts"][
+                    "disposition_success_conflict"
+                ],
+                1,
+            )
+            self.assertEqual(report["summary"]["pair_occurrences"], 0)
+
+    def test_multi_call_concurrent_batch_is_not_a_directed_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = fixture_call("planned-first", 2.0, turn=4)
+            first.update(
+                execution_mode="concurrent",
+                batch_size=2,
+                batch_index=0,
+                planned_index=0,
+            )
+            second = fixture_call("planned-second", 1.0, turn=4)
+            second.update(
+                execution_mode="concurrent",
+                batch_size=2,
+                batch_index=0,
+                planned_index=1,
+            )
+            later = fixture_call("later", 3.0, turn=5)
+            write_rows(root / "calls.jsonl", [first, second, later])
+
+            report = MINER.analyze(root)
+
+            self.assertEqual(
+                report["summary"]["excluded_ambiguous_concurrent_calls"], 2
+            )
+            self.assertEqual(report["summary"]["ambiguous_concurrent_groups"], 1)
+            self.assertEqual(report["summary"]["pair_occurrences"], 0)
 
     def test_malformed_row_fails_closed_with_source_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -274,6 +371,25 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             write_rows(root / "bad.jsonl", [{"record_kind": "future_kind"}])
 
             with self.assertRaisesRegex(MINER.RowError, "unknown record_kind"):
+                MINER.analyze(root)
+
+    def test_null_record_kind_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_rows(root / "bad.jsonl", [{"record_kind": None}])
+
+            with self.assertRaisesRegex(MINER.RowError, "record_kind must be a string"):
+                MINER.analyze(root)
+
+    def test_missing_record_kind_after_schema_boundary_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_rows(
+                root / "bad.jsonl",
+                [fixture_call("current", 1.0), {"tool": "late-legacy"}],
+            )
+
+            with self.assertRaisesRegex(MINER.RowError, "after the schema boundary"):
                 MINER.analyze(root)
 
 

@@ -355,14 +355,12 @@ let () =
     exit 2
   | Ok () ->
     let base_path =
-      match !base_path with
-      | Some dir ->
-        dir
-        |> Config_dir_resolver.absolute_path
-        |> Masc.Workspace.runtime_base_path_for_request
-      | None ->
-        Config_dir_resolver.base_path_or_cwd ()
-        |> Masc.Workspace.runtime_base_path_for
+      (match !base_path with
+       | Some dir ->
+         Masc.Workspace.Explicit (Config_dir_resolver.absolute_path dir)
+       | None ->
+         Masc.Workspace.Ambient (Config_dir_resolver.base_path_or_cwd ()))
+      |> Masc.Workspace.runtime_base_path
     in
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path

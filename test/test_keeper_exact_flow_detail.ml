@@ -29,6 +29,34 @@ let test_execution_cause_detail () =
     (Detail.execution_cause_detail (Exact_output.Ambiguous_output 2))
 ;;
 
+let test_bookkeeping_start_causes_keep_their_payloads () =
+  Alcotest.(check string)
+    "call id detail"
+    "call_id_generation_failed detail=\"random source unavailable\""
+    (Detail.attempt_start_error_detail
+       (Exact_output.Call_id_generation_failed "random source unavailable"));
+  let operation_id_failure =
+    Detail.measurement_start_error_detail
+      (Exact_output.Measurement_operation_id_generation_failed "operation id unavailable")
+  in
+  let missing_clock =
+    Detail.measurement_start_error_detail
+      Exact_output.Measurement_clock_required_for_timeout
+  in
+  Alcotest.(check string)
+    "operation id detail"
+    "operation_id_generation_failed detail=\"operation id unavailable\""
+    operation_id_failure;
+  Alcotest.(check string)
+    "clock requirement"
+    "measurement_clock_required_for_timeout"
+    missing_clock;
+  Alcotest.(check bool)
+    "measurement causes stay distinct"
+    false
+    (String.equal operation_id_failure missing_clock)
+;;
+
 let test_raw_response_excerpt_none () =
   Alcotest.(check string)
     "none"
@@ -100,12 +128,12 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
     (Astring.String.is_infix ~affix:"301 bytes total" rendered)
 ;;
 
-(* The eleven distinct execution causes reach the advance line through
+(* The distinct execution causes reach the advance line through
    [execution_cause_detail]. The execution-failed branch of
-   the execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
-   private agent-core type with no constructor — so what is pinned is that every
-   cause the renderer can receive still renders apart from every other. A
-   single shared label is what made the eleven indistinguishable in the log,
+   [advance_failure_kind] cannot be built here — [flow_attempt_snapshot] is a
+   private agent-core type with no constructor — so this test pins that every
+   cause the branch can receive still renders apart from every other. A
+   single shared label is what made them indistinguishable in the log,
    and this fails if any two collapse onto the same string. *)
 let test_every_execution_cause_renders_distinctly () =
   let causes : Exact_output.execution_error_cause list =
@@ -113,6 +141,7 @@ let test_every_execution_cause_renders_distinctly () =
     ; Clock_required_for_timeout
     ; Frozen_request_mismatch
     ; Completion_failed
+    ; Response_body_deadline_exceeded
     ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
     ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
     ; Provider_response_refused { http_status = 529; refusal = Overloaded }
@@ -150,12 +179,98 @@ let test_every_execution_cause_renders_distinctly () =
        (Detail.execution_cause_detail Incomplete_output))
 ;;
 
+let require_ok label = function
+  | Ok value -> value
+  | Error _ -> Alcotest.fail label
+;;
+
+let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
+  let declared target_ref : Exact_output.declared_target =
+    { target_ref
+    ; provider_ref = "openai-responses"
+    ; model_id = "gpt-5.6-luna"
+    ; enable_thinking = None
+    ; reasoning_effort = None
+    ; connect_timeout_s = Some 1.0
+    ; body_timeout_s = None
+    ; api_key_env = Some "MISSING_FLOW_KEY"
+    }
+  in
+  let snapshot =
+    Exact_output.load_resolver_snapshot
+      ~io:{ getenv = (fun _ -> Ok None) }
+      ~catalog:
+        (Exact_output.Embedded_with_targets
+           [ declared "missing-first"; declared "missing-last" ])
+      ()
+    |> require_ok "load rejection catalog"
+  in
+  let candidate id =
+    let target =
+      Exact_output.admit_target_ref snapshot id |> require_ok ("admit " ^ id)
+    in
+    Exact_output.make_flow_candidate ~id ~admitted_target:target
+    |> require_ok ("make candidate " ^ id)
+  in
+  let requirement =
+    Exact_output.make_output_requirement
+      ~schema:(`Assoc [ "type", `String "object" ])
+      ~minimum_guarantee:Exact_output.Json_syntax
+  in
+  let flow =
+    Exact_output.snapshot_flow
+      ~first:(candidate "missing-first")
+      ~rest:[ candidate "missing-last" ]
+      ~messages:[ Agent_core.Types.user_msg "Return one JSON object." ]
+      requirement
+    |> require_ok "snapshot rejection flow"
+    |> Exact_output.start_flow
+    |> require_ok "start rejection flow"
+  in
+  Eio_main.run @@ fun env ->
+  match
+    Exact_output.execute_flow_once
+      ~net:(Eio.Stdenv.net env)
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Alcotest.fail "missing credential reached dispatch")
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun success -> Exact_output.Accept success)
+      flow
+  with
+  | Error
+      (Exact_output.Flow_execution_terminal
+        { cause = Exact_output.Flow_candidates_exhausted { rejection; evidence }
+        ; prior_rejections = _
+        }) ->
+    Alcotest.(check string)
+      "intermediate rejection keeps its typed preparation cause"
+      "advance=missing-first->missing-last kind=candidate_rejected \
+       cause=missing_target_credential(target_ref=\"missing-first\" \
+       environment_variable=\"MISSING_FLOW_KEY\")"
+      (Detail.flow_evidence_detail evidence);
+    Alcotest.(check string)
+      "terminal rejection keeps its typed preparation cause"
+      "slot=missing-last runtime slot unavailable \
+       cause=missing_target_credential(target_ref=\"missing-last\" \
+       environment_variable=\"MISSING_FLOW_KEY\"); \
+       flow=[advance=missing-first->missing-last kind=candidate_rejected \
+       cause=missing_target_credential(target_ref=\"missing-first\" \
+       environment_variable=\"MISSING_FLOW_KEY\")]"
+      (Detail.candidates_exhausted_detail ~rejection ~evidence)
+  | Ok _ | Error _ -> Alcotest.fail "missing credentials did not exhaust the exact flow"
+;;
+
 let () =
   Alcotest.run
     "keeper_exact_flow_detail"
     [ ( "render"
       , [ Alcotest.test_case "execution cause detail" `Quick
             test_execution_cause_detail
+        ; Alcotest.test_case
+            "bookkeeping start causes keep their payloads"
+            `Quick
+            test_bookkeeping_start_causes_keep_their_payloads
         ; Alcotest.test_case "raw response none" `Quick
             test_raw_response_excerpt_none
         ; Alcotest.test_case "raw response flattens newlines" `Quick
@@ -168,5 +283,7 @@ let () =
             test_raw_response_excerpt_cuts_on_utf8_boundary
         ; Alcotest.test_case "every execution cause renders distinctly" `Quick
             test_every_execution_cause_renders_distinctly
+        ; Alcotest.test_case "rejection cause reaches terminal and intermediate detail" `Quick
+            test_rejection_cause_reaches_terminal_and_intermediate_detail
         ] )
     ]

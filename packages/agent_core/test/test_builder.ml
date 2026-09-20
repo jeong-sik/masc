@@ -296,7 +296,6 @@ let exact_provider_config () =
     ~tool_choice:Types.Auto
     ~response_format:(Types.JsonSchema schema)
     ~cache_system_prompt:true
-    ~supports_tool_choice_override:true
     ~supports_structured_output_override:true
     ~model_capabilities_override:capabilities
     ~keep_alive:"-1"
@@ -381,10 +380,6 @@ let test_with_provider_config_reaches_dispatch_losslessly () =
     "headers"
     provider_config.headers
     dispatched.headers;
-  Alcotest.(check (option bool))
-    "tool choice override"
-    provider_config.supports_tool_choice_override
-    dispatched.supports_tool_choice_override;
   Alcotest.(check (option bool))
     "structured output override"
     provider_config.supports_structured_output_override

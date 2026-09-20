@@ -137,7 +137,7 @@ let list_length json key =
 
 (* Run masc_keeper_list against a workspace seeded with [names], through the
    same dispatch an MCP client and the HTTP route use. *)
-let keeper_list ~names ~args f =
+let keeper_list ?(before_list = fun _ -> ()) ~names ~args f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   ensure_runtime ();
@@ -152,6 +152,7 @@ let keeper_list ~names ~args f =
       Keeper_runtime.reset_test_state base_path)
     (fun () ->
       seed_keepers config names;
+      before_list config;
       Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
       Eio.Switch.run @@ fun sw ->
       let ctx : _ Keeper_types_profile.context =
@@ -325,6 +326,111 @@ let test_absent_next_action_is_null_not_empty () =
         (Yojson.Safe.to_string other))
 ;;
 
+(* The same roster drives the TUI's current failure reading. The registry's
+   last_error is a separate observation and must not stand in for this one. *)
+let timeout_error =
+  Agent_core.Error.Api
+    (Llm_provider.Retry.Timeout
+       { message = "fixture response body stopped"
+       ; phase = Some Llm_provider.Http_client.Non_streaming_body
+       })
+;;
+
+let timeout_reason () =
+  let raw_error = Agent_core.Error.to_string timeout_error in
+  let terminal = Keeper_turn_terminal.of_failure ~raw_error timeout_error in
+  match Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+          ~core_error:timeout_error terminal ~raw_error with
+  | Some (Keeper_registry.Provider_runtime_error { detail; _ } as reason) ->
+    check string "original typed error detail survives" raw_error detail;
+    reason
+  | Some _ | None -> fail "API timeout did not produce a runtime failure"
+;;
+
+(* This is a wiring test, not another definition of status wording. *)
+let timeout_summary () =
+  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason (timeout_reason ()) with
+  | Some surface -> surface.summary
+  | None -> fail "runtime failure did not produce a status summary"
+;;
+
+let register_failed_keeper config =
+  let base_path = config.Workspace.base_path in
+  ignore (Keeper_registry.For_testing.register ~base_path "alpha" (make_meta "alpha"));
+  Keeper_registry.set_failure_reason ~base_path "alpha" (Some (timeout_reason ()))
+;;
+
+let check_roster_failure expected json =
+  match Yojson.Safe.Util.member "keepers" json with
+  | `List [ row ] ->
+    Printf.printf "KEEPER_ROSTER_FIXTURE %s\n%!" (Yojson.Safe.to_string json);
+    check (option string) "current failure is explicitly published" expected
+      (match Json_util.assoc_member_opt "runtime_blocker_summary" row with
+       | Some (`String summary) -> Some summary
+       | Some `Null -> None
+       | Some other -> failf "invalid summary: %s" (Yojson.Safe.to_string other)
+       | None -> fail "roster omitted runtime_blocker_summary");
+    (match Tui_decode.decode_keeper_runtime_list json with
+     | Ok ([decoded], [], false, 1) ->
+       check (option string) "typed TUI projection retains the current failure"
+         expected decoded.kr_runtime_blocker_summary
+     | Ok _ -> fail "the current roster must decode one complete reading"
+     | Error detail -> failf "TUI rejected the actual roster: %s" detail)
+  | other -> failf "expected one Keeper row: %s" (Yojson.Safe.to_string other)
+;;
+
+let failure_roster ?before_list f =
+  keeper_list ?before_list ~names:[ "alpha" ]
+    ~args:(`Assoc [ "detailed", `Bool true ]) f
+;;
+
+let test_current_failure_without_last_error () =
+  failure_roster ~before_list:register_failed_keeper
+    (check_roster_failure (Some (timeout_summary ())))
+;;
+
+let test_last_error_is_not_the_current_failure () =
+  failure_roster
+    ~before_list:(fun config ->
+      register_failed_keeper config;
+      Keeper_registry.set_last_error_entry ~base_path:config.Workspace.base_path
+        ~name:"alpha" "older launch failure")
+    (check_roster_failure (Some (timeout_summary ())))
+;;
+
+let test_success_clears_current_failure_but_retains_last_error () =
+  failure_roster
+    ~before_list:(fun config ->
+      register_failed_keeper config;
+      let base_path = config.Workspace.base_path in
+      Keeper_registry.set_last_error_entry ~base_path ~name:"alpha" "older launch failure";
+      check bool "production success reset commits" true
+        (Keeper_turn_failure_streak.reset ~base_path ~keeper_name:"alpha");
+      check (option string) "last error remains a distinct observation"
+        (Some "older launch failure")
+        (Option.bind (Keeper_registry.get ~base_path "alpha")
+           (fun entry -> entry.last_error)))
+    (check_roster_failure None)
+;;
+
+let test_missing_current_failure_is_not_clear () =
+  failure_roster (fun json ->
+    let json =
+      match json with
+      | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          if String.equal key "keepers" then
+            key, `List (List.map (function
+              | `Assoc row -> `Assoc (List.remove_assoc "runtime_blocker_summary" row)
+              | value -> value) (Yojson.Safe.Util.to_list value))
+          else key, value) fields)
+      | value -> value
+    in
+    match Tui_decode.decode_keeper_runtime_list json with
+    | Error _ -> ()
+    | Ok _ -> fail "missing current-failure field was accepted as a clear reading")
+;;
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -346,6 +452,12 @@ let () =
             test_health_is_a_health_word_not_a_surface_word
         ; test_case "an unnamed next action is null" `Quick
             test_absent_next_action_is_null_not_empty
+        ] )
+    ; ( "current failure"
+      , [ test_case "timeout without last_error" `Quick test_current_failure_without_last_error
+        ; test_case "last_error is separate" `Quick test_last_error_is_not_the_current_failure
+        ; test_case "success clears current failure" `Quick test_success_clears_current_failure_but_retains_last_error
+        ; test_case "missing is not clear" `Quick test_missing_current_failure_is_not_clear
         ] )
     ; ( "lifecycle"
       , [ test_case "detailed row carries lifecycle phase" `Quick

@@ -77,6 +77,7 @@ type forecast_carried_origin =
   | Carried_from_ledger
   | Carried_from_turn_record of { turn : int }
   | Carried_halved_after_refusal of { retry : int }
+  | Carried_evicted_after_refusal of { retry : int }
   | Carried_whole_history
 
 type forecast_carried =
@@ -196,14 +197,13 @@ let decode_turn_records = function
                              }
                        | None -> newest_attributed rest)
                 in
-                (* A conversation-cumulative figure is a fact about the
-                   whole conversation, so it is not offered as this turn's
-                   input even though the record carries the number. *)
+                (* Only a per-request figure describes one request's input. *)
                 let per_request_tokens (record : Turn_record.t) =
                   match record.usage.scope with
-                  | Runtime_usage_scope.Conversation_cumulative -> None
-                  | Runtime_usage_scope.Per_request
-                  | Runtime_usage_scope.Usage_scope_unavailable ->
+                  | Runtime_usage_scope.Turn_total
+                  | Runtime_usage_scope.Conversation_cumulative
+                  | Runtime_usage_scope.Usage_scope_unavailable -> None
+                  | Runtime_usage_scope.Per_request ->
                       record.usage.input_tokens
                 in
                 let recent =
@@ -719,6 +719,10 @@ let decode_forecast_origin = function
       let* retry_json = field "retry" fields in
       let* retry = nonnegative_int "origin.retry" retry_json in
       Ok (Carried_halved_after_refusal { retry })
+    else if String.equal kind "evicted_after_refusal" then
+      let* retry_json = field "retry" fields in
+      let* retry = nonnegative_int "origin.retry" retry_json in
+      Ok (Carried_evicted_after_refusal { retry })
     else if String.equal kind "whole_history" then Ok Carried_whole_history
     else Error ("origin.kind is not a known kind: " ^ kind)
   | _ -> Error "origin is not an object"

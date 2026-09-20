@@ -67,6 +67,11 @@ type model_input_window =
   ; front_atom_digest : string
   }
 
+type response_observed_model_input =
+  { runtime_profile : string
+  ; window : model_input_window
+  }
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -78,6 +83,12 @@ type raw_trace_run_ref =
   ; end_seq : int
   ; agent_name : string
   ; session_id : string
+  }
+
+type raw_trace_reachability_root =
+  { keeper : string
+  ; trace_id : string
+  ; raw_trace_run_ref : raw_trace_run_ref option
   }
 
 type t =
@@ -101,6 +112,7 @@ type t =
   ; ttfrc_ms : float option
   ; request_wire_observation : request_wire_observation option
   ; model_input_window : model_input_window option
+  ; response_observed_model_input : response_observed_model_input option
   ; raw_trace_run_ref : raw_trace_run_ref option
   ; sampling : sampling
   ; usage : usage
@@ -214,6 +226,20 @@ let to_json (r : t) : Yojson.Safe.t =
       , `String window.front_atom_digest )
     | None -> `Null, `Null, `Null, `Null
   in
+  let response_observed_model_input =
+    match r.response_observed_model_input with
+    | None -> `Null
+    | Some observed ->
+      let window = observed.window in
+      `Assoc
+        [ "runtime_profile", `String observed.runtime_profile
+        ; "transmitted_atoms", `Int window.transmitted_atoms
+        ; "total_atoms", `Int window.total_atoms
+        ; ( "model_input_measurement"
+          , `String (model_input_measurement_to_string window.measurement) )
+        ; "front_atom_digest", `String window.front_atom_digest
+        ]
+  in
   `Assoc
     ([ ( "execution_ids"
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
@@ -236,6 +262,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ; "total_atoms", total_atoms
      ; "model_input_measurement", model_input_measurement
      ; "front_atom_digest", front_atom_digest
+     ; "response_observed_model_input", response_observed_model_input
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
@@ -277,6 +304,14 @@ let require name fields =
   match member name fields with
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "turn_record: missing field %S" name)
+
+let require_unique name fields =
+  match List.filter_map (fun (field, value) ->
+    if String.equal field name then Some value else None) fields with
+  | [ value ] -> Ok value
+  | [] -> Error (Printf.sprintf "turn_record: missing field %S" name)
+  | _ -> Error (Printf.sprintf "turn_record: duplicate field %S" name)
+;;
 
 let as_string name = function
   | `String s -> Ok s
@@ -440,6 +475,32 @@ let raw_trace_run_ref_of_json (json : Yojson.Safe.t) =
     Ok { worker_run_id; path; start_seq; end_seq; agent_name; session_id }
   | _ -> Error "turn_record: raw_trace_run_ref is not an object"
 
+let raw_trace_run_ref_for_trace_id_of_json ~trace_id = function
+  | `Null -> Ok None
+  | json ->
+    let* run_ref = raw_trace_run_ref_of_json json in
+    let* () =
+      if String.equal run_ref.session_id trace_id
+      then Ok ()
+      else Error "turn_record: raw trace session_id does not match trace_id"
+    in
+    Ok (Some run_ref)
+;;
+
+let raw_trace_reachability_root_of_json = function
+  | `Assoc fields ->
+    let* keeper_json = require_unique "keeper" fields in
+    let* keeper = as_nonempty_string "keeper" keeper_json in
+    let* trace_id_json = require_unique "trace_id" fields in
+    let* trace_id = as_nonempty_string "trace_id" trace_id_json in
+    let* raw_trace_run_ref_json = require_unique "raw_trace_run_ref" fields in
+    let* raw_trace_run_ref =
+      raw_trace_run_ref_for_trace_id_of_json ~trace_id raw_trace_run_ref_json
+    in
+    Ok { keeper; trace_id; raw_trace_run_ref }
+  | _ -> Error "turn_record: raw trace reachability root is not an object"
+;;
+
 let rec collect_results acc = function
   | [] -> Ok (List.rev acc)
   | item :: rest -> (
@@ -505,6 +566,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "total_atoms"
             ; "model_input_measurement"
             ; "front_atom_digest"
+            ; "response_observed_model_input"
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
@@ -624,18 +686,92 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
              model_input_measurement and front_atom_digest must all be present \
              or all be null"
       in
+      let* response_observed_model_input_json =
+        require "response_observed_model_input" fields
+      in
+      let* response_observed_model_input =
+        match response_observed_model_input_json with
+        | `Null -> Ok None
+        | `Assoc observed_fields ->
+          let require_observed name =
+            match require name observed_fields with
+            | Ok _ as value -> value
+            | Error _ ->
+              Error
+                (Printf.sprintf
+                   "turn_record: missing field %S"
+                   ("response_observed_model_input." ^ name))
+          in
+          let* () =
+            if
+              fields_are_unique_known
+                [ "runtime_profile"
+                ; "transmitted_atoms"
+                ; "total_atoms"
+                ; "model_input_measurement"
+                ; "front_atom_digest"
+                ]
+                observed_fields
+            then Ok ()
+            else
+              Error
+                "turn_record: response_observed_model_input fields are not exact"
+          in
+          let* runtime_profile_json = require_observed "runtime_profile" in
+          let* runtime_profile =
+            as_nonempty_string
+              "response_observed_model_input.runtime_profile"
+              runtime_profile_json
+          in
+          let* transmitted_atoms_json = require_observed "transmitted_atoms" in
+          let* transmitted_atoms =
+            as_nonnegative_int
+              "response_observed_model_input.transmitted_atoms"
+              transmitted_atoms_json
+          in
+          let* total_atoms_json = require_observed "total_atoms" in
+          let* total_atoms =
+            as_nonnegative_int
+              "response_observed_model_input.total_atoms"
+              total_atoms_json
+          in
+          let* measurement_json = require_observed "model_input_measurement" in
+          let* measurement_raw =
+            as_nonempty_string
+              "response_observed_model_input.model_input_measurement"
+              measurement_json
+          in
+          let* measurement = model_input_measurement_of_string measurement_raw in
+          let* front_atom_digest_json = require_observed "front_atom_digest" in
+          let* front_atom_digest =
+            as_sha256_digest
+              "response_observed_model_input.front_atom_digest"
+              front_atom_digest_json
+          in
+          if transmitted_atoms > total_atoms
+          then
+            Error
+              "turn_record: response_observed_model_input.transmitted_atoms \
+               cannot exceed total_atoms"
+          else
+            Ok
+              (Some
+                 { runtime_profile
+                 ; window =
+                     { transmitted_atoms
+                     ; total_atoms
+                     ; measurement
+                     ; front_atom_digest
+                     }
+                 })
+        | _ ->
+          Error
+            "turn_record: response_observed_model_input is not an object or \
+             null"
+      in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =
-        match raw_trace_run_ref_json with
-        | `Null -> Ok None
-        | json ->
-          let* run_ref = raw_trace_run_ref_of_json json in
-          let* () =
-            if String.equal run_ref.session_id trace_id
-            then Ok ()
-            else Error "turn_record: raw trace session_id does not match trace_id"
-          in
-          Ok (Some run_ref)
+        raw_trace_run_ref_for_trace_id_of_json ~trace_id raw_trace_run_ref_json
       in
       let* selected_model = opt_member "selected_model" fields as_nonempty_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
@@ -692,6 +828,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; ttfrc_ms
         ; request_wire_observation
         ; model_input_window
+        ; response_observed_model_input
         ; raw_trace_run_ref
         ; sampling = { temperature; top_p; max_tokens; enable_thinking }
         ; usage =

@@ -83,6 +83,33 @@ let test_classify_error_edge_cases () =
   | _ -> fail "expected NotFound for 404"
 ;;
 
+let test_server_refusal_status_boundaries () =
+  let body = {|{"error":{"message":"provider unavailable"}}|} in
+  List.iter
+    (fun (status, expected) ->
+       let error = Retry.classify_error ~retry_after_header:None ~status ~body in
+       (match expected, error with
+        | `Server_error, Retry.ServerError { status = actual; message } ->
+          check int "original status survives" status actual;
+          check string "provider message survives" "provider unavailable" message
+        | `Overloaded, Retry.Overloaded { message } ->
+          check string "provider message survives" "provider unavailable" message
+        | `Unknown,
+          Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; message } ->
+          check string "provider message survives" "provider unavailable" message
+        | _ -> failf "HTTP %d classified as %s" status (Retry.error_message error));
+       check bool "only server refusals are retryable"
+         (expected <> `Unknown) (Retry.is_retryable error))
+    [ 499, `Unknown
+    ; 500, `Server_error
+    ; 503, `Server_error
+    ; 520, `Server_error
+    ; 529, `Overloaded
+    ; 599, `Server_error
+    ; 600, `Unknown
+    ]
+;;
+
 let test_classify_error_402_payment_required () =
   let body = {|{"error":{"message":"Insufficient Balance"}}|} in
   let err = Retry.classify_error ~retry_after_header:None ~status:402 ~body in
@@ -141,6 +168,29 @@ let test_classify_error_429_retry_after_finite_guard () =
   match retry_after_of {|{"error":{"retry_after":3.0}}|} with
   | Some ra -> check (float 0.0) "valid retry_after preserved" 3.0 ra
   | None -> fail "expected retry_after Some 3.0 for a valid body"
+;;
+
+(* JSON has one number grammar, so providers may encode whole-second retry
+   hints as integers. Both number representations are accepted; strings remain
+   outside the typed boundary even when their contents look numeric. *)
+let test_classify_error_429_retry_after_json_numbers () =
+  let retry_after_of body =
+    match Retry.classify_error ~retry_after_header:None ~status:429 ~body with
+    | Retry.RateLimited { retry_after; _ } -> retry_after
+    | _ -> fail "expected RateLimited for 429"
+  in
+  List.iter
+    (fun (label, body, expected) ->
+       match retry_after_of body with
+       | Some actual -> check (float 0.0) label expected actual
+       | None -> failf "%s: expected retry_after Some %f" label expected)
+    [ "integer retry_after", {|{"error":{"retry_after":7}}|}, 7.0
+    ; "float retry_after", {|{"error":{"retry_after":7.5}}|}, 7.5
+    ; "zero retry_after", {|{"error":{"retry_after":0}}|}, 0.0
+    ];
+  match retry_after_of {|{"error":{"retry_after":"7"}}|} with
+  | None -> ()
+  | Some bad -> failf "string retry_after: expected None, got Some %f" bad
 ;;
 
 let test_is_retryable () =
@@ -337,6 +387,10 @@ let () =
       , [ test_case "http status mapping" `Quick test_classify_error
         ; test_case "edge cases" `Quick test_classify_error_edge_cases
         ; test_case
+            "server refusal status boundaries"
+            `Quick
+            test_server_refusal_status_boundaries
+        ; test_case
             "a refusal body that never arrived is not an empty body"
             `Quick
             test_a_refusal_body_that_never_arrived_is_not_an_empty_body
@@ -349,6 +403,10 @@ let () =
             "429 retry_after finite guard"
             `Quick
             test_classify_error_429_retry_after_finite_guard
+        ; test_case
+            "429 retry_after JSON numbers"
+            `Quick
+            test_classify_error_429_retry_after_json_numbers
         ] )
     ; ( "typed_projection"
       , [ test_case

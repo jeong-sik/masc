@@ -712,7 +712,7 @@ let test_session_leaf_containment () =
 
 (* Issue #25077: history snapshot ids arrive verbatim from the dashboard
    HTTP surface. A non-segment id must never reach the filesystem — delete
-   reports it [missing], load reports [Not_found] — and a file outside the
+   reports it [refused], load reports [Not_found] — and a file outside the
    session directory must stay unreachable through either entry point. *)
 let test_history_snapshot_id_containment () =
   let session_dir = temp_dir () in
@@ -728,12 +728,10 @@ let test_history_snapshot_id_containment () =
          Keeper_checkpoint_store.delete_agent_core_history_files ~session_dir
            ~snapshot_ids:[ escape ]
        with
-       | [], [ missing ] ->
-         check string "escaping id is reported missing" escape missing
-       | deleted, missing ->
-         fail
-           (Printf.sprintf "unexpected delete outcome: deleted=%d missing=%d"
-              (List.length deleted) (List.length missing)));
+       | [ Keeper_checkpoint_store.History_refused refused ] ->
+         check string "escaping id is reported refused" escape refused
+       | results ->
+         fail (Printf.sprintf "unexpected delete outcome count: %d" (List.length results)));
       check bool "file outside the session dir survives" true
         (Sys.file_exists outside);
       match

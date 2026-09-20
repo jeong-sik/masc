@@ -208,9 +208,17 @@ let test_owned_paths_and_history_deletion () = with_session (fun session_dir ->
   let reference = Store.exact_snapshot_reference snapshot in
   let names = ["accepted-checkpoints"; "accepted-checkpoints/" ^ reference.sha256 ^ ".json";
                "../accepted-checkpoints/" ^ reference.sha256 ^ ".json"] in
-  let deleted, missing = Store.delete_agent_core_history_files ~session_dir ~snapshot_ids:names in
-  check (list string) "history endpoint cannot delete owned snapshots" [] deleted;
-  check int "all invalid history targets refused" 3 (List.length missing);
+  let results = Store.delete_agent_core_history_files ~session_dir ~snapshot_ids:names in
+  check bool
+    "all invalid history targets refused"
+    true
+    (List.for_all
+       (function
+         | Store.History_refused _ -> true
+         | Store.History_deleted _
+         | Store.History_missing _
+         | Store.History_removal_failed _ -> false)
+       results);
   assert_snapshot "after history deletion attempt" snapshot (load session_dir reference);
   let path = artifact_path session_dir snapshot in
   Unix.unlink path;

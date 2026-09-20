@@ -392,8 +392,7 @@ let test_config_bounds_are_enforced () =
   | Error (Purge.Invalid_config _) -> ()
   | _ -> Alcotest.fail "negative keep_recent_messages was accepted"
 
-let test_checkpoint_fields_pass_through () =
-  let checkpoint =
+let checkpoint_fixture () =
     Agent_core.Checkpoint.
       { version = checkpoint_version
       ; session_id = "trace-purge-fixture"
@@ -424,7 +423,9 @@ let test_checkpoint_fields_pass_through () =
       ; mcp_sessions = []
       ; working_context = None
       }
-  in
+
+let test_checkpoint_fields_pass_through () =
+  let checkpoint = checkpoint_fixture () in
   match Purge.purge ~config:no_tail_config checkpoint with
   | Error _ -> Alcotest.fail "checkpoint purge failed"
   | Ok (purged, report) ->
@@ -437,6 +438,146 @@ let test_checkpoint_fields_pass_through () =
       "turn watermark unchanged"
       checkpoint.turn_count
       purged.Agent_core.Checkpoint.turn_count
+
+let test_librarian_coordinates_block_endpoint_rewrite () =
+  let before = (checkpoint_fixture ()).Agent_core.Checkpoint.messages in
+  let after = [ text_message Types.User "retained" ] in
+  let invalidates coordinates_present rewritten =
+    match
+      Purge.rewrite_invalidates_librarian_coordinates
+        ~coordinates_present
+        ~before
+        ~after:rewritten
+    with
+    | Ok invalidates -> invalidates
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool)
+    "tracked endpoint rewrite is refused"
+    true
+    (invalidates true after);
+  Alcotest.(check bool)
+    "untracked rewrite remains available"
+    false
+    (invalidates false after);
+  Alcotest.(check bool)
+    "tracked stable endpoint remains available"
+    false
+    (invalidates true before)
+;;
+
+
+let rec workspace_contents dir =
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.sort String.compare
+  |> List.concat_map (fun name ->
+    let path = Filename.concat dir name in
+    if Sys.is_directory path then
+      (path, None) :: workspace_contents path
+    else [ path, Some (In_channel.with_open_bin path In_channel.input_all) ])
+
+let test_cli_workspace ?(linked_worktree = false) cluster_name () =
+  Eio_main.run @@ fun env ->
+  let owner_root = Filename.temp_dir "checkpoint-purge-cli-" "" |> Unix.realpath in
+  let base_path =
+    if not linked_worktree then owner_root
+    else
+      let main_root = Filename.concat owner_root "main" in
+      let worktree_root = Filename.concat owner_root "worktree" in
+      Unix.mkdir main_root 0o700;
+      Unix.mkdir (Filename.concat main_root ".git") 0o700;
+      Unix.mkdir worktree_root 0o700;
+      Out_channel.with_open_text (Filename.concat worktree_root ".git") (fun output ->
+        Printf.fprintf output "gitdir: %s/.git/worktrees/checkpoint-purge\n" main_root);
+      worktree_root
+  in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree owner_root)
+    (fun () ->
+      Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+      Masc_test_deps.with_process_env "MASC_CLUSTER_NAME" cluster_name @@ fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let checkpoint = checkpoint_fixture () in
+      let session_dir = Masc.Keeper_fs.keeper_session_dir config checkpoint.session_id in
+      let runtime_root = Masc.Workspace.masc_root_dir config in
+      let checkpoint_path =
+        Masc.Keeper_checkpoint_store.agent_core_checkpoint_path
+          ~session_dir ~session_id:checkpoint.session_id
+      in
+      (match Masc.Keeper_checkpoint_store.save_agent_core_classified
+        ~session_dir ~history_retained:0 checkpoint with
+       | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
+       | Ok (Masc.Keeper_checkpoint_store.Stale_noop _) ->
+           Alcotest.fail "fixture checkpoint was not saved"
+       | Error detail -> Alcotest.failf "fixture checkpoint: %s" detail);
+      let original = In_channel.with_open_bin checkpoint_path In_channel.input_all in
+      let before = workspace_contents owner_root in
+      let runtime_entries = Sys.readdir runtime_root |> Array.to_list in
+      let run_cli ?(from_cwd = false) args =
+        let runtime_base_path =
+          Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit base_path)
+        in
+        let executable =
+          Sys.getenv "MASC_TEST_CHECKPOINT_PURGE_EXE"
+          |> Config_dir_resolver.absolute_path
+        in
+        let child_env =
+          [ "HOME=" ^ owner_root; "XDG_CONFIG_HOME=" ^ owner_root ]
+          @ (if from_cwd then [] else [ "MASC_BASE_PATH=" ^ runtime_base_path ])
+          @ (match cluster_name with
+             | None -> []
+             | Some name -> [ "MASC_CLUSTER_NAME=" ^ name ])
+        in
+        let output =
+          Eio.Process.parse_out
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+            ~env:(Array.of_list child_env)
+            (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
+            ([ executable
+             ; "--trace"; checkpoint.session_id; "--keep-recent"; "0"
+             ] @ args)
+        in
+        Alcotest.(check bool) "CLI reports the producer checkpoint" true
+          (List.mem ("checkpoint: " ^ checkpoint_path)
+             (String.split_on_char '\n' output));
+        print_string output
+      in
+      run_cli [ "--base"; base_path ];
+      Alcotest.(check (list (pair string (option string))))
+        "dry-run leaves all workspace files and directories unchanged"
+        before (workspace_contents owner_root);
+      run_cli [];
+      Alcotest.(check (list (pair string (option string))))
+        "MASC_BASE_PATH dry-run uses the same workspace without writes"
+        before (workspace_contents owner_root);
+      run_cli ~from_cwd:true [];
+      Alcotest.(check (list (pair string (option string))))
+        "no base or recorded default uses current workspace without writes"
+        before (workspace_contents owner_root);
+      run_cli [ "--base"; base_path; "--apply" ];
+      let backup_dirs =
+        Sys.readdir runtime_root |> Array.to_list
+        |> List.filter (fun name -> not (List.mem name runtime_entries))
+      in
+      let backup_dir = match backup_dirs with
+        | [ name ] -> Filename.concat runtime_root name
+        | names -> Alcotest.failf "expected one backup in runtime root, got %d"
+                     (List.length names)
+      in
+      let backup = Filename.concat backup_dir (checkpoint.session_id ^ ".json") in
+      Alcotest.(check string) "backup preserves every original byte" original
+        (In_channel.with_open_bin backup In_channel.input_all);
+      (match Masc.Keeper_checkpoint_store.load_agent_core
+        ~session_dir ~session_id:checkpoint.session_id with
+       | Error _ -> Alcotest.fail "applied checkpoint is not readable"
+       | Ok purged ->
+           Alcotest.(check int) "actual CLI removes the middle duplicate" 2
+             (List.length purged.messages);
+           Alcotest.(check int) "apply preserves turn watermark" checkpoint.turn_count
+             purged.turn_count;
+           Alcotest.(check string) "apply preserves session identity" checkpoint.session_id
+             purged.session_id))
 
 let () =
   Alcotest.run
@@ -510,5 +651,17 @@ let () =
             "checkpoint fields pass through"
             `Quick
             test_checkpoint_fields_pass_through
+        ; Alcotest.test_case
+            "Librarian coordinates block endpoint rewrite"
+            `Quick
+            test_librarian_coordinates_block_endpoint_rewrite
+        ] )
+    ; ( "cli"
+      , [ Alcotest.test_case "default cluster: workspace dry-run and apply" `Quick
+            (test_cli_workspace None)
+        ; Alcotest.test_case "named cluster: workspace dry-run and apply" `Quick
+            (test_cli_workspace (Some "  Purge/Cluster  "))
+        ; Alcotest.test_case "linked worktree: shared runtime dry-run and apply" `Quick
+            (test_cli_workspace ~linked_worktree:true None)
         ] )
     ]

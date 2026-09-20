@@ -1128,7 +1128,6 @@ let test_glm_preserved_reasoning_replay_and_preserves_auto_tool_choice () =
       ~clear_thinking:false
       ~tool_stream:true
       ~tool_choice:Auto
-      ~supports_tool_choice_override:true
       ()
   in
   let messages =

@@ -11,11 +11,12 @@ import {
   type TurnRecordsResponse,
 } from '../api/dashboard'
 import {
-  initialTurnRowForTimestamp,
   initialTurnRowForTurnRef,
   KeeperMemoryOsRecallPanel,
   KeeperTurnInspector,
 } from './keeper-turn-inspector'
+import { TurnInspectorDrawer } from './keeper-turn-inspector-drawer'
+import type { KeeperConversationEntry } from '../types'
 
 vi.mock('../api/dashboard', () => {
   return {
@@ -173,7 +174,8 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
         record: {
           keeper: 'albini',
           agent_name: 'keeper-albini-agent',
-          generation: 1,
+          usage_scope: 'per_request',
+          response_observed_model_input: null,
           turn_kind: 'autonomous',
           raw_trace_run_ref: null,
           trace_id: 'trace-active',
@@ -193,7 +195,8 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
         record: {
           keeper: 'albini',
           agent_name: 'keeper-albini-agent',
-          generation: 1,
+          usage_scope: 'per_request',
+          response_observed_model_input: null,
           turn_kind: 'autonomous',
           raw_trace_run_ref: null,
           trace_id: 'trace-active',
@@ -433,18 +436,18 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(text).toContain('wire 547.4KB')
   })
 
-  // The share is the answer to "can this keeper still see what it did 10 turns
-  // ago". It is carried by its own observation, so it has to survive a turn
-  // whose input-component attribution was unavailable — the shape
-  // keeper_agent_run logs as "turn input composition unavailable".
-  it('shows how much history a turn transmitted even without input components', async () => {
+  // A later candidate can own the turn row while an earlier candidate supplied
+  // the last range. Keep that observation without attributing it to the row.
+  it('keeps an unattributed wire range under a later runtime without input components', async () => {
     const records = turnRecordsWithMemoryOs()
     const latestRow = records.entries.at(-1)
     if (!latestRow) throw new Error('fixture must carry a latest turn')
     const latest = latestRow.record
     latest.input_components = null
+    latest.runtime_profile = 'codex.codex'
     latest.transmitted_atoms = 800
     latest.total_atoms = 5000
+    latest.model_input_measurement = 'wire_shape'
     fetchKeeperTurnRecordsMock.mockResolvedValue(records)
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -460,12 +463,15 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(text).toContain('800')
     expect(text).toContain('5,000')
     expect(text).toContain('16.0%')
+    expect(text).toContain('마지막 이력 범위 관측')
+    expect(text).toContain('요청 형태 기준')
+    expect(text).toContain('범위 관측 런타임: 기록 없음')
+    expect(text).not.toContain('% 전송')
+    expect(text).not.toContain('codex.codex')
+    expect(container.textContent).toContain('codex.codex')
   })
 
-  // A narrower window with no reason attached reads as an ordinary bad turn.
-  // The decline does not age out, so a keeper can sit in it indefinitely —
-  // which is why the basis is recorded rather than only logged.
-  it('says when a turn was measured against the checkpoint instead of the wire', async () => {
+  it('labels the prepared history basis without claiming transmission or a decline', async () => {
     const records = turnRecordsWithMemoryOs()
     const latestRow = records.entries.at(-1)
     if (!latestRow) throw new Error('fixture must carry a latest turn')
@@ -480,10 +486,14 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    expect(container.querySelector('[data-testid="turn-measurement-declined"]')).toBeTruthy()
+    const text = container.querySelector('[data-testid="turn-transmitted-atoms"]')?.textContent ?? ''
+    expect(text).toContain('이력 목록 기준')
+    expect(text).toContain('범위 관측 런타임: 기록 없음')
+    expect(text).not.toContain('% 전송')
+    expect(text).not.toContain('reasoning 포함')
   })
 
-  it('says nothing extra when the wire shape was measured', async () => {
+  it('labels the wire basis separately from its unrecorded runtime', async () => {
     const records = turnRecordsWithMemoryOs()
     const latestRow = records.entries.at(-1)
     if (!latestRow) throw new Error('fixture must carry a latest turn')
@@ -499,12 +509,13 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="turn-measurement-declined"]')).toBeNull()
+    expect(container.querySelector('[data-testid="turn-measurement"]')?.textContent)
+      .toContain('요청 형태 기준')
+    expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')?.textContent)
+      .toContain('범위 관측 런타임: 기록 없음')
   })
 
-  // Absence has to read as absence: a turn on a runtime that assembles its own
-  // input carries no observation, and rendering 0 would say the keeper saw
-  // nothing.
+  // An absent observation must not become a measured zero-length history.
   it('renders nothing when the turn recorded no window observation', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
@@ -515,16 +526,6 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')).toBeNull()
-  })
-
-  it('matches an initial timestamp to the closest retained turn row', () => {
-    const response = turnRecordsWithMemoryOs()
-    const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()
-    const farFromRetainedTurns = new Date((1_781_587_560 + 3600) * 1000).toISOString()
-
-    expect(initialTurnRowForTimestamp(response.entries, nearTurn42)?.record.absolute_turn).toBe(42)
-    expect(initialTurnRowForTimestamp(response.entries, farFromRetainedTurns)).toBeNull()
-    expect(initialTurnRowForTimestamp(response.entries, 'not-a-date')).toBeNull()
   })
 
   it('matches an exact turn_ref (trace_id + absolute_turn), no fuzzy fallback', () => {
@@ -552,14 +553,76 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(initialTurnRowForTurnRef([], 'trace-active#42')).toBeNull()
   })
 
-  it('opens the detail drawer when an initial timestamp matches a retained turn', async () => {
+  it.each([
+    { role: 'user', delivery: 'delivered', source: 'direct_user', label: 'You' },
+    { role: 'assistant', delivery: 'error', source: 'direct_assistant', label: 'albini' },
+  ] as const)('does not link a fresh $role/$delivery message to a nearby old turn', async state => {
+    // Current sends create user rows without turnRef; an assistant can fail
+    // before REPLY_DETAILS supplies it. This tests their inspector input,
+    // not the network send or SSE producer itself.
+    const entry: KeeperConversationEntry = {
+      ...state,
+      id: `fresh-${state.role}`,
+      text: 'new message with no completed turn identity',
+      timestamp: new Date((1_781_587_560 + 5) * 1000).toISOString(),
+      turnRef: null,
+      streamState: null,
+    }
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-    const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()
+    const { container } = render(html`
+      <${TurnInspectorDrawer}
+        keeperName="albini"
+        subtitle=${`${entry.label} · ${entry.timestamp}`}
+        anchor=${{ kind: 'unreferenced' }}
+        open=${true}
+        onClose=${() => {}}
+        testId="fresh-message"
+      />
+    `)
+    await waitFor(() => {
+      expect(container.textContent).toContain('턴 연결 정보 없음')
+    })
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeNull()
+    expect(container.textContent).toContain('T42')
+    fireEvent.click(container.querySelectorAll('.ti-turn-summary')[0]!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+        .toContain('trace-active#42')
+    })
+  })
+
+  it('keeps generic browsing unlinked and preserves manual selection across equivalent anchors', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    const drawer = () => html`<${TurnInspectorDrawer}
+      keeperName="albini"
+      anchor=${{ kind: 'no-origin' }}
+      open=${true}
+      onClose=${() => {}}
+      testId="generic-turns"
+    />`
+    const { container, rerender } = render(drawer())
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+    expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeNull()
+    fireEvent.click(container.querySelectorAll('.ti-turn-summary')[0]!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+        .toContain('trace-active#42')
+    })
+    rerender(drawer())
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent)
+      .toContain('trace-active#42')
+  })
+
+  it('opens the detail drawer for an exact retained turn reference', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`
       <${KeeperTurnInspector}
         keeperName="albini"
-        initialTurnTimestamp=${nearTurn42}
+        anchor=${{ kind: 'ref', value: 'trace-active#42' }}
       />
     `)
 
@@ -572,14 +635,13 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeFalsy()
   })
 
-  it('keeps the list view when an initial timestamp is outside the retained turn window', async () => {
+  it('keeps the list view when the exact reference is unavailable', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
-    const farFromRetainedTurns = new Date((1_781_587_560 + 3600) * 1000).toISOString()
 
     const { container } = render(html`
       <${KeeperTurnInspector}
         keeperName="albini"
-        initialTurnTimestamp=${farFromRetainedTurns}
+        anchor=${{ kind: 'ref', value: 'trace-other#42' }}
       />
     `)
 
@@ -591,7 +653,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeTruthy()
     })
     expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeFalsy()
-    expect(container.textContent).toContain('30분 이내의 turn record 없음')
+    expect(container.textContent).toContain('연결된 turn record를 찾지 못했습니다')
   })
 
   it('renders repeated trace turn rows without duplicate-key warnings', async () => {
@@ -893,11 +955,48 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(stats).not.toContain('미상')
   })
 
+  it.each([
+    { scope: 'per_request', label: '요청별', context: '25.0%', cost: '$0.070' },
+    { scope: 'turn_total', label: '클라이언트 턴 합계', context: '미상', cost: '미상' },
+    { scope: 'conversation_cumulative', label: '대화 누적', context: '미상', cost: '미상' },
+    { scope: 'unavailable', label: '범위 미상', context: '미상', cost: '미상' },
+  ] as const)('shows $scope usage without changing its meaning', async ({ scope, label, context, cost }) => {
+    const response = turnRecordsWithMemoryOs()
+    Object.assign(response.entries[1]!.record, {
+      usage_scope: scope,
+      input_tokens: 50_000,
+      output_tokens: 10_000,
+      context_window: 200_000,
+      price_input_per_million: 1,
+      price_output_per_million: 2,
+    })
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+    await waitFor(() => expect(container.textContent).toContain('T42'))
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="turn-token-bar"]')).toBeTruthy())
+
+    const tokenBar = container.querySelector('[data-testid="turn-token-bar"]')!
+    expect.soft(tokenBar.textContent).toContain(label)
+    expect.soft(tokenBar.textContent).toContain('50,000')
+    expect.soft(tokenBar.textContent).toContain('10,000')
+    expect.soft(tokenBar.querySelector('.ctxpct')?.textContent).toBe(`컨텍스트 ${context} / 200K`)
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+    await waitFor(() => expect(container.querySelector('.ti-kv')).toBeTruthy())
+    const metadata = new Map(Array.from(container.querySelectorAll('.ti-kv .k'))
+      .map(key => [key.textContent, key.nextElementSibling?.textContent]))
+    expect.soft(metadata.get('usage scope')).toBe(label)
+    expect.soft(metadata.get('ctx window')).toBe(`${context} / 200,000`)
+    expect.soft(metadata.get('est. cost')).toBe(cost)
+  })
+
   it('renders missing token observations as unknown without synthetic values', async () => {
     const response = turnRecordsWithMemoryOs()
     const record = response.entries[1]!.record
     delete record.input_tokens
     delete record.output_tokens
+    delete record.context_window
     fetchKeeperTurnRecordsMock.mockResolvedValue(response)
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -921,6 +1020,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(tokenBar?.textContent).toContain('측정 없음')
     expect(tokenBar?.textContent).toContain('입력 미상')
     expect(tokenBar?.textContent).toContain('출력 미상')
+    expect(tokenBar?.querySelector('.ctxpct')?.textContent).toBe('컨텍스트 미상')
     expect(tokenBar?.querySelector('.seg-in')).toBeNull()
     expect(tokenBar?.querySelector('.seg-out')).toBeNull()
   })
@@ -1127,7 +1227,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('tool log unavailable')
   })
 
-  it('displays the token-economics stacked bar', async () => {
+  it('displays the token usage stacked bar', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -1143,7 +1243,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     const barText = container.querySelector('[data-testid="turn-token-bar"]')?.textContent ?? ''
-    expect(barText).toContain('토큰 경제')
+    expect(barText).toContain('토큰 사용량 · 요청별')
     expect(barText).toContain('입력 2,400')
     expect(barText).toContain('출력 280')
   })

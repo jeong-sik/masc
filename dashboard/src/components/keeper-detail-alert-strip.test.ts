@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import '@testing-library/jest-dom'
 
 import type { Keeper } from '../types'
+import { normalizeKeepers } from '../keeper-store-normalize'
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 
 afterEach(() => {
@@ -22,6 +23,50 @@ function keeper(overrides: Partial<Keeper> = {}): Keeper {
 }
 
 describe('KeeperRuntimeAlertStrip', () => {
+  it.each([false, true])('shows a normalized current blocker once when paused=%s', (paused) => {
+    const summary = 'API timeout during non_streaming_body'
+    const [normalized] = normalizeKeepers([{
+      name: 'timeout-keeper',
+      status: 'active',
+      keepalive_running: true,
+      needs_attention: false,
+      paused,
+      runtime_blocker_class: 'provider_runtime_error',
+      runtime_blocker_summary: summary,
+    }])
+    expect(normalized).toBeDefined()
+    const { getAllByText, queryByText } = render(h(KeeperRuntimeAlertStrip, { keeper: normalized! }))
+
+    const summaryRows = getAllByText((_, element) =>
+      element?.tagName === 'SPAN' && element.textContent?.includes(summary) === true)
+    expect(summaryRows).toHaveLength(1)
+    expect(queryByText('정지 원인', { exact: true })).toBeNull()
+  })
+
+  it('keeps an independent terminal failure beside the current blocker', () => {
+    const [normalized] = normalizeKeepers([{
+      name: 'timeout-keeper',
+      status: 'active',
+      keepalive_running: true,
+      runtime_blocker_class: 'provider_runtime_error',
+      runtime_blocker_summary: 'API timeout during non_streaming_body',
+      runtime_trust: {
+        latest_terminal_reason: {
+          code: 'fiber_unresolved',
+          source: 'turn_receipt',
+          summary: 'The previous turn did not settle.',
+          severity: 'bad',
+        },
+      },
+    }])
+    expect(normalized).toBeDefined()
+    const { container } = render(h(KeeperRuntimeAlertStrip, { keeper: normalized! }))
+
+    expect(container.textContent).toContain('API timeout during non_streaming_body')
+    expect(container.textContent).toContain('The previous turn did not settle.')
+    expect(container.textContent).toContain('종료 코드')
+  })
+
   it('stays hidden for a quiet keeper without runtime evidence', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, { keeper: keeper({ needs_attention: false }) }))
 

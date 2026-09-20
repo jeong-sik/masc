@@ -196,6 +196,7 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  run_lint "Stale-worktree cleanup keeps commits" bash scripts/test-cleanup-stale-worktrees.sh
   # A guard nobody runs is a document. Twice a guard sat red on untouched main
   # because nothing reached it -- the cancel-guard lint and
   # check-tui-render-purity.sh -- and a sweep on 2026-09-07 found four more in

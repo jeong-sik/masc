@@ -83,31 +83,27 @@ end
 let test_three_modules_share_one_rule () =
   let open Llm_provider.Model_identifiers in
   List.iter
-    (fun (module M : STRINGY) ->
+    (fun ((module M : STRINGY), empty_message) ->
+       check_error ~of_string:M.of_string ~show:M.to_string ~expected:empty_message "";
        (match M.of_string " padded " with
         | Error _ -> ()
         | Ok _ -> Alcotest.fail "padded input must be rejected");
-       (match M.of_string "AbC-xYz" with
-        | Ok value ->
-          Alcotest.(check bool) "case-different bytes compare equal" true
-            (M.equal value (match M.of_string "abc-XYZ" with Ok v -> v | Error _ -> assert false));
-          Alcotest.(check string) "to_string preserves outside spelling" "AbC-xYz" (M.to_string value)
-        | Error message -> Alcotest.failf "plain id must parse: %s" message))
-    [ (module Id_prefix : STRINGY)
-    ; (module Api_name : STRINGY)
-    ; (module Model_id : STRINGY) ];
-  check_error ~of_string:Api_name.of_string ~show:Api_name.to_string
-    ~expected:"api_name must not be empty" "";
-  (match Llm_provider.Model_identifiers.Model_id.of_string "" with
-   | Error "model_id must not be empty" -> ()
-   | Error message -> Alcotest.failf "Model_id empty message: %s" message
-   | Ok _ -> Alcotest.fail "Model_id empty input must be rejected")
+       match M.of_string "AbC-xYz", M.of_string "abc-XYZ" with
+       | Ok value, Ok other ->
+         Alcotest.(check bool) "case-different bytes compare equal" true (M.equal value other);
+         Alcotest.(check string) "to_string preserves outside spelling" "AbC-xYz"
+           (M.to_string value)
+       | Error message, _ | _, Error message ->
+         Alcotest.failf "plain id must parse: %s" message)
+    [ (module Id_prefix : STRINGY), "model entry field \"id_prefix\" must not be empty"
+    ; (module Api_name : STRINGY), "api_name must not be empty"
+    ; (module Model_id : STRINGY), "model_id must not be empty" ]
 ;;
 
 (* Catalog lookup path: the row keeps its declared spelling; comparison folds
    ASCII case. [lookup] rejects a padded query; [lookup_for_provider] trims
-   its query instead, so the two entry points apply different padding rules
-   and only [lookup]'s is pinned here. *)
+   its query instead — a known divergence tracked in issue #37276, so only
+   [lookup]'s padding rule is pinned here. *)
 let test_lookup_folds_case_and_rejects_padding () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog

@@ -170,6 +170,13 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         "overlay-lanes": report(
             "overlay-origin", [sample("overlay-context", "Scored")]
         ),
+        "overlay-return": report(
+            "overlay-origin", [sample("overlay-context", "Scored")]
+        ),
+        "overlay-palette": report(
+            "overlay-origin", [sample("overlay-context", "Scored")]
+        ),
+        "theme-preview": report("theme-preview", [sample("retained", "Scored")]),
     }
     if scenario == "large":
         large = sample("large", "Scored", provided=True)
@@ -182,6 +189,15 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         )
     elif scenario == "malformed":
         values[scenario] = report("must-not-render", [sample("malformed", "Scored")])
+    elif scenario == "probabilities-preview":
+        values[scenario] = report(
+            "many-probabilities",
+            [
+                sample(f"case-{index:03d}-" + "x" * 1024, "Scored", provided=True)
+                for index in range(96)
+            ]
+            + [sample("last-failure", "Judge_failed")],
+        )
     sha, response = artifact(values[scenario])
     if scenario == "integrity":
         response = copy.deepcopy(response)
@@ -204,7 +220,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
     )
     fixtures["/api/v1/artifacts/" + new_sha] = new_response
     status_requested = threading.Event()
-    if scenario in ("overlay", "overlay-lanes"):
+    if scenario in ("overlay", "overlay-lanes", "overlay-return", "overlay-palette"):
         status_response: h.HttpResponse = (
             200,
             {
@@ -227,6 +243,14 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             return status_response
 
         fixtures["/api/v1/git/status"] = read_status
+        fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
+        fixtures["/api/v1/repositories/masc/changes"] = (
+            200,
+            {
+                **status_response[1],
+                "scope": {"kind": "repository", "repository_id": "masc"},
+            },
+        )
 
     def interact(process, master, _slave, output, _base):
         h.send_and_wait(process, master, output, b"2", b"MASC Keepers")
@@ -244,15 +268,46 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             )
             h.send_and_wait(process, master, output, b"\r", needle)
 
-        if scenario == "overlay-lanes":
+        if scenario in ("overlay-lanes", "overlay-palette"):
             h.palette_go(process, master, output, b"go lanes", b"MASC Lanes")
-        if scenario in ("overlay", "overlay-lanes"):
+        if scenario in (
+            "overlay",
+            "overlay-lanes",
+            "overlay-return",
+            "overlay-palette",
+        ):
+            # Lanes does not draw the repository overlay, but its Esc handler
+            # still sees it. The HTTP fixture proves /diff opened that state.
             submit_command(
                 "/diff",
-                h.FRAME_START if scenario == "overlay-lanes" else b"overlay-file.ml",
+                h.FRAME_START
+                if scenario in ("overlay-lanes", "overlay-palette")
+                else b"overlay-file.ml",
             )
             assert status_requested.wait(2.0), "repository changes were not requested"
+        if scenario == "overlay-palette":
+            # Returning to the same surface need not repaint its title.
+            h.palette_go(process, master, output, b"go lanes", b"j/k:move")
+            h.send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        if scenario == "theme-preview":
+            h.palette_go(process, master, output, b"go Config / themes", b"MASC Themes")
+            h.wait_for_output(
+                process, master, output, b"terminal colours", start=0, timeout=3.0
+            )
+            preview = h.send_and_wait(
+                process, master, output, b"j", b"Enter:pick another"
+            )
+            assert b"\x1b]4;" in preview and b"\x1b]11;" in preview, preview
+        before_command = len(output)
         submit_command("/measurement " + sha, b"MASC Measurement")
+        if scenario == "theme-preview":
+            transition = bytes(output[before_command:])
+            for reset in (b"\x1b]110\x1b\\", b"\x1b]111\x1b\\", b"\x1b]104\x1b\\"):
+                assert reset in transition, (
+                    "measurement kept an uncommitted theme",
+                    reset,
+                    transition,
+                )
         expected = {
             "contexts": b"SCORED 2",
             "incomplete": b"INCOMPLETE 2",
@@ -264,6 +319,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             "malformed": b"not JSON",
             "overlay": b"SCORED 1",
             "overlay-lanes": b"SCORED 1",
+            "overlay-return": b"SCORED 1",
+            "overlay-palette": b"SCORED 1",
+            "theme-preview": b"SCORED 1",
+            "probabilities-preview": b"SCORED 96",
         }[scenario]
         h.wait_for_output(process, master, output, expected, start=0, timeout=5.0)
         if delayed is not None:
@@ -354,10 +413,50 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         elif scenario == "stale":
             assert b"new-result" in screen and b"old-result" not in screen, screen
             assert b"INCOMPLETE 1" in screen and b"SCORED 0" in screen, screen
-        elif scenario in ("overlay", "overlay-lanes"):
+        elif scenario in (
+            "overlay",
+            "overlay-lanes",
+            "overlay-return",
+            "overlay-palette",
+        ):
             assert b"overlay-origin" in screen and b"SCORED 1" in screen, screen
             closed = h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
             assert b"MASC Measurement" not in h.screen_text(closed), closed
+            if scenario == "overlay-return":
+                h.palette_go(
+                    process, master, output, b"go Workspace", b"MASC Workspace"
+                )
+                h.send_and_wait(process, master, output, b"d", b"overlay-file.ml")
+                closed = h.send_and_wait(
+                    process, master, output, b"\x1b", b"MASC Workspace"
+                )
+                assert "Keepers ▸ alpha ▸ chat".encode() not in h.screen_text(closed), (
+                    closed
+                )
+                # A new /diff still owns its direct return to Keeper chat.
+                submit_command("/diff", b"overlay-file.ml")
+                h.send_and_wait(
+                    process, master, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode()
+                )
+                h.escape_to_keeper_detail(process, master, output, name=b"alpha")
+        elif scenario == "theme-preview":
+            h.palette_go(
+                process, master, output, b"go Config / themes", b"terminal colours"
+            )
+        elif scenario == "probabilities-preview":
+            for needle in (
+                b"SCORED 96",
+                b"FAILED 1",
+                b"INCOMPLETE 0",
+                b"output truncated",
+                b"full report:",
+                b"measurement-result.json",
+                b"BLOB SHA256",
+            ):
+                assert needle in screen, (needle, screen)
+            # The overview covers the entire report; the explicitly labelled
+            # text preview need not contain every probability or failure stage.
+            h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
         if evidence is not None:
             evidence.mkdir(parents=True, exist_ok=True)
             (evidence / (scenario + ".pty")).write_bytes(output)
@@ -398,6 +497,10 @@ if __name__ == "__main__":
         "malformed",
         "overlay",
         "overlay-lanes",
+        "overlay-return",
+        "overlay-palette",
+        "theme-preview",
+        "probabilities-preview",
     ):
         run(os.path.abspath(args.executable), name, args.evidence_dir)
-    print("TUI Noul measurement: 10 scenarios PASS")
+    print("TUI Noul measurement: 14 scenarios PASS")

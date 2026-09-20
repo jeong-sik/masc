@@ -72,9 +72,14 @@ output file. A failed copy is reported as `publication_error` in stdout JSON
 and does not change the measurement's exit code or its retained report.
 
 In that server's TUI, enter `/measurement <sha256>` to inspect the report.
-The TUI shows scored, failed and incomplete sample counts, every raw
-probability, failure stage and report location. It does not turn a probability
-into a pass, coverage percentage or operational Librarian verdict.
+The TUI counts every scored, failed and incomplete sample. Its text preview
+shows raw probabilities and per-sample details within a 64 KiB output limit;
+later probabilities or failure stages may be omitted. When truncated, the
+preview says so and names the complete report file. The input pane also shows
+the published blob SHA; the original output file remains authoritative. Read
+that file for the full distribution and every failure stage. The TUI does not
+turn a probability into a pass, coverage percentage or operational Librarian
+verdict.
 
 Each case declares `question`: a fixed string skips question generation; `null`
 asks the selected runtime to generate one from the reference. The report records

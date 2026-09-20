@@ -5420,6 +5420,7 @@ let open_repository_changes state ~mailbox ~scope =
 
 let close_repository_changes state =
   state.repository_changes_open <- false;
+  state.repository_changes_return_chat <- false;
   state.repository_changes_scope <- None;
   state.repository_changes <- None;
   state.repository_changes_error <- None;
@@ -6617,6 +6618,47 @@ let search_jump ?(backwards = false) state ~query ~after =
         scan 1
       end
 
+(* Reads the palette rather than taking a colour, so every caller sends
+   whatever is in force at the moment it asks -- picking a scheme, dropping
+   one, and the first paint all go through the same answer.
+
+   Gated on the reader's own pick rather than on the palette alone. The
+   palette is also what the terminal answered about itself, and sending a
+   terminal its own colours back is masc claiming an opinion it does not
+   have. It read as harmless while only the page travelled; the sixteen
+   make it a round trip through masc's 8-bit parse of a reply a terminal
+   may have given at 16. *)
+let sync_theme_page state =
+  Frame_presenter.sync_scheme ~write:(output_string stdout)
+    ~flush:(fun () -> flush stdout)
+    (match state.theme_choice with
+     | None -> None
+     | Some _ ->
+       Option.map
+         (fun palette ->
+           { Frame_presenter.foreground =
+               Masc_tui_terminal_palette.foreground palette
+           ; background = Masc_tui_terminal_palette.background palette
+           ; ansi =
+               Array.init Masc_tui_terminal_palette.ansi_slot_count
+                 (Masc_tui_terminal_palette.ansi palette)
+           })
+         (Masc_tui_terminal_palette.current ()))
+
+(* Esc, and leaving the pane. Restoring goes through the same two calls a
+   pick does, so a preview cannot leave the screen and the background
+   disagreeing. *)
+let cancel_theme_preview state =
+  match state.theme_before_preview with
+  | None -> ()
+  | Some previous ->
+    state.theme_before_preview <- None;
+    (match previous with
+     | Some name -> ignore (Masc_tui_theme_choice.apply name : bool)
+     | None -> Masc_tui_theme_choice.follow_terminal ());
+    state.theme_choice <- previous;
+    sync_theme_page state
+
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
    a load the other performs. Surfaces not listed refresh on the periodic
@@ -6624,8 +6666,11 @@ let search_jump ?(backwards = false) state ~query ~after =
    otherwise read as empty until the next tick. *)
 let goto_surface state ~mailbox (destination : surface) =
   leave_browser_lane_for_surface state destination;
-  if state.repository_changes_open && destination <> state.view then
-    close_repository_changes state;
+  if state.repository_changes_open then close_repository_changes state;
+  (match state.view with
+   | Config when state.config_pane = Config_themes && destination <> Config ->
+       cancel_theme_preview state
+   | _ -> ());
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
   (* The lane editor's line belongs to the view that drew it. *)
@@ -9187,7 +9232,6 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            notice ~role:Message_error (Tool_blob_store.invalid_sha256_to_string error)
        | Ok () ->
            Buffer.clear state.msg_input;
-           close_repository_changes state;
            goto_surface state ~mailbox Lanes;
            open_measurement_artifact state ~mailbox ~sha256)
   | Masc_tui_command.View_image path ->
@@ -15517,33 +15561,6 @@ let main
      that gives this back is already installed. *)
   Frame_presenter.setup frame_presenter ~write:(output_string stdout)
     ~flush:(fun () -> flush stdout);
-  (* Reads the palette rather than taking a colour, so every caller sends
-     whatever is in force at the moment it asks -- picking a scheme, dropping
-     one, and the first paint all go through the same answer.
-
-     Gated on the reader's own pick rather than on the palette alone. The
-     palette is also what the terminal answered about itself, and sending a
-     terminal its own colours back is masc claiming an opinion it does not
-     have. It read as harmless while only the page travelled; the sixteen
-     make it a round trip through masc's 8-bit parse of a reply a terminal
-     may have given at 16. *)
-  let sync_theme_page () =
-    Frame_presenter.sync_scheme ~write:(output_string stdout)
-      ~flush:(fun () -> flush stdout)
-      (match state.theme_choice with
-       | None -> None
-       | Some _ ->
-         Option.map
-           (fun palette ->
-             { Frame_presenter.foreground =
-                 Masc_tui_terminal_palette.foreground palette
-             ; background = Masc_tui_terminal_palette.background palette
-             ; ansi =
-                 Array.init Masc_tui_terminal_palette.ansi_slot_count
-                   (Masc_tui_terminal_palette.ansi palette)
-             })
-           (Masc_tui_terminal_palette.current ()))
-  in
   (* The pick, written to the runtime.toml boot reads it back from. Only a
      commit comes here: a preview is a look at a scheme, not a choice of one,
      and storing every row the cursor passes would make Esc a lie.
@@ -15591,38 +15608,13 @@ let main
       if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
       then begin
         state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
-        sync_theme_page ()
+        sync_theme_page state
       end
   in
-  (* Esc, and leaving the pane. Restoring goes through the same two calls a
-     pick does, so a preview cannot leave the screen and the background
-     disagreeing. *)
-  let cancel_theme_preview () =
-    match state.theme_before_preview with
-    | None -> ()
-    | Some previous ->
-      state.theme_before_preview <- None;
-      (match previous with
-       | Some name -> ignore (Masc_tui_theme_choice.apply name : bool)
-       | None -> Masc_tui_theme_choice.follow_terminal ());
-      state.theme_choice <- previous;
-      sync_theme_page ()
-  in
-  (* Shadowed on purpose: every surface change in this loop goes through here,
-     and a preview must not survive one. Wrapping is what keeps the three call
-     sites from each having to remember. *)
-  let goto_surface state ~mailbox destination =
-    (match state.view with
-     | Config when state.config_pane = Config_themes && destination <> Config ->
-       cancel_theme_preview ()
-     | _ -> ());
-    goto_surface state ~mailbox destination
-  in
-
   (* A scheme named in runtime.toml was applied at boot, before this existed.
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
-  sync_theme_page ();
+  sync_theme_page state;
   output_string stdout mouse_tracking_enable;
   output_string stdout bracketed_paste_enable;
   (* Only terminals with an extended profile receive this opt-in. Apple
@@ -19938,7 +19930,7 @@ and is loaded on demand through keeper_skill.
                    scheme picks dark text because it expects a light page, so
                    leaving the terminal's own background is what made "light
                    theme is still black". *)
-                sync_theme_page ();
+                sync_theme_page state;
                 store_theme_choice (Some entry.Masc_tui_theme_choice.name)
               end)
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
@@ -19986,7 +19978,7 @@ and is loaded on demand through keeper_skill.
        | Some ("s" | "S") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Resources
        | Some "9" when state.view = Config ->
-           cancel_theme_preview ();
+           cancel_theme_preview state;
            goto_surface state ~mailbox:async_messages Runtime
        | Some ("t" | "T") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Tools
@@ -21221,7 +21213,6 @@ and is loaded on demand through keeper_skill.
              let return_chat = state.repository_changes_return_chat in
              close_repository_changes state;
              if return_chat then begin
-               state.repository_changes_return_chat <- false;
                state.view <- Keepers Keeper_message
              end
            end
@@ -21235,7 +21226,7 @@ and is loaded on demand through keeper_skill.
             | Config
               when state.config_pane = Config_themes
                    && state.theme_before_preview <> None ->
-                cancel_theme_preview ()
+                cancel_theme_preview state
             | Code ->
                 if state.repository_changes_open then
                   close_repository_changes state
@@ -21446,7 +21437,6 @@ and is loaded on demand through keeper_skill.
              let return_chat = state.repository_changes_return_chat in
              close_repository_changes state;
              if return_chat then begin
-               state.repository_changes_return_chat <- false;
                state.view <- Keepers Keeper_message
              end
            end
@@ -22744,7 +22734,6 @@ and is loaded on demand through keeper_skill.
             let change_ctx =
               Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
-            close_repository_changes state;
             goto_surface state ~mailbox:async_messages Planning;
             state.planning_mode <- Planning_list;
             (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
@@ -22892,7 +22881,6 @@ and is loaded on demand through keeper_skill.
             let change_ctx =
               Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
-            close_repository_changes state;
             goto_surface state ~mailbox:async_messages Overview;
             (match change_ctx.Masc_tui_render_prim.ctx_task_id with
              | Some tid ->
@@ -23313,7 +23301,7 @@ and is loaded on demand through keeper_skill.
            state.theme_choice <- None;
            state.theme_before_preview <- None;
            (* Withdrawing the choice withdraws the background with it. *)
-           sync_theme_page ();
+           sync_theme_page state;
            store_theme_choice None
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
@@ -23478,7 +23466,7 @@ and is loaded on demand through keeper_skill.
               empty list -- and empty reads as "nothing registered". *)
            (* Leaving the themes pane ends the preview the same way Esc does.
               A scheme the reader never picked must not follow them out. *)
-           cancel_theme_preview ();
+           cancel_theme_preview state;
            (match state.config_pane with
             | Config_prompts ->
               (* [start] answers Already_loading for a read in flight, so the

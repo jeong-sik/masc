@@ -1,8 +1,8 @@
 (** Event-Layer stimulus intake for the keeper heartbeat loop.
 
-    Admits every ready Event Layer stimulus from one durable snapshot. Payload
-    families share queue order except for explicit owner-lane manual
-    durable stimulus admission at persisted turn boundaries, and
+    Admits a bounded batch of ready Event Layer stimuli from one durable
+    snapshot. Payload families share queue order except for explicit
+    owner-lane manual durable stimulus admission at persisted turn boundaries, and
     Connector attention, which admits only the first ready conversation. An
     unready input remains queued without blocking later ready work. *)
 
@@ -173,14 +173,18 @@ val reconcile_spent_selection
     turn spent on it fails at the same replay lookup every cycle. *)
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
-     ~pending_board_events] reads one exact durable queue snapshot and admits
-    every ready selection in queue order.
+     ~pending_board_events] reads one exact durable queue snapshot in queue
+    order, projecting batches of at most the configured admission limit.
+    A batch with no admitted source and no hard error yields to the next
+    batch in that snapshot. The first productive batch or hard error ends
+    intake; the earliest transient diagnostic is kept across skipped batches.
+    Retiring a permanently absent Board source or a spent grant does not
+    admit work into the turn, so it does not end this search.
 
-    RFC-0377's routing boundary remains: only the first ready
-    [Connector_attention] conversation is admitted, but all of its pending
-    members are included. Other connector conversations remain queued; every
-    ready non-connector source is included except that at most one
-    [Hitl_resolved] is admitted because a turn carries one exact cycle grant.
+    RFC-0377's routing boundary remains: only members of the first ready
+    [Connector_attention] conversation are eligible, and only the selected
+    batch is projected. Other connector conversations remain queued. At most
+    one [Hitl_resolved] is eligible because a turn carries one exact cycle grant.
     Later ready HITL resolutions remain queued for their own replay turns.
     [source_batch] carries all exact admitted selections. Payloads and counts
     are derived from that batch. [diagnostic_selection] retains a withdrawn

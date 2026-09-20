@@ -6,8 +6,8 @@
     - the [heartbeat_event_intake] record returned to the heartbeat loop;
     - per-class string labels used in Otel_metric_store and log lines;
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
-    - the top-level all-ready draining function ([heartbeat_event_intake])
-      that admits one durable snapshot. *)
+    - the bounded-batch intake function ([heartbeat_event_intake]) that reads
+      one durable snapshot. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -805,13 +805,14 @@ let heartbeat_event_intake
       ~meta_after_triage
       ~pending_board_events
   =
-  (* RFC-event-queue-admit-all-ready — one turn observes every source that is
-     ready in this durable snapshot. The queue is a wake/attention layer, not a
-     second work tracker: admitting one row per turn made a steady arrival rate
-     an unbounded backlog even while every Keeper remained alive.
+  (* RFC-event-queue-admit-all-ready — one turn observes a bounded batch of
+     ready sources from this durable snapshot. The queue is a wake/attention
+     layer, not a second work tracker: admitting one row per turn made a
+     steady arrival rate an unbounded backlog even while every Keeper remained
+     alive.
 
-     Connector attention keeps RFC-0377's conversation boundary: the
-     first ready connector conversation is admitted as a whole, while rows for
+     Connector attention keeps RFC-0377's conversation boundary:
+     only the first ready connector conversation is eligible, while rows for
      other conversations remain pending for their own routed turn. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
@@ -875,16 +876,7 @@ let heartbeat_event_intake
                     first_channel))
           selections
       in
-      (* RFC-event-queue-admit-all-ready bounds the batch: a steady arrival
-         rate must not turn into an unbounded backlog. Selections past the
-         bound stay pending for a later turn instead of being dropped. *)
-      let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
-      let rec take n = function
-        | [] -> []
-        | _ when n <= 0 -> []
-        | x :: rest -> x :: take (n - 1) rest
-      in
-      take max_events admitted
+      admitted
   in
   let connector_attention_items_of_batch selections =
     let event_ids =
@@ -1016,6 +1008,25 @@ let heartbeat_event_intake
     in
     loop [] [] None selections
   in
+  let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
+  let rec consume_ready first_withdrawn = function
+    | [] -> [], [], first_withdrawn, None
+    | selections ->
+      (* The existing positive admission limit bounds each projection batch.
+         Only a batch admitting no source may look further into this snapshot;
+         an unavailable prefix must not hide a readable source behind it. *)
+      let batch = List.take max_events selections in
+      let rest = List.drop max_events selections in
+      let observations, consumed, withdrawn, hard_error = consume_batch batch in
+      let first_withdrawn =
+        match first_withdrawn with
+        | Some _ -> first_withdrawn
+        | None -> withdrawn
+      in
+      (match consumed, hard_error with
+       | [], None -> consume_ready first_withdrawn rest
+       | _ -> observations, consumed, first_withdrawn, hard_error)
+  in
   let ( queued_observations
       , consumed_selections
       , first_withdrawn
@@ -1035,7 +1046,7 @@ let heartbeat_event_intake
     | Ok selections ->
       let batch = ready_batch selections in
       let observations, selections, withdrawn, error =
-        consume_batch batch
+        consume_ready None batch
       in
       ( observations
       , selections

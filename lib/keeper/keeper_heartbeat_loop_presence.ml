@@ -102,10 +102,27 @@ let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : kee
       turn_failures
 ;;
 
+let dispatch_heartbeat_event_exact
+      (registry_entry : Keeper_registry.registry_entry)
+      event
+  =
+  match Keeper_registry.dispatch_event_exact registry_entry event with
+  | Ok _ -> ()
+  | Error error ->
+    Log.Keeper.warn
+      ~keeper_name:registry_entry.name
+      "heartbeat event retained newer lane: %s"
+      (Keeper_state_machine.transition_error_to_string error)
+;;
+
 (* A heartbeat failure is current only until presence recovers. Turn failure
    debt is independent, so recovery restores its typed count instead of
    leaving a stale heartbeat blocker or clearing both observations. *)
-let settle_recovered_heartbeat_reason ~(ctx : _ context) ~(meta : keeper_meta) =
+let settle_recovered_heartbeat_reason
+      ~(ctx : _ context)
+      ~(registry_entry : Keeper_registry.registry_entry)
+      ~(meta : keeper_meta)
+  =
   let base_path = ctx.config.base_path in
   let turn_failures = Keeper_registry.get_turn_failures ~base_path meta.name in
   let recovered =
@@ -115,8 +132,7 @@ let settle_recovered_heartbeat_reason ~(ctx : _ context) ~(meta : keeper_meta) =
   in
   let replaced =
     Keeper_registry.replace_heartbeat_failure_reason
-      ~base_path
-      meta.name
+      registry_entry
       recovered
   in
   if not replaced
@@ -128,6 +144,7 @@ let settle_recovered_heartbeat_reason ~(ctx : _ context) ~(meta : keeper_meta) =
 
 let sync_keeper_presence
       ~(ctx : _ context)
+      ~(registry_entry : Keeper_registry.registry_entry)
       ~(meta_current : keeper_meta)
       ~(consecutive_failures : int ref)
   : keeper_meta
@@ -135,11 +152,10 @@ let sync_keeper_presence
   try
     let synced = meta_current in
     consecutive_failures := 0;
-    Keeper_registry.dispatch_event_unit
-      ~base_path:ctx.config.base_path
-      meta_current.name
+    dispatch_heartbeat_event_exact
+      registry_entry
       Keeper_state_machine.Heartbeat_ok;
-    settle_recovered_heartbeat_reason ~ctx ~meta:meta_current;
+    settle_recovered_heartbeat_reason ~ctx ~registry_entry ~meta:meta_current;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatSuccesses)
       ~labels:[ "keeper", meta_current.name ]
@@ -159,9 +175,8 @@ let sync_keeper_presence
       !consecutive_failures
       (Printexc.to_string exn);
     (* RFC-0002: dispatch heartbeat failure *)
-    Keeper_registry.dispatch_event_unit
-      ~base_path:ctx.config.base_path
-      meta_current.name
+    dispatch_heartbeat_event_exact
+      registry_entry
       (Keeper_state_machine.Heartbeat_failed
          { consecutive = !consecutive_failures });
     meta_current

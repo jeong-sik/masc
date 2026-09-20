@@ -206,9 +206,10 @@ val clear_error : base_path:string -> string -> unit
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
 
 (** Atomically replace a heartbeat failure observation. Returns [false] and
-    leaves the entry untouched if a newer cause has already replaced it. *)
+    leaves the entry untouched if a newer cause or same-name lane has already
+    replaced it. *)
 val replace_heartbeat_failure_reason :
-  base_path:string -> string -> failure_reason option -> bool
+  registry_entry -> failure_reason option -> bool
 
 
 (** Store the AGENT_CORE Event_bus [correlation_id] from the most recent turn. *)

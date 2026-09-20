@@ -91,9 +91,13 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
   Fun.protect ~finally:R.For_testing.clear (fun () ->
     ignore (R.For_testing.register ~base_path meta.name meta);
     R.set_failure_reason ~base_path meta.name reason;
+    let registry_entry =
+      match R.get ~base_path meta.name with
+      | Some entry -> entry
+      | None -> Alcotest.fail "registered keeper disappeared before refresh"
+    in
     KHL.refresh_failure_reason_after_turn
-      ~base_path
-      ~keeper_name:meta.name
+      ~registry_entry
       ~turn_fail_count:1;
     let stored =
       match R.get ~base_path meta.name with
@@ -423,7 +427,12 @@ let record_failed_turn ~config ~meta err =
   KUF.record_failure_observation ~config ~meta ~terminal_reason ~err ~error_text
 
 let refresh_failure_reason ~base_path ~keeper_name =
-  KHL.refresh_failure_reason_after_turn ~base_path ~keeper_name
+  let registry_entry =
+    match R.get ~base_path keeper_name with
+    | Some entry -> entry
+    | None -> Alcotest.fail "registered keeper disappeared before refresh"
+  in
+  KHL.refresh_failure_reason_after_turn ~registry_entry
     ~turn_fail_count:(R.get_turn_failures ~base_path keeper_name)
 
 let failure_reason ~base_path ~keeper_name =

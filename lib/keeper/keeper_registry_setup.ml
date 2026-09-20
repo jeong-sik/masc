@@ -1093,14 +1093,6 @@ let set_failure_reason ~base_path name reason =
   Error_tracking.set_failure_reason ~base_path name reason ~update_entry:update_entry_unit
 ;;
 
-let replace_heartbeat_failure_reason ~base_path name replacement =
-  update_entry_if_registered ~base_path name (fun entry ->
-    match entry.last_failure_reason with
-    | Some (Heartbeat_consecutive_failures _) ->
-      { entry with last_failure_reason = replacement }, true
-    | Some _ | None -> entry, false)
-;;
-
 let set_last_correlation_id ~base_path name cid =
   Error_tracking.set_last_correlation_id ~base_path name cid ~update_entry:update_entry_unit
 ;;

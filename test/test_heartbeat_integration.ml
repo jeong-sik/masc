@@ -663,19 +663,19 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
         ~base_path
         ~keeper_name:with_turn_debt.name
         ~turn_fail_count:(R.get_turn_failures ~base_path with_turn_debt.name);
-      match
-        Option.bind (R.get ~base_path with_turn_debt.name) (fun entry ->
-          entry.R.last_failure_reason)
-      with
-      | Some (R.Turn_consecutive_failures 1 as reason) ->
-        (match Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
-         | Some surface -> check string "public blocker follows remaining turn debt"
-             "turn_failures" surface.blocker_class
-         | None -> fail "remaining turn debt has no public blocker")
-      | Some reason ->
-        failf "heartbeat recovery left the wrong reason: %s"
-          (R.failure_reason_to_string reason)
-      | None -> fail "heartbeat recovery cleared remaining turn debt";
+      (match
+         Option.bind (R.get ~base_path with_turn_debt.name) (fun entry ->
+           entry.R.last_failure_reason)
+       with
+       | Some (R.Turn_consecutive_failures 1 as reason) ->
+         (match Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+          | Some surface -> check string "public blocker follows remaining turn debt"
+              "turn_failures" surface.blocker_class
+          | None -> fail "remaining turn debt has no public blocker")
+       | Some reason ->
+         failf "heartbeat recovery left the wrong reason: %s"
+           (R.failure_reason_to_string reason)
+       | None -> fail "heartbeat recovery cleared remaining turn debt");
       let raced = make_meta "heartbeat-recovery-race" in
       ignore (R.For_testing.register ~base_path raced.name raced);
       R.set_failure_reason ~base_path raced.name (Some (R.Heartbeat_consecutive_failures 2));

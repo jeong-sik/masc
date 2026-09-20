@@ -261,6 +261,26 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
          next
          (fun progress -> Baseline_advanced progress))
   | R.Read { range; boundary_lines_seen = _ } ->
+    let* next =
+      match R.progress_after ~trace_id selection with
+      | Some next -> Ok next
+      | None -> Error (Range_end_boundary_missing range)
+    in
+    let* already_committed =
+      Keeper_memory_os_current.durable_range_was_committed
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        next
+      |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
+    in
+    if already_committed
+    then
+      write_progress
+        ~keepers_dir:runtime_keepers_dir
+        ~keeper_name
+        next
+        (fun progress -> Progress_advanced progress)
+    else
     let* ended_at, turn_ref =
       match
         turn_boundary_for_position
@@ -323,17 +343,14 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
       ; counterpart_observations
       }
     in
-    if not (commit ~expected_revision input)
+    if not (commit ~expected_revision ~progress:next input)
     then Ok Memory_not_committed
-    else (
-      match R.progress_after ~trace_id selection with
-      | None -> Ok Memory_not_committed
-      | Some next ->
-        write_progress
-          ~keepers_dir:runtime_keepers_dir
-          ~keeper_name
-          next
-          (fun progress -> Progress_advanced progress))
+    else
+      write_progress
+        ~keepers_dir:runtime_keepers_dir
+        ~keeper_name
+        next
+        (fun progress -> Progress_advanced progress)
 ;;
 
 let consume_one ~config ~keeper_name ~commit =
@@ -355,12 +372,20 @@ let consume_one ~config ~keeper_name ~commit =
   result
 ;;
 
-let commit_with_runtime ~base_path ~keepers_dir ~keeper_id ~expected_revision input =
+let commit_with_runtime
+      ~base_path
+      ~keepers_dir
+      ~keeper_id
+      ~expected_revision
+      ~progress
+      input
+  =
   let committed = ref false in
   Keeper_librarian_runtime.run_best_effort
     ~trigger:Keeper_librarian_runtime.Durable_range
     ~input_projection:Keeper_librarian_runtime.Already_selected_range
     ~on_memory_committed:(fun () -> committed := true)
+    ~durable_range_progress:progress
     ~base_path
     ~keepers_dir
     ~keeper_id
@@ -368,3 +393,9 @@ let commit_with_runtime ~base_path ~keepers_dir ~keeper_id ~expected_revision in
     input;
   !committed
 ;;
+
+module For_testing = struct
+  let reset_process_state () =
+    Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.clear failed_ranges)
+  ;;
+end

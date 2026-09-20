@@ -51,6 +51,7 @@ type dashboard_purge_artifact =
   | Keeper_root_logs_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
+  | Keeper_librarian_range_receipt_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_working_context_recall_artifact
   | Keeper_working_context_artifact
@@ -514,6 +515,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        snapshots and journal behind, and a later keeper with the same name
        inherits them. *)
   ; Keeper_memory_current_artifact
+  ; Keeper_librarian_range_receipt_artifact
   ; Keeper_memory_source_current_artifact
   ; Keeper_working_context_recall_artifact
   ; Keeper_working_context_artifact

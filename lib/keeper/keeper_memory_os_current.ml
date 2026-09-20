@@ -97,6 +97,160 @@ let journal_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ journal_suffix)
 ;;
 
+let durable_range_receipt_suffix = ".librarian-range-commit.json"
+
+let durable_range_receipt_path ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ durable_range_receipt_suffix)
+;;
+
+type durable_range_receipt =
+  | Prepared of
+      { progress : Keeper_librarian_progress.t
+      ; snapshot_revision : int
+      ; snapshot_sha256 : string
+      }
+  | Committed of
+      { progress : Keeper_librarian_progress.t
+      ; snapshot_revision : int
+      ; snapshot_sha256 : string
+      }
+
+let durable_range_receipt_to_json = function
+  | Prepared { progress; snapshot_revision; snapshot_sha256 } ->
+    `Assoc
+      [ "state", `String "prepared"
+      ; "progress", Keeper_librarian_progress.to_json progress
+      ; "snapshot_revision", `Int snapshot_revision
+      ; "snapshot_sha256", `String snapshot_sha256
+      ]
+  | Committed { progress; snapshot_revision; snapshot_sha256 } ->
+    `Assoc
+      [ "state", `String "committed"
+      ; "progress", Keeper_librarian_progress.to_json progress
+      ; "snapshot_revision", `Int snapshot_revision
+      ; "snapshot_sha256", `String snapshot_sha256
+      ]
+;;
+
+let durable_range_receipt_of_json = function
+  | `Assoc fields ->
+    let* () =
+      exact_field_names_result
+        [ "state"; "progress"; "snapshot_revision"; "snapshot_sha256" ]
+        fields
+    in
+    let* state = wire_string_field "state" fields in
+    let* progress_json = wire_json_field "progress" fields in
+    let* progress =
+      wire_at
+        (Wire_field "progress")
+        (Keeper_librarian_progress.of_json progress_json)
+    in
+    let* snapshot_revision = wire_int_field "snapshot_revision" fields in
+    let* () =
+      if snapshot_revision >= 1
+      then Ok ()
+      else wire_fail [ Wire_field "snapshot_revision" ] Not_positive
+    in
+    let* snapshot_sha256 = wire_string_field "snapshot_sha256" fields in
+    let* () =
+      if String_util.is_lowercase_sha256_hex snapshot_sha256
+      then Ok ()
+      else wire_fail [ Wire_field "snapshot_sha256" ] (Unknown_token snapshot_sha256)
+    in
+    (match state with
+     | "prepared" -> Ok (Prepared { progress; snapshot_revision; snapshot_sha256 })
+     | "committed" -> Ok (Committed { progress; snapshot_revision; snapshot_sha256 })
+     | unknown -> wire_fail [ Wire_field "state" ] (Unknown_token unknown))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
+;;
+
+let read_durable_range_receipt ~keepers_dir ~keeper_id =
+  let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
+  match Fs_compat.load_file_opt path with
+  | None -> Ok None
+  | Some content ->
+    (match Yojson.Safe.from_string content with
+     | json ->
+       durable_range_receipt_of_json json
+       |> Result.map (fun receipt -> Some receipt)
+       |> Result.map_error (fun error ->
+         Printf.sprintf
+           "durable Librarian range receipt rejected path=%s: %s"
+           path
+           (wire_error_to_string error))
+     | exception Yojson.Json_error message ->
+       Error
+         (Printf.sprintf
+            "durable Librarian range receipt is not JSON path=%s: %s"
+            path
+            message))
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Error
+      (Printf.sprintf
+         "durable Librarian range receipt unreadable path=%s: %s"
+         path
+         (Printexc.to_string exn))
+;;
+
+let write_durable_range_receipt ~keepers_dir ~keeper_id receipt =
+  let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
+  Fs_compat.save_file_atomic_strict
+    path
+    (Yojson.Safe.to_string (durable_range_receipt_to_json receipt))
+  |> Result.map_error (fun message ->
+    Printf.sprintf
+      "durable Librarian range receipt write failed path=%s: %s"
+      path
+      message)
+;;
+
+let remove_durable_range_receipt ~keepers_dir ~keeper_id =
+  let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
+  match Sys.remove path with
+  | () -> Ok ()
+  | exception Sys_error _ when not (Sys.file_exists path) -> Ok ()
+  | exception exn ->
+    Error
+      (Printf.sprintf
+         "durable Librarian range receipt removal failed path=%s: %s"
+         path
+         (Printexc.to_string exn))
+;;
+
+let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
+
+let reconcile_durable_range_receipt
+      ~keepers_dir
+      ~keeper_id
+      ~snapshot_content
+  =
+  let* receipt = read_durable_range_receipt ~keepers_dir ~keeper_id in
+  match receipt with
+  | None | Some (Committed _) -> Ok receipt
+  | Some (Prepared { progress; snapshot_revision; snapshot_sha256 }) ->
+    if Option.equal String.equal (Option.map sha256 snapshot_content) (Some snapshot_sha256)
+    then (
+      let committed = Committed { progress; snapshot_revision; snapshot_sha256 } in
+      let+ () = write_durable_range_receipt ~keepers_dir ~keeper_id committed in
+      Some committed)
+    else
+      let+ () = remove_durable_range_receipt ~keepers_dir ~keeper_id in
+      None
+;;
+
+let same_durable_progress
+      (left : Keeper_librarian_progress.t)
+      (right : Keeper_librarian_progress.t)
+  =
+  left.boundary_lines_seen = right.boundary_lines_seen
+  && left.position.end_atom = right.position.end_atom
+  && String.equal left.position.trace_id right.position.trace_id
+  && String.equal left.position.last_atom_digest right.position.last_atom_digest
+;;
+
 let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename
 ;;
 
@@ -1093,6 +1247,7 @@ let update_locked_with_error
       ?clock
       ?dropped_statements
       ?before_replace
+      ?durable_range_progress
       ~store_error
       ~keepers_dir
       ~keeper_id
@@ -1127,15 +1282,15 @@ let update_locked_with_error
        (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
           locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
        File_lock_eio.with_lock ?clock snapshot_path (fun () ->
-         let* previous =
+         let* previous, snapshot_content =
            match Fs_compat.load_file_opt snapshot_path with
-           | None -> Ok None
+           | None -> Ok (None, None)
            | Some content ->
              (match
                 Domain_pool_ref.submit_cpu_or_inline (fun () ->
                   parse snapshot_path content)
               with
-              | Ok snapshot -> Ok (Some snapshot)
+              | Ok snapshot -> Ok (Some snapshot, Some content)
               | Error rejection ->
                 (* Every writer reads before it writes, so a snapshot this
                    build cannot decode is durable state no producer can leave:
@@ -1161,7 +1316,7 @@ let update_locked_with_error
                      "memory os snapshot quarantined rejected_path=%s rejection=%s"
                      rejected_path
                      rejection;
-                   Ok None
+                   Ok (None, None)
                  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                  | exception exn ->
                    (* Failing here keeps the wedge, which is the lesser harm:
@@ -1173,6 +1328,13 @@ let update_locked_with_error
                            snapshot_path
                            (Printexc.to_string exn)
                            rejection))))
+         in
+         let* (_ : durable_range_receipt option) =
+           reconcile_durable_range_receipt
+             ~keepers_dir
+             ~keeper_id
+             ~snapshot_content
+           |> Result.map_error store_error
          in
          let* next = build previous in
          (* The file is 150-330 KB per keeper and every commit reads it, parses
@@ -1194,6 +1356,21 @@ let update_locked_with_error
            | None -> Ok ()
            | Some write -> write ~previous ~next
          in
+         let snapshot_sha256 = sha256 content in
+         let* () =
+           match durable_range_progress with
+           | None -> Ok ()
+           | Some progress ->
+             write_durable_range_receipt
+               ~keepers_dir
+               ~keeper_id
+               (Prepared
+                  { progress
+                  ; snapshot_revision = next.revision
+                  ; snapshot_sha256
+                  })
+             |> Result.map_error store_error
+         in
          match Fs_compat.save_file_atomic snapshot_path content with
          | Ok () ->
            committed := Some
@@ -1203,6 +1380,25 @@ let update_locked_with_error
              ; revision = next.revision
              };
            append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
+           (match durable_range_progress with
+            | None -> ()
+            | Some progress ->
+              (match
+                 write_durable_range_receipt
+                   ~keepers_dir
+                   ~keeper_id
+                   (Committed
+                      { progress
+                      ; snapshot_revision = next.revision
+                      ; snapshot_sha256
+                      })
+               with
+               | Ok () -> ()
+               | Error detail ->
+                 Log.Keeper.warn
+                   ~keeper_name:keeper_id
+                   "%s; prepared receipt remains recoverable"
+                   detail));
            List.iter
              (fun invalidation ->
                 Log.Keeper.info
@@ -1236,6 +1432,7 @@ let update_locked
       ?clock
       ?dropped_statements
       ?before_replace
+      ?durable_range_progress
       ~keepers_dir
       ~keeper_id
       ~now
@@ -1245,11 +1442,40 @@ let update_locked
     ?clock
     ?dropped_statements
     ?before_replace
+    ?durable_range_progress
     ~store_error:Fun.id
     ~keepers_dir
     ~keeper_id
     ~now
     build
+;;
+
+let durable_range_was_committed ~keepers_dir ~keeper_id progress =
+  try
+    Fs_compat.mkdir_p keepers_dir;
+    let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+    Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+      File_lock_eio.with_lock snapshot_path (fun () ->
+        let snapshot_content = Fs_compat.load_file_opt snapshot_path in
+        let* receipt =
+          reconcile_durable_range_receipt
+            ~keepers_dir
+            ~keeper_id
+            ~snapshot_content
+        in
+        Ok
+          (match receipt with
+           | Some (Committed { progress = committed; _ }) ->
+             same_durable_progress progress committed
+           | None | Some (Prepared _) -> false)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "durable Librarian range receipt check failed keeper=%s: %s"
+         keeper_id
+         (Printexc.to_string exn))
 ;;
 
 let make_snapshot_from_maintained
@@ -1311,6 +1537,7 @@ let make_snapshot
 let apply_disposition
       ?clock
       ?dropped_statements
+      ?durable_range_progress
       ~absorbed
       ~keepers_dir
       ~keeper_id
@@ -1369,6 +1596,7 @@ let apply_disposition
   update_locked
     ?clock
     ?dropped_statements
+    ?durable_range_progress
     ~before_replace:write_absorbed_rows
     ~keepers_dir
     ~keeper_id

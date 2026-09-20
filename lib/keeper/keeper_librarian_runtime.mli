@@ -66,6 +66,7 @@ val run_best_effort
   :  ?trigger:trigger
   -> ?input_projection:input_projection
   -> ?on_memory_committed:(unit -> unit)
+  -> ?durable_range_progress:Keeper_librarian_progress.t
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
        (** Injectable effect edge for the cli lane-slot fallback walked after
            catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
@@ -81,7 +82,9 @@ val run_best_effort
     consumer passes [Already_selected_range], because applying the retired
     recent-message window again would drop the front of the selected range.
     [on_memory_committed] runs only after the current Memory OS snapshot write
-    succeeds. *)
+    succeeds. [durable_range_progress] is stored in that same snapshot, so a
+    durable consumer can recover a later progress-file failure without
+    submitting the completed-turn range again. *)
 
 module For_testing : sig
   type classified_error

@@ -28,7 +28,11 @@ module For_testing : sig
   val run_durable_with_commit
     :  config:Workspace.config
     -> keeper_name:string
-    -> commit:(expected_revision:int option -> Keeper_librarian.input -> bool)
+    -> commit:
+         (expected_revision:int option
+          -> progress:Keeper_librarian_progress.t
+          -> Keeper_librarian.input
+          -> bool)
     -> unit
   (** The production durable reader with a controlled Memory commit edge. *)
 

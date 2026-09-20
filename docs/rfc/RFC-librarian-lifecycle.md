@@ -308,7 +308,7 @@ flowchart TD
 - 한가한 Keeper 의 밀린 턴은 다음 신호까지 다시 읽히지 않는다. 그동안 그 Keeper 는 턴을 돌지 않으므로 요청도 커지지 않는다. 다음 턴이 끝나면 그 신호에 밀린 구간을 같이 읽는다.
 - **읽기가 실패해도 받은 일 정리는 굶지 않는다.** 읽기 회차가 실패한 뒤에도 받은 일이 바뀌어 있으면 메시지 없는 회차를 돌리고 나서 기다린다. 지금은 받은 일 신호가 cadence 를 건너뛰어 바로 돈다. 그보다 늦어지지 않게 한다.
 - 범위가 비어 있으면 LLM 을 부르지 않고 위치만 옮긴다. 내부 생각을 이력에 남기지 않는 턴(`keeper_replay_checkpoint.ml` 의 `exclude_thought_from_replay`)이 도구를 쓰지 않았으면, 저장할 때 그 턴의 몫이 통째로 빠져 끝이 앞 턴과 같다. 읽을 것이 없는 턴이다.
-- **두 턴 이상을 읽다 실패했으면 다음에는 가장 오래된 한 턴만 읽는다.** 그 턴이 성공하면 다시 전부를 읽는다. 범위가 커서 생긴 실패(모델 한도, 시간 초과, 출력 거절)를 숫자 없이 푸는 방법이다. "바로 앞 회차가 실패했다"는 루프의 메모리에만 둔다. 서버가 재시작하면 전부 읽기부터 다시 한다.
+- **두 턴 이상을 읽다 실패했으면 가장 오래된 한 턴씩 읽어서 밀린 범위를 모두 비운다.** 좁힌 회차 하나가 성공했다고 곧바로 전부 읽기로 돌아가지 않는다. `Nothing_to_read`가 실제로 확인되거나 `All_unread`가 성공했을 때만 제한을 푼다. 범위가 커서 생긴 실패(모델 한도, 시간 초과, 출력 거절)를 숫자 없이 푸는 방법이다. 실패 표식은 루프의 메모리에만 둔다. 서버가 재시작하면 전부 읽기부터 다시 한다.
 - "수시로"는 깨우는 사건을 늘리는 일이다. 깰 때 하는 일은 언제나 위와 같다. 이 RFC 의 범위에서 깨우는 사건은 서버 기동, 턴 끝, 받은 일 변경이다. §7 의 (나)가 턴 도중의 도구 경계를, (다)가 한가할 때를 더한다.
 - 종료 때는 루프를 취소한다. 위치는 저장이 끝난 뒤에만 옮기므로 도중에 끊겨도 잃는 것이 없다. 지금은 앞선 Librarian 작업이 남아 있으면 Keeper 기동이 거절되고(`Librarian_drain_still_active`), Keeper 종료는 30초 join 을 기다린다. 둘 다 이유가 사라진다. `begin_librarian_lifecycle`·`abort_librarian`·`drain_and_join_librarian` 과 그 호출자(`keeper_supervisor.ml`, `keeper_supervisor_supervise_keepalive.ml`, `keeper_keepalive_launch_transaction.ml`, `keeper_shutdown_prepare_join.ml`)를 걷어낸다.
 - 같은 모양이 저장소에 있다: 서버 소유 daemon, wake, promise 로 잠들기(`server_workspace_memory_curator.ml` `start_with`). Workspace Curator 는 기능이 완성되지 않았으므로 모양만 빌리고 루프 테스트는 새로 쓴다.
@@ -350,7 +350,7 @@ flowchart TD
 **전제: 한 Keeper 의 턴은 겹치지 않는다.** Keeper Owner 가 child 턴을 하나씩만 돌린다(`keeper_owner.mli` 의 `turn_in_flight`, 이미 도는 child 가 있으면 `run_autonomous_if_idle` 이 `Busy` 를 돌려준다). §4.4 의 규칙은 이 전제 위에서만 성립한다. 턴이 겹치면 늦게 저장한 턴이 앞 턴의 이력을 갈아 끼울 수 있고, 그 턴의 재시작 줄은 그때 이미 지나간 뒤다. 읽는 쪽은 위치가 맞지 않아 서거나, 같은 자리에 글자가 같은 메시지가 오면 atom 을 건너뛴다. 이 전제를 깨는 변경(같은 base path 에 서버 둘, Owner 밖에서 도는 턴)은 이 RFC 를 먼저 고친다.
 
 - **I1 순서·빠짐없음** — 턴 끝 기록에 있는 턴은 하나도 빠짐없이 이력의 순서대로 읽힌다. 지금 이력의 줄(§4.4 의 2a)은 `end_atom` 순서가 곧 이력의 순서다. Librarian 이 멈췄다 돌아오면 그 사이의 구간을 전부 읽는다.
-- **I2 기억 먼저, 위치는 맨 끝** — facts 저장이 `Ok` 인 뒤에 위치를 옮긴다. 중간에 죽으면 같은 턴을 한 번 더 읽는다. 글자가 같은 claim 은 SHA256 id 가 거른다. 말만 바뀐 중복은 다음 회차의 `absorbs` 가 접는다. 위치만 옮겨지고 기억이 빠지는 일은 없다.
+- **I2 기억 먼저, 위치는 맨 끝** — facts 저장이 `Ok` 인 뒤에 위치를 옮긴다. Memory 저장과 진행 파일 사이에서 멈추면 완료 범위 영수증이 그 Memory snapshot의 SHA256을 증명한다. 재시작한 consumer는 모델에 같은 범위를 다시 제출하지 않고 위치만 복구한다. Memory 저장 전 실패는 같은 범위를 다시 읽는다. 위치만 옮겨지고 기억이 빠지는 일도, 저장된 범위를 두 번 합성하는 일도 없다.
 - **I3 건너뛰지 않는다** — 위치는 읽은 턴만 지나간다. 읽지 못한 턴이 있으면 그 앞에 선다(§4.10). 읽을 원문이 없는 경우는 둘이고 둘 다 기록을 남긴다: 턴 끝 기록 전부터 있던 이력(§10), `keeper_clear` 가 원문을 지운 구간(§4.6).
 - **I4 밀림이 보인다** — 읽은 위치 뒤에 끝난 턴의 수가 typed 값으로 TUI 와 대시보드에 뜬다. 루프가 회차마다 센 값이다(§4.4 의 2 로 고른 줄 수). checkpoint 없이 파일만 보고 세면 지난 이력의 줄이 영영 밀린 턴으로 남는다. Gate 가 아니다.
 - **I5 실패 뒤에 혼자 돌지 않는다** — 실패한 회차 뒤에는 신호를 기다린다. 같은 실패를 쉬지 않고 되풀이하는 루프가 없다.
@@ -359,7 +359,7 @@ flowchart TD
 - **I8 Keeper 마다 따로** — 한 Keeper 의 Librarian 이 밀리거나 멈추거나 호출이 오래 걸려도 다른 Keeper 의 Librarian 과 턴은 늦어지지 않는다.
 - **I9 읽은 턴은 다시 읽지 않는다** — 한 이력 안에서 위치는 앞으로만 간다. 0 으로 돌아가는 것은 재시작 줄이 있을 때뿐이고(§4.4 의 3c) 그때 읽는 것은 새 이력이다. 되돌려진 비우기(#37021) 뒤에는 같은 구간을 한 번 더 읽는다. Keeper 의 instructions 가 바뀌어도 지나간 턴을 다시 읽지 않는다.
 
-### 4.6 파일 둘을 새로 둔다
+### 4.6 새 파일 셋
 
 기억 스냅숏과 턴 기록은 필드 이름이 정확히 일치해야 디코딩된다(`keeper_memory_os_current.ml` `of_json` 의 `exact_field_names_result`, `turn_record.ml` `of_json`). 스냅숏에 필드를 더하면 배포와 롤백 때 모든 Keeper 의 facts 가 격리된다. 턴 기록에 더하면 hard cut 이 배포 preflight, raw-trace 정리, 창의 첫 요청까지 번진다. 턴 기록은 보존 기간(`jsonl_retention_days`)이 지나면 정리 pass 가 지우기도 한다(`server_runtime_startup_maintenance.ml`). 그래서 둘 다 기존 저장소 밖에 둔다.
 
@@ -400,6 +400,12 @@ flowchart TD
    - 이력이 새로 시작하는 일은 줄이 말한다. 새로 만든 Keeper 의 첫 턴, checkpoint 를 못 읽었거나 버전이 바뀐 뒤의 턴(`keeper_context_core.ml` 의 `load_context_from_checkpoint` 가 `None` 을 돌려주는 모든 경우), purge 로 지워진 뒤의 턴은 빈 이력에서 시작하므로 시작할 때 `history_restarted` 줄을 쓰고 끝의 줄이 `Fresh_history` 다. `keeper_clear` 는 `history_restarted` 줄을 남긴다. 그래서 루프 말고는 누구도 이 파일을 고쳐 쓰지 않는다. 줄을 남기지 못하는 경우가 둘 알려져 있다(§6).
    - purge 는 두 파일을 같이 지운다. purge 가 회차 도중에 일어나면 루프가 옛 위치를 되살려 쓸 수 있다. 막는 것은 순서다. purge 는 그 Keeper 의 루프를 취소하고 끝난 것을 확인한 뒤에 두 파일을 지운다(§8 의 4단계). 잠금으로는 막지 못한다. purge 는 턴 끝 기록을 잠금 없이 지우므로(`server_dashboard_http_delete_actions.ml`), 잠금 아래에서 줄이 그대로인지 확인해도 그 확인과 진행 파일 쓰기 사이에 purge 가 낄 수 있다. 그래서 진행 파일 쓰기는 턴 끝 기록의 잠금과 엮지 않는다.
    - 이 파일이 갖는 것은 읽은 위치다. 창이 보는 위치는 §7 (라)의 파일이 따로 갖는다. 창 조립은 이 파일을 직접 쓰지 않는다.
+3. **완료 범위 영수증** `<config keepers_dir>/<keeper>.librarian-range-commit.json`
+   - 기존 Memory snapshot에는 필드를 더하지 않는다. 이 절 첫 문단의 strict codec과 배포·롤백 경계를 그대로 지킨다.
+   - Memory snapshot을 바꾸기 전에 `prepared` 영수증을 먼저 원자적으로 쓴다. 영수증에는 다음 진행 위치, Memory revision, 곧 쓸 snapshot 전체 바이트의 SHA256이 들어간다. snapshot 교체가 끝나면 같은 영수증을 `committed`로 바꾼다.
+   - 프로세스가 두 쓰기 사이에서 멈춰 `prepared`만 남으면 현재 Memory snapshot의 SHA256과 비교한다. 같으면 이미 저장된 범위이므로 `committed`로 복구하고, 다르면 Memory 저장 전 실패이므로 영수증을 지운다.
+   - 모든 Memory writer는 기존 `prepared`를 먼저 판정한 뒤 snapshot을 바꾼다. 따라서 범위를 저장한 뒤 다른 Memory write가 먼저 와도 완료 증거를 덮어쓰지 않는다.
+   - consumer는 같은 진행 위치의 `committed` 영수증이 있으면 모델과 Memory commit을 건너뛰고 진행 파일만 다시 쓴다. Keeper purge는 snapshot·journal·진행 파일과 함께 이 영수증도 지운다.
 
 두 파일 모두 Keeper purge 변형(`keeper_shutdown_types.ml`, `server_dashboard_http_delete_actions.ml`)에 등록한다. 배포 preflight 의 저장소 목록(`bin/deployment_preflight_helper.ml`)에는 두 파일을 읽는 루프가 들어가는 4단계에서 등록한다. 그 목록의 `on_refusal` 칸은 "돌고 있는 서버가 못 읽는 줄을 어떻게 하는가"를 적는 자리다. 2단계의 고르는 함수는 그 답(§4.4 의 2c, §4.6 의 진행 파일 오류)을 구현하지만 부르는 곳이 없어서, 그때 적으면 돌고 있는 서버에 대한 거짓 문장이 된다. preflight lint 가 `exact_field_names_result` 로 읽는 저장소를 못 보는 빈틈(#37019)도 그때 같이 본다.
 

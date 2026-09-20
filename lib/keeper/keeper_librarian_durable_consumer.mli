@@ -36,7 +36,10 @@ val consume_one
   :  config:Workspace.config
   -> keeper_name:string
   -> commit:
-       (expected_revision:int option -> Keeper_librarian.input -> bool)
+       (expected_revision:int option
+        -> progress:Keeper_librarian_progress.t
+        -> Keeper_librarian.input
+        -> bool)
   -> (outcome, error) result
 (** The first attempt reads all unread cut points. A failed commit, typed
     error, or cancellation keeps a process-local marker; the next attempt for
@@ -57,7 +60,13 @@ val consume_one
     Under the progress store's single-writer contract, a fixed boundary
     snapshot and checkpoint therefore cannot select the same range again
     after an advance; repeated successful passes exhaust their cut points.
-    New boundary appends can extend a drain while it is running. *)
+    New boundary appends can extend a drain while it is running.
+
+    The Memory snapshot stores the exact [progress] passed to a successful
+    [commit]. If the separate progress write then fails, the next pass matches
+    that durable receipt and advances progress without calling [commit] again.
+    Later Memory writers preserve the receipt until a newer durable range
+    replaces it. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)
@@ -66,5 +75,10 @@ val commit_with_runtime
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
+  -> progress:Keeper_librarian_progress.t
   -> Keeper_librarian.input
   -> bool
+
+module For_testing : sig
+  val reset_process_state : unit -> unit
+end

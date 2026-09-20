@@ -745,6 +745,7 @@ let run_best_effort
       ?(trigger = Conversation_completed)
       ?(input_projection = Recent_window)
       ?(on_memory_committed = fun () -> ())
+      ?durable_range_progress
       ?cli_runner
       ~base_path
       ~keepers_dir
@@ -874,9 +875,10 @@ let run_best_effort
                 never mentions is one it never saw. *)
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
-               ~clock
-               ~dropped_statements:selection.dropped
-               ~absorbed:selection.absorbed
+                 ~clock
+                 ~dropped_statements:selection.dropped
+                 ?durable_range_progress
+                 ~absorbed:selection.absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())

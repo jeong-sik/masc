@@ -102,11 +102,12 @@ let check_preserved ~base_path ~keeper_name ~expected error =
   Fun.protect
     ~finally:(fun () -> R.For_testing.unregister ~base_path keeper_name)
     (fun () ->
-      R.set_failure_reason ~base_path keeper_name reason;
-      let count = Keeper_turn_failure_streak.increment ~base_path ~keeper_name in
-      R.set_failure_reason ~base_path keeper_name
-        (Keeper_heartbeat_loop.failure_reason_after_turn_status
-           ~turn_fail_count:count reason);
+      Keeper_unified_turn_failure.record_failure_observation
+        ~config:(Workspace.default_config base_path) ~meta ~terminal_reason:terminal
+        ~err:error ~error_text:raw_error;
+      let count = R.get_turn_failures ~base_path keeper_name in
+      Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+        ~base_path ~keeper_name ~turn_fail_count:count;
       (match R.get ~base_path keeper_name with
        | Some { last_failure_reason = Some (R.Official_client_recovery_required payload as observed); _ } ->
          Alcotest.(check bool) "heartbeat retains typed claim refusal" true (payload = expected);

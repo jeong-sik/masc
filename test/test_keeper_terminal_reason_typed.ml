@@ -1487,10 +1487,11 @@ max-concurrent = 1
          (entry_after_recovery.last_failure_reason = None);
        check "completed turn after recovery clears failure count"
          (entry_after_recovery.turn_consecutive_failures = 0);
-       check "post-turn heartbeat projection keeps the successful recovery clear"
-         (Masc.Keeper_heartbeat_loop.failure_reason_after_turn_status
-            ~turn_fail_count:entry_after_recovery.turn_consecutive_failures
-            entry_after_recovery.last_failure_reason = None);
+       Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+         ~base_path:config.base_path ~keeper_name
+         ~turn_fail_count:entry_after_recovery.turn_consecutive_failures;
+       check "post-turn heartbeat refresh keeps the successful recovery clear"
+         ((registered_entry ()).last_failure_reason = None);
        let public_after_recovery =
          Masc.Keeper_status_bridge.runtime_blocker_fields_json config meta
        in

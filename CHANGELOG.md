@@ -128,6 +128,7 @@
 - TUI: creating a Composition with `C` checks the authored source the way the server does before sending it, so a frontmatter name that differs from the Composition body's name is shown on screen instead of coming back as a server refusal (#37420).
 - TUI: a lane-run payload shows each top-level field as its own labeled preview, so a large first field no longer hides the results after it. When the 65,536-byte preview budget cannot hold every field whole, each keeps a minimum preview and the count of omitted fields is stated (#37418).
 - TUI: PageDown and PageUp on a lane run move by the payload rows actually on screen, so no rows are skipped between pages; at 180×42 rows 29–32 used to be skipped (#37426).
+- Dashboard: the FSM hub no longer shows `retry applied -> <runtime>` when a turn only set a lane aside for the next turn. A keeper receipt records the lane a turn took up (`degraded_retry_applied`, set only when that turn reached the provider on it) and the lane it set aside (`degraded_retry_deferred`) separately, each with its own runtime and reason, and the hub shows both (#37375).
 
 ## [0.35.20] - 2026-09-17
 

@@ -38,7 +38,7 @@ let canonical_phases =
   ; "http_operation", KPB.Http_operation
   ; "non_streaming_body", KPB.Non_streaming_body
   ; "stream_body", KPB.Stream_body
-  ; "stream_idle", KPB.Stream_idle KPB.Streaming_unknown
+  ; "stream_idle:streaming_unknown", KPB.Stream_idle KPB.Streaming_unknown
   ; "provider_step", KPB.Provider_step
   ; "cli_stdout_idle", KPB.Cli_stdout_idle
   ; "wall_clock", KPB.Wall_clock
@@ -51,7 +51,8 @@ let canonical_phases =
    the phase again would keep passing after the canonical label moved, with
    the alias left pointing at where the phase used to be. *)
 let aliases =
-  [ "no_first_token", "first_token"
+  [ "stream_idle", "stream_idle:streaming_unknown"
+  ; "no_first_token", "first_token"
   ; "time_to_first_token", "first_token"
   ; "ttft", "first_token"
   ; "wall_clock_timeout", "wall_clock"

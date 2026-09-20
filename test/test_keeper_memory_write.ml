@@ -1417,7 +1417,8 @@ let test_absorbed_facts_are_searchable () =
    text. A claim answers when it holds the whole query or every word of it, in
    any order. The whole-query answers come first, so a search the substring
    rule answered is still answered the same way at its head. The absorbed
-   store follows the same rule. *)
+   store follows the same rule, so there too the kind of match comes before
+   the order the rows were written in. *)
 let test_a_query_of_several_words_is_answered () =
   with_temp_dir
   @@ fun base_path ->
@@ -1431,7 +1432,13 @@ let test_a_query_of_several_words_is_answered () =
   let together = fact "alpha tuesday checklist lives in the wiki" in
   let other = fact "beta ships on tuesday" in
   let retired = fact "tuesday was chosen for alpha after the outage" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ apart; together; other; retired ];
+  let retired_later = fact "the alpha tuesday window moved once" in
+  (* Absorbed rows are written in the order of the snapshot they leave, so
+     [retired] is written before [retired_later]. *)
+  replace_current_facts
+    ~keepers_dir
+    ~keeper_id:meta.name
+    [ apart; together; other; retired; retired_later ];
   let merged = fact "alpha deploys on a fixed weekday" in
   (match
      Current.apply_disposition
@@ -1439,7 +1446,10 @@ let test_a_query_of_several_words_is_answered () =
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
        ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-       ~absorbed:[ { Masc.Keeper_memory_os_types.absorbed = id retired; into = id merged } ]
+       ~absorbed:
+         [ { Masc.Keeper_memory_os_types.absorbed = id retired; into = id merged }
+         ; { Masc.Keeper_memory_os_types.absorbed = id retired_later; into = id merged }
+         ]
        ~new_claims:[ merged ]
        ()
    with
@@ -1472,9 +1482,14 @@ let test_a_query_of_several_words_is_answered () =
     [ "the alpha service deploys every tuesday"; "alpha tuesday checklist lives in the wiki" ]
     (texts (search ~source:"memory" "tuesday alpha"));
   Alcotest.(check (list string))
-    "the absorbed store answers by the same rule"
-    [ "tuesday was chosen for alpha after the outage" ]
+    "the absorbed store answers by the same rule: the row holding the whole \
+     query comes before the row written earlier that holds only its words"
+    [ "the alpha tuesday window moved once"; "tuesday was chosen for alpha after the outage" ]
     (texts (search ~source:"absorbed" "alpha tuesday"));
+  Alcotest.(check (list string))
+    "and it is the row holding only the words that the limit cuts"
+    [ "the alpha tuesday window moved once" ]
+    (texts (search ~limit:1 ~source:"absorbed" "alpha tuesday"));
   let unanswered = search ~source:"memory" "alpha gamma" in
   Alcotest.(check (list string))
     "a word no claim holds leaves the query unanswered"

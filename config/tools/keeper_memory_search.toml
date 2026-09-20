@@ -1,15 +1,15 @@
 name = "keeper_memory_search"
 description = """
 Search your durable Memory OS facts or conversation history. A fact matches \
-when it holds the whole query, else every word of it; whole-query matches \
-come first. Results give exact memory_id, category, and basis. Use returned \
-memory_id values as premise_ids when writing a derived conclusion only when \
-store='current_memory_snapshot'; other results name their different store \
-explicitly. Use source='absorbed' for facts a librarian merged into a newer \
-claim, in the order they were merged: into names that claim's memory_id, and \
-into_current=false means that claim is not current -- removed since, or \
-never committed. Use source='history' for raw user messages, source='all' \
-for every store."""
+when it holds the whole query, else every word of it; each store lists \
+whole-query matches first, else in stored order. Results give exact \
+memory_id, category, and basis. Use returned memory_id values as premise_ids \
+when writing a derived conclusion only when store='current_memory_snapshot'; \
+other results name their different store explicitly. Use source='absorbed' \
+for facts a librarian merged into a newer claim: into names that claim's \
+memory_id, and into_current=false means that claim is not current -- removed \
+since, or never committed. Use source='history' for raw user messages, \
+source='all' for every store."""
 additional_properties = false
 
 [[params]]

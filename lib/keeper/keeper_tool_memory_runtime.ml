@@ -221,11 +221,18 @@ let current_memory_ids facts =
 ;;
 
 (* Rows a librarian pass wrote for facts that left the snapshot, answering the
-   query the way current facts do ({!answering}), in the order written. The
-   rows are written just before a snapshot replace, so a replace that failed
-   leaves rows for a pass that never committed (RFC-0456 §4.2). Two of their
-   shapes are exact to recognise: a row for a fact that is still current is
-   not an absorption, and a row repeating another row's memory_id and into
+   query the way current facts do ({!answering}): the rows holding the whole
+   query, then the rows holding its words, each kind in the order written. A
+   row written earlier that holds only the words therefore comes after a later
+   row holding the whole query, and is the one [limit] cuts. The other order
+   would let such a row push out a row this search returned before it matched
+   words at all. The time of the merge is not carried by position alone: every
+   result states its own [absorbed_at].
+
+   The rows are written just before a snapshot replace, so a replace that
+   failed leaves rows for a pass that never committed (RFC-0456 §4.2). Two of
+   their shapes are exact to recognise: a row for a fact that is still current
+   is not an absorption, and a row repeating another row's memory_id and into
    states the same thing, kept once at its last write. The third -- an [into]
    that never became current -- reads as [into_current = false], which is
    what it is.

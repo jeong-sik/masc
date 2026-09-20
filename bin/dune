@@ -1307,6 +1307,7 @@
   masc_tui_message_layout
   masc_tui_observation_layout
   masc_tui_layout
+  masc_tui_render_schedule
   masc_tui_terminal_palette
   masc_tui_theme))
 

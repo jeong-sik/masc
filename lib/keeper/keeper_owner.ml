@@ -1079,6 +1079,7 @@ let start
                    (Printexc.to_string exn));
               `Stop_daemon)
           with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
             Log.Keeper.warn
               "keeper_owner: cooling retry wake not scheduled keeper=%s error=%s"
@@ -1125,6 +1126,7 @@ let start
                 (Printexc.to_string exn));
            `Stop_daemon)
        with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "keeper_owner: transient retry wake not scheduled keeper=%s error=%s"

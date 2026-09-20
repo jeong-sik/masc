@@ -1361,7 +1361,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                  { outcome = Terminal_failed _; _ } as stop) ->
                { final_result with success = false; abort_turn = Some stop }
              | None, Some stop -> { final_result with abort_turn = Some stop })
-        | exception exn ->
+        | exception exn -> (* cancel-guard-ok: this arm ends by re-throwing with the original backtrace nine lines down, one line past the guard's eight-line lookahead. *)
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
             ignore

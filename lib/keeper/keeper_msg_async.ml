@@ -542,7 +542,7 @@ let with_keeper_lane_lock observation table ~lane_label ?wait_budget ~base_path 
           let outcome =
             match f () with
             | value -> Lane_lock_returned value
-            | exception exn ->
+            | exception exn -> (* cancel-guard-ok: the exception is stashed as Lane_lock_raised and thrown again at line 563 once the lane in-flight counter is decremented. *)
               Lane_lock_raised (exn, Printexc.get_raw_backtrace ())
           in
           `Persistence (outcome, elapsed_seconds started))
@@ -2679,6 +2679,7 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
               durably_accepted := true;
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn ->
           background_start_failed (Printexc.to_string exn))))))
      with

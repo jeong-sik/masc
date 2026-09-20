@@ -448,6 +448,7 @@ let observe_durable_write_success ~on_durable_commit = function
      | () ->
        Eio_guard.check_if_ready ();
        Ok Committed
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        let backtrace = Printexc.get_raw_backtrace () in
        Ok (Committed_but_observer_failed (exn, backtrace)))

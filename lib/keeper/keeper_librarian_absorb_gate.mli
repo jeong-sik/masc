@@ -96,10 +96,10 @@ val questions_per_request : int
     request's size, not the number of statements judged. *)
 
 val state_bytes_limit : int
-(** The claim, sent as the state, is at most this many bytes: the model's
-    32k-token state bound taken in bytes, which no tokenizer can exceed. A
-    claim over it cannot be asked about; every memory it absorbs stays
-    current. *)
+(** The claim, sent as the state, is at most this many bytes: half of
+    {!request_bytes_limit}, so the questions sharing the request with it
+    always have the other half. A claim over it cannot be asked about;
+    every memory it absorbs stays current. *)
 
 val request_bytes_limit : int
 (** A request carries at most this many bytes of claim and questions (each

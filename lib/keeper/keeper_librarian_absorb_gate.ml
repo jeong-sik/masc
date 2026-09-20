@@ -154,10 +154,18 @@ let questions_per_request = 64
    it should keep, so what cannot fit is decided here, before asking.
    Statements are not bounded by the cut -- a memory without sentence ends
    is one statement -- so a statement that does not fit a request beside
-   its claim, or a claim that does not fit the state, cannot be judged;
-   that memory stays current. *)
-let state_bytes_limit = 32_000
+   its claim, or a claim over its own bound, cannot be judged; that memory
+   stays current.
+
+   The claim and the questions share one request, so the claim's bound is
+   half of it: the questions always have the other half (about fifty of
+   them at their usual size), and a claim never leaves them nothing. The
+   35,874 merged claims of the production replay behind issue #37079 were
+   at most 14,127 bytes (p99 5,394, median 611) on 2026-09-21; a claim
+   over the bound keeps everything it absorbs current, which is the
+   cautious side. *)
 let request_bytes_limit = 32_000
+let state_bytes_limit = request_bytes_limit / 2
 
 let instructions_prefix =
   "The claim under review conveys this statement, in any wording.\n\nStatement:\n"

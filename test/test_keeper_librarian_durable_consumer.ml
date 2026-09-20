@@ -1468,14 +1468,16 @@ let test_unseen_restart_still_reads_checkpoint () =
   | Ok _ -> fail "unseen restart skipped checkpoint validation"
 ;;
 
-let test_trace_change_still_reads_its_own_checkpoint () =
-  with_consumed_shorter_history @@ fun config _trace_id _current _session_dir _path ->
+let test_trace_change_without_history_witness_keeps_prior_progress () =
+  with_consumed_shorter_history @@ fun config trace_id _current _session_dir _path ->
   write_meta config "trace-preflight-new";
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ _ -> fail "missing trace checkpoint called commit") with
-  | Error (Consumer.Checkpoint_unreadable Store.Not_found) -> ()
+  | Error (Consumer.Position_in_other_trace position) ->
+    check string "prior trace remains authoritative" trace_id position.trace_id;
+    check int "prior trace position remains authoritative" 1 position.end_atom
   | Error error -> fail (Consumer.error_to_string error)
-  | Ok _ -> fail "trace change skipped its own checkpoint validation"
+  | Ok _ -> fail "trace change without a history witness discarded prior progress"
 ;;
 
 let test_new_unreadable_boundary_is_not_hidden_by_preflight () =
@@ -1896,8 +1898,8 @@ let () =
             test_new_completed_cut_still_reads_checkpoint
         ; test_case "unseen restart reads checkpoint" `Quick
             test_unseen_restart_still_reads_checkpoint
-        ; test_case "trace change reads its own checkpoint" `Quick
-            test_trace_change_still_reads_its_own_checkpoint
+        ; test_case "trace change without witness keeps prior progress" `Quick
+            test_trace_change_without_history_witness_keeps_prior_progress
         ; test_case "new unreadable boundary remains visible" `Quick
             test_new_unreadable_boundary_is_not_hidden_by_preflight
         ] )

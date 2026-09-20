@@ -104,8 +104,8 @@ let test_checkpoint_owner_selects_one_librarian_producer () =
          ~meta:core_meta
          ~turn:1;
        Alcotest.(check bool)
-         "Agent Core retires the direct closure"
-         false
+         "Agent Core handoff attempts pending direct evidence"
+         true
          (Queue_refresh.For_testing.attempt_remembered
             ~base_path:config.base_path
             ~keeper_name:core_name
@@ -113,7 +113,17 @@ let test_checkpoint_owner_selects_one_librarian_producer () =
             ~meta:core_meta
             ~sources_changed:false
             ~trigger:Librarian_runtime.Queue_changed);
-       Alcotest.(check int) "Agent Core does not run the direct producer" 0 !direct_runs;
+       Alcotest.(check int) "Agent Core runs the pending direct producer once" 1 !direct_runs;
+       Alcotest.(check bool)
+         "Agent Core retires direct evidence after the handoff attempt"
+         false
+         (Queue_refresh.For_testing.attempt_remembered
+            ~base_path:config.base_path
+            ~keeper_name:core_name
+            ~trace_id:core_trace_id
+            ~meta:core_meta
+            ~sources_changed:true
+            ~trigger:Librarian_runtime.Queue_changed);
        Alcotest.(check (list (pair string string)))
          "Agent Core emits one durable wake"
          [ config.base_path, core_name ]

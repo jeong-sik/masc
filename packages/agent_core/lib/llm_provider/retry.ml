@@ -313,7 +313,7 @@ let parse_body_retry_after (body : string) : float option =
   try
     let json = Yojson.Safe.from_string body in
     let open Yojson.Safe.Util in
-    json |> member "error" |> member "retry_after" |> to_float |> usable_retry_after
+    json |> member "error" |> member "retry_after" |> to_number |> usable_retry_after
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Yojson.Safe.Util.Undefined _ ->
     None

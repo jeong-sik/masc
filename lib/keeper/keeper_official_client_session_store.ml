@@ -155,7 +155,6 @@ let ( let* ) = Result.bind
 let schema = "masc.keeper.official-client-session.v1"
 let filename = "session.json"
 let state_dirname = "official-client-runtime"
-let lock_filename = "session.lock"
 let recovery_rng = Random.State.make_self_init ()
 let recovery_rng_mutex = Stdlib.Mutex.create ()
 
@@ -787,50 +786,59 @@ let prepare_state_dir ~base_path ~keeper_name =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let with_store_lock ~base_path ~keeper_name f =
-  let* directory = prepare_state_dir ~base_path ~keeper_name in
+let store_lock_path directory = directory ^ ".lock"
+
+let with_store_lock_in directory f =
   match
     File_lock_eio.with_durable_lock
-      ~lock_path:(Filename.concat directory lock_filename)
+      ~lock_path:(store_lock_path directory)
       (fun () -> f directory)
   with
   | Ok result -> result
   | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
 ;;
 
-let clear ~base_path ~keeper_name =
+let with_store_lock ~base_path ~keeper_name f =
+  let* directory = prepare_state_dir ~base_path ~keeper_name in
+  with_store_lock_in directory f
+;;
+
+let prepare_store_lock ~base_path ~keeper_name =
   let* directory = state_dir ~base_path ~keeper_name in
-  let directory_state =
-    try
-      Fs_compat.inspect_owned_directory_chain
-        ~ownership_root:directory
-        directory
-      |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
-  in
-  match directory_state with
-  | Error _ as error -> error
-  | Ok Fs_compat.Owned_directory_missing -> Ok ()
-  | Ok (Fs_compat.Owned_directory _) ->
-    with_store_lock ~base_path ~keeper_name (fun directory ->
+  try
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname directory) in
+    Ok directory
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let clear_then ~base_path ~keeper_name after_clear =
+  let* directory = prepare_store_lock ~base_path ~keeper_name in
+  with_store_lock_in directory (fun directory ->
+    let directory_state =
+      try
+        Fs_compat.inspect_owned_directory_chain
+          ~ownership_root:directory
+          directory
+        |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    match directory_state with
+    | Error _ as error -> error
+    | Ok Fs_compat.Owned_directory_missing -> Ok (after_clear ())
+    | Ok (Fs_compat.Owned_directory _) ->
       let state_path = Filename.concat directory filename in
-      let* current = load_path state_path in
-      match current with
-      | Some
-          { phase =
-              ( Start { owner_epoch; _ }
-              | Active { owner_epoch; _ }
-              | Turn_inflight { owner_epoch; _ } )
-          ; _
-          }
-        when not (String.equal owner_epoch (process_epoch ())) ->
-        Error "official-client session is held by another process"
-      | None | Some _ ->
-        (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
-         | Ok () -> Ok ()
-         | Error error -> Error (Keeper_fs.durable_remove_error_to_string error)))
+      let* (_ : t option) = load_path state_path in
+      (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
+       | Ok () -> Ok (after_clear ())
+       | Error error -> Error (Keeper_fs.durable_remove_error_to_string error)))
+;;
+
+let clear ~base_path ~keeper_name =
+  clear_then ~base_path ~keeper_name Fun.id
 ;;
 
 let transition ~base_path ~keeper_name ~expected next =
@@ -1303,7 +1311,7 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
   | Ok directory ->
     (match
        File_lock_eio.with_durable_lock
-         ~lock_path:(Filename.concat directory lock_filename)
+         ~lock_path:(store_lock_path directory)
          (fun () ->
       let* current =
         match load_path (Filename.concat directory filename) with

@@ -223,28 +223,19 @@ let test_unread_checkpoint_leaves_both_stores_untouched () =
     (Option.is_some (official_session ()))
 ;;
 
-let test_session_clear_refusal_leaves_history_untouched () =
+let test_paused_keeper_clears_stale_epoch_without_resuming () =
   with_keeper
     ~official_owner_epoch:"11111111-1111-4111-8111-111111111111"
-    ~paused:false
+    ~paused:true
     ~install_owner:true
-  @@ fun ~config:_ ~meta:_ ~saved ~save:_ ~load ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ->
   let result = clear () in
-  check bool "clear reports the store refusal" true (Tool_result.is_failed result);
-  (match result with
-   | Tool_result.Failed { effect_disposition = Effect_outcome_unknown; _ } -> ()
-   | _ ->
-     failf
-       "session clear refusal was not reported as an unknown effect: %s"
-       (Tool_result.message result));
-  check bool
-    "session clear refusal leaves canonical history untouched"
-    true
-    (Context.messages_of_context saved = Context.messages_of_context (load ()));
-  check bool
-    "session clear refusal keeps the foreign binding"
-    true
-    (Option.is_some (official_session ()))
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_empty load;
+  check_official_session_cleared official_session;
+  match Keeper_meta_store.read_meta config meta.name |> require_ok with
+  | Some current -> check bool "stale clear does not resume the keeper" true current.paused
+  | None -> fail "keeper metadata disappeared"
 ;;
 
 let () =
@@ -256,6 +247,6 @@ let () =
                    test_missing_checkpoint_still_clears_official_session
                ; test_case "unread checkpoint leaves both stores untouched" `Quick
                    test_unread_checkpoint_leaves_both_stores_untouched
-               ; test_case "session refusal leaves history untouched" `Quick
-                   test_session_clear_refusal_leaves_history_untouched
+               ; test_case "paused stale epoch clears without resume" `Quick
+                   test_paused_keeper_clears_stale_epoch_without_resuming
                ] ]

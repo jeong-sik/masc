@@ -166,8 +166,16 @@ val clear : base_path:string -> keeper_name:string -> (unit, string) result
 (** Durably remove the Keeper's current official-client session binding under
     the store lock. Missing state is success and does not create the store
     directory, so an operator may safely retry a clear whose outcome was not
-    confirmed. An active binding owned by another process is refused rather
-    than unlinked underneath that process's provider turn. *)
+    confirmed. A different process epoch is restart ambiguity, not proof of a
+    live owner; the BasePath process lease is the cross-process authority. *)
+
+val clear_then :
+  base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result
+(** [clear_then ... after_clear] durably removes the current binding, then runs
+    [after_clear] before releasing the same claim lock. New claims therefore
+    cannot observe an absent binding until the caller's paired durable mutation
+    has finished. Missing state still runs [after_clear] without creating the
+    optional session-store directory. *)
 
 val plan_claim :
   expected:t option ->

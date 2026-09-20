@@ -344,29 +344,29 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
               ("reason", `String reason);
             ]))
       in
-      let reset_official_client_session () =
+      let clear_official_client_session_then after_clear =
         match
-          Keeper_official_client_session_store.clear
+          Keeper_official_client_session_store.clear_then
             ~base_path:config.base_path
             ~keeper_name:name
+            after_clear
         with
-        | Ok () -> Ok ()
+        | Ok result -> result
         | Error detail ->
           Log.Keeper.error
             "%s: canonical history was left untouched because the official-client session reset was not confirmed (reason=%s): %s"
             name reason detail;
-          Error
-            (keeper_clear_failure
-               ~class_:Tool_result.Runtime_failure
-               ~effect_disposition:Tool_result.Effect_outcome_unknown
-               ~code:Tool_args.Internal_error
-               ~message:
-                 (Printf.sprintf
-                    "history was left untouched, but the official-client session reset was not confirmed: %s. Run masc_keeper_clear again."
-                    detail)
-               [ "name", `String name
-               ; "official_client_session_clear", `String "unknown"
-               ])
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Effect_outcome_unknown
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history was left untouched, but the official-client session reset was not confirmed: %s. Run masc_keeper_clear again."
+                 detail)
+            [ "name", `String name
+            ; "official_client_session_clear", `String "unknown"
+            ]
       in
       (* A clear the store did not save is reported as what it was, never as a
          message count. *)
@@ -412,67 +412,64 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                  detail)
             []
         | Clear_no_checkpoint ->
-          (match reset_official_client_session () with
-           | Ok () -> cleared ~cleared_message_count:0 ()
-           | Error failure -> failure)
+          clear_official_client_session_then (fun () ->
+            cleared ~cleared_message_count:0 ())
         | Clear_checkpoint_loaded (meta, session, wctx) ->
-          (match reset_official_client_session () with
-           | Error failure -> failure
-           | Ok () ->
-             (match
-                Keeper_history_clear.clear
-                  ~keepers_dir:(Workspace.keepers_runtime_dir config)
-                  ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-                  ~keeper_name:meta.name
-                  ~session
-                  ~preserve_system
-                  wctx
-              with
-              | Keeper_history_clear.Cleared
-                  { cleared_message_count; marker = Ok () } ->
-                cleared ~cleared_message_count ()
-              | Keeper_history_clear.Cleared
-                  { cleared_message_count; marker = Error detail } ->
-                Log.Keeper.error
-                  "%s: context cleared by operator (reason=%s, cleared=%d msgs) but the \
-                   history_restarted line was not written: %s"
-                  name reason cleared_message_count detail;
-                Otel_metric_store.inc_counter
-                  Keeper_metrics.(to_string TurnBoundaryFailures)
-                  ~labels:[ "keeper", name; "site", "clear" ]
-                  ();
-                cleared ~line_error:detail ~cleared_message_count ()
-              | Keeper_history_clear.Superseded
-                  { incoming_turn_count; known_turn_count } ->
-                Log.Keeper.warn
-                  "%s: operator clear removed the official-client session but wrote no history (reason=%s): the checkpoint on disk has turn_count %d, the one this clear loaded has %d"
-                  name reason known_turn_count incoming_turn_count;
-                keeper_clear_failure
-                  ~class_:Tool_result.Workflow_rejection
-                  ~effect_disposition:Tool_result.Proven_post_effect
-                  ~code:Tool_args.Conflict
-                  ~message:
-                    (Printf.sprintf
-                       "the official-client session was cleared, but the checkpoint on disk (turn_count %d) is newer than the one this clear loaded (turn_count %d), so history was left unchanged. Run masc_keeper_clear again."
-                       known_turn_count
-                       incoming_turn_count)
-                  [ "incoming_turn_count", `Int incoming_turn_count
-                  ; "known_turn_count", `Int known_turn_count
-                  ; "official_client_session_cleared", `Bool true
-                  ]
-              | Keeper_history_clear.Save_unconfirmed { detail } ->
-                Log.Keeper.error
-                  "%s: operator clear removed the official-client session but did not confirm the save of the emptied checkpoint (reason=%s): %s"
-                  name reason detail;
-                keeper_clear_failure
-                  ~class_:Tool_result.Runtime_failure
-                  ~effect_disposition:Tool_result.Effect_outcome_unknown
-                  ~code:Tool_args.Internal_error
-                  ~message:
-                    (Printf.sprintf
-                       "the official-client session was cleared, but the checkpoint save was not confirmed, so history may or may not have been cleared: %s. Run masc_keeper_clear again."
-                       detail)
-                  [ "official_client_session_cleared", `Bool true ]))
+          clear_official_client_session_then (fun () ->
+            match
+              Keeper_history_clear.clear
+                ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+                ~keeper_name:meta.name
+                ~session
+                ~preserve_system
+                wctx
+            with
+            | Keeper_history_clear.Cleared
+                { cleared_message_count; marker = Ok () } ->
+              cleared ~cleared_message_count ()
+            | Keeper_history_clear.Cleared
+                { cleared_message_count; marker = Error detail } ->
+              Log.Keeper.error
+                "%s: context cleared by operator (reason=%s, cleared=%d msgs) but the \
+                 history_restarted line was not written: %s"
+                name reason cleared_message_count detail;
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string TurnBoundaryFailures)
+                ~labels:[ "keeper", name; "site", "clear" ]
+                ();
+              cleared ~line_error:detail ~cleared_message_count ()
+            | Keeper_history_clear.Superseded
+                { incoming_turn_count; known_turn_count } ->
+              Log.Keeper.warn
+                "%s: operator clear removed the official-client session but wrote no history (reason=%s): the checkpoint on disk has turn_count %d, the one this clear loaded has %d"
+                name reason known_turn_count incoming_turn_count;
+              keeper_clear_failure
+                ~class_:Tool_result.Workflow_rejection
+                ~effect_disposition:Tool_result.Proven_post_effect
+                ~code:Tool_args.Conflict
+                ~message:
+                  (Printf.sprintf
+                     "the official-client session was cleared, but the checkpoint on disk (turn_count %d) is newer than the one this clear loaded (turn_count %d), so history was left unchanged. Run masc_keeper_clear again."
+                     known_turn_count
+                     incoming_turn_count)
+                [ "incoming_turn_count", `Int incoming_turn_count
+                ; "known_turn_count", `Int known_turn_count
+                ; "official_client_session_cleared", `Bool true
+                ]
+            | Keeper_history_clear.Save_unconfirmed { detail } ->
+              Log.Keeper.error
+                "%s: operator clear removed the official-client session but did not confirm the save of the emptied checkpoint (reason=%s): %s"
+                name reason detail;
+              keeper_clear_failure
+                ~class_:Tool_result.Runtime_failure
+                ~effect_disposition:Tool_result.Effect_outcome_unknown
+                ~code:Tool_args.Internal_error
+                ~message:
+                  (Printf.sprintf
+                     "the official-client session was cleared, but the checkpoint save was not confirmed, so history may or may not have been cleared: %s. Run masc_keeper_clear again."
+                     detail)
+                [ "official_client_session_cleared", `Bool true ])
       in
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorClear)
         ~labels:[("keeper", name);

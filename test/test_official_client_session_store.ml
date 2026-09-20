@@ -91,10 +91,10 @@ let test_clear_missing_state_does_not_create_store () =
       (Sys.file_exists (Filename.dirname state_path)))
 ;;
 
-let test_clear_refuses_foreign_active_claim () =
-  with_workspace "masc-clear-foreign-session-" (fun base_path ->
-    let keeper_name = "foreign-session" in
-    let claimed =
+let test_clear_removes_stale_epoch_claim () =
+  with_workspace "masc-clear-stale-session-" (fun base_path ->
+    let keeper_name = "stale-session" in
+    let _claimed =
       claim_new
         ~base_path
         ~keeper_name
@@ -104,16 +104,62 @@ let test_clear_refuses_foreign_active_claim () =
         ~at:1.
     in
     (match clear ~base_path ~keeper_name with
-     | Error detail ->
-       check string
-         "foreign owner refusal"
-         "official-client session is held by another process"
-         detail
-     | Ok () -> fail "clear removed another process's active claim");
+     | Ok () -> ()
+     | Error detail -> fail detail);
     check bool
-      "foreign active claim stays durable"
+      "stale process epoch is not treated as live ownership"
       true
-      (load ~base_path ~keeper_name = Ok (Some claimed)))
+      (load ~base_path ~keeper_name = Ok None))
+;;
+
+let test_clear_then_fences_new_claim_until_callback_finishes () =
+  with_workspace "masc-clear-claim-fence-" (fun base_path ->
+    Eio_main.run @@ fun _env ->
+    Eio.Switch.run @@ fun sw ->
+    let keeper_name = "claim-fence" in
+    let _claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    let claim_started, resolve_claim_started = Eio.Promise.create () in
+    let claim_done, resolve_claim_done = Eio.Promise.create () in
+    let callback_ran =
+      clear_then ~base_path ~keeper_name (fun () ->
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve resolve_claim_started ();
+          Eio.Promise.resolve
+            resolve_claim_done
+            (claim
+               ~base_path
+               ~keeper_name
+               ~expected:None
+               ~client_kind:Codex
+               ~owner_epoch:next_owner_epoch
+               ~runtime_id:"codex.default"
+               ~tool_surface_sha256:empty_surface
+               ~updated_at:2.));
+        Eio.Promise.await claim_started;
+        Eio.Fiber.yield ();
+        check bool
+          "new claim stays fenced during paired mutation"
+          false
+          (Eio.Promise.is_resolved claim_done);
+        true)
+      |> Result.get_ok
+    in
+    check bool "paired mutation ran" true callback_ran;
+    match Eio.Promise.await claim_done with
+    | Ok claimed ->
+      check bool
+        "claim starts only after the clear transaction"
+        true
+        (load ~base_path ~keeper_name = Ok (Some claimed))
+    | Error detail -> fail detail)
 ;;
 
 let test_roundtrip_and_settlement () =
@@ -1335,8 +1381,10 @@ let () =
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
         ; test_case "clear missing state without creating store" `Quick
             test_clear_missing_state_does_not_create_store
-        ; test_case "clear refuses foreign active claim" `Quick
-            test_clear_refuses_foreign_active_claim
+        ; test_case "clear removes stale epoch claim" `Quick
+            test_clear_removes_stale_epoch_claim
+        ; test_case "clear fences claim through paired mutation" `Quick
+            test_clear_then_fences_new_claim_until_callback_finishes
         ; test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement
         ; test_case
             "duplicate claim and CAS fail closed"

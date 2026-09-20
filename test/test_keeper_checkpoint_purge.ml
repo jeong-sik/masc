@@ -439,6 +439,33 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_core.Checkpoint.turn_count
 
+let test_librarian_coordinates_block_endpoint_rewrite () =
+  let before = (checkpoint_fixture ()).Agent_core.Checkpoint.messages in
+  let after = [ text_message Types.User "retained" ] in
+  let invalidates coordinates_present rewritten =
+    match
+      Purge.rewrite_invalidates_librarian_coordinates
+        ~coordinates_present
+        ~before
+        ~after:rewritten
+    with
+    | Ok invalidates -> invalidates
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool)
+    "tracked endpoint rewrite is refused"
+    true
+    (invalidates true after);
+  Alcotest.(check bool)
+    "untracked rewrite remains available"
+    false
+    (invalidates false after);
+  Alcotest.(check bool)
+    "tracked stable endpoint remains available"
+    false
+    (invalidates true before)
+;;
+
 
 let rec workspace_contents dir =
   Sys.readdir dir
@@ -608,6 +635,10 @@ let () =
             "checkpoint fields pass through"
             `Quick
             test_checkpoint_fields_pass_through
+        ; Alcotest.test_case
+            "Librarian coordinates block endpoint rewrite"
+            `Quick
+            test_librarian_coordinates_block_endpoint_rewrite
         ] )
     ; ( "cli"
       , [ Alcotest.test_case "default cluster: workspace dry-run and apply" `Quick

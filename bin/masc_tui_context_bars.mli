@@ -73,18 +73,14 @@ val reach_bar :
     would put the omitted history in the future. Exactly [width] cells, with
     [sent_style] applied to the filled run. *)
 
-val sent_pointer_label : string
-(** ["sent this turn"]: the label for a cut measured on the wire. *)
-
 val reach_pointer :
   label:string -> width:int -> transmitted:int -> total:int -> string
 (** [reach_pointer ~label ~width ~transmitted ~total] labels the cut in the
     bar that {!reach_bar} draws for the same three size arguments. [label]
-    says what the newest run is -- {!sent_pointer_label} when a wire body
-    carried it, something weaker when only the durable history was measured.
-    The flag hangs to the left
-    of the cut and ends on it, which is the usual shape because the sent run is
-    a cell or two; when the sent run leaves no room on the left, the label sits
+    is caller-supplied text for the filled run; this drawing primitive does
+    not establish how the range was measured. The flag hangs to the left of
+    the cut and ends on it, which is the usual shape because the filled run is
+    a cell or two; when that run leaves no room on the left, the label sits
     to the right of the cut instead. *)
 
 val bar_full : string

@@ -103,6 +103,9 @@ let durable_range_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ durable_range_receipt_suffix)
 ;;
 
+(* schema-compat: the removed [progress] receipt field existed only in the
+   unmerged #37208 head b0e7d3b4e1; no released binary wrote this new sidecar,
+   so [range_id] is its first deployable schema. *)
 type durable_range_id =
   { trace_id : string
   ; history_start_boundary_line : int

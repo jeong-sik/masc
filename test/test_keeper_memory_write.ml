@@ -1730,8 +1730,12 @@ let test_absorbed_facts_are_searchable () =
          | _ -> None)
        (matches (search "all")));
   Alcotest.(check (list string))
-    "memory still returns only current facts"
-    [ "gamma deploys on friday"; "alpha and beta deploy on tuesday" ]
+    "the default search returns the current facts, then the absorbed ones"
+    [ "gamma deploys on friday"
+    ; "alpha and beta deploy on tuesday"
+    ; "beta deploys on tuesday"
+    ; "alpha deploys on tuesday"
+    ]
     (List.map (string_field "text") (matches (search "memory")));
   let channel =
     open_out_gen
@@ -1806,16 +1810,25 @@ let test_a_query_of_several_words_is_answered () =
     | _ -> Alcotest.fail "matches is a list"
   in
   Alcotest.(check (list string))
-    "the claim holding the whole query, then the one holding its words apart"
-    [ "alpha tuesday checklist lives in the wiki"; "the alpha service deploys every tuesday" ]
+    "the claims holding the whole query, current then absorbed, then the ones \
+     holding its words apart in the same store order"
+    [ "alpha tuesday checklist lives in the wiki"
+    ; "the alpha tuesday window moved once"
+    ; "the alpha service deploys every tuesday"
+    ; "tuesday was chosen for alpha after the outage"
+    ]
     (texts (search ~source:"memory" "alpha tuesday"));
   Alcotest.(check (list string))
     "what the substring rule alone returned is the head of the result"
     [ "alpha tuesday checklist lives in the wiki" ]
     (texts (search ~limit:1 ~source:"memory" "alpha tuesday"));
   Alcotest.(check (list string))
-    "word order does not matter, and snapshot order is kept"
-    [ "the alpha service deploys every tuesday"; "alpha tuesday checklist lives in the wiki" ]
+    "word order does not matter, and each store keeps its own order"
+    [ "the alpha service deploys every tuesday"
+    ; "alpha tuesday checklist lives in the wiki"
+    ; "tuesday was chosen for alpha after the outage"
+    ; "the alpha tuesday window moved once"
+    ]
     (texts (search ~source:"memory" "tuesday alpha"));
   Alcotest.(check (list string))
     "the absorbed store answers by the same rule: the row holding the whole \
@@ -1838,7 +1851,8 @@ let test_a_query_of_several_words_is_answered () =
 (* [source=all] applies the match tier before the store order. A weaker current
    fact must not consume [limit] before an exact absorbed or history result.
    Once the tier is equal, the documented current/source-bound/absorbed/history
-   order remains deterministic. *)
+   order remains deterministic. The default search does the same over its two
+   stores, without the history. *)
 let test_all_ranks_complete_queries_before_fragments_across_stores () =
   with_temp_dir
   @@ fun base_path ->
@@ -1905,7 +1919,7 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
       (empty_ctx ())
       (Agent_core.Types.user_msg "history alpha tuesday exact")
   in
-  let search limit =
+  let search ?(source = "all") limit =
     Runtime.keeper_memory_search_json
       ~config
       ~meta
@@ -1913,7 +1927,7 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
       ~args:
         (`Assoc
            [ "query", `String "alpha tuesday"
-           ; "source", `String "all"
+           ; "source", `String source
            ; "limit", `Int limit
            ])
     |> Yojson.Safe.from_string
@@ -1934,7 +1948,18 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
     ; "ordinary alpha deploys each tuesday"
     ; "source alpha deploys each tuesday"
     ]
-    (search 4)
+    (search 4);
+  Alcotest.(check (list string))
+    "the default search keeps the absorbed complete-query result at limit one"
+    [ "absorbed alpha tuesday exact" ]
+    (search ~source:"memory" 1);
+  Alcotest.(check (list string))
+    "and puts its fragment matches after it, without the history"
+    [ "absorbed alpha tuesday exact"
+    ; "ordinary alpha deploys each tuesday"
+    ; "source alpha deploys each tuesday"
+    ]
+    (search ~source:"memory" 4)
 ;;
 
 let test_fragment_contract_is_whitespace_split_substring_matching () =
@@ -1984,10 +2009,10 @@ let test_fragment_contract_is_whitespace_split_substring_matching () =
     history_empty
 ;;
 
-(* The absorbed store is one of three that source=all reads. When it cannot be
-   read at all, source=absorbed fails as a store that did not answer, and
-   source=all still answers from the current facts and names the store it went
-   without. *)
+(* The absorbed store is one of the two the default search reads and one of
+   the three source=all reads. When it cannot be read at all, source=absorbed
+   fails as a store that did not answer, and the default search and source=all
+   still answer from the current facts and name the store they went without. *)
 let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
   with_temp_dir
   @@ fun base_path ->
@@ -2013,9 +2038,21 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
     "absorbed_read_failed"
     (string_field "error_kind"
        (Yojson.Safe.from_string absorbed.Masc.Keeper_tool_execution.raw_output));
-  let all =
-    (search "all").Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  let answered source =
+    (search source).Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
+  let default_search = answered "memory" in
+  (match json_field "matches" default_search with
+   | `List [ matched ] ->
+     Alcotest.(check string) "the default search still answers its current fact"
+       "gamma deploys on friday" (string_field "text" matched)
+   | _ -> Alcotest.fail "expected the one current fact from the default search");
+  (match json_field "unavailable_stores" default_search with
+   | `List [ store ] ->
+     Alcotest.(check string) "and names the store it went without" "absorbed_memory"
+       (string_field "store" store)
+   | _ -> Alcotest.fail "expected the default search to name the absorbed store unavailable");
+  let all = answered "all" in
   (match json_field "matches" all with
    | `List [ matched ] ->
      Alcotest.(check string) "the current fact is still answered"

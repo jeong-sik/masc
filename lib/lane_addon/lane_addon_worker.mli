@@ -16,9 +16,13 @@ type mount = { source : string; destination : string }
     before waiting for inspect or protocol initialization. Store the handle to
     allow concurrent detach even if either operation never responds. Packages expose
     [lane_observe] in the initial MCP tools/list page. [docker_command] is an
-    executable path, also allowing hermetic control-protocol tests. *)
+    executable path, also allowing hermetic control-protocol tests.
+    [control_timeout_sec] bounds each Docker control command and cancels its
+    switch so the child is killed and reaped. *)
 val start :
   sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr ->
   instance_id:string ->
   package:Lane_addon_types.package ->
@@ -41,8 +45,10 @@ val stop : t -> (unit, error) result
     container's ownership label before removal. [None] recovers a lost create
     receipt using this instance's deterministic container name, then verifies
     both the name and ownership label before removing the resolved exact ID.
-    In either case, absence requires a successful Docker query. *)
+    In either case, absence requires a successful Docker query. Each query is
+    bounded by [control_timeout_sec]. *)
 val recover_stop :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr ->
   instance_id:string -> container_id:string option -> max_reply_bytes:int ->
   ?docker_command:string -> unit -> (unit, error) result
@@ -54,7 +60,9 @@ val container_id : t -> string
 val container_name : t -> string
 val error_to_string : error -> string
 
-(** Read-only engine inspection. Failure does not imply that the image is absent. *)
+(** Read-only engine inspection. Failure does not imply that the image is
+    absent. [control_timeout_sec] also bounds this Docker query. *)
 val inspect_image :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr -> package:Lane_addon_types.package ->
   ?docker_command:string -> unit -> (string, error) result

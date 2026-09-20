@@ -219,12 +219,29 @@ let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
     [ id source ] (List.map (fun (v : Gate.source_verdict) -> v.memory_id) j.left)
 ;;
 
-let test_selection_gate_and_store_keep_the_unconveyed_original () =
+type runtime_case = Judged_run | Disabled_run | Http_failure | Memory_write_failure
+
+let runtime_case_name = function
+  | Judged_run -> "judged"
+  | Disabled_run -> "disabled"
+  | Http_failure -> "http-failure"
+  | Memory_write_failure -> "memory-write-failure"
+;;
+
+let run_runtime_evidence ?fixture_dir () =
   let module Librarian = Masc.Keeper_librarian in
   let module Current = Masc.Keeper_memory_os_current in
   let module Absorbed = Masc.Keeper_memory_absorbed in
+  let module Runs = Masc.Exact_lane_run_registry in
+  let module Projection = Server_standalone_lane_projection in
   let module Fixture = Exact_output_fixture in
   let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let member = Yojson.Safe.Util.member in
+  let string value = Yojson.Safe.Util.to_string value in
+  let check_json label expected actual =
+    Alcotest.(check string) label
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
+  in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
@@ -234,86 +251,215 @@ let test_selection_gate_and_store_keep_the_unconveyed_original () =
   Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
   let base_path = Filename.temp_dir "librarian-absorb-gate-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let a = fact (List.nth sources 0) in
-  let b = fact (List.nth sources 1) in
-  let untouched = fact "The unrelated service retains its own deployment instructions." in
-  let keeper_id = "absorb-gate-fixture" in
-  let source : Current.source = { kind = Current.Librarian; trace_id = "fixture" } in
-  let seeded =
-    Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
-      ~now:100. ~source ~facts:[ a; b; untouched ] () |> require
-  in
-  let input : Librarian.input =
-    { turn_ref = Ids.Turn_ref.make ~trace_id:"fixture" ~absolute_turn:1
-    ; goal_context = Librarian.No_task
-    ; keeper_instructions = "Keep the service deployment instructions."
-    ; current = Some { Librarian.facts = seeded.facts }
-    ; working_context = Masc.Keeper_librarian_context.empty
-    ; messages = []; tool_observations = []; counterpart_observations = []
-    }
-  in
-  let tokens = List.mapi (fun i f -> id f, Printf.sprintf "m%d" (i + 1)) seeded.facts in
-  let claim = "The alpha service deploys every Tuesday at nine in the morning." in
-  let answer =
-    `Assoc
-      [ "new_claims", `List
-          [ `Assoc [ "claim", `String claim; "category", `String "fact"
-                   ; "absorbs", `List [ `String (List.assoc (id a) tokens)
-                                       ; `String (List.assoc (id b) tokens) ] ] ]
-      ; "dropped", `List []; "working_contexts", `List []
-      ]
-  in
-  let selection =
-    match Librarian.selection_of_json_result ~now:200. input answer with
-    | Ok selection -> selection
-    | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
-  in
-  Alcotest.(check bool) "the answer projection already removed the originals" false
-    (List.exists (fun f -> String.equal (id f) (id a) || String.equal (id f) (id b))
-       selection.facts);
+  let registry_path = Filename.concat base_path Runs.storage_filename in
+  let registry = Runs.create ~path:registry_path () in
+  (match Runs.install_global registry with
+   | Ok () -> ()
+   | Error Runs.Already_installed -> Alcotest.fail "fixture registry already installed");
   let root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
     | Some root -> root | None -> Sys.getcwd () in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Masc.Prompt_defaults.init ();
-  let librarian = Fixture.start_server ~sw ~net ~clock
-    (Fixture.Reply (Fixture.openai_response answer)) in
-  let jev_response = Yojson.Safe.to_string
-    (`Assoc [ "model", `String "jev-fixture"
-            ; "answers", `Assoc
-                [ "s0_0", `Assoc [ "type", `String "noul"; "noul", `Float 1.0 ]
-                ; "s1_0", `Assoc [ "type", `String "noul"; "noul", `Float 0.0 ] ] ]) in
-  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply jev_response) in
-  let resolver = Fixture.resolver_snapshot ~source:"absorb-gate-fixture"
-    [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
-  (match Runtime_exact_output_registry.publish
-    ~lanes:[ { Runtime_schema.id = "librarian_exact"
-             ; slot_ids = [ "librarian-absorb-fixture" ]; cli_slot_ids = [] } ] resolver with
-   | Ok _ -> ()
-   | Error error -> Alcotest.fail
-       (Runtime_exact_output_registry.publication_error_to_string error));
-  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") (fun () ->
-    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" (Some "true") (fun () ->
-    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
-      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some jev.base_url) (fun () ->
-        Masc.Keeper_librarian_runtime.run_best_effort
-          ~trigger:Masc.Keeper_librarian_runtime.Queue_changed
-          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input))));
-  Alcotest.(check int) "the runtime obtained a real selection" 1 (Fixture.post_count librarian);
-  Alcotest.(check int) "the runtime sent the originals to Jev" 1 (Fixture.post_count jev);
-  let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
-    | Some snapshot -> snapshot
-    | None -> Alcotest.fail "committed current snapshot is missing"
-  in
-  Alcotest.(check (list string)) "only the conveyed original leaves current"
-    (List.sort String.compare (List.map id (b :: untouched :: selection.new_claims)))
-    (List.sort String.compare (List.map id stored.facts));
-  let records = Absorbed.read ~keepers_dir ~keeper_id |> require in
-  let records = List.map (fun (_, result) -> match result with
-    | Ok record -> record
-    | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
-  Alcotest.(check (list string)) "only the conveyed original is archived"
-    [ a.claim ] (List.map (fun (r : Absorbed.record) -> r.fact.claim) records)
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  List.iter (fun scenario ->
+    let case_name = runtime_case_name scenario in
+    let a = fact (List.nth sources 0) in
+    let b = fact (List.nth sources 1) in
+    let untouched = fact "The unrelated service retains its own deployment instructions." in
+    let keeper_id = "absorb-gate-" ^ case_name in
+    let source : Current.source = { kind = Current.Librarian; trace_id = "fixture" } in
+    let seeded =
+      Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+        ~now:100. ~source ~facts:[ a; b; untouched ] () |> require
+    in
+    let input : Librarian.input =
+      { turn_ref = Ids.Turn_ref.make ~trace_id:"fixture" ~absolute_turn:1
+      ; goal_context = Librarian.No_task
+      ; keeper_instructions = "Keep the service deployment instructions."
+      ; current = Some { Librarian.facts = seeded.facts }
+      ; working_context = Masc.Keeper_librarian_context.empty
+      ; messages = []; tool_observations = []; counterpart_observations = []
+      }
+    in
+    let tokens = List.mapi (fun i f -> id f, Printf.sprintf "m%d" (i + 1)) seeded.facts in
+    let claim = "The alpha service deploys every Tuesday at nine in the morning." in
+    let claims =
+      [ `Assoc [ "claim", `String claim; "category", `String "fact"
+               ; "absorbs", `List [ `String (List.assoc (id a) tokens)
+                                   ; `String (List.assoc (id b) tokens) ] ] ]
+    in
+    (* A valid unabsorbing claim makes exact_output exceed the TUI preview.
+       The gate evidence must remain ahead of that original model output. *)
+    let claims = match scenario with
+      | Judged_run -> claims @
+          [ `Assoc [ "claim", `String (String.make 70000 'x' ^ "EXACT_OUTPUT_TAIL")
+                   ; "category", `String "fact" ] ]
+      | Disabled_run | Http_failure | Memory_write_failure -> claims
+    in
+    let answer = `Assoc
+      [ "new_claims", `List claims; "dropped", `List []; "working_contexts", `List [] ] in
+    let selection = match Librarian.selection_of_json_result ~now:200. input answer with
+      | Ok selection -> selection
+      | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
+    in
+    Alcotest.(check bool) "the answer projection already removed the originals" false
+      (List.exists (fun f -> String.equal (id f) (id a) || String.equal (id f) (id b))
+         selection.facts);
+    let librarian = Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response answer)) in
+    let jev_response = Yojson.Safe.to_string
+      (`Assoc [ "model", `String "jev-fixture"
+              ; "answers", `Assoc
+                  [ "s0_0", `Assoc [ "type", `String "noul"; "noul", `Float 1.0 ]
+                  ; "s1_0", `Assoc [ "type", `String "noul"; "noul", `Float 0.0 ] ] ]) in
+    let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let saved_path = current_path ^ ".preserved" in
+    let jev_requests = ref [] in
+    let handler _conn _request body =
+      let raw = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+      jev_requests := raw :: !jev_requests;
+      (match scenario with
+       | Memory_write_failure ->
+         Unix.rename current_path saved_path;
+         Unix.mkdir current_path 0o700
+       | Judged_run | Disabled_run | Http_failure -> ());
+      match scenario with
+      | Http_failure -> Cohttp_eio.Server.respond_string
+          ~status:`Service_unavailable ~body:"fixture unavailable" ()
+      | Judged_run | Disabled_run | Memory_write_failure ->
+        Cohttp_eio.Server.respond_string ~status:`OK ~body:jev_response ()
+    in
+    let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+    let port = match Eio.Net.listening_addr socket with
+      | `Tcp (_, port) -> port
+      | _ -> Alcotest.fail "JEV fixture has no TCP address" in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
+        ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
+    let jev_uri = Printf.sprintf "http://127.0.0.1:%d" port in
+    let resolver = Fixture.resolver_snapshot ~source:"absorb-gate-fixture"
+      [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
+    (match Runtime_exact_output_registry.publish
+      ~lanes:[ { Runtime_schema.id = "librarian_exact"
+               ; slot_ids = [ "librarian-absorb-fixture" ]; cli_slot_ids = [] } ] resolver with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail
+         (Runtime_exact_output_registry.publication_error_to_string error));
+    Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") (fun () ->
+      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" (Some "true") (fun () ->
+      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED"
+        (Some (if scenario = Disabled_run then "false" else "true")) (fun () ->
+        Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some jev_uri) (fun () ->
+          Masc.Keeper_librarian_runtime.run_best_effort
+            ~trigger:Masc.Keeper_librarian_runtime.Queue_changed
+            ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input))));
+    Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
+    Alcotest.(check int) "JEV request count"
+      (if scenario = Disabled_run then 0 else 1) (List.length !jev_requests);
+    let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
+        (Runs.list_runs registry) with
+      | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
+      | _ -> Alcotest.fail "expected one actual Librarian run" in
+    Alcotest.(check string) "Memory result remains distinct from JEV result"
+      (if scenario = Memory_write_failure then "failed" else "succeeded")
+      (Runs.status_label run.status);
+    let original = Runs.run_to_yojson run in
+    (match scenario with
+     | Memory_write_failure ->
+       Alcotest.(check string) "the actual storage exception reaches run detail"
+         "Librarian raised: Sys_error(\"Is a directory\")"
+         (member "detail" original |> string)
+     | Judged_run | Disabled_run | Http_failure -> ());
+    let replayed = Runs.get (Runs.replay registry_path) ~run_id:run.run_id |> Option.get in
+    check_json "the full execution evidence survives disk replay"
+      original (Runs.run_to_yojson replayed);
+    let output = member "output" original in
+    (match output with
+     | `Assoc (("absorb_gate", _) :: _) -> ()
+     | _ -> Alcotest.fail "absorb_gate evidence must precede exact_output");
+    let gate = member "absorb_gate" output in
+    let expected_status = match scenario with
+      | Judged_run | Memory_write_failure -> "judged"
+      | Disabled_run -> "skipped"
+      | Http_failure -> "open" in
+    Alcotest.(check string) "gate status" expected_status (member "status" gate |> string);
+    (match scenario with
+     | Disabled_run ->
+       Alcotest.(check string) "disabled is explicitly skipped" "not_enabled"
+         (member "reason" gate |> string);
+       check_json "no invented evaluations" `Null (member "evaluations" gate)
+     | Judged_run | Http_failure | Memory_write_failure ->
+       let evaluation = match member "evaluations" gate with
+         | `List [ evaluation ] -> evaluation
+         | _ -> Alcotest.fail "expected the one actual JEV evaluation" in
+       let raw = List.hd !jev_requests in
+       let sent = Yojson.Safe.from_string raw in
+       let request = member "request" evaluation in
+       List.iter (fun key -> check_json ("actual JEV request " ^ key)
+         (member key sent) (member key request)) [ "state"; "questions" ];
+       (match scenario with
+        | Http_failure ->
+          let reason = Printf.sprintf "typesafeai: HTTP 503 returned by %s: fixture unavailable" jev_uri in
+          Alcotest.(check string) "original HTTP failure" reason (member "reason" gate |> string);
+          Alcotest.(check string) "evaluation failure" "failed" (member "status" evaluation |> string);
+          Alcotest.(check string) "same evaluation failure" reason (member "reason" evaluation |> string);
+          List.iter (fun key -> check_json ("failure does not invent " ^ key)
+            `Null (member key evaluation)) [ "model"; "answers"; "request_body_sha256" ]
+        | Judged_run | Memory_write_failure ->
+          Alcotest.(check string) "answered evaluation" "answered" (member "status" evaluation |> string);
+          Alcotest.(check string) "actual answer model" "jev-fixture" (member "model" evaluation |> string);
+          Alcotest.(check string) "actual destination" jev_uri (member "destination_uri" evaluation |> string);
+          Alcotest.(check string) "actual HTTP request digest"
+            Digestif.SHA256.(digest_string raw |> to_hex)
+            (member "request_body_sha256" evaluation |> string);
+          List.iter (fun (qid, expected) ->
+            Alcotest.(check (float 0.)) ("raw probability " ^ qid) expected
+              (member qid (member "answers" evaluation) |> Yojson.Safe.Util.to_float))
+            [ "s0_0", 1.0; "s1_0", 0.0 ]
+        | Disabled_run -> Alcotest.fail "disabled scenario cannot evaluate"));
+    (match scenario with
+     | Memory_write_failure ->
+       Unix.rmdir current_path;
+       Unix.rename saved_path current_path
+     | Judged_run | Disabled_run | Http_failure -> ());
+    let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+      | Some snapshot -> snapshot
+      | None -> Alcotest.fail "current snapshot is missing" in
+    let expected_facts = match scenario with
+      | Judged_run -> b :: untouched :: selection.new_claims
+      | Disabled_run | Http_failure -> untouched :: selection.new_claims
+      | Memory_write_failure -> seeded.facts in
+    Alcotest.(check (list string)) "correct originals remain current"
+      (List.sort String.compare (List.map id expected_facts))
+      (List.sort String.compare (List.map id stored.facts));
+    let records = Absorbed.read ~keepers_dir ~keeper_id |> require in
+    let records = List.map (fun (_, result) -> match result with
+      | Ok record -> record
+      | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
+    let archived = match scenario with
+      | Judged_run -> [ a.claim ]
+      | Disabled_run | Http_failure -> [ a.claim; b.claim ]
+      | Memory_write_failure -> [] in
+    Alcotest.(check (list string)) "only applied originals are archived"
+      (List.sort String.compare archived)
+      (List.sort String.compare (List.map (fun (r : Absorbed.record) -> r.fact.claim) records));
+    Option.iter (fun directory ->
+      let detail = match Projection.For_testing.run_detail_json_with
+        ~run_id:replayed.run_id ~exact_runs:[ replayed ]
+        ~verification_runs:[] ~goal_verification_runs:[] with
+        | Projection.Detail_found detail -> detail
+        | Detail_not_found | Detail_ambiguous -> Alcotest.fail "replayed run has no HTTP detail" in
+      let page = Projection.For_testing.recent_run_page_json_with
+        ~limit:1 ~before:None ~lane:(Some "librarian_exact") ~run_kind:None
+        ~exact_runs:[ replayed ] ~verification_runs:[] ~goal_verification_runs:[] |> require in
+      Yojson.Safe.to_file (Filename.concat directory (case_name ^ ".json"))
+        (`Assoc [ "scenario", `String case_name; "detail", detail; "page", page ])) fixture_dir)
+    [ Judged_run; Disabled_run; Http_failure; Memory_write_failure ]
+;;
+
+let test_selection_gate_and_store_keep_the_unconveyed_original () =
+  run_runtime_evidence ()
 ;;
 
 (* A noul is a probability. A value outside [0, 1] is a response-shape
@@ -448,7 +594,9 @@ let test_a_statement_too_large_to_judge_keeps_its_memory_current () =
 ;;
 
 let () =
-  Alcotest.run
+  if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--emit-tui-fixtures"
+  then run_runtime_evidence ~fixture_dir:Sys.argv.(2) ()
+  else Alcotest.run
     "keeper_librarian_absorb_gate"
     [ ( "statements"
       , [ Alcotest.test_case "the cut matches the golden" `Quick test_statements_match_the_golden ] )

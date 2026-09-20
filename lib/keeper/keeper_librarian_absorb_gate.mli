@@ -123,6 +123,31 @@ val judge
 
 (** {1 Entry point} *)
 
+type skip_reason = No_absorptions | Not_enabled
+
+type evaluation =
+  { state : Yojson.Safe.t
+  ; questions : (string * Typesafeai_types.question) list
+  ; result : (Typesafeai_client.evaluated, string) result
+  }
+
+type run_result =
+  | Skipped of
+      { reason : skip_reason
+      ; absorbed : Keeper_memory_os_types.absorbed_statement list
+      }
+  | Evaluated of
+      { outcome : outcome
+      ; evaluations : evaluation list
+      }
+
+val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
+val run_result_to_yojson : run_result -> Yojson.Safe.t
+(** Observed gate outcome and the actual evaluation responses, for the
+    Librarian run's existing output payload. Valid Noul values are preserved
+    without rounding; rejected answers retain their decoder diagnostic.
+    A request failure has no fabricated response model or request receipt. *)
+
 val run
   :  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
@@ -130,8 +155,8 @@ val run
   -> new_claims:Keeper_memory_os_types.fact list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> unit
-  -> Keeper_memory_os_types.absorbed_statement list
-(** The absorptions to apply. Reads {!Typesafeai_config}: without a key, or
-    with the lane turned off, returns [absorbed] unchanged and says nothing.
-    Otherwise judges with {!Typesafeai_client.evaluate} and writes one keeper
-    log line with the counts, or the reason the gate stayed open. *)
+  -> run_result
+(** Reads {!Typesafeai_config} and judges with {!Typesafeai_client.evaluate}
+    when enabled. {!absorbed_of_run} is the unchanged application decision;
+    the result also retains skipped reasons and actual request observations
+    for the existing durable Librarian run detail. *)

@@ -12,6 +12,25 @@ status: reference
 : 다중 에이전트의 Board, Task, Goal, Schedule, Keeper와 도구 실행을 조율하는
   OCaml/Eio 서버.
 
+**agent core**
+: `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를
+  참조하지 않아 MASC 없이도 쓸 수 있다. Agent 구성, tool turn, typed response와
+  실패의 타입은 모든 레인이 여기 것을 쓴다. Provider 요청을 실제로 보내는 것은
+  agent core 레인뿐이고, 공식 클라이언트 레인은 자기 프로세스가 보낸다.
+
+**Official Client Lane**
+: Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
+  provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
+
+**MCP**
+: Model Context Protocol의 약어. MASC는 양쪽으로 쓴다. 자기 도구와 협업 상태를
+  MCP 서버로 내보내고(`masc_*` 도구), Agent는 `mcp_clients`로 바깥 MCP 서버에
+  붙어 그쪽 도구를 가져온다.
+
+**HITL**
+: Human-in-the-Loop의 약어. Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로다.
+  대기 중인 HITL 판정은 다른 Keeper의 턴이나 서로 독립인 작업을 멈추지 않는다.
+
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
@@ -27,7 +46,8 @@ status: reference
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Keeper Turn**
-: 하나의 Keeper 작업 시도를 위해 MASC가 agent core Agent run을 실행하는 단위.
+: 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
+  레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는

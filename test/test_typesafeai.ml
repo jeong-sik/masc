@@ -228,6 +228,40 @@ let test_config_defaults () =
   Alcotest.(check string) "default model" "jev-latest" C.default_model
 ;;
 
+(* Each gate has its own switch on top of the lane's: a key turns the lane
+   on, and a gate can still be turned off by name without touching the other. *)
+let test_each_gate_has_its_own_switch () =
+  let env = Masc_test_deps.with_process_env in
+  let with_key f = env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") f in
+  let lane_on f = env "MASC_TYPESAFEAI_ENABLED" None f in
+  let gates () = C.is_board_attention_enabled (), C.is_absorb_gate_enabled () in
+  with_key (fun () ->
+    lane_on (fun () ->
+      env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
+        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" None (fun () ->
+          Alcotest.(check (pair bool bool))
+            "a key alone turns the board gate on and leaves the absorb gate off"
+            (true, false) (gates ())));
+      env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" (Some "false") (fun () ->
+        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
+          Alcotest.(check (pair bool bool)) "each switch reaches only its own gate"
+            (false, true) (gates ())));
+      env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
+        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "on") (fun () ->
+          Alcotest.(check (pair bool bool)) "the absorb gate turned on leaves the board gate on"
+            (true, true) (gates ()))));
+    env "MASC_TYPESAFEAI_ENABLED" (Some "false") (fun () ->
+      env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
+        env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
+          Alcotest.(check (pair bool bool)) "the lane off turns both gates off"
+            (false, false) (gates ())))));
+  env "TYPESAFEAI_API_KEY" None (fun () ->
+    lane_on (fun () ->
+      env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
+        Alcotest.(check (pair bool bool)) "without a key neither gate is on"
+          (false, false) (gates ()))))
+;;
+
 let () =
   Alcotest.run "typesafeai"
     [ ( "codecs"
@@ -254,6 +288,10 @@ let () =
             `Quick
             test_choice_set_rejects_no_options_and_shared_labels
         ] )
-    ; "config", [ Alcotest.test_case "defaults" `Quick test_config_defaults ]
+    ; ( "config"
+      , [ Alcotest.test_case "defaults" `Quick test_config_defaults
+        ; Alcotest.test_case "each gate has its own switch" `Quick
+            test_each_gate_has_its_own_switch
+        ] )
     ]
 ;;

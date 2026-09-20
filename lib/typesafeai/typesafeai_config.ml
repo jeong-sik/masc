@@ -23,3 +23,19 @@ let is_enabled () =
   Env_config_core.get_bool ~default:true "MASC_TYPESAFEAI_ENABLED"
   && Option.is_some (api_key ())
 ;;
+
+(* One switch per gate. A key turns the lane on; each gate can still be
+   turned off by name, so adding a gate does not switch on another one that
+   nobody reviewed with it. The Board gate defaults to on, which is what the
+   lane switch alone meant before the second gate existed. The absorb gate
+   defaults to off: it sends the librarian's memories to the vendor, which a
+   deployment that set its key for the Board gate did not choose. *)
+let is_board_attention_enabled () =
+  is_enabled ()
+  && Env_config_core.get_bool ~default:true "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED"
+;;
+
+let is_absorb_gate_enabled () =
+  is_enabled ()
+  && Env_config_core.get_bool ~default:false "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED"
+;;

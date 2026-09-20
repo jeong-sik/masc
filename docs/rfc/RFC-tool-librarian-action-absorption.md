@@ -15,13 +15,15 @@ implementation_prs: []
 
 ## 0. Summary
 
-Memory OS의 Librarian이 파편화된 개별 관측(`m1`, `m2`)을 읽어 하나의 상위 기억으로 묶어 **흡수(Absorb / Consolidate)**하고 옛 ID를 `dropped`로 처리하듯, 도구 레이어에서도 **Tool Librarian (독립 메타 분석 에이전트)**이 키퍼들의 실행 로그(`tool_calls`)를 분석하여 반복되는 다단계 도구 호출 사슬을 **단일 컴포지션(`keeper_compose_*`)으로 흡수(Action Absorption)**한다.
+Memory OS의 Librarian은 관련 기억(`m1`, `m2`)을 새 claim으로 묶고, 재료 ID를 그 claim의 `absorbs`에 적는다. 재료는 현재 스냅샷에서 빠지지만 원문과 흡수 대상은 별도 기록에 남는다. 삭제(`dropped`)와 교정(`dropped` + `supersedes`)은 이와 다른 계약이다(§2).
+
+이 RFC는 이 구분을 참고해 **Tool Librarian(별도 분석자)**이 Keeper들의 실행 로그(`tool_calls`)에서 반복되는 도구 호출을 찾아 **컴포지션(`keeper_compose_*`) 후보로 제안**하는 흐름을 다룬다. 컴포지션은 이후 호출을 묶는 것이며, 이미 일어난 호출 기록이나 턴을 지우는 것이 아니다. Memory 흡수가 구현됐다는 사실만으로 Tool Librarian의 자동 생성·검증·승인이 구현되거나 효과가 입증된 것은 아니다.
 
 이 RFC는:
 1. `tools-as-shell-commands` (Shell IR)의 실패(16일간 59,500회 호출 중 채택률 0%)와,
 2. `keeper-writes-own-compositions`의 우려(일하는 키퍼의 집중 분산, 1회성 과적합)
 
-를 모두 극복하고, **데이터 기반의 오프라인 마이닝 + 샌드박스 사전 검증(Dry-run) + HITL 승인**을 거쳐 살아있는 고효율 컴포지션 카탈로그를 유지하는 아키텍처를 정의한다.
+를 배경으로, **오프라인 마이닝 + 샌드박스 사전 검증(Dry-run) + HITL 승인**을 거쳐 컴포지션 후보를 검토하는 아키텍처를 제안한다.
 
 ---
 
@@ -135,20 +137,27 @@ Memory OS의 Librarian이 파편화된 개별 관측(`m1`, `m2`)을 읽어 하�
 
 ## 2. 핵심 원리: 기억의 흡수(Memory OS)에서 행동의 흡수(Action OS)로
 
-MASC의 Memory OS에서 Librarian은 이미 완벽한 흡수 메커니즘을 수행하고 있다 (`RFC-0418`, `config/prompts/librarian.md:32-36`):
+현재 Memory 계약은 [Librarian 프롬프트](../../config/prompts/librarian.md)의 유지·삭제·교정 절과 [RFC-0456 §4.2](RFC-0456-librarian-output-contract.md)에 따라 세 경로를 구분한다.
 
-> *"반복되는 개념이나 주제에 대한 정보면, 그 주제를 중심으로 묶어서 하나로 다시 쓰세요...  
-> 묶어서 쓴 기억을 `new_claims`에 넣고, 재료가 된 기억의 ID는 모두 `dropped`에 넣습니다."*
+- **흡수**: 묶은 내용을 `new_claims`에 쓰고 재료의 짧은 ID를 그 claim의 `absorbs`에 적는다. 같은 ID를 `dropped`에도 넣거나 여러 번 흡수하면 [파서의 `translate_absorbs`](../../lib/keeper/keeper_librarian.ml)가 거절한다.
+- **삭제**: 현재 기억에서 뺄 ID와 이유를 `dropped`에 적는다.
+- **교정**: 옛 ID를 `dropped`에 적고, 이를 고친 새 claim의 `supersedes`에 같은 ID를 적는다. `supersedes`는 여러 기억을 묶는 필드가 아니다.
 
-이 원리는 절차적 행동(도구 실행)과 1:1로 대응된다:
+흡수할 때 [현재 스냅샷 저장소](../../lib/keeper/keeper_memory_os_current.mli)는 교체 전에 재료의 전체 fact와 `memory_id`·`into`를 [흡수 기록](../../lib/keeper/keeper_memory_absorbed.mli)에 덧붙인다. 기록에 실패하면 커밋하지 않는다. 원문은 `keeper_memory_search`의 `absorbed` 또는 `all`에서 찾을 수 있다. 다만 기록을 쓴 뒤 스냅샷 교체가 실패하면 미완료 회차의 행도 남을 수 있으므로, 흡수 기록 한 줄 자체가 커밋 성공 증명은 아니다.
 
-| 비교 차원 | Librarian의 기억 흡수 (Memory Consolidation) | Tool Librarian의 행동 흡수 (Action Absorption) |
+완료 턴 범위의 소비 여부는 이 흡수 기록과 별개다. 현재 저장소의 `durable_range_id`와 범위 영수증이 Memory 스냅샷의 revision·SHA-256에 연결되고, [durable consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli)는 progress 쓰기 실패 후 그 범위의 커밋이 확인되면 모델을 다시 부르지 않고 진행 위치를 복구한다. 이 복구 계약도 원래 턴이나 호출 기록을 삭제한다는 뜻은 아니다.
+
+두 흐름은 같은 동작이 아니라 다음과 같이 비교할 수 있다.
+
+| 비교 차원 | Librarian의 기억 흡수 — 현재 구현 | Tool Librarian의 행동 흡수 — 이 RFC의 제안 |
 | :--- | :--- | :--- |
-| **원시 재료** | 턴마다 쏟아지는 파편적 관측·사실들 (`m1`, `m2`) | 턴마다 쏟아지는 파편적 도구 호출들 (`tool_a`, `tool_b`) |
-| **시스템 엔트로피** | 기억 개수 증가로 인한 컨텍스트 한도(16KB) 초과 | 턴 수 증가로 인한 LLM 왕복 시간(Roundtrip) 및 토큰 낭비 |
-| **판정 기준** | "반복되는 주제인가? 결정론적 팩트인가?" | "반복되는 시퀀스인가? 중간 판단 없이 인자가 직결되는가?" |
-| **흡수(Absorb) 행위** | 재료 기억을 `dropped`하고, 묶은 새 claim 발행 (`supersedes`) | 재료 도구 호출 턴들을 제거하고, 묶은 새 `composition` 발행 |
-| **결과** | 고밀도 장기 기억 스냅샷 (400개 사실로 수렴) | 고밀도 1턴 컴포지션 도구 (20~30ms 초고속 실행) |
+| **재료** | 현재 기억과 읽은 대화·도구 관측 | 기록된 도구 호출과 입출력 |
+| **줄이려는 반복** | 같은 주제의 기억을 따로 유지하며 생기는 중복 | 중간 판단 없이 이어지는 도구 호출의 모델 왕복 |
+| **판정 기준** | Librarian이 조건·수치·교훈과 출처를 살펴 묶을 내용을 판단 | §3.1의 재사용성·데이터 흐름·크기 조건으로 후보를 판정 |
+| **흡수 행위** | `new_claims[].absorbs`로 재료와 새 claim을 연결하고, 재료 원문은 흡수 기록에 보존 | 기존 호출 기록을 근거로 컴포지션 후보를 만들고 검증·승인 후 이후 호출에 사용 |
+| **결과** | 선택한 현재 기억 스냅샷과 검색 가능한 흡수 원문 | 여러 도구를 한 번에 부를 후보. 절감 효과는 해당 컴포지션의 실행에서 확인 |
+
+[현재 기억의 recall](../../lib/keeper/keeper_memory_os_recall.ml)은 선택된 사실을 그대로 렌더링하며, 프롬프트에도 목표 항목 수가 없다. 기억이 400개로 수렴하거나 16KB로 제한된다는 계약은 없다. [Common의 `max_tool_result_wire_bytes`](../../lib/core/common.ml)는 도구 결과 한도이며, 레인별 인라인 한도는 §3.1에서 구분한다. §1의 특정 컴포지션 실측 시간을 모든 흡수 결과의 실행 시간으로 일반화할 수 없다.
 
 ---
 
@@ -169,7 +178,7 @@ Tool Librarian은 실시간 턴을 방해하지 않는 **오프라인/스탠드�
                        ↓
  [3단계: 샌드박스 Dry-Run 검증 게이트 (필수 Invariant)]
    - 실제 격리 환경(host, microvm)에서 자동 생성된 컴포지션 실행 테스트
-   - exit code 0, timeout 미발생, wire size 16KB 이하 검증
+   - exit code 0, timeout 미발생, §3.1의 레인별 인라인 한도 이하인지 검증
                        ↓
  [4단계: Staged 제안 및 사람 승인 (HITL)]
    - "기록 09-12~09-18, Keeper 3명, 420회, /id → /post_id 예외 0, 한도 넘은 발생 0, Dry-run 통과"

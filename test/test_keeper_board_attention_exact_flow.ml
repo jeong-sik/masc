@@ -1446,7 +1446,10 @@ let run_eio_with_http_pool f =
 let with_jev ~endpoint f =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
     Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some endpoint) (fun () ->
-      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" (Some "requested-model") f))
+      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" (Some "requested-model") (fun () ->
+        (* The Board gate's own switch, so a shell that turned it off does
+           not reach these tests. *)
+        Masc_test_deps.with_process_env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" (Some "true") f)))
 ;;
 
 (* A System One answer to the adapter's one question, [relevance]. *)

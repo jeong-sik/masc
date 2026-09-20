@@ -66,11 +66,14 @@ type outcome =
   | Open of
       { reason : string
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
+      ; left : source_verdict list
+      ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
       }
-      (** the model did not answer. [absorbed] is the answer's list minus
-          the memories that could not have been judged for their size
-          ({!request_bytes_limit}): those stay current whatever the model
-          did, the rest are applied as answered. [reason] is for the log. *)
+      (** the model stopped answering. What the gate had decided by then
+          stays decided: [unjudgeable] (too large to ask,
+          {!request_bytes_limit}) and [left] (a completed answer showed a
+          statement not conveyed) stay current; [absorbed] is the answer's
+          list without them, applied as answered. [reason] is for the log. *)
   | Judged of judged
 
 val conveyed_boundary : float
@@ -93,7 +96,8 @@ val state_bytes_limit : int
 val request_bytes_limit : int
 (** A request carries at most this many bytes of claim and questions (each
     statement with the fixed instruction and criteria text sent beside it):
-    the model's 64k-token request bound taken in bytes, so a request is
+    the smallest request bound among the routes the lane can use (32k
+    tokens on OpenRouter, 64k at TypeSafe) taken in bytes, so a request is
     never refused for its size. A statement that does not fit a request
     beside its claim cannot be judged, and its memory stays current rather
     than being absorbed on a predictable refusal. *)

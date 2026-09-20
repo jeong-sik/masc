@@ -150,7 +150,7 @@ let test_the_model_not_answering_applies_the_answer () =
   let absorbed = absorbed_into merged facts in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
   (match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
-   | Gate.Open { reason; absorbed = applied } ->
+   | Gate.Open { reason; absorbed = applied; _ } ->
      Alcotest.(check string) "the reason is carried" "HTTP 529" reason;
      Alcotest.(check int) "and every absorption is still applied" 2 (List.length applied)
    | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open");
@@ -327,6 +327,77 @@ let test_a_noul_outside_the_unit_interval_opens_the_gate () =
   | Gate.Judged _ -> Alcotest.fail "2.0 is not a probability"
 ;;
 
+(* A verdict reached before a later request fails stays reached: the source
+   a completed answer showed not conveyed is kept current, the source the
+   failure left unresolved is applied as answered. *)
+let test_a_rejection_completed_before_a_later_failure_is_kept () =
+  let first = fact (List.nth sources 0) in
+  let second = fact (List.nth sources 1) in
+  let other = fact "gamma restarts nightly and keeps its logs for a week" in
+  let absorbed = absorbed_into merged [ first ] @ absorbed_into other [ second ] in
+  let calls = ref 0 in
+  let evaluate ~state:_ ~questions =
+    incr calls;
+    if !calls = 1
+    then
+      Ok
+        { T.model = "jev-test"
+        ; usage = None
+        ; answers = List.map (fun (qid, _) -> qid, T.Noul_answer { T.noul = 0.0 }) questions
+        }
+    else Error "HTTP 529"
+  in
+  match
+    Gate.judge ~evaluate ~facts:[ first; second ] ~new_claims:[ merged; other ] ~absorbed
+  with
+  | Gate.Open { absorbed = applied; left; _ } ->
+    Alcotest.(check (list string)) "the rejected source stays current"
+      [ id first ]
+      (List.map (fun (v : Gate.source_verdict) -> v.memory_id) left);
+    Alcotest.(check (list string)) "the unresolved source is applied as answered"
+      [ id second ]
+      (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) applied)
+  | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open"
+;;
+
+(* The same inside one source: a statement not conveyed in an answered
+   request keeps the source current when the next request fails. *)
+let test_a_rejection_in_an_answered_request_survives_the_next_failing () =
+  let long =
+    fact
+      (String.concat " "
+         (List.init (Gate.questions_per_request + 1) (fun i ->
+            Printf.sprintf "statement number %d is long enough to stand alone." i)))
+  in
+  let absorbed = absorbed_into merged [ long ] in
+  let calls = ref 0 in
+  let evaluate ~state:_ ~questions =
+    incr calls;
+    if !calls = 1
+    then
+      Ok
+        { T.model = "jev-test"
+        ; usage = None
+        ; answers =
+            List.mapi
+              (fun k (qid, _) -> qid, T.Noul_answer { T.noul = (if k = 0 then 0.0 else 1.0) })
+              questions
+        }
+    else Error "HTTP 529"
+  in
+  Alcotest.(check int) "the source cuts into more than one request"
+    (Gate.questions_per_request + 1)
+    (List.length (Gate.statements long.claim));
+  match Gate.judge ~evaluate ~facts:[ long ] ~new_claims:[ merged ] ~absorbed with
+  | Gate.Open { absorbed = applied; left; _ } ->
+    Alcotest.(check int) "two requests were attempted" 2 !calls;
+    Alcotest.(check (list string)) "the source stays current"
+      [ id long ]
+      (List.map (fun (v : Gate.source_verdict) -> v.memory_id) left);
+    Alcotest.(check int) "nothing is applied" 0 (List.length applied)
+  | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open"
+;;
+
 (* A claim over the state bound cannot be asked about at all: every memory
    it absorbs stays current, and nothing is sent. *)
 let test_a_claim_over_the_state_bound_keeps_all_its_absorptions_current () =
@@ -401,6 +472,10 @@ let () =
             test_an_oversized_memory_stays_current_when_another_request_fails
         ; Alcotest.test_case "a claim over the state bound keeps all its absorptions current" `Quick
             test_a_claim_over_the_state_bound_keeps_all_its_absorptions_current
+        ; Alcotest.test_case "a rejection completed before a later failure is kept" `Quick
+            test_a_rejection_completed_before_a_later_failure_is_kept
+        ; Alcotest.test_case "a rejection in an answered request survives the next failing" `Quick
+            test_a_rejection_in_an_answered_request_survives_the_next_failing
         ; Alcotest.test_case "a missing seventeenth statement keeps the original" `Quick
             test_a_missing_seventeenth_statement_keeps_the_whole_memory
         ; Alcotest.test_case "selection gate and store preserve the original" `Quick

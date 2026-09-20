@@ -934,6 +934,27 @@ let test_the_notice_that_blocks_the_row_is_the_one_given_up () =
     (contains ~needle:"MISMATCH" row);
   check_bool "the door survives" true (contains ~needle:"q:quit" row)
 
+let test_long_action_keeps_the_short_drawable_notice () =
+  (* The higher-ranked workspace notice fits the initial probe exactly but
+     not the row's omission marker. A long action must not make the shorter
+     build warning disappear with it. *)
+  let path = "/w/" ^ String.make 42 'a' in
+  List.iter (fun action_text ->
+    let row = Masc_tui_footer.line ~action_text
+        ~status:
+          [ Masc_tui_footer.Workspace_mismatch path
+          ; Masc_tui_footer.Tui_build_mismatch
+              { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server } ]
+        ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:"q:quit" () in
+    check_bool "the short actionable warning survives" true
+      (contains ~needle:"redeploy)" row);
+    check_bool "the blocking workspace warning is omitted" false
+      (contains ~needle:"MISMATCH" row);
+    check_bool "the pinned exit survives" true (contains ~needle:"q:quit" row);
+    check_bool "the clipped outcome remains visible" true (contains ~needle:"…" row);
+    check_at_most_cells "the combined row stays bounded" 80 row)
+    [ action_message; String.make 160 'x' ]
+
 let test_an_armed_action_outlives_every_notice () =
   (* A conflict stays true on the next frame. An armed action is a question
      waiting for one keypress and gone after any other, and [?] cannot recover
@@ -1190,6 +1211,8 @@ let tests =
           test_ansi_keeper_keys_remain_individually_droppable
       ; Alcotest.test_case "the notice that blocks the row is given up" `Quick
           test_the_notice_that_blocks_the_row_is_the_one_given_up
+      ; Alcotest.test_case "long action keeps the short drawable notice" `Quick
+          test_long_action_keeps_the_short_drawable_notice
       ; Alcotest.test_case "an armed action outlives every notice" `Quick
           test_an_armed_action_outlives_every_notice
       ; Alcotest.test_case "a running action reads as one item" `Quick

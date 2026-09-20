@@ -80,7 +80,6 @@ const writerRows: Record<string, unknown>[] = readFileSync(
   resolve(__dirname, 'fixtures/turn-record-writer.jsonl'),
   'utf8',
 ).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
-
 afterEach(() => {
   getMock.mockReset()
 })

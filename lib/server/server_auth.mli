@@ -315,8 +315,10 @@ val authorize_tool_request_with_actor :
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t -> (string, Masc_domain.masc_error) result
 (** Check [tool_name] authority and return the exact principal used for that
-    decision. Auth-disabled same-origin dashboard calls use the explicit
-    ["dashboard"] principal. *)
+    decision. Ordinary bearer credentials resolve to their owner. An admitted
+    token-less same-origin request uses its supplied header/query attribution,
+    or ["dashboard"] when it supplies no name. The returned name alone does
+    not distinguish credential identity from local attribution. *)
 
 val authorize_token_bound_permission_request :
   base_path:string ->
@@ -362,15 +364,19 @@ val with_tool_auth :
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Tool-call auth combinator. *)
+(** Tool-call auth combinator for handlers that do not need caller attribution.
+    Use [with_tool_actor_auth] when a handler records or checks caller identity;
+    consume its resolved actor rather than reading identity headers. *)
 
 val with_tool_actor_auth :
   tool_name:string ->
   (Mcp_server.server_state ->
    string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Tool-call auth combinator that threads the exact authorized caller into the
-    handler instead of asking the handler to resolve identity again. *)
+(** Tool-call auth combinator that threads the principal used for authorization
+    into the handler. Identity resolution follows
+    [authorize_tool_request_with_actor], including supplied local attribution
+    for admitted token-less requests. *)
 
 val with_token_permission_auth :
   permission:Masc_domain.permission ->

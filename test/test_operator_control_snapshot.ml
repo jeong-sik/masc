@@ -1347,7 +1347,7 @@ let test_digest_workspace_includes_tool_host_failure_attention () =
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
-      Dashboard_tool_host_events.record ~fs:() config
+      Dashboard_tool_host_events.record ~fs:() config ~reported_by:"codex"
         {
           Dashboard_tool_host_events.agent_name = "codex";
           client_name = "codex";

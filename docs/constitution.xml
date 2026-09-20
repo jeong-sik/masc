@@ -14,7 +14,7 @@
 <masc_constitution version="2026-09-01">
 
   <project>
-    <name>MASC (Multi Agent Streaming Coordination)</name>
+    <name>MASC (Multi-Agent Shared Context)</name>
     <description>
       Provider·Model Free 원칙으로 Multi LLM Runtime Failover 를 지원하는 하네스.
       하나 이상의 에이전트가 영속성을 가지고, 에이전트끼리 협업한다.

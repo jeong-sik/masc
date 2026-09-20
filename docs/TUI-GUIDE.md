@@ -417,6 +417,8 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
+The [Glossary](spec/00-glossary.md#core) uses Lane for Runtime candidate order. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes; this section's existing UI label `Lanes` shows exact-output routes.
+
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.

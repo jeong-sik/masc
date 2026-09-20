@@ -16,6 +16,9 @@
     errors. *)
 
 module Task : sig
+  val producer_payload_key : string
+  (** Payload field that identifies the producer whose work a verdict commits. *)
+
   type t =
     | Created
     | Claimed

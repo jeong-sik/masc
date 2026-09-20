@@ -599,9 +599,28 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                  respond_error ~status:`Not_found ~ok:false reqd msg
              | Ok trace_id ->
                  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
-                 let (deleted, missing) =
+                 let delete_results =
                    Keeper_checkpoint_store.delete_agent_core_history_files
                      ~session_dir ~snapshot_ids
+                 in
+                 let deleted, missing, refused, failed =
+                   List.fold_left
+                     (fun (deleted, missing, refused, failed) -> function
+                       | Keeper_checkpoint_store.History_deleted id ->
+                         id :: deleted, missing, refused, failed
+                       | Keeper_checkpoint_store.History_missing id ->
+                         deleted, id :: missing, refused, failed
+                       | Keeper_checkpoint_store.History_refused id ->
+                         deleted, missing, id :: refused, failed
+                       | Keeper_checkpoint_store.History_removal_failed id ->
+                         deleted, missing, refused, id :: failed)
+                     ([], [], [], [])
+                     delete_results
+                   |> fun (deleted, missing, refused, failed) ->
+                   ( List.rev deleted
+                   , List.rev missing
+                   , List.rev refused
+                   , List.rev failed )
                  in
                  let (_status, inventory) =
                    keeper_checkpoint_inventory_json config name
@@ -614,6 +633,8 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                         ("keeper", `String name);
                         ("deleted_snapshot_ids", `List (List.map (fun id -> `String id) deleted));
                         ("missing_snapshot_ids", `List (List.map (fun id -> `String id) missing));
+                        ("refused_snapshot_ids", `List (List.map (fun id -> `String id) refused));
+                        ("failed_snapshot_ids", `List (List.map (fun id -> `String id) failed));
                         ("inventory", inventory);
                    ])
                    reqd)

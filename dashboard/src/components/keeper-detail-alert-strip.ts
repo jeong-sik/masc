@@ -127,6 +127,10 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const stopCauseCodeRaw = stopCause?.code?.trim() || null
   const stopCauseCode = canonicalTerminalCode(stopCauseCodeRaw)
   const stopCauseSummary = canonicalTerminalSummary(stopCauseCodeRaw, stopCause?.summary)
+  // normalizeStopCause projects the current blocker into stop_cause too.
+  // Its source identifies that projection without comparing summary text.
+  const stopCauseShownAsBlocker =
+    stopCause?.source === 'runtime_blocker_class' && runtimeBlocker !== null
   const latestTerminalReason = keeper.trust?.latest_terminal_reason ?? null
   const latestTerminalCodeRaw = latestTerminalReason?.code?.trim() || null
   const latestTerminalCode = canonicalTerminalCode(latestTerminalCodeRaw)
@@ -335,7 +339,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${nextHumanActionText && !suppressDuplicateNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
-        ${stopCause && stopCauseCode && isTurnTerminalFailureCode(stopCauseCode)
+        ${stopCause && !stopCauseShownAsBlocker && stopCauseCode && isTurnTerminalFailureCode(stopCauseCode)
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCauseCode}${stopCauseSummary ? ` · ${stopCauseSummary}` : ''}</span>`
           : null}
         ${latestTerminalCode && latestTerminalCode !== stopCauseCode && !suppressStaleLatestTerminal

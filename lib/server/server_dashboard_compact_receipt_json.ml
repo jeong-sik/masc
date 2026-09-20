@@ -53,7 +53,16 @@ let compact_receipt_error_json receipt =
    key that is not there. Reading the two fields independently would therefore
    mark the first unreadable and report the second as "this turn deferred no
    lane", which is a claim the old row cannot support. So the bool decides for
-   both. *)
+   both.
+
+   The matches below name every tag rather than ending in a wildcard, so a
+   shape nobody thought about cannot fall into "absent". [Yojson.Safe.t] has
+   eight of them (yojson/safe.mli):
+
+     `Null | `Bool | `Int | `Intlit | `Float | `String | `Assoc | `List
+
+   `Tuple and `Variant are [Yojson.t], the extended tree, and are not
+   reachable here. *)
 type receipt_lane_shape =
   | Lanes_split
   | Lanes_predate_the_split
@@ -61,14 +70,8 @@ type receipt_lane_shape =
 let degraded_retry_shape runtime =
   match json_member "degraded_retry_applied" runtime with
   | `Assoc _ | `Null -> Lanes_split
-  | `Bool _
-  | `Int _
-  | `Float _
-  | `String _
-  | `List _
-  | `Intlit _
-  | `Tuple _
-  | `Variant _ -> Lanes_predate_the_split
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Lanes_predate_the_split
 ;;
 
 let unreadable_lane_json =
@@ -98,14 +101,8 @@ let compact_degraded_retry_json shape lane =
      | `Null -> `Null
      (* The row is this generation's and this field still is not a lane. Not
         absence, so not `Null. *)
-     | `Bool _
-     | `Int _
-     | `Float _
-     | `String _
-     | `List _
-     | `Intlit _
-     | `Tuple _
-     | `Variant _ -> unreadable_lane_json)
+     | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+       unreadable_lane_json)
 ;;
 
 let compact_receipt_runtime_json receipt =

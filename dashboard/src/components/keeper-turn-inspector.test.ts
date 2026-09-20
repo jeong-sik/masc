@@ -893,6 +893,41 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(stats).not.toContain('미상')
   })
 
+  it.each([
+    { scope: 'per_request', label: '요청별', context: '25.0%', cost: '$0.070' },
+    { scope: 'conversation_cumulative', label: '대화 누적', context: '미상', cost: '미상' },
+    { scope: 'unavailable', label: '범위 미상', context: '미상', cost: '미상' },
+  ] as const)('shows $scope usage without changing its meaning', async ({ scope, label, context, cost }) => {
+    const response = turnRecordsWithMemoryOs()
+    Object.assign(response.entries[1]!.record, {
+      usage_scope: scope,
+      input_tokens: 50_000,
+      output_tokens: 10_000,
+      context_window: 200_000,
+      price_input_per_million: 1,
+      price_output_per_million: 2,
+    })
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+    await waitFor(() => expect(container.textContent).toContain('T42'))
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => expect(container.querySelector('[data-testid="turn-token-bar"]')).toBeTruthy())
+
+    const tokenBar = container.querySelector('[data-testid="turn-token-bar"]')!
+    expect.soft(tokenBar.textContent).toContain(label)
+    expect.soft(tokenBar.textContent).toContain('50,000')
+    expect.soft(tokenBar.textContent).toContain('10,000')
+    expect.soft(tokenBar.querySelector('.ctxpct')?.textContent).toBe(`컨텍스트 ${context} / 200K`)
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+    await waitFor(() => expect(container.querySelector('.ti-kv')).toBeTruthy())
+    const metadata = new Map(Array.from(container.querySelectorAll('.ti-kv .k'))
+      .map(key => [key.textContent, key.nextElementSibling?.textContent]))
+    expect.soft(metadata.get('usage scope')).toBe(label)
+    expect.soft(metadata.get('ctx window')).toBe(`${context} / 200,000`)
+    expect.soft(metadata.get('est. cost')).toBe(cost)
+  })
+
   it('renders missing token observations as unknown without synthetic values', async () => {
     const response = turnRecordsWithMemoryOs()
     const record = response.entries[1]!.record
@@ -1127,7 +1162,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('tool log unavailable')
   })
 
-  it('displays the token-economics stacked bar', async () => {
+  it('displays the token usage stacked bar', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -1143,7 +1178,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     const barText = container.querySelector('[data-testid="turn-token-bar"]')?.textContent ?? ''
-    expect(barText).toContain('토큰 경제')
+    expect(barText).toContain('토큰 사용량 · 요청별')
     expect(barText).toContain('입력 2,400')
     expect(barText).toContain('출력 280')
   })

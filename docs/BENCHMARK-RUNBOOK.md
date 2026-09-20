@@ -63,9 +63,12 @@ request hashes describe prepared bytes before dispatch; they alone do not prove
 that the remote provider received a request.
 
 `--publish-base-path` is optional. It publishes the same final bytes in the
-selected server's artifact store and prints their SHA. The artifact is a view
-copy and may be collected when no durable consumer references it; keep the
-output file.
+selected server's artifact store and prints their SHA. In that server's TUI, enter
+`/measurement <sha256>` to inspect the report. The artifact is a view copy and may
+be collected when no durable consumer references it; keep the output file. The
+TUI shows scored, failed and incomplete sample counts, every raw probability,
+failure stage and report location. It does not turn a probability into a pass,
+coverage percentage or operational Librarian verdict.
 
 The checked-in cases contain one synthetic fact present/absent from the answer
 context. Questions are generated separately for each case; inspect their actual

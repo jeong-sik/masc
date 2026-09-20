@@ -5508,13 +5508,138 @@ let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
   | Some availability, output ->
     lane_run_payload_availability_lines ~width availability output
 
-let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
-  let input_title, output_title = lane_run_panel_titles detail in
+module Continuity_report = Masc.Librarian_continuity_report
+
+type run_inspection =
+  | Inspection_lane of Tui_decode.lane_run_detail
+  | Inspection_measurement of string * Continuity_report.t
+
+let measurement_summary_lines (report : Continuity_report.t) =
+  let counts = Measurement.counts report in
+  [ Ansi.reset, "  MEANING PRESERVATION  " ^ Terminal_text.single_line report.run_id
+  ; Ansi.dim, "  SYNTHETIC INPUT  ·  " ^ Terminal_text.single_line report.started_at
+  ; Ansi.reset,
+    Printf.sprintf "  SAMPLES  %d  ·  SCORED %d  ·  FAILED %d  ·  INCOMPLETE %d"
+      (List.length report.samples) counts.scored counts.failed counts.incomplete
+  ]
+
+let measurement_text_lines ~width lines =
+  List.concat_map
+    (fun (style, text) ->
+      String.split_on_char '\n' text
+      |> List.concat_map (fun line ->
+        Message_layout.wrap_words ~max_cells:(max 1 width)
+          (Terminal_text.single_line line)
+        |> List.map (fun line -> style, line)))
+    lines
+
+let measurement_input_lines ~width ~sha256 (report : Continuity_report.t) =
+  let module R = Continuity_report in
+  let metadata =
+    [ "AUTHORITATIVE FILE  " ^ report.output_path
+    ; "BLOB SHA256  " ^ sha256
+    ; "Published blob is a copy; it may be collected."
+    ; "INPUT  " ^ report.input_path
+    ; "INPUT SHA256  " ^ report.input_sha256
+    ; "CONFIG REVISION  " ^ report.config_revision
+    ]
+    @ (match report.binary_commit with None -> [] | Some value -> [ "BINARY COMMIT  " ^ value ])
+    @ (match report.executable_sha256 with None -> [] | Some value -> [ "EXECUTABLE SHA256  " ^ value ])
+    @ List.map (fun (sample : R.sample) ->
+        "CONTEXT SHA256  " ^ sample.case.id ^ "  "
+        ^ R.sha256 (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context))) report.samples
+  in
+  measurement_text_lines ~width (List.map (fun text -> Ansi.dim, text) metadata)
+  @ lane_run_payload_lines ~width
+      (`List (List.map (fun (sample : R.sample) -> R.case_to_yojson sample.case) report.samples))
+
+let measurement_output_lines ~width (report : Continuity_report.t) =
+  let module R = Continuity_report in
+  let prepared (request : R.generation_request) =
+    List.concat_map
+      (fun (wire : Llm_provider.Request_wire_observer.observation) ->
+        [ "PREPARED REQUEST  " ^ wire.provider ^ "  ·  " ^ wire.model
+        ; "PRE-DISPATCH SHA256  " ^ wire.body_sha256 ])
+      request.prepared_requests
+  in
+  let generation label (value : R.generation) =
+    [ label ^ "  " ^ value.response.model ^ "  ·  runtime " ^ value.request.runtime_id
+    ; "RESPONSE  " ^ value.response.response_id
+    ; value.response.text
+    ] @ prepared value.request
+  in
+  let failed_generation label (value : R.failed_generation) =
+    [ label ^ " FAILED  " ^ value.error
+    ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
+    ] @ prepared value.request
+    @ (match value.incomplete_response with
+       | None -> []
+       | Some response -> [ "INCOMPLETE RESPONSE  " ^ response.model ^ "  ·  " ^ response.response_id; response.text ])
+  in
+  let values =
+    List.filter_map (fun (sample : R.sample) -> match sample.progress with
+      | R.Scored (_, _, judgment) -> Some (judgment.probability, sample.case.id)
+      | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
+      | R.Answer_ready _ | R.Judge_failed _ -> None) report.samples
+    |> List.sort (fun (a, id_a) (b, id_b) ->
+        let order = Float.compare a b in if order = 0 then String.compare id_a id_b else order)
+  in
+  let probabilities =
+    (Ansi.bold, "RAW PROBABILITIES · NO PASS THRESHOLD")
+    :: (match values with
+        | [] -> [ Theme.muted (), "No scored samples" ]
+        | values -> List.map (fun (probability, id) ->
+            Ansi.reset, Printf.sprintf "%s  %.17g" id probability) values)
+  in
+  let samples = List.concat_map (fun (sample : R.sample) ->
+      let style, status, lines = match sample.progress with
+        | R.Not_started -> Theme.muted (), "NOT STARTED", []
+        | R.Question_failed failed -> Theme.bad (), "QUESTION FAILED", failed_generation "QUESTION" failed
+        | R.Question_ready question -> Theme.info (), "INCOMPLETE · QUESTION READY", generation "QUESTION" question
+        | R.Answer_failed (question, failed) -> Theme.bad (), "ANSWER FAILED",
+            generation "QUESTION" question @ failed_generation "ANSWER" failed
+        | R.Answer_ready (question, answer) -> Theme.info (), "INCOMPLETE · ANSWER READY",
+            generation "QUESTION" question @ generation "ANSWER" answer
+        | R.Judge_failed (question, answer, failed) -> Theme.bad (), "JUDGE FAILED",
+            generation "QUESTION" question @ generation "ANSWER" answer
+            @ [ "JUDGE REQUESTED  " ^ failed.request.model ^ "  ·  " ^ failed.request.endpoint
+              ; "JUDGE FAILED  " ^ failed.error ]
+        | R.Scored (question, answer, judgment) -> Ansi.reset, "SCORED",
+            generation "QUESTION" question @ generation "ANSWER" answer
+            @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
+              ; "Noul  " ^ Printf.sprintf "%.17g" judgment.probability
+              ; "TRUE  " ^ judgment.request.true_criteria
+              ; "FALSE  " ^ judgment.request.false_criteria
+              ; "REQUEST SHA256  " ^ judgment.request_body_sha256 ]
+      in
+      [ Ansi.dim, ""; style, sample.case.id ^ "  ·  " ^ status ]
+      @ List.map (fun line -> Ansi.reset, line) lines) report.samples
+  in
+  measurement_text_lines ~width (probabilities @ samples)
+
+let inspection_summary_lines = function
+  | Inspection_lane detail -> lane_run_summary_lines detail
+  | Inspection_measurement (_, report) -> measurement_summary_lines report
+
+let inspection_panel_titles = function
+  | Inspection_lane detail -> lane_run_panel_titles detail
+  | Inspection_measurement _ -> "INPUT · SYNTHETIC CASES", "OBSERVATIONS · NO VERDICT"
+
+let inspection_input_lines ~width = function
+  | Inspection_lane detail -> lane_run_input_lines ~width detail
+  | Inspection_measurement (sha256, report) -> measurement_input_lines ~width ~sha256 report
+
+let inspection_output_lines ~width = function
+  | Inspection_lane detail -> lane_run_output_lines ~width detail
+  | Inspection_measurement (_, report) -> measurement_output_lines ~width report
+
+let lane_run_stacked_lines ~width detail =
+  let input_title, output_title = inspection_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
-  @ indent (lane_run_input_lines ~width detail)
+  @ indent (inspection_input_lines ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
-  @ indent (lane_run_output_lines ~width detail)
+  @ indent (inspection_output_lines ~width detail)
 
 let lane_run_split_line buf cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
@@ -5532,15 +5657,19 @@ let render_lane_run_detail (state : state) ~run_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
+  let measurement = match state.lanes_mode with
+    | Lanes_measurement_detail _ -> true
+    | Lanes_overview | Lanes_run_list _ | Lanes_run_detail _ -> false in
   let detail =
-    match state.lane_run_detail with
+    if measurement then Option.map (fun report -> Inspection_measurement (run_id, report)) state.measurement_report
+    else match state.lane_run_detail with
     | Some detail when String.equal detail.Tui_decode.lrd_run_id run_id ->
-        Some detail
+        Some (Inspection_lane detail)
     | Some _ | None -> None
   in
   let header =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Lane Run")
+      (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run"))
       (fit_width (Terminal_text.single_line run_id) 38)
       (connection_badge state)
   in
@@ -5568,7 +5697,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let content_height = max 1 (rows - 5 - error_rows) in
       let line =
         match error with
-        | None -> Ansi.dim, "  (loading exact run record)"
+        | None -> Ansi.dim, (if measurement then "  (loading measurement artifact)" else "  (loading exact run record)")
         | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
@@ -5577,7 +5706,7 @@ let render_lane_run_detail (state : state) ~run_id =
       done;
       0, None
     | Some detail, (Some _ | None) ->
-      let summary = lane_run_summary_lines detail in
+      let summary = inspection_summary_lines detail in
       List.iter
         (fun (style, line) -> box_line_styled buf cols ~style line)
         summary;
@@ -5588,9 +5717,9 @@ let render_lane_run_detail (state : state) ~run_id =
         let left_width = max 1 ((inner - divider_width) / 2) in
         let right_width = max 1 (inner - left_width - divider_width) in
         let input_lines =
-          lane_run_input_lines ~width:left_width detail
+          inspection_input_lines ~width:left_width detail
         in
-        let output_lines = lane_run_output_lines ~width:right_width detail in
+        let output_lines = inspection_output_lines ~width:right_width detail in
         let payload_rows =
           max 0 (rows - List.length summary - 6 - error_rows)
         in
@@ -5613,7 +5742,7 @@ let render_lane_run_detail (state : state) ~run_id =
           let input_scroll = min scroll input_max_scroll in
           let input_lines_window = Rows.of_list ~first:input_scroll ~height:content_height input_lines in
           let output_scroll = min scroll output_max_scroll in
-          let input_title, output_title = lane_run_panel_titles detail in
+          let input_title, output_title = inspection_panel_titles detail in
           lane_run_split_line buf cols ~left_width
             ~left:
               ( Ansi.bold
@@ -5805,6 +5934,7 @@ let render_lanes (state : state) =
   | Lanes_overview -> render_lanes_overview state
   | Lanes_run_list lane_id -> render_lane_run_list state ~lane_id
   | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
+  | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
 
 (** Render keeper detail view with live context and scrolling *)
 (* The detail box alone -- borders, title, scrolled content -- written into

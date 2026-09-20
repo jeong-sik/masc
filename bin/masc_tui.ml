@@ -1910,6 +1910,8 @@ type async_msg =
       (Masc.Tui_decode.lane_run_page, string) result
   | Lane_run_detail_loaded of
       string * int * (Masc.Tui_decode.lane_run_detail, string) result
+  | Measurement_artifact_loaded of
+      string * int * (Masc.Librarian_continuity_report.t, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -6029,6 +6031,30 @@ let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
   state.lane_run_detail_scroll <- 0;
   launch_lane_run_detail_load state ~mailbox ~run_id
 
+let launch_measurement_artifact_load state ~mailbox ~sha256 =
+  state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
+  let generation = state.lane_run_detail_generation in
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result = Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256 in
+    enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async mailbox
+      (Measurement_artifact_loaded
+         (sha256, generation, Error "Eio switch is unavailable"))
+
+let open_measurement_artifact state ~mailbox ~sha256 =
+  state.view <- Lanes;
+  state.lanes_mode <- Lanes_measurement_detail sha256;
+  state.measurement_report <- None;
+  state.lane_run_detail_error <- None;
+  state.lane_run_detail_scroll <- 0;
+  launch_measurement_artifact_load state ~mailbox ~sha256
+
 (* Everything that names a row stops meaning anything when the surface moves
    to another page or another list: the cursor, the scroll, the open detail
    and a half-armed approve all point at rows this surface is about to stop
@@ -6186,7 +6212,7 @@ let row_list (state : state) : row_list option =
            let runs = List.length (Option.value state.lane_runs ~default:[]) in
            windowed ~count:runs ~cursor:state.lane_runs_cursor (fun index ->
              state.lane_runs_cursor <- index)
-       | Lanes_run_detail _ -> None
+       | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
        | Lanes_overview ->
            of_counted (fun count ->
                windowed ~count ~cursor:state.lanes_standalone_cursor
@@ -6482,7 +6508,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
        | None -> None)
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ -> pane (fun v -> Lane_run_detail_scroll v)
+       | Lanes_run_detail _ | Lanes_measurement_detail _ -> pane (fun v -> Lane_run_detail_scroll v)
        | Lanes_run_list _ | Lanes_overview -> None)
   | Changes ->
       (match state.changes_diff_row with
@@ -9150,6 +9176,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       add_event state "error" "/task needs a title on the same line"
   | Masc_tui_command.View_image_missing_path ->
       notice ~role:Message_error "/image needs a path on the same line"
+  | Masc_tui_command.Measurement_missing_sha ->
+      notice ~role:Message_error "/measurement needs a SHA-256 on the same line"
+  | Masc_tui_command.Open_measurement sha256 ->
+      (match Tool_blob_store.validate_sha256 sha256 with
+       | Error error ->
+           notice ~role:Message_error (Tool_blob_store.invalid_sha256_to_string error)
+       | Ok () ->
+           Buffer.clear state.msg_input;
+           open_measurement_artifact state ~mailbox ~sha256)
   | Masc_tui_command.View_image path ->
       Buffer.clear state.msg_input;
       open_image state ~notice (String.trim path)
@@ -12069,6 +12104,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        (* [/find] moves the pane on purpose, so unlike every other command it
           must not be followed by the reset to the newest row above. *)
        | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
+       | Masc_tui_command.Open_measurement _ | Masc_tui_command.Measurement_missing_sha
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
@@ -14862,7 +14898,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (* A failed page retains both the rows and its retry cursor.
                    Refresh supersedes every older response by generation. *)
                 state.lane_runs_error <- Some detail)
-       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ -> ())
+       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ -> ())
   | Lane_run_detail_loaded (run_id, generation, result) ->
       (match state.lanes_mode with
        | Lanes_run_detail (_, open_run)
@@ -14876,7 +14912,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 state.lane_run_detail_error <-
                   Some "lane run detail response does not match the requested run"
             | Error detail -> state.lane_run_detail_error <- Some detail)
-       | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _ -> ())
+       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_overview | Lanes_run_list _ -> ())
+  | Measurement_artifact_loaded (sha256, generation, result) ->
+      accept_measurement_artifact state ~sha256 ~generation result
   | Harness_loaded result ->
       state.harness_inflight <- false;
       (match result with
@@ -20931,7 +20969,7 @@ and is loaded on demand through keeper_skill.
                  state.clients_surface_scroll <- scroll
              | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_detail _ ->
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ ->
                      state.lane_run_detail_scroll <-
                        (if direction > 0 then
                      Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:page
@@ -21100,6 +21138,9 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_detail (_, run_id) ->
                      launch_lane_run_detail_load state ~mailbox:async_messages
                        ~run_id
+                 | Lanes_measurement_detail sha256 ->
+                     launch_measurement_artifact_load state ~mailbox:async_messages
+                       ~sha256
                  | Lanes_overview -> ())
             | Harness -> launch_harness_load state ~mailbox:async_messages
             | Fusion ->
@@ -21316,6 +21357,11 @@ and is loaded on demand through keeper_skill.
              | Lanes ->
                 state.lanes_action_error <- None;
                 (match state.lanes_mode with
+                 | Lanes_measurement_detail _ ->
+                     state.lanes_mode <- Lanes_overview;
+                     state.measurement_report <- None;
+                     state.lane_run_detail_error <- None;
+                     state.lane_run_detail_scroll <- 0
                  | Lanes_run_detail (lane_id, _) ->
                      state.lanes_mode <- Lanes_run_list lane_id;
                      state.lane_run_detail <- None;
@@ -21494,6 +21540,11 @@ and is loaded on demand through keeper_skill.
                 (* Left closes a drill-down level but never leaves the surface;
                    Esc owns leaving it. *)
                 (match state.lanes_mode with
+                 | Lanes_measurement_detail _ ->
+                     state.lanes_mode <- Lanes_overview;
+                     state.measurement_report <- None;
+                     state.lane_run_detail_error <- None;
+                     state.lane_run_detail_scroll <- 0
                  | Lanes_run_detail (lane_id, _) ->
                      state.lanes_mode <- Lanes_run_list lane_id;
                      state.lane_run_detail <- None;
@@ -21758,7 +21809,7 @@ and is loaded on demand through keeper_skill.
                 state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_detail _ ->
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ ->
                      state.lane_run_detail_scroll <-
                        Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:1
                  | Lanes_run_list _ ->
@@ -22124,7 +22175,7 @@ and is loaded on demand through keeper_skill.
                 state.clients_surface_scroll <- scroll
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_detail _ ->
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ ->
                      state.lane_run_detail_scroll <-
                        max 0 (state.lane_run_detail_scroll - 1)
                  | Lanes_run_list _ ->
@@ -22468,7 +22519,7 @@ and is loaded on demand through keeper_skill.
                                  ~run_id:run.lrs_run_id
                            | None -> ())
                       | None -> ())
-                 | Lanes_run_detail _ -> ()
+                 | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
                  | Lanes_overview ->
                      open_lanes_standalone_selection state
                        ~mailbox:async_messages)
@@ -23221,7 +23272,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_list _ | Lanes_run_detail _ -> ()
+                 | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
                  | Lanes_overview ->
                      show_lanes_action_error state
                        "Cannot open chat: Standalone lanes have no Keeper; use Keepers")
@@ -23599,7 +23650,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview, None ->
                    show_lanes_action_error state
                      "Cannot open config: no standalone lane is selected"
-                 | (Lanes_run_list _ | Lanes_run_detail _), _ -> ())
+                 | (Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _), _ -> ())
             | Config ->
                 (match state.config_pane with
                  | Config_prompts ->

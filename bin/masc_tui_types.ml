@@ -1575,6 +1575,43 @@ type lanes_mode =
   | Lanes_overview
   | Lanes_run_list of string
   | Lanes_run_detail of string * string
+  | Lanes_measurement_detail of string
+
+module Measurement = struct
+  module R = Masc.Librarian_continuity_report
+
+  type counts = { scored : int; failed : int; incomplete : int }
+
+  let counts (report : R.t) =
+    List.fold_left
+      (fun counts (sample : R.sample) ->
+        match sample.progress with
+        | R.Scored _ -> { counts with scored = counts.scored + 1 }
+        | R.Question_failed _ | R.Answer_failed _ | R.Judge_failed _ ->
+          { counts with failed = counts.failed + 1 }
+        | R.Not_started | R.Question_ready _ | R.Answer_ready _ ->
+          { counts with incomplete = counts.incomplete + 1 })
+      { scored = 0; failed = 0; incomplete = 0 }
+      report.samples
+
+  let decode_artifact ~sha256 json =
+    match Tool_blob_store.validate_sha256 sha256 with
+    | Error error -> Error (Tool_blob_store.invalid_sha256_to_string error)
+    | Ok () ->
+      let field name = match json with
+        | `Assoc fields -> List.assoc_opt name fields
+        | _ -> None in
+      (match field "sha256", field "bytes", field "content" with
+       | Some (`String actual), Some (`Int bytes), Some (`String content)
+         when String.equal actual sha256
+              && bytes = String.length content
+              && String.equal (R.sha256 content) sha256 ->
+         (match Yojson.Safe.from_string content with
+          | report -> R.of_yojson report
+          | exception Yojson.Json_error detail ->
+            Error ("Measurement artifact is not JSON: " ^ detail))
+       | _ -> Error "Measurement artifact does not match the requested SHA and bytes")
+end
 
 (** One authority for the Fusion surface's list/detail state. The top-level
     [surface] only says Fusion is open; it does not repeat this mode. *)
@@ -5229,6 +5266,7 @@ type state = {
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
+  mutable measurement_report: Masc.Librarian_continuity_report.t option;
   mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
@@ -5739,6 +5777,19 @@ type state = {
    because this module cannot see a frame. *)
 (* Browser is an operator reader inside Connectors. A retained
    reader model must not change chrome after the operator leaves its view. *)
+let accept_measurement_artifact state ~sha256 ~generation result =
+  match state.lanes_mode with
+  | Lanes_measurement_detail selected
+    when generation = state.lane_run_detail_generation
+         && String.equal selected sha256 ->
+      (match result with
+       | Ok report ->
+           state.measurement_report <- Some report;
+           state.lane_run_detail_error <- None
+       | Error detail -> state.lane_run_detail_error <- Some detail)
+  | Lanes_measurement_detail _ | Lanes_run_detail _
+  | Lanes_overview | Lanes_run_list _ -> ()
+
 let browser_lane_on_screen (state : state) =
   match state.view, state.browser_lane_visibility with
   | Connectors, Browser_lane_shown _ -> state.browser_lane
@@ -6903,6 +6954,7 @@ let create_state
   lane_runs_cursor = 0;
   lane_runs_scroll = 0;
   lane_run_detail = None;
+  measurement_report = None;
   lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
@@ -7739,7 +7791,7 @@ let lanes_scrolled (state : state) =
       ; sc_overflow_takes_row = true
       ; sc_preview_keep = None
       }
-  | Lanes_run_detail _ ->
+  | Lanes_run_detail _ | Lanes_measurement_detail _ ->
       (* The detail's lines are built by the drawing; the frame reports the
          clamp through [clamped_scroll], so no count is knowable here. *)
       { sc_count = 0
@@ -8615,7 +8667,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           }
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ -> None
+       | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
        | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
   | Clients ->
       listing ~error:state.clients_surface_error
@@ -8939,7 +8991,7 @@ let surface_row_texts (state : state) : surface -> string list option =
       else None
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
        | Lanes_overview ->
            let standalone =
              match state.standalone_lanes with

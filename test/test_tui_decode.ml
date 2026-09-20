@@ -7410,8 +7410,13 @@ let test_lane_detail_distinguishes_null_missing_and_unavailable () =
     match lane_run_detail_json "recorded-null" with
     | `Assoc [ "run", `Assoc fields ] ->
       `Assoc [ "run", `Assoc
-        (("payload_availability", availability) :: output
-          @ (fields |> List.remove_assoc "payload_availability" |> List.remove_assoc "output")) ]
+        (("lane", `String "payload_fixture")
+         :: ("payload_availability", availability)
+         :: output
+         @ (fields
+            |> List.remove_assoc "lane"
+            |> List.remove_assoc "payload_availability"
+            |> List.remove_assoc "output")) ]
     | _ -> assert false
   in
   let available = lane_payload_availability ~running:false ~output:true in

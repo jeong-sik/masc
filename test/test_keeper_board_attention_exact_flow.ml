@@ -1330,14 +1330,10 @@ let test_jev_relevant_is_kept () =
       "Vendor System One does not fabricate a selected slot"
       None
       run.exact_selected_slot;
-    (match Candidate.judgment_of_yojson run.exact_output with
-     | Ok { Candidate.source = Candidate.Vendor_system_one provenance; _ } ->
-       Alcotest.(check string)
-         "the exact-run output keeps the answering model"
-         "jev-latest"
-         provenance.answering_model_id
-     | Ok _ -> Alcotest.fail "the exact-run output changed Jev into a lane slot"
-     | Error detail -> Alcotest.failf "the exact-run output is invalid: %s" detail);
+    Alcotest.(check bool)
+      "the exact-run output keeps the accepted judgment"
+      true
+      (run.exact_output = Candidate.judgment_to_yojson judgment);
     (match judgment.Candidate.source with
      | Candidate.Vendor_system_one provenance ->
        let expected = expected_jev_provenance run in

@@ -143,6 +143,32 @@ let test_row_carrying_a_retired_key_is_refused () =
     retired_post_keys
 ;;
 
+(* The posts file is the board's one snapshot (RFC-0091). A size cap used to
+   rename it to [.1] once it passed 10 MiB, while the loader reads only
+   [board_posts.jsonl]; a restart before the next full rewrite came up with no
+   posts (2026-09-19). The long post puts the file past that old cap. *)
+let test_post_file_past_ten_mib_is_not_renamed () =
+  let long = create_post ~content:(String.make ((10 * 1024 * 1024) + 1024) 'x') in
+  let short = create_post ~content:"written after the long post" in
+  Alcotest.(check bool)
+    "no renamed copy beside the posts file"
+    false
+    (Sys.file_exists (Board.persist_path () ^ ".1"));
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  List.iter
+    (fun (label, (post : Board.post)) ->
+       match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf
+           "%s post is missing after the reload: %s"
+           label
+           (Board.show_board_error error))
+    [ "long", long; "short", short ]
+;;
+
 let () =
   Alcotest.run
     "Board explicit writes"
@@ -167,6 +193,10 @@ let () =
             "a row carrying a retired key is refused"
             `Quick
             (with_board test_row_carrying_a_retired_key_is_refused)
+        ; Alcotest.test_case
+            "posts file past 10 MiB is not renamed"
+            `Quick
+            (with_board test_post_file_past_ten_mib_is_not_renamed)
         ] )
     ]
 ;;

@@ -18,6 +18,7 @@ const currentWire = {
     name: 'planner',
     meta: {
       name: 'planner',
+      sandbox_profile: 'docker',
       trace_id: 'trace-planner',
       created_at: '2026-08-12T00:00:00Z',
       updated_at: '2026-08-12T00:01:00Z',
@@ -27,6 +28,7 @@ const currentWire = {
     health: 'healthy',
     paused: false,
     next_action: 'direct_message',
+    runtime_blocker_summary: null,
     keepalive_running: true,
     activation_mode: 'on_demand',
     runtime_id: 'runtime-planner',

@@ -2593,7 +2593,7 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~status ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/logs/tool-host-failures" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_broadcast" (fun state req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_broadcast" (fun state reported_by req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            let fallback_agent =
              dashboard_actor_for_request
@@ -2610,6 +2610,7 @@ let add_routes ~sw ~clock router =
            | Ok report ->
                Dashboard_tool_host_events.record ?fs:state.Mcp_server.fs
                  (Mcp_server.workspace_config state)
+                 ~reported_by
                  report;
                respond_dashboard_ok ~request:req reqd
            | Error message ->

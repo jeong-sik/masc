@@ -3,11 +3,15 @@
 
     RFC keeper-context-window-in-tokens §10.4, run forward: the carried
     range from the pair's front over the durable checkpoint with the
-    autonomous wake line appended as the newest atom. Nothing here
-    dispatches, advances a cursor, consumes a note, or moves the front.
+    autonomous wake line appended as the newest atom. A valid pair ledger
+    is projected through the same high/low-water decision the driver applies
+    at the next turn boundary; this calculation leaves the observed ledger
+    unchanged. [counted_tokens] remains its last measured total, not the
+    projected total after eviction. Nothing here
+    dispatches, advances a cursor, consumes a note, or writes a front.
 
     Live at the time of the call: the pair's ledger (process-local, absent
-    after a restart until the first counted usage), the binding's marks, and
+    after a restart until the first response observation), the binding's marks, and
     the checkpoint. Without a ledger the front is the range the newest
     completed Agent Core turn record on the trace measured, whichever
     runtime ran it, exactly as the turn driver seeds it; without that the

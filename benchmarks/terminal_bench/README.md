@@ -226,10 +226,19 @@ harbor 기본 에이전트는 태스크 명령을 `exec_as_agent` 로 돌린다.
   `GH_CONFIG_DIR`·`GIT_TERMINAL_PROMPT`)과 여러 줄 값은 keeper 명령에 닿지 않는다.
   뺀 이름과 이유는 harbor trial 결과의 `agent_result.metadata.endpoint_env_left_out` 에 남는다
   (arm K 도 같다). `PATH` 는 `path=` 로 넘어가므로 여기에 적지 않는다.
-- 태스크가 선언한 `mcp_servers`(medical-claims-processing)와 `skills_dir`
-  (cumulative-layout-shift)를 keeper 에 연결하지 않는다 — #36908
+- 태스크가 선언한 `mcp_servers`(medical-claims-processing)는 keeper 에 연결하지 않는다 — #36908
 - GPU 태스크 3개는 GPU 를 주는 환경(`BENCH_ENV=modal`)에서만 돈다. 이 호스트에는 Modal
   자격 증명이 없다.
 
 비교 기준점은 Terminal-Bench 리더보드
 (`hub.harborframework.com/datasets/terminal-bench/terminal-bench/latest?tab=leaderboard`)에서 본다.
+
+## 태스크가 준 Skills
+
+Harbor의 `[environment] skills_dir` 는 이미지 안 경로다. masc agent는 설치 때 이 디렉터리를
+로컬 임시 스냅숏으로 내려받아 렌더된 config의 `task-skills/`에 싣고, bootstrap은 이를
+`<base>/.masc/task-skills`로 따로 복사한다. runtime에는 `terminal-bench-task` read-only source로
+등록된다. MASC seed Skill을 켜는 arm c 이후의 실험축과 섞지 않는다. 따라서 arm b도 태스크가
+준 Skill은 받지만 MASC seed Skill은 받지 않으며, arm c는 태스크 Skill과 seed instruction
+Skill만 받는다. 태스크 source가 비었거나 seed와 이름이 겹치거나 catalog에서 거부·shadow되면
+keeper를 실행하지 않고 설치를 실패시킨다.

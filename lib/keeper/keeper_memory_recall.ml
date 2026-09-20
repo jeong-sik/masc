@@ -6,10 +6,6 @@
     [keeper_memory_search] tool, not a substring heuristic. What remains
     here is the typed file-reading substrate those surfaces share. *)
 
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
-
 (* Whether the final returned line was newline-terminated in the file.
    [Partial_last_line] means an append was in flight when the read happened,
    which is the difference between a truncated write and real corruption at
@@ -121,93 +117,87 @@ let record_memory_recall_read_error ~site path exn_class =
     ()
 ;;
 
-let recent_user_messages (msgs : Agent_core.Types.message list) ~(max_n : int) : string list =
+let user_messages_newest_first (msgs : Agent_core.Types.message list) : string list =
   msgs
   |> List.rev
   |> List.filter_map (fun (m : Agent_core.Types.message) ->
        if m.role = Agent_core.Types.User then
-         let c = String.trim (Agent_core.Types.text_of_message m) in
-         if c = "" then None else Some c
+         let content = String.trim (Agent_core.Types.text_of_message m) in
+         if content = "" then None else Some content
        else None)
-  |> take max_n
+;;
 
-(* RFC-0149 §3.1: pure list -> list filter behind
-   [load_history_user_messages_result].  The per-line
-   [try ... with exn -> log + (* cancel-guard-ok: prose *)
-   counter + None] is a separate boundary (JSONL corruption) from the
-   file-read IO fault the caller reports as [Error]. *)
-let history_user_messages_from_lines
-    ~(path : string)
-    ~(max_n : int)
-    (lines : string list) : string list =
-  lines
-  |> List.filter_map (fun line ->
-       try
-         let json = Yojson.Safe.from_string line in
+let load_history_user_messages_result ~path ~limit ~accept =
+  let unreadable_rows = ref 0 in
+  let matches = ref [] in
+  let remaining = ref limit in
+  let record_unreadable exn_class detail =
+    incr unreadable_rows;
+    Log.Keeper.warn "load_history_user_messages: skipping line in %s: %s" path detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MemoryRecallHistorySwallowedExceptions)
+      ~labels:[ "exception_class", Keeper_memory_recall_exn_class.to_label exn_class ]
+      ()
+  in
+  let user_message = function
+    | Dated_jsonl.Malformed_json { detail; _ } ->
+      record_unreadable Keeper_memory_recall_exn_class.Yojson_parse_error detail;
+      None
+    | Dated_jsonl.Parsed json ->
+      (try
          let role = Json_util.get_string json "role" in
          let source =
            Json_util.get_string json "source"
            |> Option.value ~default:""
            |> String.trim
          in
-         (* Issue #18400: role may be null in corrupted JSONL lines. Use to_string_option so null/missing roles are skipped instead of throwing Type_error. *)
-         if role = Some "user" then
-           let content =
-             String.trim
-               (Keeper_context_core.text_of_history_jsonl_json json)
-           in
-           if content = ""
-              || Keeper_types_support.is_internal_history_source source
-           then None
-           else Some content
+         if role = Some "user"
+            && not (Keeper_types_support.is_internal_history_source source)
+         then
+           let content = String.trim (Keeper_context_core.text_of_history_jsonl_json json) in
+           if content = "" then None else Some content
          else None
        with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           (* V07 (HIGH): make non-Cancel failures visible instead of
-              masking JSONL corruption / fs faults as "no history".
-              Behavior preserved — we still drop this line and return
-              [None]; only logging + counter are added.
-
-              P1 follow-up: the [exception_class] label is now a
-              4-value closed sum from [Keeper_memory_recall_exn_class]
-              (constructor-level match on the [exn] type, not a
-              substring scan on [Printexc.to_string]) so the metric
-              cardinality is bounded. The full error string is still
-              emitted to the log body. *)
-           let exn_detail = Printexc.to_string exn in
-           let exn_label =
-             Keeper_memory_recall_exn_class.(to_label (classify exn))
-           in
-           Log.Keeper.warn
-             "load_history_user_messages: skipping line in %s: %s"
-             path exn_detail;
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string MemoryRecallHistorySwallowedExceptions)
-             ~labels:[ ("exception_class", exn_label) ]
-             ();
-           None)
-  |> take max_n
-
-(* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
-   user messages found in the history file") from [Error class] ("the
-   history file read failed"). Read failures still increment the bounded
-   recall-read-error metric before returning [Error]. *)
-let load_history_user_messages_result
-    ~(path : string)
-    ~(max_n : int) :
-    (string list, Keeper_memory_recall_exn_class.t) result =
-  match
-    read_file_tail_lines_result
-      path
-      ~max_bytes:0
-      ~max_lines:(max_n * 3)
-  with
-  | Ok lines ->
-    Ok (history_user_messages_from_lines ~path ~max_n lines)
-  | Error exn_class ->
-    record_memory_recall_read_error
-      ~site:"load_history_user_messages_result"
-      path
-      exn_class;
-    Error exn_class
+       | (Yojson.Safe.Util.Type_error _ | Failure _) as exn ->
+         record_unreadable (Keeper_memory_recall_exn_class.classify exn)
+           (Printexc.to_string exn);
+         None)
+  in
+  let read_result =
+    if limit <= 0 then Ok None
+    else
+      try
+        let exists =
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            match Unix.lstat path with
+            | _ -> true
+            | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false)
+        in
+        if not exists then Ok None
+        else
+          match
+            Dated_jsonl.find_latest_entry_in_file_result path (fun entry ->
+              match user_message entry with
+              | Some content when accept content ->
+                matches := content :: !matches;
+                decr remaining;
+                if !remaining = 0 then Some () else None
+              | Some _ | None -> None)
+          with
+          | Ok _ as result -> result
+          | Error error ->
+            Log.Keeper.warn "history search: %s" (Dated_jsonl.read_error_to_string error);
+            Error Keeper_memory_recall_exn_class.Io_error
+      with
+      | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
+        Error (Keeper_memory_recall_exn_class.classify exn)
+  in
+  let result =
+    match read_result with
+    | Ok _ -> Ok (List.rev !matches)
+    | Error exn_class ->
+      record_memory_recall_read_error ~site:"load_history_user_messages_result" path exn_class;
+      Error exn_class
+  in
+  result, !unreadable_rows
+;;

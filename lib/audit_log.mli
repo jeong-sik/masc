@@ -202,6 +202,7 @@ val log_non_public_tool_call :
 val log_client_tool_host_failure :
   config ->
   agent_id:string ->
+  reported_agent:string ->
   client_name:string ->
   tool_name:string ->
   transport:string ->
@@ -212,6 +213,8 @@ val log_client_tool_host_failure :
   ?trace_id:string ->
   ?timeout_ms:int ->
   unit -> unit
+(** [agent_id] is the resolved reporting caller. [reported_agent] identifies
+    the agent whose failure was reported and is retained in [details]. *)
 
 val log_gate_decision :
   config ->

@@ -384,12 +384,16 @@ let test_transient_network_failure_advances_crash_streak () =
     ~finally:(fun () -> R.For_testing.clear ())
     (fun () ->
        ignore (R.For_testing.register ~base_path meta.name meta);
-       KUF.record_failure_observation ~config ~meta ~err ~error_text:"TLS handshake";
+       KUF.record_failure_observation ~config ~meta ~err
+         ~terminal_reason:(Keeper_turn_terminal.of_failure ~raw_error:"TLS handshake" err)
+         ~error_text:"TLS handshake";
        Alcotest.(check int)
          "first network failure counts toward the streak"
          1
          (R.get_turn_failures ~base_path meta.name);
-       KUF.record_failure_observation ~config ~meta ~err ~error_text:"TLS handshake";
+       KUF.record_failure_observation ~config ~meta ~err
+         ~terminal_reason:(Keeper_turn_terminal.of_failure ~raw_error:"TLS handshake" err)
+         ~error_text:"TLS handshake";
        let count = R.get_turn_failures ~base_path meta.name in
        Alcotest.(check int) "second network failure compounds the streak" 2 count;
        let event = KHL.turn_status_event ~turn_fail_count:count in
@@ -405,6 +409,77 @@ let test_transient_network_failure_advances_crash_streak () =
             "failing"
             (KSM.phase_to_string phase)
         | None -> Alcotest.fail "expected registered keeper phase"))
+
+(* Exercise the failure producer, the production heartbeat cause refresh and
+   public blocker surface, including a later failure and successful reset.
+   The live loop's event dispatch and late-event filtering are not run here. *)
+let record_failed_turn ~config ~meta err =
+  let error_text = Agent_core.Error.to_string err in
+  let terminal_reason = Keeper_turn_terminal.of_failure ~raw_error:error_text err in
+  KUF.record_failure_observation ~config ~meta ~terminal_reason ~err ~error_text
+
+let refresh_failure_reason ~base_path ~keeper_name =
+  KHL.refresh_failure_reason_after_turn ~base_path ~keeper_name
+    ~turn_fail_count:(R.get_turn_failures ~base_path keeper_name)
+
+let failure_reason ~base_path ~keeper_name =
+  match Option.bind (R.get ~base_path keeper_name) (fun entry -> entry.R.last_failure_reason) with
+  | Some reason -> reason
+  | None -> Alcotest.fail "expected current failure reason"
+
+let test_failed_ticks_preserve_current_runtime_cause () =
+  with_temp_dir "failure-cause-ticks" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let meta = make_meta "failure-cause-ticks" in
+  Fun.protect ~finally:(fun () -> R.For_testing.clear ()) (fun () ->
+    ignore (R.For_testing.register ~base_path meta.name meta);
+    let exhausted =
+      KTD.core_error_of_masc_internal_error
+        (KTD.Runtime_exhausted
+           { runtime_id = "runtime.test"; reason = KTD.No_providers_available })
+    in
+    record_failed_turn ~config ~meta exhausted;
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
+    (match failure_reason ~base_path ~keeper_name:meta.name with
+     | R.Provider_runtime_error { reason = Some Keeper_meta_contract.No_providers_available; _ } -> ()
+     | reason -> Alcotest.failf "exhaustion cause lost: %s" (R.failure_reason_to_string reason));
+    (match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+             (failure_reason ~base_path ~keeper_name:meta.name) with
+     | Some surface -> Alcotest.(check string) "public blocker" "runtime_exhausted" surface.blocker_class
+     | None -> Alcotest.fail "missing public blocker");
+    record_failed_turn ~config ~meta
+      (raw_provider_timeout_error
+         ~phase:(Some (Llm_provider.Http_client.Stream_idle
+                        Llm_provider.Http_client.Streaming_thinking)));
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
+    Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);
+    (match failure_reason ~base_path ~keeper_name:meta.name with
+     | R.Provider_runtime_error { reason = None; code; detail; agent_core_timeout; _ } ->
+       (match KPB.classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () with
+        | KPB.Provider_timeout _ -> ()
+        | KPB.Not_provider_runtime_failure -> Alcotest.fail "new cause is not a timeout")
+     | reason -> Alcotest.failf "new timeout cause lost: %s" (R.failure_reason_to_string reason));
+    Alcotest.(check bool) "successful turn resets" true
+      (Keeper_turn_failure_streak.reset ~base_path ~keeper_name:meta.name);
+    Alcotest.(check int) "success clears count" 0 (R.get_turn_failures ~base_path meta.name);
+    Alcotest.(check bool) "success clears cause" true
+      (Option.bind (R.get ~base_path meta.name) (fun entry -> entry.R.last_failure_reason) = None))
+
+let test_crashed_tick_replaces_previous_configuration_cause () =
+  with_temp_dir "failure-cause-crash" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let meta = make_meta "failure-cause-crash" in
+  Fun.protect ~finally:(fun () -> R.For_testing.clear ()) (fun () ->
+    ignore (R.For_testing.register ~base_path meta.name meta);
+    record_failed_turn ~config ~meta
+      (Agent_core.Error.Config (MissingEnvVar { var_name = "TEST_PROVIDER_KEY" }));
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
+    KHL.record_crashed_cycle_failure ~base_path ~keeper_name:meta.name (Failure "synthetic cycle crash");
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
+    Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);
+    match failure_reason ~base_path ~keeper_name:meta.name with
+    | R.Exception _ -> ()
+    | reason -> Alcotest.failf "previous cause survived new crash: %s" (R.failure_reason_to_string reason))
 
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
@@ -463,6 +538,10 @@ let () =
         Alcotest.test_case
           "generic InvalidRequest is not empty completion" `Quick
           test_generic_invalid_request_is_not_empty_completion;
+        Alcotest.test_case "failed ticks preserve current runtime cause" `Quick
+          test_failed_ticks_preserve_current_runtime_cause;
+        Alcotest.test_case "crashed tick replaces previous configuration cause" `Quick
+          test_crashed_tick_replaces_previous_configuration_cause;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
         Alcotest.test_case

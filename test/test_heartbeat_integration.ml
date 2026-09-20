@@ -604,6 +604,79 @@ let test_fresh_presence_preserves_turn_failures () =
       | Some phase -> check string "heartbeat alone stays failing" "failing" (KSM.phase_to_string phase)
       | None -> fail "expected registered keeper phase")
 
+let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  Eio.Switch.run @@ fun sw ->
+  R.For_testing.clear ();
+  let base_path = temp_dir "fresh-presence-reason" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let recover meta failures =
+        R.set_failure_reason
+          ~base_path
+          meta.Keeper_meta_contract.name
+          (Some (R.Heartbeat_consecutive_failures failures));
+        ignore
+          (R.dispatch_event
+             ~base_path
+             meta.name
+             (KSM.Heartbeat_failed { consecutive = failures }));
+        ignore
+          (Masc.Keeper_heartbeat_loop.sync_keeper_presence
+             ~ctx
+             ~meta_current:meta
+             ~consecutive_failures:(ref failures))
+      in
+      let heartbeat_only = make_meta "heartbeat-only-recovery" in
+      ignore (R.For_testing.register ~base_path heartbeat_only.name heartbeat_only);
+      recover heartbeat_only 2;
+      let heartbeat_only_reason =
+        Option.bind (R.get ~base_path heartbeat_only.name) (fun entry ->
+          entry.R.last_failure_reason)
+      in
+      check bool "healthy heartbeat clears its stale reason" true
+        (Option.is_none heartbeat_only_reason);
+      let with_turn_debt = make_meta "heartbeat-with-turn-debt" in
+      ignore (R.For_testing.register ~base_path with_turn_debt.name with_turn_debt);
+      ignore
+        (Masc.Keeper_turn_failure_streak.increment
+           ~base_path
+           ~keeper_name:with_turn_debt.name);
+      recover with_turn_debt 3;
+      Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+        ~base_path
+        ~keeper_name:with_turn_debt.name
+        ~turn_fail_count:(R.get_turn_failures ~base_path with_turn_debt.name);
+      match
+        Option.bind (R.get ~base_path with_turn_debt.name) (fun entry ->
+          entry.R.last_failure_reason)
+      with
+      | Some (R.Turn_consecutive_failures 1 as reason) ->
+        (match Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+         | Some surface -> check string "public blocker follows remaining turn debt"
+             "turn_failures" surface.blocker_class
+         | None -> fail "remaining turn debt has no public blocker")
+      | Some reason ->
+        failf "heartbeat recovery left the wrong reason: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "heartbeat recovery cleared remaining turn debt")
+
 let test_turn_failure_streak_survives_registry_restart () =
   Eio_main.run @@ fun env ->
   install_test_env env;
@@ -5327,6 +5400,8 @@ let () =
       eio_test "turn crash flow" test_crash_turn_failures;
       test_case "fresh presence preserves turn failures" `Quick
         test_fresh_presence_preserves_turn_failures;
+      test_case "fresh presence clears only heartbeat failure reason" `Quick
+        test_fresh_presence_clears_only_the_heartbeat_failure_reason;
       test_case "turn failure streak survives registry restart" `Quick
         test_turn_failure_streak_survives_registry_restart;
       test_case "turn failure streak rejects unknown schema" `Quick

@@ -667,6 +667,103 @@ let test_keeper_brief_publishes_health_and_phase () =
       Alcotest.(check string) "phase travels with the row" {|"Running"|} (field "phase"))
 ;;
 
+(* A Keeper declared in [.masc/config/keepers] that has never booted: the
+   operator snapshot lists it as a declaration row (#35084). *)
+let declare_unbooted_keeper (config : Workspace_utils.config) name =
+  Workspace_utils.mkdir_p (Lib.Workspace.keepers_runtime_dir config);
+  let declarations =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  Workspace_utils.mkdir_p declarations;
+  Out_channel.with_open_bin
+    (Filename.concat declarations (name ^ ".toml"))
+    (fun out ->
+      output_string out
+        "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\n\
+         instructions = \"Help the operator.\"\n")
+
+let row_named name rows =
+  List.find_opt
+    (fun row -> Yojson.Safe.Util.(row |> member "name") = `String name)
+    rows
+
+(* The execution render that answered 500 on 2026-09-19: the snapshot's
+   declaration row for [imp] had no health, and the continuity briefs raised
+   on it. *)
+let test_execution_render_with_a_declared_keeper () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      declare_unbooted_keeper config "imp";
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let json =
+        Dashboard_execution.json
+          ~actor:"test-execution-declared-keeper"
+          ~light:true
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      check bool "the render is not the timeout page" true
+        (json |> member "error" = `Null);
+      (match row_named "imp" (json |> member "keepers" |> to_list) with
+       | Some row ->
+         check bool "the declared keeper stays listed as a declaration" true
+           (row |> member "declaration_only" |> to_bool)
+       | None -> fail "the declared keeper is missing from the keeper list");
+      check bool "the declared keeper has no continuity brief" true
+        (Option.is_none
+           (row_named "imp" (json |> member "continuity_briefs" |> to_list))))
+
+(* The snapshot is cached for ten seconds, so a render can hold a declaration
+   row for a Keeper whose metadata exists by now. Enriching that row from the
+   metadata would build a row that is declaration-only and has runtime health
+   at once. *)
+let test_enrich_leaves_a_declaration_row_without_runtime_fields () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc [ "name", `String "imp"; "trace_id", `String "declared-trace" ])
+        with
+        | Ok meta -> meta
+        | Error error -> fail ("meta fixture: " ^ error)
+      in
+      (match Lib.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error error -> fail ("write meta: " ^ error));
+      let declared =
+        Lib.Keeper_declared_roster.to_json
+          { Lib.Keeper_declared_roster.name = "imp"
+          ; requirements = [ Lib.Keeper_declared_roster.Runtime_check_required ]
+          }
+      in
+      let enriched =
+        Dashboard_execution.For_test.enrich_keeper_with_diagnostic ~config declared
+      in
+      List.iter
+        (fun key ->
+           check bool (key ^ " is not added to a declaration row") false
+             (object_has_key "enriched declaration row" key enriched))
+        [ "diagnostic"; "trust"; "runtime_trust" ];
+      check bool "the row stays a declaration" true
+        Yojson.Safe.Util.(enriched |> member "declaration_only" |> to_bool))
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -706,5 +803,12 @@ let () =
             test_keeper_brief_publishes_health_and_phase;
           Alcotest.test_case "internal signals do not pair the two streams"
             `Quick test_internal_signals_do_not_pair_streams;
+        ] );
+      ( "execution render",
+        [
+          Alcotest.test_case "declared keeper does not take down the render"
+            `Quick test_execution_render_with_a_declared_keeper;
+          Alcotest.test_case "enrich leaves a declaration row without runtime fields"
+            `Quick test_enrich_leaves_a_declaration_row_without_runtime_fields;
         ] );
     ]

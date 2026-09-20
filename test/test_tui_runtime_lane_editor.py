@@ -77,9 +77,12 @@ class LaneStore:
     returns, the way a committed write reaches that read on the server:
 
     - create declares the lane with the candidates it was given;
-    - set replaces a lane's candidates with the list it was given, and an
-      "exact/<name>" set replaces that standalone lane's admitted slots
-      (Runtime.set_exact_output_lane_slots);
+    - set replaces a lane's candidates with the list it was given;
+    - an "exact/<name>" append adds one slot to the end of that standalone
+      lane's declared slots and refuses one already declared
+      (Runtime.append_exact_output_lane_slot). The declared slots include one
+      the registry dropped, which the standalone lanes read never lists, as
+      the server's registry would;
     - remove drops the lane, and is refused while [runtime.assignments]
       names it, with the server's sentence.
 
@@ -100,6 +103,12 @@ class LaneStore:
         _status, standalone = h.standalone_lanes_response()
         self.standalone = standalone
         self.standalone_held: tuple[threading.Event, threading.Event] | None = None
+        exact = self.exact_lane(EXACT_LANE)
+        exact["dropped_slots"] = [DROPPED_SLOT]
+        self.exact_declared = {EXACT_LANE: [DROPPED_SLOT, *exact["admitted_slots"]]}
+
+    def exact_lane(self, name: str) -> dict:
+        return next(lane for lane in self.standalone["lanes"] if lane["lane_id"] == name)
 
     def resolved(self) -> h.HttpResponse:
         with self.lock:
@@ -140,6 +149,19 @@ class LaneStore:
             self.held = (arrived, release)
         return arrived, release
 
+    def replace_lane_from_another_client(
+        self, lane_id: str, runtime_ids: list[str]
+    ) -> None:
+        """Apply a dashboard write after the TUI's last readable snapshot."""
+        with self.lock:
+            lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
+            lane["runtime_ids"] = list(runtime_ids)
+
+    def lane_candidates(self, lane_id: str) -> list[str]:
+        with self.lock:
+            lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
+            return list(lane["runtime_ids"])
+
     def route(self, raw: bytes) -> h.HttpResponse:
         with self.lock:
             held, self.held = self.held, None
@@ -153,10 +175,18 @@ class LaneStore:
         action = request.get("action", "set")
         with self.lock:
             if lane_id.startswith("exact/"):
+                if action != "append":
+                    raise AssertionError(f"the TUI posted {action!r} to a standalone lane")
                 name = lane_id[len("exact/"):]
-                for lane in self.standalone["lanes"]:
-                    if lane["lane_id"] == name:
-                        lane["admitted_slots"] = list(request["runtime_ids"])
+                slot = request["runtime_id"]
+                declared = self.exact_declared[name]
+                if slot in declared:
+                    return 400, {"error": f"{slot} is already a slot of {name}"}
+                declared.append(slot)
+                lane = self.exact_lane(name)
+                lane["admitted_slots"] = [
+                    s for s in declared if s not in lane["dropped_slots"]
+                ]
                 return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
@@ -287,6 +317,11 @@ def run(executable: str) -> None:
             process, fd, output, b"D",
             b"lane write refused: HTTP 400: " + in_use_refusal("primary", ["sangsu"]).encode(),
         )
+        # The refusal is about the row the key acted on: moving the cursor
+        # ends it. The cursor comes back to primary's head for the next key.
+        press(process, fd, output, b"j")
+        screen_lacks(process, fd, output, b"lane write refused: HTTP 400", timeout=3.0)
+        press(process, fd, output, b"k")
 
         # A refused write ends at once: J posts. Its read-back fails, and that
         # ends it too, with a line saying the list may be stale -- the screen
@@ -295,9 +330,27 @@ def run(executable: str) -> None:
         h.send_and_wait(
             process, fd, output, b"J", b"the lane list could not be re-read",
         )
-        # K is sent, not refused. It is built from that stale list, where
-        # runtime-b is still second, and the read-back after it lands.
-        h.send_and_wait(process, fd, output, b"K", b"1/2 runtime-b")
+        # Another client now removes runtime-a. The TUI still shows the old
+        # [runtime-a; runtime-b] order, where runtime-b is second. K used to
+        # post that whole stale order and restore runtime-a. The unread list
+        # now refuses the key without posting, so the authoritative removal
+        # stays in place.
+        store.replace_lane_from_another_client("primary", ["runtime-b"])
+        h.send_and_wait(
+            process, fd, output, b"K",
+            b"lane write refused: the lane list may be stale",
+        )
+        # The conversation-lane picker uses the same whole stale order when it
+        # adds a candidate. Opening it refreshes only the catalog. Enter must
+        # refuse locally too, without restoring runtime-a beside the new id.
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"e", b"adding a failover candidate to primary")
+        h.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
+        h.send_and_wait(
+            process, fd, output, b"\r",
+            b"lane write refused: the lane list may be stale",
+        )
+        os.write(fd, b"esc")
 
         # The request log is appended after the response goes out, so the
         # last post can trail the frame it produced.
@@ -309,7 +362,6 @@ def run(executable: str) -> None:
             {"lane": NEW_LANE, "action": "remove"},
             {"lane": "primary", "action": "remove"},
             {"lane": "primary", "runtime_ids": ["runtime-b", "runtime-a"]},
-            {"lane": "primary", "runtime_ids": ["runtime-b", "runtime-a"]},
         ]
         deadline = time.monotonic() + 3.0
         while True:
@@ -319,6 +371,11 @@ def run(executable: str) -> None:
             time.sleep(0.05)
         if posted != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
+        primary = store.lane_candidates("primary")
+        if primary != ["runtime-b"]:
+            raise AssertionError(
+                f"the stale TUI restored another client's removal: {primary!r}"
+            )
         os.write(fd, b"q")
 
     h.run_terminal_scenario(
@@ -331,6 +388,9 @@ def run(executable: str) -> None:
 
 
 EXACT_LANE = "board_attention_exact"
+# Declared on the lane and dropped by the registry: the standalone lanes read
+# lists it under dropped_slots, never among the admitted slots the picker sees.
+DROPPED_SLOT = "retired-catalog.slot"
 
 
 def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
@@ -347,8 +407,9 @@ def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
 def run_exact(executable: str) -> None:
     """A standalone lane's slots are read back from the standalone lanes list.
     A load of that list already out when the write answers may have left
-    before it, so the read-back is queued behind it; the next pick is built
-    from what the queued read returns."""
+    before it, so the read-back is queued behind it; the next picker offers
+    what the queued read returns. Each pick posts only the slot it adds, so
+    the declared slot the registry dropped survives both."""
     store = LaneStore()
     fixtures = h.overview_event_http_fixtures()
     fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
@@ -393,20 +454,24 @@ def run_exact(executable: str) -> None:
         # lands first, with slots that do not name runtime-a, and the picker
         # that did is closed.
         h.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
-        # The second pick is built from that list, so runtime-a stays.
+        # The second picker is built from that list, so runtime-a is no
+        # longer offered and the cursor opens on runtime-b.
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a", picker)
         h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
         os.write(fd, b"\r")
         posted = wait_for_posts(2)
+        # A pick sends only the slot it adds. A whole order built from the
+        # admitted slots would have left out the dropped one and deleted it.
         expected = [
-            {"lane": f"exact/{EXACT_LANE}",
-             "runtime_ids": ["glm-coding.glm-5-turbo", "runtime-a"]},
-            {"lane": f"exact/{EXACT_LANE}",
-             "runtime_ids": ["glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]},
+            {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-a"},
+            {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-b"},
         ]
         if posted != expected:
             raise AssertionError(f"exact posts: {posted!r}, expected {expected!r}")
+        declared = store.exact_declared[EXACT_LANE]
+        if declared != [DROPPED_SLOT, "glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]:
+            raise AssertionError(f"declared slots after the picks: {declared!r}")
         screen_lacks(process, fd, output, picker, timeout=5.0)
         os.write(fd, b"q")
 

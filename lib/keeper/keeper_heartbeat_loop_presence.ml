@@ -102,6 +102,24 @@ let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : kee
       turn_failures
 ;;
 
+(* A heartbeat failure is current only until presence recovers. Turn failure
+   debt is independent, so recovery restores its typed count instead of
+   leaving a stale heartbeat blocker or clearing both observations. *)
+let settle_recovered_heartbeat_reason ~(ctx : _ context) ~(meta : keeper_meta) =
+  let base_path = ctx.config.base_path in
+  match Keeper_registry.get ~base_path meta.name with
+  | Some { last_failure_reason = Some (Keeper_registry.Heartbeat_consecutive_failures _); _ }
+    ->
+    let turn_failures = Keeper_registry.get_turn_failures ~base_path meta.name in
+    let recovered =
+      if turn_failures > 0
+      then Some (Keeper_registry.Turn_consecutive_failures turn_failures)
+      else None
+    in
+    Keeper_registry.set_failure_reason ~base_path meta.name recovered
+  | Some _ | None -> ()
+;;
+
 let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
@@ -115,6 +133,7 @@ let sync_keeper_presence
       ~base_path:ctx.config.base_path
       meta_current.name
       Keeper_state_machine.Heartbeat_ok;
+    settle_recovered_heartbeat_reason ~ctx ~meta:meta_current;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatSuccesses)
       ~labels:[ "keeper", meta_current.name ]

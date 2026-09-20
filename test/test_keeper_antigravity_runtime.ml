@@ -1264,7 +1264,8 @@ let test_gate_only_floor_emits_no_durable_front () =
   in
   (match List.rev projected with
    | last :: _ ->
-     check bool "the Gate atom remains at the floor" true (last.content = marker.content)
+     check bool "the Gate atom remains at the floor" true
+       (last.Agent_core.Types.content = marker.content)
    | [] -> fail "the capacity floor removed the Gate atom");
   check (option reject) "a Gate-only suffix has no durable front" None !observed
 ;;

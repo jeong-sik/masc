@@ -11,8 +11,6 @@ val wire_field_reason : string
 val wire_field_origin : string
 val wire_field_basis : string
 val wire_field_derivations : string
-val wire_field_rule_id : string
-val wire_field_premise_ids : string
 
 (** On a librarian claim: the short id of the dropped memory this claim
     continues (RFC-0418). *)

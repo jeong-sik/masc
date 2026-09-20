@@ -143,17 +143,18 @@ let surrogate_id_of_index index = Printf.sprintf "m%d" (index + 1)
 let basis_for_prompt ~by_identity = function
   | Observed _ as basis -> basis_to_json basis
   | Derived derivations ->
+    (* Deduplicate before projection: distinct missing premises both become null. *)
+    let premise_paths =
+      List.map (fun proof -> (normalize_derivation proof).premise_ids) derivations
+      |> List.sort_uniq (List.compare String.compare)
+    in
     `Assoc
       [ wire_field_kind, `String "derived"
       ; wire_field_derivations,
-        `List (List.map (fun proof ->
-          let proof = normalize_derivation proof in
-          `Assoc
-            [ wire_field_premise_ids,
-              `List (List.map (fun identity ->
-                String_map.find_opt identity by_identity
-                |> Json_util.string_opt_to_json) proof.premise_ids)
-            ]) derivations)
+        `List (List.map (fun premise_ids ->
+          `List (List.map (fun identity ->
+            String_map.find_opt identity by_identity
+            |> Json_util.string_opt_to_json) premise_ids)) premise_paths)
       ]
 ;;
 

@@ -26,8 +26,9 @@ template_variables: [working_context, current_memory, conversation_history, coun
 추출을 뜻합니다. `basis.kind`가 `observed`이면 관측한 기억이며,
 `basis.board`는 Board 글·댓글 출처, `board`가 없으면 대화 출처입니다.
 작성 경로와 출처 참조는 내용의 진위나 원본의 현재 유효성을 보증하지 않습니다.
-`derived`의 각 derivation은 독립된 근거 경로이며, 한 경로의 모든 `premise_ids`가
-현재 기억에 있을 때 그 경로가 뒷받침합니다. 참조는 같은 입력의 짧은 ID(m1 등)입니다.
+`derived`의 `derivations`는 전제 ID 목록들을 담습니다. 각 목록은 독립된 근거
+경로이며, 그 안의 모든 전제가 현재 기억에 있을 때 그 경로가 뒷받침합니다.
+참조는 같은 입력의 짧은 ID(m1 등)입니다.
 `null`은 그 전제가 현재 기억에 없다는 뜻이며, ID를 지어내거나 빈자리를 무시하지 마세요.
 다른 경로가 살아 있으면 일부 전제가 없는 경로도 설명을 위해 남아 있을 수 있습니다.
 기억을 삭제·흡수할 때 남은 사실의 유일한 근거를 함께 없애는지 살피세요.

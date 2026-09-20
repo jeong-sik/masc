@@ -1326,6 +1326,7 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
       | Error error -> fail (Memory.wire_error_to_string error)
     in
     let primary = { (fact ~claim:"primary approval") with first_seen = 10.; last_seen = 20. } in
+    let secondary = fact ~claim:"secondary approval" in
     let emergency =
       { (fact ~claim:"emergency approval") with
         first_seen = 100.; last_seen = 200.
@@ -1338,7 +1339,9 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
         ~origin:{ kind = Memory.Injected; trace_id = "trace-derived" }
         ~derivations:
           [ { rule_id = Memory.memory_id primary; premise_ids = [Memory.memory_id primary] }
-          ; { rule_id = "emergency"; premise_ids = [Memory.memory_id emergency] } ]
+          ; { rule_id = "secondary"; premise_ids = [Memory.memory_id secondary] }
+          ; { rule_id = "emergency"; premise_ids = [Memory.memory_id emergency] }
+          ; { rule_id = "confirmed-emergency"; premise_ids = [Memory.memory_id emergency] } ]
       |> require
     in
     let temporary =
@@ -1348,7 +1351,7 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
     in
     let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
         ~now:300. ~source:{ kind = Current.Explicit_write; trace_id = "trace-seed" }
-        ~facts:[primary; emergency; conclusion; temporary] () |> require in
+        ~facts:[primary; secondary; emergency; conclusion; temporary] () |> require in
     ignore (Current.replace ~keepers_dir ~keeper_id
       ~expected_revision:(Some seeded.revision) ~now:400.
       ~source:{ kind = Current.Explicit_write; trace_id = "trace-retract" }
@@ -1417,15 +1420,11 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
       check string "derived basis remains typed" "derived"
         Yojson.Safe.Util.(basis |> member "kind" |> to_string);
       let proofs = Yojson.Safe.Util.(basis |> member "derivations" |> to_list) in
-      check int "both alternative proofs remain visible" 2 (List.length proofs);
-      List.iter (fun proof ->
-        check bool "opaque rule identities are not prompt context" false
-          Yojson.Safe.Util.(proof |> member "rule_id" <> `Null)) proofs;
-      let premises = List.map Yojson.Safe.Util.(member "premise_ids") proofs in
-      check bool "missing premise stays explicit" true
-        (List.mem (`List [`Null]) premises);
-      check bool "current premise uses its input surrogate" true
-        (List.mem (`List [`String expected_premise]) premises);
+      check int "only identical premise paths are combined" 3 (List.length proofs);
+      check int "distinct missing premise paths remain separate arrays" 2
+        (List.length (List.filter ((=) (`List [`Null])) proofs));
+      check int "different rules with the same current premise share one array" 1
+        (List.length (List.filter ((=) (`List [`String expected_premise])) proofs));
       let current_memory = List.assoc "current_memory" (Librarian.prompt_variables input) in
       (match Runtime.messages_for_librarian input with
        | Error detail -> fail detail
@@ -1436,7 +1435,7 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
          List.iter (fun fact ->
            check bool "memory identities remain absent from model input" false
              (String_util.contains_substring rendered (Memory.memory_id fact)))
-           [primary; emergency; conclusion; temporary]);
+           [primary; secondary; emergency; conclusion; temporary]);
       let temporary_row = row_for temporary.claim rows in
       check bool "transcript basis remains explicit" true
         (Yojson.Safe.Util.(temporary_row |> member "fact" |> member "basis")

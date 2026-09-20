@@ -113,11 +113,17 @@ let settle_recovered_heartbeat_reason ~(ctx : _ context) ~(meta : keeper_meta) =
     then Some (Keeper_registry.Turn_consecutive_failures turn_failures)
     else None
   in
-  ignore
-    (Keeper_registry.replace_heartbeat_failure_reason
-       ~base_path
-       meta.name
-       recovered)
+  let replaced =
+    Keeper_registry.replace_heartbeat_failure_reason
+      ~base_path
+      meta.name
+      recovered
+  in
+  if not replaced
+  then
+    Log.Keeper.debug
+      "heartbeat recovery for %s kept a newer failure reason"
+      meta.name
 ;;
 
 let sync_keeper_presence

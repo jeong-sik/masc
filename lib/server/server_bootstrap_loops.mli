@@ -144,8 +144,11 @@ val start_keeper_loops :
     subscription. *)
 type keeper_lifecycle_refresh =
   | Lifecycle_refreshed
-  | Lifecycle_not_refreshed
-  (** Not a lifecycle event, or a lifecycle payload that did not decode. *)
+  | Lifecycle_ignored
+  (** Not a lifecycle event. Nothing about a Keeper changed. *)
+  | Lifecycle_undecodable
+  (** A lifecycle event whose payload did not decode. Which Keeper changed is
+      unknown, so the caches cannot be patched precisely. *)
   | Lifecycle_refresh_failed of
       { keeper_name : string
       ; event : Keeper_lifecycle_events.lifecycle_event
@@ -207,7 +210,7 @@ module For_testing : sig
     Runtime_event_bus.batch ->
     keeper_lifecycle_refresh list
   (** One drained batch of the lifecycle listener: each event is refreshed on
-      its own, and a refresh failure or an overflow drop calls
+      its own, and an undecodable lifecycle event, refresh failure, or overflow drop calls
       [invalidate_all] once after the batch. *)
 end
 

@@ -1146,8 +1146,11 @@ let refresh_dashboard_for_keeper_lifecycle ~config ~keeper_name event =
    subscription. *)
 type keeper_lifecycle_refresh =
   | Lifecycle_refreshed
-  | Lifecycle_not_refreshed
-  (** Not a lifecycle event, or a lifecycle payload that did not decode. *)
+  | Lifecycle_ignored
+  (** Not a lifecycle event. Nothing about a Keeper changed. *)
+  | Lifecycle_undecodable
+  (** A lifecycle event whose payload did not decode. Which Keeper changed is
+      unknown, so the caches cannot be patched precisely. *)
   | Lifecycle_refresh_failed of
       { keeper_name : string
       ; event : Keeper_lifecycle_events.lifecycle_event
@@ -1189,7 +1192,7 @@ let refresh_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
           Otel_metric_store.inc_counter
             Otel_metric_store.metric_keeper_lifecycle_malformed
             ();
-          Lifecycle_not_refreshed)
+          Lifecycle_undecodable)
      | None, _ | Some _, None ->
        (* A payload missing [event] or [keeper_name] bumps a counter, so a
           systematic encoding bug that would lose every cache invalidation
@@ -1197,10 +1200,10 @@ let refresh_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
        Otel_metric_store.inc_counter
          Otel_metric_store.metric_keeper_lifecycle_malformed
          ();
-       Lifecycle_not_refreshed)
+       Lifecycle_undecodable)
   | _ ->
     Log.Dashboard.debug "ignored non-lifecycle event";
-    Lifecycle_not_refreshed
+    Lifecycle_ignored
 ;;
 
 (* One drained batch of the lifecycle listener. Each event is refreshed on
@@ -1219,11 +1222,13 @@ let handle_keeper_lifecycle_batch
   let results =
     List.map (refresh_keeper_lifecycle_event ~refresh) drained.Runtime_event_bus.events
   in
-  let failures =
-    List.filter
-      (function
-        | Lifecycle_refresh_failed _ -> true
-        | Lifecycle_refreshed | Lifecycle_not_refreshed -> false)
+  let failures, undecodable_count =
+    List.fold_left
+      (fun (failures, undecodable_count) -> function
+         | Lifecycle_refresh_failed _ as failure -> failure :: failures, undecodable_count
+         | Lifecycle_undecodable -> failures, undecodable_count + 1
+         | Lifecycle_refreshed | Lifecycle_ignored -> failures, undecodable_count)
+      ([], 0)
       results
   in
   (match results with
@@ -1234,18 +1239,19 @@ let handle_keeper_lifecycle_batch
         refresh failure(s))"
        (List.length results)
        (List.length failures));
-  (match drained.Runtime_event_bus.overflow_loss, failures with
-   | Runtime_event_bus.Nothing_dropped, [] -> ()
-   | Runtime_event_bus.Dropped count, ([] | _ :: _) ->
+  let dropped_count =
+    match drained.Runtime_event_bus.overflow_loss with
+    | Runtime_event_bus.Nothing_dropped -> 0
+    | Runtime_event_bus.Dropped count -> count
+  in
+  (match dropped_count, undecodable_count, failures with
+   | 0, 0, [] -> ()
+   | dropped_count, undecodable_count, failures ->
      Log.Dashboard.warn
-       "keeper lifecycle listener subscription dropped %d event(s) past its \
-        capacity; invalidating every keeper-dependent dashboard cache"
-       count;
-     invalidate_all ()
-   | Runtime_event_bus.Nothing_dropped, (_ :: _ as failures) ->
-     Log.Dashboard.warn
-       "keeper lifecycle listener: %d refresh(es) failed; invalidating every \
-        keeper-dependent dashboard cache"
+       "keeper lifecycle listener lost updates: dropped=%d undecodable=%d \
+        refresh_failures=%d; invalidating every keeper-dependent dashboard cache"
+       dropped_count
+       undecodable_count
        (List.length failures);
      invalidate_all ());
   results

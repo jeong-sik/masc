@@ -3847,6 +3847,37 @@ let test_keeper_lifecycle_overflow_invalidates_every_keeper_cache () =
       1
       !invalidations)
 
+let test_keeper_lifecycle_undecodable_invalidates_every_keeper_cache () =
+  let malformed_lifecycle =
+    Agent_core.Event_bus.mk_event
+      (Agent_core.Event_bus.Custom
+         ( "masc.keeper.lifecycle"
+         , `Assoc [ "keeper_name", `String "keeper-a" ] ))
+  in
+  let unrelated =
+    Agent_core.Event_bus.mk_event
+      (Agent_core.Event_bus.Custom ("unrelated", `Assoc []))
+  in
+  let invalidations = ref 0 in
+  let results =
+    Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+      ~refresh:(fun ~keeper_name:_ _event ->
+        Alcotest.fail "an undecodable or unrelated event must not refresh a keeper")
+      ~invalidate_all:(fun () -> incr invalidations)
+      { Runtime_event_bus.events = [ malformed_lifecycle; unrelated ]
+      ; overflow_loss = Runtime_event_bus.Nothing_dropped
+      }
+  in
+  (match results with
+   | [ Server_bootstrap_loops.Lifecycle_undecodable
+     ; Server_bootstrap_loops.Lifecycle_ignored
+     ] -> ()
+   | _ -> Alcotest.fail "expected one undecodable and one ignored event");
+  Alcotest.(check int)
+    "an undecodable lifecycle event invalidates every keeper cache once"
+    1
+    !invalidations
+
 let test_startup_state_json () =
   Server_startup_state.reset ();
   Server_startup_state.mark_state_ready ()
@@ -5417,6 +5448,10 @@ let () =
             "keeper lifecycle overflow invalidates every keeper cache"
             `Quick
             test_keeper_lifecycle_overflow_invalidates_every_keeper_cache;
+          Alcotest.test_case
+            "keeper lifecycle undecodable invalidates every keeper cache"
+            `Quick
+            test_keeper_lifecycle_undecodable_invalidates_every_keeper_cache;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case

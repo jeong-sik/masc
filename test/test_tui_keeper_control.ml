@@ -30,6 +30,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_runtime_id = runtime_id
   ; kr_phase = phase
   ; kr_sandbox_profile = sandbox_profile
+  ; kr_runtime_blocker_summary = None
   }
 
 let complete rows = Control.Roster_complete rows
@@ -553,7 +554,7 @@ let gate_row ?(health = "healthy") ?(paused = false)
     {|{"runtime_class":"keeper","name":%S,"agent_name":"keeper-%s-agent",
        "meta":{"name":%S,"trace_id":"trace-1","created_at":"2026-08-21T17:32:29Z",
                "updated_at":"2026-08-23T06:53:43Z","sandbox_profile":%S},
-       "health":%S,"paused":%b,"next_action":%s,
+       "health":%S,"paused":%b,"next_action":%s,"runtime_blocker_summary":null,
        "phase":%S,"keepalive_running":true,"activation_mode":"autonomous","runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
     name name name sandbox_profile health paused next_action phase

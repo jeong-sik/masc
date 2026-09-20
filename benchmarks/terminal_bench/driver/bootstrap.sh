@@ -42,6 +42,14 @@ if [[ -d "$MASC_CONFIG_DIR/skills" ]]; then
   rm -rf "$MASC_BASE_PATH/.masc/skills"
   cp -r "$MASC_CONFIG_DIR/skills" "$MASC_BASE_PATH/.masc/skills"
 fi
+# Harbor task Skills are benchmark input for every arm. Keep their read-only
+# source tree separate from MASC's seed Skills so arm b can receive only the
+# task input and arm c can still exclude seed composition Skills.
+if [[ -d "$MASC_CONFIG_DIR/task-skills" ]]; then
+  mkdir -p "$MASC_BASE_PATH/.masc"
+  rm -rf "$MASC_BASE_PATH/.masc/task-skills"
+  cp -r "$MASC_CONFIG_DIR/task-skills" "$MASC_BASE_PATH/.masc/task-skills"
+fi
 
 # shellcheck source-path=SCRIPTDIR source=deps.sh
 source "$BENCH/driver/deps.sh"

@@ -8388,6 +8388,151 @@ let runtime_pick_item_id = function
   | Pick_lane lane -> lane.Tui_decode.rrl_id
   | Pick_model model -> model.Tui_decode.ro_id
 
+(* Target and route column widths for the runtime picker. Bindings of one
+   model that differ only in reasoning effort share provider, model and
+   context; their ids ([claude_code.claude-sonnet-5-low], [-high]) are the
+   text that tells them apart, and at a fixed 24 cells every one of them was
+   cut to the same [claude_code.claude-sonn…]. The target column therefore
+   takes the longest id, and the route column, which repeats provider and
+   model, gives up that room. Neither goes below the 24 cells both had. *)
+let runtime_pick_min_column_cells = 24
+
+(* The context size as the row writes it. It lives here, not in the renderer,
+   because the width calculation below measures the same string the renderer
+   draws; a format that changed in one place and not the other would put the
+   row back over the frame. *)
+let format_context_tokens tokens =
+  if tokens >= 1_000_000 then
+    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
+    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
+  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
+  else Printf.sprintf "%d" tokens
+
+(* What the row says after the two columns. [rpf_warn] asks the renderer for
+   the warning colour; the text is the same either way, and the width below
+   counts it either way. *)
+type runtime_pick_fact =
+  { rpf_text : string
+  ; rpf_warn : bool
+  }
+
+let runtime_pick_facts = function
+  | Pick_lane lane ->
+    [ { rpf_text =
+          Printf.sprintf "(%d hops)" (List.length lane.Tui_decode.rrl_runtime_ids)
+      ; rpf_warn = false
+      }
+    ]
+  | Pick_model option ->
+    let fact text = { rpf_text = text; rpf_warn = false } in
+    let context =
+      fact
+        (Printf.sprintf "[%s ctx]"
+           (format_context_tokens option.Tui_decode.ro_effective_max_context))
+    in
+    let effort =
+      match option.Tui_decode.ro_declared_reasoning_effort with
+      | Some effort ->
+        [ fact
+            (Printf.sprintf "[effort %s]"
+               (Tui_decode.runtime_reasoning_effort_label effort))
+        ]
+      | None -> []
+    in
+    let default = if option.Tui_decode.ro_is_default then [ fact "[default]" ] else [] in
+    let quota =
+      if option.Tui_decode.ro_quota_exhausted
+      then [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
+      else []
+    in
+    (context :: effort) @ default @ quota
+
+(* One space between facts, the way the renderer joins them. *)
+let runtime_pick_facts_width facts =
+  List.fold_left
+    (fun cells fact -> cells + Masc_tui_message_layout.display_width fact.rpf_text)
+    0
+    facts
+  + max 0 (List.length facts - 1)
+
+(* Everything in the row that is not one of the two columns and not the facts:
+   the cursor mark, the kind badge, and the two-space gap on each side of the
+   route column. The row the renderer draws is
+   [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
+let runtime_pick_fixed_cells = 2 + 7 + 2 + 2
+
+(* What is left for the facts once the chrome and the two column floors are
+   paid. At 80 columns that is 15 cells, which one fact fills. *)
+let runtime_pick_tail_budget ~cols =
+  max 0
+    (Masc_tui_frame.inner_width ~cols
+     - runtime_pick_fixed_cells
+     - (2 * runtime_pick_min_column_cells))
+
+(* The facts a row can afford, dropped from the front.
+
+   [runtime_pick_facts] lists them least decisive first. The context size is
+   the same for every binding of one model, and the reasoning step has a
+   second spelling in the id the target column draws ([…-sonnet-5-high]),
+   while [quota exhausted] is said nowhere else on the row. When even one
+   fact is too wide it is cut rather than dropped, so a narrow terminal shows
+   the start of the warning instead of an empty properties column. *)
+let runtime_pick_visible_facts ~cols item =
+  let budget = runtime_pick_tail_budget ~cols in
+  let rec trim = function
+    | [] -> []
+    | [ last ] when runtime_pick_facts_width [ last ] > budget ->
+      if budget <= 0
+      then []
+      else
+        [ { last with
+            rpf_text = Masc_tui_message_layout.fit_width last.rpf_text budget
+          }
+        ]
+    | _ :: rest as all ->
+      if runtime_pick_facts_width all <= budget then all else trim rest
+  in
+  trim (runtime_pick_facts item)
+
+let runtime_pick_tail_width ~cols item =
+  runtime_pick_facts_width (runtime_pick_visible_facts ~cols item)
+
+(* What the frame leaves for the properties once the chrome and the two
+   columns are drawn. The header's own label is cut to it, so the row that
+   names the column cannot be the one that overruns the frame. *)
+let runtime_pick_properties_room ~cols ~target ~route =
+  max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - target - route)
+
+let runtime_pick_column_widths ~cols items =
+  let longest_id =
+    List.fold_left
+      (fun longest item ->
+        max longest
+          (Masc_tui_message_layout.display_width
+             (Tui_decode.sanitize_terminal_text (runtime_pick_item_id item))))
+      0 items
+  in
+  (* The columns divide what is left after the facts. The earlier budget
+     subtracted a constant 62 that predated the effort fact, and every cell
+     the facts grew past it ran off the right edge: a default row lost its
+     whole [default], and [effort medium] drew as [effort me. *)
+  let longest_tail =
+    List.fold_left
+      (fun longest item -> max longest (runtime_pick_tail_width ~cols item))
+      0
+      items
+  in
+  let shared =
+    max
+      (2 * runtime_pick_min_column_cells)
+      (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - longest_tail)
+  in
+  let target =
+    max runtime_pick_min_column_cells
+      (min longest_id (shared - runtime_pick_min_column_cells))
+  in
+  target, shared - target
+
 let runtime_surface_listing_chrome state =
   runtime_listing_chrome ~error:state.runtime_surface_error
     ~action_error:state.runtime_lane_notice
@@ -8618,11 +8763,27 @@ let approval_items (state : state) =
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
+(* Everything on the Approvals surface waiting on the operator: the three
+   approval row kinds plus the questions keepers have open. The surface
+   answers both -- that is why it fetches asks -- so its ring entry, badge
+   and alert colour must all count the same thing. One count here, not
+   three copies that can drift: with zero approvals and one open question
+   the entry still has to be reachable, or the question has nowhere to be
+   seen from. The badge number is therefore the SUM of approval rows and open
+   questions, not an approval count: a badge of 3 may be three approvals,
+   three questions, or a mix. *)
+let approvals_surface_pending (state : state) =
+  List.length (approval_items state)
+  +
+  match state.asks_snapshot with
+  | Some snapshot -> List.length (Masc_tui_ask_projection.open_rows snapshot)
+  | None -> 0
+
 let is_surface_active (state : state) (s : surface) =
   match s with
   | Metrics -> false
   | Approvals ->
-      state.view = Approvals || List.length (approval_items state) > 0
+      state.view = Approvals || approvals_surface_pending state > 0
   | _ -> true
 ;;
 

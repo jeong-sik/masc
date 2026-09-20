@@ -16,6 +16,10 @@ SOURCE_MODULES = (
     "bin/masc_tui_http.ml",
     "packages/agent_core/lib/skill_document.ml",
     "packages/agent_core/lib/skill_document.mli",
+    "lib/keeper/keeper_skill_catalog.ml",
+    "lib/keeper/keeper_skill_catalog.mli",
+    "lib/keeper/keeper_tool_composition_catalog.ml",
+    "lib/keeper/keeper_tool_composition_catalog.mli",
 )
 
 CREATE_PATH = "/api/v1/skills/editor/create"
@@ -32,6 +36,7 @@ def run_case(
     description: str,
     source: bytes,
     diagnostic: bytes | None = None,
+    composition: bool = False,
 ) -> None:
     fixtures = h.overview_event_http_fixtures()
     fixtures["/api/v1/skills/editor/sources"] = (
@@ -56,13 +61,14 @@ def run_case(
     ) -> None:
         h.tab_until(process, fd, output, b"MASC Config")
         h.send_and_wait(process, fd, output, b"t", b"MASC Tools")
+        key = b"C" if composition else b"c"
         if diagnostic is None:
-            os.write(fd, b"c")
+            os.write(fd, key)
             # The harness records a POST only after sending its response.
             # An editor exit or a catalog refresh alone cannot satisfy this.
             h.wait_for_http_request(process, fd, output, requests, path=CREATE_PATH)
         else:
-            h.send_and_wait(process, fd, output, b"c", diagnostic)
+            h.send_and_wait(process, fd, output, key, diagnostic)
         os.write(fd, b"q")
 
     with tempfile.TemporaryDirectory(prefix="masc-tui-skill-editor-") as directory:
@@ -121,8 +127,35 @@ def run(executable: str) -> None:
         source=b"---\nname: reviewed-skill\n---\n\n# Missing description\n",
         diagnostic=MISSING_DESCRIPTION,
     )
+    for name, diagnostic in (
+        (PACKAGE_ID, None),
+        (
+            "new-skill",
+            b'composition name "new-skill" must equal the skill name',
+        ),
+    ):
+        source = (
+            '---\nname: "reviewed-skill"\n'
+            "description: Inspect a reviewed composition.\n---\n\n"
+            "# Reviewed composition\n\nKeep operator notes: 확인.  \n\n"
+            "```toml composition\n[[compositions]]\n"
+            f'name = "{name}"\nexecution = "inline"\n\n'
+            '[[compositions.nodes]]\nid = "lane"\ntool = "keeper_lane_status"\n'
+            '[compositions.nodes.input]\nkind = "literal"\nvalue = {}\n```\n'
+        ).encode("utf-8")
+        run_case(
+            executable,
+            description=(
+                "C creates a composition with matching names"
+                if diagnostic is None
+                else "C rejects mismatched composition names before create"
+            ),
+            source=source,
+            diagnostic=diagnostic,
+            composition=True,
+        )
 
 
 if __name__ == "__main__":
     run(h.tui_executable(sys.argv[1]))
-    print("Tools creates decoded Skill names and preserves authored bytes: PASS")
+    print("Tools validates authored Skills and preserves valid source bytes: PASS")

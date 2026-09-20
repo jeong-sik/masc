@@ -382,8 +382,10 @@ status: reference
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는
   `keeper_memory_search` 결과에 나온 것, `revised`는 `supersedes`로 고쳐 써진
-  것이다. `cited`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
-  철회한 것이다. 기록하는 곳이 그 하나뿐이라 살아 있는 Fact의 `cited`는 0이다.
+  것이다. `retracted`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
+  철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
+  붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
+  강화 정도를 뜻하지 않는다.
 
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을

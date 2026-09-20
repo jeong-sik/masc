@@ -1483,14 +1483,13 @@ let keeper_memory_retract_with_outcome
          ()
      with
      | Ok snapshot ->
-       (* The model named this fact by id and the store found it: a citation
-          (RFC-0418). The fact is gone from the snapshot from here on, and the
-          event stays as the record of its last use. *)
+       (* The fact is gone from the snapshot; its retraction remains in the
+          history if the same claim is later stored again. *)
        record_memory_events
          ~keepers_dir
          ~meta
          ~now
-         ~kind:(Keeper_memory_os_events.Cited { tool = "keeper_memory_retract" })
+         ~kind:Keeper_memory_os_events.Retracted
          [ memory_id ];
        Log.Keeper.info
          "explicit current Memory retracted keeper=%s revision=%d memory_id=%s support_invalidations=%d"

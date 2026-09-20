@@ -193,17 +193,6 @@ let temp_dir () =
   path
 ;;
 
-let with_env key value f =
-  let previous = Sys.getenv_opt key in
-  Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some value -> Unix.putenv key value
-      | None -> Unix.putenv key "")
-    f
-;;
-
 let install_stub ~dir =
   let script_path = Filename.concat dir "ssh" in
   save
@@ -360,7 +349,9 @@ let test_profile_picks_the_lane () =
 let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with_eio
   @@ fun () ->
-  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "60"
+  Masc_test_deps.with_process_env
+    "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC"
+    (Some "60")
   @@ fun () ->
   let base_path = temp_dir () in
   let dir = temp_dir () in

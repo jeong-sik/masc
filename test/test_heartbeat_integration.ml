@@ -675,7 +675,24 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
       | Some reason ->
         failf "heartbeat recovery left the wrong reason: %s"
           (R.failure_reason_to_string reason)
-      | None -> fail "heartbeat recovery cleared remaining turn debt")
+      | None -> fail "heartbeat recovery cleared remaining turn debt";
+      let raced = make_meta "heartbeat-recovery-race" in
+      ignore (R.For_testing.register ~base_path raced.name raced);
+      R.set_failure_reason ~base_path raced.name (Some (R.Heartbeat_consecutive_failures 2));
+      check bool "heartbeat observation is replaced" true
+        (R.replace_heartbeat_failure_reason
+           ~base_path
+           raced.name
+           (Some (R.Turn_consecutive_failures 1)));
+      R.set_failure_reason ~base_path raced.name (Some (R.Exception "newer failure"));
+      check bool "newer cause rejects stale heartbeat recovery" false
+        (R.replace_heartbeat_failure_reason ~base_path raced.name None);
+      match Option.bind (R.get ~base_path raced.name) (fun entry -> entry.R.last_failure_reason) with
+      | Some (R.Exception "newer failure") -> ()
+      | Some reason ->
+        failf "heartbeat recovery overwrote the newer reason: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "heartbeat recovery cleared the newer reason")
 
 let test_turn_failure_streak_survives_registry_restart () =
   Eio_main.run @@ fun env ->

@@ -522,24 +522,6 @@ let json_ensure_meta_string_field name value = function
   | _non_object ->
       Error "json_ensure_meta_string_field: expected JSON object"
 
-let board_tool_agent_name_from_request request =
-  let hdr name =
-    Option.bind
-      (Httpun.Headers.get request.Httpun.Request.headers name)
-      (fun value ->
-        let trimmed = String.trim value in
-        if String.equal trimmed "" then None else Some trimmed)
-  in
-  match hdr "x-gate-agent" with
-  | Some value -> value
-  | None -> (
-      match hdr "x-masc-agent" with
-      | Some value -> value
-      | None ->
-          (* NDT-OK: same-origin dashboard tool calls may omit agent headers;
-             the sibling board REST bridges already use this dashboard actor fallback. *)
-          "dashboard")
-
 let sub_board_owner_matches ~owner (sb : Board.sub_board) =
   String.equal (Board.Agent_id.to_string sb.Board.owner) owner
 

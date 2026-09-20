@@ -5227,34 +5227,46 @@ let render_lane_run_list (state : state) ~lane_id =
        ~hints:Masc_tui_keys.footer_hints_lanes_run_list);
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
 
-(* A payload renders whole up to a bound; past it the frame shows the head and
-   says so, rather than hanging the TUI on the kind of body that made the
-   listing drop payloads. The cut lands on a line boundary so no multibyte
-   sequence is split. *)
+(* Each top-level field has its own preview so a large field cannot hide its
+   siblings. The total preview can therefore grow with the number of fields;
+   this is not the separate HTTP record-size limit. Other JSON values remain
+   one bounded document. Full stored payloads are unchanged. *)
 let lane_run_render_max_bytes = 65536
 
 let lane_run_payload_lines ~width json =
-  let full = Yojson.Safe.pretty_to_string json in
-  let text, truncated =
-    if String.length full <= lane_run_render_max_bytes then full, false
-    else
-      let cut =
-        match String.rindex_from_opt full lane_run_render_max_bytes '\n' with
-        | Some newline -> newline
-        | None -> lane_run_render_max_bytes
-      in
-      String.sub full 0 cut, true
+  let render_document value =
+    let full = Yojson.Safe.pretty_to_string value in
+    let text, truncated =
+      if String.length full <= lane_run_render_max_bytes then full, false
+      else
+        let cut =
+          match String.rindex_from_opt full lane_run_render_max_bytes '\n' with
+          | Some newline -> newline
+          | None -> String_util.utf8_char_boundary full lane_run_render_max_bytes
+        in
+        String.sub full 0 cut, true
+    in
+    let rendered =
+      fenced_document_text ~language:"json" text
+      |> document_markdown ~width
+      |> List.map (fun line -> Ansi.reset, line)
+    in
+    if truncated then
+      rendered
+      @ [ ( Theme.warn ()
+          , Printf.sprintf "… truncated, total %d bytes" (String.length full) ) ]
+    else rendered
   in
-  let rendered =
-    fenced_document_text ~language:"json" text
-    |> document_markdown ~width
-    |> List.map (fun line -> Ansi.reset, line)
-  in
-  if truncated then
-    rendered
-    @ [ ( Theme.warn ()
-        , Printf.sprintf "… truncated, total %d bytes" (String.length full) ) ]
-  else rendered
+  match json with
+  | `Assoc (_ :: _ as fields) ->
+    List.concat_map
+      (fun (name, value) ->
+        let heading =
+          Yojson.Safe.to_string (`String name) |> Terminal_text.single_line
+        in
+        (Ansi.bold, heading) :: render_document value)
+      fields
+  | _ -> render_document json
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_decision with
@@ -5473,7 +5485,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
 let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_run_kind, detail.lrd_tool_evidence with
   | Tui_decode.Lane_run_exact_output, _ ->
-    "INPUT · PROMPT PAYLOAD", "OUTPUT · MODEL RESPONSE"
+    "INPUT · RUN INPUT", "OUTPUT · RUN RESULT"
   | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
     Tui_decode.Lane_run_tools_observed tools ->
     ( "INPUT · VERIFICATION REQUEST"

@@ -1,4 +1,4 @@
-"""Actual HTTP/PTY readings distinguish missing originals from JSON null."""
+"""Actual HTTP/PTY readings retain payload fields and distinguish absent bytes."""
 
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# The two section headings it reads ("INPUT · PROMPT PAYLOAD",
-# "OUTPUT · MODEL RESPONSE") are masc_tui_render.ml's.
-SOURCE_MODULES = ("bin/masc_tui_render.ml",)
+# The two section headings it reads ("INPUT · RUN INPUT",
+# "OUTPUT · RUN RESULT") are masc_tui_render.ml's.
+SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_markdown.ml")
 
 
 def run(executable: str, scenario: str) -> None:
@@ -53,6 +53,25 @@ def run(executable: str, scenario: str) -> None:
         del run_record["elapsed_s"]
         del run_record["selected_slot"]
         run_record["payload_availability"]["output"] = None
+    elif scenario == "large-fields":
+        # Synthetic renderer input, not a claim that these JEV requests ran.
+        # The first field alone exceeds the preview; its siblings still matter.
+        run_record["output"] = {
+            "absorb_gate": {
+                "status": "judged",
+                "evaluations": [{"request": {"state": "x" * 70000 + "GATE_TAIL"}}],
+            },
+            "exact_output": {"marker": "original-model-output"},
+            "before": {"marker": "before-preserved"},
+            "after": {"marker": "after-preserved"},
+        }
+    elif scenario == "available-array":
+        run_record["output"] = ["array-first", {"marker": "array-second"}]
+    elif scenario == "available-empty-object":
+        run_record["output"] = {}
+    elif scenario == "large-scalar":
+        # The quote and ASCII prefix put the old byte cut inside a Korean rune.
+        run_record["output"] = "u" + "한" * 23000 + "SCALAR_TAIL"
     elif scenario != "available-null":
         raise AssertionError("unknown fixture scenario")
     summary = {
@@ -97,18 +116,16 @@ def run(executable: str, scenario: str) -> None:
         h.send_and_wait(
             process, master, output, b"\r", b"1 loaded / 1 retained \xc2\xb7 end"
         )
-        h.send_and_wait(
-            process, master, output, b"\r", b"INPUT \xc2\xb7 PROMPT PAYLOAD"
-        )
+        h.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7")
         h.read_available(master, output)
         before = len(output)
         h.resize_and_wait(
             process,
             master,
             output,
-            rows=30,
+            rows=42,
             columns=140,
-            needle=b"OUTPUT \xc2\xb7 MODEL RESPONSE",
+            needle=b"OUTPUT \xc2\xb7",
             controls=(h.FULL_REDRAW,),
         )
         redraw = output.find(h.FULL_REDRAW, before)
@@ -121,6 +138,7 @@ def run(executable: str, scenario: str) -> None:
         assert start >= 0
         frame = bytes(output[start:end])
         screen = h.screen_text(frame)
+        initial_screen = screen
         assert detail_reads == [run_id], detail_reads
         assert run_id.encode() in screen, screen
         pending = "실행 중 · 아직 출력이 기록되지 않았습니다".encode()
@@ -142,10 +160,48 @@ def run(executable: str, scenario: str) -> None:
             assert b"retained-input" in screen, screen
             assert pending not in screen and unavailable not in screen, screen
             assert b"run has not completed" not in screen, screen
-        else:
+        elif scenario == "running":
             assert b"RUN  running" in screen and pending in screen, screen
             assert b"retained-input" in screen, screen
             assert not null_cell and unavailable not in screen, screen
+        elif scenario == "large-fields":
+            assert b'"absorb_gate"' in screen and b"judged" in screen, screen
+            if b"after-preserved" not in screen:
+                h.send_and_wait(process, master, output, b"\x1b[F", b"after-preserved")
+            h.drain_until_quiet(process, master, output)
+            frame = bytes(output[start:])
+            screen = h.screen_text(bytes(output))
+            for needle in (
+                b'"exact_output"',
+                b"original-model-output",
+                b'"before"',
+                b"before-preserved",
+                b'"after"',
+                b"after-preserved",
+                b"truncated, total",
+            ):
+                assert needle in screen, (needle, screen)
+            assert b"GATE_TAIL" not in frame, frame
+        elif scenario == "available-array":
+            assert b"array-first" in screen and b"array-second" in screen, screen
+        elif scenario == "available-empty-object":
+            assert any(
+                cell.strip() == b"{}"
+                for line in screen.splitlines()
+                for cell in line.split("│".encode())
+            ), screen
+        elif scenario == "large-scalar":
+            h.send_and_wait(process, master, output, b"\x1b[F", b"truncated, total")
+            h.drain_until_quiet(process, master, output)
+            frame = bytes(output[start:])
+            screen = h.screen_text(bytes(output))
+            frame.decode("utf-8", errors="strict")
+            assert "�".encode() not in frame, frame
+            assert "한".encode() in screen, screen
+            assert b"SCALAR_TAIL" not in frame, frame
+        assert b"INPUT \xc2\xb7 RUN INPUT" in initial_screen, initial_screen
+        assert b"OUTPUT \xc2\xb7 RUN RESULT" in initial_screen, initial_screen
+        assert b"MODEL RESPONSE" not in initial_screen, initial_screen
         print(
             "LANE_PAYLOAD_PTY_EVIDENCE "
             + json.dumps(
@@ -153,7 +209,7 @@ def run(executable: str, scenario: str) -> None:
                     "scenario": scenario,
                     "run_id": run_id,
                     "detail_reads": detail_reads,
-                    "rows": 30,
+                    "rows": 42,
                     "columns": 140,
                     "binary_sha256": hashlib.sha256(
                         Path(executable).read_bytes()
@@ -175,6 +231,14 @@ def run(executable: str, scenario: str) -> None:
 
 
 if __name__ == "__main__":
-    for scenario in ("unavailable", "available-null", "running"):
+    for scenario in (
+        "unavailable",
+        "available-null",
+        "running",
+        "large-fields",
+        "available-array",
+        "available-empty-object",
+        "large-scalar",
+    ):
         run(os.path.abspath(sys.argv[1]), scenario)
     print("TUI lane original payload availability: PASS")

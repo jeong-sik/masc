@@ -77,7 +77,6 @@
 - Context: the inspectors say when a displayed history range has no runtime recorded against it. After a failover a turn can keep an earlier candidate's range while its row names a later runtime; the dashboard called that range transmitted and the TUI said it was sent this turn (#37258).
 - TUI: the NEXT REQUEST band stays on screen when the turn history is empty or its read fails. The forecast is measured separately and used to disappear with the history error (#37347).
 - Board: the Board JEV status reads the same on the server, the TUI and the Dashboard. `CONFIGURED` means an API model is set, not that a call or a credential check succeeded; `OFF` means Board judgement is switched off; a CLI-only lane and a lane that is not ready each show their reason. A valid key with the Board switch off no longer reads as configured. Blank or whitespace-only endpoint and model values are normalized in the shared config, so the HTTP client's defaults change along with the display. The `masc.standalone_llm_lanes.v2` payload carries a typed `configured` field and has no compatibility reader (#37339).
-- Exact output: whether a verifier slot can judge is decided by one shared check instead of separately at load and at dispatch. Which slots can judge is unchanged; a slot that cannot is now found earlier (#37395).
 
 ### Fixed
 

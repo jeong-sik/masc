@@ -480,6 +480,9 @@ let evaluation_to_yojson { state; questions; result } =
                ])
         ]
   in
+  (* Question IDs are reused across requests. Keep their state and wording in
+     this durable report so each answer remains interpretable; the outbound
+     body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
     @ [ "request", `Assoc
           [ "state", state

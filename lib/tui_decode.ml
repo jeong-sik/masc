@@ -1655,6 +1655,14 @@ let optional_string_field json key =
   | `Null -> Ok None
   | bad -> field_type_error key "a string or null" bad
 
+let required_nullable_nonblank_string_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> missing_field key
+  | Some `Null -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some (`String _) -> Error (Printf.sprintf "field '%s' must not be blank" key)
+  | Some bad -> field_type_error key "a non-empty string or null" bad
+
 let optional_bool_field json key =
   match member key json with
   | `Bool value -> Ok (Some value)
@@ -7404,46 +7412,64 @@ let decode_keeper_turns json =
   in
   loop [] items
 
-type runtime_assignment = {
-  ra_keeper : string;
-  ra_source : string;  (* "default" | "explicit" *)
-  ra_target_id : string option;
-  ra_unavailable_reason : string option;
-}
+type runtime_assignment_source =
+  | Default_runtime
+  | Explicit_runtime
+
+type runtime_unavailable_reason =
+  | Missing_catalog_model of
+      { provider_label : string
+      ; model_id : string
+      }
+
+type runtime_assignment_resolution =
+  | Runtime_assignment_lane of string
+  | Runtime_assignment_missing
+  | Runtime_assignment_unavailable of
+      { runtime_id : string
+      ; reason : runtime_unavailable_reason
+      }
+
+type runtime_assignment =
+  { ra_keeper : string
+  ; ra_source : runtime_assignment_source
+  ; ra_resolution : runtime_assignment_resolution
+  }
 
 let decode_runtime_assignment json =
   let* ra_keeper = required_string_field json "keeper" in
-  let* ra_source = required_string_field json "assignment_source" in
-  let* () =
-    match ra_source with
-    | "default" | "explicit" -> Ok ()
+  let* source = required_string_field json "assignment_source" in
+  let* ra_source =
+    match source with
+    | "default" -> Ok Default_runtime
+    | "explicit" -> Ok Explicit_runtime
     | value -> Error (Printf.sprintf "unknown runtime assignment source %S" value)
   in
   let* resolved = required_object_field json "resolved" in
   let* kind = required_string_field resolved "kind" in
   let* id = required_nullable_string_field resolved "id" in
-  let* ra_target_id, ra_unavailable_reason =
+  let* ra_resolution =
     match kind, id with
-    | "lane", Some lane_id -> Ok (Some lane_id, None)
-    | "missing", None -> Ok (None, None)
+    | "lane", Some lane_id -> Ok (Runtime_assignment_lane lane_id)
+    | "missing", None -> Ok Runtime_assignment_missing
     | "unavailable", Some runtime_id ->
         let* reason = required_object_field resolved "reason" in
-        let* kind = required_string_field reason "kind" in
-        let* () = match kind with
-          | "missing_catalog_model" -> Ok ()
+        let* reason_kind = required_string_field reason "kind" in
+        let* reason =
+          match reason_kind with
+          | "missing_catalog_model" ->
+              let* provider_label = required_string_field reason "provider_label" in
+              let* model_id = required_string_field reason "model_id" in
+              Ok (Missing_catalog_model { provider_label; model_id })
           | value -> Error (Printf.sprintf "unknown runtime unavailability reason %S" value)
         in
-        let* message = required_string_field reason "message" in
-        let* _provider_id = required_string_field reason "provider_id" in
-        let* _provider_label = required_string_field reason "provider_label" in
-        let* _model_id = required_string_field reason "model_id" in
-        Ok (Some runtime_id, Some message)
+        Ok (Runtime_assignment_unavailable { runtime_id; reason })
     | "unavailable", None -> Error "unavailable runtime assignment is missing its configured id"
     | "lane", None -> Error "runtime lane assignment is missing its id"
     | "missing", Some _ -> Error "missing runtime assignment carries an id"
     | value, _ -> Error (Printf.sprintf "unknown resolved runtime kind %S" value)
   in
-  Ok { ra_keeper; ra_source; ra_target_id; ra_unavailable_reason }
+  Ok { ra_keeper; ra_source; ra_resolution }
 
 let decode_runtime_resolved_full json =
   let* snapshot = decode_runtime_resolved_snapshot json in
@@ -7455,9 +7481,9 @@ let decode_runtime_resolved_full json =
     match
       List.find_opt
         (fun assignment ->
-           match assignment.ra_target_id, assignment.ra_unavailable_reason with
-           | None, _ | Some _, Some _ -> false
-           | Some lane_id, None ->
+           match assignment.ra_resolution with
+           | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false
+           | Runtime_assignment_lane lane_id ->
                not
                  (List.exists
                     (fun lane -> String.equal lane.rrl_id lane_id)
@@ -8417,6 +8443,14 @@ type lane_run_page =
   ; lrpg_total : int option
   }
 
+type lane_run_answer_source =
+  | Lane_run_answer_exact_attempt of string
+  | Lane_run_answer_cli_slot of string
+  | Lane_run_answer_vendor_system_one of
+      { model : string
+      ; endpoint : string
+      }
+
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
@@ -8427,6 +8461,7 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_answer_source : lane_run_answer_source option
   ; lrd_failure : lane_run_failure option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
@@ -8445,15 +8480,21 @@ let decode_lane_run_summary json =
   let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
   let* lrs_started_at = require_float_field json "started_at" in
-  let* lrs_status = required_string_field json "status" in
+  let* status_raw = required_string_field json "status" in
+  let lrs_status = lane_run_status_of_string status_raw in
   let* lrs_elapsed_s = optional_float_field json "elapsed_s" in
-  let* lrs_selected_slot = optional_string_field json "selected_slot" in
+  let* lrs_selected_slot =
+    match lrs_status, Json_util.assoc_member_opt "selected_slot" json with
+    | Lane_run_running, None -> Ok None
+    | Lane_run_running, Some _ ->
+      Error "running lane run must not report selected_slot"
+    | _, _ -> required_nullable_nonblank_string_field json "selected_slot"
+  in
   let lrs_run_kind =
     match lrs_run_kind with
     | None -> Lane_run_exact_output
     | Some kind -> lane_run_kind_of_string kind
   in
-  let lrs_status = lane_run_status_of_string lrs_status in
   let* lrs_failure =
     match lrs_run_kind, lrs_status with
     | Lane_run_exact_output, Lane_run_failed ->
@@ -8536,6 +8577,52 @@ let decode_lane_run_detail json =
     | None | Some (Exact_lane_run_registry.Not_loaded
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
+  let* lrd_answer_source =
+    let board_attention_lane =
+      Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
+    in
+    let is_board_attention = String.equal summary.lrs_lane board_attention_lane in
+    let* answer_succeeded =
+      match summary.lrs_status with
+      | Lane_run_succeeded -> Ok true
+      | (Lane_run_completion_persistence_failed
+        | Lane_run_completion_durability_unknown)
+        when is_board_attention ->
+        let* intended_status = required_string_field run "intended_status" in
+        (match intended_status with
+         | "succeeded" -> Ok true
+         | "cancelled" | "failed" -> Ok false
+         | other ->
+           Error (Printf.sprintf "unknown intended lane run status %S" other))
+      | _ -> Ok false
+    in
+    match is_board_attention, answer_succeeded, lrd_output with
+    | true, true, Some output ->
+      let* judgment =
+        Keeper_board_attention_candidate.judgment_of_yojson output
+      in
+      (match judgment.source, summary.lrs_selected_slot with
+       | Keeper_board_attention_candidate.Exact_attempt _, Some slot
+         when String.equal slot judgment.slot_id ->
+         Ok (Some (Lane_run_answer_exact_attempt slot))
+       | Keeper_board_attention_candidate.Cli_lane_slot, Some slot
+         when String.equal slot judgment.slot_id ->
+         Ok (Some (Lane_run_answer_cli_slot slot))
+       | Keeper_board_attention_candidate.Vendor_system_one provenance, None
+         when String.equal judgment.slot_id provenance.answering_model_id ->
+         Ok
+           (Some
+              (Lane_run_answer_vendor_system_one
+                 { model = provenance.answering_model_id
+                 ; endpoint = provenance.destination_uri
+                 }))
+       | (Keeper_board_attention_candidate.Exact_attempt _
+         | Keeper_board_attention_candidate.Cli_lane_slot), _ ->
+         Error "Board answer slot_id must match selected_slot"
+       | Keeper_board_attention_candidate.Vendor_system_one _, _ ->
+         Error "Vendor System One answer must not have selected_slot")
+    | _, _, _ -> Ok None
+  in
   let* lrd_tool_evidence =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
@@ -8576,6 +8663,7 @@ let decode_lane_run_detail json =
     ; lrd_status = summary.lrs_status
     ; lrd_elapsed_s = summary.lrs_elapsed_s
     ; lrd_selected_slot = summary.lrs_selected_slot
+    ; lrd_answer_source
     ; lrd_failure = summary.lrs_failure
     ; lrd_input_payload
     ; lrd_input_availability

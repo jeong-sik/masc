@@ -15,8 +15,11 @@ type attempt_failure =
   | Server_error
   | Network_transient
   | Provider_timeout
+  | Access_refused
 (** The failure routes that say the candidate did not answer, and that are
-    neither the candidate's rate limit nor MASC's own capacity. *)
+    neither the candidate's rate limit nor MASC's own capacity. Access refusal
+    means that this candidate did not produce a model answer; another declared
+    candidate may use a different credential. *)
 
 type failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure }

@@ -130,19 +130,34 @@ type extraction_error =
   | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
-  | Cli_slots_exhausted
+  | Cli_slots_exhausted of
+      { prior_error : extraction_error option
+      ; failures : Keeper_lane_cli_oneshot.failure list
+      }
+  | Cli_prompt_unavailable of
+      { prior_error : extraction_error option
+      }
+  | No_transport_declared
   | Domain_output_invalid of string
   | Memory_snapshot_write_failed of
       { detail : string
       ; selected_slot : string
       }
 
-let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
+let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
-  | Exact_execution_failed _ | Cli_slots_exhausted -> Exact_execution_failure
+  | Exact_execution_failed _ ->
+    Exact_execution_failure
+  | Cli_slots_exhausted { prior_error = Some error; _ }
+  | Cli_prompt_unavailable { prior_error = Some error } ->
+    extraction_error_kind error
+  | Cli_slots_exhausted { prior_error = None; _ }
+  | Cli_prompt_unavailable { prior_error = None } ->
+    Exact_execution_failure
+  | No_transport_declared -> Exact_setup_failure
   | Domain_output_invalid _ -> Domain_output_invalid
   | Memory_snapshot_write_failed _ -> Memory_snapshot_write_failure
 ;;
@@ -177,7 +192,7 @@ let exact_setup_error_to_string = function
       slot_id reason
 ;;
 
-let extraction_error_to_string = function
+let rec extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
   | Execution_clock_unavailable ->
     "memory os librarian execution clock unavailable"
@@ -189,7 +204,29 @@ let extraction_error_to_string = function
        | No_outward_effect -> "none"
        | Outward_effect_started -> "started")
       detail
-  | Cli_slots_exhausted -> "librarian official-client slots exhausted; per-slot failures are logged"
+  | Cli_slots_exhausted { prior_error; failures } ->
+    let cli_detail =
+      let summary = "librarian official-client slots exhausted" in
+      match failures with
+      | [] -> summary
+      | _ :: _ ->
+        summary ^ ": "
+        ^ String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
+    in
+    (match prior_error with
+     | None -> cli_detail
+     | Some error ->
+       "API failure: " ^ extraction_error_to_string error ^ "; " ^ cli_detail)
+  | Cli_prompt_unavailable { prior_error } ->
+    let cli_detail =
+      "librarian official-client fallback skipped: fitted prompt is not one text message"
+    in
+    (match prior_error with
+     | None -> cli_detail
+     | Some error ->
+       "API failure: " ^ extraction_error_to_string error ^ "; " ^ cli_detail)
+  | No_transport_declared ->
+    "librarian lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
     "librarian domain output invalid: " ^ detail
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
@@ -202,7 +239,9 @@ let selected_slot_of_extraction_error = function
   | Execution_clock_unavailable
   | Exact_setup_failed _
   | Exact_execution_failed _
-  | Cli_slots_exhausted
+  | Cli_slots_exhausted _
+  | Cli_prompt_unavailable _
+  | No_transport_declared
   | Domain_output_invalid _ ->
     None
 ;;
@@ -427,6 +466,11 @@ let cli_prompt_of_messages ~keeper_id (messages : Agent_core.Types.message list)
     None
 ;;
 
+type cli_fallback_failure =
+  | No_cli_slots
+  | Fitted_prompt_unavailable
+  | Slot_failures of Keeper_lane_cli_oneshot.failure list
+
 let try_cli_slots
       ~keeper_id
       ~base_path
@@ -436,10 +480,10 @@ let try_cli_slots
       ~messages
   =
   match cli_slots with
-  | [] -> None
+  | [] -> Error No_cli_slots
   | cli_slots ->
     (match cli_prompt_of_messages ~keeper_id messages with
-     | None -> None
+     | None -> Error Fitted_prompt_unavailable
      | Some prompt ->
        (match
           Keeper_lane_cli_oneshot.walk
@@ -459,9 +503,20 @@ let try_cli_slots
                 (Keeper_lane_cli_oneshot.failure_to_string failure))
             ()
         with
-        | Error _failures -> None
+        | Error failures -> Error (Slot_failures failures)
         | Ok (runtime_id, (selection, output)) ->
-          Some (runtime_id, selection, output)))
+          Ok (runtime_id, selection, output)))
+;;
+
+(* An API refusal says nothing about the CLI walk that followed it. Keep the
+   walk's typed failures with that refusal so the run record and Memory
+   journal cannot describe an answered CLI request as only API pre-flight. *)
+let with_cli_failure prior_error = function
+  | No_cli_slots -> prior_error
+  | Slot_failures failures ->
+    Cli_slots_exhausted { prior_error = Some prior_error; failures }
+  | Fitted_prompt_unavailable ->
+    Cli_prompt_unavailable { prior_error = Some prior_error }
 ;;
 
 let execute_exact_output_classified
@@ -478,10 +533,17 @@ let execute_exact_output_classified
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
   match selected_slots with
   | [] ->
+    (* Registry publication rejects a lane with neither transport, and lane
+       resolution rejects a lane with no admitted transport. Keep this final
+       classification defensive in case either upstream contract changes. *)
     (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
-     | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
-     | None -> Error Cli_slots_exhausted)
+     | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
+     | Error No_cli_slots -> Error No_transport_declared
+     | Error (Slot_failures failures) ->
+       Error (Cli_slots_exhausted { prior_error = None; failures })
+     | Error Fitted_prompt_unavailable ->
+       Error (Cli_prompt_unavailable { prior_error = None }))
   | _ :: _ ->
   match preflight_slots ~selected_slots ~messages with
   | Error error ->
@@ -489,12 +551,12 @@ let execute_exact_output_classified
        slots still own a chance to answer, just as after API exhaustion. *)
     (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
-     | Some (runtime_id, selection, output) ->
+     | Ok (runtime_id, selection, output) ->
        Log.Keeper.warn ~keeper_name:keeper_id
          "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
          exact_lane_id runtime_id (extraction_error_to_string error);
        Ok ((selection, output), runtime_id)
-     | None -> Error error)
+     | Error cli_failure -> Error (with_cli_failure error cli_failure))
   | Ok preflight ->
   (if preflight.unusable <> [] then
      Log.Keeper.warn ~keeper_name:keeper_id
@@ -547,9 +609,13 @@ let execute_exact_output_classified
             ~selected_input
             ~messages
         with
-        | Some (runtime_id, selection, output) ->
+        | Ok (runtime_id, selection, output) ->
           Ok ((selection, output), runtime_id)
-        | None -> terminal ())
+        | Error cli_failure ->
+          Error
+            (with_cli_failure
+               (Exact_execution_failed (exact_execution_error cause))
+               cli_failure))
      | Exact_output.Flow_attempt_already_started _
      | Exact_output.Flow_attempt_start_failed _
      | Exact_output.Flow_measurement_start_failed _
@@ -575,12 +641,14 @@ let execute_exact_output_classified
          ~selected_input
          ~messages
      with
-     | Some (runtime_id, selection, output) ->
+     | Ok (runtime_id, selection, output) ->
        Ok ((selection, output), runtime_id)
-     | None ->
+     | Error cli_failure ->
        Error
-         (Domain_output_invalid
-            (Keeper_librarian.parse_error_to_string rejection.rejection)))
+         (with_cli_failure
+            (Domain_output_invalid
+               (Keeper_librarian.parse_error_to_string rejection.rejection))
+            cli_failure))
 ;;
 
 (* A failure while no current snapshot exists means the keeper is running
@@ -844,12 +912,27 @@ let run_best_effort
                 one fact of its own in that window ended the pass (masc
                 #32859). The decision itself has no such requirement: a fact it
                 never mentions is one it never saw. *)
+             (* An absorption the merged claim does not convey is not applied:
+                that memory stays current (RFC-librarian-absorb-gate). The
+                gate only narrows the list; without a key or an answer it is
+                the answer's list. *)
+             let absorbed =
+               Keeper_librarian_absorb_gate.run
+                 ~clock
+                 ~keeper_id
+                 ~facts:(match prompt_input.current with
+                   | None -> []
+                   | Some current -> current.facts)
+                 ~new_claims:selection.new_claims
+                 ~absorbed:selection.absorbed
+                 ()
+             in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
                  ~clock
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
-                 ~absorbed:selection.absorbed
+                 ~absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())

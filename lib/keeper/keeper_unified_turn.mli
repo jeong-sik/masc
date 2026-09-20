@@ -1,12 +1,11 @@
-(** Keeper_unified_turn — Single entry point for keeper turns via Agent_core.Agent.run().
+(** MASC orchestration of a Keeper turn.
 
-    Replaces the 3-path dispatcher (social/scheduled-autonomous/autonomy) with a unified
-    observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
-    The model decides what to do; code only enforces safety and observes results.
+    Observes current state, prepares the turn prompt and calls
+    [Keeper_agent_run.run_turn] through [Keeper_unified_turn_execution].
+    [Keeper_turn_driver] dispatches each runtime attempt to AGENT_CORE or an
+    official client according to [Runtime_execution.t].
 
-    Error classification predicates are in [Keeper_error_classify].
-
-    @since Unified Keeper Loop *)
+    Error classification predicates are in [Keeper_error_classify]. *)
 
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)

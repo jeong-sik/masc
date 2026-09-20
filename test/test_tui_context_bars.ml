@@ -217,24 +217,28 @@ let test_wrap_never_returns_nothing () =
   check int "no width" 1 (List.length (Bars.wrap ~width:0 "anything at all"))
 
 let test_the_pointer_ends_on_the_cut () =
-  (* The corner has to land on the first sent cell, or the flag labels the
+  (* The corner has to land on the first filled cell, or the flag labels the
      omitted history instead. Its cell count is therefore one past the cut. *)
   let width = 60 in
-  let sent =
+  let label = "sample range" in
+  let filled =
     Bars.fill_cells ~width ~numerator:history_transmitted
       ~denominator:history_total
   in
-  check int "flag ends on the first sent cell" (width - sent + 1)
-    (cells
-       (Bars.reach_pointer ~label:Bars.sent_pointer_label ~width ~transmitted:history_transmitted
-          ~total:history_total));
-  (* With the whole conversation sent there is no room on the left, so the
-     label sits to the right of the cut and the row is longer than the cut. *)
-  check bool "a full reach labels from the right" true
-    (cells
-       (Bars.reach_pointer ~label:Bars.sent_pointer_label ~width ~transmitted:history_total
-          ~total:history_total)
-    > 0)
+  let partial =
+    Bars.reach_pointer ~label ~width ~transmitted:history_transmitted
+      ~total:history_total
+  in
+  check int "flag ends on the first filled cell" (width - filled + 1)
+    (cells partial);
+  check bool "the left flag preserves the caller's label" true (contains partial label);
+  (* With a full range there is no room on the left. The corner and a space
+     precede the caller's label at the start of the bar. *)
+  let full =
+    Bars.reach_pointer ~label ~width ~transmitted:history_total ~total:history_total
+  in
+  check int "a full range labels from the right" (String.length label + 2) (cells full);
+  check bool "the right flag preserves the caller's label" true (contains full label)
 
 (* The row is drawn with the shades the caller named, in the order it named
    them: the groups on screen keep their shade whatever the sizes do. *)
@@ -263,7 +267,7 @@ let test_preview () =
     (Bars.reach_bar ~width:60 ~transmitted:history_transmitted
        ~total:history_total ~sent_style:"");
   print_endline
-    (Bars.reach_pointer ~label:Bars.sent_pointer_label ~width:60 ~transmitted:history_transmitted
+    (Bars.reach_pointer ~label:"sample range" ~width:60 ~transmitted:history_transmitted
        ~total:history_total);
   print_endline
     (Bars.band ~width ~title:"COMPOSITION"

@@ -14,6 +14,30 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_keeper_librarian_absorb_gate)
+ (modules test_keeper_librarian_absorb_gate)
+ (deps fixtures/librarian_statements_golden.json)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+; The reference cut (scripts/librarian/statements.py, the scorer of issue
+; #37079) must still write the golden the OCaml test above reads.
+(rule
+ (alias runtest-librarian-statements-golden)
+ (deps ../scripts/librarian/statements.py fixtures/librarian_statements_golden.json)
+ (action
+  (run python3 %{dep:../scripts/librarian/statements.py} --check
+   %{dep:fixtures/librarian_statements_golden.json})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-librarian-statements-golden)))
+
+(test
+ (name test_librarian_continuity_report)
+ (modules test_librarian_continuity_report)
+ (libraries alcotest masc yojson))
+
+(test
  (name test_keeper_peer_artifact)
  (modules test_keeper_peer_artifact)
  (libraries masc_test_deps))
@@ -1970,6 +1994,17 @@
  (name test_cancel_safe)
  (modules test_cancel_safe)
  (libraries alcotest masc_cancel_safe eio eio_main))
+
+; The metric store is on the same contract: a counter bumped inside a
+; cancelled fiber must not turn the cancellation into a warning (#37349).
+; The AST cases read the store's source, so it is a dep -- without it dune
+; caches a pass and never re-runs them when the store changes.
+
+(test
+ (name test_otel_metric_store_cancel)
+ (modules test_otel_metric_store_cancel)
+ (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
+ (libraries alcotest ast_grep otel_metric_store eio eio_main))
 
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library
@@ -5220,7 +5255,9 @@
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
+(include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
+(include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
 (include stanzas/test_tui_mermaid.inc)
@@ -6053,6 +6090,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_lane_payload_availability)))
+
+(rule
+ (alias runtest-test_tui_board_answer_source)
+ (deps test_tui_board_answer_source.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_board_answer_source.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_board_answer_source)))
 
 (rule
  (alias runtest-test_tui_lane_detail_owner)

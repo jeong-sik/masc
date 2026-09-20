@@ -147,7 +147,7 @@ let () =
      | Some value ->
        Masc.Workspace.Explicit (Config_dir_resolver.absolute_path value)
      | None ->
-       Masc.Workspace.Ambient (Config_dir_resolver.base_path_or_cwd ()))
+       Masc.Workspace.Explicit (Config_dir_resolver.base_path_or_cwd ()))
     |> Masc.Workspace.runtime_base_path
   in
   (* The save below prunes the session's checkpoint history to the window the

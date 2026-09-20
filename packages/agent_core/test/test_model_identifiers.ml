@@ -125,7 +125,13 @@ let test_lookup_folds_case_and_rejects_padding () =
    | None -> Alcotest.fail "provider-scoped query must fold the model_id case"
    | Some entry ->
      Alcotest.(check string) "provider-scoped row found through case" "gpt-5.6-terra"
-       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix))
+       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix));
+  Alcotest.(check bool) "provider-scoped padded query is rejected" true
+    (Option.is_none
+       (Model_catalog.lookup_for_provider
+          catalog
+          ~provider_name:"openai-responses"
+          ~model_id:"  GPT-5.6-TERRA\t"))
 ;;
 
 let test_lookup_misses_stay_misses () =

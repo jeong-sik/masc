@@ -1091,8 +1091,13 @@ let%test "of_toml_string_lenient skips poisoned provider rows after model skips"
 ;;
 
 let lookup_for_provider t ~provider_name ~model_id =
-  let model_id = normalize_label model_id in
-  let find_exact label =
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error _ -> None
+  | Ok model_id ->
+    let model_id =
+      normalize_label (Model_identifiers.Model_id.to_string model_id)
+    in
+    let find_exact label =
     List.find_opt
       (fun entry ->
          match entry.provider_name with

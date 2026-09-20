@@ -3129,6 +3129,29 @@ let context_split_width cols =
   min 62 (max 44 (available * 45 / 100))
 
 
+let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
+    (forecast : (Masc_tui_context_inspector.forecast, string) result) =
+  let width = max 1 (framed_inner_width cols - 2) in
+  let prose text =
+    List.map
+      (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+      (Context_bars.wrap ~width text)
+  in
+  let fact text =
+    List.map (fun line -> "  " ^ line) (Context_bars.wrap ~width text)
+  in
+  [ "  "
+    ^ Context_bars.band ~width ~title:"NEXT REQUEST"
+        ~caption:"what the next Agent Core request would carry, computed now"
+  ]
+  @ Masc_tui_next_request_band.lines ~prose ~fact
+      ~safe:Keeper_chat.terminal_safe_text ~scale forecast
+  @ (if show_scale_note
+     then prose (Masc_tui_token_scale.note scale)
+     else [])
+  @ [ "" ]
+
+
 let context_composition_lines ~cols ~turn_back
     ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
     (selection : Masc_tui_context_inspector.selection) =
@@ -3312,39 +3335,34 @@ let context_composition_lines ~cols ~turn_back
         let share =
           if total <= 0 then 0. else float transmitted /. float total *. 100.
         in
-        (* What the newest run is depends on who composed it. A wire shape
-           is Agent Core's: the range it cut from the checkpoint history and
-           projected for the wire, so these atoms went out. A durable shape
-           is an official client's: the list masc handed over, which the
-           client assembles into its own request, and a resumed client
-           session already holds the earlier turns, so "sent" would claim a
-           transmission nothing observed. *)
+        (* The last projection in this turn does not record its runtime.
+           Wire and durable shapes describe the measurement basis; neither
+           attributes this range to the runtime in the turn's heading. *)
         let measured, label, reach_prose =
           match window.measurement with
           | Turn_record.Wire_shape ->
               ( "wire shape"
-              , Context_bars.sent_pointer_label
+              , "projected range"
               , Printf.sprintf
                   "An atom is one user message, or one assistant message \
-                   with the tool results it caused. %d older atoms stayed \
-                   behind. A cut falls between atoms, so a tool result and \
-                   the call it answers either both travel or neither does."
+                   with the tool results it caused. %d older atoms were \
+                   outside this projected range. A cut falls between atoms, \
+                   so a tool result and the call it answers are kept together."
                   (max 0 (total - transmitted)) )
           | Turn_record.Durable_shape ->
               ( "durable shape"
-              , "in reach this turn"
+              , "prepared history"
               , Printf.sprintf
                   "An atom is one user message, or one assistant message \
-                   with the tool results it caused. %d older atoms stayed \
-                   behind. Measured on the durable history masc holds, not on \
-                   a body that went out: on a lane \
-                   whose client assembles the request, these atoms are what \
-                   masc could hand over, and a resumed client session already \
-                   holds the earlier ones. A cut falls between atoms, so a \
+                   with the tool results it caused. %d older atoms were \
+                   outside this prepared range. Measured on the history list \
+                   prepared for a client; its final request is not measured \
+                   here. A cut falls between atoms, so a \
                    tool result and the call it answers stay together."
                   (max 0 (total - transmitted)) )
         in
-        [ Printf.sprintf "  %s%d of %d kept atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
+        prose "Last observed history range"
+        @ [ Printf.sprintf "  %s%d of %d kept atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
             transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
@@ -3353,6 +3371,7 @@ let context_composition_lines ~cols ~turn_back
           ^ Context_bars.reach_pointer ~label ~width:bar_width ~transmitted
               ~total
         ]
+        @ prose "Range observation runtime: not recorded"
         @ prose reach_prose
     | None ->
         [ (Theme.bad ())
@@ -3649,10 +3668,6 @@ let context_composition_lines ~cols ~turn_back
     @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
-  let next_request_lines =
-    Masc_tui_next_request_band.lines ~prose ~fact
-      ~safe:Keeper_chat.terminal_safe_text ~scale forecast
-  in
   (* Read top to bottom as the turn is built: what came in, what was sent,
      how far back it reached, and what the provider counted on the turns
      before it. The request stood above the components it is made of, so the
@@ -3677,12 +3692,7 @@ let context_composition_lines ~cols ~turn_back
     ]
   @ history_lines
   @ [ "" ]
-  @ [ "  "
-      ^ Context_bars.band ~width ~title:"NEXT REQUEST"
-          ~caption:"what the next Agent Core request would carry, computed now"
-    ]
-  @ next_request_lines
-  @ [ "" ]
+  @ context_next_request_lines ~cols ~scale forecast
   @ recent_turns_lines @ [ "" ]
   @ prose
       "Three measurements of one turn, not three views of one number: none of \
@@ -4351,7 +4361,12 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                 Plain
                   ( [ (Theme.bad ()) ^ "  Composition unavailable: "
                       ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                    ; ""
                     ]
+                    @ context_next_request_lines ~cols
+                        ~scale:Masc_tui_token_scale.fleet
+                        ~show_scale_note:true
+                        reading.Masc_tui_context_inspector.forecast
                   , None ))
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with

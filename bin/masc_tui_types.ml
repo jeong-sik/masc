@@ -5232,6 +5232,8 @@ type state = {
   mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
+  (* A projection of the last rendered payload, not another layout formula. *)
+  mutable lane_run_detail_content_height: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
      not projected is simply absent from this list, which the Secrets tab
      shows as "no projection" rather than as an empty credential set. *)
@@ -6906,6 +6908,7 @@ let create_state
   lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
+  lane_run_detail_content_height = 0;
   keeper_secrets = [];
   lanes_error = None;
   lanes_action_error = None;
@@ -7486,7 +7489,7 @@ type clamped_scroll =
   | Runtime_detail_scroll of int
   | System_log_detail_scroll of int
   | Planning_detail_scroll of int
-  | Lane_run_detail_scroll of int
+  | Lane_run_detail_scroll of { scroll : int; content_height : int }
   (* An open diff's rows are built by the drawing, out of the recorded before
      and after text, so the keypress cannot count them. It steps unbounded and
      the frame reports back what it could actually use: without that report
@@ -7571,7 +7574,9 @@ let apply_clamped_scroll (state : state) = function
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
-  | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
+  | Lane_run_detail_scroll { scroll; content_height } ->
+      state.lane_run_detail_scroll <- scroll;
+      state.lane_run_detail_content_height <- content_height
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
   | Repository_changes_diff_scroll value ->
       state.repository_changes_diff_scroll <- value

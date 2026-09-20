@@ -19,6 +19,7 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render.mli",
+    "bin/masc_tui_types.ml",
     "bin/masc_tui_scroll.mli",
 )
 
@@ -210,6 +211,31 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
             raise AssertionError(
                 f"paging omitted payload rows: {sorted(expected - seen)!r}"
             )
+        # A new frame must replace the previous frame's paging height.
+        # Keep the width stable so wrapping and row identities stay unchanged.
+        h.resize_and_wait(
+            process,
+            master,
+            output,
+            rows=34,
+            columns=columns,
+            needle=h.WINDOW_TEXT_RE,
+            controls=(h.FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        resized = visible_window(output, split=split)
+        if resized.first != initial.first or resized.height >= initial.height:
+            raise AssertionError(f"resize did not shrink the payload: {resized}")
+        h.send_and_wait(process, master, output, b"\x1b[6~", h.WINDOW_TEXT_RE)
+        resized_down = visible_window(output, split=split)
+        assert_page(resized, resized_down, down=True)
+        h.send_and_wait(process, master, output, b"\x1b[5~", h.WINDOW_TEXT_RE)
+        resized_up = visible_window(output, split=split)
+        assert_page(resized_down, resized_up, down=False)
+        if resized_up != resized:
+            raise AssertionError(
+                f"resized PageUp lost its starting window: {resized_up}"
+            )
         expected_reads = [200, 503] if refresh_error else [200]
         if detail_reads != expected_reads:
             raise AssertionError(f"unexpected detail requests: {detail_reads!r}")
@@ -224,6 +250,8 @@ def run(executable: str, *, columns: int, split: bool, refresh_error: bool) -> N
                         Path(executable).read_bytes()
                     ).hexdigest(),
                     "detail_reads": detail_reads,
+                    "resized_height": resized.height,
+                    "resized_page_down_first": resized_down.first,
                     "windows": [
                         {
                             "first": w.first,

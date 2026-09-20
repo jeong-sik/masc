@@ -436,6 +436,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
                ? html` · Workspace <code>${run.actor}</code> · model-proposed; semantic verification not performed`
                : html` · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>`}
           </p>
+          ${run.code === undefined
+            ? null
+            : html`<p class="ia-err"><code>${run.code}</code>: ${run.detail}</p>`}
         </div>
         <div class="ia-tool-io">
           <${ExactPayload} side="input" availability=${run.payloadAvailability.input} value=${run.input.payload} />

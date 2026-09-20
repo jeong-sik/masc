@@ -519,7 +519,8 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_working_context_artifact
   ; Keeper_memory_journal_artifact
   ; Keeper_memory_absorbed_artifact
-    (* The turn boundary log sits in the same keepers directory. Left behind,
+    (* The turn boundary log and progress sit in the selected cluster's
+       per-Keeper runtime directory. Left behind,
        a later keeper with the same name would read the atom positions of
        another history as its own. *)
   ; Keeper_turn_boundaries_artifact

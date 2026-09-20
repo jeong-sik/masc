@@ -120,10 +120,12 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
   let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
   let* endpoint = resolve ~config ~keeper_name in
   let gh_dir = Keeper_sandbox_remote.gh_config_dir endpoint in
+  let* () = Keeper_sandbox_remote.check_endpoint_preflight endpoint in
   (* The endpoint may never have held this Keeper. A root the ssh user cannot
      write is the bootstrap's job, and this step names it rather than letting
      gh fail later with a directory message. *)
-    let* () = bootstrap_control_root ~redaction endpoint in
+  let* () = bootstrap_control_root ~redaction endpoint in
+  let* () = Keeper_sandbox_remote.check_workspace_preflight endpoint in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "mkdir"; "-p"; gh_dir ] in
   let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
   let lane : Keeper_github_identity.login_lane =

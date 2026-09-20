@@ -581,7 +581,9 @@ let test_fresh_presence_preserves_turn_failures () =
         }
       in
       let meta = make_meta "fresh-presence-turn-failure" in
-      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
+      let registry_entry =
+        R.For_testing.register ~base_path:config.base_path meta.name meta
+      in
       R.increment_turn_failures ~base_path:config.base_path meta.name;
       ignore
         (R.dispatch_event
@@ -594,6 +596,7 @@ let test_fresh_presence_preserves_turn_failures () =
       ignore
         (Masc.Keeper_heartbeat_loop.sync_keeper_presence
            ~ctx
+           ~registry_entry
            ~meta_current:meta
            ~consecutive_failures:(ref 0));
       check int
@@ -603,6 +606,133 @@ let test_fresh_presence_preserves_turn_failures () =
       match R.get_phase ~base_path:config.base_path meta.name with
       | Some phase -> check string "heartbeat alone stays failing" "failing" (KSM.phase_to_string phase)
       | None -> fail "expected registered keeper phase")
+
+let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  Eio.Switch.run @@ fun sw ->
+  R.For_testing.clear ();
+  let base_path = temp_dir "fresh-presence-reason" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let recover registry_entry meta failures =
+        R.set_failure_reason
+          ~base_path
+          meta.Keeper_meta_contract.name
+          (Some (R.Heartbeat_consecutive_failures failures));
+        ignore
+          (R.dispatch_event
+             ~base_path
+             meta.name
+             (KSM.Heartbeat_failed { consecutive = failures }));
+        ignore
+          (Masc.Keeper_heartbeat_loop.sync_keeper_presence
+             ~ctx
+             ~registry_entry
+             ~meta_current:meta
+             ~consecutive_failures:(ref failures))
+      in
+      let heartbeat_only = make_meta "heartbeat-only-recovery" in
+      let heartbeat_only_entry =
+        R.For_testing.register ~base_path heartbeat_only.name heartbeat_only
+      in
+      recover heartbeat_only_entry heartbeat_only 2;
+      let heartbeat_only_reason =
+        Option.bind (R.get ~base_path heartbeat_only.name) (fun entry ->
+          entry.R.last_failure_reason)
+      in
+      check bool "healthy heartbeat clears its stale reason" true
+        (Option.is_none heartbeat_only_reason);
+      let with_turn_debt = make_meta "heartbeat-with-turn-debt" in
+      let with_turn_debt_entry =
+        R.For_testing.register ~base_path with_turn_debt.name with_turn_debt
+      in
+      ignore
+        (Masc.Keeper_turn_failure_streak.increment
+           ~base_path
+           ~keeper_name:with_turn_debt.name);
+      recover with_turn_debt_entry with_turn_debt 3;
+      Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+        ~registry_entry:with_turn_debt_entry
+        ~turn_fail_count:(R.get_turn_failures ~base_path with_turn_debt.name);
+      (match
+         Option.bind (R.get ~base_path with_turn_debt.name) (fun entry ->
+           entry.R.last_failure_reason)
+       with
+       | Some (R.Turn_consecutive_failures 1 as reason) ->
+         (match Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+          | Some surface -> check string "public blocker follows remaining turn debt"
+              "turn_failures" surface.blocker_class
+          | None -> fail "remaining turn debt has no public blocker")
+       | Some reason ->
+         failf "heartbeat recovery left the wrong reason: %s"
+           (R.failure_reason_to_string reason)
+      | None -> fail "heartbeat recovery cleared remaining turn debt");
+      let raced = make_meta "heartbeat-recovery-race" in
+      let raced_entry = R.For_testing.register ~base_path raced.name raced in
+      R.set_failure_reason ~base_path raced.name (Some (R.Heartbeat_consecutive_failures 2));
+      check bool "heartbeat observation is replaced" true
+        (R.replace_heartbeat_failure_reason
+           raced_entry
+           (Some (R.Turn_consecutive_failures 1)));
+      R.set_failure_reason ~base_path raced.name (Some (R.Exception "newer failure"));
+      check bool "newer cause rejects stale heartbeat recovery" false
+        (R.replace_heartbeat_failure_reason raced_entry None);
+      (match Option.bind (R.get ~base_path raced.name) (fun entry -> entry.R.last_failure_reason) with
+      | Some (R.Exception "newer failure") -> ()
+      | Some reason ->
+        failf "heartbeat recovery overwrote the newer reason: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "heartbeat recovery cleared the newer reason");
+      R.For_testing.unregister ~base_path raced.name;
+      let _replacement_entry = R.For_testing.register ~base_path raced.name raced in
+      R.set_failure_reason
+        ~base_path
+        raced.name
+        (Some (R.Heartbeat_consecutive_failures 7));
+      check bool "old lane cannot clear replacement heartbeat" false
+        (R.replace_heartbeat_failure_reason raced_entry None);
+      (match Option.bind (R.get ~base_path raced.name) (fun entry -> entry.R.last_failure_reason) with
+      | Some (R.Heartbeat_consecutive_failures 7) -> ()
+      | Some reason ->
+        failf "old lane changed replacement reason: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "old lane cleared replacement heartbeat reason");
+      let stale_turn = make_meta "post-turn-reason-race" in
+      let stale_turn_entry =
+        R.For_testing.register ~base_path stale_turn.name stale_turn
+      in
+      R.set_failure_reason
+        ~base_path
+        stale_turn.name
+        (Some (R.Exception "newer turn failure"));
+      Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+        ~registry_entry:stale_turn_entry
+        ~turn_fail_count:4;
+      match
+        Option.bind (R.get ~base_path stale_turn.name) (fun entry ->
+          entry.R.last_failure_reason)
+      with
+      | Some (R.Exception "newer turn failure") -> ()
+      | Some reason ->
+        failf "stale post-turn refresh overwrote the newer reason: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "stale post-turn refresh cleared the newer reason")
 
 let test_turn_failure_streak_survives_registry_restart () =
   Eio_main.run @@ fun env ->
@@ -700,12 +830,13 @@ let test_crashed_cycle_records_turn_failure () =
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       let meta = make_meta "crashed-cycle" in
-      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
+      let registry_entry =
+        R.For_testing.register ~base_path:config.base_path meta.name meta
+      in
       check int "no failures before crash" 0
         (R.get_turn_failures ~base_path:config.base_path meta.name);
       KHL.record_crashed_cycle_failure
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
+        ~registry_entry
         (Failure "boom");
       let count = R.get_turn_failures ~base_path:config.base_path meta.name in
       check int "crash recorded as turn failure" 1 count;
@@ -718,14 +849,38 @@ let test_crashed_cycle_records_turn_failure () =
        | _ -> fail "expected Turn_failed for crashed cycle");
       ignore (R.dispatch_event ~base_path:config.base_path meta.name event);
       (match R.get_phase ~base_path:config.base_path meta.name with
-       | Some phase ->
+      | Some phase ->
          check string "crashed cycle moves state machine to failing" "failing"
            (KSM.phase_to_string phase)
        | None -> fail "expected registered keeper phase");
       (* Clean cycle (count = 0) still maps to Turn_succeeded. *)
-      match KHL.turn_status_event ~turn_fail_count:0 with
+      (match KHL.turn_status_event ~turn_fail_count:0 with
       | KSM.Turn_succeeded -> ()
-      | _ -> fail "expected Turn_succeeded when no failures recorded")
+      | _ -> fail "expected Turn_succeeded when no failures recorded");
+      let stale_meta = make_meta "stale-crashed-cycle" in
+      let stale_entry =
+        R.For_testing.register ~base_path:config.base_path stale_meta.name stale_meta
+      in
+      R.For_testing.unregister ~base_path:config.base_path stale_meta.name;
+      let _replacement_entry =
+        R.For_testing.register ~base_path:config.base_path stale_meta.name stale_meta
+      in
+      R.set_failure_reason
+        ~base_path:config.base_path
+        stale_meta.name
+        (Some (R.Exception "replacement cause"));
+      KHL.record_crashed_cycle_failure
+        ~registry_entry:stale_entry
+        (Failure "old fiber crash");
+      check int "stale crash does not increment replacement debt" 0
+        (R.get_turn_failures ~base_path:config.base_path stale_meta.name);
+      match Option.bind (R.get ~base_path:config.base_path stale_meta.name) (fun entry ->
+        entry.R.last_failure_reason) with
+      | Some (R.Exception "replacement cause") -> ()
+      | Some reason ->
+        failf "stale crash overwrote replacement cause: %s"
+          (R.failure_reason_to_string reason)
+      | None -> fail "stale crash cleared replacement cause")
 
 let test_turn_status_preserves_configuration_failure_reason () =
   let configuration_reason =
@@ -762,10 +917,10 @@ let test_operator_interrupt_skips_turn_accounting () =
       cleanup_dir base_path)
     (fun () ->
       let meta = make_meta "operator-interrupt-turn-accounting" in
-      ignore (R.For_testing.register ~base_path meta.name meta);
+      let registry_entry = R.For_testing.register ~base_path meta.name meta in
       let outcome =
         KHL.handle_cycle_exception
-          ~base_path
+          ~registry_entry
           ~meta
           (Eio.Cancel.Cancelled R.Operator_interrupt)
       in
@@ -5168,17 +5323,21 @@ let test_turn_intake_uses_only_lifecycle () =
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
   install_test_env env;
+  R.For_testing.clear ();
   let base_path = temp_dir "health-feed" in
   let keeper_name = "health-feed-keeper" in
+  let meta = make_meta keeper_name in
+  let registry_entry = R.For_testing.register ~base_path keeper_name meta in
   Health.record_success ~agent_name:keeper_name;
   for i = 1 to 3 do
     KHL.record_crashed_cycle_failure
-      ~base_path
-      ~keeper_name
+      ~registry_entry
       (Failure (Printf.sprintf "boom-%d" i))
   done;
   let summary = Health.get_summary ~agent_name:keeper_name in
-  check int "crashed cycles are observed" 3 summary.failure_count
+  check int "crashed cycles are observed" 3 summary.failure_count;
+  R.For_testing.clear ();
+  cleanup_dir base_path
 
 let test_invalid_keeper_config_revision_name_creates_no_artifact () =
   let base_path = temp_dir "invalid-config-revision-name" in
@@ -5327,6 +5486,8 @@ let () =
       eio_test "turn crash flow" test_crash_turn_failures;
       test_case "fresh presence preserves turn failures" `Quick
         test_fresh_presence_preserves_turn_failures;
+      test_case "fresh presence clears only heartbeat failure reason" `Quick
+        test_fresh_presence_clears_only_the_heartbeat_failure_reason;
       test_case "turn failure streak survives registry restart" `Quick
         test_turn_failure_streak_survives_registry_restart;
       test_case "turn failure streak rejects unknown schema" `Quick

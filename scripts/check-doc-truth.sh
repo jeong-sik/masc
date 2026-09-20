@@ -208,6 +208,15 @@ require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure i
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
 require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
 
+# Keep the glossary's invariant-prefix index derived from the spec files that
+# actually declare numbered invariants. Testing uses its separate INV-T1..T5
+# short form and is intentionally documented outside this comparison.
+declared_prefixes="$(rg -o '^\| \x60(INV-[A-Z]+)\x60' docs/spec/SPEC-INDEX.md -r '$1' | sort -u)"
+used_prefixes="$(rg -o 'INV-[A-Z]+-[0-9]+' docs/spec -g '*.md' -g '!SPEC-INDEX.md' --no-filename \
+  | sed 's/-[0-9]*$//' | sort -u)"
+[[ "$declared_prefixes" == "$used_prefixes" ]] || \
+  fail "SPEC-INDEX invariant-prefix table drifted from numbered spec invariants"
+
 docs_to_scan=(
   README.md
   README.ko.md

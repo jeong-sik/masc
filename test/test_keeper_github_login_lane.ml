@@ -135,8 +135,9 @@ let stub_main () =
        write_all Unix.stderr (trailer (if root_was_bootstrapped then 0 else 70))
      | [ "git"; "--version" ] ->
        record "preflight-git";
-       write_all Unix.stdout "git version 2.51.0\n";
-       write_all Unix.stderr (trailer 0)
+       let forced_failure = Sys.file_exists (Filename.concat dir "fail-preflight-git") in
+       if not forced_failure then write_all Unix.stdout "git version 2.51.0\n";
+       write_all Unix.stderr (trailer (if forced_failure then 72 else 0))
      | [ "rg"; "--version" ] ->
        record "preflight-rg";
        write_all Unix.stdout "ripgrep 14.1.1\n";
@@ -367,22 +368,6 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with_stub_ssh ~dir
   @@ fun () ->
   let config = workspace ~base_path in
-  let endpoint =
-    match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name with
-    | Error error -> failf "remote endpoint did not resolve: %s" error
-    | Ok endpoint ->
-      (match Keeper_sandbox_ssh.create ~base_path ~keeper_name ~endpoint () with
-       | Error error -> failf "remote endpoint was not built: %s" error
-       | Ok endpoint -> endpoint)
-  in
-  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
-  (match Keeper_sandbox_remote.check_preflight endpoint with
-   | Ok () -> fail "the absent Keeper workspace unexpectedly passed preflight"
-   | Error error ->
-     check bool "the initial failure is the absent Keeper workspace" true
-       (contains "remote_ssh_keeper_root_missing:" error));
-  Sys.remove (Filename.concat dir "endpoint-probed");
-  Sys.remove (frame_path ~dir "preflight-endpoint-root");
   match
     Keeper_github_login_lane.for_keeper
       ~config
@@ -413,6 +398,23 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     check string "workspace preflight request root"
       "/srv/masc/playground/gh-lane-keeper"
       git_check.remote_root;
+    let endpoint =
+      match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name with
+      | Error error -> failf "remote endpoint did not resolve: %s" error
+      | Ok endpoint ->
+        (match Keeper_sandbox_ssh.create ~base_path ~keeper_name ~endpoint () with
+         | Error error -> failf "remote endpoint was not built: %s" error
+         | Ok endpoint -> endpoint)
+    in
+    Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+    let preflight_failure = Filename.concat dir "fail-preflight-git" in
+    save preflight_failure "fail";
+    (match Keeper_sandbox_remote.check_preflight endpoint with
+     | Ok () -> fail "the forced preflight failure unexpectedly passed"
+     | Error error ->
+       check bool "the pre-login failure is cached" true
+         (contains "remote_git_unavailable:" error));
+    Sys.remove preflight_failure;
     check
       (list string)
       "the lane creates the endpoint's gh directory before logging in"

@@ -681,6 +681,11 @@ val candidate_rejection_disposition
   :  candidate_rejection_receipt
   -> candidate_rejection_disposition
 
+val candidate_rejection_reason : candidate_rejection_receipt -> string
+(** Stable one-line reason from the receipt's original typed selection or
+    admission error. This retains the cause hidden by the coarser disposition
+    without exposing credentials or provider response bodies. *)
+
 type flow_evidence = private
   { flow_id : flow_id
   ; declared_candidate_snapshot : flow_candidate_identity list

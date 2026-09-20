@@ -259,7 +259,12 @@ open Alcotest
    required. No headroom. *)
 (* 2026-09-20: the read-only keeper_skill_validate caller adds artifact document
    validation. The production renderer measures 119,546 bytes / 136 tools. *)
-let ceiling_bytes = 119_546
+(* 2026-09-21: the DOS lane gains its mouse. The production renderer measures
+   121,200 bytes / 137 tools. masc_dos_click declares x/y/buttons/steps so a
+   keeper can drive mouse-polled games: Sangokushi III boots on a click and
+   never reads INT 16h (it polls the BDA ring), so press and type alone
+   cannot start it. 1,554 bytes over the previous ceiling. *)
+let ceiling_bytes = 121_200
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -418,6 +423,7 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_dos_click"
   ; "masc_dos_eject"
   ; "masc_dos_load"
   ; "masc_dos_peek"

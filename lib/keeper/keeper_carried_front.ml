@@ -48,7 +48,11 @@ let composer_to_string = function
 
 (* The response-observed field certifies this range at the producer. A
    runtime can leave today's catalog without changing that historical fact;
-   [for_history] checks whether its opening position still names this history. *)
+   [for_history] checks whether its opening position still names this history.
+   Historical motivation: #36997 records a 2026-09-18 incident where skipping
+   official-client records resent 13 MB per candidate on Agent Core turn 4059,
+   after 20 claude_code turns. Preserve that response evidence, subject to the
+   same history-position check. *)
 let of_records ~trace_id (records : Turn_record.t list) =
   List.fold_left
     (fun newest (record : Turn_record.t) ->

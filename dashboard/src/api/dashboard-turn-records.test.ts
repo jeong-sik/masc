@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
@@ -14,11 +16,8 @@ function entry(overrides: Record<string, unknown> = {}) {
   return {
     record: {
       keeper: 'sangsu',
-      // lib/types/turn_record.ml:148-163 writes these four on every row. The
-      // fixture carried none of them until #26792, so the suite stayed green
-      // against a shape the server had stopped sending.
+      // Current identity fields from Turn_record.to_json.
       agent_name: 'keeper-sangsu-agent',
-      generation: 1,
       turn_kind: 'autonomous',
       raw_trace_run_ref: null,
       trace_id: 'trace-1',
@@ -31,6 +30,7 @@ function entry(overrides: Record<string, unknown> = {}) {
       input_components: [],
       request_runtime_profile: null,
       request_body_bytes: null,
+      usage_scope: 'per_request',
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -39,7 +39,7 @@ function entry(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function payload(...entries: ReturnType<typeof entry>[]) {
+function payload(...entries: { record: Record<string, unknown>; diff_vs_prev: null }[]) {
   return {
     keeper: 'sangsu',
     count: entries.length,
@@ -72,6 +72,14 @@ function payload(...entries: ReturnType<typeof entry>[]) {
   }
 }
 
+// Unmodified rows emitted by Keeper_turn_record_writer.write on c861d8fe,
+// then read from its temporary Dated_jsonl store. Synthetic fixture only:
+// the marker is not evidence that a tool blob was stored or retrieved.
+const writerRows: Record<string, unknown>[] = readFileSync(
+  resolve(__dirname, 'fixtures/turn-record-writer-main.jsonl'),
+  'utf8',
+).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
+
 afterEach(() => {
   getMock.mockReset()
 })
@@ -81,6 +89,44 @@ afterEach(() => {
 // reaching the inspector. Absent stays absent — a provider that reports no
 // cache count must not decode to a fabricated 0.
 describe('keeper turn record cache token counts', () => {
+  it.each(writerRows)('accepts the actual writer row with usage scope $usage_scope', async record => {
+    // Only the surrounding HTTP metadata is synthetic; record is unchanged.
+    const raw = payload({ record, diff_vs_prev: null })
+    raw.keeper = String(record.keeper)
+    raw.durable_store = `.masc/keepers/${raw.keeper}/turn-records`
+    raw.latest_ts_unix = Number(record.ts)
+    raw.latest_ts_iso = new Date(Math.floor(raw.latest_ts_unix) * 1000).toISOString().replace('.000Z', 'Z')
+    raw.memory_os.keeper = raw.keeper
+    raw.memory_os.snapshot_store = `.masc/keepers/${raw.keeper}.memory-current.json`
+    getMock.mockResolvedValue(raw)
+
+    const response = await fetchKeeperTurnRecords(raw.keeper)
+    expect(response.entries).toHaveLength(1)
+    expect(response.entries[0]?.record).toMatchObject({
+      turn_ref: record.turn_ref,
+      usage_scope: record.usage_scope,
+    })
+    expect(response.entries[0]?.record.tool_surface_ref).toBe(record.tool_surface_ref)
+    expect(response.entries[0]?.record).not.toHaveProperty('generation')
+  })
+
+  it.each([undefined, null, 'unknown', 1])('rejects a missing or invalid usage scope %s', async usage_scope => {
+    const row = entry({ usage_scope })
+    if (usage_scope === undefined) delete (row.record as Record<string, unknown>).usage_scope
+    getMock.mockResolvedValue(payload(row))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+  })
+
+  it.each([null, '', ' ', 1])('rejects an invalid present tool surface reference %s', async tool_surface_ref => {
+    getMock.mockResolvedValue(payload(entry({ tool_surface_ref })))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+  })
+
+  it.each([{ unexpected_record_field: true }, { generation: 1 }])('keeps unsupported record fields rejected: %j', async extra => {
+    getMock.mockResolvedValue(payload(entry(extra)))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+  })
+
   it('surfaces a current-only window containing only incompatible rows', async () => {
     getMock.mockResolvedValue({
       ...payload(),
@@ -199,7 +245,6 @@ describe('keeper turn record cache token counts', () => {
 
     expect(response.entries[0]?.record).toMatchObject({
       agent_name: 'keeper-sangsu-agent',
-      generation: 1,
       turn_kind: 'autonomous',
       raw_trace_run_ref: null,
     })
@@ -223,7 +268,6 @@ describe('keeper turn record cache token counts', () => {
 
   it.each([
     ['agent_name', { agent_name: '' }],
-    ['generation', { generation: -1 }],
     ['turn_kind', { turn_kind: 'scheduled' }],
     ['raw_trace_run_ref', { raw_trace_run_ref: { worker_run_id: 'wr-1' } }],
   ])('rejects a row whose %s violates the writer contract', async (_field, override) => {

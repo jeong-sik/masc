@@ -38,11 +38,6 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
-**Heartbeat**
-: Workspace에서 Agent의 `last_seen`을 갱신하는 명시적 liveness 작업. 성공은
-  `Heartbeat_updated`일 때만 뜻하며, 잘못된 Agent 파일이나 없는 Agent는 생존 증거가 아니다.
-  → [Workspace_gc.heartbeat](../../lib/workspace/workspace_gc.mli)
-
 **Agent**
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
 

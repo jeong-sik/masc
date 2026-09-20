@@ -1,8 +1,9 @@
 {
-  "synthetic": true,
+  "provenance": ["Synthetic"],
   "cases": [
     {
       "id": "retained",
+      "question": "What is the cabinet code?",
       "source": {
         "trace_id": "synthetic-original",
         "turn": 1,
@@ -18,6 +19,7 @@
     },
     {
       "id": "absent",
+      "question": "What is the cabinet code?",
       "source": {
         "trace_id": "synthetic-original",
         "turn": 1,
@@ -28,6 +30,70 @@
         "trace_id": "synthetic-later",
         "read_position": 17,
         "facts": [],
+        "unread": "The cabinet is still locked."
+      }
+    },
+    {
+      "id": "paraphrased",
+      "question": "During a frost drill, under what temperature condition and for how long must valve C stay closed?",
+      "source": {
+        "trace_id": "synthetic-original",
+        "turn": 2,
+        "text": "During a frost drill, keep valve C closed for 12 minutes only when the outside temperature is below -5 degrees Celsius."
+      },
+      "context": {
+        "keeper_name": "synthetic-keeper",
+        "trace_id": "synthetic-later",
+        "read_position": 17,
+        "facts": [{"id": "synthetic-fact", "claim": "For frost drills, valve C must remain shut for twelve minutes, and this applies only when the outdoor temperature is colder than minus five degrees Celsius."}],
+        "unread": "The frost drill checklist is available."
+      }
+    },
+    {
+      "id": "partial",
+      "question": "During a frost drill, under what temperature condition and for how long must valve C stay closed?",
+      "source": {
+        "trace_id": "synthetic-original",
+        "turn": 2,
+        "text": "During a frost drill, keep valve C closed for 12 minutes only when the outside temperature is below -5 degrees Celsius."
+      },
+      "context": {
+        "keeper_name": "synthetic-keeper",
+        "trace_id": "synthetic-later",
+        "read_position": 17,
+        "facts": [{"id": "synthetic-fact", "claim": "During a frost drill, keep valve C closed for 12 minutes."}],
+        "unread": "The frost drill checklist is available."
+      }
+    },
+    {
+      "id": "unread_only",
+      "question": "During a frost drill, under what temperature condition and for how long must valve C stay closed?",
+      "source": {
+        "trace_id": "synthetic-original",
+        "turn": 2,
+        "text": "During a frost drill, keep valve C closed for 12 minutes only when the outside temperature is below -5 degrees Celsius."
+      },
+      "context": {
+        "keeper_name": "synthetic-keeper",
+        "trace_id": "synthetic-later",
+        "read_position": 17,
+        "facts": [],
+        "unread": "During a frost drill, keep valve C closed for 12 minutes only when the outside temperature is below -5 degrees Celsius."
+      }
+    },
+    {
+      "id": "generated_question",
+      "question": null,
+      "source": {
+        "trace_id": "synthetic-original",
+        "turn": 1,
+        "text": "The cabinet code is ORCHID-731."
+      },
+      "context": {
+        "keeper_name": "synthetic-keeper",
+        "trace_id": "synthetic-later",
+        "read_position": 17,
+        "facts": [{"id": "synthetic-fact", "claim": "The cabinet code is ORCHID-731."}],
         "unread": "The cabinet is still locked."
       }
     }

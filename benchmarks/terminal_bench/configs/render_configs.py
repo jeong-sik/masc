@@ -30,6 +30,7 @@ from pathlib import Path
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BENCH_ROOT.parents[1]
 OUT_ROOT = BENCH_ROOT / "configs" / "out"
+PROVIDER_CATALOG = REPO_ROOT / "packages" / "agent_core" / "models.toml"
 
 # keepers, skills, composition, parallel
 ARMS: dict[str, dict] = {
@@ -311,12 +312,14 @@ def effective_runtime_id(runtime_id: str) -> str:
     provider, _, wire_model = runtime_id.partition(".")
     if not provider or not wire_model:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
-    return f"{provider}.{model_binding_id(wire_model)}"
+    runtime_provider = PROVIDERS[provider].get("runtime_provider", provider)
+    return f"{runtime_provider}.{model_binding_id(wire_model)}"
 
 
 # provider 프로토콜 매핑. 새 provider 추가 시 여기만 고친다.
 PROVIDERS = {
-    "anthropic": dict(protocol="messages-http",
+    "anthropic": dict(runtime_provider="claude",
+                      protocol="messages-http",
                       endpoint="https://api.anthropic.com",
                       api_key_env="ANTHROPIC_API_KEY",
                       carries_effort=True,
@@ -328,15 +331,13 @@ PROVIDERS = {
                       # boundary before completion" at 775s after the truncation
                       # recovery exhausted the same ceiling. fable-5 takes 64k.
                       max_output_tokens=64000),
-    "openai": dict(protocol="openai-compatible-http",
-                   endpoint="https://api.openai.com/v1",
+    "openai": dict(runtime_provider="openai-responses",
+                   protocol="openai-compatible-http",
+                   endpoint="https://api.openai.com",
                    api_key_env="OPENAI_API_KEY",
-                   carries_effort=True,
-                   # Chat completions carries an effort only when the model row
-                   # declares the reasoning_effort dialect
-                   # (reasoning_dialect.validate_request_control_inputs:
-                   # Chat_completions + Reasoning_effort is the admitted pair).
-                   thinking_control_line='thinking-control-format = "reasoning-effort"\n'),
+                   # The canonical catalog provider selects Responses and its
+                   # scoped model rows own the reasoning-effort dialect.
+                   carries_effort=True),
     # 한 계정 크레딧으로 여러 vendor 모델을 태우는 스윕 레인. 모델 id 에
     # 슬래시가 들어가므로 --model openrouter/z-ai/glm-5.3 처럼 주면
     # runtime_id 는 openrouter.z-ai/glm-5.3 이 된다. glm/deepseek 계열은
@@ -372,6 +373,28 @@ PROVIDERS = {
 def is_official_client(provider: str) -> bool:
     return bool(PROVIDERS[provider].get("official_client"))
 
+
+@functools.lru_cache(maxsize=None)
+def provider_parallel_suppression_contract(provider: str) -> bool:
+    """Whether the checked-in Agent Core provider declaration permits it.
+
+    An absent row and an omitted field both mean false. That is the same
+    fail-closed contract the runtime enforces; the HTTP protocol alone does
+    not prove that a service accepts this request policy.
+    """
+    rows = tomllib.loads(PROVIDER_CATALOG.read_text()).get("providers") or []
+    matches = [row for row in rows
+               if provider == row.get("id") or provider in (row.get("aliases") or [])]
+    if len(matches) > 1:
+        raise ValueError(f"provider catalog declares {provider!r} more than once")
+    if not matches:
+        return False
+    value = matches[0].get("supports_parallel_tool_suppression", False)
+    if not isinstance(value, bool):
+        raise ValueError(
+            f"provider catalog {provider!r} parallel suppression contract is not boolean")
+    return value
+
 # reasoning-effort / thinking-support in [models.X] seed the keeper turn's
 # reasoning controls (Runtime_inference.thinking_support_of_runtime_id ->
 # keeper_turn_driver.attempt_inference_policy). Emit them only where the
@@ -380,9 +403,8 @@ def is_official_client(provider: str) -> bool:
 #   enable_thinking=false reaches
 #   backend_anthropic.validate_thinking_controls, which rejects
 #   reasoning_effort + enable_thinking=false outright).
-# - openai: chat-completions carries reasoning_effort only under the
-#   reasoning_effort thinking-control dialect, which the rendered
-#   [models.X.capabilities] block declares.
+# - openai: the canonical openai-responses provider and its scoped model row
+#   declare the reasoning_effort dialect.
 # - kimi: capabilities_base"kimi" declares thinking_control_format =
 #   No_thinking_control, so any reasoning_effort is rejected by
 #   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
@@ -527,10 +549,11 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     if not provider or not model_alias:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
     pcfg = PROVIDERS[provider]
+    runtime_provider = pcfg.get("runtime_provider", provider)
     # The binding is named by a slug; the wire name stays in api-name.
     # See model_binding_id.
     binding_id = model_binding_id(model_alias)
-    runtime_id = f"{provider}.{binding_id}"
+    runtime_id = f"{runtime_provider}.{binding_id}"
     if is_official_client(provider) and effort not in CLAUDE_CODE_EFFORTS:
         raise ValueError(
             f"effort {effort!r} is not admitted by Claude Code; "
@@ -540,6 +563,12 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             f"arm {arm} requires disabling parallel tool calls, but the "
             f"{provider} runtime cannot carry that request policy; "
             "use an HTTP runtime for arms b, c, d")
+    suppression = provider_parallel_suppression_contract(runtime_provider)
+    if not spec["parallel"] and not suppression:
+        raise ValueError(
+            f"arm {arm} requires disabling parallel tool calls, but provider "
+            f"{runtime_provider!r} has no catalog-declared suppression contract; "
+            "use arm e or later with this provider")
 
     # Before anything is written: a lookup that fails must not leave a
     # half-rendered config directory behind.
@@ -592,14 +621,8 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, task_skills))
         return root
 
-    # OpenAI chat-completions carries effort only when the model row declares
-    # the reasoning_effort thinking-control dialect
-    # (reasoning_dialect.validate_request_control_inputs:
-    # Chat_completions + Reasoning_effort is the admitted pair).
-    # What each provider needs is declared on its own entry above, beside the
-    # observation that put it there. Read here rather than re-derived from the
-    # protocol: a name in a branch is a classifier, and this file already has
-    # one place that knows which provider is which.
+    # Provider-specific overrides live on the provider entry above. Read them
+    # here rather than deriving capabilities from the HTTP protocol.
     thinking_control = pcfg.get("thinking_control_line", "")
     max_output = pcfg.get("max_output_tokens")
     if max_output is None and openrouter is not None:
@@ -607,7 +630,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     max_output_lines = (
         f"max-output-tokens = {max_output}\n" if max_output is not None else "")
     runtime_toml = RUNTIME_TOML.format(
-        runtime_id=runtime_id, provider=provider, model_alias=model_alias,
+        runtime_id=runtime_id, provider=runtime_provider, model_alias=model_alias,
         binding_id=binding_id,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,

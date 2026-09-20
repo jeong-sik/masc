@@ -3,7 +3,7 @@ rfc: "librarian-lifecycle"
 title: "Librarian 생명주기 — 끝난 턴을 빠짐없이 순서대로 읽고, 읽은 위치를 남긴다"
 status: Draft
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 author: vincent
 supersedes: []
 superseded_by: null
@@ -14,8 +14,9 @@ implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031"]
 # RFC: Librarian 생명주기
 
 - 상태: Draft
-- 작성: 2026-09-18, 고침: 2026-09-19. 코드는 origin/main `84fb520c34`, 실측은 작성일 라이브 `<base-path>/.masc`. 뒤에 더한 실측은 문장마다 잰 날을 적었다.
+- 작성: 2026-09-18, 고침: 2026-09-20. 코드는 origin/main `84fb520c34`, 실측은 작성일 라이브 `<base-path>/.masc`. 뒤에 더한 실측은 문장마다 잰 날을 적었다.
 - 관련: 창 RFC(`keeper-context-window-in-tokens`) §13 개정 Draft #37008, Memory OS RFC(`memory-os-bounded-context-and-librarian-curator`), RFC-0456, RFC-0363, 이슈 #37004·#36979
+- 구현 상태(2026-09-20, main `3affdf3463`): 턴 끝 기록과 진행 파일 저장소, 순수 범위 선택 함수, 읽기 전용 오프라인 replay 하네스까지 들어왔다. 하네스는 실제 턴 끝 기록과 checkpoint에 범위 선택 규칙을 적용하지만 진행 위치는 메모리에서만 옮기고 아무 파일도 쓰지 않는다. 현재 Keeper/server의 Librarian 회차는 진행 파일을 읽거나 쓰지 않는다. §4의 서버 루프와 §4.9의 밀림 표시는 §8의 4~6단계 계획이다. 현재 서버 동작은 §2를 따르며, 이 구분은 #37104에서 추적한다.
 
 ## 읽기 전에 — 말의 뜻
 
@@ -50,7 +51,7 @@ Keeper
 | facts | Keeper 의 기억 항목들. 파일 하나(스냅숏)에 전부 들어 있고, Keeper 턴의 첫 요청에 전부 실린다 | `<keeper>.memory-current.json`, `Memory_os_recall` 블록 |
 | 받은 일 | Keeper 에게 들어왔고 아직 처리되지 않은 요청들 | working-context 의 `sources` |
 | 받은 일 정리 | 받은 일을 묶어 맥락과 다음 할 일을 적은 것 | `working_contexts`, pocket |
-| 읽은 위치 | Librarian 이 이력의 어디까지 읽었는가. atom 번호다 | `<keeper>.librarian-progress.json` |
+| 읽은 위치 | Librarian 이 이력의 어디까지 읽었는가. atom 번호다 | `keepers/<keeper>/librarian-progress.json` (선택한 cluster runtime root 아래) |
 | 창이 보는 위치 | Keeper 요청이 이력의 어디서부터 실리는가. 지금 코드의 `front` | §7 (라) |
 | 밀림 | 끝났는데 아직 안 읽은 턴이 있는 상태. 그 범위가 밀린 구간이다 | |
 
@@ -109,7 +110,7 @@ trace 하나에 atom 이 112개 쌓여 있고, 사람이 rondo 에게 말을 걸
 
 ```mermaid
 flowchart TD
-  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Ledger, Turn_record, Unfinished_turn, Whole_history 순으로 복원한다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
+  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Ledger, response-observed Turn_record, Whole_history 순으로 복원한다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
   B --> C["finalize: checkpoint 저장<br/>librarian_messages 는 checkpoint 의 메시지 전부"]
   C --> D{"librarian_config_state 가 Enabled 인가"}
   D -->|"아니오"| X0["끝. 기록 없음"]
@@ -166,9 +167,11 @@ Keeper 는 다음 턴의 첫 요청에서 facts 전부를 `Memory OS Recall` 블
 
 놓친 턴의 메시지는 checkpoint 에 남아 있다. 그래서 다음 회차의 "맨 뒤 72개"에 들어오면 읽히고, 못 들어오면 영영 읽히지 않는다. 어느 쪽이었는지는 어디에도 남지 않는다. 읽은 위치가 없으므로 창은 Librarian 에게 물을 것이 없다.
 
-**이 스택(1~2b)이 어디까지 닫는가** (09-19 확인). 일곱 자리 **전부 정보는 더 이상 잃지 않는다.** 턴 끝 줄은 checkpoint 저장 바로 뒤, 큐·레인·owner 를 건드리기 **전에** 조건 없이 쓴다(`keeper_agent_run_finalize_response.ml`). 그래서 L2·L4 처럼 제출 쪽이 거절해도 기록은 남는다. L1·L3 의 덮어쓰기는 append-only 파일이라 일어나지 않는다. L5 는 매 턴 줄이 남으니 나중 회차가 위치부터 따라잡는다. L6 은 위치가 `Read`·`Baseline` 에서만 움직이고 그것도 회차가 배운 것을 저장한 뒤라는 계약이다(`keeper_librarian_range.mli` 의 `progress_after`). L7 은 둘 다 파일이라 재시작을 넘는다.
+**이 스택(1~3)에 들어온 것** (09-20 확인). checkpoint 저장 결과를 확인한 뒤, Librarian에 턴 내용을 넘기기 전에 턴 끝 기록을 쓴다(`keeper_agent_run_finalize_response.ml`). 쓰기가 성공한 줄은 L2·L4의 제출 거절이나 L1·L3의 제출 덮어쓰기와 별개로 파일에 남는다. 진행 파일 저장소와 순수 범위 선택 함수도 있다. 공개 실행 파일 `masc-librarian-replay`는 `select`·`slice`·`progress_after`를 실제 턴 끝 기록과 checkpoint에 반복 적용한다. 다만 읽기 전용 오프라인 하네스라 진행 위치를 메모리에서만 옮기고 진행 파일·턴 끝 기록·checkpoint를 쓰지 않는다. 이 함수들을 부르는 Keeper/server runtime 소비자와 진행 파일 read/write 루프는 아직 없다. `progress_after`는 다음 위치를 계산하는 함수이며, 회차의 기억 저장 성공이나 진행 파일 쓰기를 실행하지 않는다.
 
-**기계는 하나도 안 지웠다.** cadence, 1칸, 대기 칸은 4단계와 5단계가 지운다. 지금 스택이 사는 것은 "잃지 않음"이지 "안 도는 자리를 없앰"이 아니다.
+**현재 회차가 읽는 것은 여전히 최근 메시지 창이다.** 턴 끝 클로저 한 칸과 memory lane의 대기 한 칸을 거쳐, `prompt_input_for_librarian`이 `max_messages × cadence_turns`만큼 뒤에서 고른다. 성공과 `Error` 결과로 끝난 회차는 cadence 카운터를 초기화한다. 취소·예외·Eio 실행 환경 누락은 이 초기화를 거치지 않는다. `attempt_remembered`는 저장 성공을 확인하지 않고 시도한 것으로 표시한다. 따라서 L5의 건너뛴 턴 따라잡기, L6의 저장 실패 후 같은 범위 재시도, L7의 재시작 후 읽던 위치 복원은 현재 보장이 아니다. 턴 끝 파일이 남는 것만으로 뒤의 회차가 그 내용을 읽었다고 말할 수 없다.
+
+registry의 `Succeeded`는 facts의 `apply_disposition` 성공을 뜻한다. working context는 별도로 저장하며 그 실패가 facts 저장을 막지 않는다. 이 성공 표시는 진행 파일 전진을 뜻하지 않는다. §8의 4단계에서 루프를 연결하고 성공한 저장 뒤에만 위치를 쓰는지 검증하며, 5단계에서 cadence·1칸·대기 칸을 지운다. 그 전에는 L1~L7의 기록 기반 전달을 완료했다고 표시하지 않는다.
 
 **L3 은 고장이 아니라 부하의 표시다**(09-19 실측). 대기 칸 덮어쓰기(`coalesced latest snapshot (lane=librarian)`)를 날짜별로 세면 이렇다.
 
@@ -363,7 +366,11 @@ flowchart TD
 
 기억 스냅숏과 턴 기록은 필드 이름이 정확히 일치해야 디코딩된다(`keeper_memory_os_current.ml` `of_json` 의 `exact_field_names_result`, `turn_record.ml` `of_json`). 스냅숏에 필드를 더하면 배포와 롤백 때 모든 Keeper 의 facts 가 격리된다. 턴 기록에 더하면 hard cut 이 배포 preflight, raw-trace 정리, 창의 첫 요청까지 번진다. 턴 기록은 보존 기간(`jsonl_retention_days`)이 지나면 정리 pass 가 지우기도 한다(`server_runtime_startup_maintenance.ml`). 그래서 둘 다 기존 저장소 밖에 둔다.
 
-1. **턴 끝 기록** `<keepers_dir>/<keeper>.turn-boundaries.jsonl`
+두 파일의 `keepers_dir`는 선택한 cluster의 `Workspace.keepers_runtime_dir`다.
+공유할 수 있는 operator config 디렉터리가 아니다. 기존 Keeper runtime 하위
+디렉터리를 사용하며 읽기와 경로 계산은 디렉터리를 만들지 않는다.
+
+1. **턴 끝 기록** `<keepers_dir>/<keeper>/turn-boundaries.jsonl`
    - 끝난 턴마다 한 줄: `kind`, `turn_ref`, 시작할 때의 이력, 위치, 끝난 시각. trace id 는 `turn_ref` 안에 있으므로 따로 적지 않는다. `kind` 는 둘이다: 끝난 턴이 쓰는 `turn_ended`, 이력에 atom 이 없는 것을 본 쪽이 쓰는 `history_restarted`(아래). 첫날부터 구분자를 둔 이유는 이 파일도 필드 이름이 정확히 일치해야 읽히기 때문이다. 구분자가 있어서 두 번째 종류의 줄을 variant 로 더했고, 기존 줄에 필드를 더하는 hard cut 을 피했다.
    - 위치는 넷 가운데 하나다. `Atom_history { end_atom; last_atom_digest }`: `end_atom` 은 atom 수(마지막 atom 의 다음 번호)이고 `last_atom_digest` 는 atom `end_atom - 1` 을 여는 메시지의 digest 다. `Empty_atom_history`: atom 이 0개다. `No_atom_history`: 공식 클라이언트라 Agent-Core checkpoint 가 없다. `Stale_noop`: Agent-Core 턴인데 저장이 stale no-op 이었다(더 새 writer 가 파일을 쥐고 있었다). 그 턴의 메시지는 durable 이력에 없으므로 읽을 범위가 없는 줄이다. 줄을 빼지 않고 남기는 이유는 밀린 턴 수를 줄 수로 세기 때문이다.
    - 위치는 저장이 돌려준 checkpoint 로 계산한다. 저장은 그 턴의 꼬리를 자르므로(`keeper_replay_checkpoint.ml`) 런타임이 돌려준 checkpoint 로 계산하면 디스크와 어긋난다. 끝의 저장을 건너뛰는 턴도 있다. 턴 도중의 저장이 이미 같은 checkpoint 를 저장했으면 끝에서 다시 저장하지 않고(`keeper_agent_run_finalize_response.ml` 의 `Reused`) 그 checkpoint 로 계산한다. 디스크를 다시 읽지는 않는다. 그 저장과 줄 사이에 `keeper_clear` 가 끼면 줄은 디스크에 없는 이력을 말하게 되고, §4.4 의 2a 가 그 줄을 거른다.
@@ -387,7 +394,7 @@ flowchart TD
    - 어휘는 기존 `Runtime_model_input_tail_window.atom_opening_digest` 를 그대로 쓴다. 창 조립의 `project_from_atom ~first_atom` 과 같은 단위다.
    - 턴의 시작은 적지 않는다. 직전 턴의 끝이 곧 시작이다. `demote_before` 는 resume·HITL 턴에서 안전한 하한이 아니다(그 턴들은 user 메시지가 이미 checkpoint 에 들어간 채로 시작한다).
    - 줄을 지우는 일은 이 RFC 의 범위가 아니다. 지난 이력의 줄과 이미 지나간 재시작 줄은 쌓이기만 한다. 2단계에서 파일 읽는 비용을 재고, 지우기로 하면 진행 파일의 줄 수(아래)와 재시작 줄을 같은 잠금 아래에서 같이 다룬다. 크기나 줄 수 문턱은 두지 않는다.
-2. **진행 파일** `<keepers_dir>/<keeper>.librarian-progress.json`
+2. **진행 파일** `<keepers_dir>/<keeper>/librarian-progress.json`
    - 읽은 위치: trace id, `end_atom`, 그 자리 atom 의 digest. 줄을 가리키지 않고 값을 갖는다(§4.4 의 2).
    - 읽은 위치를 옮길 때, 그 회차가 checkpoint 를 읽기 **전에** 읽은 턴 끝 기록에서 개행으로 끝난 줄의 수도 같이 적는다. §4.4 의 3c 가 "위치를 옮긴 뒤에 더해진 줄"을 가리는 데 쓴다. 진행 파일을 쓸 때 다시 센 값을 적으면 안 된다. 회차가 도는 동안 더해진 표식을 보지도 않고 지나간 것으로 치게 된다. 파일에 더해진 순서는 턴 순서는 아니지만 줄이 보이기 시작한 순서이기는 하다. 3c 가 묻는 것은 뒤쪽이다.
    - 쓰는 곳은 그 Keeper 의 Librarian 루프 하나다.
@@ -531,7 +538,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 | 1d | checkpoint 읽기의 결과와 실패 원인을 `run_turn` 까지 가져온다. 읽기·파싱 실패는 턴을 시작하지 않는다. 명시적인 버전 교체로 시작한 턴은 시작할 때 줄을 쓰지 않고, 처음 받아들여진 턴 도중 저장 바로 뒤에 재시작 줄을 쓴다(§4.6). 줄 종류의 이름은 읽는 쪽의 말로 정한다: `history_restarted` | 읽는 곳이 없다. 4단계 전에 있어야 한다 |
 | 2a | 진행 파일 저장소. purge 에 등록한다 | 부르는 곳이 없다 |
 | 2b | 순수 함수 둘(`keeper_librarian_range.ml` 의 `select`, `slice`): (턴 끝 기록, 진행 파일, checkpoint)에서 다음에 읽을 범위를 고르기, (checkpoint, 범위)에서 메시지를 자르기. §4.4 의 1b·2·2a·2c·3·3a·3c·3d·5 를 여기서 테스트한다. 회차가 실패하고 다시 도는 흐름(I2·I3·I5)은 루프가 있어야 하므로 4단계에서 테스트한다 | 부르는 곳이 없다 |
-| 3 | 하네스(§9) | 저장소 밖 실행 |
+| 3 | 읽기 규칙 replay 하네스(§9). 공개 실행 파일 `masc-librarian-replay`가 실제 턴 끝 기록과 checkpoint를 읽어 범위·회차·중복을 재며, 진행 위치는 메모리에서만 옮기고 파일은 쓰지 않는다. 모델 호출과 출력·연속성 평가는 아직 하지 않는다 | 읽기 전용 저장소 밖 실행 |
 | 4 | 서버 소유 루프. 회차는 지금의 프롬프트, 스키마, 레인, 저장 경로를 그대로 쓰고 입력만 §4.7 로 바꾼다. 같은 PR 에서 Keeper 턴 끝 경로의 제출을 끈다. #36979·#37004·#37021 이 닫히고 §10 의 2 와 3 이 정해진 뒤에 넣는다 | 두 경로가 같이 돌면 같은 턴을 두 번 읽는다. 그래서 한 PR 에서 바꾼다 |
 | 5 | 죽은 것을 지운다: cadence, 72, 턴 끝 1칸(`remember_turn`·`attempt_remembered`), memory lane 의 Librarian 예약과 lifecycle 결합(30초 대기 포함), 그 소비자들(설정, 런타임 설정 등록, health JSON, TUI·대시보드 디코더, 저널의 `cadence_deferred`, 그 값을 핀한 테스트) | 4 와 같은 스택으로 이어서 머지한다 |
 | 6 | 밀림 표시(§4.9) | |
@@ -558,7 +565,7 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
 
 다루지 않는 것: 한 회차가 얼마나 가져가는가(3a)와 어느 trace 를 읽는가(1b). 둘 다 atom 을 잃는지가 아니라 회차 수와 헛 정지 수를 정한다.
 
-**하네스로 재는 것.** 1단계가 쌓은 실제 턴 끝으로 라이브 checkpoint 를 잘라 지금 프롬프트를 오프라인으로 돌린다.
+**하네스로 재는 것.** 현재 `masc-librarian-replay`는 1단계가 쌓은 실제 턴 끝과 라이브 checkpoint를 읽어 범위 선택, 회차 수, atom 중복을 모델 없이 잰다. 진행 파일을 읽거나 쓰지 않고 한 실행 안에서만 위치를 옮긴다. 아래의 모델 출력·연속성 측정은 이 범위 replay 위에 지금 프롬프트를 오프라인으로 돌리는 다음 하네스 단계다.
 
 | 재는 것 | 뜻 |
 |---|---|

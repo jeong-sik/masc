@@ -1987,6 +1987,16 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         ; measurement = Turn_record.Wire_shape
         ; front_atom_digest
         }
+  ; response_observed_model_input =
+      Some
+        { runtime_profile = "kimi_coding.kimi-k3"
+        ; window =
+            { transmitted_atoms = transmitted
+            ; total_atoms
+            ; measurement = Turn_record.Wire_shape
+            ; front_atom_digest
+            }
+        }
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }

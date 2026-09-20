@@ -208,12 +208,25 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
          ~detail
          ()
      with
-     | Keeper_provider_runtime_boundary.Provider_timeout _ ->
+     | Keeper_provider_runtime_boundary.Provider_timeout { source; phase } ->
+       let source_label =
+         match source with
+         | Agent_core_api -> "API"
+         | Agent_core_provider -> "Provider"
+       in
+       let phase_suffix =
+         match phase with
+         | None -> ""
+         | Some phase ->
+           " during " ^ Keeper_provider_runtime_boundary.timeout_phase_label phase
+       in
        Some
          { blocker_class = "provider_runtime_error"
          ; summary =
              Printf.sprintf
-               "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
+               "%s timeout%s (%s): %s; keeper can soft-fail and retry with provider cooldown."
+               source_label
+               phase_suffix
                code
                detail
          }

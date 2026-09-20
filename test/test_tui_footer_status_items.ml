@@ -44,13 +44,24 @@ let test_action_text_is_not_dropped_as_a_key () =
   List.iter (fun view ->
     let state = action_state view in
     let row = render_action state 98 in
-    check_bool "the complete action survives the 100-column surface footer" true
-      (contains ~needle:action_message row);
+    check_bool "the action diagnosis survives the 100-column surface footer" true
+      (contains ~needle:"skill \"reviewed-skill\": composition name \"new-skill\"" row);
+    List.iter (fun key ->
+      check_bool ("the diagnosis preserves " ^ key) true
+        (contains ~needle:(Masc_tui_theme.strip_sgr key) row))
+      (Masc_tui_footer.undroppable_keys (Masc_tui_keys.footer_hints view));
+    check_bool "a clipped diagnosis is explicit" true (contains ~needle:"…" row);
+    check_string "rendering keeps the complete outcome in state" action_message
+      (Option.get state.last_action |> fst);
     check_at_most_cells "the action respects the existing cell budget" 98 (String.trim row);
     check_one_line "action footer stays one line" row;
     let narrow = render_action state 60 in
     check_bool "a narrower row retains the start of the actual action" true
-      (contains ~needle:"skill \"reviewed-skill\":" narrow);
+      (contains ~needle:"skill " narrow);
+    List.iter (fun key ->
+      check_bool ("the narrow diagnosis preserves " ^ key) true
+        (contains ~needle:(Masc_tui_theme.strip_sgr key) narrow))
+      (Masc_tui_footer.undroppable_keys (Masc_tui_keys.footer_hints view));
     check_bool "a narrower row marks the cut" true (contains ~needle:"…" narrow);
     check_at_most_cells "narrow action footer remains bounded" 60 (String.trim narrow))
     [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
@@ -116,6 +127,34 @@ let test_action_with_no_remaining_cells_marks_the_omission () =
       (contains ~needle:"…?" row);
     check_at_most_cells "zero-room footer remains bounded" width (String.trim row))
     [ 37, true; 36, false ]
+
+let test_complete_action_fits_without_an_omission_marker () =
+  let notice = "press d again to stop k" in
+  let status = [ Masc_tui_footer.Keeper_action_armed
+      { key = "d"; action = "stop"; keeper = "k" } ] in
+  List.iter (fun action ->
+    let expected = "  " ^ notice ^ "  " ^ action ^ "  q:quit\n" in
+    let width = Masc_tui_message_layout.display_width (String.trim expected) + 2 in
+    List.iter (fun extra ->
+      let rendered = Masc_tui_footer.line ~action_text:action ~status
+          ~dim:"" ~reset:"" ~max_cells:(width + extra) ~port:0 ~hints:"q:quit" () in
+      check_string "nothing omitted when the whole row fits" expected rendered)
+      [ 0; 1; 2; 3 ]) [ "x"; "done"; "확인" ]
+
+let test_long_action_without_conflicts_keeps_pinned_keys () =
+  List.iter (fun view ->
+    let state = action_state view in
+    state.last_action <- Some (String.make 160 'x', Unix.gettimeofday ());
+    List.iter (fun width ->
+      let rendered = render_action state width in
+      List.iter (fun key ->
+        check_bool ("long action preserves " ^ key) true
+          (contains ~needle:(Masc_tui_theme.strip_sgr key) rendered))
+        (Masc_tui_footer.undroppable_keys (Masc_tui_keys.footer_hints view));
+      check_bool "action is visibly clipped" true (contains ~needle:"…" rendered);
+      check_bool "the outcome is still shown" true (contains ~needle:"xxxx" rendered);
+      check_at_most_cells "pinned keys and action stay bounded" width (String.trim rendered))
+      [ 60; 98 ]) [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
 
 let test_literal_search_status_survives_hint_fitting () =
   let prefix = "/  deploy note   (2) n/N" in
@@ -1133,6 +1172,10 @@ let tests =
           test_action_text_preserves_existing_conflict_priority
       ; Alcotest.test_case "action with no remaining cells marks its omission" `Quick
           test_action_with_no_remaining_cells_marks_the_omission
+      ; Alcotest.test_case "complete action fits without an omission marker" `Quick
+          test_complete_action_fits_without_an_omission_marker
+      ; Alcotest.test_case "long action without conflicts keeps pinned keys" `Quick
+          test_long_action_without_conflicts_keeps_pinned_keys
       ; Alcotest.test_case "literal search status survives hint fitting" `Quick
           test_literal_search_status_survives_hint_fitting
       ; Alcotest.test_case "a conflict notice leads the search marker" `Quick

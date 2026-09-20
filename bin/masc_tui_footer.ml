@@ -500,16 +500,32 @@ let rec fit_with_conflicts ?literal_prefix ~max_cells ~conflicts ~hints ~omissio
    carrying only [q:quit  ...?] where the refresh interval, the answering badge
    and the port all fit once the notice was gone. *)
 let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omissions statuses =
+  let prefix_with_action action =
+    match Option.to_list literal_prefix @ (if action = "" then [] else [ action ]) with
+    | [] -> None
+    | parts -> Some (String.concat "  " parts)
+  in
+  (* Try the complete outcome first. The existing fitter only adds its marker
+     after it actually gives up a key; reserving it ahead of this attempt can
+     hide an outcome even when the whole row fits exactly. *)
+  let complete =
+    let prefix = match action_text with
+      | None -> literal_prefix
+      | Some action -> prefix_with_action action in
+    fit_with_conflicts ?literal_prefix:prefix ~max_cells ~conflicts ~hints
+      ~omissions statuses
+  in
+  match complete with
+  | Some fitted -> fitted
+  | None ->
   let displayed_prefix, displayed_hints =
     match action_text with
     | None | Some "" -> literal_prefix, hints
     | Some action ->
       let shown, mark_omission =
-        match conflicts with
-        | [] -> action, false
-        | _ :: _ ->
           (* Existing warnings, search status and pinned keys keep their
-             space. Only the action uses the remaining cells. *)
+             space, including on rows without warnings. Only the action
+             uses the remaining cells. *)
           let reserved action_parts =
             body (String.concat "  "
               (List.map (fun conflict -> conflict.text) conflicts
@@ -524,10 +540,7 @@ let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omis
           shown, (shown = ""
             && Masc_tui_message_layout.display_width (reserved []) <= max_cells)
       in
-      let prefix = match Option.to_list literal_prefix
-          @ (if shown = "" then [] else [ shown ]) with
-        | [] -> None
-        | parts -> Some (String.concat "  " parts) in
+      let prefix = prefix_with_action shown in
       (* Mark a wholly omitted action when the marker itself fits; a marker
          must not displace the warning or its pinned keys either. *)
       prefix, (if mark_omission then hints ^ "  " ^ cut_marker else hints)
@@ -557,8 +570,8 @@ let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omis
     are preserved while the separately supplied hints are split into items.
     [action_text] is a transient outcome of an operator action. Existing
     conflicts, search status and pinned keys retain their space before that
-    outcome is cell-cut. With no conflicts, it follows the existing literal
-    prefix fallback, so it cannot disappear as a droppable key hint.
+    outcome is cell-cut. A complete outcome is attempted before reserving an
+    omission marker, and it cannot disappear as a droppable key hint.
     Key hints retain the row before status facts do. When the facts do not fit,
     whole typed items are omitted in this order: refresh interval, build, base
     path, live turn activity, port. Only an overlong surface-owned hint uses

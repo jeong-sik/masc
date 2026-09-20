@@ -11,9 +11,15 @@ type answer_context =
   ; unread : string
   }
 [@@deriving yojson]
-type case = { id : string; source : source_turn; context : answer_context }
+type case =
+  { id : string
+  ; source : source_turn
+  ; context : answer_context
+  ; question : string option
+  }
 [@@deriving yojson]
-type dataset = { synthetic : bool; cases : case list } [@@deriving yojson]
+type provenance = Synthetic [@@deriving yojson]
+type dataset = { provenance : provenance; cases : case list } [@@deriving yojson]
 
 type prompt = { system : string; user : string } [@@deriving yojson]
 type generation_request =
@@ -27,6 +33,7 @@ type text_response = { response_id : string; model : string; text : string }
 [@@deriving yojson]
 type generation = { request : generation_request; response : text_response }
 [@@deriving yojson]
+type question = Provided of string | Generated of generation [@@deriving yojson]
 type failed_generation =
   { request : generation_request
   ; error : string
@@ -56,15 +63,17 @@ type failed_judgment = { request : judge_request; error : string } [@@deriving y
 type progress =
   | Not_started
   | Question_failed of failed_generation
-  | Question_ready of generation
-  | Answer_failed of generation * failed_generation
-  | Answer_ready of generation * generation
-  | Judge_failed of generation * generation * failed_judgment
-  | Scored of generation * generation * judgment
+  | Question_ready of question
+  | Answer_failed of question * failed_generation
+  | Answer_ready of { question : question; answer : generation }
+  | Judge_failed of
+      { question : question; answer : generation; failure : failed_judgment }
+  | Scored of { question : question; answer : generation; judgment : judgment }
 [@@deriving yojson]
 type sample = { case : case; progress : progress } [@@deriving yojson]
 type t =
   { schema : string
+  ; provenance : provenance
   ; run_id : string
   ; started_at : string
   ; input_path : string
@@ -78,9 +87,12 @@ type t =
 
 [@@deriving yojson]
 
-let schema = "masc.librarian-continuity.synthetic.v1"
-let sha256 text = Digestif.SHA256.(to_hex (digest_string text))
+let schema = "masc.librarian-continuity.v1"
 let ( let* ) = Result.bind
+
+let question_text = function
+  | Provided text -> text
+  | Generated generation -> generation.response.text
 
 let question_prompt (source : source_turn) =
   { system =
@@ -158,7 +170,11 @@ let validate_cases cases =
           Error "Turn and read position must be nonnegative"
         else if String.trim case.source.text = "" then
           Error "The source turn must contain reference text"
-        else loop (case.id :: seen) rest
+        else
+          match case.question with
+          | Some question when String.trim question = "" ->
+              Error "A provided question must not be blank"
+          | None | Some _ -> loop (case.id :: seen) rest
   in
   match cases with
   | [] -> Error "At least one synthetic case is required"
@@ -166,21 +182,51 @@ let validate_cases cases =
 
 let parse_dataset json =
   let* dataset = dataset_of_yojson json in
-  if not dataset.synthetic then Error "This command accepts explicit synthetic datasets only"
-  else
-    let* () = validate_cases dataset.cases in
-    Ok dataset
+  let* () = validate_cases dataset.cases in
+  Ok dataset
 
 let of_yojson json =
   let* report = of_yojson json in
   if not (String.equal report.schema schema) then Error "Unknown continuity report schema"
   else
     let* () = validate_cases (List.map (fun sample -> sample.case) report.samples) in
-    let valid_sample sample =
+    let validate_sample sample =
+      let validate_question question =
+        match sample.case.question, question with
+        | None, Generated _ -> Ok ()
+        | Some expected, Provided actual when String.equal expected actual -> Ok ()
+        | Some _, Provided _ ->
+            Error "Continuity question text does not match its provided question"
+        | None, Provided _ | Some _, Generated _ ->
+            Error "Continuity question origin does not match its sample"
+      in
+      let* () =
+        match sample.progress with
+        | Question_ready question | Answer_failed (question, _)
+        | Answer_ready { question; _ } | Judge_failed { question; _ }
+        | Scored { question; _ } -> validate_question question
+        | Not_started -> Ok ()
+        | Question_failed _ ->
+            (match sample.case.question with
+             | None -> Ok ()
+             | Some _ -> Error "A provided question cannot have a generation failure")
+      in
       match sample.progress with
-      | Scored (_, _, judgment) -> valid_probability judgment.probability
+      | Scored { judgment; _ } ->
+          if not (String.equal judgment.request.question_id sample.case.id) then
+            Error "Continuity judgment request does not match its sample ID"
+          else if not (valid_probability judgment.probability) then
+            Error "Continuity report contains an invalid Noul probability"
+          else Ok ()
+      | Judge_failed { failure; _ } ->
+          if String.equal failure.request.question_id sample.case.id then Ok ()
+          else Error "Continuity judgment request does not match its sample ID"
       | Not_started | Question_failed _ | Question_ready _ | Answer_failed _
-      | Answer_ready _ | Judge_failed _ -> true
+      | Answer_ready _ -> Ok ()
     in
-    if List.for_all valid_sample report.samples then Ok report
-    else Error "Continuity report contains an invalid Noul probability"
+    let* () =
+      List.fold_left
+        (fun result sample -> let* () = result in validate_sample sample)
+        (Ok ()) report.samples
+    in
+    Ok report

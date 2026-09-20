@@ -16326,11 +16326,12 @@ let main
           state.runtime_params_notice <- Some (true, "Reset " ^ key ^ " to its default");
           launch_runtime_params_load state ~mailbox:async_messages)
   in
+  let skill_template_placeholder_name = "new-skill" in
   let skill_template ~composition =
     if composition
     then
-      {|---
-name: new-skill
+      Printf.sprintf {|---
+name: %s
 description: Describe the repeatable job this Skill performs.
 ---
 
@@ -16338,10 +16339,11 @@ description: Describe the repeatable job this Skill performs.
 
 This preset runs one no-argument tool. Add nodes and dependencies after the
 first preview succeeds. Change execution to "async" for durable background work.
+Replace the frontmatter name and composition name below with the same unique name.
 
 ```toml composition
 [[compositions]]
-name = "new-skill"
+name = %S
 description = "Describe the repeatable job this Skill performs."
 execution = "inline"
 
@@ -16352,10 +16354,10 @@ tool = "keeper_lane_status"
 kind = "literal"
 value = {}
 ```
-|}
+|} skill_template_placeholder_name skill_template_placeholder_name
     else
-      {|---
-name: new-skill
+      Printf.sprintf {|---
+name: %s
 description: Describe when an agent should use this Skill.
 ---
 
@@ -16363,21 +16365,7 @@ description: Describe when an agent should use this Skill.
 
 Write the durable procedure here. The body stays out of the eager tool context
 and is loaded on demand through keeper_skill.
-|}
-  in
-  let skill_name_from_source source_text =
-    source_text
-    |> String.split_on_char '\n'
-    |> List.find_map (fun line ->
-      let prefix = "name:" in
-      if String.starts_with ~prefix line
-      then
-        let value =
-          String.sub line (String.length prefix) (String.length line - String.length prefix)
-          |> String.trim
-        in
-        if String.equal value "" then None else Some value
-      else None)
+|} skill_template_placeholder_name
   in
   let handle_skill_create ~composition () =
     let host = server_peer_host in
@@ -16399,11 +16387,29 @@ and is loaded on demand through keeper_skill.
           | Error abort ->
             report_editor_abort state ~action:"Skill creation" abort
           | Ok source_text ->
-            (match skill_name_from_source source_text with
-             | None -> report_action state "error" "Skill template has no name frontmatter"
-             | Some "new-skill" ->
-               report_action state "error" "change new-skill to a real unique name before creating"
-             | Some package_id ->
+            (match Agent_core.Skill_document.decode_authored source_text with
+             | Agent_core.Skill_document.Unloadable diagnostics ->
+               report_action state "error"
+                 (String.concat "; "
+                    (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics))
+             | Agent_core.Skill_document.Loaded document
+               when String.equal document.name skill_template_placeholder_name ->
+               report_action state "error"
+                 (Printf.sprintf "change %s to a real unique name before creating"
+                    skill_template_placeholder_name)
+             | Agent_core.Skill_document.Loaded document ->
+               let package_id = document.name in
+               (* No directory exists yet, so its name is compared with itself.
+                  Catalog validation also checks composition names in the body. *)
+               (match Masc.Keeper_skill_catalog.validate_authored_source
+                        ~directory:package_id source_text with
+                | Error (Masc.Keeper_skill_catalog.Source_too_large { bytes; max_bytes }) ->
+                  report_action state "error"
+                    (Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)"
+                       bytes max_bytes)
+                | Error (Masc.Keeper_skill_catalog.Invalid_document error) ->
+                  report_action state "error" (Masc.Keeper_skill_catalog.error_to_string error)
+                | Ok _ ->
                (match
                   Masc_tui_http.post_skill_editor_create
                     ~host
@@ -16460,7 +16466,7 @@ and is loaded on demand through keeper_skill.
                           "%s/%s: create receipt carried no status"
                           source_id
                           package_id));
-                  launch_tools_load state ~mailbox:async_messages))))
+                  launch_tools_load state ~mailbox:async_messages)))))
   in
   let handle_skill_evidence () =
     match selected_tools_skill_profile state with

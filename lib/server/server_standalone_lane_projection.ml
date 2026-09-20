@@ -417,6 +417,30 @@ let json_string_opt = function
   | Some value -> `String value
 ;;
 
+type jev_lane_readiness =
+  | Jev_off
+  | Jev_configured of { model : string }
+  | Jev_cli_only
+  | Jev_lane_unavailable
+
+let jev_lane_readiness configuration = function
+  | Typesafeai_config.Off -> Jev_off
+  | Typesafeai_config.Configured { model } ->
+    (match configuration with
+     | Configured { admitted_slots = _ :: _; _ } -> Jev_configured { model }
+     | Configured { admitted_slots = []; cli_slots = _ :: _; _ } -> Jev_cli_only
+     | Configured { admitted_slots = []; cli_slots = []; _ }
+     | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
+;;
+
+let jev_readiness_json = function
+  | Jev_off -> `Assoc [ "state", `String "off" ]
+  | Jev_cli_only -> `Assoc [ "state", `String "cli_only" ]
+  | Jev_lane_unavailable -> `Assoc [ "state", `String "lane_unavailable" ]
+  | Jev_configured { model } ->
+    `Assoc [ "state", `String "configured"; "model", `String model ]
+;;
+
 let terminal_of_exact_outcome = function
   | Exact_lane_run_registry.Succeeded -> Succeeded
   | Exact_lane_run_registry.Cancelled -> Cancelled
@@ -566,6 +590,7 @@ let slot_counts runs =
 let lane_json
       ~now:_
       ~resolve_lane
+      ~jev_readiness
       (all_runs : observed_run list)
       (spec : lane_spec)
   =
@@ -637,8 +662,15 @@ let lane_json
       then Some (run.started_at +. terminal.elapsed_s)
       else None)
   in
+  let jev_field =
+    if
+      String.equal spec.lane_id
+        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention)
+    then [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
+    else []
+  in
   `Assoc
-    [ "lane_id", `String spec.lane_id
+    ([ "lane_id", `String spec.lane_id
     ; "label", `String spec.label
     ; "purpose", `String spec.purpose
     ; "required", `Bool spec.required
@@ -669,11 +701,13 @@ let lane_json
                 `Assoc [ "slot_id", `String slot_id; "count", `Int count ])
              (slot_counts runs)) )
     ]
+     @ jev_field)
 ;;
 
 let snapshot_json_with
       ~now
       ~resolve_lane
+      ~jev_readiness
       ~exact_runs_total
       ~exact_runs
       ~verification_runs
@@ -687,7 +721,7 @@ let snapshot_json_with
   let exact_run_projection_count = List.length exact_runs in
   let exact_run_source_total = max exact_run_projection_count exact_runs_total in
   `Assoc
-    [ "schema", `String "masc.standalone_llm_lanes.v1"
+    [ "schema", `String "masc.standalone_llm_lanes.v2"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "observed_at_unix", `Float now
     ; "observation_only", `Bool true
@@ -695,7 +729,11 @@ let snapshot_json_with
     ; "exact_run_source_total", `Int exact_run_source_total
     ; ( "exact_run_projection_truncated"
       , `Bool (exact_run_projection_count < exact_run_source_total) )
-    ; "lanes", `List (List.map (lane_json ~now ~resolve_lane all_runs) lane_specs)
+    ; ( "lanes"
+      , `List
+          (List.map
+             (lane_json ~now ~resolve_lane ~jev_readiness all_runs)
+             lane_specs) )
     ]
 ;;
 
@@ -819,6 +857,7 @@ let snapshot_json () =
   snapshot_json_with
     ~now:(Time_compat.now ())
     ~resolve_lane
+    ~jev_readiness:(Typesafeai_config.readiness ())
     ~exact_runs_total:(List.length exact_run_source)
     ~exact_runs
     ~verification_runs:

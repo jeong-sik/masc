@@ -10,10 +10,22 @@ let default_model = "jev-latest"
 let api_key () = Env_config_core.trim_opt (Env_config_core.raw_value_opt "TYPESAFEAI_API_KEY")
 
 let endpoint () =
-  Env_config_core.get_string ~default:default_endpoint "MASC_TYPESAFEAI_ENDPOINT"
+  match
+    Env_config_core.trim_opt
+      (Env_config_core.raw_value_opt "MASC_TYPESAFEAI_ENDPOINT")
+  with
+  | Some endpoint -> endpoint
+  | None -> default_endpoint
 ;;
 
-let model () = Env_config_core.get_string ~default:default_model "MASC_TYPESAFEAI_MODEL"
+let model () =
+  match
+    Env_config_core.trim_opt
+      (Env_config_core.raw_value_opt "MASC_TYPESAFEAI_MODEL")
+  with
+  | Some model -> model
+  | None -> default_model
+;;
 
 (* The variable turns the lane off; it cannot turn it on without a key, and a
    key alone is enough to opt in. [get_bool] reads the same spellings this
@@ -31,6 +43,9 @@ let lane_api_key () =
   if not (Env_config_core.get_bool ~default:true "MASC_TYPESAFEAI_ENABLED")
   then Error Lane_disabled
   else match api_key () with Some key -> Ok key | None -> Error Missing_api_key
+;;
+
+let is_enabled () = Result.is_ok (lane_api_key ())
 ;;
 
 (* One switch per gate. A key turns the lane on; each gate can still be
@@ -51,4 +66,12 @@ let absorb_gate_api_key () =
     if Env_config_core.get_bool ~default:false "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED"
     then Ok key
     else Error Absorb_gate_disabled
+;;
+
+type readiness =
+  | Off
+  | Configured of { model : string }
+
+let readiness () =
+  if is_board_attention_enabled () then Configured { model = model () } else Off
 ;;

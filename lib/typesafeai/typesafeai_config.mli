@@ -16,6 +16,19 @@ val absorb_gate_api_key : unit -> (string, unavailable_reason) result
     global switch, trimmed key, then the absorb-gate switch. The lane defaults
     to on when a key is present; the absorb gate requires explicit opt-in. *)
 
+val is_enabled : unit -> bool
+(** Whether the lane has a key and its global switch permits use. Also used
+    by the continuity measurement CLI, independently of either gate switch. *)
+
+type readiness =
+  | Off
+  | Configured of { model : string }
+
+val readiness : unit -> readiness
+(** Credential-free Board attention readiness for operator projections. [Off]
+    covers a disabled Board gate or lane and a missing key; [Configured] carries
+    only the configured model, never the API key. *)
+
 val is_board_attention_enabled : unit -> bool
 (** A key is present and neither [MASC_TYPESAFEAI_ENABLED] nor
     [MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED] turns it off: the Board judgment
@@ -25,7 +38,9 @@ val api_key : unit -> string option
 (** [TYPESAFEAI_API_KEY], trimmed. [None] when unset or blank. *)
 
 val endpoint : unit -> string
-(** [MASC_TYPESAFEAI_ENDPOINT], else {!default_endpoint}. *)
+(** Trimmed [MASC_TYPESAFEAI_ENDPOINT], else {!default_endpoint} when absent or
+    blank. This is the endpoint used by the HTTP client. *)
 
 val model : unit -> string
-(** [MASC_TYPESAFEAI_MODEL], else {!default_model}. *)
+(** Trimmed [MASC_TYPESAFEAI_MODEL], else {!default_model} when absent or
+    blank. *)

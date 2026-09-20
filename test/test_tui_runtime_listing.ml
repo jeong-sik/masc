@@ -5,7 +5,7 @@ let expect label wanted actual = Alcotest.(check int) label wanted actual
 let runtime id : Masc.Tui_decode.runtime_option =
   { ro_id = id; ro_provider = "provider"; ro_model = "model";
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
-    ro_max_output_tokens = Some 8192; ro_is_local = false;
+    ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
     ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None }
 
@@ -326,6 +326,118 @@ let test_search_follows_the_runtime_mode () =
   Alcotest.(check (option (list string))) "runtime detail has no list cursor" None
     (surface_row_texts state Runtime)
 
+(* Bindings of one model that differ only in reasoning effort share provider,
+   model and context, so their ids are the only text that tells them apart.
+   At a fixed 24-cell target column both ids below drew as
+   [claude_code.claude-sonn…]. *)
+let test_picker_target_column_fits_the_longest_id () =
+  let effort_pair =
+    [ Pick_model { (runtime "claude_code.claude-sonnet-5-low") with ro_model = "claude-sonnet-5" }
+    ; Pick_model { (runtime "claude_code.claude-sonnet-5-high") with ro_model = "claude-sonnet-5" }
+    ]
+  in
+  let longest = String.length "claude_code.claude-sonnet-5-high" in
+  let target, route = runtime_pick_column_widths ~cols:200 effort_pair in
+  expect "wide terminal: the target column holds the longest id" longest target;
+  expect "wide terminal: the route column gives up the room"
+    (Masc_tui_frame.inner_width ~cols:200
+     - runtime_pick_fixed_cells
+     - runtime_pick_tail_width ~cols:200 (List.hd effort_pair))
+    (target + route);
+  let target, route = runtime_pick_column_widths ~cols:80 effort_pair in
+  Alcotest.(check bool)
+    "narrow terminal: target keeps its floor"
+    true
+    (target >= runtime_pick_min_column_cells);
+  Alcotest.(check bool)
+    "narrow terminal: route keeps its floor"
+    true
+    (route >= runtime_pick_min_column_cells);
+  let target, _ = runtime_pick_column_widths ~cols:200 [ Pick_model (runtime "short") ] in
+  expect "short ids keep the floor" runtime_pick_min_column_cells target
+
+(* The row is the chrome, the two columns padded to their widths, and the
+   facts. Widening one part used to push the rest off the right edge, where
+   the frame cut it: a row carrying [effort medium] lost its [default]. Every
+   width the picker can pick has to leave the whole row inside the frame. *)
+let test_every_row_fits_the_frame () =
+  let items =
+    [ Pick_model
+        { (runtime "claude_code.claude-sonnet-5-high") with
+          ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.High
+        ; ro_is_default = true
+        }
+    ; Pick_model
+        { (runtime "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731") with
+          ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.Medium
+        ; ro_quota_exhausted = true
+        }
+    ; Pick_model (runtime "short")
+    ]
+  in
+  List.iter
+    (fun cols ->
+       let target, route = runtime_pick_column_widths ~cols items in
+       let widest_tail =
+         List.fold_left
+           (fun longest item -> max longest (runtime_pick_tail_width ~cols item))
+           0
+           items
+       in
+       let row = runtime_pick_fixed_cells + target + route + widest_tail in
+       Alcotest.(check bool)
+         (Printf.sprintf "%d columns: the row stays inside the frame" cols)
+         true
+         (row <= Masc_tui_frame.inner_width ~cols))
+    [ 80; 100; 120; 160; 200 ]
+
+(* The facts a narrow row drops, and the one it keeps. *)
+let test_narrow_rows_keep_the_fact_that_is_said_nowhere_else () =
+  let quota_row =
+    Pick_model
+      { (runtime "claude_code.claude-sonnet-5-high") with
+        ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.High
+      ; ro_quota_exhausted = true
+      }
+  in
+  let texts cols =
+    runtime_pick_visible_facts ~cols quota_row
+    |> List.map (fun (fact : runtime_pick_fact) -> fact.rpf_text)
+  in
+  Alcotest.(check (list string))
+    "a wide terminal says all three"
+    [ "[200k ctx]"; "[effort high]"; "[quota exhausted]" ]
+    (texts 200);
+  (* The cut point follows the frame, so the test asks what survived rather
+     than repeating the arithmetic. *)
+  match texts 80 with
+  | [ only ] ->
+    Alcotest.(check bool) "80 columns keeps the warning" true
+      (String.length only >= 6 && String.equal (String.sub only 0 6) "[quota");
+    expect "the kept fact spends the whole budget"
+      (runtime_pick_tail_budget ~cols:80)
+      (Masc_tui_message_layout.display_width only)
+  | facts ->
+    Alcotest.failf "80 columns kept %d facts, wanted the warning alone"
+      (List.length facts)
+
+(* The reasoning step is the last four cells of the id, and a head-keeping cut
+   drops exactly those: at 80 columns both bindings drew as
+   [claude_code.claude-sonn…]. *)
+let test_narrow_target_column_still_tells_the_variants_apart () =
+  let pair =
+    [ Pick_model (runtime "claude_code.claude-sonnet-5-low")
+    ; Pick_model (runtime "claude_code.claude-sonnet-5-high")
+    ]
+  in
+  let target, _ = runtime_pick_column_widths ~cols:80 pair in
+  let drawn id = Masc_tui_message_layout.fit_middle target id in
+  let low = drawn "claude_code.claude-sonnet-5-low" in
+  let high = drawn "claude_code.claude-sonnet-5-high" in
+  Alcotest.(check bool) "the two ids do not draw the same" true (not (String.equal low high));
+  Alcotest.(check bool) "the step survives the cut" true
+    (Masc_tui_message_layout.display_width high = target)
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
@@ -343,4 +455,12 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;
       Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
       Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
-      Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode]]
+      Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode;
+      Alcotest.test_case "picker target column fits the longest id" `Quick
+        test_picker_target_column_fits_the_longest_id;
+      Alcotest.test_case "every picker row fits the frame" `Quick
+        test_every_row_fits_the_frame;
+      Alcotest.test_case "narrow rows keep the quota warning" `Quick
+        test_narrow_rows_keep_the_fact_that_is_said_nowhere_else;
+      Alcotest.test_case "narrow target column tells the variants apart" `Quick
+        test_narrow_target_column_still_tells_the_variants_apart]]

@@ -493,6 +493,7 @@ module For_testing : sig
     request_view
 
   val carried_front :
+    ledger:Keeper_model_input_ledger.t option ref ->
     keeper_name:string ->
     runtime_id:string ->
     session_id:string ->
@@ -501,14 +502,26 @@ module For_testing : sig
     cold:(unit -> Keeper_carried_front.seed option) ->
     Keeper_carried_front.seed option * Keeper_model_input_ledger.t option
   (** The front a request composes from, [digest_at] being the lookup over
-      the history it composes from: the pair's ledger front while that
-      history holds the ledger ({!Keeper_model_input_ledger.holds}), advanced
+      the history it composes from: the candidate's working ledger front
+      while that history holds the ledger ({!Keeper_model_input_ledger.holds}), advanced
       by a valid later [after_refusal] front. With neither, [cold ()]. A ledger
-      that does not hold is removed from the table and returned second. *)
+      that does not hold is returned second; the current table entry is
+      independently checked before discarding or adopting it. *)
+
+  val move_ledger_front :
+    Keeper_model_input_ledger.t option ref ->
+    first_atom:int -> front_digest:string -> bool
+  (** Move only the candidate's working value. *)
+
+  val evict_at_turn_boundary :
+    keeper_name:string -> runtime_id:string ->
+    context_marks:Runtime_schema.context_marks option ->
+    Keeper_model_input_ledger.t option ref -> unit
+  (** Apply this runtime's declared marks to its candidate's working value. *)
 
   val halve_front :
     digest_at:(int -> string option) option ->
-    move_ledger:(first_atom:int -> front_digest:string -> Keeper_model_input_ledger.Table.move) ->
+    move_ledger:(first_atom:int -> front_digest:string -> bool) ->
     hold:(Keeper_carried_front.seed -> unit) ->
     first_atom:int ->
     retry:int ->

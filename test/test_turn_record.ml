@@ -303,7 +303,6 @@ let test_client_turn_usage_roundtrip () =
   | Ok decoded ->
     check bool "all known counts and their scope survive" true (decoded.usage = usage)
 ;;
-
 let test_codec_roundtrip () =
   let record = sample_record () in
   match Turn_record.of_json (Turn_record.to_json record) with

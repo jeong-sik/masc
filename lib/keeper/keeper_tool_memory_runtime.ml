@@ -283,75 +283,91 @@ let absorbed_match_to_json { row; into_current } : Yojson.Safe.t =
 
 (* --- History search (checkpoint + trace history) --- *)
 
-let search_history
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(ctx_work : working_context)
-      ~(query : string)
-      ~(limit : int)
-  : string list
-  =
-  (* RFC-0149 §3.1 — aggregation site.  Multiple history files are
-     concatenated for search; a per-path Read failure is dropped to
-     [[]] so a single corrupt history does not suppress matches from
-     the others.  The decision to elide is made *here* rather than
-     hidden inside a silent facade — failures still surface via the
-     [metric_keeper_memory_recall_read_errors] counter emitted by
-     [Keeper_memory_recall.load_history_user_messages_result]. *)
-  let current_history =
-    match
-      Keeper_memory_recall.load_history_user_messages_result
-        ~path:
-          (Keeper_types_support.keeper_history_path
-             config
-             (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-        ~max_n:50
-    with
-    | Ok msgs -> msgs
-    | Error _ -> []
-  in
-  let prev_history =
-    meta.runtime.trace_history
-    |> List.concat_map (fun old_trace_id ->
-      match
-        Keeper_memory_recall.load_history_user_messages_result
-          ~path:(Keeper_types_support.keeper_history_path config old_trace_id)
-          ~max_n:20
-      with
-      | Ok msgs -> msgs
-      | Error _ -> [])
-  in
-  let checkpoint_user_msgs =
-    Keeper_memory_recall.recent_user_messages (messages_of_context ctx_work) ~max_n:100
-  in
-  let key_of s =
-    let len = min 100 (String.length s) in
-    String.sub s 0 len
-  in
-  let seen0 =
-    List.fold_left
-      (fun acc s -> StringSet.add (key_of s) acc)
-      StringSet.empty
-      checkpoint_user_msgs
-  in
-  let dedup seen lst =
-    List.fold_left
-      (fun (acc, seen) s ->
-         let k = key_of s in
-         if StringSet.mem k seen then acc, seen else s :: acc, StringSet.add k seen)
-      ([], seen)
-      lst
-    |> fun (acc, seen) -> List.rev acc, seen
-  in
-  let all_candidates =
-    checkpoint_user_msgs
-    @ fst (dedup seen0 current_history)
-    @ fst (dedup (snd (dedup seen0 current_history)) prev_history)
-  in
-  all_candidates
-  |> List.filter (fun msg -> query <> "" && String_util.contains_all_tokens_ci msg query)
-  |> List.rev
-  |> take limit
+type history_search =
+  { matches : string list
+  ; unreadable_rows : int
+  ; unavailable_traces : (string * Keeper_memory_recall_exn_class.t) list
+  }
+
+let empty_history_search = { matches = []; unreadable_rows = 0; unavailable_traces = [] }
+
+let history_has_read_errors history =
+  history.unreadable_rows > 0 || history.unavailable_traces <> []
+;;
+
+let history_read_error_fields history =
+  if not (history_has_read_errors history) then []
+  else
+    [ ( "history_read_errors"
+      , `Assoc
+          [ "unreadable_rows", `Int history.unreadable_rows
+          ; ( "unavailable_traces"
+            , `List
+                (List.map
+                   (fun (trace_id, error) ->
+                      `Assoc
+                        [ "trace_id", `String trace_id
+                        ; "error_kind", `String (Keeper_memory_recall_exn_class.to_label error)
+                        ])
+                   history.unavailable_traces) )
+          ] )
+    ]
+;;
+
+let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
+  if query = "" || limit <= 0 then empty_history_search
+  else
+    let accept seen content =
+      if StringSet.mem content !seen
+         || not (String_util.contains_all_tokens_ci content query)
+      then false
+      else (seen := StringSet.add content !seen; true)
+    in
+    let checkpoint_seen = ref StringSet.empty in
+    let rec select_checkpoint remaining selected = function
+      | [] -> List.rev selected
+      | _ when remaining = 0 -> List.rev selected
+      | content :: rest ->
+        if accept checkpoint_seen content
+        then select_checkpoint (remaining - 1) (content :: selected) rest
+        else select_checkpoint remaining selected rest
+    in
+    let checkpoint =
+      Keeper_memory_recall.user_messages_newest_first (messages_of_context ctx_work)
+      |> select_checkpoint limit []
+    in
+    let rec read_traces remaining seen matches unreadable_rows unavailable_traces = function
+      | [] ->
+        { matches = List.rev matches
+        ; unreadable_rows
+        ; unavailable_traces = List.rev unavailable_traces
+        }
+      | _ when remaining = 0 ->
+        { matches = List.rev matches
+        ; unreadable_rows
+        ; unavailable_traces = List.rev unavailable_traces
+        }
+      | trace_id :: rest ->
+        (* Selection belongs to this read until it succeeds. A failed scan
+           must not hide the same body in a later readable trace. *)
+        let local_seen = ref seen in
+        let result, unreadable =
+          Keeper_memory_recall.load_history_user_messages_result
+            ~path:(Keeper_types_support.keeper_history_path config trace_id)
+            ~limit:remaining ~accept:(accept local_seen)
+        in
+        (match result with
+         | Ok selected ->
+           read_traces (remaining - List.length selected) !local_seen
+             (List.rev_append selected matches) (unreadable_rows + unreadable)
+             unavailable_traces rest
+         | Error error ->
+           read_traces remaining seen matches (unreadable_rows + unreadable)
+             ((trace_id, error) :: unavailable_traces) rest)
+    in
+    read_traces (limit - List.length checkpoint) !checkpoint_seen
+      (List.rev checkpoint) 0 []
+      (Keeper_id.Trace_id.to_string meta.runtime.trace_id :: meta.runtime.trace_history)
 ;;
 
 (* The ordinary facts in a result set, by identity. Source-bound facts are
@@ -431,7 +447,7 @@ let keeper_memory_search_with_outcome
         ~base_path:config.Workspace.base_path
     in
     let source_label = memory_search_source_to_string source in
-    let durable_json ~fact_jsons ~fact_total ~total_matches ~extra_matches ~absorbed_fields =
+    let durable_json ~fact_jsons ~fact_total ~total_matches ~extra_matches ~read_errors ~read_error_fields =
       `Assoc
         ([ "query", `String query
          ; "source", `String source_label
@@ -439,8 +455,8 @@ let keeper_memory_search_with_outcome
          ; "match_count", `Int total_matches
          ; "matches", `List (fact_jsons @ extra_matches)
          ]
-         @ (if total_matches = 0 then [ "no_match", `Bool true ] else [])
-         @ absorbed_fields)
+         @ (if total_matches = 0 && not read_errors then [ "no_match", `Bool true ] else [])
+         @ read_error_fields)
     in
     (* A line of the absorbed store that does not decode is left out of the
        results, and both the model and the operator are told. The store is
@@ -488,8 +504,9 @@ let keeper_memory_search_with_outcome
     let result =
       match source with
       | History ->
-        let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
-        let no_match = matches = [] in
+        let history = search_history ~config ~meta ~ctx_work ~query ~limit in
+        let matches = history.matches in
+        let no_match = matches = [] && not (history_has_read_errors history) in
         let match_jsons = List.map (fun msg -> `String msg) matches in
         Ok
           ( `Assoc
@@ -498,7 +515,8 @@ let keeper_memory_search_with_outcome
                ; "match_count", `Int (List.length matches)
                ; "matches", `List match_jsons
                ]
-               @ if no_match then [ "no_match", `Bool true ] else [])
+               @ (if no_match then [ "no_match", `Bool true ] else [])
+               @ history_read_error_fields history)
           , [] )
       | All ->
         (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
@@ -523,11 +541,10 @@ let keeper_memory_search_with_outcome
                  let history_limit =
                    max 0 (absorbed_limit - List.length absorbed.matches)
                  in
-                 let history_matches =
-                   if history_limit > 0
-                   then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
-                   else []
+                 let history =
+                   search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
                  in
+                 let history_matches = history.matches in
                  let total_matches =
                    List.length fact_matches
                    + List.length absorbed.matches
@@ -550,7 +567,12 @@ let keeper_memory_search_with_outcome
                        ~fact_total:(fact_total + absorbed.candidates)
                        ~total_matches
                        ~extra_matches
-                       ~absorbed_fields:(absorbed_fields ~absorbed ~unavailable)
+                       ~read_errors:
+                         (history_has_read_errors history
+                          || absorbed.unreadable <> [] || unavailable <> None)
+                       ~read_error_fields:
+                         (absorbed_fields ~absorbed ~unavailable
+                          @ history_read_error_fields history)
                    , ordinary_memory_ids fact_matches )))
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
@@ -574,7 +596,8 @@ let keeper_memory_search_with_outcome
                     ~fact_total:absorbed.candidates
                     ~total_matches:(List.length absorbed.matches)
                     ~extra_matches:[]
-                    ~absorbed_fields:(absorbed_fields ~absorbed ~unavailable:None)
+                    ~read_errors:(absorbed.unreadable <> [])
+                    ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
                 , [] )))
       | Memory ->
         (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
@@ -589,7 +612,8 @@ let keeper_memory_search_with_outcome
                     ~fact_total:total_candidates
                     ~total_matches:(List.length matches)
                     ~extra_matches:[]
-                    ~absorbed_fields:[]
+                    ~read_errors:false
+                    ~read_error_fields:[]
                 , ordinary_memory_ids matches )))
     in
     match result with

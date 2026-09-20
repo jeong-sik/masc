@@ -57,7 +57,9 @@
 
     The table is process memory keyed by keeper and runtime. Token counts
     are the provider's, so the same atoms carried on another runtime are a
-    separate ledger. *)
+    separate ledger. The turn driver records responses in this table and
+    applies boundary/refusal moves to a candidate-local working value. An
+    unaccepted narrower request never replaces the next turn's observation. *)
 
 (** The positions a request carried, named by their opening messages. *)
 type carried_ends =
@@ -259,22 +261,6 @@ module Table : sig
       when the request is composed, and a ledger that fails restarts). The
       restart is the removal: a ledger needs a request and its usage to start
       from, and the request being composed has neither yet. *)
-
-  type move =
-    | Moved
-    | Not_moved  (** The pair has a ledger and {!move_front} did not move it. *)
-    | No_pair_ledger
-
-  val move_front
-    :  keeper_name:string
-    -> runtime_id:string
-    -> session_id:string
-    -> first_atom:int
-    -> front_digest:string
-    -> move
-  (** {!move_front} on the pair's ledger, so the next request composes and
-      the next observation measures from the new front. A pair without a
-      ledger has no front to move, and nothing is written. *)
 
   module For_testing : sig
     val reset : unit -> unit

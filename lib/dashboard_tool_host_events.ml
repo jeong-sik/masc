@@ -125,12 +125,13 @@ let ring_message (report : report) =
   Printf.sprintf "%s %s%s failed: %s" report.client_name phase report.tool_name
     report.message
 
-let record ?fs config (report : report) =
+let record ?fs config ~reported_by (report : report) =
   let details = details_json report in
   Log.client_tool_host_error
     ~module_name:Failure_envelope.tool_host_log_module_name ~details
     (ring_message report);
-  Audit_log.log_client_tool_host_failure config ~agent_id:report.agent_name
+  Audit_log.log_client_tool_host_failure config ~agent_id:reported_by
+    ~reported_agent:report.agent_name
     ~client_name:report.client_name ~tool_name:report.tool_name
     ~transport:report.transport ~message:report.message ?phase:report.phase
     ?request_id:report.request_id ?session_id:report.session_id

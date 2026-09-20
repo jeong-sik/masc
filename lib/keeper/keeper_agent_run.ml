@@ -1339,16 +1339,14 @@ let run_turn
        provider-bound history inside the runtime and hands the result to a
        client that assembles the wire itself.
 
-       Only a lane that started the conversation reports a list: on those
-       turns the whole window is rendered into the request, so its bytes are
-       the ones the model read. A resumed lane reports no list at all, because
-       the client re-sends only the new turn and the accumulated history never
-       leaves this process -- attributing the local window there would have
-       counted bytes that were not sent, and on Antigravity would additionally
-       have dropped the carrier that was. The gap is recorded as
-       [Client_session_holds_input] rather than as a zero or an absent
-       attribution, so a reader can tell it from a turn that never
-       dispatched. *)
+       The receipt distinguishes retransmitted MASC input from history held
+       by the client; it does not distinguish Start from Resume. On resume,
+       MASC can retransmit the canonical snapshot, as documented by
+       Keeper_official_client_host.transmitted_model_input. Client-owned
+       native history outside that snapshot is not measured here.
+       Held_by_client_session becomes an explicit attribution gap rather than
+       zero bytes or an absent receipt, so it remains distinct from a turn
+       that never dispatched. *)
     let record_transmitted_model_input ~runtime_id ~tools ~transmitted =
       let () = match direct_resume with
         | Some (Gate_continuation admission) ->

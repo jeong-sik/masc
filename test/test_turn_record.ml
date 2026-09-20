@@ -289,10 +289,7 @@ let test_dashboard_writer_fixture_roundtrip () =
   in
   check (list string) "fixture covers the current usage scopes"
     (List.map Runtime_usage_scope.to_string
-       [ Runtime_usage_scope.Per_request
-       ; Runtime_usage_scope.Conversation_cumulative
-       ; Runtime_usage_scope.Usage_scope_unavailable
-       ])
+       Runtime_usage_scope.all)
     scopes
 
 let test_codec_roundtrip () =

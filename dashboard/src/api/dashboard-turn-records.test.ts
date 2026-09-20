@@ -10,7 +10,7 @@ vi.mock('./core', () => ({
 }))
 vi.mock('./dev-token', () => ({ ensureDevToken }))
 
-import { TURN_PROMPT_BLOCK_IDS, fetchKeeperTurnRecords } from './dashboard-turn-records'
+import { TURN_PROMPT_BLOCK_IDS, TURN_USAGE_SCOPES, fetchKeeperTurnRecords } from './dashboard-turn-records'
 
 function entry(overrides: Record<string, unknown> = {}) {
   return {
@@ -89,6 +89,11 @@ afterEach(() => {
 // reaching the inspector. Absent stays absent — a provider that reports no
 // cache count must not decode to a fabricated 0.
 describe('keeper turn record cache token counts', () => {
+  it('accepts exactly the usage scopes covered by the shared writer fixture', () => {
+    // The OCaml codec test pins this fixture to the generated Runtime_usage_scope.all.
+    expect(new Set(TURN_USAGE_SCOPES)).toEqual(new Set(writerRows.map(row => row.usage_scope)))
+  })
+
   it.each(writerRows)('accepts the actual writer row with usage scope $usage_scope', async record => {
     // Only the surrounding HTTP metadata is synthetic; record is unchanged.
     const raw = payload({ record, diff_vs_prev: null })

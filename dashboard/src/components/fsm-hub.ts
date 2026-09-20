@@ -105,12 +105,18 @@ export function executionReceiptLabel(execution: KeeperCompositeExecution | unde
   const elapsed = formatMs(execution.duration_ms)
   // Separate lanes, so both can show on one turn: it took up a deferred lane
   // and then deferred another.
-  const appliedRuntime = shortText(execution.runtime?.degraded_retry_applied?.runtime, 32)
-  const deferredRuntime = shortText(execution.runtime?.degraded_retry_deferred?.runtime, 32)
+  const applied = execution.runtime?.degraded_retry_applied
+  const deferred = execution.runtime?.degraded_retry_deferred
+  const appliedRuntime = shortText(applied?.runtime, 32)
+  const deferredRuntime = shortText(deferred?.runtime, 32)
+  // A receipt older than the field split is not "no retry" — it is a shape
+  // this build does not read. Say which.
+  const unreadable = applied?.unreadable || deferred?.unreadable
   return [
     execution.outcome ?? 'unknown',
     terminal,
     elapsed,
+    unreadable ? 'retry: 이전 receipt 형식' : '',
     appliedRuntime ? `retry applied -> ${appliedRuntime}` : '',
     deferredRuntime ? `retry queued -> ${deferredRuntime}` : '',
   ].filter(Boolean).join(' · ')
@@ -122,12 +128,16 @@ export function executionReceiptTitle(execution: KeeperCompositeExecution | unde
   const deferred = execution.runtime?.degraded_retry_deferred
   // Each lane carries the reason it was deferred for, so the reason sits with
   // its own runtime instead of standing alone beside whichever one printed.
-  const laneLine = (label: string, lane: { runtime: string | null; reason: string | null } | null | undefined) =>
-    lane?.runtime ? `retry ${label}: ${lane.runtime}${lane.reason ? ` (${lane.reason})` : ''}` : ''
+  const laneLine = (
+    label: string,
+    lane: { runtime: string | null; reason: string | null; unreadable?: boolean } | null | undefined,
+  ) => (lane?.runtime ? `retry ${label}: ${lane.runtime}${lane.reason ? ` (${lane.reason})` : ''}` : '')
+  const unreadable = applied?.unreadable || deferred?.unreadable
   return [
     execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
     execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
     execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
+    unreadable ? 'retry: 이 receipt 는 degraded retry 칸이 나뉘기 전 형식이라 읽지 않습니다' : '',
     laneLine('applied', applied),
     laneLine('queued', deferred),
     execution.error?.kind ? `error: ${execution.error.kind}` : '',

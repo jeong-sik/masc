@@ -16,37 +16,53 @@ let lane_attempt_facts ~turn_succeeded ~last_attempt_index =
   lane_attempt_count, lane_failover_applied
 ;;
 
+(** Whether the runtime walk got as far as a provider on this turn.
+
+    [runtime_observation] is written from the runtime's own observation hook
+    and from the settled result, so it is [None] exactly when no provider
+    attempt was observed: a deferred head that has left the catalog, a
+    checkpoint continuation with nothing to continue, any pre-dispatch
+    refusal. Named rather than passed as a bool so the only way to say
+    [Provider_attempt_observed] is to hold an observation. *)
+type provider_reached =
+  | Provider_attempt_observed
+  | No_provider_attempt
+
+let provider_reached_of_observation = function
+  | Some (_ : Runtime_observation.runtime_observation) -> Provider_attempt_observed
+  | None -> No_provider_attempt
+;;
+
 (** The lane an earlier turn deferred to, when this turn is the one that took
-    it up. Empty when no lane was deferred, when the turn started on another
-    runtime, or when it never reached a provider.
+    it up. Empty when no lane was deferred, and empty when the turn ended
+    before any provider answered.
 
-    [dispatched_runtime_id] is the head [Keeper_turn_driver.run_named] walks
-    from, so a hint was taken up exactly when it named that head. Where the
-    walk travelled afterwards is [runtime_fallback_applied]'s fact.
+    A turn does not choose whether to honour the lane it was handed.
+    [Keeper_turn_driver.run_named] builds its candidate list from
+    [deferred_runtime_ids hint] whenever a lane is present and the contract is
+    [Provider_default] (keeper_turn_driver.ml, [lane_candidate_ids]), and
+    [deferred_runtime_ids] leads with [next_runtime_id]. [run_turn] passes no
+    [output_contract], so the contract is always [Provider_default] here: the
+    [Tool_verdict] slot calls [run_named] directly. The walk therefore starts
+    on the lane's own head, whatever [~runtime_id] this turn was routed to.
 
-    The receipt used to take this as a bool from its caller, and the unified
-    path handed it [Option.is_some hint] — true on every turn that merely
-    carried a pending lane, which is what an operator then read as "retry
-    applied" (#37108). The decision cannot be made by a caller: only here is
-    the runtime the turn started on in scope. *)
+    So the fact left to establish is whether the walk got that far, which is
+    what [provider_reached] carries.
+
+    Two earlier readings were wrong in opposite directions. The caller used to
+    assert a bool, and the unified path asserted [Option.is_some hint] with no
+    dispatch condition at all, so a turn that never reached a provider still
+    reported a retry (#37108). Comparing the lane against the turn's routed
+    [~runtime_id] instead reads false on the direct path, where
+    [Keeper_turn.resolve_direct_turn_runtime_id] answers with an official
+    client's checkpoint runtime while [run_named] still walks the lane. *)
 let degraded_retry_taken_up
       ~(hint : Keeper_error_classify.degraded_retry option)
-      ~(dispatched_runtime_id : string)
-      ~(runtime_outcome : Keeper_execution_receipt.runtime_outcome)
+      ~(provider_reached : provider_reached)
   =
-  let dispatched_to_a_provider =
-    match runtime_outcome with
-    | Keeper_execution_receipt.Runtime_not_dispatched -> false
-    | Keeper_execution_receipt.Runtime_passed_to_next_model
-    | Keeper_execution_receipt.Runtime_completed
-    | Keeper_execution_receipt.Runtime_failed
-    | Keeper_execution_receipt.Runtime_not_observed -> true
-  in
-  if not dispatched_to_a_provider
-  then None
-  else
-    Option.bind hint (fun (lane : Keeper_error_classify.degraded_retry) ->
-      if String.equal lane.next_runtime dispatched_runtime_id then Some lane else None)
+  match provider_reached with
+  | No_provider_attempt -> None
+  | Provider_attempt_observed -> hint
 ;;
 
 let finalize
@@ -59,7 +75,6 @@ let finalize
     ~runtime_manifest_context
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~(degraded_retry_hint : Keeper_error_classify.degraded_retry option)
-    ~(dispatched_runtime_id : string)
     ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
     ~turn_result
     ~receipt_agent_core_turn_count_ref
@@ -132,8 +147,7 @@ let finalize
   let degraded_retry_applied =
     degraded_retry_taken_up
       ~hint:degraded_retry_hint
-      ~dispatched_runtime_id
-      ~runtime_outcome
+      ~provider_reached:(provider_reached_of_observation runtime_observation)
   in
   let receipt =
     { Keeper_execution_receipt.keeper_name = meta.name

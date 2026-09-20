@@ -88,8 +88,8 @@ function snapshot(
 
 describe('fsm-hub derived state', () => {
   const receiptWithLanes = (
-    applied: { runtime: string; reason: string } | null,
-    deferred: { runtime: string; reason: string } | null,
+    applied: { runtime: string | null; reason: string | null; unreadable?: boolean } | null,
+    deferred: { runtime: string | null; reason: string | null; unreadable?: boolean } | null,
   ) =>
     ({
       latest_receipt_present: true,
@@ -146,6 +146,22 @@ describe('fsm-hub derived state', () => {
     const label = executionReceiptLabel(execution)
     expect(label).toContain('retry applied -> runtime.b')
     expect(label).toContain('retry queued -> runtime.c')
+  })
+
+  // A receipt written before the lanes were split reaches the server as a
+  // bool, which it will not guess at. That must not draw as "no retry": the
+  // keeper may well have recorded one.
+  it('marks a receipt older than the field split instead of showing no retry', () => {
+    const execution = receiptWithLanes(
+      { runtime: null, reason: null, unreadable: true },
+      null,
+    )
+
+    const label = executionReceiptLabel(execution)
+    expect(label).toContain('retry: 이전 receipt 형식')
+    expect(label).not.toContain('retry applied')
+    expect(label).not.toContain('retry queued')
+    expect(executionReceiptTitle(execution)).toContain('나뉘기 전 형식')
   })
 
   it('skips duplicate observations when tracked fields are unchanged', () => {

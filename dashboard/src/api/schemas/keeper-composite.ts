@@ -145,10 +145,13 @@ const KeeperCompositeClaimAttemptSchema = object({
 })
 
 // One deferred runtime lane: the runtime it names, and why the failure that
-// deferred it is continuable.
+// deferred it is continuable. `unreadable` marks a receipt written before the
+// field split: the server does not guess what the older shape meant, and the
+// UI says so rather than drawing an empty lane as "no retry".
 const DegradedRetryLaneSchema = object({
   runtime: nullable(string()),
   reason: nullable(string()),
+  unreadable: optional(boolean()),
 })
 
 const KeeperCompositeExecutionSchema = object({

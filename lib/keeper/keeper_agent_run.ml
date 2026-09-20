@@ -1970,8 +1970,8 @@ let run_turn
           for this one. They used to be merged into one runtime slot with the
           new deferral winning, so a receipt could read "retry applied"
           against a runtime this turn had only queued. Both travel now, and
-          [Keeper_agent_run_receipt.finalize] decides which of them the turn
-          dispatched on. *)
+          [Keeper_agent_run_receipt.degraded_retry_taken_up] says whether the
+          turn got far enough to run the lane it was handed. *)
        let degraded_retry_deferred =
          Option.map
            Keeper_error_classify.degraded_retry_of_deferred_lane
@@ -2003,7 +2003,6 @@ let run_turn
            ~runtime_manifest_context
            ~acc
            ~degraded_retry_hint
-           ~dispatched_runtime_id:runtime_id_string
            ~degraded_retry_deferred
            ~turn_result
            ~receipt_agent_core_turn_count_ref

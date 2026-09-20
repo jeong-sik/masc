@@ -15,12 +15,15 @@
     Measured on a live keeper receipt at 2026-08-26T16:40Z: the turn's own error
     was an invalid request (a reasoning-effort contract rejection) while the
     receipt read [degraded_retry_applied = true] and
-    [fallback_reason = rate_limit]. The dashboard consequence is in
-    [dashboard/src/components/fsm-hub.ts], which renders "retry applied" versus
-    "retry queued" off this flag — the second branch was unreachable, because
-    the flag was true exactly when the runtime it prints alongside was present.
+    [fallback_reason = rate_limit]. The reason came from the earlier turn's
+    failure, because the receipt's runtime and reason slots were shared between
+    the lane the turn was handed and the lane it deferred, with the newer one
+    winning.
 
-    Applied means this turn ran on the runtime the hint named. *)
+    Applied means the lane the turn was handed got its turn. A turn does not
+    choose: [Keeper_turn_driver.run_named] leads with [deferred_runtime_ids
+    hint] on a [Provider_default] contract, which the head-order test below
+    pins. What remains is whether the walk reached a provider at all. *)
 
 open Alcotest
 
@@ -28,7 +31,7 @@ module Types = Masc.Keeper_unified_turn_types
 module EC = Masc.Keeper_error_classify
 module Budget = Masc.Keeper_turn_runtime_budget
 module Receipt_finalize = Masc.Keeper_agent_run_receipt
-module Receipt = Masc.Keeper_execution_receipt
+module Driver = Masc.Keeper_turn_driver
 
 let deferred_lane_to next_runtime =
   Some { EC.next_runtime; fallback_reason = EC.Rate_limit }
@@ -107,59 +110,43 @@ let test_no_hint_is_never_applied () =
        ~last_execution:None)
 ;;
 
-(* The same question on the receipt side, where the turn knows the runtime its
-   lane walk started on. [Keeper_unified_turn_execution] used to answer it for
-   the receipt with [Option.is_some hint]; the answer is now read here. *)
+(* The same question on the receipt side. [Keeper_unified_turn_execution] used
+   to answer it for the receipt with [Option.is_some hint], with no condition
+   on the turn having run at all. *)
 
-let taken_up ?(runtime_outcome = Receipt.Runtime_failed) ~hint ~dispatched () =
-  Receipt_finalize.degraded_retry_taken_up
-    ~hint
-    ~dispatched_runtime_id:dispatched
-    ~runtime_outcome
+let taken_up ?(provider_reached = Receipt_finalize.Provider_attempt_observed) ~hint () =
+  Receipt_finalize.degraded_retry_taken_up ~hint ~provider_reached
 ;;
 
 let lane_runtime = Alcotest.option Alcotest.string
 
 let runtime_of = Option.map (fun (retry : EC.degraded_retry) -> retry.next_runtime)
 
-(* The filed case. The turn carries a hint toward ollama and dispatched on
-   glm. On main the receipt read "retry applied" here. *)
-let test_receipt_pending_hint_on_another_runtime_is_not_taken_up () =
-  check
-    lane_runtime
-    "a hint toward a lane this turn did not dispatch on is pending, not applied"
-    None
-    (runtime_of
-       (taken_up
-          ~hint:(deferred_lane_to "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
-          ~dispatched:"glm-coding.glm-5-turbo"
-          ()))
-;;
-
-let test_receipt_hint_the_turn_dispatched_on_is_taken_up () =
-  check
-    lane_runtime
-    "the turn started on the runtime the hint named, so the retry ran"
-    (Some "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
-    (runtime_of
-       (taken_up
-          ~hint:(deferred_lane_to "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
-          ~dispatched:"ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
-          ()))
-;;
-
-(* A turn that fails before it reaches a provider ran nothing, whatever its
-   assignment said. *)
-let test_receipt_hint_without_a_dispatch_is_not_taken_up () =
+(* The reachable half of #37108, and the one main gets wrong. The turn carried
+   a lane and ended before any provider answered -- a deferred head that has
+   left the catalog reaches exactly this, at [resolve_runtime_candidate_for_attempt]
+   in the driver -- so the lane got no turn. Reducing the guard to the hint
+   makes this report a retry. *)
+let test_receipt_hint_without_a_provider_attempt_is_not_taken_up () =
   check
     lane_runtime
     "a turn that never reached a provider applied no retry"
     None
     (runtime_of
        (taken_up
-          ~runtime_outcome:Receipt.Runtime_not_dispatched
+          ~provider_reached:Receipt_finalize.No_provider_attempt
           ~hint:(deferred_lane_to "glm-coding.glm-5-turbo")
-          ~dispatched:"glm-coding.glm-5-turbo"
+          ()))
+;;
+
+let test_receipt_hint_with_a_provider_attempt_is_taken_up () =
+  check
+    lane_runtime
+    "the walk leads with the lane's head, so a turn that reached a provider ran it"
+    (Some "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
+    (runtime_of
+       (taken_up
+          ~hint:(deferred_lane_to "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731")
           ()))
 ;;
 
@@ -168,7 +155,13 @@ let test_receipt_no_hint_is_never_taken_up () =
     lane_runtime
     "with no deferred lane there is no retry to apply"
     None
-    (runtime_of (taken_up ~hint:None ~dispatched:"glm-coding.glm-5-turbo" ()))
+    (runtime_of (taken_up ~hint:None ()));
+  check
+    lane_runtime
+    "and a turn that ran nothing with no lane is still nothing"
+    None
+    (runtime_of
+       (taken_up ~provider_reached:Receipt_finalize.No_provider_attempt ~hint:None ()))
 ;;
 
 (* The reason travels with the lane it belongs to, so a receipt cannot print
@@ -181,10 +174,27 @@ let test_receipt_keeps_the_hints_own_reason () =
     (Option.map
        (fun (retry : EC.degraded_retry) ->
           EC.degraded_retry_reason_to_string retry.fallback_reason)
-       (taken_up
-          ~hint:(deferred_lane_to "glm-coding.glm-5-turbo")
-          ~dispatched:"glm-coding.glm-5-turbo"
-          ()))
+       (taken_up ~hint:(deferred_lane_to "glm-coding.glm-5-turbo") ()))
+;;
+
+(* [degraded_retry_taken_up] reports the hint's own runtime because the driver
+   walks the lane from its head. That is [deferred_runtime_ids] leading with
+   [next_runtime_id]; reorder it and the receipt starts naming a runtime the
+   turn did not start on. *)
+let test_lane_walk_leads_with_the_deferred_head () =
+  let lane =
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"assignment-1"
+      ~failed_runtime_id:"glm-coding.glm-5-turbo"
+      ~next_runtime_id:"ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+      ~later_runtime_ids:[ "kimi.kimi-k3" ]
+      ~failure:(Agent_core.Error.Internal "deferred for the test")
+  in
+  check
+    (list string)
+    "the lane the driver walks leads with the runtime the hint names"
+    [ "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"; "kimi.kimi-k3" ]
+    (Driver.deferred_runtime_ids lane)
 ;;
 
 let () =
@@ -226,6 +236,10 @@ let () =
             "the applied lane keeps its own reason"
             `Quick
             test_receipt_keeps_the_hints_own_reason
+        ; test_case
+            "the driver walks the deferred lane from its head"
+            `Quick
+            test_lane_walk_leads_with_the_deferred_head
         ] )
     ]
 ;;

@@ -530,31 +530,32 @@ let error_kinds =
   ]
 
 (* The receipt carries the two degraded-retry lanes separately: the one an
-   earlier turn deferred to and that this turn dispatched on, and the one this
-   turn leaves behind. Either puts the turn on a degraded-retry disposition,
-   so the axis walks each alone; a receipt holding both reaches the same
-   branch as one holding only the first. *)
+   earlier turn took up, and the one it leaves behind. Either puts the turn on
+   a degraded-retry disposition, and a turn can hold both -- it took a lane up,
+   failed there, and deferred another -- so the axis walks all four. *)
+let applied_lane =
+  { EC.next_runtime = "runtime-2"; fallback_reason = EC.Rate_limit }
+;;
+
+let deferred_lane =
+  { EC.next_runtime = "runtime-3"; fallback_reason = EC.Deferred_runtime_lane }
+;;
+
 let degraded_lane_label = function
   | `Neither -> "neither"
   | `Applied -> "applied"
   | `Deferred -> "deferred"
+  | `Both -> "both"
 ;;
 
 let degraded_lanes_of_case = function
   | `Neither -> None, None
-  | `Applied ->
-    ( Some
-        { EC.next_runtime = "runtime-2"; fallback_reason = EC.Rate_limit }
-    , None )
-  | `Deferred ->
-    ( None
-    , Some
-        { EC.next_runtime = "runtime-3"
-        ; fallback_reason = EC.Deferred_runtime_lane
-        } )
+  | `Applied -> Some applied_lane, None
+  | `Deferred -> None, Some deferred_lane
+  | `Both -> Some applied_lane, Some deferred_lane
 ;;
 
-let degraded_cases = [ `Neither; `Applied; `Deferred ]
+let degraded_cases = [ `Neither; `Applied; `Deferred; `Both ]
 let fallback_bools = [ false; true ]
 
 let runtime_outcomes =
@@ -1693,6 +1694,41 @@ let () =
   check
     "a turn that never failed over reports one candidate, not zero"
     (Json_util.get_int single_runtime "lane_attempt_count" = Some 1)
+;;
+
+(* The shape the old bool and single runtime string could not carry: a turn
+   that took up one lane and deferred another. The two used to share the
+   runtime and reason slots, with the new deferral winning, so this receipt
+   read "retry applied" beside the runtime nothing had run on yet (#37108).
+   Each lane now travels with the reason it was deferred for. *)
+let () =
+  let both =
+    { base_receipt with
+      degraded_retry_applied = Some applied_lane
+    ; degraded_retry_deferred = Some deferred_lane
+    }
+  in
+  let runtime = Yojson.Safe.Util.member "runtime" (R.to_json both) in
+  let lane key field =
+    Json_util.get_string (Yojson.Safe.Util.member key runtime) field
+  in
+  check
+    "the lane the turn took up names its own runtime"
+    (lane "degraded_retry_applied" "runtime" = Some "runtime-2");
+  check
+    "and its own reason, not the other lane's"
+    (lane "degraded_retry_applied" "reason" = Some "rate_limit");
+  check
+    "the lane the turn leaves behind names the other runtime"
+    (lane "degraded_retry_deferred" "runtime" = Some "runtime-3");
+  check
+    "with the reason that deferred it"
+    (lane "degraded_retry_deferred" "reason" = Some "deferred_runtime_lane");
+  let neither = R.to_json base_receipt |> Yojson.Safe.Util.member "runtime" in
+  check
+    "a turn with no degraded retry says so with null, not an empty lane"
+    (Yojson.Safe.Util.member "degraded_retry_applied" neither = `Null
+     && Yojson.Safe.Util.member "degraded_retry_deferred" neither = `Null)
 ;;
 
 (* #29929 gave [Terminal_effect_failed] its own operator disposition, but the

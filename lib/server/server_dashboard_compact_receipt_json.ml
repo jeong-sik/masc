@@ -44,15 +44,26 @@ let compact_receipt_error_json receipt =
 (* A deferred lane travels as one object so the runtime and the reason it was
    deferred for cannot be split apart on the way to the dashboard. Absent
    stays absent: a receipt that took up no lane says so with `Null, not with
-   an object holding empty strings. *)
+   an object holding empty strings.
+
+   A receipt written before the field split carries a bool here and a separate
+   runtime string beside it. The store has no version partition and
+   [Keeper_execution_receipt.latest_json] hands back the newest row whatever
+   its shape, so every keeper that has not taken a turn since the deploy is
+   read through this function. Nothing here interprets the old shape — that
+   would be the compatibility reader the hard cut exists to avoid — but it must
+   not read as "no retry" either, so it says [unreadable] and the dashboard
+   prints that instead of nothing. *)
 let compact_degraded_retry_json lane =
   match lane with
   | `Assoc _ ->
     `Assoc
       [ "runtime", Json_util.string_opt_to_json (json_string "runtime" lane)
       ; "reason", Json_util.string_opt_to_json (json_string "reason" lane)
+      ; "unreadable", `Bool false
       ]
-  | _ -> `Null
+  | `Null -> `Null
+  | _ -> `Assoc [ "runtime", `Null; "reason", `Null; "unreadable", `Bool true ]
 ;;
 
 let compact_receipt_runtime_json receipt =

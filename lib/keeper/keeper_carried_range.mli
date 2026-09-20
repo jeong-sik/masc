@@ -53,7 +53,8 @@ val at_turn_boundary
   -> Keeper_model_input_ledger.t
   -> step
 (** Evict from the front while the projected total is above the low-water
-    mark, only when the measured total passed the high-water mark. *)
+    mark, only when the measured total passed the high-water mark. A request
+    with [No_atom_carried] has no named front to advance and is unchanged. *)
 
 val apply_turn_boundary
   :  marks:Runtime_schema.context_marks

@@ -14,6 +14,8 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_editor.ml",
     "bin/masc_tui_http.ml",
+    "bin/masc_tui_footer.ml",
+    "bin/masc_tui_render_prim.ml",
     "packages/agent_core/lib/skill_document.ml",
     "packages/agent_core/lib/skill_document.mli",
     "lib/keeper/keeper_skill_catalog.ml",
@@ -36,6 +38,7 @@ def run_case(
     description: str,
     source: bytes,
     diagnostic: bytes | None = None,
+    diagnostic_preview: bytes | None = None,
     composition: bool = False,
 ) -> None:
     fixtures = h.overview_event_http_fixtures()
@@ -68,7 +71,27 @@ def run_case(
             # An editor exit or a catalog refresh alone cannot satisfy this.
             h.wait_for_http_request(process, fd, output, requests, path=CREATE_PATH)
         else:
-            h.send_and_wait(process, fd, output, key, diagnostic)
+            visible = (
+                diagnostic_preview if diagnostic_preview is not None else diagnostic
+            )
+            h.send_and_wait(process, fd, output, key, visible)
+            rows = [
+                row for row in h.screen_rows(bytes(output)).values() if visible in row
+            ]
+            if len(rows) != 1:
+                raise AssertionError(f"expected one diagnostic footer: {rows!r}")
+            for pinned in (b"Esc:config", b"q:quit"):
+                if pinned not in rows[0]:
+                    raise AssertionError(f"diagnostic hid {pinned!r}: {rows[0]!r}")
+            if diagnostic_preview is not None:
+                if not diagnostic.startswith(diagnostic_preview):
+                    raise AssertionError(
+                        "preview must preserve the canonical diagnostic prefix"
+                    )
+                if "…".encode() not in rows[0]:
+                    raise AssertionError(
+                        f"clipped diagnostic has no marker: {rows[0]!r}"
+                    )
         os.write(fd, b"q")
 
     with tempfile.TemporaryDirectory(prefix="masc-tui-skill-editor-") as directory:
@@ -131,7 +154,7 @@ def run(executable: str) -> None:
         (PACKAGE_ID, None),
         (
             "new-skill",
-            b'composition name "new-skill" must equal the skill name',
+            b'skill "reviewed-skill": composition name "new-skill" must equal the skill name',
         ),
     ):
         source = (
@@ -152,6 +175,11 @@ def run(executable: str) -> None:
             ),
             source=source,
             diagnostic=diagnostic,
+            diagnostic_preview=(
+                b'skill "reviewed-skill": composition name "new-skill" must equal'
+                if diagnostic is not None
+                else None
+            ),
             composition=True,
         )
 

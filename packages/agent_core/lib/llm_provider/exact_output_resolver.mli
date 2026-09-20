@@ -30,7 +30,9 @@ type declared_target =
   ; model_id : string
   ; enable_thinking : bool option
   ; reasoning_effort : Reasoning_effort.t option
-      (** The binding's explicit effort. [None] leaves the request unspecified. *)
+      (** The binding's explicit effort. [None] leaves the request unspecified.
+          Runtime bindings supply this typed value. Target documents have no
+          effort field and leave it [None]. *)
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   ; api_key_env : string option

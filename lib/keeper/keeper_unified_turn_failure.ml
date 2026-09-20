@@ -30,7 +30,37 @@ let record_failure_observation
     | Some typed_cause -> typed_cause
     | None -> Keeper_registry.Turn_consecutive_failures count
   in
-  Keeper_registry.set_failure_reason ~base_path meta.name (Some reason);
+  let publish_reason () =
+    Keeper_registry.set_failure_reason ~base_path meta.name (Some reason)
+  in
+  (match reason with
+   | Keeper_registry.Official_client_recovery_required recovery ->
+     (match
+        Keeper_official_client_session_store.commit_if_input_recovery_current
+          ~base_path
+          ~keeper_name:meta.name
+          ~expected:recovery
+          ~commit:publish_reason
+      with
+      | Ok true -> ()
+      | Ok false ->
+        Log.Keeper.info
+          ~keeper_name:meta.name
+          "turn failure retained a resolved or replaced official-client recovery"
+      | Error detail ->
+        Log.Keeper.warn
+          ~keeper_name:meta.name
+          "turn failure could not verify current official-client recovery: %s"
+          detail)
+   | Keeper_registry.Turn_consecutive_failures _
+   | Keeper_registry.Heartbeat_consecutive_failures _
+   | Keeper_registry.Stale_termination_storm _
+   | Keeper_registry.Provider_runtime_error _
+   | Keeper_registry.Turn_configuration_error _
+   | Keeper_registry.Fiber_unresolved _
+   | Keeper_registry.Exception _
+   | Keeper_registry.Turn_overflow_failure
+   | Keeper_registry.Operator_interrupt -> publish_reason ());
   Log.Keeper.warn
     "%s: turn failure observed (consecutive=%d); Keeper lifecycle remains active: %s"
     meta.name

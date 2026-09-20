@@ -80,6 +80,15 @@ export type TurnRawTraceRunRef = {
 // Wire tokens owned by Runtime_usage_scope.to_string.
 export const TURN_USAGE_SCOPES = ['per_request', 'conversation_cumulative', 'unavailable'] as const
 
+type TurnModelInputMeasurement = 'wire_shape' | 'durable_shape'
+
+export type TurnResponseObservedModelInput = {
+  runtime_profile: string
+  transmitted_atoms: number
+  total_atoms: number
+  model_input_measurement: TurnModelInputMeasurement
+  front_atom_digest: string
+}
 export type TurnRecordEntry = {
   execution_ids: string[]
   keeper: string
@@ -133,7 +142,9 @@ export type TurnRecordEntry = {
   total_atoms?: number
   // 'wire_shape' uses the Agent Core checkpoint history; 'durable_shape'
   // uses the prepared message list supplied to an official client runtime.
-  model_input_measurement?: 'wire_shape' | 'durable_shape'
+  model_input_measurement?: TurnModelInputMeasurement
+  // The runtime/range pair with a typed response, separate from the last projection above.
+  response_observed_model_input: TurnResponseObservedModelInput | null
   price_input_per_million?: number
   price_output_per_million?: number
   // RFC-0233 §9 — wall-clock duration of the provider call (ms), sourced from
@@ -455,6 +466,35 @@ function decodeTurnRawTraceRunRef(raw: unknown): TurnRawTraceRunRef | null {
   return { worker_run_id, path, start_seq, end_seq, agent_name, session_id }
 }
 
+function decodeTurnModelInputMeasurement(raw: unknown): TurnModelInputMeasurement | null {
+  return raw === 'wire_shape' || raw === 'durable_shape' ? raw : null
+}
+
+function decodeTurnResponseObservedModelInput(raw: unknown): TurnResponseObservedModelInput | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, [
+    'runtime_profile',
+    'transmitted_atoms',
+    'total_atoms',
+    'model_input_measurement',
+    'front_atom_digest',
+  ])) return null
+  const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
+  const transmitted_atoms = decodeNonNegativeSafeInteger(raw.transmitted_atoms)
+  const total_atoms = decodeNonNegativeSafeInteger(raw.total_atoms)
+  const model_input_measurement = decodeTurnModelInputMeasurement(raw.model_input_measurement)
+  const front_atom_digest = decodeExactNonEmptyString(raw.front_atom_digest)
+  if (
+    runtime_profile === null
+    || transmitted_atoms === null
+    || total_atoms === null
+    || transmitted_atoms > total_atoms
+    || model_input_measurement === null
+    || front_atom_digest === null
+    || !/^[0-9a-f]{64}$/.test(front_atom_digest)
+  ) return null
+  return { runtime_profile, transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest }
+}
+
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'execution_ids',
@@ -473,6 +513,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'transmitted_atoms',
     'total_atoms',
     'model_input_measurement',
+    'response_observed_model_input',
     // The window's front position (RFC keeper-context-window-in-tokens
     // §10.4). The inspector does not render it; it is accepted so a record
     // carrying it is not rejected as unknown.
@@ -537,8 +578,11 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const model_input_measurement = decodeOptionalField(
     raw,
     'model_input_measurement',
-    value => (value === 'wire_shape' || value === 'durable_shape' ? value : null),
+    decodeTurnModelInputMeasurement,
   )
+  const response_observed_model_input = raw.response_observed_model_input === null
+    ? null
+    : decodeTurnResponseObservedModelInput(raw.response_observed_model_input)
   const price_input_per_million =
     decodeOptionalField(raw, 'price_input_per_million', decodeFiniteNumber)
   const price_output_per_million =
@@ -581,6 +625,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || !Array.isArray(raw.execution_ids)
     || !raw.execution_ids.every((id): id is string => typeof id === 'string' && id.length > 0)
     || usage_scope === undefined
+    || !Object.hasOwn(raw, 'response_observed_model_input')
+    || (response_observed_model_input === null && raw.response_observed_model_input !== null)
     || tool_surface_ref === null
     || selected_model === null
     || finish_reason === null
@@ -622,6 +668,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     max_tokens,
     enable_thinking,
     usage_scope,
+    response_observed_model_input,
     input_tokens,
     output_tokens,
     cache_creation_input_tokens,

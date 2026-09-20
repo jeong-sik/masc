@@ -38,9 +38,11 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
-**Heartbeat**
-: Workspace에서 Agent의 `last_seen`을 갱신하는 명시적 liveness 작업. 성공은
-  `Heartbeat_updated`일 때만 뜻하며, 잘못된 Agent 파일이나 없는 Agent는 생존 증거가 아니다.
+**Workspace Heartbeat**
+: `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
+  `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
+  `keeper_heartbeat` SSE나 MCP·transport activity 같은 별도 liveness signal의 부재를
+  뜻하지 않으며, 해당 신호는 이 Workspace 쓰기가 갱신되지 않아도 발생할 수 있다.
   → [Workspace_gc.heartbeat](../../lib/workspace/workspace_gc.mli)
 
 **Agent**
@@ -144,8 +146,9 @@ status: reference
   구간의 소유자다.
 
 **Evidence**
-: 관찰·검증·전환이 실제 근거에 연결되었음을 나타내는 typed reference. `evidence_refs`
-  같은 필드로 전달하며, 설명 문장만으로 근거를 대신하지 않는다.
+: 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
+  `note:<text>`는 허용된 서술형 근거이며, Task handoff summary와 completion notes도 이
+  형식으로 정규화된다. Note evidence는 artifact나 collaboration source의 증명은 아니다.
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
@@ -326,7 +329,8 @@ status: reference
   보관한 Carried Front를 쓴다.
 
 **Turn Boundary**
-: 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이
+: 끝난 Keeper turn이 남기는 한 줄(`keepers/<keeper>/turn-boundaries.jsonl`).
+  선택한 cluster의 runtime root 아래에 저장한다. 그 turn이
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
@@ -340,14 +344,19 @@ status: reference
   Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
   보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
   줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
+  이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
+  cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
 
 **Read Position**
-: Librarian이 History를 어디까지 읽었는지 적은 값(`<keeper>.librarian-progress.json`).
+: Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
+  Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
   읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
+  이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
+  cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
   Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Generation**
@@ -359,6 +368,14 @@ status: reference
 
 **Memory OS**
 : Keeper의 durable personal facts와 recall을 소유하는 typed memory store.
+  현재 Memory OS와 working context는 operator config의 Keeper 이름에 귀속되어,
+  같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
+  Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
+
+**Working Context**
+: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
+  operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
+  cluster별 Librarian Read Position과는 별개의 상태다.
 
 **Fact**
 : Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,

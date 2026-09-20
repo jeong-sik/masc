@@ -27,6 +27,7 @@ type declared_target =
   ; provider_ref : string
   ; model_id : string
   ; enable_thinking : bool option
+  ; reasoning_effort : Reasoning_effort.t option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   ; api_key_env : string option
@@ -103,6 +104,7 @@ type target_declaration =
   ; provider_ref : string
   ; model_id : string
   ; enable_thinking : bool option
+  ; reasoning_effort : Reasoning_effort.t option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   ; api_key_env : string option
@@ -295,6 +297,7 @@ let parse_target_declaration ~source toml =
     ; provider_ref
     ; model_id
     ; enable_thinking
+    ; reasoning_effort = None
     ; connect_timeout_s
     ; body_timeout_s
     ; (* A document declares its slots next to the provider rows they name, so
@@ -514,6 +517,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; target.provider_ref
       ; target.model_id
       ; option_bool target.enable_thinking
+      ; option_string (Option.map Reasoning_effort.to_string target.reasoning_effort)
       ; option_float target.connect_timeout_s
       ; option_float target.body_timeout_s
       ])
@@ -595,6 +599,7 @@ let load_resolver_snapshot
         ; provider_ref = declared.provider_ref
         ; model_id
         ; enable_thinking = declared.enable_thinking
+        ; reasoning_effort = declared.reasoning_effort
         ; connect_timeout_s = declared.connect_timeout_s
         ; body_timeout_s = declared.body_timeout_s
         ; api_key_env = declared.api_key_env
@@ -749,6 +754,7 @@ let load_resolver_snapshot
              ?max_tokens:capabilities.max_output_tokens
              ?max_context:capabilities.max_context_tokens
              ?enable_thinking:target.enable_thinking
+             ?reasoning_effort:target.reasoning_effort
              ~supports_structured_output_override:capabilities.supports_structured_output
              ~model_capabilities_override:capabilities
              ?connect_timeout_s:target.connect_timeout_s
@@ -769,6 +775,7 @@ let load_resolver_snapshot
               ; provider.request_path
               ; provider.api_key_env
               ; option_bool target.enable_thinking
+              ; option_string (Option.map Reasoning_effort.to_string target.reasoning_effort)
               ; option_float target.connect_timeout_s
               ; option_float target.body_timeout_s
               ; codec

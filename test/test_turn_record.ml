@@ -301,7 +301,6 @@ let test_dashboard_writer_fixture_roundtrip () =
     (List.map Runtime_usage_scope.to_string
        Runtime_usage_scope.all)
     scopes
-
 let test_codec_roundtrip () =
   let record = sample_record () in
   match Turn_record.of_json (Turn_record.to_json record) with

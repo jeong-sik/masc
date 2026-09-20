@@ -89,7 +89,6 @@ export type TurnResponseObservedModelInput = {
   model_input_measurement: TurnModelInputMeasurement
   front_atom_digest: string
 }
-
 export type TurnRecordEntry = {
   execution_ids: string[]
   keeper: string

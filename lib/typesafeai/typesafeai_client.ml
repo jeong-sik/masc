@@ -6,6 +6,54 @@ type evaluated =
   ; request_body_sha256 : string
   }
 
+type failure =
+  | Transport_failure of string
+  | Http_response_failure of
+      { status : int
+      ; body : string
+      ; detail : string
+      }
+
+let endpoint_for_observation endpoint =
+  Uri.of_string endpoint
+  |> fun uri -> Uri.with_userinfo uri None
+  |> fun uri -> Uri.with_query uri []
+  |> fun uri -> Uri.with_fragment uri None
+  |> Uri.to_string
+;;
+
+let redact_diagnostic ~endpoint ~api_key detail =
+  let displayed = endpoint_for_observation endpoint in
+  let normalized = Uri.of_string endpoint |> Uri.to_string in
+  detail
+  |> String_util.replace_substring ~needle:endpoint ~by:displayed
+  |> String_util.replace_substring ~needle:normalized ~by:displayed
+  |> String_util.replace_substring ~needle:api_key ~by:"[REDACTED]"
+  |> Observability_redact.redact_text
+;;
+
+let transport_failure ~endpoint ~api_key detail =
+  Transport_failure (redact_diagnostic ~endpoint ~api_key detail)
+;;
+
+let failure_to_string = function
+  | Transport_failure detail -> "typesafeai: transport failure: " ^ detail
+  | Http_response_failure { status; detail; _ } ->
+    Printf.sprintf "typesafeai: HTTP %d: %s" status detail
+;;
+
+let failure_to_yojson = function
+  | Transport_failure detail ->
+    `Assoc [ "kind", `String "transport"; "detail", `String detail ]
+  | Http_response_failure { status; body; detail } ->
+    `Assoc
+      [ "kind", `String "http_response"
+      ; "status", `Int status
+      ; "body", `String body
+      ; "detail", `String detail
+      ]
+;;
+
 let evaluate
       ?(endpoint = Typesafeai_config.endpoint ())
       ?(model = Typesafeai_config.model ())
@@ -35,6 +83,15 @@ let evaluate
       ~headers
       ~body
       ()
+    |> Result.map_error (transport_failure ~endpoint ~api_key)
+  in
+  let failed detail =
+    Error
+      (Http_response_failure
+         { status
+         ; body = response_body
+         ; detail = redact_diagnostic ~endpoint ~api_key detail
+         })
   in
   if status = 200
   then
@@ -42,15 +99,20 @@ let evaluate
       match Yojson.Safe.from_string response_body with
       | json -> Ok json
       | exception Yojson.Json_error msg ->
-        Error (Printf.sprintf "typesafeai: invalid response JSON: %s" msg)
+        failed ("invalid response JSON: " ^ msg)
     in
-    let* response = Typesafeai_types.eval_response_of_yojson parsed_json in
-    Ok { response; destination_uri = endpoint; request_body_sha256 }
+    (match Typesafeai_types.eval_response_of_yojson parsed_json with
+     | Error detail -> failed detail
+     | Ok response ->
+       Ok
+         { response
+         ; destination_uri = endpoint_for_observation endpoint
+         ; request_body_sha256
+         })
   else
-    Error
-      (Printf.sprintf
-         "typesafeai: HTTP %d returned by %s: %s"
-         status
-         endpoint
-         response_body)
+    failed response_body
 ;;
+
+module For_testing = struct
+  let transport_failure = transport_failure
+end

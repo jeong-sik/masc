@@ -135,7 +135,7 @@ type evaluation =
   ; model : string
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
-  ; result : (Typesafeai_client.evaluated, string) result
+  ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
 
 type run_result =
@@ -164,7 +164,12 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     without rounding and the applied [conveyed_boundary] is recorded;
     rejected answers retain their decoder diagnostic.
     Endpoint and model are captured once per run; a request failure has no
-    fabricated response model or request receipt. *)
+    fabricated response model or request receipt. Endpoint observations remove
+    userinfo, query and fragment. HTTP failures retain the response as
+    a JSON string, including invalid JSON and rejected typed responses.
+    State, question wording and raw responses are private run evidence, like
+    the existing [actual_input]. The existing exact-run HTTP detail requires
+    CanAdmin; this payload is not a public or secret-free projection. *)
 
 val run
   :  ?observe:(observation -> unit)

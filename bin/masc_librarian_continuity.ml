@@ -161,7 +161,7 @@ let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
            ; incomplete_response = Some response
            } : R.failed_generation)
 
-let judge ~clock (request : R.judge_request) =
+let judge ~clock ~endpoint (request : R.judge_request) =
   let* api_key =
     match Masc.Typesafeai_config.api_key () with
     | None -> Error "TypeSafe API key is not configured"
@@ -171,8 +171,9 @@ let judge ~clock (request : R.judge_request) =
   in
   let* evaluated =
     Masc.Typesafeai_client.evaluate ~clock ~api_key
-      ~endpoint:request.endpoint ~model:request.model
+      ~endpoint ~model:request.model
       ~state:(R.judge_state request) ~questions:(R.judge_questions request) ()
+    |> Result.map_error Masc.Typesafeai_client.failure_to_string
   in
   R.judgment request evaluated
 
@@ -216,13 +217,14 @@ let measure_case ~generate ~clock ~save (case : R.case) =
        | Error failed -> save (R.Answer_failed (question, failed))
        | Ok answer ->
            let* _ = save (R.Answer_ready { question; answer }) in
+           let endpoint = Masc.Typesafeai_config.endpoint () in
            let request =
              R.judge_request
-               ~endpoint:(Masc.Typesafeai_config.endpoint ())
+               ~endpoint:(Masc.Typesafeai_client.endpoint_for_observation endpoint)
                ~model:(Masc.Typesafeai_config.model ()) case
                ~question:question_text ~answer:answer.response.text
            in
-           match judge ~clock request with
+           match judge ~clock ~endpoint request with
            | Ok judgment -> save (R.Scored { question; answer; judgment })
            | Error error ->
                save (R.Judge_failed { question; answer; failure = { request; error } }))

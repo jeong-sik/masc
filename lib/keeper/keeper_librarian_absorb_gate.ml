@@ -438,7 +438,7 @@ type evaluation =
   ; model : string
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
-  ; result : (Typesafeai_client.evaluated, string) result
+  ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
 
 type run_result =
@@ -464,7 +464,11 @@ let absorbed_of_run = function
 let evaluation_to_yojson { endpoint; model; state; questions; result } =
   let response =
     match result with
-    | Error reason -> [ "status", `String "failed"; "reason", `String reason ]
+    | Error failure ->
+      [ "status", `String "failed"
+      ; "reason", `String (Typesafeai_client.failure_to_string failure)
+      ; "failure", Typesafeai_client.failure_to_yojson failure
+      ]
     | Ok evaluated ->
       let answers =
         match decode questions evaluated.Typesafeai_client.response with
@@ -499,7 +503,7 @@ let evaluation_to_yojson { endpoint; model; state; questions; result } =
      body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
     @ [ "request", `Assoc
-          [ "endpoint", `String endpoint
+          [ "endpoint", `String (Typesafeai_client.endpoint_for_observation endpoint)
           ; "model", `String model
           ; "state", state
           ; "questions", `Assoc
@@ -585,6 +589,7 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
          evaluations := { endpoint; model; state; questions; result } :: !evaluations;
          publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
+         |> Result.map_error Typesafeai_client.failure_to_string
        in
        let outcome = judge ~evaluate ~facts ~new_claims ~absorbed in
        let evaluations = List.rev !evaluations in

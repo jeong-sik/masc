@@ -148,6 +148,88 @@ let test_choice_response_rejects_empty_probabilities () =
   | Ok _ -> Alcotest.fail "choice response accepted empty probabilities"
 ;;
 
+let test_response_rejects_every_nonfinite_answer_field () =
+  let forms =
+    [ "noul", (fun number -> Printf.sprintf {|{"type":"noul","noul":%s}|} number)
+    ; "choice confidence",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"choice","choice":"yes","confidence":%s,"probabilities":{"yes":1}}|}
+          number)
+    ; "choice probability",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"choice","choice":"yes","confidence":1,"probabilities":{"yes":%s}}|}
+          number)
+    ; "score",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":%s,"confidence":1,"probabilities":{"0":1}}|}
+          number)
+    ; "score confidence",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":0,"confidence":%s,"probabilities":{"0":1}}|}
+          number)
+    ; "score probability",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":0,"confidence":1,"probabilities":{"0":%s}}|}
+          number)
+    ]
+  in
+  List.iter (fun (field, form) ->
+    List.iter (fun number ->
+      let answer = form number in
+      let response =
+        Yojson.Safe.from_string
+          (Printf.sprintf {|{"model":"jev-test","answers":{"q":%s}}|} answer)
+      in
+      match T.eval_response_of_yojson response with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "accepted non-finite %s: %s" field number)
+      [ "NaN"; "Infinity"; "-Infinity"; "1e400"; "-1e400" ]) forms
+;;
+
+let test_response_preserves_answers_with_unknown_usage () =
+  let counts input output =
+    `Assoc [ "input_tokens", input; "output_tokens", output ]
+  in
+  let cases =
+    [ "absent", None, None
+    ; "null", Some `Null, None
+    ; "not an object", Some (`String "unknown"), None
+    ; "empty object", Some (`Assoc []), None
+    ; "missing input", Some (`Assoc [ "output_tokens", `Int 0 ]), None
+    ; "missing output", Some (`Assoc [ "input_tokens", `Int 12 ]), None
+    ; "string input", Some (counts (`String "12") (`Int 0)), None
+    ; "string output", Some (counts (`Int 12) (`String "0")), None
+    ; "float input", Some (counts (`Float 12.0) (`Int 0)), None
+    ; "float output", Some (counts (`Int 12) (`Float 0.0)), None
+    ; "negative input", Some (counts (`Int (-1)) (`Int 0)), None
+    ; "negative output", Some (counts (`Int 12) (`Int (-1))), None
+    ; "measured zero", Some (counts (`Int 0) (`Int 0)), Some (0, 0)
+    ; "measured counts", Some (counts (`Int 12) (`Int 3)), Some (12, 3)
+    ]
+  in
+  List.iter (fun (label, usage, expected) ->
+    let response =
+      `Assoc
+        ([ "model", `String "jev-test"
+         ; "answers", `Assoc [ "q", `Assoc [ "type", `String "noul"; "noul", `Int 1 ] ]
+         ] @ match usage with None -> [] | Some usage -> [ "usage", usage ])
+    in
+    match T.eval_response_of_yojson response with
+    | Error detail -> Alcotest.failf "%s usage rejected a valid answer: %s" label detail
+    | Ok response ->
+      (match response.answers with
+       | [ "q", T.Noul_answer { noul = 1.0 } ] -> ()
+       | _ -> Alcotest.failf "%s usage changed the answer" label);
+      Alcotest.(check (option (pair int int))) label expected
+        (Option.map (fun (usage : T.usage) -> usage.input_tokens, usage.output_tokens)
+           response.usage)) cases
+;;
+
 type team =
   | Frontend
   | Backend
@@ -330,6 +412,14 @@ let () =
             "choice response rejects empty probabilities"
             `Quick
             test_choice_response_rejects_empty_probabilities
+        ; Alcotest.test_case
+            "every non-finite answer field is rejected"
+            `Quick
+            test_response_rejects_every_nonfinite_answer_field
+        ; Alcotest.test_case
+            "unknown usage preserves valid answers without inventing zero"
+            `Quick
+            test_response_preserves_answers_with_unknown_usage
         ; Alcotest.test_case
             "choice set builds the request and decodes the answer"
             `Quick

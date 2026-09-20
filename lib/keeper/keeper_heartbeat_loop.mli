@@ -12,6 +12,7 @@ val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
 
 val sync_keeper_presence :
   ctx:'a context ->
+  registry_entry:Keeper_registry.registry_entry ->
   meta_current:keeper_meta ->
   consecutive_failures:int ref ->
   keeper_meta
@@ -137,7 +138,9 @@ val owner_turn_rejection_cycle_status :
     belongs to the path that received the rate limit or quota answer; the
     keeper waits only while the path it would send next rests.
     [Continue_on_deferred_lane] names the walk head of the deferred suffix,
-    which is not resting; a pending input runs on it without a sleep.
+    which is not resting; a pending input runs on it without a sleep. The
+    failed lane is removed before the suffix is recorded, so consecutive
+    immediate cycles walk a finite candidate set and end when it is empty.
     [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
     runtime or assignment whose release that is. A rate limit or quota wait is
     [Serve_wakeup_after_duration] (#34653), a capacity wait
@@ -167,13 +170,14 @@ type keepalive_turn_outcome = {
     [Keeper_unified_turn_failure]), bumps the CycleExceptions counter
     and logs at ERROR. Does not raise. *)
 val record_crashed_cycle_failure :
-  base_path:string -> keeper_name:string -> exn -> unit
+  registry_entry:Keeper_registry.registry_entry -> exn -> unit
 
 (** Convert an exception escaping one autonomous cycle into its accounting
     outcome. Operator interrupts are expected cancellation and do not mutate
     the turn-failure counter; every other exception is recorded as a crash. *)
 val handle_cycle_exception :
-  base_path:string -> meta:keeper_meta -> exn -> keepalive_turn_outcome
+  registry_entry:Keeper_registry.registry_entry ->
+  meta:keeper_meta -> exn -> keepalive_turn_outcome
 
 type batch_disposition =
   | Batch_ack_completed
@@ -226,9 +230,18 @@ val failure_reason_after_turn_status :
   turn_fail_count:int ->
   Keeper_registry.failure_reason option ->
   Keeper_registry.failure_reason option
-(** Preserve a typed configuration root cause when the post-turn heartbeat
-    records its generic consecutive-failure observation. Other failures keep
-    the existing consecutive-count projection. *)
+(** Preserve the current failure cause when the post-turn heartbeat records
+    its status. Refresh a turn-failure count only when that is the current
+    reason or no reason exists. Preserve a heartbeat-failure count from
+    the current workspace I/O failure. Failure producers replace the reason
+    when a new failure occurs. *)
+
+val refresh_failure_reason_after_turn :
+  registry_entry:Keeper_registry.registry_entry -> turn_fail_count:int -> unit
+(** Refresh the registry cause after the loop dispatches turn status.
+    The exact originating lane is updated from its latest immutable entry, so
+    a concurrent cause is preserved and a same-name replacement is untouched.
+    A nonpositive turn-failure count does not write a reason. *)
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
     The caller classifies lifecycle state and fd/disk pressure
@@ -238,6 +251,7 @@ val failure_reason_after_turn_status :
 val run_keepalive_unified_turn :
   wake:Keeper_world_observation.cycle_wake ->
   ctx:'a context ->
+  registry_entry:Keeper_registry.registry_entry ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
@@ -290,7 +304,8 @@ val record_keepalive_stage_timing :
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
+  proactive_warmup_sec:int -> registry_entry:Keeper_registry.registry_entry ->
+  'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
@@ -312,6 +327,35 @@ module For_testing : sig
     assignment_id:string ->
     Keeper_unified_turn.turn_failure ->
     after_failure option
+
+  (** Whether the loop starts another cycle without sleeping. A serving
+      deferred suffix is itself unfinished input and starts immediately;
+      ordinary cadence and path-release outcomes retain the existing
+      acknowledged-pending-stimulus rule. *)
+  val next_cycle_starts_now :
+    after_failure:after_failure option ->
+    stimuli_acked:bool ->
+    pending_stimulus:(unit -> bool) ->
+    bool
+
+  (** Scheduling authority chosen from the loop's exact state. A deferred
+      runtime suffix takes precedence over cadence because it is unfinished
+      input, rather than a fabricated periodic tick. When both are present,
+      the label is deferred while {!periodic_cadence_after_cycle} consumes
+      the due cadence boundary independently in the same cycle. *)
+  val cycle_wake :
+    periodic_due:bool ->
+    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    Keeper_world_observation.cycle_wake
+
+  val periodic_cadence_after_cycle :
+    periodic_due:bool ->
+    now:float ->
+    Keeper_keepalive_signal.periodic_cadence ->
+    Keeper_keepalive_signal.periodic_cadence
+  (** Advance a due cadence boundary after the cycle even when another wake
+      label, including {!Keeper_world_observation.Deferred_runtime_lane},
+      authorized the turn. *)
 
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and

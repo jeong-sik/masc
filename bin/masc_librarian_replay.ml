@@ -359,14 +359,10 @@ let () =
     exit 2
   | Ok () ->
     let base_path =
-      match !base_path with
-      | Some dir ->
-        dir
-        |> Config_dir_resolver.absolute_path
-        |> Masc.Workspace.runtime_base_path_for_request
-      | None ->
-        Config_dir_resolver.base_path_or_cwd ()
-        |> Masc.Workspace.runtime_base_path_for
+      (match !base_path with
+       | Some dir -> Config_dir_resolver.absolute_path dir
+       | None -> Config_dir_resolver.base_path_or_cwd ())
+      |> fun selected -> Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit selected)
     in
     let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
     let runtime_root = Filename.dirname session_store in

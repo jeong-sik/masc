@@ -65,9 +65,9 @@ Keeper
 | `supersedes` | 옛 기억 하나를 새 claim 하나가 고쳐 쓴다(1:1). 옛 id 는 같은 답의 `dropped` 에도 있어야 한다. 기억 이벤트에 `revised`(옛 id → 새 id)가 남아 거슬러 올라갈 수 있다 | `revision`, `Keeper_memory_os_events.Revised` |
 | `absorbs` | 기억 여러 개를 새 claim 하나가 대신 말한다(N:1). 흡수된 id 는 `dropped` 에 있으면 안 된다. 스냅숏에서 빠지고 원문은 "어느 claim 으로 들어갔나"와 함께 남아 검색으로 다시 찾을 수 있다 | `absorbed_statement`, `<keeper>.memory-absorbed.jsonl` |
 | `retrieved` | 이 fact 가 `keeper_memory_search` 결과에 나온 횟수 | `Keeper_memory_os_events.Retrieved` |
-| `cited` | 이름은 "인용"이지만 기록되는 곳은 하나다. Keeper 가 `keeper_memory_retract` 로 이 fact 를 id 로 지목해 철회에 성공했을 때다. 그래서 살아 있는 fact 에서는 늘 0 이다 | `Keeper_memory_os_events.Cited` |
+| `retracted` | Keeper 가 `keeper_memory_retract` 로 이 fact 를 id 로 지목해 철회에 성공한 사건이다. 같은 claim 이 다시 추가되면 과거 철회 이력이 다시 보인다 | `Keeper_memory_os_events.Retracted` |
 
-회차가 말하지 않은 fact 는 그대로 남는다. 규칙을 하나라도 어긴 답(모르는 id, `supersedes` 의 id 가 `dropped` 에 없음, `absorbs` 의 id 가 `dropped` 에 있음)은 회차 전체가 거절되고 기억은 바뀌지 않는다. 2026-09-18 라이브 20개 Keeper 의 fact 2,462개 가운데 `injected` 가 2,157개, `derived` 가 9개였고, 기억 이벤트는 `revised` 3,632건, `retrieved` 1,508건, `cited` 116건, 흡수 기록은 300줄이었다.
+회차가 말하지 않은 fact 는 그대로 남는다. 규칙을 하나라도 어긴 답(모르는 id, `supersedes` 의 id 가 `dropped` 에 없음, `absorbs` 의 id 가 `dropped` 에 있음)은 회차 전체가 거절되고 기억은 바뀌지 않는다. 2026-09-18 라이브 20개 Keeper 의 fact 2,462개 가운데 `injected` 가 2,157개, `derived` 가 9개였고, 기억 이벤트는 `revised` 3,632건, `retrieved` 1,508건, 당시 wire 이름 `cited`(현재 `retracted`) 116건, 흡수 기록은 300줄이었다.
 
 ### 턴 하나를 따라가 보기
 
@@ -109,7 +109,7 @@ trace 하나에 atom 이 112개 쌓여 있고, 사람이 rondo 에게 말을 걸
 
 ```mermaid
 flowchart TD
-  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Ledger, Turn_record, Unfinished_turn, Whole_history 순으로 복원한다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
+  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Ledger, response-observed Turn_record, Whole_history 순으로 복원한다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
   B --> C["finalize: checkpoint 저장<br/>librarian_messages 는 checkpoint 의 메시지 전부"]
   C --> D{"librarian_config_state 가 Enabled 인가"}
   D -->|"아니오"| X0["끝. 기록 없음"]
@@ -624,4 +624,6 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
 
    라이브에서 두 레인을 섞는 Keeper 가 몇이고 그 안의 agent core 턴이 몇인지는 다른 세션이 쟀고(14개 중 6개, 326턴), 여기서 따로 세어 7개·328턴으로 같은 답을 얻었다. 레인은 `runtime_profile` 의 앞부분으로 가른다 — `total_atoms` 로 가르면 공식 클라이언트가 11% 로 나와 알려진 56% 와 어긋난다.
 
-   **그 레인이 도구를 안 써서 내용이 없는 것이 아니다**(09-19, 턴 기록의 `input_components`). 공식 클라이언트 턴 1,018건 중 **819건(80%)** 에 도구 바이트가 있고 합이 **1.59 GB** 다. agent core 는 694건 전부에 있지만 합은 0.18 GB 다. 이 값은 masc 가 조립한 입력을 잰 것이므로(`keeper_run_prompt.ml` 의 `build_prompt_metrics`) 그 순간 손에 있었다는 뜻이다. 그러니 §2.5 의 D6 은 43% 의 문제가 아니라 **100% 의 문제**이고, 버려지는 양은 공식 클라이언트 쪽이 9배 크다. 도구 본문을 어디에 남길지는 §6 이 정하는데, 그 자리가 checkpoint 라면 이 1.59 GB 는 계속 버려진다.
+   **입력 구성 바이트는 도구 본문의 소실량이 아니다.** `Turn_record.input_components`는 Keeper 턴에서 관측한 마지막 요청의 구성 비용이다(`lib/types/turn_record.mli`). `keeper_agent_run.ml`이 넘긴 `input_messages` 전체에서 `Keeper_agent_prompt_metrics.build_ctx_segments`가 도구 호출·결과 바이트를 합하므로, 같은 이력을 다음 요청에 다시 실으면 다시 세어진다. 호출 id·도구 이름·인자도 포함하며, 새 결과량·중복을 제거한 본문량·삭제량을 구분해서 측정하는 값이 아니다.
+
+   Claude Code와 Codex는 재개할 때도 MASC의 canonical snapshot을 설정으로 다시 보내고 그 메시지를 `Whole_input_transmitted`로 보고한다. 이 측정에는 클라이언트가 따로 보유한 native 대화·도구 이력이 포함되지 않는다. 따라서 이 합계로 D6의 발생률이나 실행 방식별 소실량을 비교할 수 없다. source로 확인되는 D6의 경계는 `keeper_librarian.ml`의 `text_of_content`가 도구 호출·결과 본문을 생략하고, checkpoint가 없는 턴의 `librarian_messages`가 assistant 메시지만 받는다는 것이다. 실제 본문이 어디에 보관되고 무엇이 빠지는지는 이 프롬프트 입력 계약과 별도로 확인해야 한다(§6).

@@ -406,36 +406,7 @@ let exact_execution_error error =
     | Exact_output.No_generation_dispatch -> No_outward_effect
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
-  (* The static labels stay as prefixes (existing log greps keep working);
-     the payload each branch carries — failing slot, typed cause, raw provider
-     body, flow journey — is rendered after them instead of being discarded. *)
-  let detail =
-    match error with
-    | Exact_output.Flow_attempt_already_started _ ->
-      "attempt_already_started"
-    | Flow_attempt_start_failed _ ->
-      "attempt_start_failed"
-    | Flow_measurement_start_failed _ ->
-      "measurement_start_failed"
-    | Flow_candidates_exhausted { rejection; evidence } ->
-      Printf.sprintf
-        "candidates_exhausted: %s"
-        (Keeper_exact_flow_detail.candidates_exhausted_detail
-           ~rejection
-           ~evidence)
-    | Flow_before_measurement_dispatch_callback_failed _
-    | Flow_measurement_terminal_callback_failed _
-    | Flow_before_dispatch_callback_failed _
-    | Flow_before_advance_callback_failed _ ->
-      "unexpected_callback_failure"
-    | Flow_exact_execution_failed { candidate; cause; evidence } ->
-      Printf.sprintf
-        "agent_core_execution_failed: %s"
-        (Keeper_exact_flow_detail.execution_failure_detail
-           ~candidate
-           ~cause
-           ~evidence)
-  in
+  let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
   { outward_effect; detail }
 ;;
 

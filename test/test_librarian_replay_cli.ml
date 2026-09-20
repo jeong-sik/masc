@@ -73,19 +73,25 @@ let write_metadata config ~trace_id =
   path
 ;;
 
-let run_cli ?(all_keepers = false) ?base_argument ?env_base_path env
-    ~base_path ~config_root ~cluster_name ~extent =
+let run_cli ?(all_keepers = false) ?base_argument ?env_base_path
+    ?(from_cwd = false)
+    env ~base_path ~config_root ~cluster_name ~extent =
+  let base_args, base_env =
+    if from_cwd then [], []
+    else
+      [ "--base-path"; Option.value ~default:base_path base_argument ],
+      [ "MASC_BASE_PATH=" ^ Option.value ~default:base_path env_base_path ]
+  in
   Eio.Process.parse_out
     ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
-    ~env:[| "MASC_CONFIG_DIR=" ^ config_root
-          ; "MASC_BASE_PATH=" ^ Option.value ~default:base_path env_base_path
-          ; "MASC_CLUSTER_NAME=" ^ cluster_name
-          |]
+    ~env:(Array.of_list
+      ([ "MASC_CONFIG_DIR=" ^ config_root
+       ; "MASC_CLUSTER_NAME=" ^ cluster_name
+       ; "HOME=" ^ base_path
+       ; "XDG_CONFIG_HOME=" ^ base_path
+       ] @ base_env))
     (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
-    ([ librarian_replay_exe ()
-     ; "--base-path"; Option.value ~default:base_path base_argument
-     ; "--extent"; extent
-     ]
+    ([ librarian_replay_exe () ] @ base_args @ [ "--extent"; extent ]
      @ if all_keepers then [] else [ "--keeper"; keeper_id ])
   |> Yojson.Safe.from_string
 ;;
@@ -106,7 +112,8 @@ let rec files_under dir =
     else [ path, Digest.to_hex (Digest.file path) ])
 ;;
 
-type base_argument = Absolute | Relative | Linked_worktree | Conflicting_environment
+type base_argument =
+  | Absolute | Relative | Linked_worktree | Conflicting_environment | Default_cwd
 
 let test_workspace_checkpoint_is_replayed ?(shared_config = false)
     ?(argument = Absolute) cluster_name () =
@@ -118,7 +125,7 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () ->
       let base_argument = match argument with
-        | Absolute | Conflicting_environment -> base_path
+        | Absolute | Conflicting_environment | Default_cwd -> base_path
         | Relative -> "."
         | Linked_worktree ->
           let run args = Eio.Process.run (Eio.Stdenv.process_mgr env)
@@ -134,7 +141,7 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
       in
       let env_base_path = match argument with
         | Conflicting_environment -> Filename.concat base_path "other-workspace"
-        | Absolute | Relative | Linked_worktree -> base_path
+        | Absolute | Relative | Linked_worktree | Default_cwd -> base_path
       in
       let config = Masc.Workspace.default_config base_path in
       let config =
@@ -191,7 +198,12 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
           ~keepers_dir:other_keepers_dir ~trace_id:other_trace ~turn:1 other_messages);
       let before = files_under base_path in
       let enumerated =
-        run_cli ~all_keepers:true ~base_argument ~env_base_path env
+        run_cli
+          ~all_keepers:true
+          ~base_argument
+          ~env_base_path
+          ~from_cwd:(argument = Default_cwd)
+          env
           ~base_path ~config_root ~cluster_name ~extent:"all"
         |> keeper_result
       in
@@ -201,7 +213,8 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
         (enumerated |> U.member "reached_atom" |> U.to_int);
       List.iter (fun (extent, expected_ranges) ->
           let output =
-            run_cli ~base_argument ~env_base_path env ~base_path ~config_root ~cluster_name ~extent
+            run_cli ~base_argument ~env_base_path ~from_cwd:(argument = Default_cwd)
+              env ~base_path ~config_root ~cluster_name ~extent
           in
           check string "resolved fixture keepers" keepers_dir
             (output |> U.member "keepers_dir" |> U.to_string);
@@ -301,6 +314,8 @@ let () =
             (test_workspace_checkpoint_is_replayed ~argument:Linked_worktree "Replay/Cluster")
         ; test_case "explicit base wins over a different environment base" `Quick
             (test_workspace_checkpoint_is_replayed ~argument:Conflicting_environment "Replay/Cluster")
+        ; test_case "no base or recorded default uses current workspace" `Quick
+            (test_workspace_checkpoint_is_replayed ~argument:Default_cwd "Replay/Cluster")
         ; test_case "missing store fails instead of reporting no Keepers" `Quick
             (test_missing_store_is_not_an_empty_replay [])
         ; test_case "named Keeper cannot hide a missing store" `Quick

@@ -511,6 +511,7 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "keepers": [
             {
                 "runtime_class": "keeper",
+                "runtime_blocker_summary": None,
                 "name": KEEPER,
                 "meta": {
                     "name": KEEPER,

@@ -180,7 +180,7 @@ let () =
             test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes
         ; Alcotest.test_case "projected first the count would be the dialect's" `Quick
             test_projected_first_the_atom_count_would_be_the_dialects
-        ; Alcotest.test_case "an unfinished turn reads where it stopped" `Quick
+        ; Alcotest.test_case "a response-observed turn reads where it started" `Quick
             test_a_response_observed_turns_range_is_read_where_it_started
         ; Alcotest.test_case "a declined projection hands over the carried range" `Quick
             test_a_declined_projection_hands_over_the_carried_range

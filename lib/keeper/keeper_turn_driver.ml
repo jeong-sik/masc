@@ -1880,6 +1880,7 @@ let run_named
       let error_runtime_id = attempt_runtime_id in
       let official_model_input_observation hooks =
         let attempted = ref None in
+        let transmitted_observation = ref None in
         let on_observation =
           match
             on_model_input_window_observation,
@@ -1897,6 +1898,12 @@ let run_named
                         observation)
                    on_model_input_window_observation)
         in
+        let on_transmitted_model_input = function
+          | Keeper_official_client_host.Whole_input_transmitted _ ->
+            transmitted_observation := !attempted
+          | Keeper_official_client_host.Held_by_client_session ->
+            transmitted_observation := None
+        in
         let hooks =
           match on_response_observed_model_input with
           | None -> hooks
@@ -1907,6 +1914,8 @@ let run_named
                   Some
                     (function
                       | Agent_core.Hooks.AfterTurn _ ->
+                        let observed = !transmitted_observation in
+                        transmitted_observation := None;
                         Option.iter
                           (fun
                             (window :
@@ -1922,7 +1931,7 @@ let run_named
                                    ; front_atom_digest = window.front_atom_digest
                                    }
                                })
-                          !attempted;
+                          observed;
                         Agent_core.Hooks.Continue
                       | Agent_core.Hooks.BeforeTurn _
                       | Agent_core.Hooks.BeforeTurnParams _
@@ -1943,7 +1952,12 @@ let run_named
                    ~outer:response_observation_hook
                    ~inner:hooks)
         in
-        (fun () -> attempted := None), on_observation, hooks
+        ( (fun () ->
+            attempted := None;
+            transmitted_observation := None)
+        , on_observation
+        , on_transmitted_model_input
+        , hooks )
       in
       let inference_policy =
         attempt_inference_policy
@@ -1961,12 +1975,16 @@ let run_named
          Keeper_provider_attempt_effect.No_effect_observed,
          Keeper_attempt_dispatch.Rejected_before_dispatch)
       | Runtime_execution.Codex_app_server config ->
-        let reset_model_input_observation, on_model_input_window_observation, hooks =
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , hooks ) =
           official_model_input_observation hooks
         in
         let run_codex ~initial_messages () =
           reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
+            record_transmitted_model_input transmitted;
             Option.iter
               (fun observe ->
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
@@ -2096,12 +2114,16 @@ let run_named
         , codex_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Antigravity_cli config ->
-        let reset_model_input_observation, on_model_input_window_observation, hooks =
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , hooks ) =
           official_model_input_observation hooks
         in
         let run_antigravity ~initial_messages () =
           reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
+            record_transmitted_model_input transmitted;
             Option.iter
               (fun observe ->
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
@@ -2208,13 +2230,17 @@ let run_named
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Claude_code config ->
-        let reset_model_input_observation, on_model_input_window_observation, hooks =
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , hooks ) =
           official_model_input_observation hooks
         in
         let run_claude ~initial_messages () =
           reset_model_input_observation ();
           let tools = if runtime.model.tools_support then tools else [] in
           let on_transmitted_model_input transmitted =
+            record_transmitted_model_input transmitted;
             Option.iter
               (fun observe ->
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)

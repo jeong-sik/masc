@@ -558,7 +558,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
          check bool "fresh transmission contains prepared history" true
            (List.length messages > 0)
        | _ -> fail "successful start/resume did not each report their exact input mode");
-      check int "both official-client responses certify their offered range" 2
+      check int "only the fresh transmission certifies its offered range" 1
         (List.length !response_observed_model_inputs);
       List.iter
         (fun (observed : Turn_record.response_observed_model_input) ->

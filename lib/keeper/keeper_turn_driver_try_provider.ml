@@ -731,15 +731,10 @@ let compose_carried_model_input
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
-      (* A turn that did not finish is read at the position it reached, not
-         ahead of it. Every candidate of a turn shares the front a refusal
-         moved (RFC keeper-context-window-in-tokens §10.4), so the record of an
-         unfinished turn already names the narrowest range that turn tried, and
-         the next refusal is answered by the in-turn ladder. Moving the front
-         again here would also move it for the turns that ended for reasons
-         that say nothing about size — a quota answer, a reset connection —
-         and those repeat, so the range would shrink to nothing while the
-         history stood still. *)
+      (* This seed names a range for which a response was observed. The next
+         refusal is answered by the in-turn ladder. Moving the front again
+         here would reinterpret a response observation as a size refusal and
+         make unrelated quota or connection failures shrink a stable history. *)
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes

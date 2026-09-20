@@ -1094,27 +1094,24 @@ let lookup_for_provider t ~provider_name ~model_id =
   match Model_identifiers.Model_id.of_string model_id with
   | Error _ -> None
   | Ok model_id ->
-    let model_id =
-      normalize_label (Model_identifiers.Model_id.to_string model_id)
-    in
     let find_exact label =
-    List.find_opt
-      (fun entry ->
-         match entry.provider_name with
-         | None -> false
-         | Some declared ->
-           String.equal label (normalize_label declared)
-           && String.equal
-                model_id
-                (normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)))
-      t.models
-  in
-  let requested = normalize_label provider_name in
-  match find_exact requested with
-  | Some _ as hit -> hit
-  | None ->
-    let canonical = canonical_provider_name t requested in
-    if String.equal canonical requested then None else find_exact canonical
+      List.find_opt
+        (fun entry ->
+           match entry.provider_name with
+           | None -> false
+           | Some declared ->
+             String.equal label (normalize_label declared)
+             && Model_identifiers.Model_id.equal_id_prefix
+                  ~prefix:entry.id_prefix
+                  model_id)
+        t.models
+    in
+    let requested = normalize_label provider_name in
+    match find_exact requested with
+    | Some _ as hit -> hit
+    | None ->
+      let canonical = canonical_provider_name t requested in
+      if String.equal canonical requested then None else find_exact canonical
 ;;
 
 (* Row-level catalog merge (Agent Core contract). Identity is what lookup keys on:

@@ -2037,11 +2037,20 @@ thinking_control_token = "<|provider|>"
                 ~wire:None
                 ~allow_bare_fallback:false
                 ~provider_label:" ACME "
-                ~model_id:" EXACT-MODEL "
+                ~model_id:"EXACT-MODEL"
             with
             | Some caps ->
-              check bool "exact normalized pair resolves" true caps.supports_tools
-            | None -> fail "exact normalized provider/model pair must resolve");
+              check bool "normalized provider and case-folded model resolve" true caps.supports_tools
+            | None -> fail "normalized provider and case-folded model must resolve");
+           check
+             (option reject)
+             "provider-scoped padded model id is rejected"
+             None
+             (Capabilities.for_provider_model_id
+                ~wire:None
+                ~allow_bare_fallback:false
+                ~provider_label:" ACME "
+                ~model_id:" EXACT-MODEL ");
            check
              (option reject)
              "provider-scoped model prefix extension is absent"

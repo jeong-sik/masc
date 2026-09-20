@@ -636,7 +636,7 @@ let test_task_approved_completes_graph_and_span () =
            ~payload:
              (`Assoc
                [ ("task_id", `String "task-901");
-                 ("assignee", `String "worker-a");
+                 ("producer", `String "worker-a");
                ])
            ());
       let json =

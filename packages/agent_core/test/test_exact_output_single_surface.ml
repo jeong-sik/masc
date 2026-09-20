@@ -9,7 +9,7 @@ let _preserve_public_raw_sync_response_surface
 ;;
 
 let _preserve_public_sync_transport_receipt_surface
-      ({ response = _; response_header_evidence = _ } :
+      ({ response = _; body_receipt = _; response_header_evidence = _ } :
         Http_client.sync_transport_receipt)
   =
   ()
@@ -492,6 +492,7 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
       ; provider_ref = "deepseek"
       ; model_id = "deepseek-v4-pro"
       ; enable_thinking = None
+      ; reasoning_effort = None
       ; connect_timeout_s = Some 30.0
       ; body_timeout_s = None
       ; api_key_env = None

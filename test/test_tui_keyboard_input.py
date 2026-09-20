@@ -1279,6 +1279,7 @@ def keeper_runtime_http_fixtures(
                     "keepalive_running": True,
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
+                    "runtime_blocker_summary": None,
                 },
                 {
                     "runtime_class": "keeper",
@@ -1291,6 +1292,7 @@ def keeper_runtime_http_fixtures(
                     "keepalive_running": True,
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
+                    "runtime_blocker_summary": None,
                 },
             ],
         },
@@ -6642,6 +6644,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
         {
             "keeper": "alpha",
             "dashboard_surface": "/api/v1/keepers/:name/memory-facts",
+            "events_read_error": None,
             "ordinary": {
                 "present": True,
                 "revision": 7,
@@ -6658,7 +6661,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                             "retrieved_count": 3,
                             "retrieved_distinct_days": 2,
                             "last_retrieved_at": 1787347500.0,
-                            "cited_count": 0,
+                            "retracted_count": 0,
                             "revised_from": [],
                         },
                     },
@@ -6673,7 +6676,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                             "retrieved_count": 0,
                             "retrieved_distinct_days": 0,
                             "last_retrieved_at": None,
-                            "cited_count": 0,
+                            "retracted_count": 0,
                             "revised_from": [],
                         },
                     },
@@ -11811,6 +11814,7 @@ def runtime_resolved_runtime(
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,
+        "declared_reasoning_effort": None,
         "is_local": False,
         # This binding flag is independent of the fleet's top-level default.
         "is_default": False,

@@ -771,8 +771,17 @@ let keeper_dir (config : Workspace.config) : string =
   let d = Workspace.keepers_runtime_dir config in
   ensure_dir d
 
+let session_store_path_for_runtime_root runtime_root =
+  Filename.concat runtime_root "traces"
+;;
+
 let session_store_path (config : Workspace.config) : string =
-  Filename.concat (Workspace.masc_root_dir config) "traces"
+  session_store_path_for_runtime_root (Workspace.masc_root_dir config)
+;;
+
+let session_store_path_for_base_path base_path =
+  let runtime_root = (Workspace.backend_config_for base_path).base_path in
+  session_store_path_for_runtime_root runtime_root
 ;;
 
 let session_base_dir (config : Workspace.config) : string =

@@ -11,6 +11,7 @@ val fusion_decision : Masc_domain.tool_schema
 val fusion_status : Masc_domain.tool_schema
 val peer_artifact : Masc_domain.tool_schema
 val artifact_read : Masc_domain.tool_schema
+val skill_validate : Masc_domain.tool_schema
 val keeper_analyze_image : Masc_domain.tool_schema
 
 (* RFC-0430 Phase 3 — provider Files tools. *)

@@ -39,6 +39,7 @@ let record ?(tokens = Some 18_000) ~wire ~scope () : Turn_record.t =
           })
         wire
   ; model_input_window = None
+  ; response_observed_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }

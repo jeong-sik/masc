@@ -1484,6 +1484,7 @@ let run_named
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
+    ?on_response_observed_model_input
     ?carried_front_seed
     ?runtime_manifest_context
     ?runtime_manifest_append
@@ -1903,6 +1904,73 @@ let run_named
              })
         on_runtime_attempt;
       let error_runtime_id = attempt_runtime_id in
+      let official_model_input_observation hooks =
+        let attempted = ref None in
+        let on_observation =
+          match
+            on_model_input_window_observation,
+            on_response_observed_model_input
+          with
+          | None, None -> None
+          | _ ->
+            Some
+              (fun observation ->
+                 attempted := Some observation;
+                 Option.iter
+                   (fun observe ->
+                      observe
+                        ~measurement:Turn_record.Durable_shape
+                        observation)
+                   on_model_input_window_observation)
+        in
+        let hooks =
+          match on_response_observed_model_input with
+          | None -> hooks
+          | Some observe ->
+            let response_observation_hook =
+              { Agent_core.Hooks.empty with
+                after_turn =
+                  Some
+                    (function
+                      | Agent_core.Hooks.AfterTurn _ ->
+                        Option.iter
+                          (fun
+                            (window :
+                              Runtime_model_input_tail_window.window_observation) ->
+                             observe
+                               { Turn_record.runtime_profile =
+                                   attempt_runtime_id
+                               ; window =
+                                   { Turn_record.transmitted_atoms =
+                                       window.transmitted_atoms
+                                   ; total_atoms = window.total_atoms
+                                   ; measurement = Turn_record.Durable_shape
+                                   ; front_atom_digest = window.front_atom_digest
+                                   }
+                               })
+                          !attempted;
+                        Agent_core.Hooks.Continue
+                      | Agent_core.Hooks.BeforeTurn _
+                      | Agent_core.Hooks.BeforeTurnParams _
+                      | Agent_core.Hooks.PreToolUse _
+                      | Agent_core.Hooks.PostToolUse _
+                      | Agent_core.Hooks.PostToolUseFailure _
+                      | Agent_core.Hooks.OnStop _
+                      | Agent_core.Hooks.OnError _
+                      | Agent_core.Hooks.OnToolError _ ->
+                        Agent_core.Hooks.Continue)
+              }
+            in
+            Some
+              (match hooks with
+               | None -> response_observation_hook
+               | Some hooks ->
+                 Agent_core.Hooks.compose
+                   ~outer:response_observation_hook
+                   ~inner:hooks)
+        in
+        (fun () -> attempted := None), on_observation, hooks
+      in
       let inference_policy =
         attempt_inference_policy
           ~runtime_id:attempt_runtime_id
@@ -1919,7 +1987,11 @@ let run_named
          Keeper_provider_attempt_effect.No_effect_observed,
          Keeper_attempt_dispatch.Rejected_before_dispatch)
       | Runtime_execution.Codex_app_server config ->
+        let reset_model_input_observation, on_model_input_window_observation, hooks =
+          official_model_input_observation hooks
+        in
         let run_codex ~initial_messages () =
+          reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
             Option.iter
               (fun observe ->
@@ -1944,10 +2016,7 @@ let run_named
                is the list it handed over. Same reading the Agent Core path
                publishes; without it the turn record has no window. *)
             ?on_model_input_window_observation:
-              (Option.map
-                 (fun observe observation ->
-                    observe ~measurement:Turn_record.Durable_shape observation)
-                 on_model_input_window_observation)
+              on_model_input_window_observation
             ~hooks
             ~context_injector
             ~context
@@ -2053,7 +2122,11 @@ let run_named
         , codex_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Antigravity_cli config ->
+        let reset_model_input_observation, on_model_input_window_observation, hooks =
+          official_model_input_observation hooks
+        in
         let run_antigravity ~initial_messages () =
+          reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
             Option.iter
               (fun observe ->
@@ -2068,10 +2141,7 @@ let run_named
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
-              (Option.map
-                 (fun observe observation ->
-                    observe ~measurement:Turn_record.Durable_shape observation)
-                 on_model_input_window_observation)
+              on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2164,7 +2234,11 @@ let run_named
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Claude_code config ->
+        let reset_model_input_observation, on_model_input_window_observation, hooks =
+          official_model_input_observation hooks
+        in
         let run_claude ~initial_messages () =
+          reset_model_input_observation ();
           let tools = if runtime.model.tools_support then tools else [] in
           let on_transmitted_model_input transmitted =
             Option.iter
@@ -2192,10 +2266,7 @@ let run_named
                when its own serializer produced the bytes and falls back to
                this same shape when it could not. *)
             ?on_model_input_window_observation:
-              (Option.map
-                 (fun observe observation ->
-                    observe ~measurement:Turn_record.Durable_shape observation)
-                 on_model_input_window_observation)
+              on_model_input_window_observation
             ~hooks
             ~context_injector
             ~context
@@ -2454,6 +2525,7 @@ let run_named
             ; on_runtime_observation
             ; on_request_wire_observation
             ; on_model_input_window_observation
+            ; on_response_observed_model_input
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append

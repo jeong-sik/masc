@@ -118,6 +118,16 @@ type model_input_window =
     present or all null. A record without the [front_atom_digest] key does not
     decode. *)
 
+type response_observed_model_input =
+  { runtime_profile : string
+  ; window : model_input_window
+  }
+(** The exact request range for which a typed provider response reached the
+    [AfterTurn] boundary. This is separate from [model_input_window], which is
+    the latest range attempted and may belong to a later request that never
+    received a response. The runtime and window travel together so failover
+    cannot certify one candidate's range with another candidate's response. *)
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -228,6 +238,11 @@ type t =
     (* [None] is an explicit observation that no model-input projection ran for
        this turn — a runtime that assembles its own input, or a turn that ended
        before any cut was selected. It is not a zero-length history. *)
+  ; response_observed_model_input : response_observed_model_input option
+    (* [None] means no request range was joined to a typed provider response.
+       The JSON key is required and nullable; older rows without the fact do
+       not decode and therefore cannot promote an attempted range after a
+       restart. *)
   ; raw_trace_run_ref : raw_trace_run_ref option
     (* Exact AGENT_CORE run selected by this turn's completed provider dispatch.
        [None] is an explicit observation that the raw-trace sink degraded or

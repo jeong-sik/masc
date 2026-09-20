@@ -177,6 +177,8 @@ type try_provider_ctx =
        -> Runtime_model_input_tail_window.window_observation
        -> unit)
         option
+  ; on_response_observed_model_input :
+      (Turn_record.response_observed_model_input -> unit) option
   ; (* Event bus *)
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -1283,6 +1285,23 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
               | Agent_core.Hooks.AfterTurn { response; _ } ->
                 (match !last_request with
                  | Some { request; digest_at } ->
+                   (match request.Keeper_model_input_ledger.ends with
+                    | Keeper_model_input_ledger.Carried_atoms
+                        { front_digest; _ } ->
+                      Option.iter
+                        (fun observe ->
+                           observe
+                             { Turn_record.runtime_profile = ctx.runtime_id
+                             ; window =
+                                 { transmitted_atoms =
+                                     request.atom_count - request.first_atom
+                                 ; total_atoms = request.atom_count
+                                 ; measurement = Turn_record.Wire_shape
+                                 ; front_atom_digest = front_digest
+                                 }
+                             })
+                        ctx.on_response_observed_model_input
+                    | Keeper_model_input_ledger.No_atom_carried -> ());
                    let usage =
                      Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->

@@ -1277,6 +1277,7 @@ let run_turn
        refused at the wire has a real cut and no wire observation. Sharing one
        cell would let the missing half erase the half that was measured. *)
     let model_input_window_ref = ref None in
+    let response_observed_model_input_ref = ref None in
     let current_request_provider_content_ref :
       ( Agent_core.Types.message list
       , Keeper_agent_prompt_metrics.provenance_failure )
@@ -1617,7 +1618,7 @@ let run_turn
                               finally answered, and the metrics row credits
                               one lane's bytes to another.
 
-                              All four cells, not just the two the record is
+                              All five attempt-local cells, not just the two the record is
                               built from: the Agent Core wire handler reads
                               the provider-content and projected-message cells
                               to assemble its attribution, so leaving them set
@@ -1625,9 +1626,13 @@ let run_turn
                               the inputs it is assembled from. That the Agent
                               Core lane happens to overwrite both on every
                               request is a property of that lane, not of this
-                              invariant. *)
+                              invariant. The response-observed cell is
+                              turn-local instead: a later unanswered attempt
+                              must not erase the last request that actually
+                              received a response. *)
                            request_attribution_ref := None;
                            request_wire_evidence_ref := None;
+                           model_input_window_ref := None;
                            current_request_provider_content_ref := None;
                            current_request_projected_messages_ref := None;
                            s.Keeper_run_tools.on_runtime_attempt attempt)
@@ -1665,6 +1670,10 @@ let run_turn
                         (fun ~measurement observation ->
                            model_input_window_ref :=
                              Some (measurement, observation))
+                      ~on_response_observed_model_input:
+                        (fun observation ->
+                           response_observed_model_input_ref :=
+                             Some observation)
                       ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
@@ -2269,6 +2278,8 @@ let run_turn
                       observation.Runtime_model_input_tail_window.front_atom_digest
                   })
                !model_input_window_ref)
+          ~response_observed_model_input:
+            !response_observed_model_input_ref
           ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature

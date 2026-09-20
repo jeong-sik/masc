@@ -303,6 +303,8 @@ val run_named :
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation
      -> unit) ->
+  ?on_response_observed_model_input:
+    (Turn_record.response_observed_model_input -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->

@@ -349,8 +349,10 @@ jobs:
         # 선택"). The step's own deadline sits two minutes above that budget
         # so the script, not the runner, ends a step that runs out and the
         # log says which suites did not run. The job is bounded at 30 minutes,
-        # and in run 35216373548 this step started 7m55s into it.
-        timeout-minutes: 20
+        # and in run 35502819681 the 18-minute budget passed 414 suites before
+        # stopping the next suite with only 15 still queued. Two measured
+        # minutes of headroom keeps that complete selection inside the job.
+        timeout-minutes: 22
         env:
           GH_TOKEN: ${{ github.token }}
           DUNE_JOBS: "4"
@@ -358,7 +360,7 @@ jobs:
         run: |
           bash scripts/ci/run-edited-tests.sh \
             "${{ github.event.pull_request.number }}" \
-            --budget-seconds 1080
+            --budget-seconds 1200
 
 
   # dashboard/ ships a `typecheck` script and no lane calls it.

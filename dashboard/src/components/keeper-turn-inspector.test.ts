@@ -433,18 +433,18 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(text).toContain('wire 547.4KB')
   })
 
-  // The share is the answer to "can this keeper still see what it did 10 turns
-  // ago". It is carried by its own observation, so it has to survive a turn
-  // whose input-component attribution was unavailable — the shape
-  // keeper_agent_run logs as "turn input composition unavailable".
-  it('shows how much history a turn transmitted even without input components', async () => {
+  // A later candidate can own the turn row while an earlier candidate supplied
+  // the last range. Keep that observation without attributing it to the row.
+  it('keeps an unattributed wire range under a later runtime without input components', async () => {
     const records = turnRecordsWithMemoryOs()
     const latestRow = records.entries.at(-1)
     if (!latestRow) throw new Error('fixture must carry a latest turn')
     const latest = latestRow.record
     latest.input_components = null
+    latest.runtime_profile = 'codex.codex'
     latest.transmitted_atoms = 800
     latest.total_atoms = 5000
+    latest.model_input_measurement = 'wire_shape'
     fetchKeeperTurnRecordsMock.mockResolvedValue(records)
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -460,12 +460,15 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(text).toContain('800')
     expect(text).toContain('5,000')
     expect(text).toContain('16.0%')
+    expect(text).toContain('마지막 이력 범위 관측')
+    expect(text).toContain('요청 형태 기준')
+    expect(text).toContain('범위 관측 런타임: 기록 없음')
+    expect(text).not.toContain('% 전송')
+    expect(text).not.toContain('codex.codex')
+    expect(container.textContent).toContain('codex.codex')
   })
 
-  // A narrower window with no reason attached reads as an ordinary bad turn.
-  // The decline does not age out, so a keeper can sit in it indefinitely —
-  // which is why the basis is recorded rather than only logged.
-  it('says when a turn was measured against the checkpoint instead of the wire', async () => {
+  it('labels the prepared history basis without claiming transmission or a decline', async () => {
     const records = turnRecordsWithMemoryOs()
     const latestRow = records.entries.at(-1)
     if (!latestRow) throw new Error('fixture must carry a latest turn')
@@ -480,10 +483,14 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(container.textContent).toContain('T42')
     })
 
-    expect(container.querySelector('[data-testid="turn-measurement-declined"]')).toBeTruthy()
+    const text = container.querySelector('[data-testid="turn-transmitted-atoms"]')?.textContent ?? ''
+    expect(text).toContain('이력 목록 기준')
+    expect(text).toContain('범위 관측 런타임: 기록 없음')
+    expect(text).not.toContain('% 전송')
+    expect(text).not.toContain('reasoning 포함')
   })
 
-  it('says nothing extra when the wire shape was measured', async () => {
+  it('labels the wire basis separately from its unrecorded runtime', async () => {
     const records = turnRecordsWithMemoryOs()
     const latestRow = records.entries.at(-1)
     if (!latestRow) throw new Error('fixture must carry a latest turn')
@@ -499,12 +506,13 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="turn-measurement-declined"]')).toBeNull()
+    expect(container.querySelector('[data-testid="turn-measurement"]')?.textContent)
+      .toContain('요청 형태 기준')
+    expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')?.textContent)
+      .toContain('범위 관측 런타임: 기록 없음')
   })
 
-  // Absence has to read as absence: a turn on a runtime that assembles its own
-  // input carries no observation, and rendering 0 would say the keeper saw
-  // nothing.
+  // An absent observation must not become a measured zero-length history.
   it('renders nothing when the turn recorded no window observation', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 

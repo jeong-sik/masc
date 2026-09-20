@@ -1098,23 +1098,24 @@ function TurnRow({
           if (transmitted == null || total == null || total <= 0) return null
           // Built as concatenation so the html template holds no nested literal.
           const label =
-            '이력 '
+            '마지막 이력 범위 관측 '
             + transmitted.toLocaleString()
             + ' / '
             + total.toLocaleString()
             + ' atom ('
             + ((transmitted / total) * 100).toFixed(1)
-            + '% 전송)'
-          // A turn measured against the durable shape budgeted for reasoning
-          // the wire deletes, so its window is narrower than it needed to be.
-          // Said here because the count alone reads as an ordinary bad turn.
-          const declined = record.model_input_measurement === 'durable_shape'
+            + '%)'
+          let measurement = '측정 기준 미기록'
+          if (record.model_input_measurement === 'wire_shape') {
+            measurement = '요청 형태 기준'
+          } else if (record.model_input_measurement === 'durable_shape') {
+            measurement = '이력 목록 기준'
+          }
           return html`
-            <div data-testid="turn-transmitted-atoms" class="flex items-center gap-2 text-2xs font-mono v2-monitoring-row">
+            <div data-testid="turn-transmitted-atoms" class="flex items-center gap-2 flex-wrap text-2xs font-mono v2-monitoring-row">
               <span class="text-[var(--color-fg-muted)]">${label}</span>
-              ${declined
-                ? html`<span data-testid="turn-measurement-declined" class="text-[var(--color-status-warn)]">· 체크포인트 형태로 측정 (전송되지 않는 reasoning 포함)</span>`
-                : null}
+              <span data-testid="turn-measurement" class="text-[var(--color-fg-muted)]">· ${measurement}</span>
+              <span class="text-[var(--color-fg-disabled)]">범위 관측 런타임: 기록 없음</span>
             </div>
           `
         })()}

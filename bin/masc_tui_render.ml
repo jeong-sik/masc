@@ -5446,6 +5446,16 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | None -> ""
     | Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
   in
+  let failure =
+    match detail.lrd_failure with
+    | None -> []
+    | Some failure ->
+      [ ( Theme.bad ()
+        , Printf.sprintf
+            "  FAILURE  %s  ·  %s"
+            (Terminal_text.single_line failure.lrf_code)
+            (Terminal_text.single_line failure.lrf_detail) ) ]
+  in
   let decision_style, decision = lane_run_decision_badge detail in
   let tool_style, tools = lane_run_tool_summary detail.lrd_tool_evidence in
   let skill_style, skills = lane_run_skill_summary detail.lrd_skill_evidence in
@@ -5471,6 +5481,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
            (Tui_decode.lane_run_status_label detail.lrd_status))
         Ansi.reset )
   ]
+  @ failure
   @ gate_judgment
   @ [ tool_style, "  " ^ tools; skill_style, "  " ^ skills ]
 

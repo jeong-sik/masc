@@ -38,9 +38,11 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
-**Heartbeat**
-: Workspace에서 Agent의 `last_seen`을 갱신하는 명시적 liveness 작업. 성공은
-  `Heartbeat_updated`일 때만 뜻하며, 잘못된 Agent 파일이나 없는 Agent는 생존 증거가 아니다.
+**Workspace Heartbeat**
+: `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
+  `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
+  `keeper_heartbeat` SSE나 MCP·transport activity 같은 별도 liveness signal의 부재를
+  뜻하지 않으며, 해당 신호는 이 Workspace 쓰기가 갱신되지 않아도 발생할 수 있다.
   → [Workspace_gc.heartbeat](../../lib/workspace/workspace_gc.mli)
 
 **Agent**
@@ -63,6 +65,12 @@ status: reference
 : 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
   레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
 
+**Keeper Chat Operation**
+: Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
+  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
+  제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
+  접수 응답은 실행 완료를 뜻하지 않는다.
+
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
@@ -74,6 +82,13 @@ status: reference
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Usage Scope**
+: Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
+  요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
+  `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
+  합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
+  않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
@@ -144,8 +159,9 @@ status: reference
   구간의 소유자다.
 
 **Evidence**
-: 관찰·검증·전환이 실제 근거에 연결되었음을 나타내는 typed reference. `evidence_refs`
-  같은 필드로 전달하며, 설명 문장만으로 근거를 대신하지 않는다.
+: 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
+  `note:<text>`는 허용된 서술형 근거이며, Task handoff summary와 completion notes도 이
+  형식으로 정규화된다. Note evidence는 artifact나 collaboration source의 증명은 아니다.
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
@@ -228,6 +244,8 @@ status: reference
 : 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
   Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
+  `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
+  뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
 
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
@@ -317,6 +335,12 @@ status: reference
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
 
+  저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
+  지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.
+  원장이 없으면 보관 중인 기록에서 같은 trace의 마지막 응답 관측까지 거슬러 찾는다.
+  응답 없는 기록이 쌓여도 이 관측을 가리지 않는다. 재시도가 같은 turn 번호를 쓰면
+  나중에 저장한 응답 관측을 선택한다. 다음 요청 예측도 같은 reader를 쓴다.
+
 **Model Input Ledger (모델 입력 원장)**
 : Keeper·runtime·trace별로 응답에서 확인한 Atom 범위와 제공된 usage를 기록한 프로세스 내 원장.
   상한 판정과 거절 뒤 이동은 후보 안의 작업값에 적용하고, 응답 관측으로 원장을 갱신한다.
@@ -324,28 +348,37 @@ status: reference
   보관한 Carried Front를 쓴다.
 
 **Turn Boundary**
-: 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이
+: 끝난 Keeper turn이 남기는 한 줄(`keepers/<keeper>/turn-boundaries.jsonl`).
+  선택한 cluster의 runtime root 아래에 저장한다. 그 turn이
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
   (`fresh`/`continued`)도 같이 적는다. Checkpoint 파일이 있었는지가 아니라 Atom이
   있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
-  줄이 파일에 쌓인 순서가 아니라 Atom 수로 줄을 세운다.
+  같은 재시작 구간 안의 줄을 Atom 수로 줄 세운다.
   같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터
   0에서 다시 시작한다"를 말하는 줄이고, History를 다시 시작하게 만든 쪽이 쓴다.
   `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. Atom이 없는 History에서
   시작하는 turn은, 저장된 History에 Atom이 없는 것을 알면 시작할 때 쓰고,
   Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
   보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
-  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
+  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다. 가장 최근의 이 두 종류
+  중 하나부터 현재 History의 끝 경계를 고른다. 그 앞의 줄은 같은 메시지가 반복되어
+  digest가 맞더라도 쓰지 않으며, `fresh` turn의 자기 끝 경계는 포함한다.
+  이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
+  cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
 
 **Read Position**
-: Librarian이 History를 어디까지 읽었는지 적은 값(`<keeper>.librarian-progress.json`).
+: Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
+  Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
   읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
+  이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
+  cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
+  Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
@@ -356,6 +389,14 @@ status: reference
 
 **Memory OS**
 : Keeper의 durable personal facts와 recall을 소유하는 typed memory store.
+  현재 Memory OS와 working context는 operator config의 Keeper 이름에 귀속되어,
+  같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
+  Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
+
+**Working Context**
+: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
+  operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
+  cluster별 Librarian Read Position과는 별개의 상태다.
 
 **Fact**
 : Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,
@@ -382,11 +423,17 @@ status: reference
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는
   `keeper_memory_search` 결과에 나온 것, `revised`는 `supersedes`로 고쳐 써진
-  것이다. `cited`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
-  철회한 것이다. 기록하는 곳이 그 하나뿐이라 살아 있는 Fact의 `cited`는 0이다.
+  것이다. `retracted`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
+  철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
+  붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
+  강화 정도를 뜻하지 않는다.
 
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
+  History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.
+  Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
+  읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
+  매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.

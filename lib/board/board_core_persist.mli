@@ -35,6 +35,11 @@ val persist_io_error : where:string -> string -> ('a, board_error) result
 
 val create_store : unit -> store
 
+val require_persisted_snapshot_readable :
+  (unit, string) result -> (unit, board_error) result
+(** Reject a mutation whose full-snapshot source did not load completely.
+    The stored detail includes the authoritative path and malformed row. *)
+
 val invalidate_post_caches : store -> unit
 val invalidate_comment_caches : store -> unit
 val mark_dirty_post : store -> string -> unit
@@ -57,8 +62,6 @@ val reactions_path : unit -> string
 val sub_boards_path : unit -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir : unit -> unit
-val max_jsonl_bytes : int
-val rotate_if_needed : string -> unit
 
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit

@@ -39,6 +39,7 @@ type one_dispatch_receipt =
 type execute_once_error_cause =
   | Clock_required_for_timeout
   | Frozen_request_mismatch
+  | Response_body_deadline_exceeded
   | Provider_error of Http_client.http_error
   | Output_normalization_failed of output_normalization_error
 
@@ -172,6 +173,17 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
                   }))
       in
       (match post_result with
+       | Error
+           (Http_client.Response_received_error
+              { status
+              ; error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }
+              })
+         when Cohttp.Code.is_success status ->
+         (* The transport closes the incomplete response before returning this
+            owned deadline. Non-success statuses retain their separate
+            Not_received_in_window refusal contract. Observer exceptions are
+            Unknown_provider_failure, not this typed transport outcome. *)
+         error (response_received_receipt status) Response_body_deadline_exceeded
        | Error transport_error ->
          let receipt, provider_error = transport_error_receipt transport_error in
          error receipt (Provider_error provider_error)
@@ -179,15 +191,18 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
          when receipt.response.status < 200 || receipt.response.status >= 300 ->
          let raw = receipt.response in
          let raw_response =
-           raw_response_evidence raw receipt.response_header_evidence
+           match receipt.body_receipt with
+           | Http_client.Received _ ->
+             Some (raw_response_evidence raw receipt.response_header_evidence)
+           | Http_client.Not_received_in_window -> None
          in
          error
-           ~raw_response
+           ?raw_response
            (response_received_receipt raw.status)
            (Provider_error
               (Http_client.HttpError
                  { code = raw.status
-                 ; body = Http_client.Received raw.body
+                 ; body = receipt.body_receipt
                  ; retry_after_header = raw.retry_after_header
                  }))
        | Ok receipt ->

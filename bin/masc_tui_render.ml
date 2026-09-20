@@ -140,13 +140,7 @@ let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list
               String.equal a.ra_keeper k.k_name)
            state.runtime_assignments
        with
-       | Some a ->
-           (match a.ra_target_id with
-            | Some target -> String.equal target lane_id
-            | None ->
-                match default_target with
-                | Some def -> String.equal def lane_id
-                | None -> false)
+       | Some a -> runtime_assignment_targets a lane_id
        | None ->
            match default_target with
            | Some def -> String.equal def lane_id
@@ -166,13 +160,7 @@ let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keepe
               String.equal a.ra_keeper k.k_name)
            state.runtime_assignments
        with
-       | Some a ->
-           (match a.ra_target_id with
-            | Some target -> String.equal target runtime_id
-            | None ->
-                match default_target with
-                | Some def -> String.equal def runtime_id
-                | None -> false)
+       | Some a -> runtime_assignment_targets a runtime_id
        | None ->
            match default_target with
            | Some def -> String.equal def runtime_id
@@ -4232,19 +4220,7 @@ let keeper_operations_preview (state : state) =
                     String.equal a.ra_keeper keeper.k_name)
                  state.runtime_assignments
              with
-             | Some a ->
-                 let is_l =
-                   match a.ra_target_id with
-                   | Some tid ->
-                       List.exists
-                         (fun (l : Tui_decode.runtime_resolved_lane) ->
-                            String.equal l.rrl_id tid)
-                         state.runtime_lanes
-                   | None -> false
-                 in
-                 Printf.sprintf " \xc2\xb7 target %s (%s)"
-                   (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
-                   (if is_l then "lane" else "model")
+             | Some a -> " \xc2\xb7 target " ^ runtime_assignment_label a
              | None ->
                  match state.runtime_surface with
                  | Some s ->
@@ -4713,7 +4689,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   let output_meaning, evidence_contract =
     if exact_lane Masc.Exact_lane_run_registry.Board_attention then
       ( "Output meaning: the accepted candidate judgment JSON."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output and outcome. HTTP/CLI attribution uses selected slot; Vendor System One provenance stays in Output." )
     else if exact_lane Masc.Exact_lane_run_registry.Hitl_auto_judge then
       ( "Output meaning: the validated and durably settled approval-context judgment summary."
       , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
@@ -5437,9 +5413,32 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
   in
   let slot =
-    match detail.lrd_selected_slot with
-    | None -> ""
-    | Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+    match detail.lrd_answer_source, detail.lrd_selected_slot with
+    | Some _, _ | None, None -> ""
+    | None, Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+  in
+  let answer_source =
+    match detail.lrd_answer_source with
+    | None -> []
+    | Some (Tui_decode.Lane_run_answer_exact_attempt slot) ->
+      [ Ansi.reset, "  ANSWER  EXACT · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_cli_slot slot) ->
+      [ Ansi.reset, "  ANSWER  CLI · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_vendor_system_one { model; endpoint = _ }) ->
+      [ ( Ansi.reset
+        , "  ANSWER  VENDOR SYSTEM ONE · "
+          ^ Terminal_text.single_line model
+          ^ " · NO EXACT-FLOW RECEIPT" ) ]
+  in
+  let failure =
+    match detail.lrd_failure with
+    | None -> []
+    | Some failure ->
+      [ ( Theme.bad ()
+        , Printf.sprintf
+            "  FAILURE  %s  ·  %s"
+            (Terminal_text.single_line failure.lrf_code)
+            (Terminal_text.single_line failure.lrf_detail) ) ]
   in
   let decision_style, decision = lane_run_decision_badge detail in
   let tool_style, tools = lane_run_tool_summary detail.lrd_tool_evidence in
@@ -5466,6 +5465,8 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
            (Tui_decode.lane_run_status_label detail.lrd_status))
         Ansi.reset )
   ]
+  @ failure
+  @ answer_source
   @ gate_judgment
   @ [ tool_style, "  " ^ tools; skill_style, "  " ^ skills ]
 
@@ -6260,23 +6261,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
            String.equal a.ra_keeper k.k_name)
         state.runtime_assignments
     in
-    let target_str, is_lane =
+    let target_str =
       match assignment with
-      | Some a ->
-          let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
-          let is_l =
-            match a.ra_target_id with
-            | Some tid ->
-                List.exists
-                  (fun (l : Tui_decode.runtime_resolved_lane) ->
-                     String.equal l.rrl_id tid)
-                  state.runtime_lanes
-            | None -> false
-          in
-          Printf.sprintf "%s (%s, %s)" target
-            (if is_l then "lane" else "model")
-            (Terminal_text.single_line a.ra_source),
-          is_l
+      | Some a -> runtime_assignment_label a
       | None ->
           let def_name =
             match state.runtime_surface with
@@ -6286,11 +6273,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  | None -> "inherited")
             | None -> "inherited"
           in
-          Printf.sprintf "default (%s)" def_name, false
+          Printf.sprintf "default (%s)" def_name
     in
     add_row "Runtime Target:" target_str;
     (match assignment with
-     | Some { ra_target_id = Some tid; _ } when is_lane ->
+     | Some { ra_resolution = Runtime_assignment_lane tid; _ } ->
          (match
             List.find_opt
               (fun (l : Tui_decode.runtime_resolved_lane) ->
@@ -6312,24 +6299,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                | first :: _ -> add_row "Head Candidate:" first
                | [] -> ())
           | None -> ())
-     | Some { ra_target_id = Some tid; _ } ->
-         (match state.runtime_surface with
-          | Some snap ->
-              (match
-                 List.find_opt
-                   (fun (ro : Tui_decode.runtime_option) -> String.equal ro.ro_id tid)
-                   snap.rss_resolved.rrs_runtimes
-               with
-               | Some ro ->
-                   add_row "Model Context:"
-                     (Printf.sprintf "%s \xc2\xb7 max output %s"
-                        (format_context_tokens ro.ro_effective_max_context)
-                        (match ro.ro_max_output_tokens with
-                         | Some t -> format_context_tokens t
-                         | None -> "default"))
-               | None -> ())
-          | None -> ())
-     | None | Some { ra_target_id = None; _ } ->
+     | Some
+         { ra_resolution =
+             (Runtime_assignment_missing | Runtime_assignment_unavailable _)
+         ; _
+         } ->
+       ()
+     | None ->
          (match state.runtime_surface with
           | Some snap ->
               (match snap.rss_resolved.rrs_default_runtime_id with
@@ -11739,25 +11715,7 @@ let render_runtime_pick (state : state) =
           | None -> false)
         state.runtime_assignments
     with
-    | Some a ->
-        let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
-        let kind =
-          match a.ra_target_id with
-          | Some tid
-            when List.exists
-                   (fun (l : Tui_decode.runtime_resolved_lane) ->
-                     String.equal l.rrl_id tid)
-                   state.runtime_lanes ->
-              "lane"
-          | Some _ -> "model"
-          | None -> "default"
-        in
-        Printf.sprintf "%s (%s, %s)%s"
-          target kind
-          (Terminal_text.single_line a.ra_source)
-          (match a.ra_unavailable_reason with
-           | None -> ""
-           | Some reason -> " — unavailable: " ^ Terminal_text.single_line reason)
+    | Some a -> runtime_assignment_label a
     | None -> "-"
   in
   let items = Masc_tui_types.runtime_picker_items state in

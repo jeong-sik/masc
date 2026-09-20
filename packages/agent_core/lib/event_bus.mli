@@ -357,3 +357,10 @@ type bus_stats =
 (** Snapshot of bus-wide and per-subscriber runtime statistics.
     @since 0.160.0 *)
 val stats : t -> bus_stats
+
+(** [dropped_total subscription] is the number of events [subscription]'s
+    overflow policy has discarded since it subscribed: the same monotonic
+    counter {!stats} reports as [dropped_total] for it. A consumer that
+    remembers the last value it read can tell that events it will never
+    receive were published in between. *)
+val dropped_total : subscription -> int

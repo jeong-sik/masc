@@ -910,14 +910,14 @@ type memory_health_snapshot = {
 
 (** What the keeper did with one fact, as the server projected it from the
     memory-events sidecar (RFC-0418): how often a search returned it, on how
-    many distinct UTC days, when last, how often a tool cited it by id, and
+    many distinct UTC days, when last, how often it was retracted, and
     which dropped facts it continues. No strength or score; the numbers are
     the record. *)
 type memory_fact_events = {
   mfe_retrieved_count : int;
   mfe_retrieved_distinct_days : int;
   mfe_last_retrieved_at : float option;
-  mfe_cited_count : int;
+  mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
@@ -981,6 +981,7 @@ type memory_fact_snapshot = {
   mfs_keeper : string;
   mfs_ordinary : memory_ordinary_store memory_store_reading;
   mfs_source : memory_source_store memory_store_reading;
+  mfs_events_read_error : string option;
 }
 
 (** One verdict the harness recorded: which gate ran on which task, what it
@@ -1812,15 +1813,33 @@ val decode_keeper_turns :
     registered keeper. Unknown schema, status, or lane is an error, not a
     silently defaulted row. *)
 
-(** Where one keeper points today. [ra_source] is the server's word:
-    ["default"] rides the fleet default, ["explicit"] was assigned. *)
-type runtime_assignment = {
-  ra_keeper : string;
-  ra_source : string;
-  ra_target_id : string option;
-  ra_unavailable_reason : string option;
-      (** Resolved lane id, or [None] when the assignment is missing. *)
-}
+type runtime_assignment_source =
+  | Default_runtime
+  | Explicit_runtime
+(** Whether the keeper rides the fleet default or has an explicit assignment. *)
+
+type runtime_unavailable_reason =
+  | Missing_catalog_model of
+      { provider_label : string
+      ; model_id : string
+      }
+(** The server's closed [reason.kind] sum for an unavailable assignment. *)
+
+type runtime_assignment_resolution =
+  | Runtime_assignment_lane of string
+  | Runtime_assignment_missing
+  | Runtime_assignment_unavailable of
+      { runtime_id : string
+      ; reason : runtime_unavailable_reason
+      }
+(** The server's closed [resolved.kind] sum. Consumers match this value directly;
+    membership in a separately projected lane catalogue does not reclassify it. *)
+
+type runtime_assignment =
+  { ra_keeper : string
+  ; ra_source : runtime_assignment_source
+  ; ra_resolution : runtime_assignment_resolution
+  }
 
 val decode_runtime_resolved_full :
   Yojson.Safe.t ->
@@ -2185,6 +2204,11 @@ type lane_run_gate_judgment =
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
+type lane_run_failure =
+  { lrf_code : string
+  ; lrf_detail : string
+  }
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
@@ -2195,6 +2219,7 @@ type lane_run_summary =
   ; lrs_status : lane_run_status
   ; lrs_elapsed_s : float option
   ; lrs_selected_slot : string option
+  ; lrs_failure : lane_run_failure option
   }
 
 type lane_run_page =
@@ -2202,6 +2227,17 @@ type lane_run_page =
   ; lrpg_next : (float * string) option
   ; lrpg_total : int option
   }
+
+type lane_run_answer_source =
+  | Lane_run_answer_exact_attempt of string
+  | Lane_run_answer_cli_slot of string
+  | Lane_run_answer_vendor_system_one of
+      { model : string
+      ; endpoint : string
+      }
+(** The typed source of a successful Board-attention answer. This is separate
+    from [lrd_selected_slot]: Vendor System One answers before a slot runs and
+    therefore has no exact-flow receipt or selected slot. *)
 
 type lane_run_detail =
   { lrd_run_id : string
@@ -2213,6 +2249,8 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_answer_source : lane_run_answer_source option
+  ; lrd_failure : lane_run_failure option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
@@ -2268,6 +2306,10 @@ type context_unavailable_reason =
   | Context_turn_record_without_usage
   | Context_turn_record_trace_mismatch
   | Context_conversation_cumulative_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_turn_total_usage of
       { raw_input_tokens : int option
       ; context_window : int option
       }
@@ -2382,7 +2424,9 @@ val decode_memory_fact_snapshot :
 (** Decode one keeper's fact listing served at
     [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
     field it carries -- [read_error], [present]:false, or [present]:true with
-    its rows -- and any other shape is a decode error, not an empty store. *)
+    its rows -- and any other shape is a decode error, not an empty store.
+    [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
+    event history. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

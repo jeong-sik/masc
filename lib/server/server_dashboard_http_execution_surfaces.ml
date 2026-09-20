@@ -1107,35 +1107,27 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
                   can no longer publish, and it invalidates the cached surface
                   when that surface holds this declaration row.
 
-                  When the event is lost -- the listener's subscription drops
-                  the oldest past its capacity, a raise elsewhere in the same
-                  batch loses the rest of it (#37175), or the bus is unset --
-                  the row stays until a render reads a snapshot taken after
-                  the boot. The execution refresh loop renders every 60s
-                  ([interval_s] in [start_execution_refresh_loop]). A render
-                  reads the projection snapshot
-                  ([Dashboard_projection_cache.snapshot_cache_ttl_s], 10s, then
-                  served stale for [Dashboard_cache.stale_factor] times that,
-                  30s), whose compute reads the operator snapshot
-                  ([Env_config_runtime_services.Operator.cache_ttl_sec], 30s by
-                  default, then served stale for [cache_stale_grace_factor]
-                  times that, 90s). A stale read starts the recompute the next
-                  read gets, so the row usually clears within one or two
-                  refresh intervals and at most after about
-                  60 + 40 + 120 = 220s at the defaults ([Dashboard_cache]
-                  jitters its TTLs by 10%).
+                  The listener ([Server_bootstrap_loops]) refreshes each
+                  event on its own. When its subscription reports events
+                  dropped past its capacity, or a refresh raises or reports a
+                  prefix it could not drop, it drops
+                  the same caches for every Keeper
+                  ([Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces]),
+                  the cached surface included, so the row clears as it would
+                  with the event handled.
 
                   On a cold start the cached surface can still be the
                   initializing placeholder. It has no keepers row, so the
-                  patch has nothing to invalidate in it; with the event
-                  delivered, the handler's cache drops above are what clear a
-                  pre-boot render. With the event lost, a read before the
-                  refresh loop's first publication is answered by
-                  [cached_execution_or_first_success_json], which keeps its
-                  render under [execution_default_light_cache_key] for
-                  [deep_surface_cache_ttl_s] (120s).
+                  patch has nothing to invalidate in it; the handler's cache
+                  drops above are what clear a pre-boot render.
 
-                  Lost events are fixed in the listener (#37175), not here. *)
+                  Two paths remain that no invalidation covers: the listener
+                  fiber itself dying ([fork_logged_fiber ~on_error]), and a
+                  publish that lands between [Event_bus_slots.set_masc] and
+                  the listener's own [subscribe]. Either leaves this row until
+                  a render reads a snapshot taken after the boot, which is one
+                  or two refresh-loop turns and at most about 220s at the
+                  default TTLs. *)
                acc)
           rows
           running

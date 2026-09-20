@@ -998,7 +998,7 @@ let test_one_dispatch_refusal_whose_body_never_arrives_is_still_the_refusal () =
     let cache = Http_client.create_cache ~sw () in
     let started = Eio.Time.now clock in
     let outcome =
-      Http_client.post_sync_once
+      Http_client.post_sync_once_with_evidence
         ~cache
         ~clock
         ~net
@@ -1011,9 +1011,14 @@ let test_one_dispatch_refusal_whose_body_never_arrives_is_still_the_refusal () =
     outcome, Http_client.cache_stats cache, Eio.Time.now clock -. started
   in
   (match outcome with
-   | Ok (response : Http_client.raw_sync_response) ->
+   | Ok (receipt : Http_client.sync_transport_receipt) ->
+     let response = receipt.response in
      Alcotest.(check int) "the status the peer sent" 429 response.status;
      Alcotest.(check string) "no body arrived, none is reported" "" response.body;
+     (match receipt.body_receipt with
+      | Http_client.Not_received_in_window -> ()
+      | Http_client.Received _ ->
+        Alcotest.fail "a body outside the caller window was reported as received");
      Alcotest.(check (option (float 0.001)))
        "the Retry-After the peer sent is kept"
        (Some (float_of_int refusal_retry_after_s))

@@ -34,8 +34,9 @@ type measurement_receipt_phase =
     The caller supplies an immutable AGENT_CORE resolver snapshot, one exact target
     reference, messages, a raw domain JSON schema, and the minimum guarantee. Provider
     config, wire response formats, schema envelopes, capability overrides,
-    tools, reasoning controls, token measurement, and retry/fallback are
-    deliberately absent from this interface. *)
+    tools, per-call reasoning overrides, token measurement, and retry/fallback are
+    deliberately absent from the request interface. Declared bindings retain
+    their explicit request controls in the resolver snapshot. *)
 
 type resolver_snapshot
 type admitted_target
@@ -60,7 +61,7 @@ type catalog_document =
   ; contents : string
   }
 
-(** One exact-output slot: which binding it names, and the deadlines that
+(** One exact-output slot: which binding it names, and the request controls and deadlines that
     binding runs under. A caller that already holds these as typed values --
     a deployment's runtime bindings -- passes them directly instead of
     rendering a TOML document for this module to parse back. [target_ref] is
@@ -71,6 +72,10 @@ type declared_target =
   ; provider_ref : string
   ; model_id : string
   ; enable_thinking : bool option
+  ; reasoning_effort : Reasoning_effort.t option
+      (** The binding's explicit effort. [None] leaves the request unspecified.
+          Runtime bindings supply this typed value. Target documents have no
+          effort field and leave it [None]. *)
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   ; api_key_env : string option
@@ -240,6 +245,10 @@ type provider_refusal =
   | Request_body_refused
       (** The provider refused this request's size. A smaller input may succeed
           and the frozen lane's successor may accept this one. *)
+  | Refusal_body_not_received
+      (** The status and headers arrived, but the refusal body did not finish
+          inside the caller's window. Its cause remains unknown and does not
+          authorize successor dispatch. *)
   | Rate_limited
       (** The provider's quota for this binding is spent. The request itself was
           acceptable, so a successor binding with its own quota may serve it. *)
@@ -260,10 +269,14 @@ type execution_error_cause =
   | Clock_required_for_timeout
   | Frozen_request_mismatch
   | Completion_failed
-      (** No response was received: the failure landed before dispatch, or the
-          transport produced no HTTP status to classify. A failure that DID
-          carry a status is {!Provider_response_refused} — folding the two
-          together discards the status and the refusal kind. *)
+      (** A failure without a more specific Exact cause. The receipt may
+          already contain response headers, for example when provider parsing
+          fails. This cause alone does not authorize a dispatched retry. *)
+  | Response_body_deadline_exceeded
+      (** Successful HTTP response headers arrived, but the explicitly declared
+          total deadline expired before its body completed. No complete body,
+          provider trace or accepted domain result exists. The one dispatch
+          remains recorded; remote cancellation or billing is not implied. *)
   | Provider_response_refused of
       { http_status : int
       ; refusal : provider_refusal
@@ -513,6 +526,8 @@ val plan_provenance_catalog_generation : plan_provenance -> catalog_generation
 val plan_provenance_catalog_evidence : plan_provenance -> catalog_evidence
 val plan_provenance_target_identity : plan_provenance -> target_identity
 val plan_fingerprint : ready_plan -> string
+val connect_timeout_s : ready_plan -> float option
+val body_timeout_s : ready_plan -> float option
 val schema_fingerprint_to_string : schema_fingerprint -> string
 
 type start_attempt_error = Call_id_generation_failed of string
@@ -665,6 +680,11 @@ val candidate_rejection_measurement_outcome
 val candidate_rejection_disposition
   :  candidate_rejection_receipt
   -> candidate_rejection_disposition
+
+val candidate_rejection_reason : candidate_rejection_receipt -> string
+(** Stable one-line reason from the receipt's original typed selection or
+    admission error. This retains the cause hidden by the coarser disposition
+    without exposing credentials or provider response bodies. *)
 
 type flow_evidence = private
   { flow_id : flow_id

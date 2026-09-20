@@ -73,7 +73,8 @@ let write_metadata config ~trace_id =
   path
 ;;
 
-let run_cli ?base_argument ?env_base_path ?(from_cwd = false)
+let run_cli ?(all_keepers = false) ?base_argument ?env_base_path
+    ?(from_cwd = false)
     env ~base_path ~config_root ~cluster_name ~extent =
   let base_args, base_env =
     if from_cwd then [], []
@@ -90,8 +91,8 @@ let run_cli ?base_argument ?env_base_path ?(from_cwd = false)
        ; "XDG_CONFIG_HOME=" ^ base_path
        ] @ base_env))
     (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
-    ([ librarian_replay_exe () ] @ base_args
-     @ [ "--keeper"; keeper_id; "--extent"; extent ])
+    ([ librarian_replay_exe () ] @ base_args @ [ "--extent"; extent ]
+     @ if all_keepers then [] else [ "--keeper"; keeper_id ])
   |> Yojson.Safe.from_string
 ;;
 
@@ -151,7 +152,8 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
       let config_root =
         Filename.concat (Masc.Workspace.masc_root_dir config) "config"
       in
-      let keepers_dir = Filename.concat config_root "keepers" in
+      let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+      Fs_compat.mkdir_p config_root;
       Fs_compat.mkdir_p keepers_dir;
       let messages =
         List.init 6 (fun index ->
@@ -174,6 +176,7 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
             backend_config = { config.backend_config with cluster_name = "Other/Cluster" }
           }
         in
+        let other_keepers_dir = Masc.Workspace.keepers_runtime_dir other_config in
         ignore (write_metadata other_config ~trace_id:other_trace : string);
         let other_messages = List.filteri (fun index _ -> index < 2) messages in
         (match Store.save_agent_core_classified
@@ -187,12 +190,27 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
           ; event = Boundaries.History_restarted { trace_id = other_trace }
           }
         in
-        (match Boundaries.append ~keepers_dir ~keeper_id restarted with
+        (match Boundaries.append ~keepers_dir:other_keepers_dir ~keeper_id restarted with
          | Ok () -> ()
          | Error error -> failf "other cluster restart: %s"
              (Boundaries.append_error_to_string error));
-        write_boundary ~keepers_dir ~trace_id:other_trace ~turn:1 other_messages);
+        write_boundary
+          ~keepers_dir:other_keepers_dir ~trace_id:other_trace ~turn:1 other_messages);
       let before = files_under base_path in
+      let enumerated =
+        run_cli
+          ~all_keepers:true
+          ~base_argument
+          ~env_base_path
+          ~from_cwd:(argument = Default_cwd)
+          env
+          ~base_path ~config_root ~cluster_name ~extent:"all"
+        |> keeper_result
+      in
+      check string "default enumeration selects the runtime Keeper" keeper_id
+        (enumerated |> U.member "keeper" |> U.to_string);
+      check int "enumeration reads the selected cluster" 6
+        (enumerated |> U.member "reached_atom" |> U.to_int);
       List.iter (fun (extent, expected_ranges) ->
           let output =
             run_cli ~base_argument ~env_base_path ~from_cwd:(argument = Default_cwd)

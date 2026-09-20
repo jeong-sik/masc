@@ -1,10 +1,4 @@
-(** Durable, non-checkpoint inputs shared by the direct and range-based
-    Librarian producers. *)
-
-val goal_context_for_task
-  :  config:Workspace.config
-  -> Keeper_id.Task_id.t option
-  -> Keeper_librarian.goal_context
+(** Durable counterpart inputs for the range-based Librarian consumer. *)
 
 type read_error =
   | Chat_store_unreadable of string

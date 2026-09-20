@@ -56,17 +56,25 @@ let with_workspace f =
        f config)
 ;;
 
-let meta trace_id =
+let meta ?current_task_id trace_id =
+  let fields = [ "name", `String keeper_name; "trace_id", `String trace_id ] in
+  let fields =
+    match current_task_id with
+    | None -> fields
+    | Some task_id -> ("current_task_id", `String task_id) :: fields
+  in
   match
     Masc_test_deps.meta_of_json_fixture
-      (`Assoc [ "name", `String keeper_name; "trace_id", `String trace_id ])
+      (`Assoc fields)
   with
   | Ok meta -> meta
   | Error detail -> failf "fixture metadata: %s" detail
 ;;
 
-let write_meta config trace_id =
-  match Masc.Keeper_meta_store.replace_snapshot config (meta trace_id) with
+let write_meta ?current_task_id config trace_id =
+  match
+    Masc.Keeper_meta_store.replace_snapshot config (meta ?current_task_id trace_id)
+  with
   | Ok () -> ()
   | Error detail -> failf "write metadata: %s" detail
 ;;
@@ -251,6 +259,57 @@ let test_failed_commit_and_restart_retry_the_same_range () =
    | Consumer.Baseline_advanced _
    | Consumer.Memory_not_committed -> fail "restart did not retry unread range");
   check (list string) "restart reads identical range" !first !after_restart
+;;
+
+let check_no_task label = function
+  | Masc.Keeper_librarian.No_task -> ()
+  | Masc.Keeper_librarian.Task_goals { task_id; _ } ->
+    failf "%s borrowed current task %s" label task_id
+;;
+
+let test_historical_range_does_not_borrow_the_current_task () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-historical-goal-context" in
+  establish_progress config ~trace_id "before";
+  write_meta ~current_task_id:"task-current-a" config trace_id;
+  let messages = [ message "before"; message "historical" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let first_context = ref None in
+  (match
+     consume config (fun ~expected_revision:_ input ->
+       first_context := Some input.Masc.Keeper_librarian.goal_context;
+       false)
+   with
+   | Consumer.Memory_not_committed -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _ -> fail "failed historical commit advanced");
+  (match !first_context with
+   | Some context -> check_no_task "first catch-up" context
+   | None -> fail "historical catch-up did not reach the commit boundary");
+  check_progress_end config 1;
+  write_meta ~current_task_id:"task-current-b" config trace_id;
+  let retry_context = ref None in
+  (match
+     consume config (fun ~expected_revision:_ input ->
+       retry_context := Some input.Masc.Keeper_librarian.goal_context;
+       true)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "retried historical range advances" 2 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Memory_not_committed -> fail "historical retry did not advance");
+  (match !retry_context with
+   | Some context -> check_no_task "retried catch-up" context
+   | None -> fail "historical retry did not reach the commit boundary");
+  write_meta ~current_task_id:"task-current-c" config trace_id;
+  (match consume config (fun ~expected_revision:_ _ -> fail "quiet tick recommitted") with
+   | Consumer.Nothing_to_read -> ()
+   | Consumer.Baseline_advanced _
+   | Consumer.Memory_not_committed
+   | Consumer.Progress_advanced _ -> fail "quiet tick did not stay quiet")
 ;;
 
 let prepare_three_unread_turns config ~trace_id =
@@ -766,6 +825,8 @@ let () =
             test_n_tick_reads_every_intermediate_turn
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
+        ; test_case "historical range does not borrow current task" `Quick
+            test_historical_range_does_not_borrow_the_current_task
         ; test_case "unchanged boundaries skip checkpoint" `Quick
             test_unchanged_boundaries_do_not_require_checkpoint
         ; test_case "trace change is not hidden by preflight" `Quick

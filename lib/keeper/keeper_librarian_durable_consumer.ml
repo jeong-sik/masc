@@ -305,10 +305,11 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
     in
     let input : Keeper_librarian.input =
       { turn_ref
-      ; goal_context =
-          Keeper_librarian_input_sources.goal_context_for_task
-            ~config
-            meta.current_task_id
+      (* Turn boundaries do not carry historical task identity. The current
+         task can belong to a later turn, so borrowing it would attach an old
+         range to an unrelated Goal. Exact historical identity must be added
+         at the same durable boundary before this can become [Task_goals]. *)
+      ; goal_context = Keeper_librarian.No_task
       ; keeper_instructions = meta.instructions
       ; current
       ; working_context =

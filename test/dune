@@ -16,7 +16,21 @@
 (test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
+ (deps fixtures/librarian_statements_golden.json)
  (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+; The reference cut (scripts/librarian/statements.py, the scorer of issue
+; #37079) must still write the golden the OCaml test above reads.
+(rule
+ (alias runtest-librarian-statements-golden)
+ (deps ../scripts/librarian/statements.py fixtures/librarian_statements_golden.json)
+ (action
+  (run python3 %{dep:../scripts/librarian/statements.py} --check
+   %{dep:fixtures/librarian_statements_golden.json})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-librarian-statements-golden)))
 
 (test
  (name test_keeper_peer_artifact)

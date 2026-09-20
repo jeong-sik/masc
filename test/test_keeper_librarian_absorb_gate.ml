@@ -16,38 +16,33 @@ let fact claim : Types.fact =
 
 let id = Types.memory_id
 
-(* --- Statements: the same cut as the Python scorer of issue #37079. The
-   expected lists were produced by that scorer (jev_coverage.statements) on
-   these inputs, not by the function under test. --- *)
+(* --- Statements: the reference cut is scripts/librarian/statements.py, the
+   scorer of issue #37079. Both it and this module are held to one golden,
+   test/fixtures/librarian_statements_golden.json: the script's --check
+   rule (test/dune) proves the script still writes it, and this test proves
+   the OCaml cut reads every input to the same statements. Neither side's
+   output is the other's expected value. --- *)
 
-let test_statements_match_the_scorer () =
-  Alcotest.(check (list string))
-    "markup dropped; sentence ends, semicolon and em dash cut; short pieces carried"
-    [ "배포는 매주 화요일 09:00 에 돈다."
-    ; "다섯 분쯤 걸린다; 실패하면 rollback.sh 를 돌린다"
-    ; "운영자에게 알린다. 한 줄 더: 이 규칙은 2026-09-01 부터다."
-    ]
-    (Gate.statements
-       "배포는 **매주 화요일** 09:00 에 돈다. 다섯 분쯤 걸린다; 실패하면 `rollback.sh` 를 \
-        돌린다 — 운영자에게 알린다.\n한 줄 더: 이 규칙은 2026-09-01 부터다.");
-  Alcotest.(check (list string))
-    "pieces under the minimum join until one is long enough; a short tail joins the last"
-    [ "Short. Also short! Third one is long enough to stand alone as a statement? Yes it is." ]
-    (Gate.statements
-       "Short. Also short! Third one is long enough to stand alone as a statement? Yes it \
-        is.");
-  let sentence i = Printf.sprintf "문장 %d 은 충분히 길게 써서 스무 자를 넘긴다." i in
-  let long =
-    "다.다.다.\n\n" ^ String.concat " " (List.init 24 (fun i -> sentence (i + 1)))
+let golden_path = "fixtures/librarian_statements_golden.json"
+
+let test_statements_match_the_golden () =
+  let entries =
+    match Yojson.Safe.from_file golden_path with
+    | `List entries -> entries
+    | _ -> Alcotest.fail "the golden is a list"
   in
-  Alcotest.(check (list string))
-    "다. cuts without whitespace; every long-memory statement remains"
-    ([ "다. 다. 다. " ^ sentence 1 ]
-     @ List.init 23 (fun i -> sentence (i + 2)))
-    (Gate.statements long);
-  Alcotest.(check int) "all statements, including the final one" 24
-    (List.length (Gate.statements long));
-  Alcotest.(check (list string)) "an empty memory has no statements" [] (Gate.statements "")
+  Alcotest.(check bool) "the golden is not empty" true (entries <> []);
+  List.iteri
+    (fun i entry ->
+       let input = Yojson.Safe.Util.(entry |> member "input" |> to_string) in
+       let expected =
+         Yojson.Safe.Util.(entry |> member "expected" |> to_list |> List.map to_string)
+       in
+       Alcotest.(check (list string))
+         (Printf.sprintf "golden entry %d cuts the same in OCaml" i)
+         expected
+         (Gate.statements input))
+    entries
 ;;
 
 (* --- Judgment --- *)
@@ -322,7 +317,7 @@ let () =
   Alcotest.run
     "keeper_librarian_absorb_gate"
     [ ( "statements"
-      , [ Alcotest.test_case "the cut matches the scorer" `Quick test_statements_match_the_scorer ] )
+      , [ Alcotest.test_case "the cut matches the golden" `Quick test_statements_match_the_golden ] )
     ; ( "judgment"
       , [ Alcotest.test_case "every statement conveyed absorbs as answered" `Quick
             test_every_statement_conveyed_absorbs_as_answered

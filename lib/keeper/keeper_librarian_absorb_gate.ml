@@ -310,7 +310,9 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
   | [] -> absorbed
   | _ :: _ ->
     (match
-       if Typesafeai_config.is_enabled () then Typesafeai_config.api_key () else None
+       if Typesafeai_config.is_absorb_gate_enabled ()
+       then Typesafeai_config.api_key ()
+       else None
      with
      | None -> absorbed
      | Some api_key ->

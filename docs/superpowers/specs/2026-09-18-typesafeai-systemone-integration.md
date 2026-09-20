@@ -34,6 +34,11 @@ It activates only when `TYPESAFEAI_API_KEY` holds a non-blank value.
 `MASC_TYPESAFEAI_ENABLED=false` (or `0`, `no`, `off`) turns it off even with a key;
 the variable alone cannot turn it on.
 
+Since RFC-librarian-absorb-gate (2026-09-21) two gates share the lane, and each has
+its own switch, on by default: `MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED` (this
+spec's Board attention judgment) and `MASC_TYPESAFEAI_ABSORB_GATE_ENABLED` (the
+librarian absorb gate). A key turns the lane on; a gate is turned off by name.
+
 ### 2.2 Data sent outside the MASC instance
 
 Opting in sends an HTTP POST to the configured TypeSafe AI endpoint (default:

@@ -39,6 +39,7 @@ let record ?(tokens = Some 18_000) ~wire ~scope () : Turn_record.t =
           })
         wire
   ; model_input_window = None
+  ; response_observed_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
@@ -178,7 +179,20 @@ let test_a_count_of_unknown_scope_never_becomes_the_ratio () =
          ~scope:Runtime_usage_scope.Usage_scope_unavailable ())
   in
   Alcotest.(check bool) "the ratio fell through to the fleet figure" true
-    (says "fleet median measured 2026-09-13..15" rows)
+    (says "fleet median measured 2026-09-13..15" rows);
+  Alcotest.(check bool) "unknown scope is not context occupancy" false
+    (says "of the window" rows)
+
+let test_a_turn_total_never_becomes_context_occupancy () =
+  let rows =
+    lines (record ~wire:(Some 560_513) ~scope:Runtime_usage_scope.Turn_total ())
+  in
+  Alcotest.(check bool) "raw total stays visible" true
+    (says "18.0k tokens counted across the client turn" rows);
+  Alcotest.(check bool) "total is not context occupancy" false
+    (says "of the window" rows);
+  Alcotest.(check bool) "total does not divide request bytes" true
+    (says "this count is the client turn's total over requests, so it is not divided" rows)
 
 let test_the_request_band_leads_with_the_providers_count () =
   let rows = lines (record ~wire:(Some 560_513) ~scope:per_request ()) in
@@ -335,6 +349,8 @@ let () =
             `Quick test_rows_read_at_the_fleet_figure_when_the_page_has_no_body
         ; Alcotest.test_case "a cumulative count never becomes the ratio" `Quick
             test_a_cumulative_count_never_becomes_the_ratio
+        ; Alcotest.test_case "a client turn total is not context occupancy" `Quick
+            test_a_turn_total_never_becomes_context_occupancy
         ; Alcotest.test_case "a count of unknown scope never becomes the ratio"
             `Quick test_a_count_of_unknown_scope_never_becomes_the_ratio
         ; Alcotest.test_case "the page note says why this turn was refused"

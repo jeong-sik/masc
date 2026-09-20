@@ -29,6 +29,34 @@ let test_execution_cause_detail () =
     (Detail.execution_cause_detail (Exact_output.Ambiguous_output 2))
 ;;
 
+let test_bookkeeping_start_causes_keep_their_payloads () =
+  Alcotest.(check string)
+    "call id detail"
+    "call_id_generation_failed detail=\"random source unavailable\""
+    (Detail.attempt_start_error_detail
+       (Exact_output.Call_id_generation_failed "random source unavailable"));
+  let operation_id_failure =
+    Detail.measurement_start_error_detail
+      (Exact_output.Measurement_operation_id_generation_failed "operation id unavailable")
+  in
+  let missing_clock =
+    Detail.measurement_start_error_detail
+      Exact_output.Measurement_clock_required_for_timeout
+  in
+  Alcotest.(check string)
+    "operation id detail"
+    "operation_id_generation_failed detail=\"operation id unavailable\""
+    operation_id_failure;
+  Alcotest.(check string)
+    "clock requirement"
+    "measurement_clock_required_for_timeout"
+    missing_clock;
+  Alcotest.(check bool)
+    "measurement causes stay distinct"
+    false
+    (String.equal operation_id_failure missing_clock)
+;;
+
 let test_raw_response_excerpt_none () =
   Alcotest.(check string)
     "none"
@@ -100,12 +128,11 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
     (Astring.String.is_infix ~affix:"301 bytes total" rendered)
 ;;
 
-(* The eleven distinct execution causes reach the advance line through
-   [execution_cause_detail]. The execution-failed branch of
-   the execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
+(* The distinct execution causes reach the advance line through
+   [execution_cause_detail]. The execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
    private agent-core type with no constructor — so what is pinned is that every
    cause the renderer can receive still renders apart from every other. A
-   single shared label is what made the eleven indistinguishable in the log,
+   single shared label is what made them indistinguishable in the log,
    and this fails if any two collapse onto the same string. *)
 let test_every_execution_cause_renders_distinctly () =
   let causes : Exact_output.execution_error_cause list =
@@ -113,6 +140,7 @@ let test_every_execution_cause_renders_distinctly () =
     ; Clock_required_for_timeout
     ; Frozen_request_mismatch
     ; Completion_failed
+    ; Response_body_deadline_exceeded
     ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
     ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
     ; Provider_response_refused { http_status = 529; refusal = Overloaded }
@@ -156,6 +184,10 @@ let () =
     [ ( "render"
       , [ Alcotest.test_case "execution cause detail" `Quick
             test_execution_cause_detail
+        ; Alcotest.test_case
+            "bookkeeping start causes keep their payloads"
+            `Quick
+            test_bookkeeping_start_causes_keep_their_payloads
         ; Alcotest.test_case "raw response none" `Quick
             test_raw_response_excerpt_none
         ; Alcotest.test_case "raw response flattens newlines" `Quick

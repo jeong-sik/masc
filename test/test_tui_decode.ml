@@ -3752,21 +3752,23 @@ let test_decode_memory_health_rejects_stale_schema () =
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
     (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
 
-let memory_fact_snapshot_json ~ordinary ~source_bound =
+let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc
     [ "keeper", `String "alpha"
     ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-facts"
     ; "ordinary", ordinary
     ; "source_bound", source_bound
+    ; ( "events_read_error"
+      , match events_read_error with None -> `Null | Some detail -> `String detail )
     ]
 
-let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(cited = 0)
+let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(retracted = 0)
     ?(revised_from = []) () =
   `Assoc
     [ "retrieved_count", `Int retrieved
     ; "retrieved_distinct_days", `Int days
     ; "last_retrieved_at", last
-    ; "cited_count", `Int cited
+    ; "retracted_count", `Int retracted
     ; "revised_from", `List (List.map (fun id -> `String id) revised_from)
     ]
 
@@ -3799,7 +3801,7 @@ let test_decode_memory_fact_reads_the_use_record () =
               ; "updated_at", `Float 1_775_000_100.0
               ; "facts", `List [ fact ]
               ])
-         ~source_bound:(`Assoc [ "present", `Bool false ]))
+         ~source_bound:(`Assoc [ "present", `Bool false ]) ())
   in
   let only_fact = function
     | Error error -> Alcotest.failf "snapshot rejected: %s" error
@@ -3818,14 +3820,14 @@ let test_decode_memory_fact_reads_the_use_record () =
       (snapshot_with
          ~events:
            (memory_fact_events_json ~retrieved:4 ~days:2
-              ~last:(`Float 1_775_000_040.0) ~cited:1 ~revised_from:[ "mem-0" ] ())
+              ~last:(`Float 1_775_000_040.0) ~retracted:1 ~revised_from:[ "mem-0" ] ())
          ())
   in
   Alcotest.(check int) "retrieved" 4 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count;
   Alcotest.(check int) "days" 2 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_distinct_days;
   Alcotest.(check (option (float 0.0))) "last" (Some 1_775_000_040.0)
     fact.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
-  Alcotest.(check int) "cited" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_cited_count;
+  Alcotest.(check int) "retracted" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_retracted_count;
   Alcotest.(check (list string)) "revised from" [ "mem-0" ]
     fact.Tui_decode.mf_events.Tui_decode.mfe_revised_from;
   let unused = only_fact (snapshot_with ~events:(memory_fact_events_json ()) ()) in
@@ -3890,7 +3892,7 @@ let test_decode_memory_facts_keeps_both_stores () =
   in
   match
     Tui_decode.decode_memory_fact_snapshot
-      (memory_fact_snapshot_json ~ordinary ~source_bound)
+      (memory_fact_snapshot_json ~ordinary ~source_bound ())
   with
   | Error err -> Alcotest.fail err
   | Ok snapshot -> (
@@ -3937,7 +3939,7 @@ let test_decode_memory_facts_keeps_store_states_apart () =
   let json =
     memory_fact_snapshot_json
       ~ordinary:(`Assoc [ "read_error", `String "corrupt row 12" ])
-      ~source_bound:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   match Tui_decode.decode_memory_fact_snapshot json with
   | Error err -> Alcotest.fail err
@@ -3952,7 +3954,22 @@ let test_decode_memory_facts_keeps_store_states_apart () =
        | Tui_decode.Memory_store_absent -> ()
        | Tui_decode.Memory_store_read_error _
        | Tui_decode.Memory_store_present _ ->
-           Alcotest.fail "an absent store must stay absent")
+          Alcotest.fail "an absent store must stay absent")
+
+let test_decode_memory_facts_keeps_event_read_error () =
+  let json =
+    memory_fact_snapshot_json
+      ~events_read_error:"memory event sidecar read failed: permission denied"
+      ~ordinary:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
+  in
+  match Tui_decode.decode_memory_fact_snapshot json with
+  | Error error -> Alcotest.fail error
+  | Ok snapshot ->
+    Alcotest.(check (option string))
+      "sidecar failure is not empty history"
+      (Some "memory event sidecar read failed: permission denied")
+      snapshot.Tui_decode.mfs_events_read_error
 
 let test_decode_memory_facts_rejects_a_shapeless_store () =
   (* Neither read_error nor present: the store object answers nothing, and
@@ -3960,7 +3977,7 @@ let test_decode_memory_facts_rejects_a_shapeless_store () =
   let json =
     memory_fact_snapshot_json
       ~ordinary:(`Assoc [ "revision", `Int 3 ])
-      ~source_bound:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   Alcotest.(check bool) "a shapeless store is a decode error, not empty" true
     (Result.is_error (Tui_decode.decode_memory_fact_snapshot json))
@@ -6950,7 +6967,17 @@ let test_decode_librarian_page_keeps_the_server_cursor () =
         (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
 let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
-    ?(completion = true) run_id =
+    ?(completion = true) ?failure run_id =
+  let completion_fields =
+    if completion then
+      [ "elapsed_s", `Float 1.25; "selected_slot", `String "qwen-primary" ]
+    else []
+  in
+  let failure_fields =
+    match failure with
+    | None -> []
+    | Some (code, detail) -> [ "code", `String code; "detail", `String detail ]
+  in
   `Assoc
     ([ "run_id", `String run_id
      ; "lane", `String lane
@@ -6958,10 +6985,8 @@ let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
      ; "started_at", `Float 100.
      ; "status", `String status
      ]
-     @
-     if completion then
-       [ "elapsed_s", `Float 1.25; "selected_slot", `String "qwen-primary" ]
-     else [])
+     @ completion_fields
+     @ failure_fields)
 
 let test_decode_lane_run_page_filters_to_one_lane () =
   let listing =
@@ -7009,6 +7034,30 @@ let test_decode_lane_run_page_running_run_has_no_completion_fields () =
            Alcotest.(check (option (pair (float 0.0) string))) "no next page"
              None page.Tui_decode.lrpg_next
        | _ -> Alcotest.fail "expected exactly one run")
+
+let test_decode_exact_lane_failure_keeps_reason () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ lane_run_summary_json
+                ~status:"failed"
+                ~failure:("missing_deadline", "target has no finite request window")
+                "lib-failed"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok { Tui_decode.lrpg_runs = [ run ]; _ } ->
+    (match run.Tui_decode.lrs_failure with
+     | Some failure ->
+       Alcotest.(check string) "failure code" "missing_deadline" failure.lrf_code;
+       Alcotest.(check string) "failure detail"
+         "target has no finite request window" failure.lrf_detail
+     | None -> Alcotest.fail "failed exact run dropped its failure")
+  | Ok _ -> Alcotest.fail "expected exactly one failed run"
 
 let test_decode_lane_run_status_is_typed () =
   let listing =
@@ -9149,6 +9198,8 @@ let () =
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick
           test_decode_memory_facts_keeps_store_states_apart;
+        Alcotest.test_case "memory facts keep event read errors" `Quick
+          test_decode_memory_facts_keeps_event_read_error;
         Alcotest.test_case "memory facts reject a shapeless store" `Quick
           test_decode_memory_facts_rejects_a_shapeless_store;
         Alcotest.test_case "project changes keep project scope" `Quick
@@ -9189,6 +9240,8 @@ let () =
           test_decode_lane_run_page_filters_to_one_lane;
         Alcotest.test_case "running run has no completion fields" `Quick
           test_decode_lane_run_page_running_run_has_no_completion_fields;
+        Alcotest.test_case "exact failure keeps code and detail" `Quick
+          test_decode_exact_lane_failure_keeps_reason;
         Alcotest.test_case "status decodes to a variant, unknown preserved" `Quick
           test_decode_lane_run_status_is_typed;
         Alcotest.test_case "verifier summary keeps subject and verdict" `Quick

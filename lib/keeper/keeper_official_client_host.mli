@@ -391,10 +391,9 @@ val host_stop_result :
     durable continuation owner, so no Agent Core checkpoint is synthesized.
 
     [usage] is what the adapter could measure before the stop: Claude Code
-    sums the usage of the assistant frames it saw, since the result frame
-    that carries a turn total never arrives after a host stop. [Some] marks
-    the observation [Per_request]; [None] leaves the scope unavailable, which
-    is what every host-stopped turn recorded before 2026-09-03.
+    uses the newest assistant request's usage, since the result frame that
+    carries a turn total never arrives after a host stop. [Some] marks the
+    observation [Per_request]; [None] leaves the scope unavailable.
 
     Non-failed stops carry a one-attempt runtime observation (masc#31312):
     the vendor loop did run to reach this boundary, and a [None] observation

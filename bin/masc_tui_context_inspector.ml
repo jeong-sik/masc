@@ -197,14 +197,13 @@ let decode_turn_records = function
                              }
                        | None -> newest_attributed rest)
                 in
-                (* A conversation-cumulative figure is a fact about the
-                   whole conversation, so it is not offered as this turn's
-                   input even though the record carries the number. *)
+                (* Only a per-request figure describes one request's input. *)
                 let per_request_tokens (record : Turn_record.t) =
                   match record.usage.scope with
-                  | Runtime_usage_scope.Conversation_cumulative -> None
-                  | Runtime_usage_scope.Per_request
-                  | Runtime_usage_scope.Usage_scope_unavailable ->
+                  | Runtime_usage_scope.Turn_total
+                  | Runtime_usage_scope.Conversation_cumulative
+                  | Runtime_usage_scope.Usage_scope_unavailable -> None
+                  | Runtime_usage_scope.Per_request ->
                       record.usage.input_tokens
                 in
                 let recent =

@@ -482,6 +482,13 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* No artifact carries this digest in a fresh workspace, so the call
          refuses rather than reading one. *)
       `Assoc [ ("sha256", `String (String.make 64 '0')) ]
+  | "keeper_skill_validate" ->
+      (* The request has the public fields, but the empty artifact must be
+         refused before any Skill content is read. *)
+      `Assoc
+        [ ("artifact", `Assoc [])
+        ; ("package_id", `String "matrix-skill")
+        ]
   | "keeper_code_query" ->
       `Assoc
         [
@@ -567,11 +574,11 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
    contract; not falling over is. The per-tool word lists this replaced
    ("file not found", "annotation sink is not installed", ...) only ever said
    "that refusal was expected", which the typed class now says for all of them
-   at once. [analyze_image] still has to refuse: its case exists to prove
-   argument validation runs. *)
+   at once. [analyze_image] and [keeper_skill_validate] still have to refuse:
+   their cases exist to prove argument validation runs. *)
 let keeper_expectation_for_name name =
   match name with
-  | "keeper_analyze_image" -> Expect_refusal
+  | "keeper_analyze_image" | "keeper_skill_validate" -> Expect_refusal
   | "keeper_voice_listen" -> Expect_no_audio
   | "keeper_artifact_transfer" | "keeper_constitution_write" | "keeper_constitution_remove"
   | "tool_execute" | "tool_search_files" | "tool_read_file"

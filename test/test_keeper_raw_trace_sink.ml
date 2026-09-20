@@ -119,6 +119,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
   in
   Keeper_turn_record_writer.write
     ~model_input_window:None
+    ~response_observed_model_input:None
     ~config
     ~keeper_name:meta.name
     ~agent_name:meta.name

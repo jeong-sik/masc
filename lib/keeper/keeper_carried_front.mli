@@ -89,8 +89,10 @@ val of_records
   :  trace_id:string
   -> Turn_record.t list
   -> seed option
-(** The newest record of [trace_id] carrying [response_observed_model_input],
-    in any input order. The producer joined this range to a response; the
+(** The highest turn of [trace_id] carrying [response_observed_model_input],
+    in any input order. Equal turns use the last observation in the list;
+    direct retries can reuse a turn number, so ties must be chronological.
+    The producer joined this range to a response; the
     runtime can be removed or redefined in the current catalog without
     changing that fact. The joined runtime remains attribution, not a lookup
     requirement. A different trace is a different history; {!for_history}
@@ -99,7 +101,7 @@ val of_records
 type unreadable_records =
   { count : int  (** At least 1. *)
   ; first_reason : string
-        (** The decoder's error for the oldest row that did not decode. *)
+        (** The decoder's error for the oldest visited row that did not decode. *)
   }
 (** JSON rows {!read_seed} read that {!Turn_record.of_json} refused. A line
     that is not JSON is skipped by the store reader before this count and is
@@ -128,8 +130,11 @@ val read_seed
   -> keeper_name:string
   -> trace_id:string
   -> seed_read
-(** {!seed_read_of_rows} over the JSON rows of the keeper's newest
-    {!records_read} turn records. Reads the record file on the
+(** The last stored response observation on the trace, scanning newest first
+    until a match or the end of the retained store. Unobserved rows do not
+    hide an older seed. Storage order also resolves direct retries that
+    reuse a turn number. Unreadable rows visited before the match are counted;
+    rows older than the match are not read. Reads the record files on the
     calling fiber; the turn driver calls it once per provider attempt, and
     only while the pair has no ledger. *)
 
@@ -153,11 +158,6 @@ val for_history
     would never widen again, so the caller starts over as with no seed. *)
 
 val dropped_front_to_string : dropped_front -> string
-
-val records_read : int
-(** Maximum recent raw rows read by {!read_seed}. Unanswered rows also
-    consume this limit, so an older observed seed can fall outside the read
-    window (follow-up #37247). *)
 
 val clamp : atom_count:int -> int -> int
 (** The front as a position in a history of [atom_count] atoms: at least 0,

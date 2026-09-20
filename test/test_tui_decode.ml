@@ -7115,7 +7115,23 @@ let lane_run_detail_json ?(output = true) run_id =
            @ (if output then
                 [ "elapsed_s", `Float 0.5
                 ; "selected_slot", `Null
-                ; "output", `Assoc [ "summary", `String "done" ]
+                ; ( "output"
+                  , `Assoc
+                      [ ( "verdict"
+                        , `Assoc
+                            [ "decision", `String "relevant"
+                            ; "rationale", `String "the Board post needs attention"
+                            ] )
+                      ; "slot_id", `String "jev-latest"
+                      ; ( "source"
+                        , `Assoc
+                            [ "kind", `String "vendor_system_one"
+                            ; "endpoint", `String "https://jev.invalid/v1/judge"
+                            ; "model", `String "jev-latest"
+                            ; "request_body_sha256", `String (String.make 64 'a')
+                            ] )
+                      ; "judged_at", `Float 42.
+                      ] )
                 ]
               else []))
       )
@@ -7142,8 +7158,17 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
       (match detail.Tui_decode.lrd_output with
        | Some (`Assoc fields) ->
            Alcotest.(check bool) "output payload" true
-             (List.assoc_opt "summary" fields = Some (`String "done"))
+             (List.assoc_opt "slot_id" fields = Some (`String "jev-latest"))
        | _ -> Alcotest.fail "a completed run carries its output");
+      (match detail.Tui_decode.lrd_answer_source with
+       | Some
+           (Tui_decode.Lane_run_answer_vendor_system_one
+              { model = "jev-latest"; endpoint }) ->
+         Alcotest.(check string)
+           "Vendor System One endpoint"
+           "https://jev.invalid/v1/judge"
+           endpoint
+       | _ -> Alcotest.fail "the Vendor System One answer source was not decoded");
       Alcotest.(check bool) "exact output has no tool loop" true
         (detail.Tui_decode.lrd_tool_evidence
          = Tui_decode.Lane_run_no_tools_by_contract);
@@ -7151,6 +7176,23 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
         (Tui_decode.lane_run_decision ~run_kind:detail.lrd_run_kind
            ~status:detail.lrd_status
          = Tui_decode.Lane_run_not_a_decision)
+
+let test_decode_board_answer_source_rejects_invented_selected_slot () =
+  let json =
+    match lane_run_detail_json "cmp-mismatch" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc
+        [ ( "run"
+          , `Assoc
+              (("selected_slot", `String "invented-slot")
+               :: List.remove_assoc "selected_slot" fields) )
+        ]
+    | _ -> Alcotest.fail "invalid Board detail fixture"
+  in
+  Alcotest.(check bool)
+    "Vendor System One cannot own a selected slot"
+    true
+    (Result.is_error (Tui_decode.decode_lane_run_detail json))
 
 let test_decode_lane_run_detail_running_has_no_output () =
   match
@@ -9195,6 +9237,8 @@ let () =
           test_decode_verifier_lane_summary_keeps_subject_and_verdict;
         Alcotest.test_case "detail carries prompt and output" `Quick
           test_decode_lane_run_detail_carries_prompt_and_output;
+        Alcotest.test_case "Board answer source rejects an invented selected slot" `Quick
+          test_decode_board_answer_source_rejects_invented_selected_slot;
         Alcotest.test_case "running detail has no output" `Quick
           test_decode_lane_run_detail_running_has_no_output;
         Alcotest.test_case "HITL advisory is not Gate resolution" `Quick

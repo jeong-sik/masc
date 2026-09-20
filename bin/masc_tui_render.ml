@@ -5437,9 +5437,22 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
   in
   let slot =
-    match detail.lrd_selected_slot with
-    | None -> ""
-    | Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+    match detail.lrd_answer_source, detail.lrd_selected_slot with
+    | Some _, _ | None, None -> ""
+    | None, Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+  in
+  let answer_source =
+    match detail.lrd_answer_source with
+    | None -> []
+    | Some (Tui_decode.Lane_run_answer_exact_attempt slot) ->
+      [ Ansi.reset, "  ANSWER  EXACT · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_cli_slot slot) ->
+      [ Ansi.reset, "  ANSWER  CLI · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_vendor_system_one { model; endpoint = _ }) ->
+      [ ( Ansi.reset
+        , "  ANSWER  VENDOR SYSTEM ONE · "
+          ^ Terminal_text.single_line model
+          ^ " · NO EXACT-FLOW RECEIPT" ) ]
   in
   let decision_style, decision = lane_run_decision_badge detail in
   let tool_style, tools = lane_run_tool_summary detail.lrd_tool_evidence in
@@ -5466,6 +5479,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
            (Tui_decode.lane_run_status_label detail.lrd_status))
         Ansi.reset )
   ]
+  @ answer_source
   @ gate_judgment
   @ [ tool_style, "  " ^ tools; skill_style, "  " ^ skills ]
 

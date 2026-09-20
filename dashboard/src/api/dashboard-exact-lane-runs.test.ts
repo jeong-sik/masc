@@ -22,6 +22,15 @@ function detailFixture(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function boardJudgment(source: Record<string, unknown>, slotId: string) {
+  return {
+    verdict: { decision: 'relevant', rationale: 'the Board post needs attention' },
+    slot_id: slotId,
+    source,
+    judged_at: 42,
+  }
+}
+
 describe('fetchExactLaneRuns', () => {
   it('requests native filtering on both the initial and cursor page', async () => {
     const requests: URL[] = []
@@ -224,6 +233,33 @@ describe('parseExactLaneRunsResponse', () => {
 })
 
 describe('parseExactLaneRunResponse', () => {
+  it('keeps a Vendor System One answer separate from the selected-slot contract', () => {
+    const run = parseExactLaneRunResponse(detailFixture({
+      lane: 'board_attention_exact',
+      selected_slot: null,
+      output: boardJudgment({
+        kind: 'vendor_system_one',
+        endpoint: 'https://jev.invalid/v1/judge',
+        model: 'jev-latest',
+        request_body_sha256: 'a'.repeat(64),
+      }, 'jev-latest'),
+    }))
+    expect(run.selectedSlot).toBeNull()
+    expect(run.answerSource).toEqual({
+      kind: 'vendor_system_one',
+      endpoint: 'https://jev.invalid/v1/judge',
+      model: 'jev-latest',
+    })
+  })
+
+  it('rejects answer-source attribution that disagrees with selected_slot', () => {
+    expect(() => parseExactLaneRunResponse(detailFixture({
+      lane: 'board_attention_exact',
+      selected_slot: 'different-slot',
+      output: boardJudgment({ kind: 'cli_lane_slot' }, 'codex_subscription.gpt-5.6-luna'),
+    }))).toThrow('slot_id must match selected_slot')
+  })
+
   it('preserves the current native metadata and available JSON null', () => {
     const run = parseExactLaneRunResponse(detailFixture())
     expect(run).toMatchObject({

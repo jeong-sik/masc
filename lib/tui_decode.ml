@@ -8398,6 +8398,14 @@ type lane_run_page =
   ; lrpg_total : int option
   }
 
+type lane_run_answer_source =
+  | Lane_run_answer_exact_attempt of string
+  | Lane_run_answer_cli_slot of string
+  | Lane_run_answer_vendor_system_one of
+      { model : string
+      ; endpoint : string
+      }
+
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
@@ -8408,6 +8416,7 @@ type lane_run_detail =
   ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
+  ; lrd_answer_source : lane_run_answer_source option
   ; lrd_input_payload : Yojson.Safe.t
   ; lrd_input_availability : Exact_lane_run_registry.payload_availability
   ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
@@ -8502,6 +8511,38 @@ let decode_lane_run_detail json =
     | None | Some (Exact_lane_run_registry.Not_loaded
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
+  let* lrd_answer_source =
+    let board_attention_lane =
+      Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
+    in
+    match summary.lrs_status, lrd_output with
+    | Lane_run_succeeded, Some output
+      when String.equal summary.lrs_lane board_attention_lane ->
+      let* judgment =
+        Keeper_board_attention_candidate.judgment_of_yojson output
+      in
+      (match judgment.source, summary.lrs_selected_slot with
+       | Keeper_board_attention_candidate.Exact_attempt _, Some slot
+         when String.equal slot judgment.slot_id ->
+         Ok (Some (Lane_run_answer_exact_attempt slot))
+       | Keeper_board_attention_candidate.Cli_lane_slot, Some slot
+         when String.equal slot judgment.slot_id ->
+         Ok (Some (Lane_run_answer_cli_slot slot))
+       | Keeper_board_attention_candidate.Vendor_system_one provenance, None
+         when String.equal judgment.slot_id provenance.answering_model_id ->
+         Ok
+           (Some
+              (Lane_run_answer_vendor_system_one
+                 { model = provenance.answering_model_id
+                 ; endpoint = provenance.destination_uri
+                 }))
+       | (Keeper_board_attention_candidate.Exact_attempt _
+         | Keeper_board_attention_candidate.Cli_lane_slot), _ ->
+         Error "Board answer slot_id must match selected_slot"
+       | Keeper_board_attention_candidate.Vendor_system_one _, _ ->
+         Error "Vendor System One answer must not have selected_slot")
+    | _, _ -> Ok None
+  in
   let* lrd_tool_evidence =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
@@ -8542,6 +8583,7 @@ let decode_lane_run_detail json =
     ; lrd_status = summary.lrs_status
     ; lrd_elapsed_s = summary.lrs_elapsed_s
     ; lrd_selected_slot = summary.lrs_selected_slot
+    ; lrd_answer_source
     ; lrd_input_payload
     ; lrd_input_availability
     ; lrd_output_availability

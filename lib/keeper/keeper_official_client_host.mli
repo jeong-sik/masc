@@ -20,13 +20,18 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
-(** What an official-client lane can say about one turn's model input.
+(** What an official-client lane can say about one turn's input handoff.
 
-    [Whole_input_transmitted] carries the MASC-prepared messages rendered into
-    this request. Starts send the seed history; Claude Code and Codex resumes
-    also send the canonical snapshot through replacement configuration.
-    Client-owned native conversation and tool history outside that snapshot
-    are not included in this capture.
+    [Whole_input_transmitted] carries the MASC-prepared messages handed to the
+    client integration. It does not prove that the client placed every byte in
+    the provider request or model context. Starts hand over the seed history.
+    On a Claude Code resume, MASC hands the canonical snapshot over as
+    replacement system-layer configuration, but the client may reuse the
+    session's original system prompt instead; this receipt records the handoff,
+    not what the model read. Codex resume behaviour needs its own evidence and
+    is not inferred from the Claude Code path. Client-owned native conversation
+    and tool history outside the snapshot are not included in this capture.
+    Do not use this receipt to compare per-lane model-input byte totals.
 
     [Held_by_client_session] means that the lane did not retransmit that
     history, as on Antigravity resume. The current goal and ephemeral context

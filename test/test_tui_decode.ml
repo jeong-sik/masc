@@ -4460,6 +4460,19 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
            (String_util.contains_substring detail
               "JEV model must be a non-empty string"))
     [ ""; " \t " ];
+  List.iter
+    (fun (state, expected) ->
+       let unavailable =
+         replace_assoc_field "jev" (`Assoc [ "state", `String state ]) board
+       in
+       match decode_board unavailable with
+       | Ok (Some actual) ->
+         Alcotest.(check bool) "unavailable reason survives decoding" true
+           (actual = expected)
+       | Ok None -> Alcotest.fail "unavailable JEV state disappeared"
+       | Error detail -> Alcotest.fail detail)
+    [ "cli_only", Tui_decode.Jev_cli_only
+    ; "lane_unavailable", Tui_decode.Jev_lane_unavailable ];
   let unknown =
     replace_assoc_field "jev" (`Assoc [ "state", `String "warming" ]) board
   in

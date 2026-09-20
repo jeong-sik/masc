@@ -417,9 +417,27 @@ let json_string_opt = function
   | Some value -> `String value
 ;;
 
-let jev_readiness_json = function
-  | Typesafeai_config.Off -> `Assoc [ "state", `String "off" ]
+type jev_lane_readiness =
+  | Jev_off
+  | Jev_ready of { model : string }
+  | Jev_cli_only
+  | Jev_lane_unavailable
+
+let jev_lane_readiness configuration = function
+  | Typesafeai_config.Off -> Jev_off
   | Typesafeai_config.Ready { model } ->
+    (match configuration with
+     | Configured { admitted_slots = _ :: _; _ } -> Jev_ready { model }
+     | Configured { admitted_slots = []; cli_slots = _ :: _; _ } -> Jev_cli_only
+     | Configured { admitted_slots = []; cli_slots = []; _ }
+     | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
+;;
+
+let jev_readiness_json = function
+  | Jev_off -> `Assoc [ "state", `String "off" ]
+  | Jev_cli_only -> `Assoc [ "state", `String "cli_only" ]
+  | Jev_lane_unavailable -> `Assoc [ "state", `String "lane_unavailable" ]
+  | Jev_ready { model } ->
     let model =
       match Env_config_core.trim_opt (Some model) with
       | Some model -> model
@@ -653,7 +671,7 @@ let lane_json
     if
       String.equal spec.lane_id
         (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention)
-    then [ "jev", jev_readiness_json jev_readiness ]
+    then [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
     else []
   in
   `Assoc

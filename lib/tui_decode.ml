@@ -155,6 +155,8 @@ type standalone_lane_slot_count = {
 type standalone_lane_jev =
   | Jev_off
   | Jev_on of { model : string }
+  | Jev_cli_only
+  | Jev_lane_unavailable
 
 type standalone_lane = {
   sl_lane_id : string;
@@ -5881,6 +5883,8 @@ let decode_standalone_lane_jev json =
   let* state = required_string_field json "state" in
   match state with
   | "off" -> Ok Jev_off
+  | "cli_only" -> Ok Jev_cli_only
+  | "lane_unavailable" -> Ok Jev_lane_unavailable
   | "on" ->
     let* model = required_string_field json "model" in
     let model = String.trim model in

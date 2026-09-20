@@ -193,6 +193,21 @@ describe('InternalAgentsMonitor', () => {
     sse.refresh?.()
     expect(await within(matrix).findByText('JEV ON · jev-next')).toBeTruthy()
     expect(within(matrix).queryByText('JEV OFF')).toBeNull()
+
+    for (const [state, label] of [
+      ['cli_only', 'JEV unavailable: Board lane is CLI-only'],
+      ['lane_unavailable', 'JEV unavailable: Board lane is not ready'],
+    ] as const) {
+      api.fetchStandaloneLanes.mockResolvedValue({
+        ...laneSnapshot,
+        lanes: laneSnapshot.lanes.map(item => item.laneId === 'board_attention_exact'
+          ? { ...item, jev: { state } }
+          : item),
+      })
+      sse.refresh?.()
+      expect(await within(matrix).findByText(label)).toBeTruthy()
+      expect(within(matrix).queryByText('JEV ON · jev-next')).toBeNull()
+    }
   })
 
   it('does not let an older refresh overwrite the latest lane matrix', async () => {

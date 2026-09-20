@@ -27,7 +27,8 @@ val api_key : unit -> string option
 (** [TYPESAFEAI_API_KEY], trimmed. [None] when unset or blank. *)
 
 val endpoint : unit -> string
-(** [MASC_TYPESAFEAI_ENDPOINT], else {!default_endpoint}. *)
+(** Trimmed [MASC_TYPESAFEAI_ENDPOINT], else {!default_endpoint} when absent or
+    blank. This is the endpoint used by the HTTP client. *)
 
 val model : unit -> string
 (** Trimmed [MASC_TYPESAFEAI_MODEL], else {!default_model} when absent or

@@ -144,16 +144,15 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
 ;;
 
 let test_board_lane_projects_credential_free_jev_readiness () =
-  let snapshot jev_readiness =
+  let http_lane =
+    Projection.Configured
+      { admitted_slots = [ "primary" ]; cli_slots = []; dropped_slots = []
+      ; admission_error = None }
+  in
+  let snapshot ?(configuration = http_lane) jev_readiness =
     Projection.For_testing.snapshot_json_with
       ~now:110.
-      ~resolve_lane:(fun lane_id ->
-        Projection.Configured
-          { admitted_slots = [ lane_id ^ "-primary" ]
-          ; cli_slots = []
-          ; dropped_slots = []
-          ; admission_error = None
-          })
+      ~resolve_lane:(fun _ -> configuration)
       ~jev_readiness
       ~exact_runs_total:0
       ~exact_runs:[]
@@ -177,6 +176,25 @@ let test_board_lane_projects_credential_free_jev_readiness () =
     (jev (Typesafeai.Ready { model = " \t " })
      |> Yojson.Safe.Util.member "model"
      |> Yojson.Safe.Util.to_string);
+  List.iter
+    (fun (configuration, expected) ->
+       let actual =
+         snapshot ~configuration (Typesafeai.Ready { model = "jev-next" })
+         |> fun json -> lane_by_id json "board_attention_exact"
+         |> Yojson.Safe.Util.member "jev"
+         |> Yojson.Safe.Util.member "state"
+         |> Yojson.Safe.Util.to_string
+       in
+       check string "readiness follows the resolved transport" expected actual)
+    [ (Projection.Configured
+         { admitted_slots = []; cli_slots = [ "cli" ]; dropped_slots = []
+         ; admission_error = None }, "cli_only")
+    ; (Projection.Configured
+         { admitted_slots = []; cli_slots = []; dropped_slots = []
+         ; admission_error = None }, "lane_unavailable")
+    ; Projection.Unconfigured "no lane", "lane_unavailable"
+    ; Projection.Registry_unavailable "no registry", "lane_unavailable"
+    ];
   check bool "no credential field" false
     (match enabled with
      | `Assoc fields -> List.mem_assoc "api_key" fields

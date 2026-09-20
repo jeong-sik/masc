@@ -183,6 +183,16 @@ let with_jev_config ~api_key ~enabled ~model f =
 ;;
 
 let test_config_readiness_is_typed_and_credential_free () =
+  List.iter
+    (fun value ->
+       Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" value (fun () ->
+         Alcotest.(check string) "absent or blank endpoint uses the HTTP default"
+           C.default_endpoint (C.endpoint ())))
+    [ None; Some ""; Some " \t " ];
+  Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT"
+    (Some "  https://fixture.invalid/systemone  ") (fun () ->
+      Alcotest.(check string) "explicit endpoint is trimmed"
+        "https://fixture.invalid/systemone" (C.endpoint ()));
   with_jev_config ~api_key:None ~enabled:(Some "true") ~model:(Some "unused")
     (fun () ->
        match C.readiness () with

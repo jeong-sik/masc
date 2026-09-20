@@ -10,7 +10,12 @@ let default_model = "jev-latest"
 let api_key () = Env_config_core.trim_opt (Env_config_core.raw_value_opt "TYPESAFEAI_API_KEY")
 
 let endpoint () =
-  Env_config_core.get_string ~default:default_endpoint "MASC_TYPESAFEAI_ENDPOINT"
+  match
+    Env_config_core.trim_opt
+      (Env_config_core.raw_value_opt "MASC_TYPESAFEAI_ENDPOINT")
+  with
+  | Some endpoint -> endpoint
+  | None -> default_endpoint
 ;;
 
 let model () =

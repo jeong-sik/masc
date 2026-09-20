@@ -67,6 +67,12 @@ describe('standalone lane snapshot decoder', () => {
     expect(parseStandaloneLanesSnapshot(enabled).lanes[0]?.jev)
       .toEqual({ state: 'on', model: 'jev-next' })
 
+    for (const state of ['cli_only', 'lane_unavailable']) {
+      const unavailable = snapshot()
+      unavailable.lanes[0] = { ...unavailable.lanes[0], jev: { state } }
+      expect(parseStandaloneLanesSnapshot(unavailable).lanes[0]?.jev).toEqual({ state })
+    }
+
     const malformed = snapshot()
     malformed.lanes[0] = { ...malformed.lanes[0], jev: { state: 'warming' } }
     expect(() => parseStandaloneLanesSnapshot(malformed)).toThrow(/jev\.state is unknown/)

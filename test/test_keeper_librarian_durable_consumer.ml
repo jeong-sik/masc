@@ -817,6 +817,80 @@ let test_counterpart_range_includes_upper_boundary_once () =
        observations)
 ;;
 
+let test_external_chat_pair_straddling_a_boundary_is_not_duplicated () =
+  with_workspace @@ fun config ->
+  let base_dir = config.Workspace.base_path in
+  let surface = Keeper_external_attention.Agent in
+  let conversation_id = "agent:boundary-dedup" in
+  let message_id = "external-boundary-message" in
+  let received_at = Time_compat.now () -. 10.0 in
+  let boundary = received_at +. 1.0 in
+  let item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key message_id
+    ; dedupe_key = message_id
+    ; keeper_name
+    ; conversation = { conversation_id; surface }
+    ; external_message =
+        Some { surface; message_id; reply_to_message_id = None }
+    ; source_label = "agent"
+    ; actor =
+        { actor_id = Some "external"
+        ; display_name = Some "External"
+        ; authority = Keeper_chat_store.External
+        }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "delivered once"
+    ; content_ref = None
+    ; received_at
+    ; metadata = []
+    }
+  in
+  (match Keeper_external_attention.record ~base_path:base_dir item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "unexpected duplicate external fixture"
+   | `Error detail -> fail detail);
+  let read ~after ~before =
+    match
+      Masc.Keeper_librarian_input_sources.counterpart_observations_between
+        ~base_dir
+        ~keeper_name
+        ~after
+        ~before
+    with
+    | Ok observations -> observations
+    | Error error ->
+      fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  in
+  check
+    (list string)
+    "the first range emits the external delivery"
+    [ "delivered once" ]
+    (List.map
+       (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+       (read ~after:None ~before:boundary));
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir
+    ~keeper_name
+    ~content:"delivered once"
+    ~conversation_id
+    ~external_message_id:message_id
+    ~speaker
+    ();
+  check
+    (list string)
+    "the later chat projection is not emitted a second time"
+    []
+    (List.map
+       (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+       (read ~after:(Some boundary) ~before:(Time_compat.now () +. 10.0)))
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -847,6 +921,8 @@ let () =
             test_counterpart_range_reads_beyond_recent_windows
         ; test_case "counterpart range includes upper boundary once" `Quick
             test_counterpart_range_includes_upper_boundary_once
+        ; test_case "external/chat pair across boundary is emitted once" `Quick
+            test_external_chat_pair_straddling_a_boundary_is_not_duplicated
         ] )
     ; ( "production wake"
       , [ test_case "failure stops and a later wake drains successful cuts" `Quick

@@ -33,15 +33,24 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
       | Keeper_chat_store.Role.System, _
       | Keeper_chat_store.Role.Tool, _ -> false)
   in
-  let* external_items =
+  let* all_external_items =
     Keeper_external_attention.load_events_result ~base_path:base_dir ~keeper_name
     |> Result.map_error (fun detail -> External_attention_unreadable detail)
     |> Result.map (List.filter_map (function
-      | Keeper_external_attention.Recorded item when in_range item.received_at -> Some item
-      | Keeper_external_attention.Recorded _ -> None))
+      | Keeper_external_attention.Recorded item -> Some item))
   in
+  let external_items =
+    List.filter
+      (fun (item : Keeper_external_attention.item) -> in_range item.received_at)
+      all_external_items
+  in
+  (* This key answers whether a chat row came from an external delivery, not
+     whether that delivery happened inside this Memory range. The external
+     event and its chat projection can straddle a turn boundary. Restricting
+     keys to [external_items] would emit the same counterpart once on each
+     side of that boundary. *)
   let external_delivery_keys =
-    external_items
+    all_external_items
     |> List.filter_map (fun (item : Keeper_external_attention.item) ->
       match item.external_message with
       | None -> None

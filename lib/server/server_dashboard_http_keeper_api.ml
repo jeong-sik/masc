@@ -1357,7 +1357,12 @@ let handle_keeper_get_subroutes state req request reqd =
          and revisions, projected from the events sidecar at read time and
          stored nowhere. A line the reader could not decode is counted, not
          dropped. *)
-      let event_rows = Keeper_memory_os_events.read ~keepers_dir ~keeper_id:name in
+      let event_rows, events_read_error =
+        match Keeper_memory_os_events.read ~keepers_dir ~keeper_id:name with
+        | Ok rows -> rows, None
+        | Error error ->
+          [], Some (Keeper_memory_os_events.file_read_error_to_string error)
+      in
       let events =
         List.filter_map
           (fun (_, row) ->
@@ -1478,6 +1483,10 @@ let handle_keeper_get_subroutes state req request reqd =
            ; "ordinary", ordinary
            ; "source_bound", source_bound
            ; "events_unreadable_lines", `Int events_unreadable_lines
+           ; ( "events_read_error"
+             , match events_read_error with
+               | None -> `Null
+               | Some detail -> `String detail )
            ])
         reqd)
   else if ends_with "/memory-journal" then

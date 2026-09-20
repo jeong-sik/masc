@@ -1567,15 +1567,17 @@ let test_unreadable_source_path_is_the_callers_to_fix () =
 module Events = Masc.Keeper_memory_os_events
 
 let events_for ~keepers_dir ~keeper_id =
-  Events.read ~keepers_dir ~keeper_id
-  |> List.map (fun (index, row) ->
-    match row with
-    | Ok event -> event
-    | Error error ->
-      Alcotest.failf
-        "events line %d unreadable: %s"
-        index
-        (Events.read_error_to_string error))
+  match Events.read ~keepers_dir ~keeper_id with
+  | Error error -> Alcotest.fail (Events.file_read_error_to_string error)
+  | Ok rows ->
+    List.map (fun (index, row) ->
+      match row with
+      | Ok event -> event
+      | Error error ->
+        Alcotest.failf
+          "events line %d unreadable: %s"
+          index
+          (Events.read_error_to_string error)) rows
 ;;
 
 let string_list_field key json =

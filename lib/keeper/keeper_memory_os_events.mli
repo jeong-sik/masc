@@ -72,13 +72,24 @@ type read_error =
   | Not_json of string
   | Malformed of Keeper_memory_os_types.wire_error
 
+type file_read_error =
+  { path : string
+  ; message : string
+  }
+
 val read_error_to_string : read_error -> string
+val file_read_error_to_string : file_read_error -> string
 
 (** Every non-blank line of the sidecar in file order, paired with its
     zero-based index among non-blank lines. A line this module cannot read
     stays in the list as an [Error] so a reader can count and name it instead
-    of losing it. A missing file reads as no events. *)
-val read : keepers_dir:string -> keeper_id:string -> (int * (event, read_error) result) list
+    of losing it. A missing file reads as no events. A sidecar lookup or read
+    failure is returned separately, so callers cannot confuse it with an empty
+    history. *)
+val read :
+  keepers_dir:string ->
+  keeper_id:string ->
+  ((int * (event, read_error) result) list, file_read_error) result
 
 (** {1 Projection} *)
 

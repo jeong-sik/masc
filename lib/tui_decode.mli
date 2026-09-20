@@ -979,6 +979,7 @@ type memory_fact_snapshot = {
   mfs_keeper : string;
   mfs_ordinary : memory_ordinary_store memory_store_reading;
   mfs_source : memory_source_store memory_store_reading;
+  mfs_events_read_error : string option;
 }
 
 (** One verdict the harness recorded: which gate ran on which task, what it
@@ -2378,7 +2379,9 @@ val decode_memory_fact_snapshot :
 (** Decode one keeper's fact listing served at
     [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
     field it carries -- [read_error], [present]:false, or [present]:true with
-    its rows -- and any other shape is a decode error, not an empty store. *)
+    its rows -- and any other shape is a decode error, not an empty store.
+    [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
+    event history. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

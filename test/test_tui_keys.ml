@@ -457,6 +457,7 @@ let memory_state_with_facts () =
                   }
                 ]
             }
+      ; mfs_events_read_error = None
       };
   state
 

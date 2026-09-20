@@ -50,6 +50,7 @@ let make_snapshot ~ordinary_facts ~source_facts ~invalidations =
         ; mss_facts = source_facts
         ; mss_invalidations = invalidations
         }
+  ; mfs_events_read_error = None
   }
 
 let category_filter_testable =

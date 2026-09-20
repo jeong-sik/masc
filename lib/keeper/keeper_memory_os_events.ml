@@ -155,26 +155,38 @@ type read_error =
   | Not_json of string
   | Malformed of W.wire_error
 
+type file_read_error =
+  { path : string
+  ; message : string
+  }
+
 let read_error_to_string = function
   | Not_json message -> "memory event line is not valid JSON: " ^ message
   | Malformed error -> "memory event line rejected: " ^ W.wire_error_to_string error
 ;;
 
-let read ~keepers_dir ~keeper_id : (int * (event, read_error) result) list =
+let file_read_error_to_string (error : file_read_error) =
+  Printf.sprintf "memory event sidecar read failed path=%s: %s" error.path error.message
+;;
+
+let read ~keepers_dir ~keeper_id :
+    ((int * (event, read_error) result) list, file_read_error) result =
   let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   match Fs_compat.load_file_opt path with
-  | None -> []
+  | exception Sys_error message -> Error { path; message }
+  | None -> Ok []
   | Some contents ->
-    String.split_on_char '\n' contents
-    |> List.filter (fun line -> non_blank line)
-    |> List.mapi (fun index line ->
-      match Yojson.Safe.from_string line with
-      | json ->
-        ( index
-        , (match event_of_json json with
-           | Ok event -> Ok event
-           | Error error -> Error (Malformed error)) )
-      | exception Yojson.Json_error message -> index, Error (Not_json message))
+    Ok
+      (String.split_on_char '\n' contents
+       |> List.filter (fun line -> non_blank line)
+       |> List.mapi (fun index line ->
+         match Yojson.Safe.from_string line with
+         | json ->
+           ( index
+           , (match event_of_json json with
+              | Ok event -> Ok event
+              | Error error -> Error (Malformed error)) )
+         | exception Yojson.Json_error message -> index, Error (Not_json message)))
 ;;
 
 type summary =

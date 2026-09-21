@@ -54,8 +54,8 @@ type error =
       }
 
 let fragment_file_to_string = function
-  | Keeper_turn_fragments.Main -> "history.jsonl"
-  | Keeper_turn_fragments.Internal -> "history.internal.jsonl"
+  | Keeper_turn_fragments.Main -> Keeper_types_support.history_file_name
+  | Keeper_turn_fragments.Internal -> Keeper_types_support.internal_history_file_name
 ;;
 
 let range_stop_to_string = function
@@ -657,19 +657,16 @@ let consume_one_with_extent
              ~last_atom_digest:position.last_atom_digest
              lines
          with
-         | Some (_, recorded_at, _) -> Ok (Some recorded_at)
+         | Some (line, recorded_at, _) -> Ok (Some (line, recorded_at))
          | None -> Error (Progress_boundary_missing position))
     in
     let* after_official =
       match official_cursor with
       | None -> Ok None
-      | Some cursor -> Result.map Option.some (official_cursor_recorded_at ~lines cursor)
-    in
-    let after =
-      match after_atom, after_official with
-      | None, None -> None
-      | Some a, None | None, Some a -> Some a
-      | Some a, Some b -> Some (Float.max a b)
+      | Some cursor ->
+        Result.map
+          (fun recorded_at -> Some (cursor.Keeper_librarian_official_progress.boundary_line, recorded_at))
+          (official_cursor_recorded_at ~lines cursor)
     in
     let* fragments = read_fragments ~config official_lines in
     (* The range's end is a cut point by construction; the fallback keeps the
@@ -744,10 +741,32 @@ let consume_one_with_extent
     in
     let selected_messages = List.rev selected_messages_rev in
     let observations = List.rev observations_rev in
-    match List.rev steps with
-    | [] -> Ok Nothing_to_read
-    | last :: _ ->
-    let ended_at, turn_ref = step_end last in
+    let first_step, last_step =
+      match steps, List.rev steps with
+      | first :: _, last :: _ -> first, last
+      | [], _ | _, [] ->
+        (* Arm 6 is entered with a read atom range or a non-empty official
+           list, and the narrowing keeps one of them. *)
+        invalid_arg "librarian pass: a selection with nothing to read"
+    in
+    let ended_at, turn_ref = step_end last_step in
+    (* The counterpart lower bound is the latest of the two positions that
+       precede the first turn this pass reads. A position beyond it -- the
+       atom baseline set while an older official line waited -- covers no
+       counterpart the older turn should see, and must not turn the interval
+       backwards. *)
+    let after =
+      List.filter_map
+        (fun cursor ->
+           match cursor with
+           | Some (line, recorded_at) when line < step_line first_step -> Some recorded_at
+           | Some _ | None -> None)
+        [ after_atom; after_official ]
+      |> List.fold_left (fun after recorded_at ->
+        match after with
+        | None -> Some recorded_at
+        | Some earlier -> Some (Float.max earlier recorded_at)) None
+    in
     let official_next =
       match List.rev official_lines with
       | last :: _ -> Some { Keeper_librarian_official_progress.boundary_line = last.R.line }
@@ -792,11 +811,17 @@ let consume_one_with_extent
            | Ok () -> Ok (Official_advanced { atom = atom_progress; official })
            | Error error -> Error (Official_progress_write_failed error)))
     in
-    if selected_messages = []
-    then
+    if selected_messages = [] && observations = []
+    then (
       (* Lines whose fragments are all gone or all untagged: nothing for the
-         model, and the cursor moves past them. *)
-      advance ()
+         model, and the position moves past them. Said aloud, because the
+         writer's own loss path ends here too. *)
+      Log.Keeper.warn
+        ~keeper_name
+        "librarian pass found no fragments for %d official line(s) through line %d; passing them"
+        (List.length official_lines)
+        (step_line last_step);
+      advance ())
     else
       let* current, expected_revision =
         current_memory ~keepers_dir:memory_keepers_dir ~keeper_name

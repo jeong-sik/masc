@@ -2044,6 +2044,76 @@ let test_a_refused_fragment_line_stops_the_pass () =
   check bool "no official position was written" true (Option.is_none (read_official config))
 ;;
 
+(* An official line older than the atom baseline: the baseline pass passes
+   over it, the next pass reads it, and the atom position set after it does
+   not turn the counterpart interval backwards. *)
+let test_an_official_line_older_than_the_baseline_is_read () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-before-baseline" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  save_checkpoint config ~trace_id [ message "t2" ] 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 [ message "t2" ];
+  (match consume config (fun ~expected_revision:_ ~range_id:_ _ -> fail "a baseline commits nothing") with
+   | Consumer.Baseline_advanced progress -> check int "the atom baseline" 1 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Progress_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "the first pass did not set the baseline");
+  let carried = ref [] in
+  match
+    consume config (fun ~expected_revision:_ ~range_id:_ input ->
+      carried := text_markers input;
+      true)
+  with
+  | Consumer.Official_advanced { atom = None; official } ->
+    check int "the official position reaches the older line" 1 official.boundary_line;
+    check (list string) "the older official turn is read" [ "q1"; "a1" ] !carried
+  | Consumer.Official_advanced { atom = Some _; _ }
+  | Consumer.Nothing_to_read
+  | Consumer.Baseline_advanced _
+  | Consumer.Progress_advanced _
+  | Consumer.Memory_not_committed -> fail "the older official line was not read"
+;;
+
+(* A refused boundary line beyond the official position stops the pass and
+   keeps stopping it: the line may be an official turn's end line, whose
+   words are still on disk, so no later restart lifts it the way one lifts
+   the atom stop (row 2c'). The keeper waits for a purge; the lag shows. *)
+let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-refused-then-restart" in
+  establish_progress config ~trace_id "t1";
+  let path =
+    Boundaries.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path (fun oc ->
+    Out_channel.output_string oc "{\n");
+  (match
+     Boundaries.append
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name
+       { Boundaries.recorded_at = 3.0; event = Boundaries.History_restarted { trace_id } }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Boundaries.append_error_to_string error));
+  save_checkpoint config ~trace_id [ message "fresh" ] 3;
+  append_boundary ~history_at_start:Boundaries.Fresh_history config ~trace_id ~turn:3
+    ~recorded_at:4.0 [ message "fresh" ];
+  match
+    Consumer.consume_one ~config ~keeper_name ~commit:(fun ~expected_revision:_ ~range_id:_ _ ->
+      fail "a pass read past a refused boundary line")
+  with
+  | Error (Consumer.Official_range_stopped { line = 2; error = Boundaries.Not_json _ }) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "the restart lifted the official stop"
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -2124,6 +2194,10 @@ let () =
             test_untagged_fragments_are_passed_without_a_commit
         ; test_case "a refused fragment line stops the pass" `Quick
             test_a_refused_fragment_line_stops_the_pass
+        ; test_case "an official line older than the baseline is read" `Quick
+            test_an_official_line_older_than_the_baseline_is_read
+        ; test_case "a refused boundary line is not lifted for official turns" `Quick
+            test_a_refused_boundary_line_is_not_lifted_for_official_turns
         ] )
     ; ( "production wake"
       , [ test_case "failure stops and a later wake drains successful cuts" `Quick

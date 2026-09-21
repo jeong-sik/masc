@@ -96,6 +96,14 @@ let of_json = Checkpoint_codec.of_json
 let to_string = Checkpoint_codec.to_string
 let message_to_json = Checkpoint_codec.message_to_json
 
+let message_of_json json =
+  let ( let* ) = Result.bind in
+  let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint message" json in
+  let* _ = Checkpoint_v11_contract.validate_message 0 json in
+  try Checkpoint_codec.message_of_json json with
+  | Yojson.Safe.Util.Type_error (detail, _) | Yojson.Json_error detail | Failure detail ->
+    Error (Error.Serialization (JsonParseError { detail = "Checkpoint.message_of_json: " ^ detail }))
+
 type encoding_memo = Checkpoint_codec.encoding_memo
 
 let create_encoding_memo = Checkpoint_codec.create_encoding_memo

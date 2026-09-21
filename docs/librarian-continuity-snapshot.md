@@ -20,14 +20,21 @@ masc-librarian-continuity restore \
 
 저장본의 끝은 exclusive atom 위치다. 같은 저장본에서 설명과 위치를 함께 읽고, 해당 위치 뒤의 메시지를 붙인다. checkpoint 뒤에 턴이 추가돼도 사용할 수 있지만, 다른 trace·새 history 시작·끝 경계의 줄이나 Turn_ref 교체·기존 prefix 변경에는 사용할 수 없다. prefix digest는 도구 결과 본문까지 포함한다. 끝 atom의 첫 메시지가 같다는 이유로 바뀐 도구 결과를 지나치지 않는다. baseline만 설정된 이력은 처음부터 보존됐다고 가정하지 않는다.
 
-이 하네스는 저장·복원 경계를 검증한다. 설명이 뜻을 보존했는지는 별도 평가가 필요하며, 파일 검증 성공이 의미 보존 성공을 뜻하지 않는다.
+이 하네스는 저장·복원 경계를 검증한다. 실제 Librarian이 만든 설명으로 JEV 연속성을 측정하고, 공식 fragment 경계까지 검증한 뒤에 운영 요청 조립에 연결한다. 지금 운영의 carried front를 이 파일이나 Librarian read position으로 대체하지 않는다.
 
-## Agent Core의 다음 턴 입력
+## 합성 입력의 두 조건 비교
 
-운영 Librarian은 runtime Keeper 디렉터리의 `librarian-continuity.json`에 하던 일과 정확한 완료 위치를 함께 쓴다. Agent Core dispatch는 이 파일을 한 번 읽고, 같은 trace·history·완료 경계·원문 prefix인지 확인한다. 다음 요청은 저장된 하던 일과 그 위치 뒤의 원문, 현재 pinned context를 함께 보낸다. checkpoint 원문과 Librarian의 Memory 진행 위치는 바꾸지 않는다.
+`compare`는 명시적으로 고른 모델로 prefix의 후보 설명을 만든 뒤 파일에 저장하고 다시 읽는다. 같은 질문과 Memory facts에 대해 전체 prefix+suffix를 받은 답변과 저장된 설명+suffix를 받은 답변을 각각 생성해 JEV에 보낸다. 후보 설명을 만드는 요청에는 질문, 미래 suffix, 별도 Memory facts를 넣지 않는다. 두 답변의 모델도 동일하다.
 
-한 dispatch에서 저장본은 고정된다. tool loop의 각 요청에서도 덮은 prefix가 같은지 검사한다. 새 도구 결과와 사용자 입력은 뒤에 그대로 붙으며, 뒤쪽 원문에는 demotion이나 기존 ledger의 더 앞선 cut을 적용하지 않는다. 용량 초과가 나면 이 경로는 원문을 추가로 잘라 같은 provider에 재시도하지 않고 기존 runtime 실패 처리에 넘긴다.
+```sh
+masc-librarian-continuity compare \
+  --input benchmarks/data/librarian_working_state_synthetic.json \
+  --output "$new_report_path" \
+  --config "$runtime_toml" --runtime "$exact_runtime_id"
+```
 
-다른 trace나 새 history에는 옛 저장본을 쓰지 않는다. 현재 history 전체를 전송하고, Librarian이 새 완료 구간을 저장한 다음 dispatch에서 줄인다. 파일 손상·읽기 실패·같은 prefix의 내용 변경은 명시적 오류가 된다. 저장본 자체가 없는 Keeper는 기존 입력 경로를 유지한다.
+이 명령은 설정한 모델과 JEV를 실제 호출한다. 입력은 `Synthetic` provenance와 canonical Checkpoint message 형식의 `prefix`·`suffix`를 사용한다. 실행 파일의 현재 Checkpoint message 계약에 맞지 않는 입력은 거절한다. 보고서와 옆의 `.snapshot-<case-id-sha256>.json` 파일에는 원문, 후보 설명, 답변이 들어간다. 기존 출력이나 snapshot 파일은 덮어쓰지 않는다.
 
-이 연결은 Agent Core 경로에 한정된다. 공식 client의 session과 fragment는 아직 연결하지 않는다. `recovery_view`가 있는 실행은 해당 복원 경로를 우선하며 두 변환을 겹치지 않는다. 로그의 `origin=librarian_snapshot`, `first_atom`, `atoms`, `transmitted_bytes`로 실제 입력 범위를 확인할 수 있다. TUI 전용 표시와 실서비스 연속 턴 검증은 별도 작업이다.
+보고서는 두 조건의 원시 probability와 개별 실패를 보존한다. 임계값이나 합격 판정은 없으며 JEV 오류를 0점으로 바꾸지 않는다. 한 조건의 답변·판정 실패가 다른 조건 실행을 막지는 않는다. `all_cases_scored`는 모든 판정을 받았다는 뜻이고, 품질 합격을 뜻하지 않는다. 종료 코드는 모두 판정 완료이면 0, 일부 미완료이면 1, 입력·설정·보고서 저장 실패이면 2다.
+
+`test_librarian_working_state_cli.py`는 로컬 HTTP 응답으로 이 연결을 검사한다. 그 고정 점수는 실제 JEV 측정값이 아니다. `compare` 또한 합성 경계를 사용하는 별도 실험이며 운영 Keeper의 요약 생성·front 전진·다음 요청 조립을 연결하지 않는다. 현재 구현만으로 연속성 개선이나 운영 적용을 입증했다고 주장하지 않는다.

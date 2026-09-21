@@ -472,6 +472,21 @@ status: reference
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
+  이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
+  `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`·`masc-librarian-continuity`가
+  공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다. 실행 기록에서 Skill 후보를
+  찾아 검증·발행하는 `Tool Librarian`은 RFC 제안(#36925)일 뿐 구현된 자동 생산 경로가
+  아니다([Skills](../SKILLS.md)).
+
+**Librarian Replay**
+: `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에
+  Librarian 읽기 규칙(`Keeper_librarian_range.select`/`slice`)을 오프라인으로 돌려,
+  backlog가 몇 회차에 걸리는지·회차마다 몇 atom을 나르는지·중복 atom이 있는지를
+  센다(RFC librarian-lifecycle §9). 메시지 본문은 출력하지 않고 count·atom 번호·digest만
+  낸다. 아무것도 쓰지 않는다 — progress 파일·boundary line·checkpoint 모두 없다.
+  서버의 Librarian 실행이 아니라 그 읽기 규칙의 측정 하네스다.
+  → [masc_librarian_replay](../../bin/masc_librarian_replay.ml)
+
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
   참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의

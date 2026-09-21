@@ -1201,7 +1201,7 @@ let reconcile_owner_with
             Error
               (Owner_reconciliation_cancelled
                  { owner; reason; backtrace })
-          | exception terminalization_exception ->
+          | exception terminalization_exception -> (* cancel-guard-ok: the scrutinee cannot raise Cancelled -- the hook is (fun () -> ()) on every production path and finish_reconciliation_terminal's body is wholly Eio.Cancel.protect *)
             let terminalization_backtrace = Printexc.get_raw_backtrace () in
             Printexc.raise_with_backtrace
               (Reconciliation_cancellation_terminalization_failed
@@ -1224,7 +1224,7 @@ let reconcile_owner_with
           Error
             (Owner_reconciliation_crashed
                { owner; exception_; backtrace })
-        | exception terminalization_exception ->
+        | exception terminalization_exception -> (* cancel-guard-ok: same as the cancellation arm above -- the hook cannot raise in production and finish_reconciliation_terminal runs under Eio.Cancel.protect *)
           let terminalization_backtrace = Printexc.get_raw_backtrace () in
           Printexc.raise_with_backtrace
             (Reconciliation_crash_terminalization_failed

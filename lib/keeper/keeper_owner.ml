@@ -1873,7 +1873,13 @@ let start
                                      });
                                 run ()))
                          with
-                         | exn -> Error (exn, Printexc.get_raw_backtrace ())
+                         (* This carries the exception out of the child rather
+                            than absorbing it: the owner turns it into
+                            [Autonomous_raised] and [run_if_idle] re-raises it
+                            with this backtrace in the requesting fiber. Raising
+                            here instead would fail the fork's switch and leave
+                            [resolve] unresolved for whoever is awaiting it. *)
+                         | exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: reified into [outcome] and re-raised with this backtrace in the requesting fiber *)
                        in
                        Atomic.set t.child_cancel None;
                        notify

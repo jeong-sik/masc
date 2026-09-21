@@ -259,16 +259,10 @@ open Alcotest
    required. No headroom. *)
 (* 2026-09-20: the read-only keeper_skill_validate caller adds artifact document
    validation. The production renderer measures 119,546 bytes / 136 tools. *)
-(* 2026-09-21: main holds 119,646 bytes / 136 tools. #37270 rewrote the
-   keeper_memory_search description (what it bought: the matcher's real
-   contract in the model's view -- complete-query substrings first, then
-   ASCII-whitespace fragments, review P2 of that PR) and landed after the line
-   above was measured on a tree without it; its own check ran against a
-   ceiling without keeper_skill_validate. Each was under its ceiling and main
-   was over by 100 -- the race the golden's note below describes. The figure
-   is #37360's measurement of 119,620 on a tree whose description is 26 bytes
-   shorter than main's. *)
-let ceiling_bytes = 119_646
+(* 2026-09-21: the merged inventory, including DOS mouse control and main's
+   keeper_memory_search description, measures 121,200 bytes across 137 tools.
+   Pin the measured surface without speculative renderer headroom. *)
+let ceiling_bytes = 121_200
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -427,6 +421,7 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_dos_click"
   ; "masc_dos_eject"
   ; "masc_dos_load"
   ; "masc_dos_peek"

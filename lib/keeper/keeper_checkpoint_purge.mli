@@ -51,15 +51,59 @@ type config =
 
 val default_config : config
 
-val rewrite_invalidates_librarian_coordinates
-  :  coordinates_present:bool
+(** What a purge does to the Librarian's atom position (RFC
+    librarian-lifecycle §10-2). A rewrite renumbers atoms and changes the
+    message that opens the last one, so the position the Librarian holds
+    in the old numbering is not a place in the new one. It is moved, not
+    dropped, and only when it has nothing left to read: an unread atom has
+    no place in the rewritten history to be read from.
+
+    [boundary_lines_seen] is left as it is. It says which lines of the
+    boundary log a round had already counted, so that a restart line beyond
+    it is taken as new; raising it to the log's current length would pass
+    over a restart no round has seen yet
+    ([specs/bug-models/LibrarianRead-purge-trim-counting-lines-buggy.cfg]).
+    The official-turn position is a line of that log and is not touched. *)
+type rebase =
+  | No_progress  (** No position: nothing to move. *)
+  | Rebased of
+      { before : Keeper_librarian_progress.t
+      ; after : Keeper_librarian_progress.t
+          (** [before] with the position's [end_atom] and [last_atom_digest]
+              taken from the rewritten history. *)
+      }
+
+type refusal =
+  | Unread_atoms_present of
+      { end_atom : int
+      ; atom_count : int
+      }
+      (** The position stops short of the history's end
+          ([specs/bug-models/LibrarianRead-purge-trim-buggy.cfg]). *)
+  | Position_beyond_history of
+      { end_atom : int
+      ; atom_count : int
+      }
+      (** The position lies past the history's end: it is not a place in
+          this checkpoint, so there is nothing to move. The next round stops
+          on it; the way out is the keeper's Librarian purge. *)
+  | Position_in_other_trace of string
+      (** The position belongs to another trace than the checkpoint's. *)
+  | Rewrite_leaves_no_atoms
+      (** The rewritten history has no atom to hold a position in. *)
+  | Position_unreadable of string
+      (** A position could not be computed from the messages. *)
+
+val refusal_to_string : refusal -> string
+
+val librarian_rebase
+  :  progress:Keeper_librarian_progress.t option
+  -> trace_id:string
   -> before:Agent_core.Types.message list
   -> after:Agent_core.Types.message list
-  -> (bool, string) result
-(** [true] exactly when a rewrite changes the typed History endpoint while a
-    turn-boundary or Librarian-progress artifact exists. Callers must refuse
-    that install until a crash-safe typed rebase protocol can advance both
-    coordinates with the checkpoint. *)
+  -> (rebase, refusal) result
+(** The position to write once [after] is installed in place of [before],
+    or why the rewrite must not be installed. Pure. *)
 (** [{ dup_threshold = 3; keep_recent_messages = 20; strip_thinking = true;
       clear_tool_results = true }] — the rule set measured on a live Keeper
     checkpoint (1,315 -> 579 messages, -28.0% bytes, next-turn input

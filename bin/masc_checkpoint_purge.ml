@@ -12,7 +12,16 @@
 
     Run [--apply] only while the keeper is stopped ([masc_keeper_down]): a
     live keeper holds the conversation in memory and its next save overwrites
-    the purge. *)
+    the purge. [--apply] also takes the workspace writer lease that the
+    server holds while it runs, so it is refused while a server owns the
+    workspace: that server's Librarian loop would read the position and the
+    checkpoint while they are replaced. On the server, the dashboard purge
+    action retires that loop instead.
+
+    The Librarian's atom position moves with the checkpoint (RFC
+    librarian-lifecycle §10-2, {!Masc.Keeper_checkpoint_purge.librarian_rebase}):
+    the rewrite is refused while the Librarian has atoms left to read, and
+    otherwise the position is written after the checkpoint. *)
 
 let usage =
   {|Usage: masc_checkpoint_purge --trace TRACE_ID [OPTIONS]
@@ -33,8 +42,11 @@ The runtime root is the selected cluster under {workspace}/.masc.
 MASC_CLUSTER_NAME selects the cluster. Backups are stored in its runtime root.
 
 --apply requires the keeper to be stopped (masc_keeper_down); a live keeper
-overwrites the purge on its next save. A rewrite that changes the History
-endpoint is refused while turn-boundary or Librarian-progress state exists.
+overwrites the purge on its next save. It also requires that no server owns
+the workspace (the writer lease); on a running server use the dashboard purge
+action. A rewrite is refused while the Librarian has atoms of this checkpoint
+left to read; otherwise the Librarian position is moved to the rewritten end
+and written after the checkpoint.
 
 Exit codes:
   0  report printed (dry-run) or purge applied
@@ -43,7 +55,7 @@ Exit codes:
 
 module Purge = Masc.Keeper_checkpoint_purge
 module Store = Masc.Keeper_checkpoint_store
-module Boundaries = Masc.Keeper_turn_boundaries
+module Progress = Masc.Keeper_librarian_progress
 
 let error msg =
   prerr_endline msg;
@@ -169,32 +181,21 @@ let () =
     (match Purge.purge ~config:!config checkpoint with
      | Error purge_error -> error (purge_error_text purge_error)
      | Ok (purged, report) ->
-       let librarian_coordinates_present =
-         List.exists
-           Sys.file_exists
-           [ Boundaries.path_for_keepers_dir
-               ~keepers_dir:runtime_keepers_dir
-               ~keeper_id:checkpoint.agent_name
-           ; Masc.Keeper_librarian_progress.path_for_keepers_dir
-               ~keepers_dir:runtime_keepers_dir
-               ~keeper_id:checkpoint.agent_name
-           ]
+       let rebase =
+         let progress =
+           match
+             Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:checkpoint.agent_name
+           with
+           | Ok progress -> progress
+           | Error read_error ->
+             error ("Librarian position unreadable: " ^ Progress.read_error_to_string read_error)
+         in
+         Purge.librarian_rebase
+           ~progress
+           ~trace_id:trace
+           ~before:checkpoint.messages
+           ~after:purged.messages
        in
-       let rewrite_invalidates_librarian_coordinates =
-         match
-           Purge.rewrite_invalidates_librarian_coordinates
-             ~coordinates_present:librarian_coordinates_present
-             ~before:checkpoint.messages
-             ~after:purged.messages
-         with
-         | Ok invalidates -> invalidates
-         | Error detail -> error ("checkpoint position unavailable: " ^ detail)
-       in
-       if !apply && rewrite_invalidates_librarian_coordinates
-       then
-         error
-           "--apply refused: checkpoint rewrite would invalidate existing \
-            turn-boundary/Librarian-progress coordinates";
        let purged_bytes = Agent_core.Checkpoint.to_string purged in
        let before_len = String.length original_bytes in
        let after_len = String.length purged_bytes in
@@ -224,9 +225,41 @@ let () =
        Printf.printf
          "R3 tool results cleared: %d\n"
          report.Purge.tool_results_cleared;
+       (match rebase with
+        | Ok Purge.No_progress -> print_endline "librarian position: none"
+        | Ok (Purge.Rebased { before; after }) ->
+          Printf.printf
+            "librarian position: end_atom %d -> %d\n"
+            before.Progress.position.end_atom
+            after.Progress.position.end_atom
+        | Error refusal ->
+          let refusal = Purge.refusal_to_string refusal in
+          if !apply
+          then error ("--apply refused: " ^ refusal)
+          else Printf.printf "librarian position: apply refused: %s\n" refusal);
        if not !apply
        then print_endline "dry-run: nothing written (pass --apply to persist)"
        else (
+         let lease =
+           let lease_dir = (Host_config.host ()).base_path_lease_dir in
+           match Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path with
+           | Server_startup_takeover.Base_path_acquired lease -> lease
+           | Base_path_already_owned { owner; _ } ->
+             error
+               (Printf.sprintf
+                  "--apply refused: a server owns this workspace (pid %s); use the dashboard \
+                   purge action, which retires the keeper's Librarian loop for the rewrite"
+                  (match Server_startup_takeover.base_path_owner_pid owner with
+                   | Some pid -> string_of_int pid
+                   | None -> "unknown"))
+           | Base_path_rejected rejection ->
+             error
+               ("--apply refused: workspace writer lease rejected: "
+                ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+         in
+         Fun.protect
+           ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+         @@ fun () ->
          let backup_dir =
            Filename.concat
              runtime_root
@@ -258,5 +291,28 @@ let () =
           | Ok (Store.Saved { relation = _; turn_count }) ->
             Printf.printf
               "applied: purged checkpoint saved at turn_count %d\n"
-              turn_count))
+              turn_count;
+            (* The position follows the checkpoint. A failure here leaves the
+               old position against the new numbering; the next Librarian
+               round stops on the mismatch until the keeper's Librarian files
+               are purged, and the message says so. *)
+            (match rebase with
+             | Ok Purge.No_progress | Error _ -> ()
+             | Ok (Purge.Rebased { after; _ }) ->
+               (match
+                  Progress.write
+                    ~keepers_dir:runtime_keepers_dir
+                    ~keeper_id:checkpoint.agent_name
+                    after
+                with
+                | Ok () ->
+                  Printf.printf
+                    "applied: librarian position moved to end_atom %d\n"
+                    after.Progress.position.end_atom
+                | Error write_error ->
+                  error
+                    ("checkpoint installed but the Librarian position was not moved with \
+                      it; the Librarian stops on the mismatch until the keeper's Librarian \
+                      files are purged: "
+                     ^ Progress.write_error_to_string write_error)))))
      )

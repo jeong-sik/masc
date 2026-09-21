@@ -18,11 +18,78 @@ let default_config =
   }
 ;;
 
-let rewrite_invalidates_librarian_coordinates ~coordinates_present ~before ~after =
-  let ( let* ) = Result.bind in
-  let* before = Keeper_turn_boundaries.position_of_messages before in
-  let* after = Keeper_turn_boundaries.position_of_messages after in
-  Ok (coordinates_present && before <> after)
+type rebase =
+  | No_progress
+  | Rebased of
+      { before : Keeper_librarian_progress.t
+      ; after : Keeper_librarian_progress.t
+      }
+
+type refusal =
+  | Unread_atoms_present of
+      { end_atom : int
+      ; atom_count : int
+      }
+  | Position_beyond_history of
+      { end_atom : int
+      ; atom_count : int
+      }
+  | Position_in_other_trace of string
+  | Rewrite_leaves_no_atoms
+  | Position_unreadable of string
+
+let refusal_to_string = function
+  | Unread_atoms_present { end_atom; atom_count } ->
+    Printf.sprintf
+      "the Librarian has read %d of %d atoms; the unread ones have no place in \
+       the rewritten history"
+      end_atom
+      atom_count
+  | Position_beyond_history { end_atom; atom_count } ->
+    Printf.sprintf
+      "the Librarian position (%d) lies past the history's %d atoms; it is not a \
+       place in this checkpoint, and the keeper's Librarian files need a purge"
+      end_atom
+      atom_count
+  | Position_in_other_trace trace_id ->
+    Printf.sprintf "the Librarian position belongs to trace %s" trace_id
+  | Rewrite_leaves_no_atoms -> "the rewritten history has no atom to hold a position in"
+  | Position_unreadable detail -> "checkpoint position unavailable: " ^ detail
+;;
+
+let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id ~before ~after =
+  match progress with
+  | None -> Ok No_progress
+  | Some progress ->
+    if not (String.equal progress.position.trace_id trace_id)
+    then Error (Position_in_other_trace progress.position.trace_id)
+    else (
+      let _labelled, atom_count = Runtime_model_input_tail_window.annotate before in
+      let end_atom = progress.position.end_atom in
+      if end_atom < atom_count
+      then Error (Unread_atoms_present { end_atom; atom_count })
+      else if end_atom > atom_count
+      then Error (Position_beyond_history { end_atom; atom_count })
+      else (
+        match Keeper_turn_boundaries.position_of_messages after with
+        | Error detail -> Error (Position_unreadable detail)
+        | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
+          Ok
+            (Rebased
+               { before = progress
+               ; after =
+                   { progress with
+                     position = { progress.position with end_atom; last_atom_digest }
+                   }
+               })
+        | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
+        | Ok Keeper_turn_boundaries.No_atom_history ->
+          (* [position_of_messages] answers [Atom_history] or
+             [Empty_atom_history] (its contract); the other two describe a
+             turn's end, not a saved history. *)
+          Error (Position_unreadable "position_of_messages answered no_atom_history")
+        | Ok Keeper_turn_boundaries.Stale_noop ->
+          Error (Position_unreadable "position_of_messages answered stale_noop")))
 ;;
 
 let cleared_tool_result_content =

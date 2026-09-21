@@ -882,7 +882,7 @@ let lookup t model_id =
   | Ok entry -> Some entry
   | Error No_such_row -> None
   | Error (Malformed_model_id detail) ->
-    Log.warn "model catalog lookup refused %S: %s" model_id detail;
+    Diag.warn "model_catalog" "lookup refused %S: %s" model_id detail;
     None
 ;;
 
@@ -966,8 +966,9 @@ let lookup_for_provider t ~provider_name ~model_id =
   | Ok entry -> Some entry
   | Error No_such_row -> None
   | Error (Malformed_model_id detail) ->
-    Log.warn
-      "model catalog provider lookup refused model %S for provider %S: %s"
+    Diag.warn
+      "model_catalog"
+      "provider lookup refused model %S for provider %S: %s"
       model_id
       provider_name
       detail;

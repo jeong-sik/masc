@@ -418,7 +418,7 @@ let test_prune_fails_open_on_incompatible_turn_record () =
   Alcotest.(check bool) "orphan survives fail-open cleanup" true
     (Sys.file_exists orphan)
 
-let test_retention_error_kinds_are_bounded () =
+let test_retention_error_kind_labels_are_pinned () =
   let module R = Keeper_raw_trace_retention in
   List.iter
     (fun (expected, error) ->
@@ -841,8 +841,8 @@ let () =
             test_prune_preserves_current_references_and_removes_orphans;
           Alcotest.test_case "retention fails open on incompatible record" `Quick
             test_prune_fails_open_on_incompatible_turn_record;
-          Alcotest.test_case "retention error kinds stay bounded" `Quick
-            test_retention_error_kinds_are_bounded;
+          Alcotest.test_case "retention error kind labels are pinned" `Quick
+            test_retention_error_kind_labels_are_pinned;
           Alcotest.test_case "retention preserves the TurnRecord hard cut" `Quick
             test_prune_refuses_a_pre_response_observation_turn_record;
           Alcotest.test_case "retention syscalls yield and finish before cancelled caller" `Quick

@@ -45,7 +45,7 @@ let keeper_meta ?(board_interests = []) config name =
   Fs_compat.mkdir_p keepers_dir;
   Out_channel.with_open_text (Filename.concat keepers_dir (name ^ ".toml"))
     (fun oc -> Printf.fprintf oc
-      "[keeper]\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
+      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
       (String.concat ", " (List.map (Printf.sprintf "%S") board_interests)));
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()

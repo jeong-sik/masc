@@ -206,15 +206,28 @@ let assert_ollama_cloud_seed_runtime runtimes case =
       (Option.is_some
          (Llm_provider.Provider_config.capabilities_for_config_model
             (agent_core_provider_config runtime)));
+    (* "forced tool_choice disabled" is a claim about what this runtime can
+       send, and the seed declares supports-tool-choice for none of these
+       eighteen models. It read false only because an unwritten key parsed as
+       false; the ollama wire is what actually disables it. Ask the resolved
+       capability, which is what the name always meant (#37435). *)
+    (match
+       Llm_provider.Provider_config.capabilities_for_config_model
+         (agent_core_provider_config runtime)
+     with
+     | None -> failf "expected resolved capabilities for %s" case.runtime_id
+     | Some (resolved : Llm_provider.Capabilities.capabilities) ->
+       check bool (case.runtime_id ^ " forced tool_choice disabled") false
+         resolved.supports_tool_choice);
+    (* Media input is the declaration, not the resolved value: MASC's model
+       spec is the SSOT for it and an unwritten media key means no. *)
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
-       check bool (case.runtime_id ^ " forced tool_choice disabled") false
-         caps.supports_tool_choice;
-       check bool (case.runtime_id ^ " image input") case.vision
-         caps.supports_image_input;
-       check bool (case.runtime_id ^ " multimodal input") case.vision
-         caps.supports_multimodal_inputs)
+       check (option bool) (case.runtime_id ^ " image input declared")
+         (Some case.vision) caps.supports_image_input;
+       check (option bool) (case.runtime_id ^ " multimodal input declared")
+         (Some case.vision) caps.supports_multimodal_inputs)
 
 let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
@@ -1612,11 +1625,14 @@ List.iter
        check (option (float 0.0)) "DeepSeek keeps AGENT_CORE connect timeout default"
          None
          (agent_core_provider_config runtime).connect_timeout_s;
-       (match runtime.model.capabilities with
-        | Some caps ->
+       (match
+          Llm_provider.Provider_config.capabilities_for_config_model
+            (agent_core_provider_config runtime)
+        with
+        | Some (resolved : Llm_provider.Capabilities.capabilities) ->
           check bool "DeepSeek Pro structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Pro capabilities"));
+            resolved.supports_structured_output
+        | None -> fail "expected DeepSeek Pro resolved capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1644,17 +1660,22 @@ List.iter
          (Runtime.resolve_max_context_of_runtime runtime
           |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source));
        (match runtime.model.capabilities with
-       | Some caps ->
-          check bool "MiniMax M3 response_format json disabled" false
-            caps.supports_response_format_json;
+        | Some caps ->
+          check (option bool) "MiniMax M3 image input declared" (Some true)
+            caps.supports_image_input;
+          check (option bool) "MiniMax M3 multimodal input declared" (Some true)
+            caps.supports_multimodal_inputs
+        | None -> fail "expected MiniMax M3 capabilities");
+       (match
+          Llm_provider.Provider_config.capabilities_for_config_model
+            (agent_core_provider_config runtime)
+        with
+        | Some (resolved : Llm_provider.Capabilities.capabilities) ->
           check bool "MiniMax M3 structured output disabled" false
-            caps.supports_structured_output;
-          check bool "MiniMax M3 image input" true caps.supports_image_input;
-          check bool "MiniMax M3 multimodal input" true
-            caps.supports_multimodal_inputs;
+            resolved.supports_structured_output;
           check bool "MiniMax M3 forced tool_choice disabled" false
-            caps.supports_tool_choice
-        | None -> fail "expected MiniMax M3 capabilities"))
+            resolved.supports_tool_choice
+        | None -> fail "expected MiniMax M3 resolved capabilities"))
 
 (* The lane-resolution test below iterates the lanes a config declares, so it
    passes vacuously on a config that declares none of them. Startup does the

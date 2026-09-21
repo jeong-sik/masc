@@ -21,12 +21,27 @@ let agent_core_history_suffix = ".json"
 
 let before_history_link_hook : (unit -> unit) option Atomic.t = Atomic.make None
 
-let is_agent_core_history_file (filename : string) : bool =
+let archive_created_ms_of_filename (filename : string) : int option =
   let len = String.length filename in
-  len > String.length agent_core_history_prefix + String.length agent_core_history_suffix
-  && String.sub filename 0 (String.length agent_core_history_prefix) = agent_core_history_prefix
-  && String.sub filename (len - String.length agent_core_history_suffix)
-       (String.length agent_core_history_suffix) = agent_core_history_suffix
+  let prefix_len = String.length agent_core_history_prefix in
+  let suffix_len = String.length agent_core_history_suffix in
+  let created_ms_digits = 13 in
+  if len <> prefix_len + created_ms_digits + suffix_len
+     || not (String.starts_with ~prefix:agent_core_history_prefix filename)
+     || not (String.ends_with ~suffix:agent_core_history_suffix filename)
+  then None
+  else
+    let raw = String.sub filename prefix_len created_ms_digits in
+    if String.for_all (fun char -> Char.compare char '0' >= 0 && Char.compare char '9' <= 0) raw
+    then int_of_string_opt raw
+    else None
+;;
+
+let is_agent_core_history_file ~(session_dir : string) (filename : string) : bool =
+  let canonical_filename = Filename.basename session_dir ^ ".json" in
+  (not (String.equal filename canonical_filename))
+  && Option.is_some (archive_created_ms_of_filename filename)
+;;
 
 let list_agent_core_history_files ~(session_dir : string) : string list =
   if not (Fs_compat.file_exists session_dir) then []
@@ -34,7 +49,7 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
     Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.list" (fun () ->
     Sys.readdir session_dir
     |> Array.to_list
-    |> List.filter is_agent_core_history_file
+    |> List.filter (is_agent_core_history_file ~session_dir)
     |> List.sort (fun a b -> compare b a))
 
 (* Each entry is a whole checkpoint of the session, and a live keeper's runs
@@ -175,22 +190,29 @@ let save_agent_core_history
       ()
   end
 
+type history_delete_result =
+  | History_deleted of string
+  | History_missing of string
+  | History_refused of string
+  | History_removal_failed of string
+
 let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : string list)
-    : string list * string list =
-  List.fold_left
-    (fun (deleted, missing) snapshot_id ->
-      (* [snapshot_ids] arrive verbatim from the dashboard POST body; a
-         non-segment id ("../..") would aim [Sys.remove] outside the
-         session directory. Such an id can never name a history entry, so
-         it is reported [missing] without touching the filesystem. *)
-      if not (leaf_is_real_segment snapshot_id) then
-        (deleted, snapshot_id :: missing)
+    : history_delete_result list =
+  List.map
+    (fun snapshot_id ->
+      (* The dashboard supplies filenames. Both containment and the same
+         archive identity used by listing/pruning must hold before unlink;
+         other files in this session are not checkpoint history entries. *)
+      if not
+           (leaf_is_real_segment snapshot_id
+            && is_agent_core_history_file ~session_dir snapshot_id)
+      then History_refused snapshot_id
       else
       let path = agent_core_history_path ~session_dir ~snapshot_id in
       if Fs_compat.file_exists path then (
         try
           Sys.remove path;
-          (snapshot_id :: deleted, missing)
+          History_deleted snapshot_id
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -200,12 +222,11 @@ let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : str
               Keeper_metrics.(to_string CheckpointFailures)
               ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Agent_core_delete))]
               ();
-            (deleted, snapshot_id :: missing))
+            History_removal_failed snapshot_id)
       else
-        (deleted, snapshot_id :: missing))
-    ([], [])
+        History_missing snapshot_id)
     snapshot_ids
-  |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
+;;
 
 (* Delta Checkpoint Shadow-Apply removed: Agent_core.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
@@ -403,11 +424,9 @@ let publish_summary_after_write ~canonical_path checkpoint =
 
 let load_agent_core ~(session_dir : string) ~(session_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
-  (* RFC-0089 G4: typed ENOENT classification at the OS boundary.
-     [Fs_compat.file_exists] answers cold-start absence as a [bool] before
-     any read, so a missing checkpoint is never inferred from a stringified
-     error detail and [classify_core_error] keeps no [Not_found] arm.
-
+  (* Absence comes from [read_checkpoint_bytes]'s typed owned-file read, not
+     [file_exists], whose boolean also covers stat failures. An unreadable
+     existing checkpoint must not become a fresh Keeper history.
      One read path for Eio and non-Eio contexts: [read_checkpoint_bytes]
      reads on a system thread when the fs capability is installed, and the
      decode is routed off the calling fiber (#25077). The previous
@@ -421,8 +440,7 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
     Error (Store_error "session_id is not a real path segment")
   else
   let path = agent_core_checkpoint_path ~session_dir ~session_id in
-  if Fs_compat.file_exists path then
-    let identity_before = canonical_identity_opt path in
+  let identity_before = canonical_identity_opt path in
     try
       match read_checkpoint_bytes ~session_dir path with
       | Error e -> Error e
@@ -435,7 +453,6 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Io_error (Printexc.to_string exn))
-  else Error Not_found
 
 (** Message count of the canonical checkpoint. Answered from the canonical
     summary while the file on disk is the one the summary was taken from;

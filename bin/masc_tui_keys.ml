@@ -84,8 +84,9 @@ let config_bindings =
 
 (* The Runtime keys, by the reading they act on. [p] goes somewhere different
    from each reading, so the footer names where it goes from here while the
-   cheat sheet names the whole walk. [e] appends to the keeper lane under the
-   cursor, and the all-runtimes reading has no lane row to append to. *)
+   cheat sheet names the whole walk. The lane edits -- [e], [a], [x], [J]/[K],
+   [D] -- act on the keeper lane under the cursor, and the all-runtimes reading
+   has no lane row to act on. *)
 type runtime_key =
   | Every_reading of binding
   | Keeper_lanes_only of binding
@@ -107,6 +108,19 @@ let runtime_keys =
   ; Keeper_lanes_only
       (b Act "e" "add failover"
          ~help:"append a failover candidate to the lane under the cursor (keeper lanes only)")
+  ; Keeper_lanes_only
+      (b Act "a" "new lane"
+         ~help:"name a new lane, then pick its first runtime; e adds the rest")
+  ; Keeper_lanes_only
+      (b Act "x" "drop candidate"
+         ~help:"take the candidate under the cursor out of its lane; the last one \
+                cannot go, remove the lane instead")
+  ; Keeper_lanes_only
+      (b Act "J/K" "move candidate" ~help:"move the candidate under the cursor down or up its lane")
+  ; Keeper_lanes_only
+      (b Act "D" "remove lane"
+         ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
+                assigned to it")
   ; Every_reading (b Act "Left / Esc" "back")
   ; Every_reading
       (b Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
@@ -515,6 +529,8 @@ let for_surface = function
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "c" "request completion"
           ~help:"send the goal to the completion judge; press again to submit"
+      ; b Act "a" "confirm proof"
+          ~help:"read the proven Goal evidence; press again to confirm that exact proof"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"

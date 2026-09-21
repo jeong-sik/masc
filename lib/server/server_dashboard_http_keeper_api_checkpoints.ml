@@ -222,6 +222,7 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
+  | Purge_librarian_coordinates_present
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
@@ -239,6 +240,9 @@ let purge_error_to_string = function
     "checkpoint unavailable: " ^ detail
   | Purge_checkpoint_invalid detail ->
     "checkpoint purge refused: " ^ detail
+  | Purge_librarian_coordinates_present ->
+    "checkpoint purge refused: rewrite would invalidate existing \
+     turn-boundary/Librarian-progress coordinates"
   | Purge_backup_failed detail ->
     "checkpoint backup failed: " ^ detail
   | Purge_source_changed ->
@@ -429,6 +433,18 @@ let purge_current_unlocked config ~keeper_name ~apply =
          let source_bytes =
            Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot
          in
+         let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+         let librarian_coordinates_present =
+           List.exists
+             Sys.file_exists
+             [ Keeper_turn_boundaries.path_for_keepers_dir
+                 ~keepers_dir:runtime_keepers_dir
+                 ~keeper_id:keeper_name
+             ; Keeper_librarian_progress.path_for_keepers_dir
+                 ~keepers_dir:runtime_keepers_dir
+                 ~keeper_id:keeper_name
+             ]
+         in
          let purge_result =
            Domain_pool_ref.submit_cpu_or_inline (fun () ->
              match Agent_core.Checkpoint.of_string source_bytes with
@@ -448,11 +464,19 @@ let purge_current_unlocked config ~keeper_name ~apply =
                        (checkpoint_purge_error_to_string error))
                 | Ok (purged, purge_report) ->
                   let purged_bytes = Agent_core.Checkpoint.to_string purged in
-                  Ok (purged, purged_bytes, purge_report)))
+                  (match
+                     Keeper_checkpoint_purge.rewrite_invalidates_librarian_coordinates
+                       ~coordinates_present:librarian_coordinates_present
+                       ~before:checkpoint.messages
+                       ~after:purged.messages
+                   with
+                   | Error detail -> Error (Purge_checkpoint_invalid detail)
+                   | Ok invalidates ->
+                     Ok (purged, purged_bytes, purge_report, invalidates))))
          in
          (match purge_result with
           | Error _ as error -> error
-          | Ok (purged, purged_bytes, raw_report) ->
+          | Ok (purged, purged_bytes, raw_report, invalidates_coordinates) ->
             let report =
               { messages_before = raw_report.messages_before
               ; messages_after = raw_report.messages_after
@@ -469,6 +493,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                 (Keeper_registry.is_registered
                    ~base_path:config.Workspace.base_path
                    keeper_name)
+              && not invalidates_coordinates
             in
             if not apply
             then
@@ -479,8 +504,16 @@ let purge_current_unlocked config ~keeper_name ~apply =
                 ; applied = false
                 ; backup_path = None
                 ; report
-                ; warnings = []
+                ; warnings =
+                    (if invalidates_coordinates
+                     then
+                       [ "apply requires removing or transactionally rebasing existing \
+                          Librarian coordinates"
+                       ]
+                     else [])
                 }
+            else if invalidates_coordinates
+            then Error Purge_librarian_coordinates_present
             else if String.equal source_bytes purged_bytes
             then
               Ok

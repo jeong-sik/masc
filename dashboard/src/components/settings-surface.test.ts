@@ -1126,7 +1126,6 @@ describe('SettingsSurface', () => {
             response_format: { kind: 'json_schema', has_schema: true },
             has_output_schema: true,
             cache_system_prompt: true,
-            supports_tool_choice_override: true,
             supports_structured_output_override: true,
             has_model_capabilities_override: true,
             keep_alive: '30m',
@@ -1373,9 +1372,9 @@ describe('SettingsSurface', () => {
       expect(container.querySelector('[data-control-id="runtime-routing-lanes"]')?.getAttribute('data-control-kind'))
         .toBe('live-write')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
-        .toContain('수동 reroute')
+        .toContain('이미지 읽기')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
-        .toContain('provider 실패 자동 전환이 아니라')
+        .toContain('턴을 넘겨받지 않아요')
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
     })
   })

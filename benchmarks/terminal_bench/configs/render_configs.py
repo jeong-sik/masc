@@ -10,8 +10,8 @@ Arm A는 run_matrix.sh 가 모델 제공자의 harbor 기본 에이전트로 돌
   tools.attached_allow). 최상위 [skills]/[tools] 테이블은 unknown key로
   로드가 실패한다. 생성 형식은 keeper_turn_up_config_persistence.ml의
   writer가 쓰는 형태와 같다.
-- overlay: config/agent-core-models-overlay.toml의 [[models]] row는
-  id_prefix (underscore) 철자를 쓴다.
+- runtime.toml [models.X.capabilities]: lib/runtime/runtime_toml.ml
+  parse_model_capabilities (dash 철자).
 - runtime.toml [fusion] enabled: lib/fusion_core/fusion_config.ml
   (Otoml ["fusion"; "enabled"]).
 """
@@ -22,6 +22,7 @@ import json
 import re
 import shutil
 import tempfile
+import tomllib
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ from pathlib import Path
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BENCH_ROOT.parents[1]
 OUT_ROOT = BENCH_ROOT / "configs" / "out"
+PROVIDER_CATALOG = REPO_ROOT / "packages" / "agent_core" / "models.toml"
 
 # keepers, skills, composition, parallel
 ARMS: dict[str, dict] = {
@@ -55,6 +57,9 @@ ARMS: dict[str, dict] = {
 # filter하고 built-in/composition 도구는 gate하지 못하는 no-op이라 쓰지 않는다
 # (keeper_run_tools_setup.ml: Keeper_identity_tool_allow.apply 대상 확인).
 COMPOSITION_FENCE = "```toml composition"
+TASK_SKILL_SOURCE_ID = "terminal-bench-task"
+TASK_SKILLS_CONFIG_DIR = "task-skills"
+TASK_SKILLS_RUNTIME_PATH = ".masc/task-skills"
 
 # spawn/delegate 게이트 (masc v0.35.6+, #35169): keeper TOML tools.deny는
 # model-visible 이름의 built-in tool을 capability surface에서 완전 제거한다
@@ -136,16 +141,24 @@ api-name = "{model_alias}"
 # does deliver tools.
 tools-support = true
 {effort_lines}
+# The capability row for this binding. A model the embedded AGENT_CORE catalog
+# has no row for is described here and nowhere else
+# (runtime_adapter.model_capabilities_override_of_model_spec); without it the
+# startup capability gate refuses the binding by name. A catalogued model keeps
+# its catalog row and takes only the output ceiling and the thinking-control
+# dialect from here.
+[models."{binding_id}".capabilities]
+{max_output_lines}{thinking_control}
 
 [{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
+disable-parallel-tool-use = {disable_parallel}
 
 # Boot gate (server_runtime_bootstrap.require_explicit_mandatory_exact_output_
 # lanes): hitl_auto_judge and board_attention_exact must be declared with
-# non-empty slots or cli_slots. slots would need AGENT_CORE exact-output
-# catalog target refs the bench overlay does not carry; cli_slots are admitted
-# verbatim and are only walked by the HITL-summary / board-attention lanes,
-# which a bench episode never triggers (autonomous orchestration is off).
+# non-empty slots or cli_slots. cli_slots are admitted verbatim and are only
+# walked by the HITL-summary / board-attention lanes, which a bench episode
+# never triggers (autonomous orchestration is off).
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = []
 cli_slots = ["{runtime_id}"]
@@ -172,6 +185,11 @@ enabled = {fusion}
 # subscription token reaches the CLI through CLAUDE_CODE_OAUTH_TOKEN, which
 # runtime_claude_code.client_environment forwards. Effort is a model-level
 # reasoning-effort (the CLI's --effort); Claude Code rejects "minimal".
+#
+# The lane declares no capabilities of its own: the catalog gate
+# (runtime.ml decide_capability_gate) resolves official-client models by
+# api-name against the embedded catalog, which already carries bare
+# claude-sonnet-5 / claude-opus-5 rows and the claude_code prefix row.
 OFFICIAL_CLIENT_RUNTIME_TOML = """\
 [runtime]
 default = "{runtime_id}"
@@ -214,15 +232,6 @@ identity_file = "/opt/masc-bench/ssh/id_ed25519"
 enabled = {fusion}
 """
 
-# The catalog gate (runtime.ml decide_capability_gate) resolves official-client
-# models by api-name against the embedded catalog, which already carries bare
-# claude-sonnet-5 / claude-opus-5 rows and the claude_code prefix row. No
-# deployment row is needed; production runs the same shape with none.
-OFFICIAL_CLIENT_OVERLAY_TOML = """\
-# No deployment rows: the claude-code lane resolves capabilities from the
-# embedded AGENT_CORE catalog by api-name (see render_configs.py).
-"""
-
 # The official client's turn-timeout-s is an idle window: the turn ends when
 # the CLI stream stays silent that long. A keeper waiting on one long tool call
 # (a build, a test suite) is silent for its whole duration, so any value here
@@ -236,37 +245,6 @@ OFFICIAL_CLIENT_TURN_TIMEOUT_S = 0.0
 OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S = 28800.0
 CLAUDE_CODE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
-OVERLAY_TOML = """\
-# messages-http bindings are materialized only when the provider id has an
-# AGENT_CORE provider registry entry (runtime_adapter.ml: "messages-http
-# requires registry kind SSOT"). The registry is built from the catalog's
-# [[providers]] rows, and the embedded catalog carries no anthropic row, so
-# the bench provider must be declared here.
-[[providers]]
-id = "{provider}"
-kind = "{kind}"
-base_url = "{endpoint}"
-request_path = "{request_path}"
-api_key_env = "{api_key_env}"
-capabilities_base = "{capabilities_base}"
-
-[[models]]
-# provider_name is required: a runtime with a declared provider_id resolves
-# capabilities only through a provider-scoped row (allow_bare_fallback=false,
-# provider_config.ml capabilities_for_config_model), and lookup_for_provider
-# matches id_prefix by exact (normalized) equality, not prefix. The
-# provider-wide capabilities_base is unreachable here anyway — "anthropic" is
-# a wire-kind label, which provider_entry_for_label refuses to resolve
-# (model_catalog.ml wire_kind_labels).
-provider_name = "{provider}"
-id_prefix = "{model_alias}"
-base = "{capabilities_base}"
-supports_reasoning = true
-supports_tools = true
-supports_native_streaming = true
-{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
-"""
-
 OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
 OPENROUTER_TIMEOUT_S = 30
 
@@ -274,7 +252,7 @@ OPENROUTER_TIMEOUT_S = 30
 @dataclass(frozen=True, slots=True)
 class OpenRouterLimits:
     max_context: int  # runtime.toml max-context: the input window masc plans against
-    max_output: int   # overlay max_output_tokens: the max_tokens masc requests
+    max_output: int   # runtime.toml max-output-tokens: the max_tokens masc requests
 
 
 @functools.lru_cache(maxsize=None)
@@ -323,8 +301,8 @@ def model_binding_id(wire_model: str) -> str:
     OpenRouter 의 와이어 id 는 `z-ai/glm-4.7-flash` 처럼 vendor 슬래시를 달고
     오므로 그대로 쓰면 설정 로드가 실패한다. 바인딩 id 는 슬러그로 두고 와이어
     이름은 `api-name` 이 나른다. capability 조회도 api-name 을 읽으므로
-    (runtime_adapter: `~model_id:spec.api_name`) overlay 의 id_prefix 는 와이어
-    이름 그대로 둔다.
+    (runtime_adapter: `~model_id:spec.api_name`) 와이어 이름은 슬러그로 바꾸지
+    않는다.
     """
     return re.sub(r"[^A-Za-z0-9._-]", "-", wire_model)
 
@@ -334,26 +312,17 @@ def effective_runtime_id(runtime_id: str) -> str:
     provider, _, wire_model = runtime_id.partition(".")
     if not provider or not wire_model:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
-    return f"{provider}.{model_binding_id(wire_model)}"
+    runtime_provider = PROVIDERS[provider].get("runtime_provider", provider)
+    return f"{runtime_provider}.{model_binding_id(wire_model)}"
 
 
 # provider 프로토콜 매핑. 새 provider 추가 시 여기만 고친다.
 PROVIDERS = {
-    "anthropic": dict(protocol="messages-http",
+    "anthropic": dict(runtime_provider="claude",
+                      protocol="messages-http",
                       endpoint="https://api.anthropic.com",
                       api_key_env="ANTHROPIC_API_KEY",
-                      kind="anthropic",
-                      request_path="/v1/messages",
-                      capabilities_base="anthropic",
                       carries_effort=True,
-                      # adaptive_only = the wire gets {"type":"adaptive"} when
-                      # thinking is on and NO thinking field when off; the model
-                      # decides depth. fable-5 rejects {"type":"disabled"}
-                      # outright (observed v0.35.8 smoke, anthropic4:
-                      # '"thinking.type.disabled" is not supported for this
-                      # model'), which the no-thinking truncation retry would
-                      # otherwise emit under adaptive_default.
-                      thinking_control_line='anthropic_thinking_control = "adaptive_only"\n',
                       # The anthropic base preset caps output at 8192 ("higher
                       # for newer models" — capabilities.ml
                       # anthropic_capabilities). With adaptive thinking on, a
@@ -361,24 +330,14 @@ PROVIDERS = {
                       # anthropic5, "Provider output reached its maximum token
                       # boundary before completion" at 775s after the truncation
                       # recovery exhausted the same ceiling. fable-5 takes 64k.
-                      max_output_tokens=64000,
-                      # Anthropic under adaptive thinking answers "temperature
-                      # may only be set to 1 when thinking is enabled or in
-                      # adaptive mode" (observed v0.35.6 smoke, turn_failed at
-                      # 12s). Dropped from the wire entirely.
-                      ignored_sampling_parameters=["temperature", "top_p"]),
-    "openai": dict(protocol="openai-compatible-http",
-                   endpoint="https://api.openai.com/v1",
+                      max_output_tokens=64000),
+    "openai": dict(runtime_provider="openai-responses",
+                   protocol="openai-compatible-http",
+                   endpoint="https://api.openai.com",
                    api_key_env="OPENAI_API_KEY",
-                   kind="openai_compat",
-                   request_path="/chat/completions",
-                   capabilities_base="openai",
-                   carries_effort=True,
-                   # Chat completions carries an effort only when the model row
-                   # declares the reasoning_effort dialect
-                   # (reasoning_dialect.validate_request_control_inputs:
-                   # Chat_completions + Reasoning_effort is the admitted pair).
-                   thinking_control_line='thinking_control_format = "reasoning_effort"\n'),
+                   # The canonical catalog provider selects Responses and its
+                   # scoped model rows own the reasoning-effort dialect.
+                   carries_effort=True),
     # 한 계정 크레딧으로 여러 vendor 모델을 태우는 스윕 레인. 모델 id 에
     # 슬래시가 들어가므로 --model openrouter/z-ai/glm-5.3 처럼 주면
     # runtime_id 는 openrouter.z-ai/glm-5.3 이 된다. glm/deepseek 계열은
@@ -391,23 +350,13 @@ PROVIDERS = {
                        protocol="openai-compatible-http",
                        endpoint="https://openrouter.ai/api/v1",
                        api_key_env="OPENROUTER_API_KEY",
-                       kind="openai_compat",
-                       request_path="/chat/completions",
-                       capabilities_base="openrouter",
-                       # The router's base declares both the dialect and the
-                       # accepted ladder, so nothing about either is repeated
-                       # into the rendered row.
+                       # The router's catalog provider row declares both the
+                       # dialect and the accepted ladder, so nothing about
+                       # either is repeated into the rendered row.
                        carries_effort=True),
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
-                        api_key_env="KIMI_API_KEY",
-                        kind="openai_compat",
-                        request_path="/chat/completions",
-                        capabilities_base="kimi",
-                        # kimi-for-coding accepts only temperature=1 ("invalid
-                        # temperature: only 1 is allowed for this model"), so
-                        # the sampling fields leave the wire entirely.
-                        ignored_sampling_parameters=["temperature", "top_p"]),
+                        api_key_env="KIMI_API_KEY"),
     # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
     # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
     # CLI api-name. bootstrap.sh installs the unmodified CLI (native
@@ -424,16 +373,38 @@ PROVIDERS = {
 def is_official_client(provider: str) -> bool:
     return bool(PROVIDERS[provider].get("official_client"))
 
+
+@functools.lru_cache(maxsize=None)
+def provider_parallel_suppression_contract(provider: str) -> bool:
+    """Whether the checked-in Agent Core provider declaration permits it.
+
+    An absent row and an omitted field both mean false. That is the same
+    fail-closed contract the runtime enforces; the HTTP protocol alone does
+    not prove that a service accepts this request policy.
+    """
+    rows = tomllib.loads(PROVIDER_CATALOG.read_text()).get("providers") or []
+    matches = [row for row in rows
+               if provider == row.get("id") or provider in (row.get("aliases") or [])]
+    if len(matches) > 1:
+        raise ValueError(f"provider catalog declares {provider!r} more than once")
+    if not matches:
+        return False
+    value = matches[0].get("supports_parallel_tool_suppression", False)
+    if not isinstance(value, bool):
+        raise ValueError(
+            f"provider catalog {provider!r} parallel suppression contract is not boolean")
+    return value
+
 # reasoning-effort / thinking-support in [models.X] seed the keeper turn's
 # reasoning controls (Runtime_inference.thinking_support_of_runtime_id ->
 # keeper_turn_driver.attempt_inference_policy). Emit them only where the
 # provider wire can carry effort:
-# - anthropic: thinking-support=true + adaptive policy (without it the keeper
-#   default enable_thinking=false reaches
+# - anthropic: thinking-support=true (without it the keeper default
+#   enable_thinking=false reaches
 #   backend_anthropic.validate_thinking_controls, which rejects
 #   reasoning_effort + enable_thinking=false outright).
-# - openai: chat-completions carries reasoning_effort only under the
-#   reasoning_effort thinking-control dialect (see the overlay emitter).
+# - openai: the canonical openai-responses provider and its scoped model row
+#   declare the reasoning_effort dialect.
 # - kimi: capabilities_base"kimi" declares thinking_control_format =
 #   No_thinking_control, so any reasoning_effort is rejected by
 #   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
@@ -485,9 +456,54 @@ def seed_skills_block() -> str:
     return "\n".join(lines[start:end]).rstrip() + "\n"
 
 
-def keeper_toml(arm: str) -> str:
+def task_skill_names(skills_dir: Path) -> list[str]:
+    """Package names from one Harbor task-provided Agent Skills directory."""
+    if not skills_dir.is_dir():
+        raise ValueError(f"task skills directory is missing: {skills_dir}")
+    names = sorted(
+        child.name
+        for child in skills_dir.iterdir()
+        if child.is_dir() and (child / "SKILL.md").is_file()
+    )
+    if not names:
+        raise ValueError(f"task skills directory has no */SKILL.md packages: {skills_dir}")
+    collisions = sorted(set(names) & set(_skill_names()))
+    if collisions:
+        raise ValueError(
+            "task Skill package names collide with MASC seed Skills: "
+            + ", ".join(collisions))
+    return names
+
+
+def _toml_string(value: str) -> str:
+    # A JSON string is also a TOML basic string. json.dumps owns escaping so a
+    # task package name never becomes TOML syntax.
+    return json.dumps(value, ensure_ascii=False)
+
+
+def skills_block_with_task_source(*, include_seed_sources: bool) -> str:
+    """Render a complete section; never edit already-rendered TOML."""
+    seed = tomllib.loads((REPO_ROOT / "config" / "runtime.toml").read_text())["skills"]
+    sources = [dict(id=TASK_SKILL_SOURCE_ID, anchor="base-path",
+                    path=TASK_SKILLS_RUNTIME_PATH, access="read-only")]
+    if include_seed_sources:
+        sources.extend(seed["sources"])
+    lines = ["[skills]", f'resource-read-max-bytes = {seed["resource-read-max-bytes"]}']
+    for source in sources:
+        lines += [
+            "", "[[skills.sources]]",
+            f'id = {_toml_string(source["id"])}',
+            f'anchor = {_toml_string(source["anchor"])}',
+            f'path = {_toml_string(source["path"])}',
+            f'access = {_toml_string(source["access"])}',
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def keeper_toml(arm: str, task_skills: list[str] | None = None) -> str:
     """Every keeper in an arm gets the same profile; only the filename differs."""
     spec = ARMS[arm]
+    task_skills = task_skills or []
     lines = [
         "[keeper]",
         "always_allow = true",
@@ -500,13 +516,16 @@ def keeper_toml(arm: str) -> str:
         '"""',
     ]
     if not spec["skills"]:
-        # 명시적 빈 배열 = skills 없음 (키 생략은 "전부"라 반대 의미).
-        lines += ["", "skills.names = []"]
+        # Task Skills are common benchmark input. With none, this is byte-for-
+        # byte the old explicit empty selection.
+        names = ", ".join(_toml_string(n) for n in task_skills)
+        lines += ["", f"skills.names = [{names}]"]
     elif not spec["composition"]:
         # composition OFF: skills.names를 비-composition skill로 명시 제한한다.
         # composition skill이 scope 밖이면 keeper_compose_<name> 도구 자체가
         # 만들어지지 않는다. 키 생략(arms d-h)은 전 skill 허용.
-        names = ", ".join(f'"{n}"' for n in instruction_skill_names())
+        names = ", ".join(
+            _toml_string(n) for n in task_skills + instruction_skill_names())
         lines += ["", f"skills.names = [{names}]"]
     denied = denied_tools(spec)
     if denied:
@@ -515,27 +534,41 @@ def keeper_toml(arm: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = None) -> Path:
+def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = None,
+               task_skills_dir: Path | None = None) -> Path:
     """arm config를 (out_root/<arm>/)에 렌더하고 디렉터리를 반환한다.
 
-    레포 config/ 시드(도구 정의·프롬프트 등)를 복사한 뒤 runtime.toml,
-    keepers/, overlay를 arm 사양으로 덮어쓴다.
+    레포 config/ 시드(도구 정의·프롬프트 등)를 복사한 뒤 runtime.toml 과
+    keepers/ 를 arm 사양으로 덮어쓴다.
     """
     if arm not in ARMS:
         raise ValueError(f"unknown arm {arm!r}; expected one of {sorted(ARMS)}")
     spec = ARMS[arm]
+    task_skills = task_skill_names(task_skills_dir) if task_skills_dir else []
     provider, _, model_alias = runtime_id.partition(".")
     if not provider or not model_alias:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
     pcfg = PROVIDERS[provider]
-    # The binding is named by a slug; the wire name stays in api-name and in
-    # the overlay's id_prefix. See model_binding_id.
+    runtime_provider = pcfg.get("runtime_provider", provider)
+    # The binding is named by a slug; the wire name stays in api-name.
+    # See model_binding_id.
     binding_id = model_binding_id(model_alias)
-    runtime_id = f"{provider}.{binding_id}"
+    runtime_id = f"{runtime_provider}.{binding_id}"
     if is_official_client(provider) and effort not in CLAUDE_CODE_EFFORTS:
         raise ValueError(
             f"effort {effort!r} is not admitted by Claude Code; "
             f"expected one of {CLAUDE_CODE_EFFORTS}")
+    if is_official_client(provider) and not spec["parallel"]:
+        raise ValueError(
+            f"arm {arm} requires disabling parallel tool calls, but the "
+            f"{provider} runtime cannot carry that request policy; "
+            "use an HTTP runtime for arms b, c, d")
+    suppression = provider_parallel_suppression_contract(runtime_provider)
+    if not spec["parallel"] and not suppression:
+        raise ValueError(
+            f"arm {arm} requires disabling parallel tool calls, but provider "
+            f"{runtime_provider!r} has no catalog-declared suppression contract; "
+            "use arm e or later with this provider")
 
     # Before anything is written: a lookup that fails must not leave a
     # half-rendered config directory behind.
@@ -559,8 +592,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         root = Path(tempfile.mkdtemp(prefix=f"{arm}-", dir=OUT_ROOT))
         root.rmdir()
     shutil.copytree(REPO_ROOT / "config", root, ignore=shutil.ignore_patterns(
-        "keepers", "keepers-default", "runtime.toml", "*.env",
-        "agent-core-models-overlay.toml"))
+        "keepers", "keepers-default", "runtime.toml", "*.env"))
 
     if is_official_client(provider):
         runtime_toml = OFFICIAL_CLIENT_RUNTIME_TOML.format(
@@ -572,21 +604,33 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             fusion=str(spec["fusion"]).lower(),
             max_concurrent=4 if spec["parallel"] else 1,
             remote_root=REMOTE_ROOT)
-        if spec["skills"]:
+        if task_skills:
+            runtime_toml += "\n" + skills_block_with_task_source(
+                include_seed_sources=spec["skills"])
+        elif spec["skills"]:
             runtime_toml += "\n" + seed_skills_block()
         (root / "runtime.toml").write_text(runtime_toml)
-        (root / "agent-core-models-overlay.toml").write_text(
-            OFFICIAL_CLIENT_OVERLAY_TOML)
         if spec["skills"]:
             shutil.copytree(REPO_ROOT / "skills", root / "skills")
+        if task_skills:
+            assert task_skills_dir is not None
+            shutil.copytree(task_skills_dir, root / TASK_SKILLS_CONFIG_DIR)
         keepers = root / "keepers"
         keepers.mkdir(exist_ok=True)
         for i in range(1, spec["keepers"] + 1):
-            (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm))
+            (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, task_skills))
         return root
 
+    # Provider-specific overrides live on the provider entry above. Read them
+    # here rather than deriving capabilities from the HTTP protocol.
+    thinking_control = pcfg.get("thinking_control_line", "")
+    max_output = pcfg.get("max_output_tokens")
+    if max_output is None and openrouter is not None:
+        max_output = openrouter.max_output
+    max_output_lines = (
+        f"max-output-tokens = {max_output}\n" if max_output is not None else "")
     runtime_toml = RUNTIME_TOML.format(
-        runtime_id=runtime_id, provider=provider, model_alias=model_alias,
+        runtime_id=runtime_id, provider=runtime_provider, model_alias=model_alias,
         binding_id=binding_id,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
@@ -596,48 +640,19 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             if pcfg.get("carries_effort") else ""),
         max_context_line=(
             f"max-context = {openrouter.max_context}\n" if openrouter else ""),
+        max_output_lines=max_output_lines,
+        thinking_control=thinking_control,
+        disable_parallel=str(not spec["parallel"]).lower(),
         **pcfg)
-    if spec["skills"]:
+    if task_skills:
+        runtime_toml += "\n" + skills_block_with_task_source(
+            include_seed_sources=spec["skills"])
+    elif spec["skills"]:
         # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.
         # skills=False이면 이 블록을 빼서 skill source가 없어 어떤 skill도
         # 로드되지 않는다 (keeper TOML의 skills.names = []와 같은 방향).
         runtime_toml += "\n" + seed_skills_block()
     (root / "runtime.toml").write_text(runtime_toml)
-    # Anthropic-kind backends refuse an explicit enable_thinking without a
-    # catalog-declared thinking policy
-    # (backend_anthropic.validate_nonexact_thinking_controls).
-    # adaptive_only = the wire gets {"type":"adaptive"} when thinking is on
-    # and NO thinking field when off; the model decides depth. fable-5 rejects
-    # {"type":"disabled"} outright (observed v0.35.8 smoke, anthropic4:
-    # '"thinking.type.disabled" is not supported for this model'), which the
-    # no-thinking truncation retry would otherwise emit under
-    # adaptive_default. adaptive_only matches the model's contract.
-    # OpenAI chat-completions carries effort only when the model row declares
-    # the reasoning_effort thinking-control dialect
-    # (reasoning_dialect.validate_request_control_inputs:
-    # Chat_completions + Reasoning_effort is the admitted pair).
-    # What each provider needs is declared on its own entry above, beside the
-    # observation that put it there. Read here rather than re-derived from the
-    # base label: a name in a branch is a classifier, and this file already has
-    # one place that knows which provider is which.
-    thinking_control = pcfg.get("thinking_control_line", "")
-    max_output = pcfg.get("max_output_tokens")
-    if max_output is None and openrouter is not None:
-        max_output = openrouter.max_output
-    max_output_lines = (
-        f"max_output_tokens = {max_output}\n" if max_output is not None else "")
-    ignored_sampling = pcfg.get("ignored_sampling_parameters")
-    sampling_lines = (
-        "ignored_sampling_parameters = ["
-        + ", ".join(f'"{name}"' for name in ignored_sampling)
-        + "]\n"
-        if ignored_sampling else "")
-    (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
-        provider=provider, model_alias=model_alias,
-        thinking_control=thinking_control,
-        sampling_lines=sampling_lines,
-        max_output_lines=max_output_lines,
-        parallel=str(spec["parallel"]).lower(), **pcfg))
 
     # skills=True arm은 skill source tree를 함께 싣는다. bootstrap.sh가 이를
     # $MASC_BASE_PATH/.masc/skills/로 옮겨 [[skills.sources]]가 resolve한다.
@@ -645,6 +660,9 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     # skills=False이면 디렉터리 자체를 만들지 않는다.
     if spec["skills"]:
         shutil.copytree(REPO_ROOT / "skills", root / "skills")
+    if task_skills:
+        assert task_skills_dir is not None
+        shutil.copytree(task_skills_dir, root / TASK_SKILLS_CONFIG_DIR)
 
     # NOTE: 예전에는 anthropic arm의 tool_execute.toml에서 [[one_of]]를 벤치 측
     # strip 했다 (Anthropic API의 top-level combinator 400 때문). masc v0.35.6
@@ -655,7 +673,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     keepers = root / "keepers"
     keepers.mkdir(exist_ok=True)
     for i in range(1, spec["keepers"] + 1):
-        (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm))
+        (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, task_skills))
     return root
 
 

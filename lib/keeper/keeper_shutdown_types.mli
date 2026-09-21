@@ -34,11 +34,14 @@ type dashboard_purge_artifact =
   | Keeper_root_logs_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
+  | Keeper_librarian_range_receipt_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_working_context_recall_artifact
   | Keeper_working_context_artifact
   | Keeper_memory_journal_artifact
   | Keeper_memory_absorbed_artifact
+  | Keeper_turn_boundaries_artifact
+  | Keeper_librarian_progress_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact

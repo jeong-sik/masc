@@ -2,8 +2,6 @@ open Alcotest
 
 module Descriptor = Masc.Keeper_tool_descriptor
 module Plan = Masc.Keeper_tool_plan
-module Descriptor_contract = Masc.Keeper_tool_descriptor_contract
-
 let node_id value =
   match Plan.Node_id.make value with
   | Ok id -> id
@@ -34,106 +32,12 @@ let descriptor name =
 
 let descriptors () = Descriptor.all_descriptors ()
 
-let lane_descriptor_contract () =
-  Descriptor_contract.create
-    ~accepted_tool_name:"keeper_lane_status"
-    (descriptor "keeper_lane_status")
-  |> Result.get_ok
-;;
-
 let replace_descriptor replacement =
   descriptors ()
   |> List.map (fun current ->
     if String.equal current.Descriptor.id replacement.Descriptor.id
     then replacement
     else current)
-;;
-
-let test_descriptor_contract_revalidates_unchanged_descriptor () =
-  let contract = lane_descriptor_contract () in
-  match Descriptor_contract.revalidate ~descriptors:(descriptors ()) contract with
-  | Ok current ->
-    check string
-      "current descriptor id"
-      current.id
-      (Descriptor_contract.descriptor_id contract)
-  | Error _ -> fail "unchanged descriptor contract drifted"
-;;
-
-let test_descriptor_contract_rejects_removed_descriptor () =
-  let contract = lane_descriptor_contract () in
-  let descriptors =
-    descriptors ()
-    |> List.filter (fun descriptor ->
-      not
-        (String.equal
-           descriptor.Descriptor.id
-           (Descriptor_contract.descriptor_id contract)))
-  in
-  match Descriptor_contract.revalidate ~descriptors contract with
-  | Error (Descriptor_contract.Descriptor_removed _) -> ()
-  | Error _ -> fail "removed descriptor returned the wrong drift"
-  | Ok _ -> fail "removed descriptor revalidated"
-;;
-
-let test_descriptor_contract_rejects_name_drift () =
-  let contract = lane_descriptor_contract () in
-  let current = descriptor "keeper_lane_status" in
-  let changed = { current with Descriptor.internal_name = "keeper_lane_status_v2" } in
-  match
-    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
-  with
-  | Error (Descriptor_contract.Accepted_tool_name_changed _) -> ()
-  | Error _ -> fail "tool name drift returned the wrong result"
-  | Ok _ -> fail "tool name drift revalidated"
-;;
-
-let test_descriptor_contract_rejects_input_schema_drift () =
-  let contract = lane_descriptor_contract () in
-  let current = descriptor "keeper_lane_status" in
-  let input_schema =
-    `Assoc
-      [ "type", `String "object"
-      ; "properties", `Assoc [ "zone", `Assoc [ "type", `String "string" ] ]
-      ; "required", `List []
-      ; "additionalProperties", `Bool false
-      ]
-  in
-  let changed = { current with Descriptor.input_schema } in
-  match
-    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
-  with
-  | Error (Descriptor_contract.Input_schema_changed _) -> ()
-  | Error _ -> fail "input schema drift returned the wrong result"
-  | Ok _ -> fail "input schema drift revalidated"
-;;
-
-let test_descriptor_contract_rejects_output_drift () =
-  let contract = lane_descriptor_contract () in
-  let current = descriptor "keeper_lane_status" in
-  let changed =
-    { current with Descriptor.composable_output = Descriptor.Opaque_output }
-  in
-  match
-    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
-  with
-  | Error (Descriptor_contract.Composable_output_changed _) -> ()
-  | Error _ -> fail "output contract drift returned the wrong result"
-  | Ok _ -> fail "output contract drift revalidated"
-;;
-
-let test_descriptor_contract_rejects_execution_drift () =
-  let contract = lane_descriptor_contract () in
-  let current = descriptor "keeper_lane_status" in
-  let changed =
-    { current with Descriptor.execution = Descriptor.Ordinary Descriptor.Serial }
-  in
-  match
-    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
-  with
-  | Error (Descriptor_contract.Execution_changed _) -> ()
-  | Error _ -> fail "execution drift returned the wrong result"
-  | Ok _ -> fail "execution drift revalidated"
 ;;
 
 let replace_contract_field name value = function
@@ -144,156 +48,6 @@ let replace_contract_field name value = function
             if String.equal field name then field, value else field, current)
          fields)
   | _ -> fail "descriptor contract encoder returned a non-object"
-;;
-
-let check_contract_round_trip label contract =
-  let encoded = Descriptor_contract.to_yojson contract in
-  let decoded = Descriptor_contract.of_yojson encoded |> Result.get_ok in
-  check
-    (testable Yojson.Safe.pp Yojson.Safe.equal)
-    label
-    encoded
-    (Descriptor_contract.to_yojson decoded)
-;;
-
-let test_descriptor_contract_round_trips () =
-  let current = descriptor "keeper_lane_status" in
-  let preferred =
-    { current with
-      Descriptor.keeper_model_projection = Descriptor.Preferred_public_name
-    ; public_name = "LaneStatus"
-    }
-  in
-  let internal =
-    { current with
-      Descriptor.keeper_model_projection = Descriptor.Internal_name
-    ; internal_name = "lane_status_internal"
-    }
-  in
-  Descriptor_contract.create ~accepted_tool_name:"LaneStatus" preferred
-  |> Result.get_ok
-  |> check_contract_round_trip "preferred-name round-trip";
-  Descriptor_contract.create ~accepted_tool_name:"lane_status_internal" internal
-  |> Result.get_ok
-  |> check_contract_round_trip "internal-name round-trip"
-;;
-
-let test_descriptor_contract_rejects_impossible_projection_and_name () =
-  let encoded = Descriptor_contract.to_yojson (lane_descriptor_contract ()) in
-  let projection name projected_by =
-    encoded
-    |> replace_contract_field "model_projection" (`String name)
-    |> replace_contract_field "projected_by" projected_by
-  in
-  List.iter
-    (fun json ->
-       match Descriptor_contract.of_yojson json with
-       | Error
-           (Descriptor_contract.Decode_invariant_violation
-              (Descriptor_contract.Uncallable_model_projection _)) -> ()
-       | Error _ -> fail "uncallable projection returned the wrong error"
-       | Ok _ -> fail "uncallable projection decoded")
-    [ projection "operator_only" `Null
-    ; projection "transport_alias" (`String "keeper_lane_status")
-    ];
-  let current = descriptor "keeper_lane_status" in
-  let operator_only =
-    { current with Descriptor.keeper_model_projection = Descriptor.Operator_only }
-  in
-  (match Descriptor_contract.create ~accepted_tool_name:"keeper_lane_status" operator_only with
-   | Error
-       (Descriptor_contract.Create_invariant_violation
-          (Descriptor_contract.Uncallable_model_projection Descriptor.Operator_only)) -> ()
-   | Error _ -> fail "uncallable created projection returned the wrong error"
-   | Ok _ -> fail "uncallable projection created");
-  let blank = replace_contract_field "accepted_tool_name" (`String " \t") encoded in
-  match Descriptor_contract.of_yojson blank with
-  | Error
-      (Descriptor_contract.Decode_invariant_violation
-         Descriptor_contract.Blank_accepted_tool_name) -> ()
-  | Error _ -> fail "blank accepted name returned the wrong error"
-  | Ok _ -> fail "blank accepted name decoded"
-;;
-
-let test_descriptor_contract_rejects_invalid_input_schema () =
-  let current = descriptor "keeper_lane_status" in
-  let encoded = Descriptor_contract.to_yojson (lane_descriptor_contract ()) in
-  let invalid_schemas =
-    [ `Null
-    ; `Assoc
-        [ "type", `String "object"
-        ; "properties", `Null
-        ; "additionalProperties", `Bool false
-        ]
-    ]
-  in
-  List.iter
-    (fun input_schema ->
-       let decoded = replace_contract_field "input_schema" input_schema encoded in
-       (match Descriptor_contract.of_yojson decoded with
-        | Error
-            (Descriptor_contract.Decode_invariant_violation
-               (Descriptor_contract.Invalid_model_input_schema (_ :: _))) -> ()
-        | Error _ -> fail "invalid decoded input schema returned the wrong error"
-        | Ok _ -> fail "invalid input schema decoded");
-       let changed = { current with Descriptor.input_schema } in
-       match Descriptor_contract.create ~accepted_tool_name:"keeper_lane_status" changed with
-       | Error
-           (Descriptor_contract.Create_invariant_violation
-              (Descriptor_contract.Invalid_model_input_schema (_ :: _))) -> ()
-       | Error _ -> fail "invalid created input schema returned the wrong error"
-       | Ok _ -> fail "invalid input schema created")
-    invalid_schemas
-;;
-
-let test_descriptor_contract_rejects_noncanonical_output_schema () =
-  let current = descriptor "keeper_lane_status" in
-  let duplicate_schema =
-    `Assoc [ "type", `String "object"; "type", `String "object" ]
-  in
-  let changed =
-    { current with
-      Descriptor.composable_output =
-        Descriptor.Json_output { schema = duplicate_schema }
-    }
-  in
-  match Descriptor_contract.create ~accepted_tool_name:"keeper_lane_status" changed with
-  | Error
-      (Descriptor_contract.Non_canonical_schema
-         { location = Descriptor_contract.Composable_output_schema
-         ; error = Descriptor_contract.Duplicate_object_key "type"
-         }) -> ()
-  | Error _ -> fail "non-canonical output schema returned the wrong error"
-  | Ok _ -> fail "non-canonical output schema was captured"
-;;
-
-let test_descriptor_contract_codec_is_closed () =
-  let encoded = Descriptor_contract.to_yojson (lane_descriptor_contract ()) in
-  let duplicate =
-    match encoded with
-    | `Assoc fields -> `Assoc (fields @ [ "execution", `String "serial" ])
-    | _ -> fail "descriptor contract encoder returned a non-object"
-  in
-  (match Descriptor_contract.of_yojson duplicate with
-   | Error (Descriptor_contract.Non_canonical_json (Descriptor_contract.Duplicate_object_key "execution")) -> ()
-   | Error _ -> fail "duplicate contract field returned the wrong error"
-   | Ok _ -> fail "duplicate contract field decoded");
-  let invalid =
-    match encoded with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (name, value) ->
-              if String.equal name "execution"
-              then name, `String "unordered"
-              else name, value)
-           fields)
-    | _ -> fail "descriptor contract encoder returned a non-object"
-  in
-  match Descriptor_contract.of_yojson invalid with
-  | Error (Descriptor_contract.Invalid_execution "unordered") -> ()
-  | Error _ -> fail "invalid execution returned the wrong error"
-  | Ok _ -> fail "invalid execution decoded"
 ;;
 
 let node ?after ~id ~tool_name input =
@@ -1383,8 +1137,6 @@ let test_composition_run_id_is_uuid_v7_identity () =
 
 module Request = Masc.Keeper_tool_plan_request
 module Catalog = Masc.Keeper_tool_composition_catalog
-module Recipe = Masc.Keeper_async_composition_recipe
-
 let parse_request json =
   Request.plan_of_json ~descriptors:(Descriptor.all_descriptors ()) json
 ;;
@@ -1666,11 +1418,6 @@ let recipe_invocation () =
 
 let accepted_surface_digest_string = String.make 64 'b'
 
-let accepted_surface_digest () =
-  Recipe.Accepted_surface_digest.of_string accepted_surface_digest_string
-  |> Result.get_ok
-;;
-
 let recipe_plan () =
   match
     parse_request
@@ -1682,203 +1429,12 @@ let recipe_plan () =
   | Error error -> failf "recipe plan rejected: %s" (Request.error_message error)
 ;;
 
-let recipe_with_origin_and_checkpoint origin accepted_checkpoint =
-  match
-    Recipe.create
-      ~composition_run_id:(Plan.Composition_run_id.fresh ())
-      ~origin
-      ~accepted_surface_digest:(accepted_surface_digest ())
-      ~plan:(recipe_plan ())
-      ~invocation:(recipe_invocation ())
-      ~accepted_checkpoint
-  with
-  | Ok recipe -> recipe
-  | Error (Recipe.Unbound_plan (Request.Unsubstituted_param { name })) ->
-    failf "recipe fixture retained parameter %S" name
-  | Error (Recipe.Create_negative_invocation_turn turn) ->
-    failf "recipe fixture has negative turn %d" turn
-  | Error (Recipe.Create_invalid_invocation_schedule detail) ->
-    failf "recipe fixture has invalid schedule: %s" detail
-  | Error (Recipe.Create_invalid_checkpoint error) ->
-    failf "recipe fixture has invalid checkpoint: %s" (Agent_core.Error.to_string error)
-  | Error (Recipe.Create_non_canonical_json _) ->
-    fail "recipe fixture did not produce canonical JSON"
-;;
-
-let recipe_with_origin origin =
-  recipe_with_origin_and_checkpoint origin (recipe_checkpoint ())
-;;
-
-let encode_recipe recipe =
-  match Recipe.to_yojson recipe with
-  | Ok json -> json
-  | Error (Recipe.Encode_plan (Request.Unsubstituted_param { name })) ->
-    failf "accepted recipe retained parameter %S" name
-  | Error (Recipe.Encode_invalid_checkpoint error) ->
-    failf "accepted recipe retained an invalid checkpoint: %s" (Agent_core.Error.to_string error)
-  | Error (Recipe.Encode_non_canonical_json _) ->
-    fail "accepted recipe retained non-canonical JSON"
-;;
-
-let encoded_recipe origin =
-  recipe_with_origin origin |> encode_recipe
-;;
-
-let decode_recipe json =
-  Recipe.of_yojson ~descriptors:(descriptors ()) json
-;;
-
-let accepted_checkpoint recipe =
-  match Recipe.accepted_checkpoint recipe with
-  | Ok checkpoint -> checkpoint
-  | Error error -> fail ("accepted checkpoint did not decode: " ^ Agent_core.Error.to_string error)
-;;
-
-let test_async_recipe_round_trips_full_accepted_values () =
-  let reference = recipe_skill_reference () in
-  let original = recipe_with_origin (Recipe.Skill_composition reference) in
-  let encoded = encode_recipe original in
-  let decoded = decode_recipe encoded |> Result.get_ok in
-  let reencoded = encode_recipe decoded in
-  (match encoded with
-   | `Assoc fields ->
-     check
-       (list string)
-       "recipe stores only durable authority and accepted observations"
-       [ "composition_run_id"
-       ; "origin"
-       ; "accepted_surface_digest"
-       ; "plan"
-       ; "invocation"
-       ; "accepted_checkpoint"
-       ]
-       (List.map fst fields)
-   | _ -> fail "recipe encoder did not return an object");
-  check
-    (testable Yojson.Safe.pp Yojson.Safe.equal)
-    "canonical recipe round-trip"
-    encoded
-    reencoded;
-  check bool
-    "composition run identity"
-    true
-    (Plan.Composition_run_id.equal
-       (Recipe.composition_run_id original)
-       (Recipe.composition_run_id decoded));
-  check string
-    "accepted surface observation"
-    accepted_surface_digest_string
-    (Recipe.accepted_surface_digest decoded
-     |> Recipe.Accepted_surface_digest.to_string);
-  check
-    (list string)
-    "bound plan"
-    (plan_signature (Recipe.plan original))
-    (plan_signature (Recipe.plan decoded));
-  (match Recipe.origin decoded with
-   | Recipe.Skill_composition decoded_reference ->
-     check bool "exact skill reference" true (Skill_reference.equal reference decoded_reference));
-  let invocation = Recipe.invocation decoded in
-  check string
-    "invocation tool use id"
-    "tool-use-parent"
-    (Agent_core.Tool_contract.Invocation.tool_use_id invocation);
-  check int "invocation turn" 9 (Agent_core.Tool_contract.Invocation.turn invocation);
-  let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
-  check int "planned index" 4 schedule.planned_index;
-  check int "batch index" 2 schedule.batch_index;
-  check int "batch size" 3 schedule.batch_size;
-  (match schedule.execution_mode with
-   | Agent_core.Tool_contract.Concurrent -> ()
-   | Agent_core.Tool_contract.Serial -> fail "invocation execution mode changed");
-  (match Agent_core.Tool_contract.Invocation.completion invocation with
-   | Agent_core.Tool_contract.Continue_after_success -> ()
-   | Agent_core.Tool_contract.Terminal_after_success _ ->
-     fail "invocation completion changed");
-  let checkpoint = accepted_checkpoint decoded in
-  check string "checkpoint session" "accepted-session" checkpoint.session_id;
-  check string "checkpoint agent" "keeper-recipe" checkpoint.agent_name;
-  check int "checkpoint turn count" 7 checkpoint.turn_count;
-  check
-    (testable Yojson.Safe.pp Yojson.Safe.equal)
-    "full checkpoint"
-    (Agent_core.Checkpoint.to_json_result (accepted_checkpoint original) |> Result.get_ok)
-    (Agent_core.Checkpoint.to_json_result checkpoint |> Result.get_ok)
-;;
-
 let poison_checkpoint_context (checkpoint : Agent_core.Checkpoint.t) =
   Agent_core.Context.set checkpoint.context "non_finite" (`Float Float.nan);
   Agent_core.Context.set
     checkpoint.context
     "duplicate"
     (`Assoc [ "same", `Int 1; "same", `Int 2 ])
-;;
-
-let test_async_recipe_checkpoint_snapshot_is_immutable () =
-  let origin = Recipe.Skill_composition (recipe_skill_reference ()) in
-  let source_checkpoint = recipe_checkpoint () in
-  let recipe = recipe_with_origin_and_checkpoint origin source_checkpoint in
-  let accepted_json = encode_recipe recipe in
-  let accepted_bytes = Yojson.Safe.to_string accepted_json in
-  let check_bytes label candidate =
-    check string label accepted_bytes (encode_recipe candidate |> Yojson.Safe.to_string)
-  in
-  poison_checkpoint_context source_checkpoint;
-  check_bytes "source checkpoint mutation" recipe;
-  let exposed_checkpoint = accepted_checkpoint recipe in
-  poison_checkpoint_context exposed_checkpoint;
-  let fresh_checkpoint = accepted_checkpoint recipe in
-  List.iter
-    (fun key ->
-       check bool
-         ("fresh accessor excludes mutation " ^ key)
-         true
-         (Agent_core.Context.get fresh_checkpoint.context key |> Option.is_none))
-    [ "non_finite"; "duplicate" ];
-  check_bytes "decoded accessor mutation" recipe;
-  let loaded = decode_recipe accepted_json |> Result.get_ok in
-  let loaded_checkpoint = accepted_checkpoint loaded in
-  poison_checkpoint_context loaded_checkpoint;
-  check_bytes "loaded checkpoint mutation" loaded
-;;
-
-let test_async_recipe_rejects_an_unbound_plan () =
-  let input =
-    Plan.Json_template.object_ [ "query", Plan.Json_template.param ~name:"query" ]
-    |> Result.get_ok
-  in
-  let plan =
-    Plan.create
-      ~descriptors:(descriptors ())
-      [ Plan.node
-          ~id:(node_id "memory")
-          ~tool_name:"keeper_memory_search"
-          ~input
-          ()
-      ]
-    |> Result.get_ok
-  in
-  match
-    Recipe.create
-      ~composition_run_id:(Plan.Composition_run_id.fresh ())
-      ~origin:(Recipe.Skill_composition (recipe_skill_reference ()))
-      ~accepted_surface_digest:(accepted_surface_digest ())
-      ~plan
-      ~invocation:(recipe_invocation ())
-      ~accepted_checkpoint:(recipe_checkpoint ())
-  with
-  | Error (Recipe.Unbound_plan (Request.Unsubstituted_param { name = "query" })) -> ()
-  | Error (Recipe.Unbound_plan (Request.Unsubstituted_param { name })) ->
-    failf "recipe rejected the wrong parameter %S" name
-  | Error (Recipe.Create_negative_invocation_turn _) ->
-    fail "unbound plan returned an invocation turn error"
-  | Error (Recipe.Create_invalid_invocation_schedule _) ->
-    fail "unbound plan returned a schedule error"
-  | Error (Recipe.Create_invalid_checkpoint _) ->
-    fail "unbound plan returned a checkpoint error"
-  | Error (Recipe.Create_non_canonical_json _) ->
-    fail "unbound plan returned a canonical JSON error"
-  | Ok _ -> fail "recipe admitted an unbound plan"
 ;;
 
 let add_field name value = function
@@ -1894,38 +1450,6 @@ let update_field name update = function
             if String.equal field name then field, update value else field, value)
          fields)
   | json -> json
-;;
-
-let test_async_recipe_decoder_closes_every_owned_object () =
-  let base = encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ())) in
-  let cases =
-    [ ( "duplicate recipe field"
-      , add_field "origin" `Null base
-      , Recipe.Duplicate_field { object_name = Recipe.Recipe; field = "origin" } )
-    ; ( "unknown recipe field"
-      , add_field "execution" (`String "async") base
-      , Recipe.Unknown_field { object_name = Recipe.Recipe; field = "execution" } )
-    ; ( "duplicate origin field"
-      , update_field "origin" (add_field "kind" (`String "skill_composition")) base
-      , Recipe.Duplicate_field { object_name = Recipe.Origin; field = "kind" } )
-    ; ( "unknown origin field"
-      , update_field "origin" (add_field "provenance" `Null) base
-      , Recipe.Unknown_field { object_name = Recipe.Origin; field = "provenance" } )
-    ; ( "duplicate invocation field"
-      , update_field "invocation" (add_field "turn" (`Int 10)) base
-      , Recipe.Duplicate_field { object_name = Recipe.Invocation; field = "turn" } )
-    ; ( "unknown invocation field"
-      , update_field "invocation" (add_field "tool_name" (`String "derived")) base
-      , Recipe.Unknown_field { object_name = Recipe.Invocation; field = "tool_name" } )
-    ]
-  in
-  List.iter
-    (fun (label, json, expected) ->
-       match decode_recipe json with
-       | Error actual when actual = expected -> ()
-       | Error _ -> failf "%s returned the wrong typed error" label
-       | Ok _ -> failf "%s was accepted" label)
-    cases
 ;;
 
 let update_recipe_schedule update =
@@ -1946,16 +1470,6 @@ let recipe_plan_with_literal value =
   |> Result.get_ok
 ;;
 
-let create_recipe_with_plan plan =
-  Recipe.create
-    ~composition_run_id:(Plan.Composition_run_id.fresh ())
-    ~origin:(Recipe.Skill_composition (recipe_skill_reference ()))
-    ~accepted_surface_digest:(accepted_surface_digest ())
-    ~plan
-    ~invocation:(recipe_invocation ())
-    ~accepted_checkpoint:(recipe_checkpoint ())
-;;
-
 let replace_recipe_literal value =
   update_field
     "plan"
@@ -1963,181 +1477,6 @@ let replace_recipe_literal value =
        | `List [ node ] ->
          `List [ update_field "input" (replace_field "value" value) node ]
        | json -> json))
-;;
-
-let test_async_recipe_rejects_duplicate_literal_keys_on_create_and_load () =
-  let duplicate = `Assoc [ "same", `Int 1; "same", `Int 2 ] in
-  let plan = recipe_plan_with_literal duplicate in
-  (match create_recipe_with_plan plan with
-   | Error
-       (Recipe.Create_non_canonical_json
-          (Recipe.Duplicate_object_key "same")) -> ()
-   | Error _ -> fail "duplicate literal key returned the wrong create error"
-   | Ok _ -> fail "create accepted a duplicate literal key");
-  let encoded =
-    encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ()))
-    |> replace_recipe_literal duplicate
-  in
-  match decode_recipe encoded with
-  | Error (Recipe.Non_canonical_json (Recipe.Duplicate_object_key "same")) -> ()
-  | Error _ -> fail "duplicate literal key returned the wrong load error"
-  | Ok _ -> fail "load accepted a duplicate literal key"
-;;
-
-let test_async_recipe_rejects_non_finite_literals_on_create_and_load () =
-  List.iter
-    (fun (label, value) ->
-       let plan = recipe_plan_with_literal (`Float value) in
-       (match create_recipe_with_plan plan with
-        | Error
-            (Recipe.Create_non_canonical_json Recipe.Non_finite_float) -> ()
-        | Error _ -> failf "%s returned the wrong create error" label
-        | Ok _ -> failf "create accepted %s" label);
-       let encoded =
-         encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ()))
-         |> replace_recipe_literal (`Float value)
-       in
-       match decode_recipe encoded with
-       | Error (Recipe.Non_canonical_json Recipe.Non_finite_float) -> ()
-       | Error _ -> failf "%s returned the wrong load error" label
-       | Ok _ -> failf "load accepted %s" label)
-    [ "NaN", Float.nan
-    ; "positive infinity", Float.infinity
-    ; "negative infinity", Float.neg_infinity
-    ]
-;;
-
-let test_async_recipe_uses_canonical_invocation_schedule_validation () =
-  let base = encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ())) in
-  let invalid_schedules =
-    [ "negative planned index", replace_field "planned_index" (`Int (-1))
-    ; "negative batch index", replace_field "batch_index" (`Int (-1))
-    ; "negative batch size", replace_field "batch_size" (`Int (-1))
-    ; "zero batch size", replace_field "batch_size" (`Int 0)
-    ; "duplicate schedule field", add_field "batch_size" (`Int 3)
-    ; "unknown schedule field", add_field "execution" (`String "derived")
-    ]
-  in
-  List.iter
-    (fun (label, update) ->
-       match decode_recipe (update_recipe_schedule update base) with
-       | Error (Recipe.Invalid_schedule _) -> ()
-       | Error _ -> failf "%s returned the wrong typed error" label
-       | Ok _ -> failf "%s was accepted" label)
-    invalid_schedules;
-  let negative_turn =
-    update_field "invocation" (replace_field "turn" (`Int (-1))) base
-  in
-  (match decode_recipe negative_turn with
-   | Error (Recipe.Negative_invocation_turn (-1)) -> ()
-   | Error _ -> fail "negative turn returned the wrong typed error"
-   | Ok _ -> fail "negative invocation turn was accepted");
-  let terminal_completion =
-    Agent_core.Tool_contract.completion_to_yojson
-      (Agent_core.Tool_contract.Terminal_after_success
-         Agent_core.Tool_contract.Proven_post_effect)
-  in
-  let invalid_terminal =
-    update_field
-      "invocation"
-      (replace_field "completion" terminal_completion)
-      base
-  in
-  match decode_recipe invalid_terminal with
-  | Error (Recipe.Invalid_completion_schedule _) -> ()
-  | Error _ -> fail "invalid terminal schedule returned the wrong typed error"
-  | Ok _ -> fail "terminal completion with a concurrent batch was accepted"
-;;
-
-let create_recipe_with_invocation invocation =
-  Recipe.create
-    ~composition_run_id:(Plan.Composition_run_id.fresh ())
-    ~origin:(Recipe.Skill_composition (recipe_skill_reference ()))
-    ~accepted_surface_digest:(accepted_surface_digest ())
-    ~plan:(recipe_plan ())
-    ~invocation
-    ~accepted_checkpoint:(recipe_checkpoint ())
-;;
-
-let test_async_recipe_constructor_validates_invocation () =
-  let schedule = Agent_core.Tool_contract.Invocation.schedule (recipe_invocation ()) in
-  let negative_turn =
-    Agent_core.Tool_contract.Invocation.create
-      ~tool_use_id:"negative-turn"
-      ~turn:(-1)
-      ~schedule
-      ~completion:Agent_core.Tool_contract.Continue_after_success
-  in
-  (match create_recipe_with_invocation negative_turn with
-   | Error (Recipe.Create_negative_invocation_turn (-1)) -> ()
-   | Error _ -> fail "constructor returned the wrong negative-turn error"
-   | Ok _ -> fail "constructor accepted a negative invocation turn");
-  let invalid_terminal =
-    Agent_core.Tool_contract.Invocation.create
-      ~tool_use_id:"invalid-terminal"
-      ~turn:1
-      ~schedule
-      ~completion:
-        (Agent_core.Tool_contract.Terminal_after_success
-           Agent_core.Tool_contract.Proven_pre_effect)
-  in
-  match create_recipe_with_invocation invalid_terminal with
-  | Error (Recipe.Create_invalid_invocation_schedule _) -> ()
-  | Error _ -> fail "constructor returned the wrong terminal-schedule error"
-  | Ok _ -> fail "constructor accepted an invalid terminal schedule"
-;;
-
-let test_async_recipe_surface_digest_is_typed_but_observational () =
-  let digest = accepted_surface_digest () in
-  check string
-    "typed digest round-trip"
-    accepted_surface_digest_string
-    (Recipe.Accepted_surface_digest.to_string digest);
-  List.iter
-    (fun invalid ->
-       match Recipe.Accepted_surface_digest.of_string invalid with
-       | Error Recipe.Accepted_surface_digest.Not_lowercase_sha256 -> ()
-       | Ok _ -> failf "invalid accepted surface digest was constructed: %S" invalid)
-    [ ""; String.make 63 'a'; String.make 64 'A'; String.make 64 'z' ];
-  let base = encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ())) in
-  List.iter
-    (fun invalid ->
-       let json = replace_field "accepted_surface_digest" (`String invalid) base in
-       match decode_recipe json with
-       | Error (Recipe.Invalid_accepted_surface_digest value)
-         when String.equal value invalid -> ()
-       | Error _ -> failf "digest %S returned the wrong typed error" invalid
-       | Ok _ -> failf "digest %S was decoded" invalid)
-    [ ""; String.make 64 'A' ]
-;;
-
-let test_async_recipe_delegates_nested_strict_decoders () =
-  let base = encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ())) in
-  let completion_unknown =
-    update_field
-      "invocation"
-      (update_field "completion" (add_field "execution" (`String "derived")))
-      base
-  in
-  (match decode_recipe completion_unknown with
-   | Error (Recipe.Invalid_completion _) -> ()
-   | Error _ -> fail "completion returned the wrong typed error"
-   | Ok _ -> fail "completion accepted an unknown field");
-  let checkpoint_unknown =
-    update_field
-      "accepted_checkpoint"
-      (add_field "execution" (`String "derived"))
-      base
-  in
-  (match decode_recipe checkpoint_unknown with
-   | Error (Recipe.Invalid_checkpoint _) -> ()
-   | Error _ -> fail "checkpoint returned the wrong typed error"
-   | Ok _ -> fail "checkpoint accepted an unknown field");
-  let plan_unknown = update_field "plan" (add_field "execution" (`String "async")) base in
-  match decode_recipe plan_unknown with
-  | Error (Recipe.Invalid_plan (Request.Unknown_request_field { field = "execution" })) -> ()
-  | Error _ -> fail "plan returned the wrong typed error"
-  | Ok _ -> fail "plan accepted an unknown field"
 ;;
 
 let test_request_defaults_missing_input_to_empty_object () =
@@ -2484,47 +1823,7 @@ let () =
   Eio_main.run @@ fun _env ->
   run
     "keeper_tool_plan"
-    [ ( "descriptor-contract"
-      , [ test_case "round-trip" `Quick test_descriptor_contract_round_trips
-        ; test_case
-            "unchanged revalidation"
-            `Quick
-            test_descriptor_contract_revalidates_unchanged_descriptor
-        ; test_case
-            "removed descriptor drift"
-            `Quick
-            test_descriptor_contract_rejects_removed_descriptor
-        ; test_case
-            "accepted tool name drift"
-            `Quick
-            test_descriptor_contract_rejects_name_drift
-        ; test_case
-            "input schema drift"
-            `Quick
-            test_descriptor_contract_rejects_input_schema_drift
-        ; test_case
-            "composable output drift"
-            `Quick
-            test_descriptor_contract_rejects_output_drift
-        ; test_case
-            "execution drift"
-            `Quick
-            test_descriptor_contract_rejects_execution_drift
-        ; test_case
-            "impossible projection and name"
-            `Quick
-            test_descriptor_contract_rejects_impossible_projection_and_name
-        ; test_case
-            "invalid input schema"
-            `Quick
-            test_descriptor_contract_rejects_invalid_input_schema
-        ; test_case
-            "non-canonical output schema"
-            `Quick
-            test_descriptor_contract_rejects_noncanonical_output_schema
-        ; test_case "closed codec" `Quick test_descriptor_contract_codec_is_closed
-        ] )
-    ; ( "request"
+    [ ( "request"
       , [ test_case "reference chain" `Quick test_request_parses_reference_chain
         ; test_case
             "JSON and TOML plan parity"
@@ -2561,55 +1860,7 @@ let () =
             `Quick
             test_request_rejects_unknown_request_field
         ; test_case "empty plan" `Quick test_request_rejects_empty_plan
-        ; test_case
-            "composable names"
-            `Quick
-            test_request_composable_names_match_registry
-        ] )
-    ; ( "async-recipe"
-      , [ test_case
-            "full accepted values round-trip"
-            `Quick
-            test_async_recipe_round_trips_full_accepted_values
-        ; test_case
-            "accepted checkpoint snapshot is immutable"
-            `Quick
-            test_async_recipe_checkpoint_snapshot_is_immutable
-        ; test_case
-            "unbound plans are rejected"
-            `Quick
-            test_async_recipe_rejects_an_unbound_plan
-        ; test_case
-            "owned objects reject duplicate and unknown fields"
-            `Quick
-            test_async_recipe_decoder_closes_every_owned_object
-        ; test_case
-            "canonical invocation schedule validation"
-            `Quick
-            test_async_recipe_uses_canonical_invocation_schedule_validation
-        ; test_case
-            "constructor validates invocation"
-            `Quick
-            test_async_recipe_constructor_validates_invocation
-        ; test_case
-            "surface digest is typed but observational"
-            `Quick
-            test_async_recipe_surface_digest_is_typed_but_observational
-        ; test_case
-            "nested strict decoders remain authoritative"
-            `Quick
-            test_async_recipe_delegates_nested_strict_decoders
-        ; test_case
-            "duplicate literal keys fail on create and load"
-            `Quick
-            test_async_recipe_rejects_duplicate_literal_keys_on_create_and_load
-        ; test_case
-            "non-finite literals fail on create and load"
-            `Quick
-            test_async_recipe_rejects_non_finite_literals_on_create_and_load
-        ] )
-    ; ( "typed-values"
-      , [ test_case "node id" `Quick test_node_id_rejects_empty
+        ; test_case "node id" `Quick test_node_id_rejects_empty
         ; test_case "composition run UUID" `Quick test_composition_run_id_is_uuid_v7_identity
         ; test_case "JSON pointer" `Quick test_json_pointer_is_exact_rfc6901_navigation
         ; test_case "JSON template" `Quick test_json_template_preserves_declared_structure

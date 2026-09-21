@@ -4222,15 +4222,26 @@ let test_lifecycle_event_display_values () =
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event event))
     cases
 
+(* A runtime row always comes back [Patched]; the declaration-row outcome has
+   its own tests below. *)
+let patched_runtime_row ~keeper_name ~event ~keepalive_running row =
+  match
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name ~event ~keepalive_running row
+  with
+  | Server_dashboard_http_execution_surfaces.Patched row -> row
+  | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
+    fail "a runtime row was reported as a stale declaration row"
+
 (* The [paused] lifecycle event patches with [keepalive_running = true], so the
    row goes through the keepalive branch of the status patcher. That branch used
    to classify against the surface vocabulary alone, where "paused" is not a
    member, and fell through to "idle" — producing a row that said [status =
-   "idle"] and [paused = true] at the same time. [rebuild_continuity_briefs]
+   "idle"] and [paused = true] at the same time. The rebuilt continuity brief
    then read the row as live. *)
 let test_paused_lifecycle_event_keeps_paused_status () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"pause-target"
       ~event:
         (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused)
@@ -4244,7 +4255,7 @@ let test_paused_lifecycle_event_keeps_paused_status () =
 
 let test_reconciled_lifecycle_event_preserves_durable_pause () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"paused-reconcile-target"
       ~event:
         (Keeper_lifecycle_events.Custom_event
@@ -4270,7 +4281,7 @@ let test_reconciled_lifecycle_event_preserves_durable_pause () =
 
 let test_stopped_lifecycle_event_stays_offline () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"stop-target"
       ~event:
         (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
@@ -4288,7 +4299,7 @@ let test_stopped_lifecycle_event_stays_offline () =
 
 let test_stopped_lifecycle_event_preserves_durable_pause () =
   let patched =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"paused-stop-target"
       ~event:
         (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
@@ -4306,7 +4317,7 @@ let test_stopped_lifecycle_event_preserves_durable_pause () =
 
 let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
   let patch row =
-    Server_dashboard_http_execution_surfaces.patch_keeper_row
+    patched_runtime_row
       ~keeper_name:"drift-target"
       ~event:
         (Keeper_lifecycle_events.Custom_event
@@ -4455,6 +4466,213 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
           Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
             config
             unrelated_surface))
+
+(* A Keeper declared in config that has never booted rides in the same
+   [keepers] list as a declaration row: no diagnostic, so no health. The
+   reconciliation that rebuilds continuity for a running keeper walked every
+   row and raised on that one, so the whole execution surface answered 500
+   (live 2026-09-19, row [imp]). The declaration row stays in [keepers] and
+   gets no brief. *)
+let test_running_keeper_reconciliation_skips_declaration_rows () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-declared-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "continuity-declared-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let now = Masc_domain.now_iso () in
+       let running_row =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "status", `String "active"
+           ; "diagnostic", `Assoc [ "health_state", `String "healthy" ]
+           ; "keepalive_running", `Bool false
+           ; "turn_count", `Int 1
+           ; "updated_at", `String now
+           ; "tool_audit_at", `String now
+           ; "recent_tool_names", `List []
+           ; "latest_tool_names", `List []
+           ]
+       in
+       let declared_row =
+         Masc.Keeper_declared_roster.to_json
+           { Masc.Keeper_declared_roster.name = "imp"
+           ; requirements = [ Masc.Keeper_declared_roster.Runtime_check_required ]
+           }
+       in
+       let patched =
+         Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+           config
+           (`Assoc
+             [ "keepers", `List [ running_row; declared_row ]
+             ; "continuity_briefs", `List []
+             ])
+       in
+       let open Yojson.Safe.Util in
+       let names key =
+         patched |> member key |> to_list
+         |> List.map (fun row -> row |> member "name" |> to_string)
+       in
+       check (list string)
+         "the declaration row stays in the keeper list"
+         [ keeper_name; "imp" ]
+         (names "keepers");
+       check (list string)
+         "only the running keeper gets a continuity brief"
+         [ keeper_name ]
+         (names "continuity_briefs"))
+
+let declared_keeper_row name =
+  Masc.Keeper_declared_roster.to_json
+    { Masc.Keeper_declared_roster.name
+    ; requirements = [ Masc.Keeper_declared_roster.Runtime_check_required ]
+    }
+
+(* The events a Keeper's boot publishes. Each one that names a declaration
+   row used to either raise ("unknown current keeper status \"unbooted\"") or
+   build a row that was declaration-only and running at once. *)
+let boot_lifecycle_events =
+  [ Keeper_lifecycle_events.Custom_event
+      { verb = Keeper_lifecycle_events.Started; phase = None }
+  ; Keeper_lifecycle_events.Custom_event
+      { verb = Keeper_lifecycle_events.Reconciled; phase = None }
+  ; Keeper_lifecycle_events.Phase_event Keeper_state_machine.Running
+  ]
+
+let test_lifecycle_patch_never_patches_a_declaration_row () =
+  List.iter
+    (fun event ->
+       let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
+       (match
+          Server_dashboard_http_execution_surfaces.patch_keeper_row
+            ~keeper_name:"imp"
+            ~event
+            ~keepalive_running:true
+            (declared_keeper_row "imp")
+        with
+        | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale -> ()
+        | Server_dashboard_http_execution_surfaces.Patched row ->
+          failf "%s patched a declaration row into %s" label
+            (Yojson.Safe.to_string row));
+       match
+         Server_dashboard_http_execution_surfaces.patch_keeper_row
+           ~keeper_name:"another-keeper"
+           ~event
+           ~keepalive_running:true
+           (declared_keeper_row "imp")
+       with
+       | Server_dashboard_http_execution_surfaces.Patched row ->
+         check bool (label ^ " leaves another keeper's declaration row alone")
+           true
+           (Yojson.Safe.equal row (declared_keeper_row "imp"))
+       | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
+         failf "%s for another keeper reported imp's row stale" label)
+    boot_lifecycle_events
+
+(* Route 1: the dashboard's Boot button, or any other boot, publishes a
+   lifecycle event, and the listener patches the cached execution surface with
+   it. The cached surface lists the Keeper as a declaration row, so the patch
+   cannot apply: the cache is invalidated and its row is left as it was. *)
+let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  let surface =
+    `Assoc
+      [ "keepers", `List [ declared_keeper_row "imp" ]
+      ; "continuity_briefs", `List []
+      ]
+  in
+  List.iter
+    (fun event ->
+       let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
+       with_cached_surface_success
+         Server_dashboard_http_execution_surfaces.execution_cache
+         surface
+       @@ fun () ->
+       Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
+         ~keeper_name:"imp"
+         ~event;
+       let cache = Server_dashboard_http_execution_surfaces.execution_cache in
+       check bool (label ^ " invalidates the cached surface") false
+         (Server_dashboard_http_cache.cached_surface_has_success cache);
+       let open Yojson.Safe.Util in
+       check bool (label ^ " leaves the declaration row unpatched") true
+         (Yojson.Safe.equal
+            (declared_keeper_row "imp")
+            ((Server_dashboard_http_cache.snapshot cache).json
+             |> member "keepers" |> to_list |> List.hd)))
+    boot_lifecycle_events
+
+(* Route 2: a fresh render whose operator snapshot predates the boot. The
+   Keeper already runs, so the running-keeper reconciliation reaches its row,
+   which is still the declaration row. It stays as the snapshot described it;
+   the boot's own lifecycle event invalidates the published surface. *)
+let test_running_keeper_reconciliation_leaves_a_stale_declaration_row () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-booted-declared-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "continuity-booted-declared-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let surface =
+         `Assoc
+           [ "keepers", `List [ declared_keeper_row keeper_name ]
+           ; "continuity_briefs", `List []
+           ]
+       in
+       check bool
+         "the surface comes back as the snapshot described it"
+         true
+         (Yojson.Safe.equal
+            surface
+            (Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+               config
+               surface)))
 
 let test_composite_preserves_runtime_attempt_scopes () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -4775,22 +4993,15 @@ let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
   in
   raw, Yojson.Safe.from_string body
 
-let post_runtime_assignment ?set_assignment ~state body =
+(* One POST through a handler the route calls after authentication, read back
+   as the status line and the JSON body. *)
+let post_to_handler ~target handle body =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      match set_assignment with
-      | None ->
-        Server_routes_http_routes_dashboard.For_testing.handle_runtime_assignment_post
-          state "dashboard-test" (Httpun.Reqd.request reqd) reqd body
-      | Some set_assignment ->
-        Server_routes_http_routes_dashboard.For_testing
-        .handle_runtime_assignment_post_with
-          ~set_assignment state "dashboard-test" (Httpun.Reqd.request reqd) reqd body)
+      handle (Httpun.Reqd.request reqd) reqd body)
   in
-  let request =
-    "POST /api/v1/runtime/config/assignment HTTP/1.1\r\nHost: x\r\n\r\n"
-  in
+  let request = Printf.sprintf "POST %s HTTP/1.1\r\nHost: x\r\n\r\n" target in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
   ignore
     (Httpun.Server_connection.read_eof connection input ~off:0
@@ -4818,6 +5029,26 @@ let post_runtime_assignment ?set_assignment ~state body =
     | [] -> fail "HTTP response has no body"
   in
   raw, Yojson.Safe.from_string body
+
+let post_runtime_assignment ?set_assignment ~state body =
+  post_to_handler ~target:"/api/v1/runtime/config/assignment"
+    (fun request reqd body ->
+      match set_assignment with
+      | None ->
+        Server_routes_http_routes_dashboard.For_testing.handle_runtime_assignment_post
+          state "dashboard-test" request reqd body
+      | Some set_assignment ->
+        Server_routes_http_routes_dashboard.For_testing
+        .handle_runtime_assignment_post_with
+          ~set_assignment state "dashboard-test" request reqd body)
+    body
+
+let post_runtime_routing ~state body =
+  post_to_handler ~target:"/api/v1/runtime/config/routing"
+    (fun request reqd body ->
+      Server_routes_http_routes_dashboard.For_testing.handle_runtime_routing_post
+        state "dashboard-test" request reqd body)
+    body
 
 let expect_http_status label status raw =
   let prefix = Printf.sprintf "HTTP/1.1 %d" status in
@@ -4987,6 +5218,73 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
+
+(* The routing handler's create, remove and append branches. A created lane
+   lands in runtime.toml; a lane under a runtime id, and a lane the default
+   walks, are refused with 400 and the writer's own sentence; a removed lane
+   leaves the file; an exact-lane append adds its slot once and refuses it the
+   second time; an exact lane the server does not run is refused before any
+   write. *)
+let test_runtime_routing_creates_and_removes_a_lane () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error error -> fail ("runtime init: " ^ error));
+  (* The handler writes the runtime.toml the resolver finds, as the server
+     does; point the resolver at this fixture's. *)
+  with_env "MASC_CONFIG_DIR" (Filename.dirname runtime_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post label status body =
+    let raw, json = post_runtime_routing ~state body in
+    expect_http_status label status raw;
+    json
+  in
+  let refusal json = Yojson.Safe.Util.(json |> member "error" |> to_string) in
+  let in_file text = String_util.contains_substring (read_file runtime_path) text in
+  ignore
+    (post "create" 200
+       {|{"lane":"coding","action":"create","runtime_ids":["test_provider.test_model"]}|});
+  check bool "the created lane is in the file" true (in_file "[runtime.lanes.coding]");
+  check string "a lane under a runtime id is refused"
+    {|"test_provider.test_model" is a runtime id; a new lane needs a name of its own|}
+    (refusal
+       (post "create under a runtime id" 400
+          {|{"lane":"test_provider.test_model","action":"create","runtime_ids":["test_provider.test_model"]}|}));
+  ignore (post "remove" 200 {|{"lane":"coding","action":"remove"}|});
+  check bool "the removed lane left the file" false (in_file "[runtime.lanes.coding]");
+  ignore
+    (post "write the default's lane" 200
+       {|{"lane":"test_provider.test_model","runtime_ids":["test_provider.test_model"]}|});
+  check string "a lane the default walks is refused"
+    {|lane "test_provider.test_model" is in use by [runtime].default, which every keeper without an assignment walks|}
+    (refusal
+       (post "remove the default's lane" 400
+          {|{"lane":"test_provider.test_model","action":"remove"}|}));
+  let append =
+    {|{"lane":"exact/board_attention_exact","action":"append","runtime_id":"test_provider.test_model"}|}
+  in
+  ignore (post "append to an exact lane" 200 append);
+  check bool "the exact lane is in the file" true
+    (in_file "[runtime.exact_output_lanes.board_attention_exact]");
+  check string "a declared slot is refused"
+    "test_provider.test_model is already a slot of board_attention_exact"
+    (refusal (post "append a declared slot" 400 append));
+  check string "an exact lane the server does not run is refused"
+    "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
+     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact)"
+    (refusal
+       (post "append to a misspelled exact lane" 400
+          {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
+  check bool "the misspelled lane left no table" false (in_file "verifer_exact")
 
 let test_direct_assignment_intervening_write_fences_keeper_config_post () =
   with_direct_assignment_model_catalog @@ fun () ->
@@ -6026,6 +6324,15 @@ let () =
             test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick
             test_running_keeper_reconciliation_rebuilds_continuity_brief;
+          test_case "reconciliation skips declaration rows" `Quick
+            test_running_keeper_reconciliation_skips_declaration_rows;
+          test_case "lifecycle patch never patches a declaration row" `Quick
+            test_lifecycle_patch_never_patches_a_declaration_row;
+          test_case "declared keeper's boot event invalidates the execution cache"
+            `Quick
+            test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache;
+          test_case "reconciliation leaves a booted keeper's declaration row" `Quick
+            test_running_keeper_reconciliation_leaves_a_stale_declaration_row;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "success clears the previous error" `Quick
@@ -6044,6 +6351,8 @@ let () =
             test_config_post_rejects_second_writer_with_same_revision;
           test_case "direct assignment stale writer loses without a write" `Quick
             test_direct_assignment_route_rejects_stale_revision_without_write;
+          test_case "routing POST creates and removes a lane" `Quick
+            test_runtime_routing_creates_and_removes_a_lane;
           test_case "direct assignment fences stale Keeper config POST" `Quick
             test_direct_assignment_intervening_write_fences_keeper_config_post;
           test_case "direct assignment response preserves lock warning" `Quick

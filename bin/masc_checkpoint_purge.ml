@@ -20,8 +20,8 @@ let usage =
 Deterministic offline checkpoint purge (RFC-0351 S1). Dry-run by default.
 
 Options:
-  --trace ID               trace/session id (directory under {base}/traces/)
-  --base DIR               masc base dir (default: MASC_BASE_PATH or cwd)
+  --trace ID               trace/session id in the selected cluster runtime root
+  --base DIR               workspace root (default: MASC_BASE_PATH or cwd)
   --apply                  back up, then write the purged checkpoint
   --keep-recent N          protected tail length in messages (default 20)
   --dup-threshold N        duplicate collapse threshold (default 3, >= 2)
@@ -29,8 +29,12 @@ Options:
   --no-clear-tool-results  keep ToolResult payloads
   -h, --help               print this help
 
+The runtime root is the selected cluster under {workspace}/.masc.
+MASC_CLUSTER_NAME selects the cluster. Backups are stored in its runtime root.
+
 --apply requires the keeper to be stopped (masc_keeper_down); a live keeper
-overwrites the purge on its next save.
+overwrites the purge on its next save. A rewrite that changes the History
+endpoint is refused while turn-boundary or Librarian-progress state exists.
 
 Exit codes:
   0  report printed (dry-run) or purge applied
@@ -39,6 +43,7 @@ Exit codes:
 
 module Purge = Masc.Keeper_checkpoint_purge
 module Store = Masc.Keeper_checkpoint_store
+module Boundaries = Masc.Keeper_turn_boundaries
 
 let error msg =
   prerr_endline msg;
@@ -138,16 +143,22 @@ let () =
     | Some _ | None -> error ("--trace is required\n" ^ usage)
   in
   let base_path =
-    match !base with
-    | Some value -> Config_dir_resolver.absolute_path value
-    | None -> Config_dir_resolver.base_path_or_cwd ()
+    (match !base with
+     | Some value ->
+       Masc.Workspace.Explicit (Config_dir_resolver.absolute_path value)
+     | None ->
+       Masc.Workspace.Explicit (Config_dir_resolver.base_path_or_cwd ()))
+    |> Masc.Workspace.runtime_base_path
   in
   (* The save below prunes the session's checkpoint history to the window the
      operator set, and that window lives in this workspace's overrides. Without
      this the purge would answer with the shipped default and trim a history
      the operator asked to keep. *)
   Masc.Runtime_params.restore ~base_path;
-  let session_dir = Filename.concat (Filename.concat base_path "traces") trace in
+  let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+  let runtime_root = Filename.dirname session_store in
+  let session_dir = Filename.concat session_store trace in
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
   let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
   if not (Sys.file_exists checkpoint_path)
   then error ("no canonical checkpoint at " ^ checkpoint_path);
@@ -158,6 +169,32 @@ let () =
     (match Purge.purge ~config:!config checkpoint with
      | Error purge_error -> error (purge_error_text purge_error)
      | Ok (purged, report) ->
+       let librarian_coordinates_present =
+         List.exists
+           Sys.file_exists
+           [ Boundaries.path_for_keepers_dir
+               ~keepers_dir:runtime_keepers_dir
+               ~keeper_id:checkpoint.agent_name
+           ; Masc.Keeper_librarian_progress.path_for_keepers_dir
+               ~keepers_dir:runtime_keepers_dir
+               ~keeper_id:checkpoint.agent_name
+           ]
+       in
+       let rewrite_invalidates_librarian_coordinates =
+         match
+           Purge.rewrite_invalidates_librarian_coordinates
+             ~coordinates_present:librarian_coordinates_present
+             ~before:checkpoint.messages
+             ~after:purged.messages
+         with
+         | Ok invalidates -> invalidates
+         | Error detail -> error ("checkpoint position unavailable: " ^ detail)
+       in
+       if !apply && rewrite_invalidates_librarian_coordinates
+       then
+         error
+           "--apply refused: checkpoint rewrite would invalidate existing \
+            turn-boundary/Librarian-progress coordinates";
        let purged_bytes = Agent_core.Checkpoint.to_string purged in
        let before_len = String.length original_bytes in
        let after_len = String.length purged_bytes in
@@ -192,7 +229,7 @@ let () =
        else (
          let backup_dir =
            Filename.concat
-             base_path
+             runtime_root
              (Printf.sprintf "backups-checkpoint-purge-%s-%s" trace (timestamp_utc ()))
          in
          (match Sys.is_directory backup_dir with

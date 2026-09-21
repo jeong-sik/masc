@@ -506,26 +506,6 @@ module Table = struct
       Dropped_stale stale
   ;;
 
-  type move =
-    | Moved
-    | Not_moved
-    | No_pair_ledger
-
-  (* [move_front] in the body is the ledger function above: this binding is
-     not recursive. *)
-  let move_front ~keeper_name ~runtime_id ~session_id ~first_atom ~front_digest =
-    let key = key ~keeper_name ~runtime_id ~session_id in
-    Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-      match M.find_opt key global.ledgers with
-      | None -> No_pair_ledger
-      | Some t ->
-        (match move_front t ~first_atom ~front_digest with
-         | Some moved ->
-           global.ledgers <- M.add key moved global.ledgers;
-           Moved
-         | None -> Not_moved))
-  ;;
-
   module For_testing = struct
     let reset () =
       Eio.Mutex.use_rw ~protect:true global.mutex (fun () -> global.ledgers <- M.empty)

@@ -143,6 +143,8 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         sandbox_image = p.profile_defaults.sandbox_image;
         network_mode;
         microvm_backend = p.profile_defaults.microvm_backend;
+        microvm_memory = p.profile_defaults.microvm_memory;
+        microvm_cpus = p.profile_defaults.microvm_cpus;
         mention_targets;
         created_at = now_iso ();
         updated_at = now_iso ();

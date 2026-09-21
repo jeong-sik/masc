@@ -1,4 +1,5 @@
 import { h } from 'preact'
+import type { TurnAnchor } from '../keeper-turn-inspector'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
@@ -47,10 +48,10 @@ vi.mock('../../api/board', () => ({
   voteComment: vi.fn().mockResolvedValue(undefined),
   requestBoardContextInference: vi.fn().mockResolvedValue({
     ok: true,
-    requestId: 'kmsg-post-share',
+    operationId: 'kmsg-post-share',
     keeperName: 'sleepers',
     postId: 'post-share',
-    status: 'queued',
+    state: 'queued',
     targetSource: 'explicit_target',
   }),
   toggleReaction: vi.fn().mockResolvedValue({
@@ -102,12 +103,12 @@ vi.mock('./board-state', () => ({
 // without the real KeeperTurnInspector self-fetching turn records. Renders the
 // anchor props as data attributes only when open, mirroring the real testId.
 vi.mock('../keeper-turn-inspector-drawer', () => ({
-  TurnInspectorDrawer: ({ keeperName, initialTurnRef, open, testId }: any) =>
+  TurnInspectorDrawer: ({ keeperName, anchor, open, testId }: { keeperName: string; anchor: TurnAnchor; open: boolean; testId: string }) =>
     open
       ? h('div', {
           'data-testid': `${testId}-drawer`,
           'data-keeper': keeperName,
-          'data-initial-turn-ref': initialTurnRef ?? '',
+          'data-initial-turn-ref': anchor.kind === 'ref' ? anchor.value : '',
         })
       : null,
 }))
@@ -757,7 +758,7 @@ describe('PostDetail', () => {
 
     const drawer = screen.getByTestId('board-post-turn-inspector-drawer')
     // keeperName falls back to post.author when no keeper is resolved in-test;
-    // initialTurnRef is the exact origin turn_ref join key (RFC-0233 §7).
+    // The ref anchor is the exact origin turn_ref join key (RFC-0233 §7).
     expect(drawer.getAttribute('data-keeper')).toBe('sleepers')
     expect(drawer.getAttribute('data-initial-turn-ref')).toBe('trace-x#5')
   })

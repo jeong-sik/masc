@@ -618,8 +618,13 @@ let test_prompt_contains_exact_current_selection () =
     (String_util.contains_substring current_memory "\"memory_id\": \"m2\"");
   check bool "cryptographic identity is not prompt context" false
     (String_util.contains_substring current_memory current_a_id);
-  check bool "presentation timestamp is not prompt context" false
-    (String_util.contains_substring current_memory "first_seen")
+  let first_fact =
+    Yojson.Safe.from_string current_memory |> Yojson.Safe.Util.member "facts"
+    |> Yojson.Safe.Util.to_list |> List.hd |> Yojson.Safe.Util.member "fact"
+  in
+  let fields = Yojson.Safe.Util.to_assoc first_fact in
+  check bool "timing metadata fields are omitted" false
+    (List.mem_assoc "first_seen" fields || List.mem_assoc "last_seen" fields)
 ;;
 
 let test_prompt_carries_keeper_instructions () =
@@ -1303,10 +1308,195 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
         in
         check (list string) "no append errors" []
           (List.map Events.append_error_to_string append_errors);
-        let read_events = Events.read ~keepers_dir ~keeper_id in
+        let read_events =
+          match Events.read ~keepers_dir ~keeper_id with
+          | Ok rows -> rows
+          | Error error -> fail (Events.file_read_error_to_string error)
+        in
         check int "one event read from sidecar" 1 (List.length read_events);
 
         Domain_pool_ref.clear_for_tests ()))
+;;
+
+let test_current_provenance_survives_store_prompt_and_decisions () =
+  let keepers_dir = Filename.temp_dir "librarian-current-provenance-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
+    let keeper_id = "provenance" in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let board =
+      match Memory.board_ref_of_ids ~post_id:"p-0123456789abcdef0123456789abcdef"
+              ~comment_id:(Some "c-0123456789abcdef0123456789abcdef") with
+      | Ok board -> board
+      | Error error -> fail (Memory.wire_error_to_string error)
+    in
+    let primary = { (fact ~claim:"primary approval") with first_seen = 10.; last_seen = 20. } in
+    let secondary = fact ~claim:"secondary approval" in
+    let emergency =
+      { (fact ~claim:"emergency approval") with
+        first_seen = 100.; last_seen = 200.
+      ; origin = { kind = Memory.Authored; trace_id = "trace-explicit" }
+      ; basis = Memory.Observed (Memory.Board board) }
+    in
+    let conclusion =
+      Memory.derived ~claim:"deployment has a supported approval"
+        ~category:Memory.Validated_approach ~now:300.
+        ~origin:{ kind = Memory.Injected; trace_id = "trace-derived" }
+        ~derivations:
+          [ { rule_id = Memory.memory_id primary; premise_ids = [Memory.memory_id primary] }
+          ; { rule_id = "secondary"; premise_ids = [Memory.memory_id secondary] }
+          ; { rule_id = "emergency"; premise_ids = [Memory.memory_id emergency] }
+          ; { rule_id = "confirmed-emergency"; premise_ids = [Memory.memory_id emergency] } ]
+      |> require
+    in
+    let temporary =
+      { (fact ~claim:"temporary queue notice") with
+        first_seen = 250.; last_seen = 250.
+      ; origin = { kind = Memory.Injected; trace_id = "trace-notice" } }
+    in
+    let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+        ~now:300. ~source:{ kind = Current.Explicit_write; trace_id = "trace-seed" }
+        ~facts:[primary; secondary; emergency; conclusion; temporary] () |> require in
+    ignore (Current.replace ~keepers_dir ~keeper_id
+      ~expected_revision:(Some seeded.revision) ~now:400.
+      ~source:{ kind = Current.Explicit_write; trace_id = "trace-retract" }
+      ~facts:[emergency; conclusion; temporary] () |> require : Current.t);
+    let read () =
+      match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+      | Some snapshot -> snapshot
+      | None -> fail "current snapshot disappeared"
+    in
+    let stored = read () in
+    let inp = { (input ()) with current = Some { Librarian.facts = stored.facts } } in
+    let report_input_size scenario facts =
+      let measured = { inp with current = Some { Librarian.facts } } in
+      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables measured) in
+      let rendered = match Runtime.messages_for_librarian measured with
+        | Ok messages -> user_text_of_messages messages
+        | Error detail -> fail detail
+      in
+      Printf.printf "%s\n%!"
+        (Yojson.Safe.to_string (`Assoc
+           [ "scenario", `String scenario; "fact_count", `Int (List.length facts)
+           ; "current_memory_bytes", `Int (String.length current_memory)
+           ; "rendered_user_bytes", `Int (String.length rendered) ]))
+    in
+    report_input_size "one_transcript" [fact ~claim:"Service uses port 8080."];
+    report_input_size "one_board" [emergency];
+    report_input_size "stored_alternative_proofs" stored.facts;
+    report_input_size "one_hundred_transcripts"
+      (List.init 100 (fun index -> fact ~claim:(Printf.sprintf "Service %d uses port 8080." index)));
+    let rows input =
+      List.assoc "current_memory" (Librarian.prompt_variables input)
+      |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "facts"
+      |> Yojson.Safe.Util.to_list
+    in
+    let row_for claim rows =
+      List.find (fun row ->
+        Yojson.Safe.Util.(row |> member "fact" |> member "claim" |> to_string) = claim) rows
+    in
+    let check_projection input expected_premise =
+      let rows = rows input in
+      let emergency_row = row_for emergency.claim rows in
+      let details = Yojson.Safe.Util.member "fact" emergency_row in
+      check bool "origin kind reaches prompt without the opaque trace id" true
+        (Yojson.Safe.Util.member "origin" details = `Assoc ["kind", `String "authored"]);
+      let fields = Yojson.Safe.Util.to_assoc details in
+      check bool "timing metadata fields are omitted" false
+        (List.mem_assoc "first_seen" fields || List.mem_assoc "last_seen" fields);
+      check bool "Board source ids remain available for new claim provenance" true
+        (Yojson.Safe.Util.member "basis" details = Memory.basis_to_json emergency.basis);
+      let source = Yojson.Safe.Util.(details |> member "basis" |> member "board") in
+      let post_id = Yojson.Safe.Util.(source |> member "post_id" |> to_string) in
+      let comment_id = Yojson.Safe.Util.(source |> member "comment_id" |> to_string) in
+      let answer = selection_json ~dropped:[]
+          ~new_claims:[board_claim ~post_id ~comment_id "approval source supports this new claim"] () in
+      (match Librarian.selection_of_json_result ~now:450. input answer with
+       | Ok { new_claims = [claim]; _ } ->
+         check bool "projected Board ids pass the existing new-claim contract" true
+           (claim.basis = emergency.basis)
+       | Ok _ -> fail "expected exactly one new Board claim"
+       | Error error -> fail (Librarian.parse_error_to_string error));
+      let derived = row_for conclusion.claim rows |> Yojson.Safe.Util.member "fact" in
+      check bool "Librarian origin is preserved too" true
+        (Yojson.Safe.Util.member "origin" derived
+         = `Assoc ["kind", `String "injected"]);
+      let basis = Yojson.Safe.Util.member "basis" derived in
+      check string "derived basis remains typed" "derived"
+        Yojson.Safe.Util.(basis |> member "kind" |> to_string);
+      let proofs = Yojson.Safe.Util.(basis |> member "derivations" |> to_list) in
+      check int "only identical premise paths are combined" 3 (List.length proofs);
+      check int "distinct missing premise paths remain separate arrays" 2
+        (List.length (List.filter ((=) (`List [`Null])) proofs));
+      check int "different rules with the same current premise share one array" 1
+        (List.length (List.filter ((=) (`List [`String expected_premise])) proofs));
+      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables input) in
+      (match Runtime.messages_for_librarian input with
+       | Error detail -> fail detail
+       | Ok messages ->
+         let rendered = user_text_of_messages messages in
+         check bool "actual model-input renderer carries the same metadata JSON" true
+           (String_util.contains_substring rendered current_memory);
+         List.iter (fun fact ->
+           check bool "memory identities remain absent from model input" false
+             (String_util.contains_substring rendered (Memory.memory_id fact)))
+           [primary; secondary; emergency; conclusion; temporary]);
+      let temporary_row = row_for temporary.claim rows in
+      check bool "transcript basis remains explicit" true
+        (Yojson.Safe.Util.(temporary_row |> member "fact" |> member "basis")
+         = `Assoc ["kind", `String "observed"]);
+      Yojson.Safe.Util.(temporary_row |> member "memory_id" |> to_string)
+    in
+    let _ = check_projection inp "m1" in
+    let reordered = { inp with current = Some { Librarian.facts = List.rev stored.facts } } in
+    let dropped_token = check_projection reordered "m3" in
+    check string "reordered fact has its new surrogate" "m1" dropped_token;
+    let commit input answer now =
+      let selection =
+        match Librarian.selection_of_json_result ~now input answer with
+        | Ok selection -> selection
+        | Error error -> fail (Librarian.parse_error_to_string error)
+      in
+      Current.apply_disposition ~keepers_dir ~keeper_id ~now
+        ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
+        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
+        ~new_claims:selection.new_claims () |> require
+    in
+    let committed = commit reordered
+        (selection_json ~dropped:[dropped_json ~reason:"temporary notice is no longer useful" dropped_token] ())
+        500. in
+    check (list string) "the selected short id retires only its current fact"
+      [emergency.claim; conclusion.claim] (List.map (fun (fact : Memory.fact) -> fact.claim) committed.facts);
+    let expected = List.map Memory.fact_to_json [emergency; conclusion] in
+    check bool "input projection does not alter retained store provenance" true
+      (List.map Memory.fact_to_json committed.facts = expected);
+    List.iter (fun now ->
+      let current = read () in
+      let next_input = { inp with current = Some { Librarian.facts = current.facts } } in
+      let next = commit next_input (selection_json ~dropped:[] ()) now in
+      check bool "later unchanged decisions preserve all stored provenance" true
+        (List.map Memory.fact_to_json next.facts = expected)) [600.; 700.])
+;;
+
+let test_input_metadata_is_not_accepted_as_claim_output () =
+  let fields =
+    [ "claim", `String "new claim"; "category", `String "fact"
+    ; "board_post_id", `Null; "board_comment_id", `Null
+    ; "supersedes", `Null; "absorbs", `List [] ]
+  in
+  (match parse (selection_json ~new_claims:[`Assoc fields] ~dropped:[] ()) with
+   | Ok _ -> ()
+   | Error error -> fail (Librarian.parse_error_to_string error));
+  List.iter (fun (field, value) ->
+    let claim = `Assoc (fields @ [field, value]) in
+    match parse (selection_json ~new_claims:[claim] ~dropped:[] ()) with
+    | Error (Librarian.Unexpected_field rejected) ->
+      check string "only the input metadata field is rejected" field rejected
+    | Error error -> fail (Librarian.parse_error_to_string error)
+    | Ok _ -> failf "input-only metadata %s was accepted as output" field)
+    [ "origin", `Assoc ["kind", `String "authored"; "trace_id", `String "forged"]
+    ; "first_seen", `Float 1.
+    ; "last_seen", `Float 2.
+    ; "basis", `Assoc ["kind", `String "observed"] ]
 ;;
 
 let () =
@@ -1367,6 +1557,10 @@ let () =
             test_duplicate_object_fields_reject
         ; test_case "removed contract fields reject" `Quick
             test_removed_contract_fields_reject
+        ; test_case "current provenance survives store prompt and decisions" `Quick
+            test_current_provenance_survives_store_prompt_and_decisions
+        ; test_case "input metadata is not accepted as claim output" `Quick
+            test_input_metadata_is_not_accepted_as_claim_output
         ; test_case "prompt carries exact current selection" `Quick
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries Keeper instructions" `Quick

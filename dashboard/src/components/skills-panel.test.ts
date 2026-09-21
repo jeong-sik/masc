@@ -487,6 +487,54 @@ describe('labels', () => {
 })
 
 describe('SkillsPanel rejection observability', () => {
+  it('creates the first Skill from a ready empty catalog through the editor API', async () => {
+    const created = entry('first-skill')
+    editorApiMocks.fetchSkills
+      .mockResolvedValueOnce(decodeSkillsResponse(readyPayload([], [])))
+      .mockResolvedValue(decodeSkillsResponse(readyPayload([created], [instructionSurface(created)])))
+    editorApiMocks.fetchAsyncRequestObservation.mockResolvedValue({
+      schema: 'masc.async-request-observation/v1', status: 'unavailable', error: {}, startup_recovery: null,
+    })
+    const fetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({
+        status: 'ready', sources: [{ source_id: 'workspace' }],
+      }))
+      .mockResolvedValueOnce(Response.json({ status: 'created_and_published' }))
+
+    try {
+      const view = render(html`<${SkillsPanel} />`)
+      await view.findByText('The published snapshot lists no skills.')
+      fireEvent.click(view.getByRole('button', { name: '+ New Skill' }))
+      await view.findByRole('option', { name: 'workspace' })
+      expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/skills/editor/sources', expect.anything())
+
+      fireEvent.input(view.getByPlaceholderText('skill-name'), { target: { value: 'first-skill' } })
+      fireEvent.input(view.getByPlaceholderText('When should an agent use this?'), {
+        target: { value: 'When a task needs a reproducible check.' },
+      })
+      fireEvent.input(view.getByDisplayValue('Write the repeatable procedure and success criteria here.'), {
+        target: { value: 'Run the focused check and keep its receipt.' },
+      })
+      fireEvent.click(view.getByRole('button', { name: 'Create + publish' }))
+
+      await view.findByText('created and published')
+      expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/skills/editor/create', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          source_id: 'workspace',
+          package_id: 'first-skill',
+          source_text: '---\nname: first-skill\ndescription: "When a task needs a reproducible check."\n---\n\n# first-skill\n\nRun the focused check and keep its receipt.\n',
+        }),
+      }))
+      await view.findByRole('button', { name: 'Read instructions for first-skill' })
+      expect(view.queryByText('The published snapshot lists no skills.')).toBeNull()
+      expect(editorApiMocks.fetchSkills).toHaveBeenCalledTimes(2)
+      expect(fetch).toHaveBeenCalledTimes(2)
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
   it('reads exact instructions directly from the catalog row without entering edit mode', async () => {
     editorApiMocks.fetchSkills.mockResolvedValue(decodeSkillsResponse(readyPayload([intake], [instructionSurface(intake)])))
     editorApiMocks.fetchAsyncRequestObservation.mockResolvedValue({

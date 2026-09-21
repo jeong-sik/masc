@@ -111,7 +111,8 @@ let test_sweeper_skips_permanent () =
   let (removed_posts, _) = sweep store in
   Alcotest.(check int) "sweeper removed 0 permanent posts" 0 removed_posts
 
-let test_sweep_reclaims_orphaned_reactions_and_votes () =
+(* A post and its dependent rows leave together, in the pass that expires it. *)
+let test_sweep_removes_the_rows_of_an_expired_target () =
   let store = create_store () in
   let post_id =
     match
@@ -131,20 +132,42 @@ let test_sweep_reclaims_orphaned_reactions_and_votes () =
   (match vote store ~voter:"voter-agent" ~post_id ~direction:Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
-  Alcotest.(check bool) "reaction present before sweep" true
-    (Hashtbl.length store.reactions > 0);
-  Alcotest.(check bool) "vote present before sweep" true
-    (Hashtbl.length store.vote_log > 0);
-  (* Simulate the post already gone — expired and swept in an earlier pass, or
-     reloaded as an orphan on boot.  A per-removal hook could never revisit its
-     reactions/votes because the post is no longer in [store.posts]; the
-     existence-based reclaim in [sweep] must still collect them. *)
+  let post = Hashtbl.find store.posts post_id in
+  Hashtbl.replace store.posts post_id { post with expires_at = 1.0 };
+  let (removed_posts, _) = sweep store in
+  Alcotest.(check int) "the expired post was swept" 1 removed_posts;
+  Alcotest.(check int) "its reaction went with it" 0 (Hashtbl.length store.reactions);
+  Alcotest.(check int) "its vote went with it" 0 (Hashtbl.length store.vote_log)
+
+(* A target that is merely not in memory is not a deleted target. Posts load
+   before votes and reactions, and a failed or partial post load leaves the
+   table empty; reading that as "every vote is orphaned" is what emptied the
+   live board on 2026-09-19, because the next snapshot wrote the pruned
+   tables to disk. *)
+let test_sweep_keeps_rows_whose_target_is_not_loaded () =
+  let store = create_store () in
+  let post_id =
+    match
+      create_post store ~author:"test-agent" ~content:"Post that fails to load"
+        ~post_kind:Human_post ()
+    with
+    | Ok post -> Post_id.to_string post.id
+    | Error e -> Alcotest.fail (show_board_error e)
+  in
+  (match
+     toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
+       ~user_id:"reactor-agent" ~emoji:"👍"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (show_board_error e));
+  (match vote store ~voter:"voter-agent" ~post_id ~direction:Up with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (show_board_error e));
   Hashtbl.remove store.posts post_id;
-  let _ = sweep store in
-  Alcotest.(check int) "orphaned reactions reclaimed" 0
-    (Hashtbl.length store.reactions);
-  Alcotest.(check int) "orphaned votes reclaimed" 0
-    (Hashtbl.length store.vote_log)
+  let (removed_posts, _) = sweep store in
+  Alcotest.(check int) "nothing expired" 0 removed_posts;
+  Alcotest.(check int) "the reaction stayed" 1 (Hashtbl.length store.reactions);
+  Alcotest.(check int) "the vote stayed" 1 (Hashtbl.length store.vote_log)
 
 (* A reply the sweeper removes leaves the post's reply count with it, so a
    listing never announces a reply no read can return. *)
@@ -316,9 +339,12 @@ let () =
             (with_eio test_expiring_post);
           Alcotest.test_case "sweeper skips permanent" `Quick
             (with_eio test_sweeper_skips_permanent);
-          Alcotest.test_case "sweep reclaims orphaned reactions and votes"
+          Alcotest.test_case "sweep removes the rows of an expired target"
             `Quick
-            (with_eio test_sweep_reclaims_orphaned_reactions_and_votes);
+            (with_eio test_sweep_removes_the_rows_of_an_expired_target);
+          Alcotest.test_case "sweep keeps rows whose target is not loaded"
+            `Quick
+            (with_eio test_sweep_keeps_rows_whose_target_is_not_loaded);
           Alcotest.test_case "sweep takes an expired reply out of the post count"
             `Quick
             (with_eio test_sweep_takes_an_expired_reply_out_of_the_post_count);

@@ -126,43 +126,65 @@ let rec forget_microvm_work_root container_name =
   then forget_microvm_work_root container_name
 ;;
 
-(* The proxy port each policy guest was booted against.
+(* What each guest this process booted was booted with.
 
-   A [Network_policy] guest carries its one route in its environment, and the
-   lane's listener takes an ephemeral port. The two have different lifetimes:
-   the guest is keeper-lifetime, the port belongs to the lane fiber. When the
-   lane rebinds -- its fiber died and respawned, or the lane restarted in
-   place -- the port moves and the still-running guest keeps CONNECTing to a
-   port nothing holds. Nothing refuses it: the guest's traffic fails at the
-   socket, so a cut-off keeper looks idle.
+   Adopt matches a guest by name, and the name carries only the keeper, the
+   network mode and the base path. Three things the guest was given at boot
+   are not in it, and each can change while the guest keeps running:
 
-   The guest's name cannot carry the port. A name is durable and a port is
-   not, and pinning one to the other would boot a fresh VM on every rebind.
-   So it is recorded here and compared at adopt, and a guest booted against a
-   port this process no longer holds is replaced rather than adopted.
+   - The proxy port a [Network_policy] guest carries in its environment. The
+     lane's listener takes an ephemeral port and the guest is keeper-lifetime,
+     so when the lane rebinds -- its fiber died and respawned, or the lane
+     restarted in place -- the still-running guest keeps CONNECTing to a port
+     nothing holds. Nothing refuses it: the traffic fails at the socket, so a
+     cut-off keeper looks idle.
+   - The image. A keeper whose [sandbox_image] changed would keep running on
+     the old one until the server restarted.
+   - The size. A keeper whose guest was raised from 2 GiB because its builds
+     were killed would keep building in 2 GiB.
 
-   Across a server restart the port is unknowable, but so is the identity
-   snapshot: [bind_registered_microvm_identity] finds nothing and the guest
-   is already replaced on that account. This table therefore only has to
-   answer for guests booted by the process asking. *)
-let microvm_policy_ports : (string * int) list Atomic.t = Atomic.make []
+   None of the three belongs in the name. A name is durable and a port is not,
+   so pinning one to the other would boot a fresh VM on every rebind; and
+   teardown finds a keeper's guests by deriving their names from the network
+   modes, which it cannot do for an image or a size it was never told. So the
+   boot is recorded here and compared at adopt, and a guest whose record is
+   missing or differs from what the keeper asks for now is replaced rather
+   than adopted.
 
-let microvm_policy_port container_name =
-  Atomic.get microvm_policy_ports |> List.assoc_opt container_name
+   Across a server restart none of this is knowable, but neither is the
+   identity snapshot: [bind_registered_microvm_identity] finds nothing and the
+   guest is already replaced on that account. This table therefore only has
+   to answer for guests booted by the process asking.
+
+   What it compares is what this process asked for, not what the guest got.
+   [container list --format json] reports a running guest's [resources.cpus],
+   [resources.memoryInBytes] and [image.reference], so the size axis could
+   read the fact instead of the memory; the other two backends answer inspect
+   in their own shapes and are unmeasured. #36993 carries that. *)
+type microvm_boot =
+  { policy_port : int option
+  ; image : string
+  ; guest_size : Keeper_microvm_guest_size.t
+  }
+
+let microvm_boots : (string * microvm_boot) list Atomic.t = Atomic.make []
+
+let microvm_boot container_name =
+  Atomic.get microvm_boots |> List.assoc_opt container_name
 ;;
 
-let rec record_microvm_policy_port container_name port =
-  let current = Atomic.get microvm_policy_ports in
-  let updated = (container_name, port) :: List.remove_assoc container_name current in
-  if not (Atomic.compare_and_set microvm_policy_ports current updated)
-  then record_microvm_policy_port container_name port
+let rec record_microvm_boot container_name boot =
+  let current = Atomic.get microvm_boots in
+  let updated = (container_name, boot) :: List.remove_assoc container_name current in
+  if not (Atomic.compare_and_set microvm_boots current updated)
+  then record_microvm_boot container_name boot
 ;;
 
-let rec forget_microvm_policy_port container_name =
-  let current = Atomic.get microvm_policy_ports in
+let rec forget_microvm_boot container_name =
+  let current = Atomic.get microvm_boots in
   let updated = List.remove_assoc container_name current in
-  if not (Atomic.compare_and_set microvm_policy_ports current updated)
-  then forget_microvm_policy_port container_name
+  if not (Atomic.compare_and_set microvm_boots current updated)
+  then forget_microvm_boot container_name
 ;;
 
 (* Whether an adoptable policy guest still points at a live listener.
@@ -178,6 +200,97 @@ let policy_route_holds ~network_mode ~booted_port ~bound_port =
      (* No record means this process did not boot it, and no bound port means
         there is nothing to point at. Neither is adoptable. *)
      | None, _ | _, None -> false)
+;;
+
+type microvm_replacement_reason =
+  | Boot_not_recorded
+  | Image_changed of
+      { booted : string
+      ; target : string
+      }
+  | Memory_changed of
+      { booted : Keeper_microvm_guest_size.memory
+      ; target : Keeper_microvm_guest_size.memory
+      }
+  | Cpus_changed of
+      { booted : Keeper_microvm_guest_size.cpus
+      ; target : Keeper_microvm_guest_size.cpus
+      }
+  | Policy_route_stale of
+      { booted_port : int option
+      ; bound_port : int option
+      }
+
+type microvm_adoption =
+  | Adopt_running_guest
+  | Replace_running_guest of microvm_replacement_reason list
+      (** Never empty: every reason the guest may not be adopted. *)
+
+(* A running guest whose identity snapshot this process holds may be adopted
+   when it was booted with what the keeper asks for now. Every difference is
+   named, not only the first, so the log line that replaces a guest says all
+   of what changed. *)
+let microvm_adoption
+      ~booted
+      ~image
+      ~(guest_size : Keeper_microvm_guest_size.t)
+      ~network_mode
+      ~bound_port
+  =
+  match booted with
+  | None -> Replace_running_guest [ Boot_not_recorded ]
+  | Some (booted : microvm_boot) ->
+    let differs changed reason = if changed then Some reason else None in
+    let booted_size = booted.guest_size in
+    let reasons =
+      List.filter_map
+        Fun.id
+        [ differs
+            (not (String.equal booted.image image))
+            (Image_changed { booted = booted.image; target = image })
+        ; differs
+            (not
+               (Int.equal
+                  (Keeper_microvm_guest_size.memory_mib booted_size.memory)
+                  (Keeper_microvm_guest_size.memory_mib guest_size.memory)))
+            (Memory_changed { booted = booted_size.memory; target = guest_size.memory })
+        ; differs
+            (not
+               (Int.equal
+                  (Keeper_microvm_guest_size.cpus_count booted_size.cpus)
+                  (Keeper_microvm_guest_size.cpus_count guest_size.cpus)))
+            (Cpus_changed { booted = booted_size.cpus; target = guest_size.cpus })
+        ; differs
+            (not
+               (policy_route_holds
+                  ~network_mode
+                  ~booted_port:booted.policy_port
+                  ~bound_port))
+            (Policy_route_stale { booted_port = booted.policy_port; bound_port })
+        ]
+    in
+    (match reasons with
+     | [] -> Adopt_running_guest
+     | _ :: _ -> Replace_running_guest reasons)
+;;
+
+let microvm_replacement_reason_to_string reason =
+  let port = Option.fold ~none:"none" ~some:string_of_int in
+  match reason with
+  | Boot_not_recorded -> "this process has no record of booting it"
+  | Image_changed { booted; target } -> Printf.sprintf "image %s -> %s" booted target
+  | Memory_changed { booted; target } ->
+    Printf.sprintf
+      "memory %s -> %s"
+      (Keeper_microvm_guest_size.memory_argv booted)
+      (Keeper_microvm_guest_size.memory_argv target)
+  | Cpus_changed { booted; target } ->
+    Printf.sprintf
+      "cpus %d -> %d"
+      (Keeper_microvm_guest_size.cpus_count booted)
+      (Keeper_microvm_guest_size.cpus_count target)
+  | Policy_route_stale { booted_port; bound_port } ->
+    Printf.sprintf "policy proxy port %s -> %s" (port booted_port) (port bound_port)
 ;;
 
 type t =
@@ -311,6 +424,7 @@ module For_testing = struct
 
   let keeper_docker_container_name = keeper_docker_container_name
   let policy_route_holds = policy_route_holds
+  let microvm_adoption = microvm_adoption
 end
 
 
@@ -798,13 +912,6 @@ let keeper_vm_name (t : t) =
     ~network_mode:t.network_mode
 ;;
 
-let policy_route_still_holds (t : t) container_name =
-  policy_route_holds
-    ~network_mode:t.network_mode
-    ~booted_port:(microvm_policy_port container_name)
-    ~bound_port:(bound_egress_proxy_port t)
-;;
-
 let bind_registered_microvm_identity t container_name =
   match microvm_identity_snapshot container_name with
   | None -> None
@@ -830,7 +937,7 @@ let stop_and_delete_microvm_container ?timeout_sec ~backend container_name =
   match probe_microvm_container_state ?timeout_sec ~backend container_name with
   | Ok Keeper_sandbox_runtime.Docker_container_absent ->
     forget_microvm_work_root container_name;
-    forget_microvm_policy_port container_name;
+    forget_microvm_boot container_name;
     Ok ()
   | Ok Keeper_sandbox_runtime.Docker_container_running
   | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
@@ -1038,9 +1145,14 @@ type microvm_start_failure =
   | Backend_unresolved of string
   | Image_not_configured
   | Guest_state_unreadable of string
+  | Guest_size_invalid of string
+      (** Neither the keeper nor the workspace names a size that parses, so
+          there is nothing to boot the guest with or compare a running one
+          against. *)
   | Unadoptable_guest_not_removed of string
       (** A running guest that may not be adopted -- its snapshot died with
-          an older server, or its proxy port moved -- and would not go. *)
+          an older server, or its image, size or proxy port is not what the
+          keeper asks for now -- and would not go. *)
   | Adopted_guest_volume_unverified of string
   | Guest_provisions_unavailable of string
   | Github_identity_invalid of string
@@ -1078,6 +1190,7 @@ let microvm_start_failure_message failure =
   | Policy_network_unavailable detail
   | Network_unexpressible detail -> failed detail
   | Image_not_configured -> failed "keeper sandbox docker image is not configured"
+  | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
   | Unadoptable_guest_not_removed detail ->
     failed ("a running guest that cannot be adopted was not removed: " ^ detail)
   | Github_identity_invalid detail -> failed ("github_identity_invalid: " ^ detail)
@@ -1109,6 +1222,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
   if String.trim image = ""
   then Error Image_not_configured
   else (
+    (* Resolved before anything is probed or removed: a running guest is
+       compared against this size, and a fresh one boots with it. *)
+    match
+      Env_config_sandbox.Runtime.microvm_guest_size
+        ~memory:t.meta.microvm_memory
+        ~cpus:t.meta.microvm_cpus
+    with
+    | Error detail -> Error (Guest_size_invalid detail)
+    | Ok guest_size ->
     let container_name = keeper_vm_name t in
     let adopt snapshot =
       bind_github_identity_snapshot t snapshot;
@@ -1151,18 +1273,34 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
       with
       | Ok Keeper_sandbox_runtime.Docker_container_running ->
         (match bind_registered_microvm_identity t container_name with
-         | Some snapshot when policy_route_still_holds t container_name ->
-           `Adopt snapshot
-         | Some _ ->
-           (* Booted against a port this process no longer holds. The guest
-              is intact and its snapshot is ours, but its one route is dead,
-              so adopting it hands the keeper a network that fails at the
-              socket with nothing said. Replace it. *)
+         | Some snapshot ->
            (match
-              stop_and_delete_microvm_container ?timeout_sec ~backend container_name
+              microvm_adoption
+                ~booted:(microvm_boot container_name)
+                ~image
+                ~guest_size
+                ~network_mode:t.network_mode
+                ~bound_port:(bound_egress_proxy_port t)
             with
-            | Ok () -> `Boot
-            | Error detail -> `Error (Unadoptable_guest_not_removed detail))
+            | Adopt_running_guest -> `Adopt snapshot
+            | Replace_running_guest reasons ->
+              (* The guest is intact and its snapshot is ours, but it was not
+                 booted with what the keeper asks for now: its one route
+                 points at a port this process no longer holds, or it runs
+                 another image or size. Adopting it keeps the keeper on the
+                 old one with nothing said. Replace it. *)
+              Log.Keeper.info
+                "microvm guest replaced instead of adopted keeper=%s name=%s: %s"
+                t.meta.name
+                container_name
+                (String.concat
+                   "; "
+                   (List.map microvm_replacement_reason_to_string reasons));
+              (match
+                 stop_and_delete_microvm_container ?timeout_sec ~backend container_name
+               with
+               | Ok () -> `Boot
+               | Error detail -> `Error (Unadoptable_guest_not_removed detail)))
          | None ->
            (* A guest from an older server process can still be running, but
               its temp snapshot capability died with that process. It is not
@@ -1206,6 +1344,11 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           ?timeout_sec
           (Keeper_sandbox_microvm.delete_force_argv_for backend ~container_name)
       in
+      (* No guest runs under the name here, so a record still held for it
+         describes one that stopped or vanished without passing through
+         [stop_and_delete_microvm_container]. Dropped before the boot: only
+         this boot's own success writes the name's record again. *)
+      forget_microvm_boot container_name;
       let image_timeout =
         match timeout_sec with
         | Some sec -> sec
@@ -1305,14 +1448,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                   ())
              ~uid:t.uid
              ~gid:t.gid
-             ~memory:
-               (match Env_config_sandbox.Runtime.microvm_memory () with
-                | "" -> Env_config_sandbox.Hardening.memory ()
-                | sized -> sized)
-             ~cpus:
-               (match Env_config_sandbox.Runtime.microvm_cpus () with
-                | "" -> None
-                | count -> Some count)
+             ~guest_size
              ~network_args
              (* Config and the GitHub identity. Config has no cleanup, so it
                 travels as-is. The identity does: the Docker lane runs that
@@ -1347,6 +1483,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          (match argv_result with
           | Error refusals -> Error (Constraints_unexpressible { backend; refusals })
           | Ok argv ->
+         let booted =
+           { policy_port =
+               Option.map
+                 (fun (proxy : Keeper_sandbox_microvm.policy_proxy) -> proxy.port)
+                 policy_proxy
+           ; image
+           ; guest_size
+           }
+         in
          let st, out = run_argv_with_status ?timeout_sec argv in
          (* A guest that came up but cannot be seen, or cannot hold the
             keeper's root on its volume, is taken down again: the remote
@@ -1372,6 +1517,14 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          in
          (match st with
           | Unix.WEXITED 0 ->
+            (* Recorded as soon as the runtime says the guest booted, before
+               anything below can fail. Every later failure either takes the
+               guest down, which forgets the record with it, or leaves the
+               guest running; a running guest this process booted with no
+               record would be replaced on every start instead of adopted --
+               including the one [microvm_remote_endpoint] exists to adopt,
+               whose [mkdir] failed and whose take-down failed too. *)
+            record_microvm_boot container_name booted;
             (match
                inspect_container_exists
                  ?timeout_sec
@@ -1388,15 +1541,6 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                 with
                 | Ok () ->
                   mark_microvm_work_root_ready container_name;
-                  (* The port this guest's environment now names. Recorded
-                     only on a boot that succeeded, so a failed start leaves
-                     no claim on the name. The race-loser path below does not
-                     record: that guest is the winner's, and the winner's
-                     port is the one in it. *)
-                  Option.iter
-                    (fun (proxy : Keeper_sandbox_microvm.policy_proxy) ->
-                       record_microvm_policy_port container_name proxy.port)
-                    policy_proxy;
                   adopt github_identity
                 | Error detail ->
                   take_down_after_boot
@@ -1417,6 +1561,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                  container_name
              with
              | Ok Keeper_sandbox_runtime.Docker_container_running ->
+               (* No boot is recorded for this guest. [booted] is what this
+                  call asked for, and the run that booted the guest may be
+                  another one: an earlier start whose run timed out before
+                  its guest came up, from a TOML that has changed since, or
+                  a start in another server process. Nothing here tells those
+                  apart from this call's own run failing while its guest came
+                  up. The name's record was dropped before this boot, so the
+                  next start finds none and replaces the guest rather than
+                  adopting an image or size nobody can vouch for. *)
                (* The stable-name race adopted the snapshot claimed before
                   either launch. Both launch argv values therefore point at
                   the same immutable directory.

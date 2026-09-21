@@ -45,6 +45,9 @@ module For_testing : sig
   (** Codec for the durable [ROWID] cursor. A malformed file is an error, not a
       silent restart from zero — that would redeliver the whole history. *)
 
+  val read_cursor : unit -> (int, string) result
+  (** Read the configured cursor through the same boundary used at startup. *)
+
   val conversation_id : chat_identifier:string -> string
 
   val inbound_message_of_row :

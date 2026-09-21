@@ -317,6 +317,7 @@ module Make (Payload : Payload) = struct
            | Durable_jsonl_append_failed { rollback_failures = _ :: _; _ } ->
              Durability_unknown
            | Incomplete_jsonl_tail
+           | Incomplete_jsonl_tail_truncate_failed _
            | Invalid_jsonl_suffix
            | Negative_expected_end_offset _
            | End_offset_mismatch _
@@ -338,6 +339,7 @@ module Make (Payload : Payload) = struct
            | Durable_jsonl_append_failed { rollback_failures = _ :: _; _ } ->
              Durability_unknown
            | Incomplete_jsonl_tail
+           | Incomplete_jsonl_tail_truncate_failed _
            | Invalid_jsonl_suffix
            | Negative_expected_end_offset _
            | End_offset_mismatch _

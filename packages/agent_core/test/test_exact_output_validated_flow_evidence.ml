@@ -69,7 +69,7 @@ let with_catalog ~base_url f =
     { source = "validated-flow-evidence-test"; contents }
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay document) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement document) () with
   | Ok snapshot -> f snapshot
   | Error _ -> fail "evidence catalog did not load"
 ;;
@@ -334,12 +334,10 @@ let test_projection_failure_is_typed_and_short_circuits_acceptance () =
      | Ok _ | Error _ -> fail "projection failure lost its typed ordinal and cause")
 ;;
 
-(* A quota refusal now advances the lane, so it also reaches durable evidence
-   as its own wire form. Folded into [completion_failed_before_dispatch] the
-   transcript would claim the request never left, while the receipt records one
-   dispatch and a 429 response — an internally inconsistent transcript that
-   validation rejects. *)
-let with_rate_limited_first_server f =
+(* A response refusal must retain the dispatch and status when it advances.
+   Calling it [completion_failed_before_dispatch] would claim the request
+   never left and produce an internally inconsistent durable transcript. *)
+let with_refusal_first_server ~http_status f =
   let posts = Atomic.make 0 in
   let result =
     Eio_main.run
@@ -355,8 +353,8 @@ let with_rate_limited_first_server f =
       if index = 0
       then
         Cohttp_eio.Server.respond_string
-          ~status:(Cohttp.Code.status_of_code 429)
-          ~body:{|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|}
+          ~status:(Cohttp.Code.status_of_code http_status)
+          ~body:{|{"error":"provider unavailable"}|}
           ()
       else
         Cohttp_eio.Server.respond_string
@@ -380,9 +378,9 @@ let with_rate_limited_first_server f =
   result, Atomic.get posts
 ;;
 
-let test_rate_limited_advance_survives_the_durable_round_trip () =
+let test_refusal_advance_survives_the_durable_round_trip ~http_status ~kind () =
   let result, posts =
-    with_rate_limited_first_server
+    with_refusal_first_server ~http_status
     @@ fun ~net ~clock ~base_url ->
     with_catalog ~base_url
     @@ fun snapshot ->
@@ -398,7 +396,7 @@ let test_rate_limited_advance_survives_the_durable_round_trip () =
   in
   check int "the refused candidate and its successor each dispatch once" 2 posts;
   match result with
-  | Error _ -> fail "the rate-limited candidate did not advance to its successor"
+  | Error _ -> fail "the refused candidate did not advance to its successor"
   | Ok success ->
     check string "successor accepted" "evidence-c" success.accepted;
     let accepted_calls = ref 0 in
@@ -406,30 +404,67 @@ let test_rate_limited_advance_survives_the_durable_round_trip () =
     let durable =
       match snapshot success ~accepted_calls ~rejection_calls with
       | Ok durable -> durable
-      | Error _ -> fail "a rate-limited advance did not produce durable evidence"
+      | Error _ -> fail "the refusal advance did not produce durable evidence"
     in
     let encoded = EO.validated_flow_evidence_to_string durable in
-    let contains needle =
-      let n = String.length needle in
-      let rec scan i =
-        i + n <= String.length encoded
-        && (String.equal (String.sub encoded i n) needle || scan (i + 1))
-      in
-      scan 0
+    let document = Yojson.Safe.from_string encoded in
+    let open Yojson.Safe.Util in
+    let is_refusal step =
+      match step |> member "outcome" |> member "failure" with
+      | `Assoc fields -> List.assoc_opt "kind" fields = Some (`String kind)
+      | `Null -> false
+      | _ -> fail "expected typed failure object"
     in
-    check bool "the advance names the refusal" true (contains {|"rate_limited"|});
-    check bool "the advance carries the status" true (contains {|"http_status":429|});
+    let refused_step =
+      document |> member "steps" |> to_list |> List.filter is_refusal
+      |> function [ step ] -> step | _ -> fail "expected one typed refusal advance"
+    in
+    check int "the advance carries the status" http_status
+      (refused_step |> member "outcome" |> member "failure" |> member "http_status" |> to_int);
     (match EO.validated_flow_evidence_of_string encoded with
      | Ok decoded ->
        check
          string
-         "the rate-limited transcript decodes to the same digest"
+         "the refusal transcript decodes to the same digest"
          (EO.validated_flow_evidence_sha256 durable)
          (EO.validated_flow_evidence_sha256 decoded)
      | Error error ->
        failf
-         "a rate-limited transcript did not decode: %s"
-         (EO.validated_flow_evidence_decode_error_to_string error))
+         "the refusal transcript did not decode: %s"
+         (EO.validated_flow_evidence_decode_error_to_string error));
+    let replace_field key replacement = function
+      | `Assoc fields ->
+        `Assoc (List.map (fun (name, value) ->
+          name, if String.equal name key then replacement else value) fields)
+      | _ -> fail "expected evidence object"
+    in
+    List.iter (fun (label, field, value) ->
+      let invalid_step = replace_field "attempt"
+          (replace_field field value (member "attempt" refused_step)) refused_step in
+      let invalid = replace_field "steps"
+          (`List (document |> member "steps" |> to_list
+            |> List.map (fun step -> if is_refusal step then invalid_step else step))) document
+        |> recompute_integrity |> Yojson.Safe.to_string in
+      match EO.validated_flow_evidence_of_string invalid with
+      | Error _ -> ()
+      | Ok _ -> fail ("accepted invalid refusal receipt: " ^ label))
+      [ "status mismatch", "http_status", `Int 200
+      ; "no dispatch", "dispatch_count", `Int 0
+      ; "missing provider trace", "provider_trace_sha256", `Null
+      ; "missing response body", "raw_response_sha256", `Null ];
+    let outcome = member "outcome" refused_step in
+    let wrong_kind = if String.equal kind "overloaded" then "server_error" else "overloaded" in
+    let invalid_step = replace_field "outcome"
+        (replace_field "failure"
+          (replace_field "kind" (`String wrong_kind) (member "failure" outcome)) outcome)
+        refused_step in
+    let invalid = replace_field "steps"
+        (`List (document |> member "steps" |> to_list
+          |> List.map (fun step -> if is_refusal step then invalid_step else step))) document
+      |> recompute_integrity |> Yojson.Safe.to_string in
+    match EO.validated_flow_evidence_of_string invalid with
+    | Error _ -> ()
+    | Ok _ -> fail "accepted a refusal kind inconsistent with its HTTP status"
 ;;
 
 let () =
@@ -443,7 +478,20 @@ let () =
         ; test_case
             "rate-limited advance round trip"
             `Quick
-            test_rate_limited_advance_survives_the_durable_round_trip
+            (test_refusal_advance_survives_the_durable_round_trip
+               ~http_status:429 ~kind:"rate_limited")
+        ; test_case "server error 500 advance round trip" `Quick
+            (test_refusal_advance_survives_the_durable_round_trip
+               ~http_status:500 ~kind:"server_error")
+        ; test_case "server error 503 advance round trip" `Quick
+            (test_refusal_advance_survives_the_durable_round_trip
+               ~http_status:503 ~kind:"server_error")
+        ; test_case "server error 520 advance round trip" `Quick
+            (test_refusal_advance_survives_the_durable_round_trip
+               ~http_status:520 ~kind:"server_error")
+        ; test_case "overload 529 advance round trip" `Quick
+            (test_refusal_advance_survives_the_durable_round_trip
+               ~http_status:529 ~kind:"overloaded")
         ; test_case
             "typed projection failure"
             `Quick

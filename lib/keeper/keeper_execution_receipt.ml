@@ -3,23 +3,6 @@
 include Keeper_execution_receipt_types
 
 
-let runtime_rotation_attempt_to_json attempt =
-  `Assoc
-    [ "from_runtime", `String (attempt.from_runtime)
-    ; "to_runtime", `String (attempt.to_runtime)
-    ; ( "reason"
-      , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
-    ; "outcome", `String (runtime_rotation_outcome_to_string attempt.outcome)
-    ; ( "productive_phase_elapsed_ms"
-      , Json_util.int_opt_to_json attempt.productive_phase_elapsed_ms )
-    ; ( "retry_phase_elapsed_ms"
-      , Json_util.int_opt_to_json attempt.retry_phase_elapsed_ms )
-    ; "error_kind", string_opt_json (Option.map error_kind_to_string attempt.error_kind)
-    ; "error_message", string_opt_json attempt.error_message
-    ; "recorded_at", `String attempt.recorded_at
-    ]
-;;
-
 let receipt_duration_ms receipt =
   match
     ( Masc_domain.parse_iso8601_opt receipt.started_at
@@ -157,6 +140,14 @@ let operator_disposition (receipt : t)
     | Keeper_terminal_reason.Config_or_auth _ -> true
     | _ -> false
   in
+  (* Either half puts this turn on a degraded-retry lane: it dispatched on a
+     lane an earlier turn deferred to, or it deferred one itself. The
+     disposition is the same for both; only the receipt's label distinguishes
+     which happened. *)
+  let degraded_retry_on_the_receipt =
+    Option.is_some receipt.degraded_retry_applied
+    || Option.is_some receipt.degraded_retry_deferred
+  in
   (* Pre-typing, this branch also matched runtime_outcome="runtime_exhausted"
      and "exhausted" — neither is in the producer's closed [runtime_outcome]
      set ([Runtime_passed_to_next_model] / [_completed] / [_failed] /
@@ -206,10 +197,7 @@ let operator_disposition (receipt : t)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
   | _ when preflight_config_failure ->
     Disp_operator_action_required, Reason_preflight_config_error
-  | _
-    when provider_runtime_failure
-         && (receipt.degraded_retry_applied
-             || Option.is_some receipt.degraded_retry_runtime) ->
+  | _ when provider_runtime_failure && degraded_retry_on_the_receipt ->
     Disp_fail_open_next_runtime, Reason_degraded_retry
   | _
     when provider_runtime_failure
@@ -245,7 +233,7 @@ let operator_disposition (receipt : t)
        [Unknown] reach here in practice;
        [Config_or_auth] and [Provider_runtime_failure] are listed to keep the
        match exhaustive without a wildcard. *)
-    if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+    if degraded_retry_on_the_receipt
     then Disp_fail_open_next_runtime, Reason_degraded_retry
     else if
       receipt.runtime_fallback_applied
@@ -433,21 +421,8 @@ let to_json_with_operator_disposition
           ; "fallback_applied", `Bool receipt.runtime_fallback_applied
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
           ; "agent_core_internal_runtime_allowed", `Bool receipt.agent_core_internal_runtime_allowed
-          ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
-          ; ( "degraded_retry_runtime"
-            , match receipt.degraded_retry_runtime with
-              | Some value -> `String (value)
-              | None -> `Null )
-          ; ( "fallback_reason"
-            , match receipt.fallback_reason with
-              | Some value ->
-                `String (Keeper_error_classify.degraded_retry_reason_to_string value)
-              | None -> `Null )
-          ; ( "rotation_attempts"
-            , `List
-                (List.map
-                   runtime_rotation_attempt_to_json
-                   receipt.runtime_rotation_attempts) )
+          ; "degraded_retry_applied", degraded_retry_json receipt.degraded_retry_applied
+          ; "degraded_retry_deferred", degraded_retry_json receipt.degraded_retry_deferred
           ] )
     ; ( "stop_reason"
       , match receipt.stop_reason with

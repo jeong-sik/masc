@@ -111,7 +111,15 @@ let roundtrip_corpus =
     (* config/auth preflight (ranked above provider) *)
   ; "config_error"
   ; "api_error_auth"
+    (* The wire the fleet actually sends. Every authorization refusal in the
+       live receipts arrives as this spelling — 852 of the 2,419 turns the
+       operator-action bucket held between 08-22 and 09-21, against 0 for
+       [api_error_auth]. The corpus covered the spelling that never happens
+       and missed the one that always does, so the equivalence matrix never
+       compared the two classifiers on it. *)
+  ; "api_error_authorization"
   ; "provider_error_auth"
+  ; "provider_error_authorization"
   ; "provider_error_auth:legacy-payload"
   ; "provider_error_invalid_config:field_x"
     (* provider family *)

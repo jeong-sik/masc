@@ -218,6 +218,7 @@ type error =
       { method_ : string
       ; code : int option
       ; message : string
+      ; data : Yojson.Safe.t option
       }
   | Subscription_required of string
   | Unsupported_server_request of string
@@ -267,13 +268,34 @@ let permissions_profile_of_posture = function
          "Codex cannot disable its built-in tools; use native read or full")
 ;;
 
+type input_capacity = { actual_chars : int; max_chars : int }
+
+(* Codex app-server reports this typed data independently of its human message:
+   openai/codex 8f2c15c39871c0698cd76a22ae239d36f7e8c9b8,
+   codex-rs/app-server/src/request_processors/turn_processor.rs, input_too_large_error.
+   A generic invalid-params error never authorizes shrinking conversation input. *)
+let input_capacity_refusal = function
+  | Rpc_error { method_ = "turn/start"; code = Some (-32602);
+                data = Some (`Assoc fields); _ } ->
+    let unique key =
+      match List.filter (fun (name, _) -> String.equal name key) fields with
+      | [(_, value)] -> Some value
+      | _ -> None
+    in
+    (match unique "input_error_code", unique "actual_chars", unique "max_chars" with
+     | Some (`String "input_too_large"), Some (`Int actual_chars), Some (`Int max_chars)
+       when max_chars > 0 && actual_chars > max_chars -> Some {actual_chars; max_chars}
+     | _ -> None)
+  | _ -> None
+;;
+
 let error_to_string = function
   | Invalid_config detail -> "invalid Codex app-server config: " ^ detail
   | Spawn_failed detail -> "failed to start Codex app-server: " ^ detail
   | Turn_input_write_failed detail -> "Codex turn/start input write failed: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Codex app-server protocol error during %s: %s" stage detail
-  | Rpc_error { method_; code; message } ->
+  | Rpc_error { method_; code; message; _ } ->
     let code = Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code in
     Printf.sprintf "Codex app-server RPC %s failed%s: %s" method_ code message
   | Subscription_required detail ->
@@ -393,6 +415,7 @@ type wire_message =
       { id : int
       ; code : int option
       ; message : string
+      ; data : Yojson.Safe.t option
       }
   | Notification of
       { method_ : string
@@ -410,7 +433,8 @@ let parse_rpc_error id fields =
   let* error_fields = assoc_at stage error_json in
   let* message = required_string stage "message" error_fields in
   let* code = required_int stage "code" error_fields in
-  Ok (Response_error { id; code = Some code; message })
+  let data = List.assoc_opt "data" error_fields in
+  Ok (Response_error { id; code = Some code; message; data })
 ;;
 
 let parse_wire_line line =
@@ -570,8 +594,8 @@ let rec await_response io ~id ~method_ =
   | Response { id = response_id; _ } ->
     protocol_error method_
       (Printf.sprintf "received response id %d while waiting for %d" response_id id)
-  | Response_error { id = response_id; code; message } when response_id = id ->
-    Error (Rpc_error { method_; code; message })
+  | Response_error { id = response_id; code; message; data } when response_id = id ->
+    Error (Rpc_error { method_; code; message; data })
   | Response_error { id = response_id; _ } ->
     protocol_error method_
       (Printf.sprintf "received error response id %d while waiting for %d" response_id id)

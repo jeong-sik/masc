@@ -271,7 +271,11 @@ missing_refs=()
 for file in "${docs_to_scan[@]}"; do
   rg_or_empty '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file"
   links="$(printf '%s\n' "$RG_OUT" | sed 's/^('// | sed 's/)$//')"
-  rg_or_empty '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
+  # Leftmost match wins, so [packages/...] comes first: a path such as
+  # packages/agent_core/lib/llm_provider/types.mli is one reference, not the
+  # lib/... it contains. [mli] is listed before [ml] because alternation takes
+  # the first branch that matches and [ml] is a prefix of [mli].
+  rg_or_empty '(packages/[A-Za-z0-9._/-]+\.(md|mli|ml|sh|toml)|docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(mli|ml)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.(mli|ml)|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
   refs="$(printf '%s\n%s\n' "$links" "$RG_OUT" | sort -u)"
   while IFS= read -r ref; do
     [[ -n "$ref" ]] || continue

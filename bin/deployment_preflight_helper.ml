@@ -1067,6 +1067,223 @@ let official_client_session_store =
   }
 ;;
 
+(* The three position stores the Librarian lifecycle writes per keeper (RFC
+   librarian-lifecycle sections 4.6 and 10.3), the turn fragments it consumes,
+   and the two memory OS sidecars beside them (RFC-0456) decode field-exact,
+   and nothing read them before a deploy (#37019). Each entry reads with the
+   module's own decoder. A JSONL line a
+   store reports as [Incomplete_line] is an append a crash cut short, which the
+   next durable append trims away; it is not a row the new binary refuses, so
+   it is neither counted as a row nor held against the deploy. *)
+let runtime_keepers_dir ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+;;
+
+let scan_keeper_dirs ~base_path scan_keeper =
+  Ok
+    (files_under (runtime_keepers_dir ~base_path) ~keep:(fun name ->
+       not (Filename.check_suffix name ".json"))
+     |> List.fold_left
+          (fun report keeper_dir ->
+             scan_keeper report ~keeper_id:(Filename.basename keeper_dir))
+          empty_report)
+;;
+
+let turn_boundary_store =
+  { store = "keeper turn boundaries"
+  ; on_refusal =
+      "the Librarian round stops at the line and journals it, so the keeper's \
+       turns after it are not read until the line is readable"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           match Masc.Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
+           | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))
+           | Ok lines ->
+             List.fold_left
+               (fun report (line, decoded) ->
+                  match decoded with
+                  | Ok _ -> count_row report (Ok ())
+                  | Error Masc.Keeper_turn_boundaries.Incomplete_line -> report
+                  | Error
+                      (( Masc.Keeper_turn_boundaries.Not_json _
+                       | Masc.Keeper_turn_boundaries.Malformed _ ) as error) ->
+                    count_row
+                      report
+                      (Error
+                         (Printf.sprintf
+                            "%s line %d: %s"
+                            keeper_id
+                            line
+                            (Masc.Keeper_turn_boundaries.read_error_to_string error))))
+               report
+               lines))
+  }
+;;
+
+let librarian_progress_store =
+  { store = "keeper Librarian progress"
+  ; on_refusal =
+      "the read position is an error, never \"not read yet\", so the keeper's \
+       history is neither read again from zero nor read further until the \
+       file is readable"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           match Masc.Keeper_librarian_progress.read ~keepers_dir ~keeper_id with
+           | Ok None -> report
+           | Ok (Some _) -> count_row report (Ok ())
+           | Error error ->
+             count_row
+               report
+               (Error
+                  (keeper_id
+                   ^ ": "
+                   ^ Masc.Keeper_librarian_progress.read_error_to_string error))))
+  }
+;;
+
+let librarian_official_progress_store =
+  { store = "keeper official-client Librarian progress"
+  ; on_refusal =
+      "the official-client read position is an error, never \"not read yet\", so the \
+       keeper's official turns are not read until the file is readable"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           match
+             Masc.Keeper_librarian_official_progress.read ~keepers_dir ~keeper_id
+           with
+           | Ok None -> report
+           | Ok (Some _) -> count_row report (Ok ())
+           | Error error ->
+             count_row
+               report
+               (Error
+                  (keeper_id
+                   ^ ": "
+                   ^ Masc.Keeper_librarian_official_progress.read_error_to_string
+                       error))))
+  }
+;;
+
+let turn_fragment_store =
+  { store = "keeper official-client turn fragments"
+  ; on_refusal =
+      "a Librarian round stops before a refused named-turn fragment instead of \
+       reading past words or tool observations it cannot assign to that turn"
+  ; scan =
+      (fun ~base_path ->
+         let root = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+         Ok
+           (files_under root ~keep:(fun _name -> true)
+            |> List.fold_left
+                 (fun report session_dir ->
+                    let trace_id = Filename.basename session_dir in
+                    List.fold_left
+                      (fun report file ->
+                         match Masc.Keeper_turn_fragments.read ~session_dir file with
+                         | Error detail ->
+                           count_row report (Error (trace_id ^ ": " ^ detail))
+                         | Ok lines ->
+                           List.fold_left
+                             (fun report (line, decoded) ->
+                                match decoded with
+                                | Ok _ -> count_row report (Ok ())
+                                | Error Masc.Keeper_turn_fragments.Incomplete_line ->
+                                  report
+                                | Error error ->
+                                  count_row
+                                    report
+                                    (Error
+                                       (Printf.sprintf
+                                          "%s line %d: %s"
+                                          trace_id
+                                          line
+                                          (Masc.Keeper_turn_fragments.read_error_to_string
+                                             error))))
+                             report
+                             lines)
+                      report
+                      [ Masc.Keeper_turn_fragments.Main
+                      ; Masc.Keeper_turn_fragments.Internal
+                      ])
+                 empty_report))
+  }
+;;
+
+let memory_absorbed_store =
+  { store = "keeper absorbed memory facts"
+  ; on_refusal =
+      "the row stays an error its readers count and name, and the fact it \
+       carries is not read"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           match Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
+           | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))
+           | Ok lines ->
+             List.fold_left
+               (fun report (line, decoded) ->
+                  match decoded with
+                  | Ok _ -> count_row report (Ok ())
+                  | Error Masc.Keeper_memory_absorbed.Incomplete_line -> report
+                  | Error
+                      (( Masc.Keeper_memory_absorbed.Not_json _
+                       | Masc.Keeper_memory_absorbed.Malformed _ ) as error) ->
+                    count_row
+                      report
+                      (Error
+                         (Printf.sprintf
+                            "%s line %d: %s"
+                            keeper_id
+                            line
+                            (Masc.Keeper_memory_absorbed.read_error_to_string error))))
+               report
+               lines))
+  }
+;;
+
+let memory_os_events_store =
+  { store = "keeper memory OS events"
+  ; on_refusal =
+      "the event stays an error its readers count and name, and the retrieval \
+       it records drops out of the memory's summary"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           match Masc.Keeper_memory_os_events.read ~keepers_dir ~keeper_id with
+           | Error file_error ->
+             count_row
+               report
+               (Error
+                  (keeper_id
+                   ^ ": "
+                   ^ Masc.Keeper_memory_os_events.file_read_error_to_string file_error))
+           | Ok lines ->
+             List.fold_left
+               (fun report (line, decoded) ->
+                  match decoded with
+                  | Ok _ -> count_row report (Ok ())
+                  | Error error ->
+                    count_row
+                      report
+                      (Error
+                         (Printf.sprintf
+                            "%s line %d: %s"
+                            keeper_id
+                            line
+                            (Masc.Keeper_memory_os_events.read_error_to_string error))))
+               report
+               lines))
+  }
+;;
+
 let durable_stores =
   [ keeper_meta_store
   ; official_client_session_store
@@ -1076,6 +1293,12 @@ let durable_stores =
   ; board_posts_store
   ; provider_input_store
   ; turn_record_store
+  ; turn_boundary_store
+  ; librarian_progress_store
+  ; librarian_official_progress_store
+  ; turn_fragment_store
+  ; memory_absorbed_store
+  ; memory_os_events_store
   ]
 ;;
 

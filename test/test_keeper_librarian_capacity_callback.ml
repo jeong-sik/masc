@@ -6,7 +6,7 @@ module Runs = Exact_lane_run_registry
 let overflow =
   {|{"id":"capacity","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
 
-let test_callback ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
+let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = env#net and clock = env#clock in
@@ -41,7 +41,7 @@ let test_callback ~base_path ~registry ~keeper_id ~first_overflow ~status ~expec
   (match Runtime_exact_output_registry.publish
       ~lanes:[{Runtime_schema.id = "librarian_exact";
         slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
-        cli_slot_ids = []}] resolver with
+        cli_slot_ids = List.map fst cli_errors}] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
@@ -50,14 +50,20 @@ let test_callback ~base_path ~registry ~keeper_id ~first_overflow ~status ~expec
      current = None; working_context = Keeper_librarian_context.empty;
      messages = [Agent_core.Types.user_msg "Pending conversation evidence."];
      tool_observations = []; counterpart_observations = []} in
+  let cli_calls = ref [] in
+  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    cli_calls := !cli_calls @ [runtime_id];
+    Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~trigger:Runtime.Durable_range
-    ~input_projection:Runtime.Already_selected_range
+    ~input_projection:Runtime.Already_selected_range ~cli_runner
     ~on_capacity_refused:(fun () -> incr refused)
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   Alcotest.(check int) "only final capacity failure requests narrowing" expected !refused;
+  Alcotest.(check (list string)) "CLI candidates ran in order"
+    (List.map fst cli_errors) !cli_calls;
   Alcotest.(check int) "terminal provider really received the request" 1 !posts;
   Option.iter (fun (_, count) -> Alcotest.(check int)
     "body-refused first provider really ran" 1 !count) first;
@@ -81,9 +87,30 @@ let () =
   let case name first_overflow status expected =
     Alcotest.test_case name `Quick
       (test_callback ~base_path ~registry ~keeper_id:name ~first_overflow ~status ~expected) in
+  let codex_error data = Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Rpc_error
+      { method_ = "turn/start"; code = Some (-32602);
+        message = "Input exceeds the maximum length of 1048576 characters.";
+        data }) in
+  let capacity = codex_error (Some (`Assoc [
+    "input_error_code", `String "input_too_large";
+    "actual_chars", `Int 23; "max_chars", `Int 17])) in
+  let generic = codex_error None in
+  let quota = Fusion_official_client.Setup_failure (Provider_error "quota") in
+  let cli_case name cli_errors expected = Alcotest.test_case name `Quick (fun () ->
+    Fixture.with_official_client_runtimes @@ fun () ->
+    test_callback ~cli_errors ~base_path ~registry ~keeper_id:name
+      ~first_overflow:false ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
     ["actual HTTP outcomes", [
       case "capacity-final" false `OK 1;
       case "quota-final" false `Too_many_requests 0;
       case "capacity-then-quota" true `Too_many_requests 0;
-      case "capacity-then-auth" true `Unauthorized 0]]
+      case "capacity-then-auth" true `Unauthorized 0];
+    "HTTP to CLI outcomes", [
+      cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1;
+      cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0;
+      cli_case "cli-capacity-then-quota"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 0;
+      cli_case "cli-quota-then-capacity"
+        [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1]]

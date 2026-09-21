@@ -156,7 +156,7 @@ let start ~sw ~key ~pass =
   if admitted then start_daemon ~sw ~key ~pass owner
 ;;
 
-let retire_key key =
+let retire_key key action =
   let held = new_owner ~life:Purging in
   let owner =
     Stdlib.Mutex.protect owners_mutex (fun () ->
@@ -189,11 +189,13 @@ let retire_key key =
       Eio.Promise.await owner.exited;
       owner
   in
-  fun () ->
-    Stdlib.Mutex.protect owners_mutex (fun () ->
-      match Hashtbl.find_opt owners key with
-      | Some current when current == owner -> Hashtbl.remove owners key
-      | Some _ | None -> ())
+  Fun.protect
+    ~finally:(fun () ->
+      Stdlib.Mutex.protect owners_mutex (fun () ->
+        match Hashtbl.find_opt owners key with
+        | Some current when current == owner -> Hashtbl.remove owners key
+        | Some _ | None -> ()))
+    action
 ;;
 
 (* {1 The production pass} *)
@@ -385,7 +387,9 @@ let boot ~config =
   List.iter (fun keeper_name -> ensure ~config ~keeper_name) (Keeper_meta_store.keeper_names config)
 ;;
 
-let retire ~config ~keeper_name = retire_key (key_of ~config ~keeper_name)
+let retire ~config ~keeper_name action =
+  retire_key (key_of ~config ~keeper_name) action
+;;
 
 let last_measurement ~config ~keeper_name =
   match find (key_of ~config ~keeper_name) with

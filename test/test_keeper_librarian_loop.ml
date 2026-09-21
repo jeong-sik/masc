@@ -28,7 +28,7 @@ let with_loop ~pass f =
   Loop.For_testing.start_with ~sw ~key ~pass;
   f ();
   (* The daemon parks on a promise nobody resolves; the release drops it. *)
-  Loop.For_testing.retire_key key ()
+  Loop.For_testing.retire_key key (fun () -> ())
 ;;
 
 let test_a_loop_runs_once_at_start_then_parks () =
@@ -117,13 +117,32 @@ let test_a_retire_cancels_the_pass_and_takes_no_wake () =
   Loop.For_testing.start_with ~sw ~key ~pass;
   settle ();
   check int "a pass is running" 1 !passes;
-  let release = Loop.For_testing.retire_key key in
-  check int "the pass did not run to its end" 0 !finished;
-  Loop.For_testing.wake_key key;
-  settle ();
-  check int "a wake after retire starts nothing" 1 !passes;
-  release ();
+  Loop.For_testing.retire_key key (fun () ->
+    check int "the pass did not run to its end" 0 !finished;
+    Loop.For_testing.wake_key key;
+    settle ();
+    check int "a wake after retire starts nothing" 1 !passes);
   check bool "the tombstone is gone" false (Loop.For_testing.is_parked key)
+;;
+
+(* The callback owns the only interval in which a tombstone may exist. Even
+   cancellation or another exception cannot strand it and silence all later
+   wakes. Starting another loop proves the key became admissible again. *)
+let test_a_retire_releases_the_tombstone_when_work_raises () =
+  Loop.For_testing.reset ();
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  check bool "the callback exception escapes" true
+    (match Loop.For_testing.retire_key key (fun () -> raise Exit) with
+     | exception Exit -> true
+     | () -> false);
+  let passes = ref 0 in
+  Loop.For_testing.start_with ~sw ~key ~pass:(fun () -> incr passes; Loop.Drained);
+  settle ();
+  check int "the released key admits a new loop" 1 !passes;
+  Loop.For_testing.retire_key key (fun () -> ())
 ;;
 
 let () =
@@ -137,6 +156,8 @@ let () =
             test_a_stopped_pass_waits_for_a_wake
         ; test_case "a retire cancels the pass and takes no wake" `Quick
             test_a_retire_cancels_the_pass_and_takes_no_wake
+        ; test_case "a raising retire callback releases the tombstone" `Quick
+            test_a_retire_releases_the_tombstone_when_work_raises
         ] )
     ]
 ;;

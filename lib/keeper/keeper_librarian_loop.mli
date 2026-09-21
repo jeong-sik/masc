@@ -57,9 +57,10 @@ val wake : base_path:string -> keeper_name:string -> unit
 
 (** Cancel the loop of [keeper_name], wait until it has exited, and hold a
     tombstone so that no wake starts another while the caller removes the
-    keeper's files. The returned function drops the tombstone. A keeper with
-    no loop retires at once. *)
-val retire : config:Workspace.config -> keeper_name:string -> unit -> unit
+    keeper's files in the callback. The tombstone is dropped when the callback
+    returns or raises, so a caller cannot forget the release. A keeper with no
+    loop retires at once. *)
+val retire : config:Workspace.config -> keeper_name:string -> (unit -> 'a) -> 'a
 
 val last_measurement : config:Workspace.config -> keeper_name:string -> measurement option
 
@@ -73,7 +74,7 @@ module For_testing : sig
     -> unit
 
   val wake_key : string -> unit
-  val retire_key : string -> unit -> unit
+  val retire_key : string -> (unit -> 'a) -> 'a
   val measurement_key : string -> measurement option
   val is_parked : string -> bool
   val reset : unit -> unit

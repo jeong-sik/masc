@@ -82,23 +82,6 @@ let turn_ref prepared =
     (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
       ~messages:prepared.messages prepared.range)).cut_turn_ref
 let end_atom prepared = prepared.end_atom
-let fit ~fits prepared =
-  let* whole_fits = fits prepared in
-  if whole_fits then Ok (Some prepared)
-  else if Option.is_some prepared.recovery_receipt then Ok None
-  else
-    let rec search low high best =
-      if low > high then Ok best
-      else
-        let end_atom = low + (high - low) / 2 in
-        let unread = R.slice prepared.messages
-          {prepared.range with R.start_atom = prepared.start_atom; end_atom} in
-        let candidate = {prepared with end_atom; unread} in
-        let* accepted = fits candidate in
-        if accepted then search (end_atom + 1) high (Some candidate)
-        else search low (end_atom - 1) best
-    in
-    search (prepared.start_atom + 1) (prepared.end_atom - 1) None
 let narrow prepared =
   let count = prepared.end_atom - prepared.start_atom in
   if count <= 1 || Option.is_some prepared.recovery_receipt then None
@@ -106,6 +89,12 @@ let narrow prepared =
     let end_atom = prepared.start_atom + count / 2 in
     let unread = R.slice prepared.messages {prepared.range with R.start_atom = prepared.start_atom; end_atom} in
     Some {prepared with end_atom; unread; recovery_receipt = None}
+let rec fit ~fits prepared =
+  let* accepted = fits prepared in
+  if accepted then Ok (Some prepared)
+  else match narrow prepared with
+    | None -> Ok None
+    | Some smaller -> fit ~fits smaller
 let memory_range_id ~config ~keeper_name prepared =
   match prepared.recovery_receipt with Some receipt -> Ok receipt | None ->
   let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines

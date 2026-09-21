@@ -197,7 +197,7 @@ let test_ordinary_baseline_coverage () = with_source @@ fun _env config save _ap
     (P.memory_range_id ~config ~keeper_name suffix |> get).start_atom;
   check bool "normal serial receipt certifies already consumed suffix" true
     (P.memory_committed ~config ~keeper_name suffix |> get)
-let test_fit_largest_request_prefix () = with_source @@ fun _env config save _append boundary ->
+let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config save _append boundary ->
   let messages = List.init 8 (fun index -> message (String.make (index + 1) 'x')) in
   save messages; boundary ~fresh:true 1 messages;
   let prepared = prepare config |> some in
@@ -211,11 +211,15 @@ let test_fit_largest_request_prefix () = with_source @@ fun _env config save _ap
   ignore (commit config first "Prior work preserved.");
   let suffix = prepare config |> some in
   let exact_size candidate = P.prompt_json candidate |> Yojson.Safe.to_string |> String.length in
-  let expected = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
-  let limit = exact_size expected in
-  let fitted = P.fit ~fits:(fun candidate -> Ok (exact_size candidate <= limit)) suffix
-    |> get |> some in
-  check int "largest fitting whole-atom endpoint" 7 (P.end_atom fitted);
+  let room_for_more = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
+  let limit = exact_size room_for_more in
+  let expected = P.narrow suffix |> some in
+  visited := [];
+  let fitted = P.fit ~fits:(fun candidate ->
+      visited := !visited @ [P.end_atom candidate];
+      Ok (exact_size candidate <= limit)) suffix |> get |> some in
+  check int "split work unit stops below capacity even with room for another atom" 6 (P.end_atom fitted);
+  check (list int) "no capacity-filling search after a fitting split" [8;6] !visited;
   check string "exact suffix and prior state preserved" (P.prompt_json expected |> Yojson.Safe.to_string)
     (P.prompt_json fitted |> Yojson.Safe.to_string);
   check string "frozen original unaffected" original (P.prompt_json prepared |> Yojson.Safe.to_string);
@@ -329,7 +333,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
 let () = run "production continuity pair"
   ["cycle",[test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
-    test_case "largest request-fitting prefix" `Quick test_fit_largest_request_prefix;
+    test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;
     test_case "normal baseline excludes unknown prefix" `Quick test_ordinary_baseline_coverage;test_case "baseline partial bootstrap and recovery" `Quick test_baseline_partial_bootstrap;test_case "executor cancellation joins commit" `Quick test_worker_cancellation_waits_for_commit;
     test_case "Memory frontier proves publication coverage" `Quick test_memory_coverage_required;

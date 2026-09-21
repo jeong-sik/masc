@@ -552,7 +552,9 @@ status: reference
   Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
   Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
   `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
-  `open`은 검사 실패 후 기존 처리 규칙에 따라 반환한 결과이고, `judged`는 검사를 마친 결과다.
+  `failed`는 검사 실패다. 모든 문장이 전달된다고 확인된 원문만 흡수하고,
+  확인하지 못한 원문은 현재 Memory에 남긴다. 새 claim 저장은 계속한다.
+  `judged`는 검사를 마친 결과다. 검사 비활성화 등 `skipped`일 때는 Librarian의 결정을 그대로 적용한다.
   취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
   반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면
   `output.after`에 저장된 snapshot과 revision을 남긴다. 저장 전 취소는 이 기록이 없다.

@@ -72,7 +72,7 @@ let lane_state () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
-      rrs_media_failover = []; rrs_media_failover_dropped = [];
+      rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
         [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
@@ -302,7 +302,7 @@ let test_search_follows_the_runtime_mode () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "assigned";
-      rrs_media_failover = []; rrs_media_failover_dropped = [];
+      rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
       rrs_lanes =
         [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
@@ -598,15 +598,20 @@ let test_the_picker_offers_only_declared_lanes () =
         (runtime_picker_items state))
 
 (* [runtime].media_failover is written as a whole list -- the routing endpoint
-   has no per-entry action for it -- and the list on screen holds only what
-   boot admitted. While boot dropped an entry, writing what is on screen would
-   delete it from the file, so the editor refuses instead. *)
-let media_failover_state ?(cursor = 0) ?(admitted = [ "a"; "b" ]) ?(dropped = []) () =
+   has no per-entry action for it -- so the editor reads and writes the file's
+   declared order while marking entries absent from the active fleet. *)
+let media_failover_state
+    ?(cursor = 0)
+    ?(admitted = [ "a"; "b" ])
+    ?declared
+    ()
+  =
+  let declared = Option.value declared ~default:admitted in
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
-      rrs_media_failover = admitted; rrs_media_failover_dropped = dropped;
+      rrs_media_failover = admitted; rrs_media_failover_declared = declared;
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
   (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
@@ -633,13 +638,26 @@ let test_the_route_editor_writes_the_whole_order () =
     "[runtime].media_failover order [] only, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
-let test_the_route_editor_refuses_a_partly_unresolved_route () =
-  let state = media_failover_state ~dropped:[ "gone.model" ] () in
-  Alcotest.(check string) "the write that would delete it is refused"
-    "refuse: boot could not resolve gone.model in [runtime].media_failover; edit the file until it does, or this write would delete it from it"
+let test_the_route_editor_edits_a_partly_unresolved_route () =
+  let state =
+    media_failover_state
+      ~cursor:1
+      ~admitted:[ "a"; "b" ]
+      ~declared:[ "a"; "gone.model"; "b" ]
+      ()
+  in
+  Alcotest.(check (list string)) "the rejected entry keeps its declared position"
+    [ "a (admitted)"; "gone.model (declared)"; "b (admitted)" ]
+    (List.map
+       (fun row ->
+          Printf.sprintf "%s (%s)" row.sr_slot
+            (if row.sr_admitted then "admitted" else "declared"))
+       (slot_editor_rows state));
+  Alcotest.(check string) "the rejected entry can be removed"
+    "[runtime].media_failover order [a; b] gone.model, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot));
-  Alcotest.(check string) "a reorder is refused for the same reason"
-    "refuse: boot could not resolve gone.model in [runtime].media_failover; edit the file until it does, or this write would delete it from it"
+  Alcotest.(check string) "the rejected entry can be reordered"
+    "[runtime].media_failover order [a; b; gone.model] gone.model, cursor 2"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_down)))
 
 let () = Alcotest.run "runtime list geometry"
@@ -680,5 +698,5 @@ let () = Alcotest.run "runtime list geometry"
         test_the_picker_offers_only_declared_lanes;
       Alcotest.test_case "the route editor writes the whole order" `Quick
         test_the_route_editor_writes_the_whole_order;
-      Alcotest.test_case "the route editor refuses a partly unresolved route" `Quick
-        test_the_route_editor_refuses_a_partly_unresolved_route]]
+      Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
+        test_the_route_editor_edits_a_partly_unresolved_route]]

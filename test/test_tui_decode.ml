@@ -6046,7 +6046,7 @@ let runtime_resolved_json =
     ; ("config_path", `String "/workspace/config/runtime.toml")
     ; ("default_runtime", picker_default_runtime)
     ; "media_failover", `List []
-    ; "media_failover_dropped", `List []
+    ; "media_failover_declared", `List []
     ; ( "runtimes"
       , `List
           [ picker_default_runtime
@@ -6328,7 +6328,7 @@ let runtime_resolved_surface_json () =
     ; "config_path", `String "/workspace/config/runtime.toml"
     ; "default_runtime", runtime_a
     ; "media_failover", `List []
-    ; "media_failover_dropped", `List []
+    ; "media_failover_declared", `List []
     ; "runtimes", `List runtimes
     ; ( "lanes"
       , `List
@@ -6552,7 +6552,30 @@ let test_runtime_limits_reject_unknown_or_invalid_values () =
      replace "declared_reasoning_effort" (`String "turbo") picker_default_runtime;
      (match picker_default_runtime with
       | `Assoc fields -> `Assoc (List.remove_assoc "declared_reasoning_effort" fields)
-      | json -> json)]
+     | json -> json)]
+
+let test_runtime_route_keeps_declared_order () =
+  let replace name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | json -> json
+  in
+  let json =
+    runtime_resolved_json
+    |> replace "media_failover" (`List [ `String "a"; `String "b" ])
+    |> replace
+         "media_failover_declared"
+         (`List [ `String "a"; `String "gone.model"; `String "b" ])
+  in
+  match Tui_decode.decode_runtime_resolved_snapshot json with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check (list string)) "active fleet"
+      [ "a"; "b" ]
+      snapshot.rrs_media_failover;
+    Alcotest.(check (list string)) "declared order"
+      [ "a"; "gone.model"; "b" ]
+      snapshot.rrs_media_failover_declared
+;;
 
 let test_runtime_default_limits_must_match_listed_row () =
   let replace key value = function
@@ -9473,6 +9496,8 @@ let () =
           test_runtime_catalog_probe_is_independent_of_dispatch
       ; Alcotest.test_case "limits reject invalid values" `Quick
           test_runtime_limits_reject_unknown_or_invalid_values
+      ; Alcotest.test_case "keeps the declared route order" `Quick
+          test_runtime_route_keeps_declared_order
       ; Alcotest.test_case "default limits match listed runtime" `Quick
           test_runtime_default_limits_must_match_listed_row
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick

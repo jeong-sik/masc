@@ -423,9 +423,7 @@ let test_an_excluded_keeper_keeps_its_content_home () =
         (state (C.absorb_gate_api_key ~keeper_id:"polisher"))))
 ;;
 
-(* The names in [excluded_keepers] are checked against the keepers of the
-   base path at boot: a misspelt name excludes nobody, so it is reported. *)
-let test_new_review_requires_its_own_opt_in () =
+let test_context_review_requires_its_own_opt_in () =
   let state = function
     | Ok _ -> "enabled"
     | Error reason -> C.unavailable_reason_to_string reason
@@ -498,8 +496,8 @@ let () =
             test_config_reads_the_published_policy
         ; Alcotest.test_case "an excluded keeper keeps its content home, at both gates" `Quick
             test_an_excluded_keeper_keeps_its_content_home
-        ; Alcotest.test_case "New review requires its own opt-in" `Quick
-            test_new_review_requires_its_own_opt_in
+        ; Alcotest.test_case "Context review requires its own opt-in" `Quick
+            test_context_review_requires_its_own_opt_in
         ; Alcotest.test_case "unknown excluded keepers are named" `Quick
             test_unknown_excluded_keepers_are_named
         ; Alcotest.test_case "each gate has its own switch" `Quick

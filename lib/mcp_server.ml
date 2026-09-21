@@ -823,7 +823,7 @@ let run_isolated_publication_recovery_discovery ~registry_root available =
                 , `String (Printexc.raw_backtrace_to_string backtrace) )
               ])
          "publication recovery discovery raised non-current cancellation")
-  | exception exception_ -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. An earlier arm of this same match takes Eio.Cancel.Cancelled seventeen lines up; the guard reads three lines back. *)
+  | exception exception_ -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. An earlier arm of this same match takes Eio.Cancel.Cancelled seventeen lines up. *)
     let backtrace = Printexc.get_raw_backtrace () in
     Log.Server.emit
       Log.Error

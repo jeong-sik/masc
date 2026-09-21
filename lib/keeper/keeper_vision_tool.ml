@@ -154,7 +154,7 @@ let record_vision_candidate_attempt
               ; "reason", `String reason
               ])
     ~output_text:""
-    ~success
+    ~wire_outcome:(if success then Tool_result.Ok else Tool_result.Error)
     ~duration_ms
     ?tool_use_id
     ?trace_id
@@ -181,7 +181,7 @@ let record_vision_candidate_start
               ; "candidate_count", `Int candidate_count
               ])
     ~output_text:""
-    ~success:true
+    ~wire_outcome:Tool_result.Unknown
     ~duration_ms:0.0
     ?tool_use_id
     ?trace_id
@@ -218,7 +218,7 @@ let record_vision_candidate_cancelled ?tool_use_id ?trace_id ~runtime_id () =
                 ; "reason", `String "parent_cancelled"
                 ])
       ~output_text:""
-      ~success:false
+      ~wire_outcome:Tool_result.Error
       ~duration_ms:0.0
       ?tool_use_id
       ?trace_id

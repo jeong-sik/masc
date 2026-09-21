@@ -202,7 +202,6 @@ val log_call :
   tool_name:string ->
   input:Yojson.Safe.t ->
   output_text:string ->
-  success:bool ->
   duration_ms:float ->
   ?record_kind:record_kind ->
   ?model:string ->
@@ -266,6 +265,8 @@ val log_call :
     the row records [Tool_result.Unknown] rather than omitting the field. A
     completed or deferred execution may therefore
     have [wire_outcome=error] when result delivery fails afterwards.
+    No parallel [success] boolean is accepted or persisted: readers consume
+    [disposition] for execution truth and [wire_outcome] for response truth.
     [typed_result] serializes the producer-owned disposition when it is
     available. Any canonical normalized artifact references in its typed data
     are also persisted as actual JSON under [artifact_refs], keeping the

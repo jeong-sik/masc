@@ -5934,7 +5934,7 @@ let test_tool_calls_select_keeper_before_limiting () =
       let append keeper index =
         Masc.Keeper_tool_call_log.log_call ~keeper_name:keeper
           ~tool_name:"keeper_lane_status" ~input:(`Assoc ["index", `Int index])
-          ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
+          ~output_text:(string_of_int index) ~wire_outcome:Tool_result.Ok ~duration_ms:1. () in
       for index = 1 to 100 do append "target" index done;
       for index = 1 to 1001 do append "busy-neighbor" index done;
       let entries = tool_call_entries_exn

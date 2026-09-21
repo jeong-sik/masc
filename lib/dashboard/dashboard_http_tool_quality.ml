@@ -64,18 +64,17 @@ let thinking_mode_of_record record =
      | _ -> "<missing thinking_enabled field>")
   | _ -> "<non-object record envelope>"
 
-let bool_field_opt record field =
-  match record with
-  | `Assoc fields ->
-    (match List.assoc_opt field fields with
-     | Some (`Bool value) -> Some value
-     | _ -> None)
-  | _ -> None
-
 let tool_success_of_record record =
-  match bool_field_opt record "success" with
-  | Some value -> value
-  | None -> false
+  match Safe_ops.json_string_opt "disposition" record with
+  | Some "completed" -> Some true
+  | Some "failed" -> Some false
+  | Some "deferred" -> None
+  | Some _ -> None
+  | None ->
+    (match Safe_ops.json_string_opt "wire_outcome" record with
+     | Some "ok" -> Some true
+     | Some "error" -> Some false
+     | Some "unknown" | Some _ | None -> None)
 
 let tool_record_is_deferred record =
   Safe_ops.json_string_opt "disposition" record = Some "deferred"
@@ -185,9 +184,10 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
   let malformed, records =
     List.fold_left
       (fun (malformed, acc) record ->
-        match result_bytes_of_record record with
-        | Some result_bytes -> (malformed, (record, result_bytes) :: acc)
-        | None -> (malformed + 1, acc))
+        match result_bytes_of_record record, tool_success_of_record record with
+        | Some result_bytes, Some success ->
+          malformed, (record, result_bytes, success) :: acc
+        | (Some _ | None), (Some _ | None) -> malformed + 1, acc)
       (0, []) records
   in
   let records = List.rev records in
@@ -224,7 +224,7 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
   in
   (* error category -> count *)
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
-  List.iter (fun (record, output_chars) ->
+  List.iter (fun (record, output_chars, ok) ->
     incr total;
     (* [tool] and [keeper] become bucket keys in the dashboard
        histogram.  A bare "unknown" bucket appears in the same column
@@ -241,7 +241,6 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
       Safe_ops.json_string_opt "keeper" record
       |> Option.value ~default:"<missing keeper field>"
     in
-    let ok = tool_success_of_record record in
     let dur = match record with
       | `Assoc fields ->
         (match List.assoc_opt "duration_ms" fields with

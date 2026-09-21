@@ -114,13 +114,13 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       Log.reset_for_testing (); Log.init ~base_path:base ();
       let execution_id = Ids.Execution_id.generate () in
       Log.log_call ~keeper_name:"reader" ~tool_name:"BrowserRead" ~input:args
-        ~output_text:(Tool_result.message result) ~success:true ~duration_ms:1.
+        ~output_text:(Tool_result.message result) ~wire_outcome:Tool_result.Ok ~duration_ms:1.
         ~typed_result:result ~execution_id ~tool_use_id:"observed-call" ();
       Log.log_call ~keeper_name:"regions-reader" ~tool_name:"masc_browser_read" ~input:args
-        ~output_text:(Tool_result.message generic_regions) ~success:true ~duration_ms:1.
+        ~output_text:(Tool_result.message generic_regions) ~wire_outcome:Tool_result.Ok ~duration_ms:1.
         ~typed_result:generic_regions ();
       Log.log_call ~keeper_name:"mcp-reader" ~tool_name:"masc_browser_read" ~input:args
-        ~output_text:(Tool_result.message bound_scene) ~success:true ~duration_ms:1.
+        ~output_text:(Tool_result.message bound_scene) ~wire_outcome:Tool_result.Ok ~duration_ms:1.
         ~typed_result:bound_scene ();
       let row = match Log.read_recent ~keeper_name:"reader" () with
         | Ok (row :: _) -> row

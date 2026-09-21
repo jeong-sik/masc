@@ -299,6 +299,13 @@ let node_observation_result (node : Executor.node_result) =
       ; duration_ms = Tool_result.duration_ms node.result }
 ;;
 
+let wire_outcome_of_result : Tool_result.result -> Tool_result.tool_call_outcome =
+  function
+  | Tool_result.Completed _ -> Tool_result.Ok
+  | Tool_result.Deferred _ -> Tool_result.Unknown
+  | Tool_result.Failed _ -> Tool_result.Error
+;;
+
 let node_result_to_json (result : Executor.node_result) =
   `Assoc
     [ "node_id", `String (Keeper_tool_plan.Node_id.to_string result.node_id)
@@ -337,7 +344,7 @@ let observe_node_result
       ~tool_name:result.tool_name
       ~input:result.input
       ~output_text:(Tool_result.message observed_result)
-      ~success:(Tool_result.is_success observed_result)
+      ~wire_outcome:(wire_outcome_of_result observed_result)
       ~duration_ms:(Tool_result.duration_ms observed_result)
       ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)
       ?agent_name:context.agent_name
@@ -462,7 +469,7 @@ let observe_composition_run_summary
       ~tool_name:composition_run_summary_tool_name
       ~input
       ~output_text
-      ~success
+      ~wire_outcome:(if success then Tool_result.Ok else Tool_result.Error)
       ~duration_ms
       ~record_kind:Keeper_tool_call_log.Composition_run
       ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)

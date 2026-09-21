@@ -399,7 +399,7 @@ let alerts (h : keeper_health) =
           ~target:"librarian_failures"
           ~label:"Librarian"
           ~message:
-            "Librarian runs failed since boot; the existing current-memory snapshot keeps serving recall but is no longer being updated."
+            "Librarian runs have failed since server start. The current-memory snapshot is available; see the last measured pass for the latest drain result."
       ]
     else
       [ alert_json
@@ -412,7 +412,7 @@ let alerts (h : keeper_health) =
              then
                "Librarian runs failed and no ordinary current-memory snapshot exists. A source-bound snapshot remains available, but it does not demonstrate or repair Librarian selection."
              else
-               "Librarian runs failed and no ordinary or source-bound current-memory snapshot exists; the keeper is running memoryless and cannot leave that state on its own.")
+               "Librarian runs failed and no ordinary or source-bound current-memory snapshot exists; recall has no stored snapshot at this observation.")
       ]
   in
   let vision_ingest_alert =

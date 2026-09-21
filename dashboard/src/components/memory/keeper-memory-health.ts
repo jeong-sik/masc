@@ -81,6 +81,9 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
           : librarianStopped || unread > 0
             ? html`<span class="kmh-badge kmh-badge--warn">${unread}</span>`
             : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+        <div><small>${entry.librarian.state ?? '아직 측정 전'}</small></div>
+        <div><small>${entry.librarian.measured_at === null ? '측정 시각 없음'
+          : `마지막 측정 ${new Date(entry.librarian.measured_at * 1000).toLocaleString()}`}</small></div>
       </td>
       <td>
         ${starving

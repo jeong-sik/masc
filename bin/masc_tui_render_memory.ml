@@ -118,11 +118,12 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some _, None | None, Some _ | None, None -> "unread ?"
     in
     Printf.sprintf
-      "  Librarian · %s · %s · read %s · last failure %s · failed %d since server start"
+      "  Librarian · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
       (match librarian.mlh_state with
        | Some state -> state
        | None -> "not measured")
       unread
+      (memory_updated_text librarian.mlh_measured_at)
       (memory_updated_text librarian.mlh_last_success_at)
       (Option.value librarian.mlh_last_failure_kind ~default:"-")
       k.mkh_librarian_failures

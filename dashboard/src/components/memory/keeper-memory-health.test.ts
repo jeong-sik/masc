@@ -250,6 +250,8 @@ describe('KeeperMemoryHealth', () => {
 
     await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
     expect(statValue(container, 'librarian-unread-turns')).toBe('3')
+    expect(screen.getByText('not_committed')).toBeTruthy()
+    expect(screen.getByText(`마지막 측정 ${new Date(1_699_999_950 * 1000).toLocaleString()}`)).toBeTruthy()
     expect(screen.getByText('Librarian')).not.toBeNull()
   })
 

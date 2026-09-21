@@ -23,12 +23,25 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 PREFLIGHT = REPO / "bin" / "deployment_preflight_helper.ml"
-# Two spellings of the same contract. Some modules call the shared helper;
-# others enforce it with a closed match whose fallback says so. Scanning only
-# the helper name found 3 of the 7 modules that actually refuse unknown
-# fields, so the message is part of the signal.
-EXACT_FIELD_CALLS = ("exact_object_fields", "fields_are_unique_known")
+# Three spellings of the same contract. Some modules call one of the shared
+# helpers; others enforce it with a closed match whose fallback says so.
+# Scanning only the first helper name found 3 of the 7 modules that actually
+# refuse unknown fields, so the message is part of the signal. The wire
+# helper in keeper_memory_os_types (`exact_field_names_result`) is the third
+# spelling; without it four per-keeper stores were invisible here (#37019).
+EXACT_FIELD_CALLS = (
+    "exact_object_fields",
+    "fields_are_unique_known",
+    "exact_field_names_result",
+)
 EXACT_FIELD_MESSAGES = ("fields are not exact",)
+
+# The module that defines a helper mentions it without decoding any store of
+# its own. Named here so the definition is not mistaken for a decoder, and
+# checked: the module must still hold the definition.
+DEFINES_EXACT_FIELD_CONTRACT = {
+    "keeper_memory_os_types": "exact_field_names_result",
+}
 
 # Decoders whose input is a request body or an in-memory value, never a file.
 # A field removal cannot strand rows for these: there are no rows.
@@ -125,6 +138,16 @@ def main() -> int:
                 state = f"via {store} through {middle}"
         elif module in NO_DURABLE_STORE:
             state = f"no store — {NO_DURABLE_STORE[module]}"
+        elif module in DEFINES_EXACT_FIELD_CONTRACT:
+            helper = DEFINES_EXACT_FIELD_CONTRACT[module]
+            module_text = (REPO / "lib" / "keeper" / f"{module}.ml").read_text(
+                encoding="utf-8", errors="replace"
+            )
+            if re.search(rf"\blet {re.escape(helper)}\b", module_text):
+                state = f"defines the contract — {helper}"
+            else:
+                state = f"BROKEN CHAIN — {module}.ml no longer defines {helper}"
+                unregistered.append(module)
         else:
             state = "UNREGISTERED"
             unregistered.append(module)
@@ -144,10 +167,12 @@ def main() -> int:
         return 1
 
     print()
+    file_free = len(NO_DURABLE_STORE.keys() & decoders.keys())
+    definers = len(DEFINES_EXACT_FIELD_CONTRACT.keys() & decoders.keys())
     print(
         f"PASS: {len(decoders)} exact-field decoder(s); "
-        f"{len(decoders) - len(NO_DURABLE_STORE & decoders.keys())} read by the preflight, "
-        f"{len(NO_DURABLE_STORE & decoders.keys())} declared file-free."
+        f"{len(decoders) - file_free - definers} read by the preflight, "
+        f"{file_free} declared file-free, {definers} define the contract."
     )
     return 0
 

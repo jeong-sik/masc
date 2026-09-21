@@ -1191,6 +1191,42 @@ let map_field key f = function
   | _ -> fail "expected object"
 ;;
 
+let test_atom_receipt_wire_and_exclusive_identity () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  let snapshot = Fs_compat.load_file
+    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper") in
+  let expected =
+    `Assoc [ "receipts", `List [
+      `Assoc [ "state", `String "committed"
+      ; "range_id", `Assoc
+          [ "receipt_scope", `String "runtime-cluster-a"
+          ; "trace_id", `String "trace"
+          ; "history_start_boundary_line", `Int 1
+          ; "start_atom", `Int 1; "end_atom", `Int 2
+          ; "last_atom_digest", `String (String.make 64 'a')
+          ; "end_boundary_line", `Int 2; "boundary_lines_seen", `Int 2 ]
+      ; "snapshot_revision", `Int 1
+      ; "snapshot_sha256", `String Digestif.SHA256.(digest_string snapshot |> to_hex)
+      ] ] ]
+  in
+  let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  check string "atom wire remains exact" (Yojson.Safe.to_string expected)
+    (String.trim (Fs_compat.load_file path));
+  List.iter (fun transform ->
+    Fs_compat.save_file path (Yojson.Safe.to_string (map_receipts transform expected));
+    match read_official ~keepers_dir with
+    | Error _ -> ()
+    | Ok _ -> fail "receipt accepted both or neither identity")
+    [ (function
+       | `Assoc fields -> `Assoc (("official_range_id", `Null) :: fields)
+       | _ -> fail "expected receipt")
+    ; (function
+       | `Assoc fields -> `Assoc (List.remove_assoc "range_id" fields)
+       | _ -> fail "expected receipt")
+    ]
+;;
+
 let test_official_receipt_survives_other_commits () =
   with_temp_keepers @@ fun keepers_dir ->
   ignore (apply_disposition ~keepers_dir ~official_range_id () |> require_ok);
@@ -1240,7 +1276,7 @@ let test_official_receipt_rejects_invalid_identity () =
     with_temp_keepers @@ fun keepers_dir ->
     ignore (apply_disposition ~keepers_dir ~official_range_id () |> require_ok);
     rewrite_receipts ~keepers_dir
-      (map_receipts (map_field "range_id" (map_field "range" (map_field "turns" (fun _ -> turns)))));
+      (map_receipts (map_field "official_range_id" (map_field "turns" (fun _ -> turns))));
     match read_official ~keepers_dir with
     | Error _ -> ()
     | Ok _ -> fail "malformed persisted receipt accepted")
@@ -2503,6 +2539,8 @@ let () =
             "range receipt survives retract and replace"
             `Quick
             test_committed_range_receipt_survives_retract_and_replace
+        ; test_case "atom wire and exclusive receipt identity" `Quick
+            test_atom_receipt_wire_and_exclusive_identity
         ; test_case "official receipt survives other commits" `Quick
             test_official_receipt_survives_other_commits
         ; test_case "mixed receipts recover prepared snapshot" `Quick

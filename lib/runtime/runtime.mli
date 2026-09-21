@@ -616,22 +616,8 @@ val resolve_assignment :
     resolves to a lane holding that runtime alone. A lane walks exactly the
     candidates it declares.
     [Unavailable] preserves the configured identity when its capability catalog
-    entry is absent. [Missing] means no active lane or runtime carries the id
-    now -- it does not distinguish an id nobody ever declared from one whose
-    lane was declared and then dropped at load because every one of its
-    candidates was missing from the catalog (see {!dropped_lane_reason}).
-    Neither selects the default in place of the requested runtime. *)
-
-val dropped_lane_reason : string -> dropped_runtime_lane option
-(** [Some lane] when [assigned_id] names a lane that {!resolve_assignment}
-    answers [`Missing] for specifically because every one of its declared
-    candidates was missing from the capability catalog at load (the lane
-    itself is in [startup_degradation.dropped_lanes], not because the id was
-    never configured). [lane.runtime_ids] is the full candidate list that was
-    dropped, for a diagnostic that names the real cause instead of feeding
-    the dropped lane's name into runtime-id resolution as if it were one
-    (task-1649). [None] for an id that was never a declared lane, or whose
-    lane is still active. *)
+    entry is absent. [Missing] means the id was not configured. Neither selects
+    the default in place of the requested runtime. *)
 
 val entry_runtime_id_of_route : string -> string option
 (** The concrete binding id a route opens first: the declared lane's entry

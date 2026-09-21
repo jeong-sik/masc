@@ -82,27 +82,7 @@ let build_runtime_execution
   in
   let* entry_runtime_id, remaining_context_ids =
     match assignment with
-    | `Missing ->
-      (* task-1649: [`Missing] here can mean "never configured", but it can
-         also mean the assigned id named a lane whose every candidate was
-         missing from the catalog at load, so the lane itself was dropped
-         (Runtime.dropped_lane_reason answers that specific case). Feeding
-         the dropped lane's own name into context-window resolution below
-         as if it were a runtime id produced a generic "no configured
-         runtime context window" that named the wrong layer; stop here with
-         the real cause instead. An id that was truly never configured keeps
-         the prior fallback -- unchanged behavior for that case. *)
-      (match Runtime.dropped_lane_reason runtime_id with
-       | Some dropped ->
-         Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-           { field = "runtime.lanes"
-           ; detail =
-               Printf.sprintf
-                 "assigned lane dropped at load: %s, candidates missing from catalog: %s"
-                 dropped.lane_id
-                 (String.concat ", " dropped.runtime_ids)
-           }))
-       | None -> Ok (runtime_id, []))
+    | `Missing -> Ok (runtime_id, [])
     | `Lane lane ->
       (match Runtime_lane.ordered_candidates lane with
        | first :: rest -> Ok (first, rest)

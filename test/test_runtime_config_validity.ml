@@ -3992,15 +3992,33 @@ streaming = false
           Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
 
 (* task-1649: a lane whose every candidate is missing from the catalog is
-   dropped whole at load (distinct from the single-runtime-assignment gap
-   the test above covers). A keeper assigned to that lane name used to fall
-   through [Runtime.resolve_assignment]'s [`Missing] into
-   [build_runtime_execution] treating the dropped lane's own name as a
-   runtime id, and only failed two layers later with a generic "no
-   configured runtime context window" that named the wrong cause. This pins
-   that the failure is now named at the real layer, with the real lane id
-   and its missing candidates. *)
-let test_dropped_lane_assignment_names_the_lane_not_context_window () =
+   dropped whole at load. Read [degrade_loaded_for_missing_catalog]
+   (runtime.ml) end to end before trusting the ticket's premise here: its
+   [Ok] branch -- the only place a [startup_degradation] value is ever
+   built -- is reached only when [has_routing_references] is false, and
+   that flag covers [dropped_lanes] together with [dropped_lane_candidates]
+   / [dropped_routes] / [dropped_media_failover]. A fully-dropped lane
+   always makes [has_routing_references] true, so a live, returned
+   [Initialized_degraded] can never carry a non-empty [dropped_lanes] --
+   [init_default_degraded_report] refuses the boot instead
+   ([Runtime_config_error]), and [server_runtime_bootstrap.ml] answers that
+   by entering [Setup_required], not by serving keeper turns. There is no
+   path from a fully-dropped lane to [Runtime.resolve_assignment] returning
+   [`Missing] for it at keeper-turn time -- confirmed against every writer
+   of runtime state, including the hot-reload save path
+   ([Runtime.save_config_text] / [validate_config_text]), which rejects the
+   same config for the same reason before it is ever applied live.
+   The earlier form of this test asserted the unreachable branch
+   ([Ok (Initialized_degraded ...)] with [orphaned-lane] inside
+   [dropped_lanes]) and failed in CI exactly where this comment says it
+   must: [degrade_loaded_for_missing_catalog] returned [Error]. What *is*
+   reachable, and was still only pinned for a partially-dropped lane
+   (`test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes`,
+   whose lane keeps one live candidate), is that a *fully*-dropped lane
+   also refuses to boot and the refusal names the lane under
+   "[runtime.lanes].dropped.<lane>", not just
+   "[runtime.lanes].candidates.<lane>". That is what this pins. *)
+let test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
@@ -4036,47 +4054,27 @@ streaming = false
 [fixture.missing-two]
 |} in
   let snapshot = Runtime.For_testing.snapshot () in
-  let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore snapshot; Masc_test_deps.cleanup_test_workspace base_path)
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
     (fun () -> with_model_catalog_content catalog @@ fun () ->
       with_temp_runtime_toml runtime_toml @@ fun path ->
-      (match Runtime.init_default_degraded_report ~config_path:path with
-       | Error error -> fail (Runtime.strict_init_error_to_string error)
-       | Ok Runtime.Initialized -> fail "a lane with every candidate missing must be observable"
-       | Ok (Runtime.Initialized_degraded degradation) ->
-         (match List.find_opt
-                  (fun (dropped : Runtime.dropped_runtime_lane) ->
-                     String.equal dropped.lane_id "orphaned-lane")
-                  degradation.dropped_lanes
-          with
-          | None -> fail "orphaned-lane must appear in dropped_lanes"
-          | Some dropped ->
-            check (list string) "every declared candidate was missing"
-              [ "fixture.missing-one"; "fixture.missing-two" ]
-              dropped.runtime_ids));
-      (match Runtime.resolve_assignment "orphaned-lane" with
-       | `Missing -> ()
-       | `Lane _ | `Unavailable _ -> fail "a fully-dropped lane must resolve to `Missing");
-      (match Runtime.dropped_lane_reason "orphaned-lane" with
-       | None -> fail "dropped_lane_reason must explain the `Missing lane"
-       | Some dropped ->
-         check string "dropped_lane_reason names the lane" "orphaned-lane" dropped.lane_id);
-      let meta = match Masc_test_deps.meta_of_json_fixture
-          (`Assoc [ "name", `String "affected"; "trace_id", `String "trace-affected" ]) with
-        | Ok meta -> meta | Error detail -> fail detail in
-      match Keeper_unified_turn_pre_dispatch.build_runtime_execution
-              ~meta ~runtime_id:"orphaned-lane" with
-      | Ok _ -> fail "a dropped lane must not resolve to a runtime execution"
-      | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
-        check string "the error names the lane layer, not context-window resolution"
-          "runtime.lanes" field;
-        check bool "the detail names the dropped lane" true
-          (String_util.contains_substring detail "orphaned-lane");
-        check bool "the detail names its missing candidates" true
-          (String_util.contains_substring detail "fixture.missing-one"
-           && String_util.contains_substring detail "fixture.missing-two")
-      | Error error -> fail (Agent_core.Error.to_string error))
+      match Runtime.init_default_degraded_report ~config_path:path with
+      | Ok Runtime.Initialized ->
+        fail "a lane with every candidate missing must not boot as fully catalog-known"
+      | Ok (Runtime.Initialized_degraded _) ->
+        fail "a fully-dropped lane must refuse degraded boot, not silently continue with it gone"
+      | Error (Runtime.Missing_catalog_models report) ->
+        failf
+          "expected a routing-reference config error, got a bare missing-catalog report: %s"
+          (Runtime.strict_init_error_to_string (Runtime.Missing_catalog_models report))
+      | Error (Runtime.Runtime_config_error msg) ->
+        check bool "diagnostic names the fully-dropped lane, not just its candidates" true
+          (String_util.contains_substring msg "[runtime.lanes].dropped.orphaned-lane");
+        check bool "diagnostic lists both missing candidates" true
+          (String_util.contains_substring msg "fixture.missing-one"
+           && String_util.contains_substring msg "fixture.missing-two");
+        check bool "diagnostic still refuses to erase the assignment into the default" true
+          (String_util.contains_substring msg "default fallback"))
 
 let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
@@ -5517,8 +5515,8 @@ let () =
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
           test_case "assignment-only catalog gap isolates requests and recovers" `Quick
             test_degraded_assignment_isolation_preserves_routing_and_recovers;
-          test_case "a dropped lane names the lane, not context-window resolution" `Quick
-            test_dropped_lane_assignment_names_the_lane_not_context_window;
+          test_case "a fully-dropped lane refuses degraded boot and names the lane" `Quick
+            test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane;
           test_case
             "server degraded init still rejects unavailable lane and media routes"
             `Quick test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes;

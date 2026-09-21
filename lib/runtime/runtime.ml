@@ -2042,24 +2042,6 @@ let resolve_assignment (assigned_id : string) =
         | None -> `Missing))
 ;;
 
-(* task-1649: [resolve_assignment]'s [`Missing] covers two different causes --
-   an id nobody ever configured, and a lane that *was* declared but was
-   dropped from [state.lanes] at load because every candidate it named was
-   missing from the catalog ([dropped_lanes], built in [materialize_config]
-   above). A keeper assigned to the second kind used to fall through
-   [`Missing] into [Keeper_unified_turn_pre_dispatch.build_runtime_execution]
-   treating the dropped lane's own name as a runtime id, which then failed
-   context-window resolution with a generic "no configured runtime context
-   window" -- naming the wrong layer. This answers the real cause so the
-   caller can name it. *)
-let dropped_lane_reason (assigned_id : string) : dropped_runtime_lane option =
-  let state = runtime_state () in
-  Option.bind state.startup_degradation (fun degradation ->
-    List.find_opt
-      (fun (dropped : dropped_runtime_lane) -> String.equal dropped.lane_id assigned_id)
-      degradation.dropped_lanes)
-;;
-
 (* A keeper assignment and a route id are routing labels: each names a declared
    lane or a runtime. The binding a turn actually opens is the lane's first
    candidate — the rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution]

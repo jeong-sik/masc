@@ -829,8 +829,11 @@ let test_run_uses_one_destination_and_model_snapshot () =
    | Gate.Skipped _ -> Alcotest.fail "expected evaluations"
    | Gate.Evaluated { evaluations; _ } ->
      List.iter (fun (evaluation : Gate.evaluation) ->
-       Alcotest.(check string) "typed evaluation has an observation endpoint"
-         initial.base_url evaluation.endpoint) evaluations);
+       match evaluation.destinations with
+       | [ asked ] ->
+         Alcotest.(check string) "typed evaluation has an observation endpoint"
+           initial.base_url asked.destination_uri
+       | asked -> Alcotest.failf "one destination, %d listed" (List.length asked)) evaluations);
   let report = Gate.run_result_to_yojson run in
   (match List.rev !observations with
    | [ Gate.Incomplete [ first ]; Gate.Incomplete [ again; second ]; Gate.Complete final ] ->
@@ -922,11 +925,14 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   match List.rev !observed with
   | [ Gate.Incomplete [ evaluation ] as observation ] ->
     let sent = List.hd (F.request_bodies server) in
+    let asked = match evaluation.destinations with
+      | [ asked ] -> asked
+      | asked -> Alcotest.failf "one destination, %d listed" (List.length asked) in
     Alcotest.(check string) "completed request destination remains inspectable"
-      server.base_url evaluation.endpoint;
+      server.base_url asked.destination_uri;
     Alcotest.(check string) "completed request model remains inspectable"
-      "request-model" evaluation.model;
-    let request = T.request_to_yojson ~model:evaluation.model
+      "request-model" asked.model;
+    let request = T.request_to_yojson ~model:asked.model
         ~state:evaluation.state ~questions:evaluation.questions in
     Alcotest.(check string) "the completed request context is the HTTP body"
       (Yojson.Safe.from_string sent |> Yojson.Safe.to_string) (Yojson.Safe.to_string request);

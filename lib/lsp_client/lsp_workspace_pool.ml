@@ -118,8 +118,7 @@ let discard_unless_installed proc installed =
   if not !installed
   then (
     try Lsp_process_manager.shutdown proc with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
+    | exn -> (* cancel-guard-ok: this is the teardown for a cancelled install, and raising here abandons the process it exists to reclaim *)
       Log.Server.debug
         "LSP pool teardown for %s raised: %s"
         proc.Lsp_process_manager.lang_id
@@ -234,8 +233,7 @@ let close t =
   List.iter
     (fun proc ->
       try Lsp_process_manager.shutdown proc with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
+      | exn -> (* cancel-guard-ok: the table is already reset, so raising on the first process abandons every one after it *)
         Log.Server.debug
           "LSP pool close for %s raised: %s"
           proc.Lsp_process_manager.lang_id

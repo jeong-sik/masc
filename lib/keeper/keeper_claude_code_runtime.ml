@@ -316,11 +316,30 @@ let claude_error_to_core_error = function
          ; retry_after = retry_after_of_rate_limit rate_limit
          ; detail = Runtime_claude_code.error_to_string (Quota_blocked blocked)
          })
-  | Runtime_claude_code.Turn_failed detail
-  | Runtime_claude_code.Turn_failed_with_observation { detail; _ } ->
+  | Runtime_claude_code.Turn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "claude_code"; error_type = Some "turn_failed"; detail })
+  (* task-1638: the CLI's own [terminal_reason] (one of three enum reasons,
+     or its free-form catch-all -- content-policy refusals among them) names
+     why its query loop concluded, so a same-input retry answers with the
+     same conclusion. A bare frame with no stated reason keeps the generic
+     "turn_failed" code (a raw transport/wire defect is plausible there, and
+     a retry may behave differently); a frame that names one gets its own
+     [error_type] so it is not conflated with every other turn_failed in
+     operator-visible failure-reason codes (Keeper_registry.Provider_runtime_error). *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { detail; provider_terminal_reason; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "claude_code"
+         ; error_type =
+             Some
+               (match provider_terminal_reason with
+                | None -> "turn_failed"
+                | Some reason -> "turn_failed:" ^ reason)
+         ; detail
+         })
   | Runtime_claude_code.Timeout seconds ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout

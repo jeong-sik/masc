@@ -220,6 +220,7 @@ type error =
       { detail : string
       ; tool_effect_attempted : bool
       ; response_emitted : bool
+      ; provider_terminal_reason : string option
       }
   | Stopped_by_host of
       { stop : host_stop
@@ -1106,6 +1107,7 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
            { detail = terminal_failure_detail ()
            ; tool_effect_attempted
            ; response_emitted
+           ; provider_terminal_reason = Option.map terminal_reason_to_wire terminal_reason
            })
     else if subtype <> "success"
     then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))

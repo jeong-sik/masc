@@ -31,8 +31,14 @@ let quota_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error"}|}
 ;;
 
+(* task-1638: matches the live won-chik incident byte-for-byte
+   (2026-09-21 03~06Z UTC, "terminal subtype=success api_status=unknown
+   reason=api_error") -- the CLI's own [terminal_reason] is present and
+   carries its free-form catch-all value, not one of the three enum
+   reasons. Earlier revisions of this fixture had no [terminal_reason]
+   field at all, which the live frame does carry. *)
 let generic_provider_rejection =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rejected-1","result":"API Error: Sonnet safeguards flagged this message","api_error_status":null}|}
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rejected-1","result":"API Error: Sonnet safeguards flagged this message","api_error_status":null,"terminal_reason":"api_error"}|}
 ;;
 
 let prompt_too_long_result =
@@ -1431,12 +1437,21 @@ let test_pre_effect_provider_rejection_keeps_failover_open () =
          match run_keeper_turn ~base_path ~cli_path ~goal:"READ_ONLY_SLACK" () with
          | Error
              (Agent_core.Error.Provider
-                (Llm_provider.Error.ProviderReportedError { detail; _ })) ->
+                (Llm_provider.Error.ProviderReportedError { detail; error_type; _ })) ->
            check
              bool
              "provider safeguard diagnostic survives without an effect fence"
              true
              (Astring.String.is_infix ~affix:"safeguards flagged" detail);
+           (* task-1638: the CLI's own terminal_reason ("api_error") rides
+              into the operator-visible code as data, so this repeated
+              same-input rejection is not indistinguishable from every other
+              "turn_failed" in Keeper_registry.Provider_runtime_error. *)
+           check
+             (option string)
+             "the failure code names the CLI's own terminal reason"
+             (Some "turn_failed:api_error")
+             error_type;
            let state = load_state base_path in
            (match state.phase with
             | Recovery_required required ->

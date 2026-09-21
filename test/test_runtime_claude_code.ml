@@ -886,12 +886,25 @@ let test_terminal_reason_prompt_too_long_is_typed () =
 let test_non_overflow_reason_beats_prefix_prose () =
   with_fixture [ Emit non_overflow_reason_with_prefix_prose_result ] (fun path ->
     match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
+    | Error
+        (Runtime_claude_code.Turn_failed_with_observation
+           { detail; provider_terminal_reason; _ }) ->
       check
         bool
         "generic rejection keeps the provider sentence"
         true
-        (Astring.String.is_infix ~affix:"gateway relayed" detail)
+        (Astring.String.is_infix ~affix:"gateway relayed" detail);
+      (* task-1638: this is the exact wire shape a content-policy refusal
+         arrives as -- [subtype=success, is_error=true] with the CLI's
+         catch-all [terminal_reason="api_error"], no enum member of its own.
+         The typed field carries the CLI's own reason as data (never a
+         string match on the sentence) so a downstream operator-visible code
+         can tell this apart from a bare frame with no stated reason. *)
+      check
+        (option string)
+        "the CLI's non-enum terminal_reason survives as typed data"
+        (Some "api_error")
+        provider_terminal_reason
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "a non-overflow terminal was reported as completion")
 ;;
@@ -1127,7 +1140,11 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
     match run_fixture path with
     | Error
         (Runtime_claude_code.Turn_failed_with_observation
-           { detail; tool_effect_attempted = false; response_emitted = false }) ->
+           { detail
+           ; tool_effect_attempted = false
+           ; response_emitted = false
+           ; provider_terminal_reason = None
+           }) ->
       check
         string
         "terminal detail retained"

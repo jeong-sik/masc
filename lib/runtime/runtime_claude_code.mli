@@ -202,6 +202,16 @@ type error =
       { detail : string
       ; tool_effect_attempted : bool
       ; response_emitted : bool
+      ; provider_terminal_reason : string option
+        (** The CLI's own [terminal_reason] wire value when the result frame
+            carried one (task-1638): [None] for a bare [is_error] frame with
+            no stated cause (a raw transport/wire defect is plausible, and a
+            same-input retry may behave differently), [Some wire] when the
+            CLI's query loop concluded for a named cause -- one of the three
+            enum reasons, or the free-form catch-all the CLI calls
+            "api_error" for everything else it does not enumerate, including
+            content-policy refusals. The bytes are carried as data for a
+            distinct operator-visible code, never compared as text. *)
       }
   | Stopped_by_host of
       { stop : host_stop

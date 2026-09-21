@@ -2282,18 +2282,12 @@ let absorbed_snapshot () =
   | Error error -> fail (Snapshot.error_to_string error)
 ;;
 
-let start_range
-      ?(librarian_front = fun _ -> Host.No_saved_position)
-      ?budget_bytes
-      ?(own_first_atom = 0)
-      messages
-  =
+let start_range ?(librarian_front = fun _ -> Host.No_position) ?(own_first_atom = 0) messages =
   Host.carried_start_range
     ~keeper_name:"alpha"
     ~runtime_id:"claude_code.claude-sonnet-5"
     ~carried_front_seed:None
     ~librarian_front
-    ~budget_bytes
     ~own_first_atom
     messages
 ;;
@@ -2316,9 +2310,8 @@ let test_a_start_seed_begins_at_the_librarian_position () =
     snapshot.Snapshot.end_atom carried.Host.first_atom;
   check bool "the front says so" true
     (match carried.Host.front with
-     | Host.Librarian_snapshot { end_atom; boundary_line } ->
-       end_atom = snapshot.Snapshot.end_atom
-       && boundary_line = snapshot.Snapshot.end_boundary_line
+     | Host.Librarian_snapshot { absorbed_through } ->
+       absorbed_through = snapshot.Snapshot.end_atom
      | Host.Carried_seed _ | Host.Lane_cut | Host.Whole_history -> false);
   check string "and the log names it the same word the Agent Core lane logs"
     "librarian_snapshot"
@@ -2347,60 +2340,23 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
      | _ -> false)
 ;;
 
-(* A position was saved and it does not describe these messages: the history
-   moved under it. A seed measured on that same history names atoms that are
-   no longer there either, so only the lane's own cut stands. *)
-let test_an_unusable_saved_position_falls_back_to_the_lane_cut () =
-  let carried =
-    start_range
-      ~librarian_front:(fun _ -> Host.Saved_position_unusable)
-      ~own_first_atom:1
-      start_seed_messages
-  in
-  check int "the lane's cut" 1 carried.Host.first_atom;
-  check bool "and nothing else" true
-    (match carried.Host.front with
-     | Host.Lane_cut -> true
-     | _ -> false);
-  check bool "no working state is carried" false
-    (List.exists
-       (fun text ->
-          let needle = working_state in
-          let extra = String.length text - String.length needle in
-          extra >= 0 && String.equal (String.sub text extra (String.length needle)) needle)
-       (texts carried.Host.messages))
-;;
-
-(* The working state is pinned, so a lane whose ceiling the composition passes
-   would refuse the turn rather than trim it. The range it replaces is carried
-   instead, because that one the ceiling is allowed to cut. *)
-let test_a_working_state_that_does_not_fit_is_not_carried () =
+(* The Librarian read through the last completed turn, so the position names
+   the atom this request has to answer. A range always carries the newest
+   atom, so the position is clamped and that turn is sent again beside the
+   summary — a request with a summary and nothing to answer is the view a
+   provider refuses. *)
+let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
   let snapshot = absorbed_snapshot () in
-  let carried =
-    start_range
-      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
-      ~budget_bytes:1
-      start_seed_messages
-  in
-  check int "starts at the oldest atom" 0 carried.Host.first_atom;
-  check bool "the front is the lane's own" true
+  let carried = start_range ~librarian_front:(fun _ -> Host.Absorbed snapshot) absorbed_messages in
+  check int "the range starts one atom before the position"
+    (snapshot.Snapshot.end_atom - 1) carried.Host.first_atom;
+  check bool "and still says the Librarian named the front" true
     (match carried.Host.front with
-     | Host.Whole_history -> true
+     | Host.Librarian_snapshot { absorbed_through } ->
+       absorbed_through = snapshot.Snapshot.end_atom
      | _ -> false);
-  check bool "the absorbed atoms are carried in its place" true
-    (List.exists (String.equal "The build passed.") (texts carried.Host.messages))
-;;
-
-(* A budget the composition fits changes nothing. *)
-let test_a_working_state_that_fits_is_carried () =
-  let snapshot = absorbed_snapshot () in
-  let carried =
-    start_range
-      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
-      ~budget_bytes:100_000
-      start_seed_messages
-  in
-  check int "the librarian position stands" snapshot.Snapshot.end_atom carried.Host.first_atom
+  check bool "the turn is on the wire" true
+    (List.exists (String.equal "Build the patch.") (texts carried.Host.messages))
 ;;
 
 (* The lane's own cut is later than what the Librarian read: the request must
@@ -2654,17 +2610,9 @@ let () =
             `Quick
             test_a_later_lane_cut_wins
         ; test_case
-            "an unusable saved position falls back to the lane cut"
+            "a fully absorbed history still carries its newest atom"
             `Quick
-            test_an_unusable_saved_position_falls_back_to_the_lane_cut
-        ; test_case
-            "a working state that does not fit is not carried"
-            `Quick
-            test_a_working_state_that_does_not_fit_is_not_carried
-        ; test_case
-            "a working state that fits is carried"
-            `Quick
-            test_a_working_state_that_fits_is_carried
+            test_a_fully_absorbed_history_still_carries_its_newest_atom
         ] )
     ]
 ;;

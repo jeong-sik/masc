@@ -117,8 +117,8 @@ val run :
     is handed: the atoms before it are in the keeper's memory, and its saved
     working state is carried in their place. The latest of the three
     positions wins, so the range never moves back; the request can still grow
-    by the working state, which is why the composition is checked against the
-    declared ceiling and falls back when it does not fit.
+    by the working state, which the declared ceiling has already cut around
+    before this lane composes.
 
     [on_transmitted_model_input] fires once per attempt, after the capacity
     window has cut the history and before the prompt is built. Required rather

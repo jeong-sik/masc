@@ -1659,7 +1659,7 @@ let run_named
 	    : Keeper_official_client_host.librarian_position
 	    =
 	    match Eio.Lazy.force librarian_front_source with
-	    | None -> Keeper_official_client_host.No_saved_position
+	    | None -> Keeper_official_client_host.No_position
 	    | Some (trace_id, lines, snapshot) ->
 	      (* [restore] hashes the whole covered prefix, so it runs on the CPU
 	         pool rather than on the fiber that is composing the request. *)
@@ -1672,13 +1672,16 @@ let run_named
 	       | Error error ->
 	         (* A position was saved and it does not describe this list: the
 	            history was rewritten, restarted, or the list is not the one it
-	            covered. A seed measured on that same history is no safer, so
-	            the range falls back to the lane's own cut. *)
+	            covered. Only the Librarian front is dropped — the seed carries
+	            its own digest of the atom it names and is checked against this
+	            history separately, so a stale position says nothing about it.
+	            The Agent Core lane answers the same three errors the same way
+	            ([prepare_continuity] above). *)
 	         Log.Keeper.warn
 	           ~keeper_name
 	           "official client start seed drops the saved librarian position: %s"
 	           (Librarian_continuity_snapshot.error_to_string error);
-	         Keeper_official_client_host.Saved_position_unusable)
+	         Keeper_official_client_host.No_position)
 	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)

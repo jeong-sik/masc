@@ -203,15 +203,15 @@ type carried_start_front =
   | Whole_history
       (** No seed held and the lane cut nothing, so the range starts at the
           oldest atom and the provider judges it. *)
-  | Librarian_snapshot of
-      { end_atom : int
-      ; boundary_line : int
-      }
-      (** The Librarian absorbed this history through [end_atom] and saved
-          what the keeper was in the middle of. The range starts there and
-          carries that working state in place of the atoms it summarises —
+  | Librarian_snapshot of { absorbed_through : int }
+      (** The Librarian absorbed this history through [absorbed_through] and
+          saved what the keeper was in the middle of. The range starts there
+          and carries that working state in place of the atoms it summarises —
           the front the Agent Core lane already takes
-          ([Keeper_carried_front.Librarian_snapshot]). *)
+          ([Keeper_carried_front.Librarian_snapshot]). [first_atom] is that
+          position clamped to the newest atom, so a range that the Librarian
+          read to the end still carries the turn it answers; the two differ
+          only then. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -228,24 +228,24 @@ type carried_start =
 (** What the Librarian's saved position says about the messages a lane is
     about to send. *)
 type librarian_position =
-  | No_saved_position
-      (** The Librarian has absorbed nothing on this history yet, or the lane
-          named no reading. *)
+  | No_position
+      (** Nothing was absorbed on this history, the lane named no reading, or
+          a saved position does not describe these messages. The caller owns
+          that reading, so it is the caller that says which of those it was.
+          Either way the seed and the lane's own cut stand: a seed is checked
+          against this history on its own
+          ([Keeper_carried_front.for_history]), so a Librarian position that
+          went stale says nothing about it. *)
   | Absorbed of Librarian_continuity_snapshot.t
       (** The saved position describes these messages: the atoms before it
           are in the keeper's memory and the working state stands for them. *)
-  | Saved_position_unusable
-      (** A position was saved and it does not describe these messages: the
-          history was rewritten, or it belongs to another trace. No front
-          older than it is trusted either, so the range falls back to the
-          lane's own cut. *)
 
 val librarian_front_or_absent
   :  (Agent_core.Types.message list -> librarian_position) option
   -> Agent_core.Types.message list
   -> librarian_position
 (** A lane's optional reading as the total function {!carried_start_range}
-    takes: [None] becomes {!No_saved_position}. *)
+    takes: [None] becomes {!No_position}. *)
 
 val carried_start_front_to_string : carried_start_front -> string
 
@@ -254,7 +254,6 @@ val carried_start_range
   -> runtime_id:string
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
   -> librarian_front:(Agent_core.Types.message list -> librarian_position)
-  -> budget_bytes:int option
   -> own_first_atom:int
   -> Agent_core.Types.message list
   -> carried_start
@@ -278,16 +277,9 @@ val carried_start_range
     as extra system context and the range starts at whichever of the three
     positions is latest, so a Librarian that read less than the last request
     carried never moves the range back. The request itself can still grow:
-    the working state is bytes the range did not carry before. On
-    {!Saved_position_unusable} the seed is dropped with the position — a seed
-    measured on a history that has since been rewritten names atoms that are
-    no longer there — and only [own_first_atom] stands.
-
-    [budget_bytes] is the lane's own ceiling for the composed range, when it
-    has one. The working state is pinned, so no cut can drop it and a lane
-    would refuse the whole turn over it; a composition that does not fit
-    falls back to the seed or the lane cut instead, which carries the atoms
-    the working state would have replaced.
+    the working state is bytes the range did not carry before, and it is
+    pinned, so a lane with a byte ceiling of its own has to be ready for a
+    composition that does not fit it.
 
     [own_first_atom] is the front the lane already chose for its own reason
     (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).

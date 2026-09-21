@@ -76,7 +76,10 @@ module For_testing : sig
     -> Agent_core.Agent.model_input_projection option
     -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
   (** Starts from the admitted carried front, runs the source projection, then
-      applies the declared byte window. Thus a Gate replay reference is
+      applies the declared byte window. A Librarian front carries a pinned
+      working state that the window cannot trim, so a composition the window
+      refuses is composed once more without that front, which is the only
+      place the refusal is actually known. Thus a Gate replay reference is
       charged to the provider-bound input without becoming a front in the
       durable checkpoint vocabulary. Refuses an undeclared window:
       Antigravity has no typed overflow response from which MASC could derive

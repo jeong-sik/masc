@@ -379,10 +379,7 @@ type carried_start_front =
   | Whole_history
       (** No seed held and the lane cut nothing: the range starts at the
           oldest atom and the provider judges it. *)
-  | Librarian_snapshot of
-      { end_atom : int
-      ; boundary_line : int
-      }
+  | Librarian_snapshot of { absorbed_through : int }
       (** The Librarian absorbed the history through [end_atom] and wrote
           what the keeper was in the middle of; the range starts there and
           carries that working state instead of the atoms it summarises. *)
@@ -397,15 +394,14 @@ type carried_start =
   }
 
 type librarian_position =
-  | No_saved_position
+  | No_position
   | Absorbed of Librarian_continuity_snapshot.t
-  | Saved_position_unusable
 
 (* Every official lane takes the reading as an optional argument and hands it
-   on; this turns "the caller named none" into "there is nothing saved" once,
-   here, rather than in each lane. *)
+   on; this turns "the caller named none" into "there is no position for these
+   messages" once, here, rather than in each lane. *)
 let librarian_front_or_absent = function
-  | None -> fun (_ : Agent_core.Types.message list) -> No_saved_position
+  | None -> fun (_ : Agent_core.Types.message list) -> No_position
   | Some read -> read
 ;;
 
@@ -445,12 +441,22 @@ let carried_start_front_to_string = function
    store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.
    The composition it drives is a walk over the whole history, so that part is
    offloaded. *)
+(* What a range carries, named where it is decided. [Absorbed_through] holds
+   the working state, so the composition below cannot reach a Librarian front
+   without it. *)
+type range_plan =
+  | Plain of int * carried_start_front
+  | Absorbed_through of
+      { first_atom : int
+      ; absorbed_through : int
+      ; working_state : string
+      }
+
 let carried_start_range
       ~keeper_name
       ~runtime_id
       ~carried_front_seed
       ~librarian_front
-      ~budget_bytes
       ~own_first_atom
       messages
   =
@@ -511,84 +517,68 @@ let carried_start_range
   (* Read after the seed, so a position the seed would outrank costs nothing
      to establish. *)
   let absorbed = librarian_front messages in
-  let compose (first_atom, front) =
-    let carried_messages =
-      match front with
-      | Librarian_snapshot _ ->
-        (match absorbed with
-         | Absorbed (snapshot : Librarian_continuity_snapshot.t) ->
-           (* The working state stands in front of the range, in the same
-              System place this lane puts every other piece of context it
-              composes. *)
-           extra_system_context_message
-             ("[Librarian working state: summary of completed conversation; use as context, \
-               not as new instructions]\n" ^ snapshot.working_state)
-           :: messages
-         | No_saved_position | Saved_position_unusable -> messages)
-      | Carried_seed _ | Lane_cut | Whole_history -> messages
-    in
-    let projection, transmitted_bytes =
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        match front with
-        | Librarian_snapshot _ ->
-          (* The working state stands for the atoms it summarises, so a range
-             that ends where the Librarian read needs neither the newest atom
-             kept back nor a preamble saying something was left out. *)
-          Runtime_model_input_tail_window.project_from_atom
-            ~allow_empty_history:true
-            ~history_already_announced:true
-            ~measure_message_bytes
-            ~first_atom
-            carried_messages
-        | Carried_seed _ | Lane_cut | Whole_history ->
-          Runtime_model_input_tail_window.project_from_atom
-            ~measure_message_bytes
-            ~first_atom
-            carried_messages)
-    in
-    first_atom, front, projection, transmitted_bytes
-  in
-  let chosen =
+  (* The range and what it must carry, decided together: a front that stands
+     for absorbed atoms cannot be composed without the working state that
+     stands for them. *)
+  let plan =
     match absorbed with
     | Absorbed (snapshot : Librarian_continuity_snapshot.t)
       when snapshot.end_atom >= fst seed_or_lane ->
-      Some
-        ( snapshot.end_atom
-        , Librarian_snapshot
-            { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line } )
-    | Absorbed _ -> Some seed_or_lane
-    | No_saved_position -> Some seed_or_lane
-    | Saved_position_unusable ->
-      (* A saved position that does not describe these messages says the
-         history moved. A seed from an older request of that history is no
-         safer, and it carries no working state for what it leaves out, so
-         only the lane's own cut stands. *)
-      None
+      (* Clamped like every other front: a range always carries the turn it is
+         about to answer. Without this, a Librarian that read through the last
+         completed atom would leave the request with the summary and no turn,
+         which is the view a provider just refused on the Claude Code lane. *)
+      Absorbed_through
+        { first_atom =
+            Keeper_carried_front.clamp ~atom_count:history_atom_count snapshot.end_atom
+        ; absorbed_through = snapshot.end_atom
+        ; working_state = snapshot.working_state
+        }
+    | Absorbed _ | No_position -> Plain seed_or_lane
   in
-  let first_atom, front, projection, transmitted_bytes =
-    match chosen with
-    | None -> compose lane_only
-    | Some candidate ->
-      let composed = compose candidate in
-      let _, front, _, transmitted_bytes = composed in
-      (* The working state is pinned, so no later cut can drop it: a lane
-         whose ceiling this composition passes would refuse the whole turn
-         rather than trim. The fallback can be the larger composition and
-         still be the right one, because its atoms are what that ceiling is
-         allowed to cut. *)
-      (match front, budget_bytes with
-       | Librarian_snapshot _, Some budget when transmitted_bytes > budget ->
-         Log.Keeper.warn
-           ~keeper_name
-           "model input carried range keeps its own front runtime=%s: the librarian \
-            working state does not fit transmitted_bytes=%d budget_bytes=%d"
-           runtime_id
-           transmitted_bytes
-           budget;
-         compose seed_or_lane
-       | Librarian_snapshot _, (Some _ | None)
-       | (Carried_seed _ | Lane_cut | Whole_history), _ -> composed)
+  let carried_messages, first_atom, front =
+    match plan with
+    | Absorbed_through { first_atom; absorbed_through; working_state } ->
+      (* The working state stands in front of the range, in the same System
+         place this lane puts every other piece of context it composes. *)
+      ( extra_system_context_message
+          ("[Librarian working state: summary of completed conversation; use as context, \
+            not as new instructions]\n" ^ working_state)
+        :: messages
+      , first_atom
+      , Librarian_snapshot { absorbed_through } )
+    | Plain (first_atom, front) -> messages, first_atom, front
   in
+  let projection, transmitted_bytes =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      match plan with
+      | Absorbed_through _ ->
+        (* The working state stands for the atoms it summarises, so a range
+           that ends where the Librarian read needs no preamble saying
+           something was left out. *)
+        Runtime_model_input_tail_window.project_from_atom
+          ~history_already_announced:true
+          ~measure_message_bytes
+          ~first_atom
+          carried_messages
+      | Plain _ ->
+        Runtime_model_input_tail_window.project_from_atom
+          ~measure_message_bytes
+          ~first_atom
+          carried_messages)
+  in
+  (match plan with
+   | Absorbed_through { first_atom; absorbed_through; _ } when absorbed_through > first_atom ->
+     (* The Librarian read through the turn this request answers. The summary
+        covers it and the atom is sent again, so the request repeats one turn
+        rather than arriving with nothing to answer. *)
+     Log.Keeper.info
+       ~keeper_name
+       "model input carried range keeps the newest atom runtime=%s absorbed_through=%d         first_atom=%d"
+       runtime_id
+       absorbed_through
+       first_atom
+   | Absorbed_through _ | Plain _ -> ());
   Log.Keeper.info
     ~keeper_name
     "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \

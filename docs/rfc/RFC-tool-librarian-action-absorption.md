@@ -3,7 +3,7 @@ rfc: "tool-librarian-action-absorption"
 title: "Tool Librarian: 도구 호출 궤적을 읽어 반복 패턴을 컴포지션으로 흡수(Absorb)한다"
 status: Draft
 created: 2026-09-17
-updated: 2026-09-19
+updated: 2026-09-21
 author: jeong-sik
 supersedes: ["keeper-writes-own-compositions"]
 superseded_by: null
@@ -13,15 +13,19 @@ implementation_prs: []
 
 # RFC: Tool Librarian — 도구 호출 궤적의 컴포지션 흡수 (Action Absorption)
 
+> **관측과 제안의 범위**: §1.1~§1.2.1은 명시된 기록 창의 관측 결과이고, §2는 현재 Memory 구현을 설명한다. §1.3의 우려와 §3~§6의 자동 후보 생성·검증·승인·제거 규칙은 아직 구현·효과가 검증되지 않은 제안이다. §4 안의 날짜가 붙은 실측 표는 그 규칙과 구분되는 관측 자료이며, 규칙의 효과를 증명하지 않는다.
+
 ## 0. Summary
 
-Memory OS의 Librarian이 파편화된 개별 관측(`m1`, `m2`)을 읽어 하나의 상위 기억으로 묶어 **흡수(Absorb / Consolidate)**하고 옛 ID를 `dropped`로 처리하듯, 도구 레이어에서도 **Tool Librarian (독립 메타 분석 에이전트)**이 키퍼들의 실행 로그(`tool_calls`)를 분석하여 반복되는 다단계 도구 호출 사슬을 **단일 컴포지션(`keeper_compose_*`)으로 흡수(Action Absorption)**한다.
+Memory OS의 Librarian은 관련 기억(`m1`, `m2`)을 새 claim으로 묶고, 재료 ID를 그 claim의 `absorbs`에 적는다. 재료는 현재 스냅샷에서 빠지지만 원문과 흡수 대상은 별도 기록에 남는다. 삭제(`dropped`)와 교정(`dropped` + `supersedes`)은 이와 다른 계약이다(§2).
+
+이 RFC는 이 구분을 참고해 **Tool Librarian(별도 분석자)**이 Keeper들의 실행 로그(`tool_calls`)에서 반복되는 도구 호출을 찾아 **컴포지션(`keeper_compose_*`) 후보로 제안**하는 흐름을 다룬다. 컴포지션은 이후 호출을 묶는 것이며, 이미 일어난 호출 기록이나 턴을 지우는 것이 아니다. Memory 흡수가 구현됐다는 사실만으로 Tool Librarian의 자동 생성·검증·승인이 구현되거나 효과가 입증된 것은 아니다.
 
 이 RFC는:
 1. `tools-as-shell-commands` (Shell IR)의 실패(16일간 59,500회 호출 중 채택률 0%)와,
 2. `keeper-writes-own-compositions`의 우려(일하는 키퍼의 집중 분산, 1회성 과적합)
 
-를 모두 극복하고, **데이터 기반의 오프라인 마이닝 + 샌드박스 사전 검증(Dry-run) + HITL 승인**을 거쳐 살아있는 고효율 컴포지션 카탈로그를 유지하는 아키텍처를 정의한다.
+를 배경으로, **오프라인 마이닝 + 샌드박스 사전 검증(Dry-run) + HITL 승인**을 거쳐 컴포지션 후보를 검토하는 아키텍처를 제안한다.
 
 ---
 
@@ -124,6 +128,42 @@ Memory OS의 Librarian이 파편화된 개별 관측(`m1`, `m2`)을 읽어 하�
 
 측정 스크립트는 저장소에 넣지 않았다. §5 Phase 1 마이너가 이 정의를 코드로 옮긴다.
 
+### 1.2.2 §3.1 은 이미 쓰이는 컴포지션 7개를 하나도 만들어 내지 못한다 (2026-09-20)
+
+§1.2.1 은 기록에서 새 후보가 몇 개 나오는지 셌다. 반대쪽도 물어야 한다. 저장소가 이미 담고 있고 Keeper 들이 지금 쓰는 컴포지션을, §3.1 은 같은 기록만 보고 다시 만들어 낼 수 있나.
+
+`skills/*/SKILL.md` 의 컴포지션은 7개다. 그 가운데 셋은 노드끼리 출력을 넘기지 않는다(`kind = "output"` 참조가 0개). §3.1 조건 2 는 앞 도구의 출력 pointer 가 뒤 도구의 입력 필드로 사상되기를 요구하므로, 이 셋은 모양 때문에 후보가 될 수 없다. 나머지 넷은 출력 참조를 가지고 있어 조건 2 가 볼 수 있는 모양인데, §1.2.1 의 판정에서 넷 다 떨어진다.
+
+| 컴포지션 | 노드 사이 이어짐 | §1.2.1 의 판정 |
+|---|---|---|
+| `prior-art` | 없음 | 조건 2 가 후보로 올릴 수 없다 |
+| `sangokushi-2-end-command` | 없음 | 같다. `masc_msx_press → masc_msx_screen` 에서 JSON 값이 넘어가지도 않는다 |
+| `work-intake` | 없음 | 같다. §1.2.1 이 이미 적었다 |
+| `browser-live-follow-read` | `BrowserInteract → BrowserRead` (`/tabId`, `/destinationUrl`, `/navigationSource`) | 조건 2 를 통과한 넷에 없다. 통과한 것은 반대 방향인 `BrowserRead → BrowserInteract` 다 |
+| `browser-navigate-read` | `BrowserGoto → BrowserRead` (`/url`) | 통과한 넷에 없다 |
+| `msx-observe` | `masc_msx_screen → keeper_analyze_image` (`/artifact`) | 통과하지 못한다. 판정할 수 있는 2,323번 중 1번이 이어지지 않는다 |
+| `run-and-read` | `keeper_spawn → keeper_spawn_wait`·`keeper_spawn_read` (`/handle`) | 통과하지 못한다. `keeper_spawn → keeper_spawn_wait` 가 1,854번 중 1,673번만 이어진다 |
+
+§3.1 이 "지금 쓸 수 있다"고 올린 것은 `keeper_spawn → keeper_spawn_wait → keeper_spawn_stop` 하나인데, `keeper_spawn_stop` 은 저장소의 어느 `SKILL.md` 에도 없다. 사람이 묶은 일곱은 전부 떨어지고, 아무도 묶지 않은 하나가 올라온다.
+
+이 실측이 반증하는 것과 반증하지 않는 것을 갈라 둔다.
+
+- 반증하는 것: "기록을 읽으면 쓸 만한 컴포지션이 나온다"는 전제. 지금 쓰이는 7개를 기준으로 하면 재현율은 0/7 이다. 조건 2 는 그 가운데 셋을 모양 때문에 아예 보지 못한다.
+- 반증하지 않는 것: §3.1 조건이 안전한지. 조건 2 는 어긋나는 발생이 하나만 있어도 떨어뜨리고, 그 엄격함이 이 결과를 만든다. 느슨하게 하면 재현율과 함께 잘못된 컴포지션도 오른다. 어느 쪽이 나은지는 이 실측이 답하지 않는다.
+
+### 1.2.3 이 작업 공간에서 컴포지션이 실제로 움직인 모양 (2026-09-20)
+
+`<base-path>/.masc/skill-composition-evidence-v1/` 에 실행 기록 17건이 있고, `reference.identity.package_id` 는 12개다. 7개는 저장소의 그 7개다. 나머지 다섯(`plan-intake`, `done-evidence`, `background-snapshot`, `mission-snapshot`, `what-arrived`)은 지금 `<base-path>/.masc/skills/` 에 없다. 돌았고, 지워졌다.
+
+- 다섯의 도구 집합은 서로 포개진다. `background-snapshot` ⊂ `plan-intake` ⊂ `mission-snapshot` 이고, `what-arrived` ⊂ `work-intake` 다.
+- `jazz-developer` 는 `background-snapshot`(도구 2개)을 09-14 19:07Z 에 돌리고, 5.9시간 뒤 `mission-snapshot`(4개)을 돌렸다. 뒤엣것이 앞엣것의 도구를 담는다.
+- `goo-yang-bong` 은 `work-intake` 를 돌린 지 193초 뒤에 `what-arrived` 를 돌렸다.
+- `done-evidence` 는 노드가 하나(`keeper_lane_status`)다.
+
+읽는 방법의 한계를 적어 둔다. `executor_settlements` 는 그 실행에서 실제로 끝난 노드만 적으므로, 위 도구 집합은 기록들의 합집합이지 정의가 아니다. 지워진 다섯은 정의가 남아 있지 않아 이 합집합이 알 수 있는 전부다.
+
+이 기록은 겹침의 방향까지는 말하지 않는다. `plan-intake`(도구 3개)가 `background-snapshot`(2개)보다 먼저이고, 만든 Keeper 도 다르다. 말하는 것은 이것이다. 이 창에서 컴포지션이 움직인 모양은 서로 겹치는 것들이 나란히 만들어지고 지워지는 쪽이었고, 그 겹침을 하나로 합치는 일은 §3.1 이 푸는 문제가 아니다. §3.1 은 아직 컴포지션이 없는 새 시퀀스를 찾는다.
+
 ### 1.3 일하는 Keeper가 직접 만들 때의 우려 (`keeper-writes-own-compositions` 검토)
 `RFC-keeper-writes-own-compositions`는 일하는 키퍼가 런타임에 `keeper_compose_save`로 제안하자고 했다. 이 RFC가 보는 우려는 둘이다. `keeper_compose_save`는 구현된 적이 없어서 둘 다 잰 값은 없다.
 1. **작업 방해(Task Distraction)**: 코딩/디버깅 턴에 복잡한 TOML DAG를 조립하느라 에이전트의 주의력과 토큰이 그쪽으로 샐 수 있다.
@@ -135,26 +175,36 @@ Memory OS의 Librarian이 파편화된 개별 관측(`m1`, `m2`)을 읽어 하�
 
 ## 2. 핵심 원리: 기억의 흡수(Memory OS)에서 행동의 흡수(Action OS)로
 
-MASC의 Memory OS에서 Librarian은 이미 완벽한 흡수 메커니즘을 수행하고 있다 (`RFC-0418`, `config/prompts/librarian.md:32-36`):
+현재 Memory 계약은 [Librarian 프롬프트](../../config/prompts/librarian.md)의 유지·삭제·교정 절과 [RFC-0456 §4.2](RFC-0456-librarian-output-contract.md)에 따라 세 경로를 구분한다.
 
-> *"반복되는 개념이나 주제에 대한 정보면, 그 주제를 중심으로 묶어서 하나로 다시 쓰세요...  
-> 묶어서 쓴 기억을 `new_claims`에 넣고, 재료가 된 기억의 ID는 모두 `dropped`에 넣습니다."*
+- **흡수**: 묶은 내용을 `new_claims`에 쓰고 재료의 짧은 ID를 그 claim의 `absorbs`에 적는다. 같은 ID를 `dropped`에도 넣거나 여러 번 흡수하면 [파서의 `translate_absorbs`](../../lib/keeper/keeper_librarian.ml)가 거절한다.
+- **삭제**: 현재 기억에서 뺄 ID와 이유를 `dropped`에 적는다.
+- **교정**: 옛 ID를 `dropped`에 적고, 이를 고친 새 claim의 `supersedes`에 같은 ID를 적는다. `supersedes`는 여러 기억을 묶는 필드가 아니다.
 
-이 원리는 절차적 행동(도구 실행)과 1:1로 대응된다:
+흡수할 때 [현재 스냅샷 저장소](../../lib/keeper/keeper_memory_os_current.mli)는 잠금을 잡은 시점에도 현재 스냅샷에 남아 있고 이번 교체로 빠지는 재료의 전체 fact와 `memory_id`·`into`를 [흡수 기록](../../lib/keeper/keeper_memory_absorbed.mli)에 덧붙인다. 기록에 실패하면 커밋하지 않는다. 이렇게 기록된 원문은 `keeper_memory_search`의 `absorbed` 또는 `all`에서 찾을 수 있다. 모델이 답하는 동안 이미 철회된 재료는 이 회차의 흡수 기록에 추가되지 않는다. 또 기록을 쓴 뒤 스냅샷 교체가 실패하면 미완료 회차의 행도 남을 수 있으므로, 흡수 기록 한 줄 자체가 커밋 성공 증명은 아니다.
 
-| 비교 차원 | Librarian의 기억 흡수 (Memory Consolidation) | Tool Librarian의 행동 흡수 (Action Absorption) |
+완료 턴 범위의 소비 여부는 이 흡수 기록과 별개다. 현재 저장소의 `durable_range_id`와 범위 영수증이 Memory 스냅샷의 revision·SHA-256에 연결되고, [durable consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli)는 progress 쓰기 실패 후 그 범위의 커밋이 확인되면 모델을 다시 부르지 않고 진행 위치를 복구한다. 이 복구 계약도 원래 턴이나 호출 기록을 삭제한다는 뜻은 아니다.
+
+두 흐름은 같은 동작이 아니라 다음과 같이 비교할 수 있다.
+
+| 비교 차원 | Librarian의 기억 흡수 — 현재 구현 | Tool Librarian의 행동 흡수 — 이 RFC의 제안 |
 | :--- | :--- | :--- |
-| **원시 재료** | 턴마다 쏟아지는 파편적 관측·사실들 (`m1`, `m2`) | 턴마다 쏟아지는 파편적 도구 호출들 (`tool_a`, `tool_b`) |
-| **시스템 엔트로피** | 기억 개수 증가로 인한 컨텍스트 한도(16KB) 초과 | 턴 수 증가로 인한 LLM 왕복 시간(Roundtrip) 및 토큰 낭비 |
-| **판정 기준** | "반복되는 주제인가? 결정론적 팩트인가?" | "반복되는 시퀀스인가? 중간 판단 없이 인자가 직결되는가?" |
-| **흡수(Absorb) 행위** | 재료 기억을 `dropped`하고, 묶은 새 claim 발행 (`supersedes`) | 재료 도구 호출 턴들을 제거하고, 묶은 새 `composition` 발행 |
-| **결과** | 고밀도 장기 기억 스냅샷 (400개 사실로 수렴) | 고밀도 1턴 컴포지션 도구 (20~30ms 초고속 실행) |
+| **재료** | 현재 기억과 읽은 대화·도구 관측 | 기록된 도구 호출과 입출력 |
+| **줄이려는 반복** | 같은 주제의 기억을 따로 유지하며 생기는 중복 | 중간 판단 없이 이어지는 도구 호출의 모델 왕복 |
+| **판정 기준** | Librarian이 조건·수치·교훈과 출처를 살펴 묶을 내용을 판단 | §3.1의 재사용성·데이터 흐름·크기 조건으로 후보를 판정 |
+| **흡수 행위** | `new_claims[].absorbs`로 재료와 새 claim을 연결하고, 재료 원문은 흡수 기록에 보존 | 기존 호출 기록을 근거로 컴포지션 후보를 만들고 검증·승인 후 이후 호출에 사용 |
+| **결과** | 선택한 현재 기억 스냅샷과 검색 가능한 흡수 원문 | 여러 도구를 한 번에 부를 후보. 절감 효과는 해당 컴포지션의 실행에서 확인 |
+
+기억 흡수는 모델이 내용을 읽고 판단한다. Tool 후보는 먼저 §3.1의 구조 조건을 충족해야 하므로, 모델이 함께 묶을 만하다고 판단할 내용이라도 출력→입력 연결이 없으면 후보가 되지 못한다.
+[기존 컴포지션 7개 대조](https://github.com/jeong-sik/masc/pull/37351)에서는 3개가 이 구조 조건 밖에 있고, 출력 참조가 있는 4개도 §1.2.1의 판정에서 탈락했다. 이 대조는 같은 입력에 대한 모델 판단과 구조 조건의 비교 실험이 아니므로, 0/7을 이 차이 하나의 결과로 단정하거나 모델 판단으로 바꾸면 해결된다고 결론 내릴 수 없다.
+
+[현재 기억의 recall](../../lib/keeper/keeper_memory_os_recall.ml)은 선택된 사실을 그대로 렌더링하며, 목표 항목 수나 고정 바이트 수로 줄이지 않는다. 도구 결과의 인라인 한도는 §3.1의 descriptor와 실행 레인을 함께 본다.
 
 ---
 
 ## 3. Tool Librarian 아키텍처
 
-Tool Librarian은 실시간 턴을 방해하지 않는 **오프라인/스탠드얼론 분석 파이프라인**으로 동작한다.
+이 RFC는 Tool Librarian을 실시간 턴과 분리된 **오프라인/스탠드얼론 분석 파이프라인**으로 제안한다.
 
 ```
  [<base-path>/.masc/tool_calls/ 프로덕션 로그 (수만 건)]
@@ -169,7 +219,7 @@ Tool Librarian은 실시간 턴을 방해하지 않는 **오프라인/스탠드�
                        ↓
  [3단계: 샌드박스 Dry-Run 검증 게이트 (필수 Invariant)]
    - 실제 격리 환경(host, microvm)에서 자동 생성된 컴포지션 실행 테스트
-   - exit code 0, timeout 미발생, wire size 16KB 이하 검증
+   - exit code 0, timeout 미발생, §3.1의 각 호출에 적용되는 출력 정책과 한도 충족 여부 검증
                        ↓
  [4단계: Staged 제안 및 사람 승인 (HITL)]
    - "기록 09-12~09-18, Keeper 3명, 420회, /id → /post_id 예외 0, 한도 넘은 발생 0, Dry-run 통과"
@@ -193,9 +243,8 @@ Tool Librarian은 다음 3가지 조건을 모두 충족할 때만 컴포지션 
      `Opaque_output` 이면 `Keeper_tool_plan.create` 가 `Opaque_output_reference` 로, schema 에 없는 pointer 면 `Invalid_output_pointer` 로 거절한다.
    - 중간에 LLM의 복잡한 자연어 추론이나 분기 선택이 개입해야 하는 경우는 흡수 대상에서 제외.
 3. **크기 (Size Ceiling)**:
-   - 발생마다 노드 결과의 원래 크기(`result_bytes`) 합을 그 발생이 돈 레인의 인라인 한도와 비교한다.
-     `Official_client` 레인은 `Common.max_tool_result_wire_bytes` (16,384 bytes), `Masc_agent_core` 레인은 `Common.max_agent_core_inline_result_bytes` 다(`keeper_tools_agent_core_bundle.ml` 의 `model_projection_for_call`).
-   - 한도를 넘은 발생에서는 결과가 blob 으로 저장되고(`Store_above`), 모델이 같은 턴에 되읽어야 한다. 그 발생에서는 턴이 줄지 않는다.
+   - 발생마다 각 노드의 descriptor에 실제 적용되는 `model_output_projection`으로 결과 크기(`result_bytes`)를 판정한다. `model_projection_for_call`은 기본 `Store_above`를 `Masc_agent_core`에서 `Common.max_agent_core_inline_result_bytes`로 바꾸지만, descriptor가 지정한 `Inline_up_to`는 그대로 둔다. 예를 들어 `keeper_artifact_read`의 한도는 해당 descriptor의 `maximum_bytes`다.
+   - `Store_above`의 한도를 넘으면 결과가 blob으로 저장되어 추가 읽기가 필요하다. `Inline_up_to`의 한도를 넘으면 `Inline_budget_exceeded` 오류가 된다. 둘을 같은 결과로 세거나, 노드 크기 합이 레인 기본값 아래라는 이유만으로 모든 결과가 inline이라고 판정하지 않는다.
    - 마이너는 넘은 발생 수를 카드에 적고 절감 예상에서 뺀다. 넘지 않은 발생이 하나도 없으면 후보가 아니다.
    - 실제 결과에는 노드마다 붙는 틀(`node_id`·`schedule`·`tool_use_id`)이 더해져 이 합보다 크다. 실제 크기는 §3.2 Dry-run 이 잰다.
 
@@ -304,7 +353,8 @@ Tool Librarian은 다음 3가지 조건을 모두 충족할 때만 컴포지션 
 
 ## 7. 결론
 
-"셸 문법을 주면 모델이 알아서 엮어 쓰겠지"라는 가정(Shell IR)은 16일간 성공률 0%로 사망했다.  
-"사람이 손으로 완벽한 컴포지션을 미리 다 짜놓겠다"는 가정 역시 7개에 멈춘 채 샌드박스 에러를 냈다.
+관측한 기록에서는 Shell IR의 도구 연결이 성공하지 않았고, 수동 컴포지션에도 샌드박스 실패가 있었다. 이 결과만으로 자동 생성이 수동 작성보다 낫거나 §3.1의 조건이 충분하다고 결론 내릴 수는 없다.
 
-진짜 정답은 **"Librarian이 기억을 흡수하듯, 프로덕션 로그를 보고 검증된 행동을 컴포지션으로 흡수하는 자동화 루프"**다. 이 RFC는 MASC가 가진 가장 우아한 기억 통섭의 철학을 도구와 실행 레이어로 확장하는 자연스러운 귀결이다.
+Tool Librarian 자동화는 검토 중인 제안이다. 채택 여부를 정하려면 기존 컴포지션을 재현하는 범위, 잘못된 후보, 실제 실행의 안전성을 비교해야 한다. 이 RFC의 관측 기록은 그 비교의 근거이며, 자동 생성·검증·승인이 구현되었다는 증거가 아니다.
+
+그 셋 가운데 첫째는 §1.2.2 가 이미 쟀다. 저장소가 담고 있고 지금 쓰이는 컴포지션 7개 가운데, §3.1 조건 2 가 볼 수 있는 넷에서 되살아나는 것은 0개이고, 나머지 셋은 노드 사이에 출력을 넘기지 않아 조건 2 의 시야 밖이다. 구현에 들어가기 전에 셋 중 하나를 정해야 한다. 조건 2 를 그 일곱이 통과하도록 고칠지, 이미 쓰이는 것을 재현하지 못한다는 사실을 받아들이고 새 시퀀스만 찾을지, 아니면 손으로 묶은 일곱이 이미 있는 지금은 만들지 않을지.

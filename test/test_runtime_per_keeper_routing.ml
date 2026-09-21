@@ -907,31 +907,50 @@ let test_runtime_route_writer_updates_default () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
-let check_first_run_lanes path runtime_id ~cli =
+(* [judges] is whether the selected runtime can judge a completion review.
+   verifier_exact dispatches each of its slots as a judge, so setup leaves that
+   lane alone when the selection cannot: writing it would provision a judge
+   that refuses every review, and a lane with neither transport is a
+   publication error (#37179). Every other lane still takes the selection. *)
+let check_first_run_lanes path runtime_id ~cli ~judges =
   match Runtime_toml.parse_string (read_file path) with
   | Error _ -> Alcotest.fail "first-run configuration must parse"
   | Ok config ->
     Alcotest.(check (option string)) "selected default" (Some runtime_id) config.default_runtime_id;
-    List.iter (fun id ->
-      match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id id)
-        config.exact_output_lane_decls with
-      | None ->
-        if cli && not (Option.fold ~none:true ~some:Runtime.exact_lane_supports_cli_tail (Runtime.exact_lane_of_id id))
-        then ()
-        else Alcotest.failf "missing first-run lane %s" id
-      | Some lane ->
-        let expected_http = if cli then [] else [ runtime_id ] in
-        let expected_cli =
-          if cli then
-            match Runtime.exact_lane_of_id id with
-            | Some lane when not (Runtime.exact_lane_supports_cli_tail lane) -> []
-            | _ -> [ runtime_id ]
-          else []
-        in
+    List.iter (fun exact_lane ->
+      let id = Runtime.exact_lane_id exact_lane in
+      let is_verifier =
+        match exact_lane with
+        | Runtime.Verifier -> true
+        | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
+        | Runtime.Workspace_curator -> false
+      in
+      let expected =
+        if is_verifier && not judges
+        then None
+        else if cli
+        then
+          Some
+            ( []
+            , if Runtime.exact_lane_supports_cli_tail exact_lane then [ runtime_id ] else [] )
+        else Some ([ runtime_id ], [])
+      in
+      match
+        List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id id)
+          config.exact_output_lane_decls,
+        expected
+      with
+      | None, None -> ()
+      | Some lane, None ->
+        Alcotest.failf
+          "%s must not be provisioned for a selection that cannot judge (slots=[%s] cli_slots=[%s])"
+          id (String.concat ", " lane.slot_ids) (String.concat ", " lane.cli_slot_ids)
+      | None, Some ([], []) -> ()
+      | None, Some _ -> Alcotest.failf "missing first-run lane %s" id
+      | Some lane, Some (expected_http, expected_cli) ->
         Alcotest.(check (list string)) (id ^ " HTTP slots") expected_http lane.slot_ids;
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
-      (List.map Runtime.exact_lane_id
-         (List.filter (function Runtime.Workspace_curator -> false | _ -> true) Runtime.all_exact_lanes));
+      (List.filter (function Runtime.Workspace_curator -> false | _ -> true) Runtime.all_exact_lanes);
     Alcotest.(check bool) "shared-memory curator is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
          String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls)
@@ -942,7 +961,7 @@ let test_first_run_runtime_binds_supporting_lanes () =
     (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
      | Ok _ -> ()
      | Error detail -> Alcotest.fail detail);
-    check_first_run_lanes path "openai.gpt" ~cli:false;
+    check_first_run_lanes path "openai.gpt" ~cli:false ~judges:true;
     let before = read_file path in
     (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
      | Error _ -> ()
@@ -959,7 +978,7 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
       (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"codex.codex" () with
        | Ok _ -> ()
        | Error detail -> Alcotest.fail detail);
-      check_first_run_lanes path "codex.codex" ~cli:true;
+      check_first_run_lanes path "codex.codex" ~cli:true ~judges:false;
       (* This is the offline first-run writer. The runtime registry is a
          server-bootstrap publication, not a side effect of saving a file.
          test_verifier_official_client exercises that publication through the
@@ -998,7 +1017,7 @@ enabled = false
     let candidates = [ "openai.gpt"; "codex.codex"; "runpod_mtp.qwen" ] in
     (match select [ "codex.codex"; "runpod_mtp.qwen" ] with
      | Ok _ -> () | Error detail -> Alcotest.fail detail);
-    check_first_run_lanes path "openai.gpt" ~cli:false;
+    check_first_run_lanes path "openai.gpt" ~cli:false ~judges:true;
     (match Runtime.resolve_assignment "openai.gpt" with
      | `Lane lane -> Alcotest.(check (list string)) "mixed transport order" candidates
          (Runtime_lane.ordered_candidates lane)

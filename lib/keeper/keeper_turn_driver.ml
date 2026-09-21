@@ -873,9 +873,28 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->
           ()
-        (* The candidate answered, badly; RFC-0458 §5 leaves these without
-           evidence until a measurement says otherwise. *)
-        | Keeper_runtime_failure_route.Rotate_now _ -> ()
+        (* A credential denial says this candidate could not answer, while a
+           sibling may use another credential. Preserve that typed route into
+           the next walk without inventing an expiry or excluding the path. *)
+        | Keeper_runtime_failure_route.Rotate_now
+            { rotate = Keeper_runtime_failure_route.Auth_failed } ->
+          note_failed_attempt Runtime_candidate_backpressure.Access_refused
+        (* These candidates answered, or the failure says nothing durable
+           about their ability to answer a later turn. *)
+        | Keeper_runtime_failure_route.Rotate_now
+            { rotate =
+                ( Keeper_runtime_failure_route.Model_unavailable
+                | Keeper_runtime_failure_route.Resumable_cli_session
+                | Keeper_runtime_failure_route.Candidates_filtered
+                | Keeper_runtime_failure_route.Runtime_exhausted
+                | Keeper_runtime_failure_route.No_progress_empty
+                | Keeper_runtime_failure_route.No_progress_thinking_only
+                | Keeper_runtime_failure_route.No_progress_truncated
+                | Keeper_runtime_failure_route.Refusal_body_not_received
+                | Keeper_runtime_failure_route.Generation_repeated
+                | Keeper_runtime_failure_route.Attempt_rejected )
+            } ->
+          ()
         (* The turn's input or MASC itself failed; another candidate would not
            do better, so this is no evidence about this one. *)
         | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());

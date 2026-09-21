@@ -280,7 +280,10 @@ id 하나다. `translate_revisions` (`:448-466`) 도 1:1 로 매핑한다. 24개
 "Revised from" 은 바뀌지 않는다. 합침의 1:N 은 `absorbs` 가 맡는다.
 
 **검색한다.** `keeper_memory_search` 의 source 에 `absorbed` 를 더하고, `all` 도 흡수 기록을
-읽는다. 결과 한 건:
+읽는다. 기본 검색(source 없음, `memory`)도 현재 사실과 함께 흡수 기록을 읽는다(2026-09-21 개정:
+keeper 는 대개 기본으로 묻고, 흡수 기록은 그 keeper 가 알던 원문이다. 현재 사실만 읽던 09-18~20 의
+재현에서 0건으로 끝난 검색 755건 중 86건이 흡수 기록으로 답했다). 묶은 claim 이 같은 검색에 답하면 그 claim 이 흡수한 기록은
+결과에서 뺀다 — claim 이 그 기록을 대신 말하는 것이 흡수의 뜻이고, 둘을 같이 내면 묶기를 검색이 되돌리는 셈이다. 대화 이력은 `all` 만 읽는다. 결과 한 건:
 
 ```
 { text, category, memory_id, basis, into, into_current, absorbed_at, store: "absorbed_memory" }

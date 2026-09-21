@@ -157,6 +157,7 @@ let supervise_keepalive
            "supervised"
            ()
        with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          (* The lane crossed its start boundary successfully. Observation
             failure must not escape into launch rollback and detach it from

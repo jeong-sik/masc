@@ -7,6 +7,15 @@
 val default_endpoint : string
 val default_model : string
 
+type readiness =
+  | Off
+  | Configured of { model : string }
+
+val readiness : unit -> readiness
+(** Credential-free Board attention readiness for operator projections. [Off]
+    covers a disabled Board gate or lane and a missing key; [Configured] carries
+    only the configured model, never the API key. *)
+
 val is_enabled : unit -> bool
 (** [true] when [TYPESAFEAI_API_KEY] holds a non-blank value and
     [MASC_TYPESAFEAI_ENABLED] does not say otherwise. The variable can turn the
@@ -14,11 +23,25 @@ val is_enabled : unit -> bool
     values leave the lane on, and a malformed one is reported by the config
     layer. *)
 
+val is_board_attention_enabled : unit -> bool
+(** {!is_enabled} and [MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED] does not say
+    otherwise: the Board attention judgment
+    ({!Keeper_board_attention_exact_flow}). *)
+
+val is_absorb_gate_enabled : unit -> bool
+(** {!is_enabled} and [MASC_TYPESAFEAI_ABSORB_GATE_ENABLED] says so: the
+    librarian absorb gate ({!Keeper_librarian_absorb_gate}) is off unless the
+    operator turns it on, because it sends the librarian's memories to the
+    vendor. Each gate has its own switch so that a key, which turns the lane
+    on, does not turn on a gate that was not reviewed with it. *)
+
 val api_key : unit -> string option
 (** [TYPESAFEAI_API_KEY], trimmed. [None] when unset or blank. *)
 
 val endpoint : unit -> string
-(** [MASC_TYPESAFEAI_ENDPOINT], else {!default_endpoint}. *)
+(** Trimmed [MASC_TYPESAFEAI_ENDPOINT], else {!default_endpoint} when absent or
+    blank. This is the endpoint used by the HTTP client. *)
 
 val model : unit -> string
-(** [MASC_TYPESAFEAI_MODEL], else {!default_model}. *)
+(** Trimmed [MASC_TYPESAFEAI_MODEL], else {!default_model} when absent or
+    blank. *)

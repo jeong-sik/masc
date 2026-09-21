@@ -342,6 +342,7 @@ let full_fields
       , Keeper_toml_loader.Toml_string
           (network_mode_to_string meta.network_mode) )
     ; "mention_targets", Keeper_toml_loader.Toml_string_array meta.mention_targets
+    ; "board_interests", Keeper_toml_loader.Toml_string_array meta.board_interests
     ; "activation_mode", Keeper_toml_loader.Toml_string (Keeper_activation_mode.to_string meta.activation_mode)
     ]
   in
@@ -435,6 +436,7 @@ let explicit_edits
   |> append_optional "sandbox_profile" set_string parsed.sandbox_profile_opt
   |> append_optional "network_mode" set_string parsed.network_mode_opt
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
+  |> append_optional "board_interests" set_strings parsed.board_interests_opt
   |> append_optional "activation_mode" set_string (Option.map Keeper_activation_mode.to_string parsed.activation_mode_opt)
   |> fun fields ->
   let fields = match parsed.sandbox_image_patch with

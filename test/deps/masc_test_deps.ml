@@ -62,6 +62,7 @@ let init_unified_tool_registry () =
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let fixture_config_keys =
     [ "mention_targets"
+    ; "board_interests"
     ; "always_allow"
     ; "activation_mode"
     ; "telemetry_feedback_enabled"
@@ -183,6 +184,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     Ok
       { meta with
         mention_targets = apply_string_list "mention_targets" meta.mention_targets
+      ; board_interests = apply_string_list "board_interests" meta.board_interests
       ; activation_mode =
           (match Safe_ops.json_string_opt "activation_mode" fixture_json with
            | None -> meta.activation_mode

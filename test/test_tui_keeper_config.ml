@@ -19,7 +19,7 @@ let observed =
       "prompt": {"instructions": "be exact"},
       "execution": {"selected_runtime_id": "codex_subscription.gpt-5.6-sol"},
       "skills": {"names": null},
-      "workspace": {"mention_targets": ["@alpha"]},
+      "workspace": {"mention_targets": ["@alpha"], "board_interests": []},
       "sources": {
         "has_live_override": true,
         "override_fields": ["runtime_id"],
@@ -38,6 +38,7 @@ let test_editor_starts_from_observed_values () =
   Alcotest.(check (list string)) "editable keys"
     [ "runtime_id"
     ; "mention_targets"
+    ; "board_interests"
     ; "activation_mode"
     ; "max_context_override"
     ; "sandbox_profile"
@@ -217,6 +218,7 @@ let test_every_row_says_whether_e_reaches_it () =
     ; "Context override", `Editable
     ; "Sandbox / network", `Editable
     ; "Mention targets", `Editable
+    ; "Board interests", `Editable
     ; "Skills", `Editable
       (* the rows inside the settings block that [e] does not reach *)
     ; "Config revision", `Read_only

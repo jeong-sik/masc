@@ -18,6 +18,7 @@ type parsed_args =
   ; runtime_id_opt : string option
   ; activation_mode_opt : Keeper_activation_mode.t option
   ; mention_targets_opt : string list option
+  ; board_interests_opt : string list option
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
   ; sandbox_profile_opt : string option
@@ -93,6 +94,13 @@ val resolve_mention_targets :
   mention_targets_opt:string list option ->
   fallback_targets:string list ->
   name:string ->
+  string list
+
+(** Resolve the semantic topics used only for targetless Board discovery.
+    Omission preserves the TOML value; an explicit empty list clears it. *)
+val resolve_board_interests :
+  board_interests_opt:string list option ->
+  fallback_interests:string list ->
   string list
 
 val resolve_sandbox_profile :

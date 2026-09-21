@@ -72,12 +72,12 @@ type judgment_material =
   { post : Board.post
   ; comments : Board.comment list
   }
-(** The Board evidence one judgment reads. Only a pending candidate is judged —
-    [prepare] in [Keeper_board_attention_exact_flow] answers
-    [Candidate_not_pending] for every other status — so this rides on the pending
-    state instead of the candidate. Consuming a candidate drops it, and that drop
-    is what reaches the store, so the cache and the file keep saying the same
-    thing. [keeper_context] is not here: it names the candidate's partition and
+(** The Board evidence retained by the current v6 pending-candidate schema.
+    Judgment requests deliberately do not send this thread snapshot: they
+    project only the candidate's current typed signal and the Keeper role.
+    Consuming a candidate drops the material, and that drop is what reaches
+    the store, so the cache and the file keep saying the same thing.
+    [keeper_context] is not here: it names the candidate's partition and
     outlives the judgment. RFC-0424. *)
 
 type pending_state =
@@ -169,8 +169,8 @@ type candidate =
   ; status : status
   }
 (** Every durable write is validated against the same current schema accepted
-    on load. All floats in the signal, exact judgment request (including nested
-    Board evidence), and lifecycle state must be finite. [Judged] and
+    on load. All floats in the signal, retained Board evidence, and lifecycle
+    state must be finite. [Judged] and
     [Consumed] states additionally require a nonblank verdict rationale and
     nonblank judgment provenance. *)
 
@@ -235,13 +235,16 @@ val candidate_id_of_signal :
     signals mint a fresh candidate per post update (#28607). Exported so test
     fixtures derive ids from this function instead of copying the formula. *)
 
-val judgment_request : candidate -> judgment_material -> Yojson.Safe.t
-(** The judgment request as the run record carries it. *)
+val judgment_request : candidate -> (Yojson.Safe.t, string) result
+(** The judgment request as the run record carries it: the exact current
+    [candidate_id] and [signal], plus a [keeper_role] projection containing
+    only the Keeper name and instructions. *)
 
-val singleton_judgment_request : candidate -> judgment_material -> Yojson.Safe.t
-(** Build the one-item exact-flow input from the candidate and its material.
-    [candidate_id] and [signal] come from the candidate, so they cannot disagree
-    with durable identity and nothing checks that they do. *)
+val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
+(** Build the one-item exact-flow input from the current candidate signal and
+    projected Keeper role. [candidate_id] and [signal] come from the candidate,
+    so they cannot disagree with durable identity. The persisted post, comments,
+    mention targets, and mention Keeper ids do not cross this boundary. *)
 
 val pending_judgment_material : status -> judgment_material option
 (** The material a status still carries: pending, or quarantined from pending

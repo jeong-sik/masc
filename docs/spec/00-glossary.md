@@ -69,6 +69,14 @@ status: reference
   관찰하고 자율 turn을 실행한다. 이어 실행할 상태는 runtime에 따라 AGENT_CORE 또는
   공식 클라이언트가 관리한다([`Runtime_execution.checkpoint_owner`](../../lib/runtime/runtime_execution.mli)).
 
+**Board Interest**
+: Keeper가 직접 지목되지 않은 Board post와 아직 참여하지 않은 thread comment를
+  의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이
+  targetless discovery를 끈다. 정확한 Keeper 지목과 broadcast, 이미 참여한 thread의
+  전달에는 영향을 주지 않으며 Task 할당이나 실행 권한도 아니다.
+  `mention_targets`는 정확한 주소 토큰이고 `board_interests`는 의미 판정의 입력이므로
+  서로 fallback하지 않는다.
+
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.

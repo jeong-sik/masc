@@ -665,6 +665,7 @@ let dashboard_config_string_fields =
 let dashboard_config_string_list_fields =
   [
     "mention_targets";
+    "board_interests";
   ]
 
 (* Accepts a string or an explicit null, so it cannot join

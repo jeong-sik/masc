@@ -408,7 +408,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     ((observation ()).state = O.Not_committed);
   check int "refused range keeps committed frontier" 4
     (P.read ~config ~keeper_name |> get |> some).end_atom;
-  (try Eio.Cancel.run (fun cancellation ->
+  (try Eio.Cancel.sub (fun cancellation ->
      let cancelled ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
        check bool "cancelling runtime was running" true ((observation ()).state = O.Running);
        Eio.Cancel.cancel cancellation Exit;

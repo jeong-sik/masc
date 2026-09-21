@@ -874,11 +874,11 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   Masc_test_deps.with_typesafeai_policy policy @@ fun () ->
   let captured = ref None in
   let call_number = ref 0 in
-  let persist ~case ~success ~output =
+  let persist ~case ~wire_outcome ~output =
     incr call_number;
     let call_id = Printf.sprintf "skill-jev-%d-%s" !call_number case in
     Keeper_tool_call_log.log_call ~keeper_name:"skill-fixture" ~tool_name:"keeper_skill"
-      ~input:(Reference.to_yojson reference) ~output_text:output ~success ~duration_ms:0.
+      ~input:(Reference.to_yojson reference) ~output_text:output ~wire_outcome ~duration_ms:0.
       ~execution_id:(Ids.Execution_id.of_string call_id)
       ~tool_use_id:call_id ()
   in
@@ -896,7 +896,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       (String_util.contains_substring output "FROZEN_SKILL_BODY");
     check bool "advice reaches actual Agent-Core content" true
       (String_util.contains_substring output expected);
-    persist ~case:expected ~success:true ~output;
+    persist ~case:expected ~wire_outcome:Tool_result.Ok ~output;
     let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
     let open Yojson.Safe.Util in
     check bool "model advice delivery is explicit" true
@@ -939,7 +939,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     (String_util.contains_substring refused "fixture-jev");
   check bool "failed wire names advice withholding" true
     (String_util.contains_substring refused "withheld_activation_failure");
-  persist ~case:"activation-failed" ~success:false ~output:refused;
+  persist ~case:"activation-failed" ~wire_outcome:Tool_result.Error ~output:refused;
   let result = Option.get !captured in
   check bool "a received JEV answer is not successful activation" false (Tool_result.is_success result);
   let metadata = Tool_result.metadata result |> Option.get in

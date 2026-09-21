@@ -417,13 +417,19 @@ let record_runtime_mcp_keeper_tool_trace
     | Tool_result.Completed _ | Tool_result.Deferred _ -> true
     | Tool_result.Failed _ -> false
   in
+  let wire_outcome =
+    match disposition with
+    | Tool_result.Completed _ -> Tool_result.Ok
+    | Tool_result.Deferred _ -> Tool_result.Unknown
+    | Tool_result.Failed _ -> Tool_result.Error
+  in
   Keeper_tool_call_log.log_call
     ?typed_result
     ~keeper_name:ctx.keeper_name
     ~tool_name
     ~input:arguments
     ~output_text:message
-    ~success
+    ~wire_outcome
     ~duration_ms:(float_of_int duration_ms)
     ~model:ctx.model
     ~lane:"runtime_mcp"

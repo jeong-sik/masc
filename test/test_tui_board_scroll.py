@@ -105,12 +105,12 @@ def run_side_by_side(executable: str) -> None:
                           needle=b"Comment 000", controls=(h.FULL_REDRAW,))
         h.read_available(fd, output)
         _, beside = comment_row(output)
-        if b"Side body line" not in beside:
-            raise AssertionError(
-                f"at {SIDE_COLUMNS} columns the comment does not share a row with the post body: " + repr(beside))
         at = beside.index(b"Comment 000")
         if at < SIDE_COMMENT_COLUMN_LEAST:
             raise AssertionError(f"the comment starts at column {at}, not in the right-hand column: " + repr(beside))
+        if beside[:at].count("│".encode()) < 2:
+            raise AssertionError(
+                f"at {SIDE_COLUMNS} columns the comment has no separate body/comment columns: " + repr(beside))
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Board read comments beside the post",

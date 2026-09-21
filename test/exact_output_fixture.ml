@@ -35,6 +35,7 @@ type test_server =
   { base_url : string
   ; posts : int Atomic.t
   ; requests : string list Atomic.t
+  ; request_paths : string list Atomic.t
   ; first_request_arrived : unit Eio.Promise.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   }
@@ -82,10 +83,12 @@ let add_request requests body =
 let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   let posts = Atomic.make 0 in
   let requests = Atomic.make [] in
+  let request_paths = Atomic.make [] in
   let first_request_arrived, resolve_first_request_arrived = Eio.Promise.create () in
-  let handler _conn _request body =
+  let handler _conn request body =
     let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     add_request requests request_body;
+    add_request request_paths (Cohttp.Request.uri request |> Uri.path);
     let request_index = Atomic.fetch_and_add posts 1 in
     ignore (Eio.Promise.try_resolve resolve_first_request_arrived ());
     Option.iter (fun hook -> hook ()) on_request_before_reply;
@@ -138,6 +141,7 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   { base_url = Printf.sprintf "http://127.0.0.1:%d" port
   ; posts
   ; requests
+  ; request_paths
   ; first_request_arrived
   ; clock
   }
@@ -363,6 +367,7 @@ let openai_response output =
 
 let post_count server = Atomic.get server.posts
 let request_bodies server = Atomic.get server.requests |> List.rev
+let request_paths server = Atomic.get server.request_paths |> List.rev
 
 (* Waits for [promise] at most [fixture_wait_seconds]. Past that the case
    fails with [failure] instead of holding the suite until the runner

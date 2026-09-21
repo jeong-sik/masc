@@ -961,6 +961,25 @@ let lane_run_list_limit = 50
    would truncate anyway. *)
 let lane_run_detail_max_body_bytes = 4 * 1024 * 1024
 
+let fetch_measurement_artifact ~host ~port ~sha256 =
+  match Tool_blob_store.validate_sha256 sha256 with
+  | Error error -> Error (Tool_blob_store.invalid_sha256_to_string error)
+  | Ok () ->
+    (match http_get ~host ~port ~path:("/api/v1/artifacts/" ^ sha256) with
+     | Error detail -> Error ("Measurement artifact request failed: " ^ detail)
+     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+       Error (named_refusal "Measurement artifact" ~status ~body)
+     | Ok (_, body) when String.length body > lane_run_detail_max_body_bytes ->
+       Error
+         (Printf.sprintf
+            "Measurement artifact is %d bytes; the inspector limit is %d bytes"
+            (String.length body) lane_run_detail_max_body_bytes)
+     | Ok (_, body) ->
+       (match Yojson.Safe.from_string body with
+        | json -> Masc_tui_types.Measurement.decode_artifact ~sha256 json
+        | exception Yojson.Json_error detail ->
+          Error ("Measurement artifact response is not JSON: " ^ detail)))
+
 (** One server-filtered page, with the exact continuation cursor retained. *)
 let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
     (Masc.Tui_decode.lane_run_page, string) result =

@@ -1615,8 +1615,27 @@ let dashboard_runtime_defaults_snapshot () =
    completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
    lane cannot judge (registry not published, lane unconfigured, or no admitted
    slots); there is no fallback to another route. *)
+(* The one answer to "can this runtime judge a completion review?".
+
+   A review is dispatched with [Keeper_required_tools.Required] and the managed
+   verification.system prompt, so the two Agent Core conditions below are not
+   extra caution: [Keeper_required_tools.check_provider] refuses a binding
+   without inline tools, and AGENT_CORE refuses a request carrying a system
+   prompt to a model that takes none ([Unsupported_system_prompt]). Reading
+   them here moves those refusals ahead of the dispatch instead of paying one
+   failed attempt per review to rediscover them (#37382). Both read the same
+   capabilities the dispatch path reads — no caller passes a capability
+   override to either. *)
 let verifier_runtime_admission (runtime : t) =
   match runtime.execution with
+  | Runtime_execution.Agent_core provider
+    when not (Provider_tool_support.provider_supports_inline_tools provider) ->
+    Error (runtime.id ^ ": completion verifier requires a binding that takes inline tools")
+  | Runtime_execution.Agent_core provider
+    when not
+           (Provider_tool_support.agent_core_capabilities_of_config provider)
+             .Llm_provider.Capabilities.supports_system_prompt ->
+    Error (runtime.id ^ ": completion verifier requires a model that takes a system prompt")
   | Runtime_execution.Agent_core _ -> Ok ()
   | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
   | Runtime_execution.Claude_code _ ->
@@ -1653,73 +1672,118 @@ let verifier_cli_slot_admission ~runtime_id =
     ~runtime_id
 ;;
 
-(* One declared [verifier_exact] cli slot the lane cannot judge through.
+(* One declared [verifier_exact] slot the lane cannot judge through.
    [position] counts from 1 across the whole lane declaration, catalog slots
-   first, so it reads the same as the registry's own rejected-slot report. *)
-type verifier_cli_slot_rejection =
+   first, so it names the same line of runtime.toml as the registry's own
+   rejected-slot report. *)
+type verifier_slot_rejection =
   { position : int
   ; slot_id : string
   ; detail : string
   }
 
 type verifier_exact_lane_slots =
-  { catalog_slot_ids : string list
+  { admitted_catalog_slot_ids : string list
   ; admitted_cli_slot_ids : string list
-  ; cli_slot_rejections : verifier_cli_slot_rejection list
+  ; slot_rejections : verifier_slot_rejection list
   }
 
-let verifier_cli_slot_rejection_to_string (rejection : verifier_cli_slot_rejection) =
+let verifier_slot_rejection_to_string (rejection : verifier_slot_rejection) =
   Printf.sprintf
-    "cli slot %d (%S) cannot judge: %s"
+    "slot %d (%S) cannot judge: %s"
     rejection.position
     rejection.slot_id
     rejection.detail
 ;;
 
-(* The registry numbers a lane's cli slots from [List.length lane.slot_ids + 1]
-   — the DECLARED catalog count, not the admitted one, so a catalog slot the
-   registry rejected still occupies its position. Recover that count from the
-   admitted slots plus this lane's registry rejections, so a position printed
-   here names the same line of runtime.toml as the boot report's. *)
-let exact_lane_declared_catalog_slot_count registry ~lane_id ~admitted_catalog_slots =
-  admitted_catalog_slots
-  + List.length
-      (List.filter
-         (fun (rejected : Runtime_exact_output_registry.rejected_slot) ->
-            String.equal rejected.lane_id lane_id)
-         (Runtime_exact_output_registry.rejected_slots registry))
+(* A catalog slot of this lane names a runtime id, because judgement dispatches
+   that id alone ([verifier_exact_slot_admission]); the same id must also be an
+   exact-output target, which the registry answers separately. A cli slot must
+   additionally be an official client, which is why the two entry points differ
+   while the verdict behind them does not. *)
+let verifier_catalog_slot_admission ~runtime_id =
+  match
+    List.find_opt
+      (fun (runtime : t) -> String.equal runtime.id runtime_id)
+      (runtime_state ()).runtimes
+  with
+  | None -> Error (runtime_id ^ ": verifier slot names no configured runtime")
+  | Some runtime -> verifier_runtime_admission runtime
 ;;
 
-(* Split one lane's declared cli ids into what this runtime table can judge
-   through and what it cannot. [catalog_slot_count] only sets where the
-   reported positions start, so the report counts across the whole lane
-   declaration the way the registry's rejected-slot report does. *)
-let verifier_cli_slots_admission ~catalog_slot_count cli_slots =
-  let rec partition position admitted rejected = function
-    | [] -> List.rev admitted, List.rev rejected
+(* Walk the lane exactly as runtime.toml declared it and split it into the ids
+   that can judge and the ones that cannot. Positions come from the declaration
+   rather than from the admitted lists, so a rejected sibling does not shift
+   the numbers a report prints.
+
+   [registry_admitted_catalog_slots] are the catalog slots publication kept.
+   A catalog slot the registry itself dropped is skipped here rather than
+   rejected again: the boot report already names it, with the cause this
+   module cannot see (#37179 reports the runtime-table cause only).
+
+   Before #37382 the catalog slots were handed out with no admission check at
+   all, so a binding that takes no inline tools or no system prompt was
+   dispatched and refused one attempt later, per review, forever. *)
+type verifier_slot_verdict =
+  | Slot_admitted
+  | Slot_reported_by_publication
+  | Slot_rejected of string
+
+let verifier_exact_lane_admission
+      ~(declared : Runtime_schema.exact_output_lane_decl)
+      ~registry_admitted_catalog_slots
+  =
+  let rec walk position admitted rejected classify = function
+    | [] -> List.rev admitted, List.rev rejected, position
     | slot_id :: rest ->
-      (match verifier_cli_slot_admission ~runtime_id:slot_id with
-       | Ok () -> partition (position + 1) (slot_id :: admitted) rejected rest
-       | Error detail ->
-         partition
+      (match classify slot_id with
+       | Slot_admitted -> walk (position + 1) (slot_id :: admitted) rejected classify rest
+       | Slot_reported_by_publication ->
+         walk (position + 1) admitted rejected classify rest
+       | Slot_rejected detail ->
+         walk
            (position + 1)
            admitted
            ({ position; slot_id; detail } :: rejected)
+           classify
            rest)
   in
-  partition (catalog_slot_count + 1) [] [] cli_slots
+  let admitted_catalog_slot_ids, catalog_rejections, next_position =
+    walk
+      1
+      []
+      []
+      (fun slot_id ->
+         if not (List.exists (String.equal slot_id) registry_admitted_catalog_slots)
+         then Slot_reported_by_publication
+         else (
+           match verifier_catalog_slot_admission ~runtime_id:slot_id with
+           | Ok () -> Slot_admitted
+           | Error detail -> Slot_rejected detail))
+      declared.slot_ids
+  in
+  let admitted_cli_slot_ids, cli_rejections, _ =
+    walk
+      next_position
+      []
+      []
+      (fun slot_id ->
+         match verifier_cli_slot_admission ~runtime_id:slot_id with
+         | Ok () -> Slot_admitted
+         | Error detail -> Slot_rejected detail)
+      declared.cli_slot_ids
+  in
+  { admitted_catalog_slot_ids
+  ; admitted_cli_slot_ids
+  ; slot_rejections = catalog_rejections @ cli_rejections
+  }
 ;;
 
 (* The published lane split into what can judge and what cannot. The registry
-   carries cli ids verbatim because only [Runtime] holds the runtime table that
+   carries the ids verbatim because only [Runtime] holds the runtime table that
    answers admission, and that table changes only through a reload that
    republishes the registry — so this stays a projection of the declaration
-   rather than a second copy of it.
-
-   Rejecting one cli slot leaves its siblings usable. Before #37179 the first
-   rejected id failed the whole lane, so a first-run config that wrote a Codex
-   or Antigravity cli slot loaded and then refused every review, one
-   Evaluator_unavailable per attempt. *)
+   rather than a second copy of it. *)
 let verifier_exact_lane_resolution () =
   match Runtime_exact_output_registry.current () with
   | Error error ->
@@ -1732,87 +1796,65 @@ let verifier_exact_lane_resolution () =
      with
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error)
-     | Ok { selected_slots; cli_slots } ->
-       let catalog_slot_ids =
-         List.map
-           (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-           selected_slots
-       in
-       let admitted_cli_slot_ids, cli_slot_rejections =
-         verifier_cli_slots_admission
-           ~catalog_slot_count:
-             (exact_lane_declared_catalog_slot_count
-                registry
-                ~lane_id:verifier_exact_lane_id
-                ~admitted_catalog_slots:(List.length catalog_slot_ids))
-           cli_slots
-       in
-       Ok { catalog_slot_ids; admitted_cli_slot_ids; cli_slot_rejections })
+     | Ok { selected_slots; cli_slots = _ } ->
+       (match
+          Runtime_exact_output_registry.declared_lane
+            registry
+            ~lane_id:verifier_exact_lane_id
+        with
+        | None ->
+          (* [resolve_lane] answered [Ok], so the registry admitted this lane
+             from a declaration it still holds. *)
+          Error
+            (Runtime_exact_output_registry.lane_resolution_error_to_string
+               (Runtime_exact_output_registry.Exact_lane_unconfigured
+                  { lane_id = verifier_exact_lane_id }))
+        | Some declared ->
+          Ok
+            (verifier_exact_lane_admission
+               ~declared
+               ~registry_admitted_catalog_slots:
+                 (List.map
+                    (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                       slot.slot_id)
+                    selected_slots))))
 ;;
 
 let verifier_exact_lane_slot_ids () =
   Result.bind (verifier_exact_lane_resolution ()) (fun lane ->
-    match lane.catalog_slot_ids @ lane.admitted_cli_slot_ids, lane.cli_slot_rejections with
+    match
+      lane.admitted_catalog_slot_ids @ lane.admitted_cli_slot_ids, lane.slot_rejections
+    with
     (* [resolve_lane] answers [Ok] only when the lane declares at least one
-       slot, so nothing admitted means every declared cli slot was rejected. *)
+       slot, so nothing admitted means every declared slot was rejected —
+       either by publication or by the runtime table. *)
     | [], rejections ->
       Error
         (Printf.sprintf
            "verifier_exact has no slot that can judge: %s"
-           (String.concat
-              "; "
-              (List.map verifier_cli_slot_rejection_to_string rejections)))
+           (String.concat "; " (List.map verifier_slot_rejection_to_string rejections)))
     | (_ :: _ as slot_ids), _ -> Ok slot_ids)
 ;;
 
-let verifier_api_slot_ready slot_id =
-  let state = runtime_state () in
-  let candidates = [slot_id] in
-  List.exists (fun id ->
-    match List.find_opt (fun (runtime : t) -> runtime.id = id) state.runtimes with
-    | None -> false
-    | Some runtime ->
-      match runtime.execution with
-      | Runtime_execution.Agent_core provider ->
-        (* The review always sends the managed verification.system prompt, and
-           an exact-output request carrying a system prompt to a model that
-           does not take one is refused as Unsupported_system_prompt. *)
-        Provider_tool_support.provider_supports_inline_tools provider
-        && (Provider_tool_support.agent_core_capabilities_of_config provider)
-             .Llm_provider.Capabilities.supports_system_prompt
-      | Runtime_execution.Claude_code _
-      | Runtime_execution.Codex_app_server _
-      | Runtime_execution.Antigravity_cli _ ->
-        Runtime_execution.supports_native_none runtime.execution && runtime.model.tools_support)
-    candidates
-;;
+(* [Ok] carries the declared slots this lane cannot judge through, so a caller
+   that reports readiness can also say why the lane is short of the
+   declaration. An empty list means the whole declaration is usable.
 
-(* [Ok] carries the declared cli slots this lane cannot judge through, so a
-   caller that reports readiness can also say why the lane is short of the
-   declaration. An empty list means the whole declaration is usable. *)
+   Readiness and {!verifier_exact_lane_slot_ids} now answer from one
+   admission. They used to disagree — readiness applied a second, stricter
+   predicate to catalog slots — and that disagreement is what let the
+   completion authority start on a lane that refused every review. *)
 let verifier_exact_lane_readiness () =
   Result.bind (verifier_exact_lane_resolution ()) (fun lane ->
-    let dispatchable_catalog_slots =
-      List.filter verifier_api_slot_ready lane.catalog_slot_ids
-    in
-    match dispatchable_catalog_slots, lane.admitted_cli_slot_ids with
+    match lane.admitted_catalog_slot_ids, lane.admitted_cli_slot_ids with
     | [], [] ->
       Error
         (Printf.sprintf
            "verifier_exact has no dispatchable slot: %s"
            (String.concat
               "; "
-              (List.map
-                 (fun slot_id ->
-                    Printf.sprintf
-                      "%S has no materialized candidate with required tools and a \
-                       system prompt"
-                      slot_id)
-                 lane.catalog_slot_ids
-               @ List.map
-                   verifier_cli_slot_rejection_to_string
-                   lane.cli_slot_rejections)))
-    | _ :: _, _ | _, _ :: _ -> Ok lane.cli_slot_rejections)
+              (List.map verifier_slot_rejection_to_string lane.slot_rejections)))
+    | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
 (* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set

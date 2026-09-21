@@ -17,11 +17,12 @@ let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
 let notify_state_change_observer () =
-  try (Atomic.get state_change_observer) () with
-  | exn ->
-    Log.Keeper.warn
-      "registry state-change observer failed: %s"
-      (Printexc.to_string exn)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "registry state-change observer failed: %s"
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ())
 ;;
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =

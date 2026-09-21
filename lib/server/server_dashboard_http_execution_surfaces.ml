@@ -442,12 +442,14 @@ let invalidate_execution_cache_with_hooks_for_testing
       ()
   =
   (try invalidate_execution_surface () with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
    | exn ->
      record_invalidation_failure
        ~callback:"execution_surface_cache_invalidate"
        ~message:"Failed to invalidate execution surface cache"
        exn);
   try invalidate_light_cache () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     record_invalidation_failure
       ~callback:"dashboard_execution_light_cache_invalidate"
@@ -496,6 +498,7 @@ let invalidate_execution_cache () =
 let invalidate_task_mutation_caches ~invalidate_full_health_snapshot () =
   invalidate_execution_cache ();
   try invalidate_full_health_snapshot () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     record_invalidation_failure
       ~callback:"full_health_snapshot_invalidate"

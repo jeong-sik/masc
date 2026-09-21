@@ -1026,12 +1026,60 @@ let test_durable_commit_observer_failure_is_typed () =
          ~payload:"committed-before-observer-failure"
          ordinary_exception
          (Printexc.get_callstack 32);
-       let cancellation = Eio.Cancel.Cancelled Synthetic_observer_cancel in
-       assert_typed_failure
+       (* A Cancelled raised by the observer is the one exception that does not
+          become a typed failure (#37372). It leaves unchanged, and the two
+          cases sit side by side so the distinction is readable: an ordinary
+          Failure is still absorbed and recorded, a cancellation is not.
+
+          Propagating is free here. [observe_durable_write_success] is reached
+          only on [Ok ()], after the blocking transaction and both directory
+          lease confirmations -- so the payload is already durable when the
+          observer runs, which this case asserts on the cancellation path too.
+          The success branch one line away already raises a pending
+          cancellation through [Eio_guard.check_if_ready]. *)
+       let assert_cancellation_propagates ~label ~filename ~payload reason backtrace =
+         let path = Filename.concat base filename in
+         let observer_count = ref 0 in
+         (match
+            KF.For_testing.save_bytes_durable_atomic_observed
+              ~on_durable_commit:(fun () ->
+                incr observer_count;
+                Printexc.raise_with_backtrace (Eio.Cancel.Cancelled reason) backtrace)
+              ~before_stage:(fun _ -> ())
+              path
+              payload
+          with
+          | Ok KF.Committed ->
+            failf "%s cancellation was lost and the commit reported clean" label
+          | Ok (KF.Committed_but_observer_failed _) ->
+            failf "%s cancellation was absorbed into a typed observer failure" label
+          | Error error ->
+            failf
+              "%s durable write failed before observer: %s"
+              label
+              (KF.durable_write_error_to_string error)
+          | exception Eio.Cancel.Cancelled observed_reason ->
+            check
+              bool
+              (label ^ " cancellation reason identity")
+              true
+              (observed_reason == reason);
+            check_preserves_raw_backtrace
+              ~label
+              ~expected_backtrace:backtrace
+              (Printexc.get_raw_backtrace ()));
+         check int (label ^ " observer cardinality") 1 !observer_count;
+         check
+           string
+           (label ^ " payload remains committed")
+           payload
+           (In_channel.with_open_bin path In_channel.input_all)
+       in
+       assert_cancellation_propagates
          ~label:"observer cancellation"
          ~filename:"observer-cancelled.bin"
          ~payload:"committed-before-observer-cancellation"
-         cancellation
+         Synthetic_observer_cancel
          (Printexc.get_callstack 32))
 ;;
 

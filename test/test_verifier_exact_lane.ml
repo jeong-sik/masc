@@ -347,12 +347,17 @@ supports_structured_output = false
 input_per_million = 1.0
 
 [[targets]]
-id = "verifier-a"
+id = "http.verifier-a"
 provider_ref = "verifier_provider"
 model_id = "verifier-model"
 
 [[targets]]
-id = "verifier-b"
+id = "http.verifier-b"
+provider_ref = "verifier_provider"
+model_id = "verifier-model"
+
+[[targets]]
+id = "http.target-only"
 provider_ref = "verifier_provider"
 model_id = "verifier-model"
 |}
@@ -400,6 +405,17 @@ api-name = "verifier-fixture"
 max-context = 400000
 tools-support = true
 [official.verifier]
+[providers.http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.verifier-a]
+api-name = "verifier-model"
+max-context = 8192
+[models.verifier-b]
+api-name = "verifier-model"
+max-context = 8192
+[http.verifier-a]
+[http.verifier-b]
 [runtime]
 default = "official.verifier"
 |});
@@ -415,10 +431,13 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
      Runtime.publish_exact_output_registry
        ~lanes:
          [ { Runtime_schema.id = "verifier_exact"
-           ; slot_ids = [ "verifier-b"; "verifier-missing"; "verifier-a" ]
+           ; slot_ids = [ "http.verifier-b"; "verifier-missing"; "http.verifier-a" ]
            ; cli_slot_ids = [ "official.verifier" ]
            }
-         ; { Runtime_schema.id = "auxiliary_exact"; slot_ids = [ "verifier-a" ]; cli_slot_ids = [] }
+         ; { Runtime_schema.id = "auxiliary_exact"
+           ; slot_ids = [ "http.verifier-a" ]
+           ; cli_slot_ids = []
+           }
          ]
        snapshot
    with
@@ -429,7 +448,7 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
   | Ok slots ->
     Alcotest.(check (list string))
       "admitted slots keep declaration order; the catalog-missing slot is dropped"
-      [ "verifier-b"; "verifier-a"; "official.verifier" ]
+      [ "http.verifier-b"; "http.verifier-a"; "official.verifier" ]
       slots
 ;;
 
@@ -479,7 +498,7 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
      Runtime.publish_exact_output_registry
        ~lanes:
          [ { Runtime_schema.id = "verifier_exact"
-           ; slot_ids = [ "verifier-a"; "verifier-missing" ]
+           ; slot_ids = [ "http.verifier-a"; "verifier-missing" ]
            ; cli_slot_ids = []
            }
          ]
@@ -544,10 +563,23 @@ max-context = 400000
 tools-support = true
 [official.verifier]
 [native_only.verifier]
+[providers.http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.verifier-a]
+api-name = "verifier-model"
+max-context = 8192
+[http.verifier-a]
 [runtime]
 default = "official.verifier"
 |}
 ;;
+
+let judging_catalog_slot = "http.verifier-a"
+
+(* Declared in the frozen catalog but named by no runtime binding. Judgement
+   dispatches a catalog slot by runtime id, so this one can never judge. *)
+let target_only_catalog_slot = "http.target-only"
 
 let judging_client = "official.verifier"
 let native_only_client = "native_only.verifier"
@@ -600,7 +632,7 @@ let test_rejected_cli_slot_leaves_the_lane_usable () =
   with_mixed_verifier_clients
   @@ fun _path ->
   publish_verifier_lane
-    ~slot_ids:[ "verifier-a" ]
+    ~slot_ids:[ judging_catalog_slot ]
     ~cli_slot_ids:[ native_only_client; judging_client ];
   (match Runtime.verifier_exact_lane_slot_ids () with
    | Error detail ->
@@ -608,7 +640,7 @@ let test_rejected_cli_slot_leaves_the_lane_usable () =
    | Ok slots ->
      Alcotest.(check (list string))
        "the lane keeps its catalog slot and the cli slot that can judge"
-       [ "verifier-a"; judging_client ]
+       [ judging_catalog_slot; judging_client ]
        slots);
   let lane = verifier_lane_projection () in
   Alcotest.(check (list string))
@@ -629,7 +661,7 @@ let test_readiness_names_the_cli_slot_that_cannot_judge () =
   with_mixed_verifier_clients
   @@ fun _path ->
   publish_verifier_lane
-    ~slot_ids:[ "verifier-a" ]
+    ~slot_ids:[ judging_catalog_slot ]
     ~cli_slot_ids:[ native_only_client; judging_client ];
   match Runtime.verifier_exact_lane_readiness () with
   | Error detail ->
@@ -783,7 +815,7 @@ let test_positions_count_catalog_slots_the_registry_rejected () =
   with_mixed_verifier_clients
   @@ fun _path ->
   publish_verifier_lane
-    ~slot_ids:[ "verifier-a"; "verifier-missing" ]
+    ~slot_ids:[ judging_catalog_slot; "verifier-missing" ]
     ~cli_slot_ids:[ native_only_client; judging_client ];
   (match Runtime.verifier_exact_lane_readiness () with
    | Error detail -> Alcotest.failf "readiness refused a lane that still has a judge: %s" detail
@@ -803,6 +835,58 @@ let test_positions_count_catalog_slots_the_registry_rejected () =
     "both the catalog slot the registry dropped and the cli slot that cannot judge"
     [ "verifier-missing"; native_only_client ]
     (projected_strings lane "dropped_slots")
+;;
+
+(* 2026-09-02: an operator wrote an id the frozen catalog knew but the runtime
+   table did not. Judgement dispatches a catalog slot by runtime id, so every
+   review walked that slot, was refused at dispatch, and posted to the Board —
+   113 times. Readiness and dispatch both knew; the lane walker did not, so it
+   kept handing the id out (#37382). *)
+let test_catalog_slot_without_a_runtime_is_dropped () =
+  with_mixed_verifier_clients
+  @@ fun _path ->
+  publish_verifier_lane
+    ~slot_ids:[ target_only_catalog_slot; judging_catalog_slot ]
+    ~cli_slot_ids:[];
+  (match Runtime.verifier_exact_lane_slot_ids () with
+   | Error detail -> Alcotest.failf "the lane still has a judge: %s" detail
+   | Ok slots ->
+     Alcotest.(check (list string))
+       "the slot that names no runtime is not handed out"
+       [ judging_catalog_slot ]
+       slots);
+  match Runtime.verifier_exact_lane_readiness () with
+  | Error detail -> Alcotest.failf "readiness refused a lane that still has a judge: %s" detail
+  | Ok [ rejection ] ->
+    Alcotest.(check string)
+      "readiness names the slot"
+      target_only_catalog_slot
+      rejection.Runtime.slot_id;
+    Alcotest.(check int) "it holds its declared position" 1 rejection.Runtime.position
+  | Ok rejections ->
+    Alcotest.failf "expected one rejection, got %d" (List.length rejections)
+;;
+
+(* The split this issue is about: the lane walker and readiness used to apply
+   different predicates to a catalog slot, so the authority started on a lane
+   that refused every review. Both must now refuse the same lane. *)
+let test_lane_walker_and_readiness_refuse_the_same_lane () =
+  with_mixed_verifier_clients
+  @@ fun _path ->
+  publish_verifier_lane ~slot_ids:[ target_only_catalog_slot ] ~cli_slot_ids:[];
+  (match Runtime.verifier_exact_lane_slot_ids () with
+   | Ok slots ->
+     Alcotest.failf
+       "the lane walker handed out a slot that cannot judge: %s"
+       (String.concat ", " slots)
+   | Error detail ->
+     Alcotest.(check bool)
+       "the refusal names the slot"
+       true
+       (String_util.contains_substring detail target_only_catalog_slot));
+  match Runtime.verifier_exact_lane_readiness () with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "readiness accepted a lane the walker refused"
 ;;
 
 let () =
@@ -874,6 +958,14 @@ let () =
             "a lane with no judge refuses before dispatch"
             `Quick
             test_lane_with_no_judge_refuses_before_dispatch
+        ; Alcotest.test_case
+            "a catalog slot that names no runtime is dropped"
+            `Quick
+            test_catalog_slot_without_a_runtime_is_dropped
+        ; Alcotest.test_case
+            "the lane walker and readiness refuse the same lane"
+            `Quick
+            test_lane_walker_and_readiness_refuse_the_same_lane
         ; Alcotest.test_case
             "positions count catalog slots the registry rejected"
             `Quick

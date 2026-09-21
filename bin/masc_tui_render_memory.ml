@@ -107,9 +107,25 @@ let memory_context_lines (k : memory_keeper_health) =
       k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
       k.mkh_removed k.mkh_support_invalidations
   in
+  (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
+     and what the journal last said. A count the durable drain could not take prints
+     as "unread ?" rather than as zero. *)
   let librarian_line =
-    Printf.sprintf "  Librarian · deferred %d · failed %d (counters since server start)"
-      k.mkh_librarian_lane_busy k.mkh_librarian_failures
+    let librarian = k.mkh_librarian in
+    let unread =
+      match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
+      | Some atoms, Some official -> Printf.sprintf "unread %d" (atoms + official)
+      | Some _, None | None, Some _ | None, None -> "unread ?"
+    in
+    Printf.sprintf
+      "  Librarian · %s · %s · read %s · last failure %s · failed %d since server start"
+      (match librarian.mlh_state with
+       | Some state -> state
+       | None -> "not measured")
+      unread
+      (memory_updated_text librarian.mlh_last_success_at)
+      (Option.value librarian.mlh_last_failure_kind ~default:"-")
+      k.mkh_librarian_failures
   in
   let source_line =
     Printf.sprintf
@@ -471,9 +487,10 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %d failures since server start"
+       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d failures since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         snapshot.mhs_total_support_invalidations snapshot.mhs_total_librarian_failures));
+         snapshot.mhs_total_support_invalidations
+         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns) snapshot.mhs_total_librarian_failures));
   push info_bar;
   let search_bar =
     if query <> "" then

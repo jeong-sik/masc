@@ -31,7 +31,9 @@ function makeEntry(
     added: 2,
     removed: 1,
     snapshot_present: true,
-    librarian_lane_busy: 0,
+    librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
+      unread_atom_turns: 0, unread_official_turns: 0,
+      last_success_at: null, last_failure_kind: null },
     librarian_failures: 0,
     vision_ingest_errors: 0,
     vision_ingest_error_reasons: [],
@@ -57,7 +59,7 @@ function makeAlertSummary(
     keepers_with_alerts: 0,
     snapshot_read_error_keepers: 0,
     source_snapshot_read_error_keepers: 0,
-    librarian_lane_busy_keepers: 0,
+    librarian_stopped_keepers: 0,
     librarian_starving_keepers: 0,
     ...overrides,
   }
@@ -69,9 +71,8 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v4',
+    schema: 'keeper.memory_os.current_health.v5',
     generated_at: 1_700_000_000,
-    cadence_counter_entries: 3,
     keepers,
     totals: {
       facts: 0,
@@ -84,7 +85,7 @@ function makeResponse(
       source_facts: 0,
       source_invalidations: 0,
       source_snapshot_bytes: 0,
-      librarian_lane_busy: 0,
+      librarian_unread_turns: 0,
       librarian_failures: 0,
       vision_ingest_errors: 0,
       read_errors: 0,
@@ -223,31 +224,45 @@ describe('KeeperMemoryHealth', () => {
     expect(screen.getByText('Vision')).not.toBeNull()
   })
 
-  it('surfaces Librarian lane pressure without inventing a retry or GC state', async () => {
+  it('surfaces a stopped Librarian drain without inventing a retry or GC state', async () => {
     const alert = {
-      code: 'librarian_lane_busy' as const,
+      code: 'librarian_stopped' as const,
       severity: 'warn' as const,
-      target: 'librarian_lane_busy' as const,
+      target: 'librarian_stopped' as const,
       label: 'Librarian',
       message: 'current-memory selection deferred',
       value: 3,
       threshold: 0,
     }
     mockFetch.mockResolvedValue(makeResponse(
-      [makeEntry({ librarian_lane_busy: 3, alerts: [alert] })],
-      { librarian_lane_busy: 3 },
+      [makeEntry({ librarian: { state: 'not_committed', detail: null,
+          measured_at: 1_699_999_950, unread_atom_turns: 3, unread_official_turns: 0,
+          last_success_at: null, last_failure_kind: null }, alerts: [alert] })],
+      { librarian_unread_turns: 3 },
       makeAlertSummary({
         total_alerts: 1,
         warn_alerts: 1,
         keepers_with_alerts: 1,
-        librarian_lane_busy_keepers: 1,
+        librarian_stopped_keepers: 1,
       }),
     ))
     const { container } = render(html`<${KeeperMemoryHealth} />`)
 
     await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
-    expect(statValue(container, 'librarian-lane-busy')).toBe('3')
+    expect(statValue(container, 'librarian-unread-turns')).toBe('3')
     expect(screen.getByText('Librarian')).not.toBeNull()
+  })
+
+  it('renders unknown fleet unread as unknown, not zero', async () => {
+    mockFetch.mockResolvedValue(makeResponse(
+      [makeEntry({ librarian: { state: null, detail: null, measured_at: null,
+        unread_atom_turns: null, unread_official_turns: null,
+        last_success_at: null, last_failure_kind: null } })],
+      { librarian_unread_turns: null },
+    ))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
+    expect(statValue(container, 'librarian-unread-turns')).toBe('?')
   })
 
   it('renders librarian starvation as an error row, not a warning', async () => {

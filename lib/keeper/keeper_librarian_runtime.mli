@@ -97,6 +97,11 @@ val run_best_effort
     without submitting the completed-turn range again. *)
 
 module For_testing : sig
+  val commit_continuity
+    : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)
+    -> observe:((Librarian_continuity_snapshot.t, string) result -> unit)
+    -> unit
+
   type classified_error
 
   val classified_error_detail : classified_error -> string

@@ -6595,3 +6595,10 @@
  (deps (alias runtest-test_tui_jev_readiness)))
 
 (include stanzas/test_pool_h2_request_body.inc)
+
+(test
+ (name test_keeper_librarian_context_review)
+ (modules test_keeper_librarian_context_review)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+(include stanzas/test_tui_librarian_context_review.inc)

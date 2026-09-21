@@ -355,7 +355,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let input : K.input =
     {turn_ref=P.turn_ref half; goal_context=K.No_task; keeper_instructions=instructions;
      current=Some {K.facts=current.facts};
-     working_context=Masc.Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name;
+     working_context=Masc.Keeper_librarian_context.empty;
      messages=P.messages half; tool_observations=[];counterpart_observations=[]} in
   let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json half)) ::
     List.remove_assoc "continuity" (K.prompt_variables input) in

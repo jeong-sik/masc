@@ -83,7 +83,11 @@ def run_case(executable: str, fixture_path: Path) -> None:
 
         if gate["status"] == "skipped":
             needles = [cast(str, gate["reason"]).encode()]
-        elif scenario in ("cancel-second-judgment", "cancel-after-commit"):
+        elif scenario in (
+            "cancel-second-judgment",
+            "cancel-after-commit",
+            "cancel-after-completion",
+        ):
             needles = [
                 b"completed-jev",
                 b"requested-cancel-model",
@@ -134,7 +138,7 @@ def run_case(executable: str, fixture_path: Path) -> None:
             ]
             if scenario == "memory-write-failure":
                 needles.append(cast(str, run["detail"]).encode())
-        if scenario == "cancel-after-commit":
+        if scenario in ("cancel-after-commit", "cancel-after-completion"):
             needles.extend(
                 [
                     b'"after"',
@@ -151,7 +155,9 @@ def run_case(executable: str, fixture_path: Path) -> None:
         for _ in range(
             len(
                 json.dumps(
-                    run["output"] if scenario == "cancel-after-commit" else gate,
+                    run["output"]
+                    if scenario in ("cancel-after-commit", "cancel-after-completion")
+                    else gate,
                     indent=2,
                 ).splitlines()
             )
@@ -264,10 +270,15 @@ def main() -> None:
                 if fixture["scenario"] in (
                     "cancel-second-judgment",
                     "cancel-after-commit",
+                    "cancel-after-completion",
                 ):
                     partial.append(encoded)
         scenarios = [json.loads(encoded)["scenario"] for encoded in partial]
-        if sorted(scenarios) != ["cancel-after-commit", "cancel-second-judgment"]:
+        if sorted(scenarios) != [
+            "cancel-after-commit",
+            "cancel-after-completion",
+            "cancel-second-judgment",
+        ]:
             raise AssertionError(f"unexpected cancellation fixtures: {scenarios}")
         for encoded in partial:
             fixture_path = Path(directory, json.loads(encoded)["scenario"] + ".json")

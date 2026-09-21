@@ -452,3 +452,4 @@ status: reference
   취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
   반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면
   `output.after`에 저장된 snapshot과 revision을 남긴다. 저장 전 취소는 이 기록이 없다.
+  이미 저장된 실행 완료 결과는 이후 화면 갱신 알림의 취소로 덮어쓰지 않는다.

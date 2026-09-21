@@ -9,7 +9,7 @@ module Fixture = Exact_output_fixture
 
 exception Operator_cancelled
 
-type stage = Provider | Second_judgment | After_commit
+type stage = Provider | Second_judgment | After_commit | After_completion | After_failed_completion
 
 let require = function Ok value -> value | Error detail -> Alcotest.fail detail
 let member = Yojson.Safe.Util.member
@@ -29,7 +29,14 @@ let test_cancel ~base_path ~registry stage () =
   let keeper_id = match stage with
     | Provider -> "cancel-provider"
     | Second_judgment -> "cancel-second-judgment"
-    | After_commit -> "cancel-after-commit" in
+    | After_commit -> "cancel-after-commit"
+    | After_completion -> "cancel-after-completion"
+    | After_failed_completion -> "cancel-after-failed-completion" in
+  let commits_memory = stage = After_commit || stage = After_completion in
+  let expected_status = match stage with
+    | After_completion -> "succeeded"
+    | After_failed_completion -> "failed"
+    | Provider | Second_judgment | After_commit -> "cancelled" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let fact claim =
     Types.observed ~claim ~category:Types.Fact ~now:100.
@@ -65,8 +72,9 @@ let test_cancel ~base_path ~registry stage () =
   let librarian = Fixture.start_server ~sw ~net ~clock
       ~on_request_before_reply:(fun () -> match stage with
         | Provider -> block ()
-        | Second_judgment | After_commit -> ())
-      (Fixture.Reply (Fixture.openai_response answer)) in
+        | Second_judgment | After_commit | After_completion | After_failed_completion -> ())
+      (Fixture.Reply (Fixture.openai_response
+        (if stage = After_failed_completion then `Assoc [ "new_claims", `String "invalid" ] else answer))) in
   let judgments = ref 0 in
   let jev = Fixture.start_server ~sw ~net ~clock
       ~on_request_before_reply:(fun () ->
@@ -98,7 +106,24 @@ let test_cancel ~base_path ~registry stage () =
          No filesystem or model work is added to the subscriber. *)
       Eio.Cancel.cancel (Eio.Promise.await cancel_context) Operator_cancelled;
       Eio.Fiber.check ())) in
-  Fun.protect ~finally:unsubscribe @@ fun () ->
+  let completed_before_cancellation = ref None in
+  let previous_observer = Atomic.get Runs.change_observer_fn in
+  Atomic.set Runs.change_observer_fn (fun () ->
+    previous_observer ();
+    if (stage = After_completion || stage = After_failed_completion)
+       && Option.is_none !completed_before_cancellation then
+      match List.find_opt (fun (run : Runs.run) ->
+        run.actor = keeper_id && match run.status with
+          | Runs.Completed _ -> true
+          | Runs.Running | Runs.Completion_persistence_failed _ -> false) (Runs.list_runs registry) with
+      | None -> ()
+      | Some run ->
+        completed_before_cancellation := Runs.get registry ~run_id:run.run_id;
+        Eio.Cancel.cancel (Eio.Promise.await cancel_context) Operator_cancelled;
+        Eio.Fiber.check ());
+  Fun.protect ~finally:(fun () ->
+    unsubscribe ();
+    Atomic.set Runs.change_observer_fn previous_observer) @@ fun () ->
   let runtime_cancelled = ref false in
   let worker = Eio.Fiber.fork_promise ~sw (fun () ->
     Eio.Cancel.sub (fun cc ->
@@ -117,7 +142,7 @@ let test_cancel ~base_path ~registry stage () =
    | Provider | Second_judgment ->
      await "the selected HTTP request did not block" blocked;
      Eio.Cancel.cancel cc Operator_cancelled
-   | After_commit -> ());
+   | After_commit | After_completion | After_failed_completion -> ());
   (match await "cancelled Librarian did not return" worker with
    | Error (Eio.Cancel.Cancelled Operator_cancelled) -> ()
    | Error exn -> Alcotest.failf "wrong cancellation: %s" (Printexc.to_string exn)
@@ -125,38 +150,42 @@ let test_cancel ~base_path ~registry stage () =
   Alcotest.(check bool) "the runtime itself propagated cancellation" true !runtime_cancelled;
   Alcotest.(check int) "one actual Librarian request" 1 (Fixture.post_count librarian);
   Alcotest.(check int) "only the intended JEV requests were sent"
-    (match stage with Provider -> 0 | Second_judgment | After_commit -> 2) (Fixture.post_count jev);
+    (match stage with Provider | After_failed_completion -> 0 | Second_judgment | After_commit | After_completion -> 2) (Fixture.post_count jev);
   let after_bytes = Fs_compat.load_file current_path in
   Printf.printf "POST_COMMIT_OBSERVATION keeper=%s callback=%b memory_changed=%b\n%!"
     keeper_id !memory_committed (after_bytes <> before_bytes);
   Alcotest.(check bool) "Memory commit callback reports the actual store commit"
-    (stage = After_commit) !memory_committed;
+    commits_memory !memory_committed;
   Alcotest.(check bool) "Memory changes only after its actual commit"
-    (stage = After_commit) (after_bytes <> before_bytes);
+    commits_memory (after_bytes <> before_bytes);
   let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
       (Runs.list_runs registry) with
     | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "one Librarian run must be retained" in
-  Alcotest.(check string) "cancellation is terminal in the live registry" "cancelled"
+  Alcotest.(check string) "the live registry retains the actual terminal outcome" expected_status
     (Runs.status_label run.status);
   let replayed = Runs.replay (Filename.concat base_path Runs.storage_filename) in
   let replayed_run = Runs.get replayed ~run_id:run.run_id |> Option.get in
-  Alcotest.(check string) "restart retains cancellation rather than inventing interruption"
-    "cancelled" (Runs.status_label replayed_run.status);
+  Alcotest.(check string) "restart retains the actual terminal outcome"
+    expected_status (Runs.status_label replayed_run.status);
+  Option.iter (fun completed ->
+    check_json "late cancellation preserves the complete stored run byte for byte"
+      (Runs.run_to_yojson completed) (Runs.run_to_yojson replayed_run))
+    !completed_before_cancellation;
   let journal = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 in
   let cancellations = List.filter (function
     | Ok (Current.Journal_failed { kind = Current.Lane_cancelled; _ }) -> true
     | Ok _ -> false
     | Error detail -> Alcotest.fail detail) journal in
   Alcotest.(check int) "pre-commit cancellation alone adds a failure journal row"
-    (if stage = After_commit then 0 else 1) (List.length cancellations);
+    (if commits_memory then 0 else 1) (List.length cancellations);
   let output = match replayed_run.status with
-    | Runs.Completed { outcome = Runs.Cancelled; output; _ } -> output
+    | Runs.Completed { output; _ } -> output
     | _ -> Alcotest.fail "cancelled replay lost its output" in
   (match stage with
-   | Provider -> check_json "no invented gate before a provider response" `Null
+   | Provider | After_failed_completion -> check_json "no invented gate before a provider response" `Null
        (member "absorb_gate" output)
-   | After_commit ->
+   | After_commit | After_completion ->
      let snapshot = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require |> Option.get in
      Alcotest.(check int) "cancelled output retains the committed revision" snapshot.revision
        (member "revision" (member "after" output) |> Yojson.Safe.Util.to_int);
@@ -201,8 +230,8 @@ let test_cancel ~base_path ~registry stage () =
   (* A cancelled observation must not make the next accepted pass stick or
      consume the original Memory. The same Keeper can finish its next pass. *)
   (match stage with
-   | Provider -> ()
-   | Second_judgment | After_commit ->
+   | Provider | After_failed_completion -> ()
+   | Second_judgment | After_commit | After_completion ->
      let successor_committed = ref false in
      let successor = Eio.Fiber.fork_promise ~sw (fun () ->
        Runtime.run_best_effort ~trigger:Runtime.Queue_changed
@@ -216,7 +245,7 @@ let test_cancel ~base_path ~registry stage () =
      let current = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
        | Some current -> current
        | None -> Alcotest.fail "successor lost current Memory" in
-     Alcotest.(check int) "each committed pass advances Memory once" (seeded.revision + if stage = After_commit then 2 else 1)
+     Alcotest.(check int) "each committed pass advances Memory once" (seeded.revision + if commits_memory then 2 else 1)
        current.revision;
      Alcotest.(check (list string)) "the successful pass retains both merged claims"
        [ "Friday is the beta service's deployment day."
@@ -227,9 +256,9 @@ let test_cancel ~base_path ~registry stage () =
        |> List.map (fun (r : Runs.run) -> Runs.status_label r.status)
        |> List.sort String.compare in
      Alcotest.(check (list string)) "both attempts have terminal evidence"
-       [ "cancelled"; "succeeded" ] statuses;
-     Printf.printf "CANCELLATION_SUCCESSOR keeper=%s statuses=cancelled,succeeded memory_revision=%d\n%!"
-       keeper_id current.revision)
+       [ expected_status; "succeeded" ] statuses;
+     Printf.printf "CANCELLATION_SUCCESSOR keeper=%s statuses=%s memory_revision=%d\n%!"
+       keeper_id (String.concat "," statuses) current.revision)
 
 let () =
   let base_path = Filename.temp_dir "librarian-cancellation-" "" in
@@ -249,4 +278,8 @@ let () =
         ; Alcotest.test_case "later JEV cancellation preserves completed evaluation" `Quick
             (test_cancel ~base_path ~registry Second_judgment)
         ; Alcotest.test_case "post-commit cancellation retains Memory commit evidence" `Quick
-            (test_cancel ~base_path ~registry After_commit) ] ])
+            (test_cancel ~base_path ~registry After_commit)
+        ; Alcotest.test_case "late notification cancellation preserves completed evidence" `Quick
+            (test_cancel ~base_path ~registry After_completion)
+        ; Alcotest.test_case "failed completion keeps its cancellation journal" `Quick
+            (test_cancel ~base_path ~registry After_failed_completion) ] ])

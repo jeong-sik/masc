@@ -1046,10 +1046,22 @@ let run_best_effort
             records before reaching it. *)
          | Eio.Cancel.Cancelled _ as exn ->
            Eio.Cancel.protect (fun () ->
+             (* Notifications run after the registry commit. A cancellation
+                from that observer must not overwrite a completed outcome. *)
+             let run_completed =
+               List.exists
+                 (fun (run : Exact_lane_run_registry.run) ->
+                    String.equal run.run_id run_id
+                    && match run.status with
+                       | Exact_lane_run_registry.Completed _ -> true
+                       | Running | Completion_persistence_failed _ -> false)
+                 (Exact_lane_run_registry.list_runs registry)
+             in
              match !committed_memory with
              | Some (snapshot, exact_output, selected_slot, absorb_gate) ->
-               complete ~selected_slot Exact_lane_run_registry.Cancelled
-                 (completed_output ~inp ~exact_output ~absorb_gate snapshot);
+               if not run_completed then
+                 complete ~selected_slot Exact_lane_run_registry.Cancelled
+                   (completed_output ~inp ~exact_output ~absorb_gate snapshot);
                (* Cadence follows the Memory commit, even when the remaining
                   side effects of the pass did not all finish. *)
                cadence_record_success ~keeper_id ~trace_id;
@@ -1058,9 +1070,10 @@ let run_best_effort
                  "memory os librarian cancelled after snapshot commit revision=%d; post-commit work may be incomplete"
                  snapshot.revision
              | None ->
-               complete
-                 Exact_lane_run_registry.Cancelled
-                 (failed_output !observed_absorb_gate);
+               if not run_completed then
+                 complete
+                   Exact_lane_run_registry.Cancelled
+                   (failed_output !observed_absorb_gate);
                record_failure
                  ~keepers_dir
                  ~keeper_id

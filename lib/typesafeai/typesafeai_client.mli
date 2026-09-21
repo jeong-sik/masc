@@ -19,7 +19,9 @@ type failure =
       ; detail : string
       }
 (** A transport diagnostic, or the response the server actually
-    returned. [body] retains the exact received bytes. JSON observations use
+    returned. [body] removes the configured API key and credential-bearing
+    endpoint before observation, preserving every other received byte.
+    JSON observations use
     a string for UTF-8 bodies and the existing [encoding]/[content]/[total_bytes]
     base64 representation otherwise. Diagnostics are valid UTF-8.
     [destination_uri] uses the same observation URL as successful responses.

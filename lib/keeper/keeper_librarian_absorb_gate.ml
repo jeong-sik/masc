@@ -499,7 +499,7 @@ let evaluation_to_yojson { endpoint; model; state; questions; result } =
      body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
     @ [ "request", `Assoc
-          [ "endpoint", `String (Typesafeai_client.endpoint_for_observation endpoint)
+          [ "endpoint", `String endpoint
           ; "model", `String model
           ; "state", state
           ; "questions", `Assoc
@@ -571,6 +571,7 @@ let run ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
        let evaluations = ref [] in
        let evaluate ~state ~questions =
          let result = Typesafeai_client.evaluate ?clock ~endpoint ~model ~api_key ~state ~questions () in
+         let endpoint = Typesafeai_client.endpoint_for_observation endpoint in
          evaluations := { endpoint; model; state; questions; result } :: !evaluations;
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string

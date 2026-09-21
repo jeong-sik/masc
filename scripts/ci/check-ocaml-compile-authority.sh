@@ -32,8 +32,8 @@ fail() {
 # previously decided per library -- 84 of the 121 stanzas under lib/ opted in,
 # 37 did not -- and an unreachable value in one of those 37 produced no signal
 # at all. Removing it from the root returns the tree to that state silently.
-assert_strict_root_flags() {
-  local profile="$1"
+assert_strict_masc_flags() {
+  local scope="$1"
   local flags="$2"
   local previous=""
   local has_warning_32=0
@@ -57,17 +57,19 @@ assert_strict_root_flags() {
   done < <(tr '()' '  ' <<<"${flags}" | tr -s '[:space:]' '\n')
 
   [ "${has_warning_32}" -eq 1 ] \
-    || fail "${profile} root flags lost warning 32: ${flags}"
+    || fail "${scope} flags lost warning 32: ${flags}"
   [ "${has_warning_69}" -eq 1 ] \
-    || fail "${profile} root flags lost warning 69: ${flags}"
+    || fail "${scope} flags lost warning 69: ${flags}"
   [ "${has_warn_error_all}" -eq 1 ] \
-    || fail "${profile} root flags lost -warn-error +a: ${flags}"
+    || fail "${scope} flags lost -warn-error +a: ${flags}"
 }
 
 cd "${repo_root}"
 for profile in dev release; do
-  root_flags="$(dune printenv --profile "${profile}" . --field flags)"
-  assert_strict_root_flags "${profile}" "${root_flags}"
+  for directory in . lib bin test; do
+    effective_flags="$(dune printenv --profile "${profile}" "${directory}" --field flags)"
+    assert_strict_masc_flags "${profile} (${directory})" "${effective_flags}"
+  done
 done
 
-echo "OCaml compile authority: PASS (effective dev and release root warnings are strict)"
+echo "OCaml compile authority: PASS (effective dev and release MASC warnings are strict)"

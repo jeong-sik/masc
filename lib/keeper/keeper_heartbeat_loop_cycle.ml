@@ -103,6 +103,7 @@ let run_keeper_cycle_admitted
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       Keeper_unified_turn.run_keeper_cycle
         ~before_dispatch_authority
+        ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
         ?deferred_runtime_lane
         ?on_deferred_runtime_consumed
         ~config:ctx.config

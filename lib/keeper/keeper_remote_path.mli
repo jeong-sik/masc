@@ -1,9 +1,8 @@
 (** Bidirectional path translation for the remote execution lane.
 
     This module is the sole owner of the mapping between the host bookkeeping
-    playground and an endpoint's remote playground. The endpoint is named by
-    its [remote_root] alone, so the OpenSSH lane and the Apple [container]
-    guest lane translate the same way. *)
+    playground and an endpoint's resolved workspace. The caller supplies that
+    root explicitly; this module does not infer endpoint layout. *)
 
 val normalize_remote : string -> string
 (** Lexical dot-segment cleanup for an endpoint-namespace path. Host realpath
@@ -13,27 +12,26 @@ val normalize_remote : string -> string
 
 val host_to_remote :
   base_path:string ->
-  remote_root:string ->
+  remote_workspace_root:string ->
   keeper:string ->
   string ->
   (string, string) result
 (** Translate an absolute host bookkeeping path or a keeper-relative path to
-    [remote_root/<keeper>/...]. Paths outside the keeper's host playground are
+    [remote_workspace_root/...]. Paths outside the keeper's host playground are
     rejected with [remote_ssh_path_jail_violation]. *)
 
-val remote_to_logical :
-  remote_root:string -> keeper:string -> string -> string
-(** Translate a path below [remote_root/<keeper>] to the keeper-relative path
+val remote_to_logical : remote_workspace_root:string -> string -> string
+(** Translate a path below [remote_workspace_root] to the keeper-relative path
     the model uses. The root itself becomes ["."]. Paths outside that root are
     returned unchanged. *)
 
 val rewrite_output :
   base_path:string ->
-  remote_root:string ->
+  remote_workspace_root:string ->
   keeper:string ->
   string ->
   string
-(** Rewrite occurrences of [remote_root/<keeper>] in tool output back to the
+(** Rewrite occurrences of [remote_workspace_root] in tool output back to the
     absolute host bookkeeping path. Component boundaries are respected, so a
     sibling such as [keeper-a-copy] is untouched. *)
 
@@ -41,7 +39,7 @@ type stream
 
 val stream :
   base_path:string ->
-  remote_root:string ->
+  remote_workspace_root:string ->
   keeper:string ->
   emit:(string -> unit) ->
   stream

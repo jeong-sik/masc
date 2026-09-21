@@ -8,19 +8,13 @@ type settlement =
   ; turn_id : string
   }
 
-(* RFC claude-code-context-overflow-bounded-restart §6: the provider rejected the
-   bootstrap input itself as over capacity. Unlike [Provider_rejected], a
-   later automatic claim must not supersede this recovery — replaying the same
-   durable history re-sends a request the provider already proved it will not
-   admit. Only an operator resolution reopens the session.
-
-   [Effect_fenced]: the rejection arrived after a response or tool effect was
-   observed, so no in-run shrink retry was admitted either (§6.3).
-   [Bootstrap_floor_exceeded]: even the smallest provider-bound view was
-   rejected; since the floor already removed every shrinkable prior-history
-   atom, a changed episode cannot fit either — only system prompt, goal, tool
-   surface, or runtime changes can. *)
-type input_rejection_reason =
+(* RFC claude-code-context-overflow-bounded-restart §6. A same-runtime input
+   rejection stays held for explicit recovery. [Bootstrap_floor_exceeded]
+   means the provider rejected even the minimum bootstrap input.
+   [Effect_fenced] means an input-capacity retry was stopped after observed
+   response/tool activity; it does not assert that the minimum input was
+   rejected. *)
+type input_rejection_reason = Keeper_internal_error.official_client_input_rejection =
   | Bootstrap_floor_exceeded
   | Effect_fenced
 
@@ -97,6 +91,10 @@ type recovery_resolution_application =
   | Applied
   | Replayed
 
+type recovery_commit =
+  | Committed
+  | Recovery_already_resolved
+
 type recovery_resolution_error =
   | Invalid_resolved_by
   | Invalid_resolved_at
@@ -150,6 +148,14 @@ type claim_plan =
   ; turn_count : int
   ; required_tool_surface_sha256 : string option
   }
+
+type claim_error =
+  | Invalid_runtime_id
+  | Input_recovery_required of Keeper_internal_error.official_client_recovery
+  | Turn_count_exhausted
+  | Start_incomplete
+  | Active_unsettled
+  | Turn_already_inflight
 
 let ( let* ) = Result.bind
 let schema = "masc.keeper.official-client-session.v1"
@@ -880,6 +886,28 @@ module For_testing = struct
   ;;
 end
 
+let commit_if_input_recovery_current
+      ~base_path
+      ~keeper_name
+      ~(expected : Keeper_internal_error.official_client_recovery)
+      ~commit
+  =
+  with_store_lock ~base_path ~keeper_name (fun directory ->
+    let* current = load_path (Filename.concat directory filename) in
+    match current with
+    | Some
+        { runtime_id
+        ; phase = Recovery_required { recovery_id; failure = Input_rejected reason; _ }
+        ; _
+        }
+      when String.equal runtime_id expected.runtime_id
+           && String.equal recovery_id expected.recovery_id
+           && reason = expected.reason ->
+      commit ();
+      Ok Committed
+    | Some _ | None -> Ok Recovery_already_resolved)
+;;
+
 let transition ~base_path ~keeper_name ~expected next =
   let* () = validate next in
   with_store_lock ~base_path ~keeper_name (fun directory ->
@@ -889,8 +917,38 @@ let transition ~base_path ~keeper_name ~expected next =
     else Error "official-client session changed before durable transition")
 ;;
 
+let claim_error_to_string = function
+  | Invalid_runtime_id -> "official-client session runtime_id must not be empty"
+  | Input_recovery_required recovery ->
+    Keeper_internal_error.official_client_recovery_summary recovery
+  | Turn_count_exhausted ->
+    "settled official-client session turn count cannot be incremented"
+  | Start_incomplete ->
+    "official-client session has an incomplete start; refusing duplicate execution"
+  | Active_unsettled ->
+    "official-client session has an active unsettled attempt; refusing duplicate execution"
+  | Turn_already_inflight ->
+    "official-client session has an in-flight turn; refusing duplicate execution"
+;;
+
+let core_error_of_claim_error = function
+  | Input_recovery_required recovery ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Official_client_recovery_required recovery)
+  | (Invalid_runtime_id | Turn_count_exhausted | Start_incomplete
+    | Active_unsettled | Turn_already_inflight) as error ->
+    Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig
+         { field = "official_client_session.claim"
+         ; detail = claim_error_to_string error
+         })
+;;
+
 let plan_claim ~expected ~client_kind ~runtime_id =
-  let* () = non_empty "runtime_id" runtime_id in
+  let* () =
+    non_empty "runtime_id" runtime_id
+    |> Result.map_error (fun _ -> Invalid_runtime_id)
+  in
   let* previous_settlement, turn_count, required_tool_surface_sha256 =
     match expected with
     | None -> Ok (None, 1, None)
@@ -908,30 +966,17 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       when binding.client_kind <> client_kind
            || not (String.equal binding.runtime_id runtime_id) ->
       Ok (None, 1, None)
-    (* RFC claude-code-context-overflow-bounded-restart §6.2: an input
-       rejection is not auto-superseded on the same runtime. The provider
-       already proved it will not admit this bootstrap episode, so a fresh
-       claim would re-send the identical over-capacity request every cycle
-       (observed live: two keepers replaying ~1.27M-token requests per
-       heartbeat on 2026-08-23). A different client_kind/runtime_id still
-       starts fresh above — that branch is operator-driven, not a heartbeat
-       replay. Re-entry needs [resolve_recovery] -- [Restart_fresh], which
-       abandons the conversation, or [Retry_previous]. *)
+    (* A same-identity input rejection must keep its exact recovery cause.
+       Floor rejection and an effect-fenced retry both require explicit
+       resolution; neither is a generic provider rejection to supersede.
+       A changed client/runtime identity still follows the fresh plan above. *)
     | Some
         { phase =
             Recovery_required
               { failure = Input_rejected reason; recovery_id; _ }
         ; _
         } ->
-      Error
-        (Printf.sprintf
-           "official-client session input_rejected(%s): provider rejected the \
-            bootstrap input as over capacity; automatic re-entry is blocked \
-            until recovery %s is resolved by an operator"
-           (match reason with
-            | Bootstrap_floor_exceeded -> "bootstrap_floor_exceeded"
-            | Effect_fenced -> "effect_fenced")
-           recovery_id)
+      Error (Input_recovery_required { runtime_id; recovery_id; reason })
     | Some
         { phase = Settled settlement
         ; turn_count
@@ -941,13 +986,13 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       when turn_count < Int.max_int ->
       Ok (Some settlement, turn_count + 1, Some tool_surface_sha256)
     | Some { phase = Ready | Settled _; _ } ->
-      Error "settled official-client session turn count cannot be incremented"
+      Error Turn_count_exhausted
     | Some { phase = Start _; _ } ->
-      Error "official-client session has an incomplete start; refusing duplicate execution"
+      Error Start_incomplete
     | Some { phase = Active _; _ } ->
-      Error "official-client session has an active unsettled attempt; refusing duplicate execution"
+      Error Active_unsettled
     | Some { phase = Turn_inflight _; _ } ->
-      Error "official-client session has an in-flight turn; refusing duplicate execution"
+      Error Turn_already_inflight
     | Some { phase = Recovery_required _; _ } -> Ok (None, 1, None)
   in
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
@@ -1023,7 +1068,10 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
   let context_frontier = Option.map (fun frontier ->
     {frontier with acknowledged_turn = None}) context_frontier in
   let* () = validate_uuid "owner_epoch" owner_epoch in
-  let* plan = plan_claim ~expected ~client_kind ~runtime_id in
+  let* plan =
+    plan_claim ~expected ~client_kind ~runtime_id
+    |> Result.map_error claim_error_to_string
+  in
   let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
   let* () = match context_frontier, plan.previous_settlement with
     | Some {delivery=Canonical_source_guard; snapshot_sha256; _}, Some _ ->

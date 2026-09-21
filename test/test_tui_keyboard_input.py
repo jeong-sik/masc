@@ -1169,10 +1169,14 @@ def fleet_safety_fixture() -> HttpResponse:
 
     Without it the poll fails and the TUI records a "fleet safety data
     unreliable" event, which is correct behaviour but adds a row to scenarios
-    that are counting the event list. Only "status" is required; the rest of
-    the section defaults.
+    that are counting the event list. The current session-recovery fields
+    are explicit: a missing observation must not become a zero count.
     """
-    return (200, {"keeper_fleet_safety": {"status": "ok"}})
+    return (200, {"keeper_fleet_safety": {
+        "status": "ok",
+        "official_client_recovery_required_keeper_count": 0,
+        "official_client_recovery_required_keeper_names": [],
+    }})
 
 
 def with_workspace_identity(
@@ -10134,12 +10138,13 @@ def standalone_lane_fixture(
         "observation_only": True,
         "configured": True,
         "configuration_state": "ready",
+        "declared_slots": ["glm-coding.glm-5-turbo"],
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes three slot lists, not one: what the lane
-        # admitted, what it reaches over a CLI, and what its admission
-        # dropped. Omitting the last two fails the row decode, and the whole
-        # snapshot with it, so the observation matrix simply never draws --
-        # the surface has no per-row gap to show.
+        # The projection writes four slot lists, not one: what the lane
+        # declares, what admission kept, what it reaches over a CLI, and what
+        # admission dropped. Omitting any list fails the row decode, and the
+        # whole snapshot with it, so the observation matrix simply never
+        # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
         "dropped_slots": [],
         "admission_error": None,

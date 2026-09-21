@@ -135,6 +135,27 @@ let fragment_failures ~site =
     ()
 ;;
 
+(* Constructing the failure handler must not report a failure. Exercise both
+   production writers and check their durable lines as well as telemetry. *)
+let test_successful_fragments_do_not_report_failures () =
+  with_session @@ fun session ->
+  let before_append = fragment_failures ~site:"append" in
+  let before_encode = fragment_failures ~site:"encode" in
+  History.persist_message ~keeper_name ~turn_ref session (message ~role:Types.User "saved");
+  check (float 0.) "successful message has no append failure" before_append
+    (fragment_failures ~site:"append");
+  History.persist_tool_observation ~keeper_name ~turn_ref session
+    ~tool_name:"masc_tasks" ~outcome:Tool_result.Ok;
+  check (float 0.) "successful observation has no append failure" before_append
+    (fragment_failures ~site:"append");
+  check (float 0.) "successful fragments have no encoding failure" before_encode
+    (fragment_failures ~site:"encode");
+  check int "message was actually saved" 1
+    (List.length (lines_of (History.main_history_path ~session_dir:session.session_dir)));
+  check int "observation was actually saved" 1
+    (List.length (lines_of (History.internal_history_path ~session_dir:session.session_dir)))
+;;
+
 (* A store the writer cannot append to: the path is a directory. The refusal
    is counted, nothing is raised, and the turn that called goes on. *)
 let test_a_refused_line_does_not_raise () =
@@ -160,7 +181,9 @@ let () =
             test_a_tool_observation_names_the_call
         ] )
     ; ( "durability"
-      , [ test_case "a torn tail is cut by the next append" `Quick
+      , [ test_case "successful fragments do not report failures" `Quick
+            test_successful_fragments_do_not_report_failures
+        ; test_case "a torn tail is cut by the next append" `Quick
             test_a_torn_tail_is_cut_by_the_next_append
         ; test_case "a refused line does not raise" `Quick
             test_a_refused_line_does_not_raise

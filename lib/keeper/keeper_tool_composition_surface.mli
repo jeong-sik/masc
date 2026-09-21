@@ -47,6 +47,7 @@ val make_instruction_skill_tool :
      content:Keeper_skill_activation_recorder.instruction_content ->
      Skill_reference.t ->
      (Keeper_skill_activation_ledger.record_outcome, Keeper_skill_activation_recorder.error) result) ->
+  ?assess_applicability:(reference:Skill_reference.t -> body:string -> Typesafeai_skill_applicability.t) ->
   ?on_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
   instruction_skills:instruction_skill list -> unit -> Agent_core.Tool.t
 (** Read a frozen Skill body or bundled resource without a Keeper turn or
@@ -206,6 +207,7 @@ module For_testing : sig
        ( Keeper_skill_activation_ledger.record_outcome
        , Keeper_skill_activation_recorder.error )
          result) ->
+    ?assess_applicability:(reference:Skill_reference.t -> body:string -> Typesafeai_skill_applicability.t) ->
     ?on_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
     instruction_skills:instruction_skill list ->
     unit ->

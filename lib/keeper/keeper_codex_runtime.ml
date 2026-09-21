@@ -578,11 +578,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           ~runtime_id
       with
       | Ok plan -> Ok plan
-      | Error detail ->
-        Error
-          (config_error
-             ~field:"official_client_session.claim"
-             detail)
+      | Error error -> Error (Keeper_official_client_session_store.core_error_of_claim_error error)
     in
     (* Before the plan is read. A moved surface has to change thread_mode and
        the ordinal too, not just what the store writes, or the adapter asks the

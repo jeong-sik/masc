@@ -7498,6 +7498,27 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
                   ~runtime_ids:[ runtime_id ])
 ;;
 
+(* Apply a slot-editor key. The plan decides; this only sends it. Each write
+   names one slot, and the server reads the lane's declared order under its
+   write lock -- the editor never sends an order of its own. *)
+let handle_standalone_slot_edit state ~mailbox edit =
+  match Masc_tui_types.plan_standalone_slot_edit state edit with
+  | Masc_tui_types.Refuse_slot_edit notice -> state.runtime_lane_notice <- Some notice
+  | Masc_tui_types.Send_slot_write { lane; slot; request; cursor_after } ->
+      Masc_tui_types.dismiss_runtime_lane_notice state;
+      state.runtime_lane_cursor_after_write <- cursor_after;
+      launch_runtime_lane_write state ~mailbox
+        ~written:Masc_tui_types.Standalone_lanes_list (fun ~host ~port ->
+        match request with
+        | Masc_tui_types.Drop_declared_slot ->
+            Masc_tui_http.drop_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+        | Masc_tui_types.Move_declared_slot move ->
+            Masc_tui_http.move_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+              ~move:
+                (match move with
+                 | Masc_tui_types.Move_up -> Masc_tui_http.Move_slot_up
+                 | Masc_tui_types.Move_down -> Masc_tui_http.Move_slot_down))
+
 let launch_runtime_catalog_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -14526,7 +14547,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok () ->
            state.runtime_lane_pick <- None;
            state.runtime_lane_pick_cursor <- 0;
-           Option.iter (fun row -> state.runtime_cursor <- row) cursor_after;
+           Option.iter
+             (fun row ->
+                match written, state.standalone_slot_editor with
+                | Masc_tui_types.Standalone_lanes_list, Some editor ->
+                    (* The slot editor's own cursor. A conversation-lane write
+                       moves the Runtime cursor instead, and an append moves
+                       neither. *)
+                    state.standalone_slot_editor <-
+                      Some { editor with Masc_tui_types.sse_cursor = row }
+                | Masc_tui_types.Standalone_lanes_list, None
+                | Masc_tui_types.Runtime_surface_list, _ ->
+                    state.runtime_cursor <- row)
+             cursor_after;
            (match written with
             | Masc_tui_types.Runtime_surface_list ->
                 launch_runtime_surface_load state ~mailbox ~force:true
@@ -19085,6 +19118,59 @@ and is loaded on demand through keeper_skill.
            Option.iter
              (handle_runtime_lane_edit state ~mailbox:async_messages)
              (Masc_tui_types.runtime_lane_edit_of_key k)
+       (* The slot editor takes its keys before the surface does, the way the
+          candidate picker does above: j/k walk the declared slots, x drops
+          one, J/K move it, and Esc closes. *)
+       | Some ("j" | "k" | "x" | "J" | "K" | "esc")
+         when state.view = Lanes
+              && Option.is_some state.standalone_slot_editor
+              && Option.is_none state.runtime_lane_pick ->
+           (match state.standalone_slot_editor, key with
+            | None, _ -> ()
+            | Some _, Some "esc" ->
+                state.standalone_slot_editor <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state
+            | Some editor, Some "j" ->
+                let count =
+                  List.length (Masc_tui_types.standalone_slot_editor_rows state)
+                in
+                if editor.Masc_tui_types.sse_cursor < count - 1 then
+                  state.standalone_slot_editor <-
+                    Some
+                      { editor with
+                        Masc_tui_types.sse_cursor = editor.Masc_tui_types.sse_cursor + 1
+                      };
+                Masc_tui_types.dismiss_runtime_lane_notice state
+            | Some editor, Some "k" ->
+                if editor.Masc_tui_types.sse_cursor > 0 then
+                  state.standalone_slot_editor <-
+                    Some
+                      { editor with
+                        Masc_tui_types.sse_cursor = editor.Masc_tui_types.sse_cursor - 1
+                      };
+                Masc_tui_types.dismiss_runtime_lane_notice state
+            | Some _, Some k ->
+                Option.iter
+                  (handle_standalone_slot_edit state ~mailbox:async_messages)
+                  (Masc_tui_types.standalone_slot_edit_of_key k)
+            | Some _, None -> ())
+       | Some "s"
+         when state.view = Lanes
+              && state.lanes_mode = Lanes_overview
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.standalone_slot_editor ->
+           (* Open the slot editor on the lane under the cursor. Its rows come
+              from the lane list, which is already loaded here. *)
+           (match Masc_tui_types.selected_standalone_lane state with
+            | None -> ()
+            | Some lane ->
+                state.standalone_slot_editor <-
+                  Some
+                    { Masc_tui_types.sse_lane = lane.Masc.Tui_decode.sl_lane_id
+                    ; sse_cursor = 0
+                    };
+                Masc_tui_types.dismiss_runtime_lane_notice state;
+                state.lanes_action_error <- None)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview

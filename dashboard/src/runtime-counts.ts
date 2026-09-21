@@ -169,6 +169,7 @@ export function resolveRuntimeFleetSafetyCounts(
 export interface KeeperFleetExecutionCounts {
   readonly running: number | null
   readonly recovering: number | null
+  readonly sessionRecoveryRequired: number | null
   readonly executable: number | null
   readonly paused: number | null
 }
@@ -186,16 +187,17 @@ export function resolveKeeperFleetExecutionCounts(
   const fleet = fleetSafety.keeper_fleet_safety
   const running = firstFiniteCount(fleet?.running_keeper_fiber_count)
   const recovering = firstFiniteCount(fleet?.recovering_keeper_fiber_count)
+  const sessionRecoveryRequired = firstFiniteCount(fleet?.official_client_recovery_required_keeper_count)
   const executable = firstFiniteCount(fleet?.executable_keeper_fiber_count)
   const paused = firstFiniteCount(
     fleetSafety.paused_keepers_health?.count,
     fleet?.paused_keeper_count,
     fleetSafety.paused_keepers,
   )
-  if (running === null && recovering === null && executable === null && paused === null) {
+  if (running === null && recovering === null && sessionRecoveryRequired === null && executable === null && paused === null) {
     return null
   }
-  return { running, recovering, executable, paused }
+  return { running, recovering, sessionRecoveryRequired, executable, paused }
 }
 
 export function runtimeHealthIsFresh(

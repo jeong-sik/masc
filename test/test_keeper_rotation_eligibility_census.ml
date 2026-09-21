@@ -167,6 +167,16 @@ let provider_not_found =
     (Llm_provider.Error.NotFound
        { provider = "ollama_cloud"; detail = "model not found" })
 
+(* A credential the binding was given and its provider refuses. The failure
+   route names both a same-turn rotation ([Auth_failed]), like the 404 above. *)
+let api_auth_error =
+  Agent_core.Error.Api (Agent_core.Retry.AuthError { message = "invalid api key" })
+
+let provider_authorization_error =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.AuthorizationError
+       { provider = "claude_code"; detail = "not authorized for this model" })
+
 let api_attempt_rejected =
   Agent_core.Provider_failure_attribution.core_error_of_http_error
     (Llm_provider.Http_client.AcceptRejected
@@ -243,6 +253,8 @@ let census_rows =
   ; "api:invalid_request", api_invalid_request_unknown_model, 2
   ; "api:not_found", api_not_found, 0
   ; "provider:not_found", provider_not_found, 0
+  ; "api:auth_error", api_auth_error, 0
+  ; "provider:authorization_error", provider_authorization_error, 0
   ; "api:attempt_rejected", api_attempt_rejected, 0
   ; "api:invalid_request_vendor_400", api_invalid_request_vendor_400, 0
   ; "api:turn_budget_timeout", api_turn_budget_timeout, 0
@@ -319,6 +331,8 @@ let expected_rotation =
   ; "api:invalid_request", false
   ; "api:not_found", true
   ; "provider:not_found", true
+  ; "api:auth_error", true
+  ; "provider:authorization_error", true
   ; "api:attempt_rejected", true
   ; "api:invalid_request_vendor_400", false
   ; "api:turn_budget_timeout", true
@@ -364,6 +378,68 @@ let test_census_and_baseline_agree_on_rows () =
     census_labels
     baseline_labels
 
+(* The failure route and the walk read the same error, in two places. For the
+   classes below the route says a different runtime is tried in this turn,
+   which is a statement about the walk, so the walk has to reach the second
+   candidate. The other rotate classes make no claim this two-candidate walk
+   can check: a resumable CLI session moves to a recovery lane rather than to
+   the next declared candidate, filtered candidates and an exhausted runtime
+   describe a whole walk rather than one failure, and the no-progress classes
+   pass through the caller's accept-no-progress admission. The match is
+   exhaustive so a new [rotate_class] does not compile until it takes a side. *)
+let route_says_this_walk_rotates = function
+  | Keeper_runtime_failure_route.Rotate_now
+      { rotate =
+          ( Keeper_runtime_failure_route.Auth_failed
+          | Keeper_runtime_failure_route.Model_unavailable
+          | Keeper_runtime_failure_route.Refusal_body_not_received
+          | Keeper_runtime_failure_route.Generation_repeated
+          | Keeper_runtime_failure_route.Attempt_rejected )
+      } -> true
+  | Keeper_runtime_failure_route.Rotate_now
+      { rotate =
+          ( Keeper_runtime_failure_route.Resumable_cli_session
+          | Keeper_runtime_failure_route.Candidates_filtered
+          | Keeper_runtime_failure_route.Runtime_exhausted
+          | Keeper_runtime_failure_route.No_progress_empty
+          | Keeper_runtime_failure_route.No_progress_thinking_only
+          | Keeper_runtime_failure_route.No_progress_truncated )
+      }
+  | Keeper_runtime_failure_route.Retry_after_observed _
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> false
+
+let route_of error =
+  Keeper_runtime_failure_route.route_of_error
+    ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+    error
+
+let test_walk_rotates_where_the_route_says_it_does () =
+  let claimed =
+    List.filter
+      (fun (_label, error, _count) -> route_says_this_walk_rotates (route_of error))
+      census_rows
+  in
+  (* The rows this test exists for. Without them in [claimed] the loop below
+     passes by checking nothing. *)
+  List.iter
+    (fun label ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s is routed as a same-turn rotation" label)
+        true
+        (List.exists (fun (claimed_label, _, _) -> String.equal claimed_label label) claimed))
+    [ "api:auth_error"
+    ; "provider:authorization_error"
+    ; "api:not_found"
+    ; "provider:not_found"
+    ];
+  List.iter
+    (fun (label, error, _count) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s: the route rotates, so the walk reaches the second candidate" label)
+        true
+        (rotates error))
+    claimed
+
 let () =
   Alcotest.run
     "keeper_rotation_eligibility_census"
@@ -377,5 +453,9 @@ let () =
             "rotation matches measured baseline"
             `Quick
             test_rotation_matches_baseline
+        ; Alcotest.test_case
+            "the walk rotates where the failure route says it does"
+            `Quick
+            test_walk_rotates_where_the_route_says_it_does
         ] )
     ]

@@ -129,7 +129,9 @@ let test_roundtrip exe () =
   reject trace_id "restarted.json"
 
 let () =
-  let exe = Sys.argv.(1) in
+  (* The targeted CI runner preserves stanza environment/dependencies but
+     invokes the test binary without the custom Dune action's arguments. *)
+  let exe = Sys.getenv "MASC_TEST_LIBRARIAN_CONTINUITY_EXE" in
   let exe = if Filename.is_relative exe then Filename.concat (Sys.getcwd ()) exe else exe in
   run ~argv:[|Sys.argv.(0)|] "continuity snapshot CLI"
     ["artifact", [test_case "capture, suffix restore, and identity refusal" `Quick (test_roundtrip exe)]]

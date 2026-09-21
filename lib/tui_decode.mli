@@ -754,6 +754,14 @@ type runtime_resolved_snapshot = {
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
+  rrs_media_failover : string list;
+      (** [\[runtime\].media_failover] as boot admitted it, in order: the
+          fleet the vision tool and the image describer call. It is a route,
+          not a lane -- no keeper turn dispatches to it. *)
+  rrs_media_failover_dropped : string list;
+      (** Entries of that list boot could not resolve. While this is
+          non-empty the route cannot be written from here: the list above is
+          missing them, and a write of it would delete them from the file. *)
   rrs_runtimes : runtime_option list;
   rrs_lanes : runtime_resolved_lane list;
 }

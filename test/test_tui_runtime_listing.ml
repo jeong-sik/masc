@@ -20,42 +20,42 @@ let check_layout state expected =
 let test_picker_and_refusal_keep_footer_space () =
   let state = state () in
   state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
-  check_layout state 9;
+  check_layout state 12;
   state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
   (* Three choices, prompt and divider consume five additional rows. *)
-  check_layout state 14;
+  check_layout state 17;
   state.runtime_lane_notice <- Some (Lane_write_refused "route write rejected");
-  check_layout state 16;
+  check_layout state 19;
   state.runtime_surface_error <- Some "resolved unavailable";
-  check_layout state 18;
+  check_layout state 21;
   state.runtime_lane_pick_cursor <- 2;
-  check_layout state 16;
+  check_layout state 19;
   state.runtime_lane_pick <- None;
-  check_layout state 13
+  check_layout state 16
 
 let test_empty_picker_keeps_its_explanation () =
   let state = state () in
   state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
-  check_layout state 12
+  check_layout state 15
 
 (* The lane editor's prompt row -- a name being typed, a lane armed for
    removal -- is two rows the footer has to be moved for, like the refusal. *)
 let test_lane_prompt_keeps_footer_space () =
   let state = state () in
-  check_layout state 9;
+  check_layout state 12;
   state.runtime_lane_name_draft <- Some "coding";
-  check_layout state 11;
+  check_layout state 14;
   state.runtime_lane_name_draft <- None;
   state.runtime_lane_remove_armed <- Some "coding";
-  check_layout state 11;
+  check_layout state 14;
   state.runtime_lane_notice <- Some (Lane_write_refused "lane \"coding\" is in use by alpha");
-  check_layout state 13;
+  check_layout state 16;
   state.runtime_lane_remove_armed <- None;
   state.runtime_lane_notice <- None;
   state.runtime_lane_pick <- Some (Pick_new_lane "coding");
   (* A lane being created has no candidates to note, and the catalogue is
      unread here: prompt, divider and the explanation row. *)
-  check_layout state 12
+  check_layout state 15
 
 let test_a_move_past_either_end_is_no_move () =
   let order = [ "a"; "b"; "c" ] in
@@ -72,6 +72,7 @@ let lane_state () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
+      rrs_media_failover = []; rrs_media_failover_dropped = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
         [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
@@ -301,6 +302,7 @@ let test_search_follows_the_runtime_mode () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "assigned";
+      rrs_media_failover = []; rrs_media_failover_dropped = [];
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
       rrs_lanes =
         [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
@@ -479,16 +481,18 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
       ; sls_exact_run_projection_truncated = false
       ; sls_lanes = [ standalone_lane ~lane_id:"librarian_exact" ~declared ~admitted ]
       };
-  state.standalone_slot_editor <- Some { sse_lane = "librarian_exact"; sse_cursor = cursor };
+  state.slot_editor <-
+    Some { se_target = Exact_lane_slots "librarian_exact"; se_cursor = cursor };
   state
 
 let slot_plan_text = function
-  | Send_slot_write { lane; slot; request; cursor_after } ->
-    Printf.sprintf "%s %s %s, cursor %s" lane
+  | Send_slot_write { target; slot; request; cursor_after } ->
+    Printf.sprintf "%s %s %s, cursor %s" (slot_editor_target_name target)
       (match request with
        | Drop_declared_slot -> "drop"
        | Move_declared_slot Move_up -> "up"
-       | Move_declared_slot Move_down -> "down")
+       | Move_declared_slot Move_down -> "down"
+       | Write_route_order order -> "order [" ^ String.concat "; " order ^ "]")
       slot
       (match cursor_after with Some row -> string_of_int row | None -> "stays")
   | Refuse_slot_edit notice -> notice_text (Some notice)
@@ -499,43 +503,43 @@ let test_the_slot_editor_edits_the_declared_order () =
     [ "a (admitted)"; "rejected (declared)"; "b (admitted)" ]
     (List.map
        (fun row ->
-          Printf.sprintf "%s (%s)" row.ssr_slot
-            (if row.ssr_admitted then "admitted" else "declared"))
-       (standalone_slot_editor_rows state));
+          Printf.sprintf "%s (%s)" row.sr_slot
+            (if row.sr_admitted then "admitted" else "declared"))
+       (slot_editor_rows state));
   Alcotest.(check string) "the head cannot move up"
     "refuse: a is already first in librarian_exact"
-    (slot_plan_text (plan_standalone_slot_edit state (Move_slot Move_up)));
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
   Alcotest.(check string) "the head moves down"
     "librarian_exact down a, cursor 1"
-    (slot_plan_text (plan_standalone_slot_edit state (Move_slot Move_down)));
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
   let state = slot_editor_state ~cursor:1 () in
   Alcotest.(check string) "a rejected slot is dropped like any other"
     "librarian_exact drop rejected, cursor stays"
-    (slot_plan_text (plan_standalone_slot_edit state Drop_slot));
+    (slot_plan_text (plan_slot_edit state Drop_slot));
   let state = slot_editor_state ~cursor:2 () in
   Alcotest.(check string) "dropping the last row moves the cursor up"
     "librarian_exact drop b, cursor 1"
-    (slot_plan_text (plan_standalone_slot_edit state Drop_slot))
+    (slot_plan_text (plan_slot_edit state Drop_slot))
 
 let test_the_slot_editor_keeps_the_last_slot () =
   let state = slot_editor_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
   Alcotest.(check string) "the lane needs one slot"
     "refuse: only is the last slot of librarian_exact; an exact-output lane needs at least one"
-    (slot_plan_text (plan_standalone_slot_edit state Drop_slot));
+    (slot_plan_text (plan_slot_edit state Drop_slot));
   (* A write already out is the other refusal both editors share: the writer
      reads the declaration, but a second write sent before the first is read
      back would be planned against rows the first replaced. *)
   state.runtime_lane_write <- Lane_write_posting;
   Alcotest.(check string) "a write already out holds the next edit"
     "pending"
-    (slot_plan_text (plan_standalone_slot_edit state Drop_slot))
+    (slot_plan_text (plan_slot_edit state Drop_slot))
 
 let test_slot_editor_keys_parse () =
   Alcotest.(check (list string)) "the editor's own keys"
     [ "drop"; "down"; "up"; "none" ]
     (List.map
        (fun key ->
-          match standalone_slot_edit_of_key key with
+          match slot_edit_of_key key with
           | Some Drop_slot -> "drop"
           | Some (Move_slot Move_down) -> "down"
           | Some (Move_slot Move_up) -> "up"
@@ -556,6 +560,7 @@ let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
+      rrs_media_failover = []; rrs_media_failover_dropped = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
         [{rrl_id = "solo"; rrl_runtime_ids = ["a"]; rrl_declared = true};
@@ -592,6 +597,51 @@ let test_the_picker_offers_only_declared_lanes () =
          | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
         (runtime_picker_items state))
 
+(* [runtime].media_failover is written as a whole list -- the routing endpoint
+   has no per-entry action for it -- and the list on screen holds only what
+   boot admitted. While boot dropped an entry, writing what is on screen would
+   delete it from the file, so the editor refuses instead. *)
+let media_failover_state ?(cursor = 0) ?(admitted = [ "a"; "b" ]) ?(dropped = []) () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_runtime_id = Some "a";
+      rrs_media_failover = admitted; rrs_media_failover_dropped = dropped;
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  state.slot_editor <- Some { se_target = Media_failover_slots; se_cursor = cursor };
+  state
+
+let test_the_route_editor_writes_the_whole_order () =
+  let state = media_failover_state () in
+  Alcotest.(check (list string)) "the route's entries, in call order"
+    [ "a"; "b" ]
+    (List.map (fun row -> row.sr_slot) (slot_editor_rows state));
+  Alcotest.(check string) "a move sends the reordered list"
+    "[runtime].media_failover order [b; a] a, cursor 1"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "a drop sends what is left"
+    "[runtime].media_failover order [b] a, cursor stays"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  (* An empty route is a configuration, not a broken one: no vision fleet. The
+     exact-lane editor refuses its last slot; this one does not. *)
+  let state = media_failover_state ~admitted:[ "only" ] () in
+  Alcotest.(check string) "the last entry may go"
+    "[runtime].media_failover order [] only, cursor stays"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+let test_the_route_editor_refuses_a_partly_unresolved_route () =
+  let state = media_failover_state ~dropped:[ "gone.model" ] () in
+  Alcotest.(check string) "the write that would delete it is refused"
+    "refuse: boot could not resolve gone.model in [runtime].media_failover; edit the file until it does, or this write would delete it from it"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  Alcotest.(check string) "a reorder is refused for the same reason"
+    "refuse: boot could not resolve gone.model in [runtime].media_failover; edit the file until it does, or this write would delete it from it"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
@@ -627,4 +677,8 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
         test_an_undeclared_lane_is_not_read_as_a_single_candidate;
       Alcotest.test_case "the picker offers only declared lanes" `Quick
-        test_the_picker_offers_only_declared_lanes]]
+        test_the_picker_offers_only_declared_lanes;
+      Alcotest.test_case "the route editor writes the whole order" `Quick
+        test_the_route_editor_writes_the_whole_order;
+      Alcotest.test_case "the route editor refuses a partly unresolved route" `Quick
+        test_the_route_editor_refuses_a_partly_unresolved_route]]

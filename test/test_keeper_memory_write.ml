@@ -2293,11 +2293,17 @@ let test_retract_records_a_retraction () =
       ~args:(make_args ~title:"" ~content:"the deploy needs assets")
   in
   let written = write () in
-  let written_id =
-    string_field
-      "memory_id"
-      (Yojson.Safe.from_string written.Masc.Keeper_tool_execution.raw_output)
-  in
+  let written_json = Yojson.Safe.from_string written.Masc.Keeper_tool_execution.raw_output in
+  let written_id = string_field "memory_id" written_json in
+  Alcotest.(check string) "new identity is inserted" "inserted"
+    (string_field "identity_disposition" written_json);
+  let repeated = (write ()).Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string in
+  Alcotest.(check string) "identical write reobserves the existing identity" "reobserved"
+    (string_field "identity_disposition" repeated);
+  Alcotest.(check string) "reobservation keeps the content identity" written_id
+    (string_field "memory_id" repeated);
+  Alcotest.(check int) "reobservation leaves exactly one current fact" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
   let retract id =
     Runtime.keeper_memory_retract_with_outcome
       ~config
@@ -2328,6 +2334,8 @@ let test_retract_records_a_retraction () =
     (json_field "ok" rewritten = `Bool true);
   Alcotest.(check string) "the same claim has the original identity" written_id
     (string_field "memory_id" rewritten);
+  Alcotest.(check string) "retracted identity can be inserted again" "inserted"
+    (string_field "identity_disposition" rewritten);
   (match current_facts ~keepers_dir ~keeper_id:meta.name with
    | [ current ] ->
        let current_id = Masc.Keeper_memory_os_types.memory_id current in

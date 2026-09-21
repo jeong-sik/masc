@@ -2,7 +2,11 @@ name = "keeper_memory_write"
 description = """
 Record a durable claim that later turns read back. Your context resets \
 between turns, so a conclusion you leave only in this turn's reasoning is \
-gone. Task sequencing and operating constraints belong to their typed domain \
+gone. An ordinary-current memory_id identifies the exact claim bytes, not a copy. \
+Writing identical content refreshes that one fact; the receipt names inserted or \
+reobserved. The same content keeps the same id even if retracted and later written \
+again. A repeated id is not evidence of duplicate storage and requires no cleanup. \
+Task sequencing and operating constraints belong to their typed domain \
 stores, not memory prose. The runtime records explicit typed provenance and \
 returns validation or persistence failures directly. When source_path is set, \
 the claim is recalled only while the exact source bytes still match. To record \
@@ -64,5 +68,5 @@ key_constraints = [
   "A source-bound claim is discarded when its source bytes change or become unreadable.",
   "A derived claim cannot use source_path and is automatically retracted when no complete support set remains current.",
 ]
-details_markdown = "Writes an observed or derived claim into the Memory OS fact store. An ordinary-current receipt returns memory_id and a bounded basis summary (kind and proof_count for derived facts). Exact proof identities remain available through memory search. A source-bound receipt instead returns source_path and source_sha256 and is not eligible as a derived premise in this slice. For a derived claim, pass the rule identity and exact ordinary-current premise memory ids; Memory OS maintains the least supported fixed point."
+details_markdown = "Writes an observed or derived claim into the Memory OS fact store. An ordinary-current receipt returns memory_id, identity_disposition (inserted or reobserved), and a bounded basis summary (kind and proof_count for derived facts). Exact proof identities remain available through memory search. A source-bound receipt instead returns source_path and source_sha256 and is not eligible as a derived premise in this slice. For a derived claim, pass the rule identity and exact ordinary-current premise memory ids; Memory OS maintains the least supported fixed point."
 examples = ["title='region' content='The deployment region is eu-west-1.' source_path='config/deploy.env'", "content='The rollout is blocked.' rule_id='blocked_when_dependency_fails' premise_ids=['sha256:...']"]

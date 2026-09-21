@@ -36,6 +36,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
      ; "post_kind", `String (post_kind_to_string p.post_kind)
      ; "visibility", `String (visibility_to_string p.visibility)
      ; "created_at", `Float p.created_at
+     ; "content_updated_at", `Float p.content_updated_at
      ; "updated_at", `Float p.updated_at
      ; "expires_at", `Float p.expires_at
      ; "votes_up", `Int p.votes_up

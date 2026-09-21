@@ -106,6 +106,51 @@ let test_create_and_get_post () =
           Alcotest.(check string) "content matches"
             "dispatch test post" fetched.body
 
+let test_content_update_time_survives_activity_and_reload () =
+  let get = function Ok value -> value | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"content-owner"
+      ~title:"original title" ~body:"original body" ~content:"original body"
+      ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let read () = get (Board_dispatch.get_post ~post_id) in
+  let same expected = Alcotest.(check (float 0.0)) "content clock preserved"
+      expected (read ()).content_updated_at in
+  Alcotest.(check (float 0.0)) "content starts at creation"
+    post.created_at post.content_updated_at;
+  Unix.sleepf 0.01;
+  ignore (get (Board_dispatch.add_comment ~post_id ~author:"peer" ~content:"reply" ()));
+  ignore (get (Board_dispatch.vote ~post_id ~voter:"peer" ~direction:Board.Up));
+  ignore (get (Board_dispatch.set_pinned ~post_id ~pinned:true));
+  same post.content_updated_at;
+  let edit ?new_author ~editor ~title ~body () =
+    Unix.sleepf 0.01;
+    get (Board_dispatch.update_post ~post_id ~editor ~title ~body ~content:body ?new_author ())
+  in
+  let unchanged = edit ~editor:"content-owner" ~title:post.title ~body:post.body () in
+  same post.content_updated_at;
+  let body_edit = edit ~editor:"content-owner" ~title:post.title ~body:"edited body" () in
+  Alcotest.(check bool) "body edit advances content clock" true
+    (body_edit.content_updated_at > unchanged.content_updated_at);
+  let title_edit = edit ~editor:"content-owner" ~title:"edited title" ~body:body_edit.body () in
+  Alcotest.(check bool) "title edit advances content clock" true
+    (title_edit.content_updated_at > body_edit.content_updated_at);
+  let transferred = edit ~editor:"content-owner" ~new_author:"new-content-owner"
+      ~title:title_edit.title ~body:title_edit.body () in
+  Alcotest.(check bool) "author edit advances content clock" true
+    (transferred.content_updated_at > title_edit.content_updated_at);
+  Board_dispatch.flush ();
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  same transferred.content_updated_at;
+  let fields = match Board.post_to_yojson (read ()) with
+    | `Assoc fields -> fields | _ -> Alcotest.fail "post encoder did not emit an object" in
+  Alcotest.(check bool) "missing content clock is rejected" true
+    (Option.is_none (Board.post_of_yojson (`Assoc (List.remove_assoc "content_updated_at" fields))));
+  Alcotest.(check bool) "nonfinite content clock is rejected" true
+    (Option.is_none (Board.post_of_yojson (`Assoc
+      (("content_updated_at", `Float nan) :: List.remove_assoc "content_updated_at" fields))))
+
 let test_update_post_by_owner () =
   match
     Board_dispatch.create_post ~author:"editor-agent"
@@ -2337,6 +2382,8 @@ let () =
     ];
     "posts", [
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
+      Alcotest.test_case "content clock survives activity and reload" `Quick
+        (with_eio test_content_update_time_survives_activity_and_reload);
       Alcotest.test_case "update by owner persists" `Quick
         (with_eio test_update_post_by_owner);
       Alcotest.test_case "update rejects non-owner" `Quick

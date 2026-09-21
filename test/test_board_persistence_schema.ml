@@ -160,6 +160,7 @@ let test_current_post_schema_is_exact () =
     ; "post_kind"
     ; "visibility"
     ; "created_at"
+    ; "content_updated_at"
     ; "updated_at"
     ; "expires_at"
     ; "votes_up"

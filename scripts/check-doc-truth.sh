@@ -30,10 +30,18 @@ fail() {
   exit 1
 }
 
+# rg exits 1 when it finds nothing, which is a normal outcome for these scans;
+# exit 2 means the scan itself broke (bad regex, unreadable path). `|| true`
+# would erase both and let a broken scan report success, so tolerate only 1.
+# The result lands in RG_OUT: callers must not pipe this function, or `fail`
+# would end only the pipeline's subshell instead of the script.
+RG_OUT=""
 rg_or_empty() {
+  local pattern="$1"
+  shift
   local status=0
-  rg -o "$1" "$2" || status=$?
-  ((status <= 1)) || fail "rg exited $status scanning $2"
+  RG_OUT="$(rg -o "$pattern" "$@")" || status=$?
+  ((status <= 1)) || fail "rg exited $status scanning $*"
 }
 
 require_contains() {
@@ -228,7 +236,8 @@ require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
 # form is intentionally outside the INV-SUBSYSTEM-NNN census and is documented
 # beside the table.
 declared_prefixes="$(sed -nE 's/^\| `(INV-[A-Z]+)` \|.*$/\1/p' docs/spec/SPEC-INDEX.md | sort -u)"
-used_prefixes="$(rg -o --no-filename 'INV-[A-Z]+-[0-9]+' docs/spec -g '*.md' -g '!SPEC-INDEX.md' | sed -E 's/-[0-9]+$//' | sort -u)"
+rg_or_empty 'INV-[A-Z]+-[0-9]+' --no-filename docs/spec -g '*.md' -g '!SPEC-INDEX.md'
+used_prefixes="$(printf '%s\n' "$RG_OUT" | sed -E 's/-[0-9]+$//' | sort -u)"
 # The census counts every ID that appears anywhere in a spec file, including
 # prose, code blocks and quotes, not only the ones a spec declares. Today the
 # two sets coincide; if this guard goes red unexpectedly, look first at a
@@ -260,22 +269,16 @@ docs_to_scan=(
 
 missing_refs=()
 for file in "${docs_to_scan[@]}"; do
+  rg_or_empty '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file"
+  links="$(printf '%s\n' "$RG_OUT" | sed 's/^('// | sed 's/)$//')"
+  rg_or_empty '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
+  refs="$(printf '%s\n%s\n' "$links" "$RG_OUT" | sort -u)"
   while IFS= read -r ref; do
     [[ -n "$ref" ]] || continue
     [[ "$ref" == *"*"* ]] && continue
     [[ "$ref" == *"..."* ]] && continue
     [[ -e "$ref" ]] || missing_refs+=("$file -> $ref")
-  done < <(
-    {
-      # rg exits 1 on no match and 2 on an error. Under `set -e` the 1 would
-      # abort this block before the second scan runs, so a doc whose links are
-      # not `(docs/...)` -- the glossary points at `../../lib/...` -- would have
-      # its code paths skipped and read as checked. [rg_or_empty] accepts the 1
-      # and stops on a 2, so a broken pattern cannot pass as an empty scan.
-      rg_or_empty '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file" | sed 's/^('// | sed 's/)$//'
-      rg_or_empty '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
-    } | sort -u
-  )
+  done <<< "$refs"
 done
 
 if ((${#missing_refs[@]} > 0)); then

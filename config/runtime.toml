@@ -544,8 +544,6 @@ max-output-tokens = 384000
 # DeepSeek Chat Completions toggles thinking.type; reasoning_effort is a
 # separate effort control (https://api-docs.deepseek.com/guides/thinking_mode/).
 thinking-control-format = "thinking-object"
-supports-response-format-json = true
-supports-structured-output = false
 
 [models.deepseek-v4-flash]
 reasoning-uncontrolled = true
@@ -585,8 +583,6 @@ streaming = true
 # serializer path + model-side proof, written on the catalog row.
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
-supports-top-k = true
-supports-seed = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -605,8 +601,6 @@ streaming = true
 # `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
-supports-top-k = true
-supports-seed = true
 supports-image-input = true
 supports-audio-input = true
 supports-multimodal-inputs = true
@@ -629,8 +623,6 @@ streaming = true
 # chat-template token. Probed 2026-09-12: `"think": false` suppressed the
 # reasoning block, and a tools request returned get_weather(city="Seoul").
 thinking-control-format = "ollama_think"
-supports-top-k = true
-supports-seed = true
 # `/api/show` reports vision, and a 64x64 PNG answered in 9.3s end to end
 # (2026-09-12). Latency on full-size screenshots is NOT measured, which is why
 # this runtime is deliberately left out of [runtime] media_failover.
@@ -662,8 +654,6 @@ streaming = true
 
 [models.glm-5-3.capabilities]
 max-output-tokens = 128000
-supports-response-format-json = true
-supports-structured-output = false
 
 [glm-coding.glm-5-3]
 # The deployment has carried these three since before this table existed, and
@@ -692,8 +682,6 @@ temperature = 1.0
 [models.kimi-for-coding.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
-supports-structured-output = true
-supports-response-format-json = true
 
 [kimi_coding.kimi-for-coding]
 
@@ -722,9 +710,7 @@ thinking-control-format = "none"
 # models.toml carries a row per wire: a bare minimax-m3 row for MiniMax's own
 # API and an ollama_cloud row for this one. That row declares structured output
 # off as well — /v1 accepts json_schema but does not guarantee schema-shaped
-# output, and strict schemas belong on the native /api/chat lane — which is
-# what the line below states.
-supports-structured-output = false
+# output, and strict schemas belong on the native /api/chat lane.
 supports-image-input = true
 supports-multimodal-inputs = true
 

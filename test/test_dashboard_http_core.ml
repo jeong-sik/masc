@@ -5254,11 +5254,14 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (post "create" 200
        {|{"lane":"coding","action":"create","runtime_ids":["test_provider.test_model"]}|});
   check bool "the created lane is in the file" true (in_file "[runtime.lanes.coding]");
-  check string "a lane under a runtime id is refused"
-    {|"test_provider.test_model" is a runtime id; a new lane needs a name of its own|}
-    (refusal
-       (post "create under a runtime id" 400
-          {|{"lane":"test_provider.test_model","action":"create","runtime_ids":["test_provider.test_model"]}|}));
+  (* A lane named after a runtime shadows it, which is what the install path
+     writes and what [set] has always produced here; [create] refused it
+     alone. *)
+  ignore
+    (post "create under a runtime id" 200
+       {|{"lane":"test_provider.test_model","action":"create","runtime_ids":["test_provider.test_model"]}|});
+  check bool "the runtime's own lane is in the file" true
+    (in_file {|[runtime.lanes."test_provider.test_model"]|});
   ignore (post "remove" 200 {|{"lane":"coding","action":"remove"}|});
   check bool "the removed lane left the file" false (in_file "[runtime.lanes.coding]");
   ignore

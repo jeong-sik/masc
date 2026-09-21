@@ -25,6 +25,16 @@ type credentials = {
           with. It is not "unknown": the id is written after the secret, so
           an id on disk means whatever secret came with it is already
           beside it. *)
+  secret_expires_at : float option;
+      (** Unix seconds at which the secret lapses, as the registration dated
+          it. [Some 0.] is the server saying it never does.
+
+          RFC 7591 section 3.2.1 makes this REQUIRED whenever a
+          [client_secret] is issued, so on a confidential client [None] does
+          not mean "never": it means this store wrote the pair before it read
+          the field, and the real deadline is unknown. {!secret_expired} reads
+          it that way. A public client has no secret and carries [None] with
+          nothing to date. *)
   scopes : string list;
       (** What to ask for instead of everything the service publishes.
 
@@ -45,6 +55,18 @@ val load :
     login has; an [Error] means the directory answered in a way that reading
     again would answer the same, and is not the same as having none --
     registering over it would strand whatever is there. *)
+
+val secret_expired : credentials -> now:float -> bool
+(** Whether the stored secret can still be redeemed at the token endpoint.
+
+    A caller that gets [true] must treat the credentials as absent so a fresh
+    registration replaces them. Continuing with them reaches the token
+    endpoint with an id the authorization server has forgotten, which it
+    answers with its own wording for "who are you" (Supabase says
+    ["Unrecognized client_id"]) and nothing on this side says why.
+
+    Public clients are always [false]: there is no secret to lapse, which is
+    why an install that registered one keeps working without this check. *)
 
 val save :
   dir:string ->

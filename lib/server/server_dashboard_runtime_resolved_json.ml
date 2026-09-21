@@ -69,10 +69,24 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
     ]
 ;;
 
-let lane_json (lane : Runtime_lane.t) : Yojson.Safe.t =
+(* Where a lane on this surface comes from. [Declared] is a
+   [runtime.lanes.<id>] table: the routing endpoint edits it, and a keeper
+   assigned to it walks every candidate. [From_assignment] is the
+   one-candidate lane [Runtime.resolve_assignment] makes on the spot for an
+   assignment that names a runtime rather than a lane -- no table declares it,
+   so it has no failover to walk and [remove] has nothing to delete. The two
+   used to reach the surface as the same row, which left the reader no way to
+   tell a lane that walks from one that cannot. *)
+type lane_origin =
+  | Declared
+  | From_assignment
+
+let lane_json ((lane : Runtime_lane.t), origin) : Yojson.Safe.t =
   `Assoc
     [ "id", `String (Runtime_lane.id lane)
     ; "runtime_ids", Json_util.json_string_list (Runtime_lane.ordered_candidates lane)
+    ; ( "declared"
+      , `Bool (match origin with Declared -> true | From_assignment -> false) )
     ]
 ;;
 
@@ -140,7 +154,7 @@ let all_keeper_names ~(config : Workspace.config) : string list =
    hide that lane's candidates from the document that is supposed to say what
    dispatch will do. *)
 let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
-  : Runtime_lane.t list
+  : (Runtime_lane.t * lane_origin) list
   =
   let declared = Runtime.lanes () in
   let seen = List.map Runtime_lane.id declared in
@@ -154,7 +168,8 @@ let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
     |> List.sort_uniq (fun a b ->
       String.compare (Runtime_lane.id a) (Runtime_lane.id b))
   in
-  declared @ implicit
+  List.map (fun lane -> lane, Declared) declared
+  @ List.map (fun lane -> lane, From_assignment) implicit
 ;;
 
 let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =

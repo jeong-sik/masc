@@ -229,17 +229,6 @@ type cancellation =
     failures remain typed evidence. *)
 exception Reconciliation_cancelled of cancellation
 
-type record_scope_callback_and_release_failure =
-  { callback : Eio.Exn.with_bt
-  ; release : cleanup_failure
-  }
-
-(** An unexpected callback exception and the exact resource-release failure
-    occurred at the same record scope. Neither is relabelled as observation
-    I/O. *)
-exception Record_scope_callback_and_release_failed of
-  record_scope_callback_and_release_failure
-
 type report
 
 val reconcile_owner

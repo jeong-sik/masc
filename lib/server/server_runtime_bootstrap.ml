@@ -1617,6 +1617,8 @@ let start_post_ready_owner_lanes
 
   start_microvm_guest_maintenance ~sw
     ~sweep:(fun () -> startup_sweep_microvm_guests state);
+  Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions
+    ~base_path:(Mcp_server.workspace_config state).base_path;
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =

@@ -2623,9 +2623,19 @@ supports_native_streaming = false
           ~user_message:"Continue the synthetic turn."
           ~cli_path ~model:"gpt-fixture" ~turn_instructions:None in
         (match result with
-         | Error (Agent_core.Error.Config (InvalidConfig {field; _})) when reject_codex ->
-           check string "B refuses its claim before projection"
-             "official_client_session.claim" field
+         | Error error when reject_codex ->
+           let expected =
+             match recovery with
+             | Some { phase = Keeper_official_client_session_store.Recovery_required held; _ } ->
+               Keeper_internal_error.Official_client_recovery_required
+                 { runtime_id = "codex.codex"
+                 ; recovery_id = held.recovery_id
+                 ; reason = Bootstrap_floor_exceeded
+                 }
+             | _ -> fail "fixture has no durable recovery binding"
+           in
+           check bool "B preserves the exact recovery cause before projection" true
+             (Keeper_internal_error.classify_masc_internal_error error = Some expected)
          | Ok _ when not reject_codex -> ()
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok _ -> fail "blocked Codex claim completed");

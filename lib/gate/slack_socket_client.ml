@@ -183,6 +183,16 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
         if not (connection_is_current conn) then
           Log.Slack.debug "stopping inactive slack gateway reader"
         else
+          (* Cancellation is how this reader is stopped, not a failure to
+             report. [Discord_wss_connection.close] cancels the per-connection
+             [session_sw] this fiber runs on, which is what makes the blocking
+             [read] raise here. By then the closer has already driven the state
+             machine through [Close_wss] and cleared [conn_ref], so
+             [enqueue_if_current] would drop anything added from here anyway.
+             The other exits enqueue [Wss_closed] because nothing else knows
+             the connection ended; this one has a closer that does. The only
+             other way to reach it is the app switch going down, where the
+             state machine is being torn down as well. *)
           (match Discord_wss_connection.read conn with
            | exception Eio.Cancel.Cancelled _ -> ()
            | exception End_of_file ->

@@ -91,6 +91,7 @@ let roundtrip_corpus =
     "runtime_exhausted"
   ; Keeper_internal_error.capacity_backpressure_kind
   ; Keeper_internal_error.incomplete_tool_transcript_kind
+  ; Keeper_internal_error.official_client_recovery_required_kind
   ; Keeper_internal_error.provider_attempt_effect_fenced_kind
   ; Keeper_internal_error.tool_correction_lost_kind
     (* The rest of what [kind_of_masc_internal_error] emits. The corpus used
@@ -111,7 +112,15 @@ let roundtrip_corpus =
     (* config/auth preflight (ranked above provider) *)
   ; "config_error"
   ; "api_error_auth"
+    (* The wire the fleet actually sends. Every authorization refusal in the
+       live receipts arrives as this spelling — 852 of the 2,419 turns the
+       operator-action bucket held between 08-22 and 09-21, against 0 for
+       [api_error_auth]. The corpus covered the spelling that never happens
+       and missed the one that always does, so the equivalence matrix never
+       compared the two classifiers on it. *)
+  ; "api_error_authorization"
   ; "provider_error_auth"
+  ; "provider_error_authorization"
   ; "provider_error_auth:legacy-payload"
   ; "provider_error_invalid_config:field_x"
     (* provider family *)
@@ -163,6 +172,26 @@ let () =
     roundtrip_corpus
 ;;
 
+let authorization_wires =
+  [ "api_error_auth"
+  ; "api_error_authorization"
+  ; "provider_error_auth"
+  ; "provider_error_authorization"
+  ]
+;;
+
+let () =
+  List.iter
+    (fun wire ->
+       match Tr.of_wire wire with
+       | Tr.Authorization_refused carried ->
+         check
+           (Printf.sprintf "authorization priority: %S" wire)
+           (String.equal carried wire)
+       | _ -> check (Printf.sprintf "authorization priority: %S" wire) false)
+    authorization_wires
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 2. (disposition, reason) equivalence vs an independent strict-wire *)
 (*    oracle.                                                           *)
@@ -176,13 +205,20 @@ let frozen_is_transient_provider_runtime_failure terminal_reason =
   || String.equal terminal_reason "api_error_network"
 ;;
 
-let frozen_is_config_or_auth_wire = function
-  | "config_error"
+(* Two predicates in the oracle, matching the two production wire sets.
+   Every wire in either set reaches [Disp_operator_action_required]; the
+   reason is what tells them apart. *)
+let frozen_is_config_invalid_wire = function
+  | "config_error" -> true
+  | wire -> String.starts_with ~prefix:"provider_error_invalid_config:" wire
+;;
+
+let frozen_is_authorization_refused_wire = function
   | "api_error_auth"
   | "api_error_authorization"
   | "provider_error_auth"
   | "provider_error_authorization" -> true
-  | wire -> String.starts_with ~prefix:"provider_error_invalid_config:" wire
+  | _ -> false
 ;;
 
 let frozen_operator_disposition (receipt : R.t)
@@ -194,7 +230,8 @@ let frozen_operator_disposition (receipt : R.t)
     || String.equal terminal_reason "provider_error"
     || String.starts_with ~prefix:"provider_error_" terminal_reason
   in
-  let preflight_config_failure = frozen_is_config_or_auth_wire terminal_reason in
+  let config_invalid = frozen_is_config_invalid_wire terminal_reason in
+  let authorization_refused = frozen_is_authorization_refused_wire terminal_reason in
   if String.equal terminal_reason "runtime_exhausted"
   then R.Disp_fail_open_next_runtime, R.Reason_runtime_exhausted
   else if
@@ -206,6 +243,12 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal
       terminal_reason
+      Keeper_internal_error.official_client_recovery_required_kind
+  then
+    R.Disp_operator_action_required, R.Reason_official_client_recovery_required
+  else if
+    String.equal
+      terminal_reason
       Keeper_internal_error.provider_attempt_effect_fenced_kind
   then R.Disp_unknown, R.Reason_provider_attempt_effect_fenced
   else if
@@ -213,8 +256,10 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_unknown, R.Reason_tool_correction_lost
   else if String.equal terminal_reason "terminal_effect_failed"
   then R.Disp_unknown, R.Reason_terminal_effect_failed
-  else if preflight_config_failure
-  then R.Disp_operator_action_required, R.Reason_preflight_config_error
+  else if config_invalid
+  then R.Disp_operator_action_required, R.Reason_config_invalid
+  else if authorization_refused
+  then R.Disp_operator_action_required, R.Reason_authorization_refused
   else if
     provider_runtime_failure
     && (Option.is_some receipt.degraded_retry_applied
@@ -334,7 +379,54 @@ let () =
   in
   check
     "canonical typed config wire requires operator action"
-    (canonical = (R.Disp_operator_action_required, R.Reason_preflight_config_error))
+    (canonical = (R.Disp_operator_action_required, R.Reason_config_invalid));
+  (* The point of the pair: same disposition, different reason. If the two
+     variants are ever collapsed into one, this stops holding. *)
+  let refused =
+    R.operator_disposition
+      { base_receipt with terminal_reason_code = "api_error_authorization" }
+  in
+  check
+    "canonical authorization wire requires operator action under its own reason"
+    (refused = (R.Disp_operator_action_required, R.Reason_authorization_refused));
+  check
+    "a config wire and an authorization wire carry different reasons"
+    (snd canonical <> snd refused);
+  (* Every wire the operator-action bucket accepts, and which half it lands
+     in. Exhaustive with no wildcard, so a variant added later has to be
+     answered here rather than silently reported as "neither". *)
+  let half = function
+    | Tr.Config_invalid _ -> "config"
+    | Tr.Authorization_refused _ -> "authorization"
+    | Tr.Runtime_exhausted _
+    | Tr.Capacity_backpressure _
+    | Tr.Provider_runtime_failure _
+    | Tr.Transcript_corruption _
+    | Tr.Official_client_recovery_required _
+    | Tr.Provider_attempt_effect_fenced _
+    | Tr.Tool_correction_lost _
+    | Tr.Accept_rejected _
+    | Tr.Terminal_effect_failed _
+    | Tr.Internal_error _
+    | Tr.Pre_dispatch_success _
+    | Tr.Unknown _ -> "neither"
+  in
+  List.iter
+    (fun (wire, expected) ->
+       let classified = Tr.of_wire wire in
+       check
+         (Printf.sprintf "%S lands in the %s half" wire expected)
+         (String.equal (half classified) expected);
+       check
+         (Printf.sprintf "%S still round-trips after the split" wire)
+         (String.equal (Tr.to_wire classified) wire))
+    [ "config_error", "config"
+    ; "provider_error_invalid_config:multimodal_input", "config"
+    ; "api_error_auth", "authorization"
+    ; "api_error_authorization", "authorization"
+    ; "provider_error_auth", "authorization"
+    ; "provider_error_authorization", "authorization"
+    ]
   ;
   check
     "canonical typed config wire emits operator broadcast"
@@ -351,6 +443,35 @@ let () =
   check
     "transcript corruption emits operator broadcast"
     (R.needs_operator_broadcast (fst transcript_corruption));
+  let official_client_recovery =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code =
+          Keeper_internal_error.official_client_recovery_required_kind
+      ; runtime_outcome = R.Runtime_not_dispatched
+      }
+  in
+  check
+    "official-client recovery requires operator action without a runtime claim"
+    (official_client_recovery
+     = ( R.Disp_operator_action_required
+       , R.Reason_official_client_recovery_required ));
+  check
+    "official-client recovery emits an operator broadcast"
+    (R.needs_operator_broadcast (fst official_client_recovery));
+  check
+    "official-client recovery reason keeps the canonical producer wire"
+    (String.equal
+       (R.operator_disposition_reason_to_string (snd official_client_recovery))
+       Keeper_internal_error.official_client_recovery_required_kind);
+  check
+    "official-client recovery wire decodes to its closed terminal variant"
+    (match
+       Tr.of_wire Keeper_internal_error.official_client_recovery_required_kind
+     with
+     | Tr.Official_client_recovery_required wire ->
+       String.equal wire Keeper_internal_error.official_client_recovery_required_kind
+     | _ -> false);
   let fenced_error =
     Keeper_internal_error.Provider_attempt_effect_fenced
       { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
@@ -1423,6 +1544,79 @@ max-concurrent = 1
        check
          "successful terminal turn clears turn consecutive failures"
          (entry_after_success.turn_consecutive_failures = 0);
+       (* A resolved native session can complete without a Keeper restart.
+          Exercise the real store transitions and Completed success owner;
+          the completed provider result is synthetic, not a provider call. *)
+       let module Session = Masc.Keeper_official_client_session_store in
+       let runtime_id = "synthetic-native-recovery" in
+       let started =
+         Session.claim ~base_path:config.base_path ~keeper_name ~expected:None
+           ~client_kind:Session.Codex ~runtime_id
+           ~owner_epoch:(Session.process_epoch ())
+           ~tool_surface_sha256:(Session.tool_surface_sha256
+             ~native_posture:Runtime_native_tools.Native_read []) ~updated_at:1.
+         |> Result.get_ok
+       in
+       let held =
+         Session.require_recovery ~base_path:config.base_path ~keeper_name
+           ~expected:started ~failure:(Session.Input_rejected Session.Effect_fenced)
+           ~detail:"synthetic observed tool activity" ~required_at:2.
+         |> Result.get_ok
+       in
+       let claim_error, recovery_id =
+         match Session.plan_claim ~expected:(Some held)
+                 ~client_kind:Session.Codex ~runtime_id with
+         | Error (Session.Input_recovery_required recovery as error) ->
+           error, recovery.recovery_id
+         | Error error -> failwith (Session.claim_error_to_string error)
+         | Ok _ -> failwith "unresolved native recovery unexpectedly admitted a claim"
+       in
+       let core_error = Session.core_error_of_claim_error claim_error in
+       let raw_error = Agent_core.Error.to_string core_error in
+       let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
+       let reason =
+         Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+           ~core_error terminal ~raw_error
+       in
+       Masc.Keeper_registry.set_failure_reason ~base_path:config.base_path
+         keeper_name reason;
+       check "native refusal increments failure debt"
+         (Masc.Keeper_turn_failure_streak.increment
+            ~base_path:config.base_path ~keeper_name = 1);
+       let public_before_recovery =
+         Option.bind (registered_entry ()).last_failure_reason
+           Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+         |> Option.map (fun surface -> surface.Masc.Keeper_status_bridge.blocker_class)
+       in
+       check "native refusal appears on the public status before recovery"
+         (public_before_recovery = Some "official_client_recovery_required");
+       let reopened, application =
+         Session.resolve_recovery ~base_path:config.base_path ~keeper_name
+           ~expected:held ~recovery_id ~resolution:Session.Restart_fresh
+           ~resolved_by:"synthetic-operator" ~resolved_at:3.
+         |> Result.get_ok
+       in
+       check "synthetic recovery resolution applied" (application = Session.Applied);
+       check "resolved native session admits the next same-runtime claim"
+         (Result.is_ok (Session.plan_claim ~expected:(Some reopened)
+            ~client_kind:Session.Codex ~runtime_id));
+       UTS.reset_turn_failures_for_stop_reason ~config ~updated_meta:meta (run_result ());
+       let entry_after_recovery = registered_entry () in
+       check "completed turn after recovery clears current failure"
+         (entry_after_recovery.last_failure_reason = None);
+       check "completed turn after recovery clears failure count"
+         (entry_after_recovery.turn_consecutive_failures = 0);
+       Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+         ~registry_entry:entry_after_recovery
+         ~turn_fail_count:entry_after_recovery.turn_consecutive_failures;
+       check "post-turn heartbeat refresh keeps the successful recovery clear"
+         ((registered_entry ()).last_failure_reason = None);
+       let public_after_recovery =
+         Masc.Keeper_status_bridge.runtime_blocker_fields_json config meta
+       in
+       check "public current blocker is absent after recovery and completion"
+         (List.assoc_opt "runtime_blocker_class" public_after_recovery = Some `Null
+          && List.assoc_opt "runtime_blocker_summary" public_after_recovery = Some `Null);
        let check_repeated_yield_preserves_failure_state label stop_reason =
          Masc.Keeper_registry.For_testing.clear ();
          ignore

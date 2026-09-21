@@ -158,8 +158,9 @@ wire 가 말하는 것은 "제공자가 이 요청을 authorization 으로 거�
 ```ocaml
 | Keeper_terminal_reason.Config_invalid _ ->
   Disp_operator_action_required, Reason_config_invalid
-| Keeper_terminal_reason.Auth_denied _ ->
-  (* 정책은 열어 둔 결정 1 *)
+| Keeper_terminal_reason.Authorization_refused _ ->
+  (* 열어 둔 결정 2 가 정한 대로 운영자를 세우는 쪽을 유지한다 *)
+  Disp_operator_action_required, Reason_authorization_refused
 ```
 
 `Reason_preflight_config_error` 도 둘로 나눈다. 대시보드가 이 문자열을 읽으므로

@@ -304,6 +304,50 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
       outcomes
 ;;
 
+(* [typesafeai].excluded_keepers names keepers by name, so a misspelt name
+   excludes nobody and looks as if it did. The keepers of a base path are
+   declared by <keepers_dir>/<name>.toml; each excluded name with no such
+   declaration is reported, one line per name, when the server is up and the
+   runtime table is loaded. The listing is a parameter so a test can point it
+   at a directory of its own. *)
+let declared_keeper_names ~keepers_dir =
+  match Sys.readdir keepers_dir with
+  | exception Sys_error detail -> Error detail
+  | entries ->
+    Ok
+      (Array.to_list entries
+       |> List.filter_map (fun entry ->
+         if Filename.check_suffix entry ".toml"
+         then Some (Filename.chop_suffix entry ".toml")
+         else None))
+;;
+
+let unknown_typesafeai_exclusions ~keepers_dir =
+  Result.map
+    (fun known -> Typesafeai_config.unknown_excluded_keepers ~known)
+    (declared_keeper_names ~keepers_dir)
+;;
+
+let report_unknown_typesafeai_exclusions ~base_path =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  match unknown_typesafeai_exclusions ~keepers_dir with
+  | Error detail ->
+    Log.Server.warn
+      "[typesafeai].excluded_keepers could not be checked against declarations in %s: %s"
+      keepers_dir
+      detail
+  | Ok names ->
+    List.iter
+      (fun name ->
+         Log.Server.warn
+           "[typesafeai].excluded_keepers names %S, but no keeper of this base path is declared \
+            by that name (%s/%s.toml): it excludes nobody"
+           name
+           keepers_dir
+           name)
+      names
+;;
+
 let start_microvm_guest_maintenance ~sw ~sweep =
   Eio.Fiber.fork ~sw (fun () ->
     let started_at = Unix.gettimeofday () in

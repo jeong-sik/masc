@@ -2477,6 +2477,131 @@ let validate_ollama_only_binding_fields
     bindings
 ;;
 
+(* --- [typesafeai] --- *)
+
+let typesafeai_keys =
+  [ "enabled"; "endpoint"; "model"; "board_attention"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
+;;
+
+let unknown_table_keys ~(path : string) ~(expected : string list) (entries : (string * Otoml.t) list) =
+  List.concat_map
+    (fun (key, _) ->
+       if List.mem key expected
+       then []
+       else
+         error
+           (path ^ "." ^ key)
+           (Printf.sprintf
+              "unknown [%s] key %S; expected %s"
+              path
+              key
+              (String.concat ", " expected)))
+    entries
+;;
+
+let result_errors = function
+  | Ok _ -> []
+  | Error errors -> errors
+;;
+
+(* A keeper name in [excluded_keepers]: a keeper is named by its directory
+   name, so an empty name or one with whitespace names nothing and would
+   exclude nothing while looking as if it did. Whether the name is a keeper
+   of this base path is checked at boot, where the keepers are known. *)
+let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
+  match typed_find "an array of strings" path tbl "excluded_keepers" (Otoml.get_array Otoml.get_string) with
+  | Error _ as error -> error
+  | Ok None -> Ok []
+  | Ok (Some names) ->
+    let bad =
+      List.concat_map
+        (fun name ->
+           if String.trim name = "" || String.exists (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') name
+           then
+             error
+               (path ^ ".excluded_keepers")
+               (Printf.sprintf "keeper name %S must be non-empty without whitespace" name)
+           else [])
+        names
+    in
+    if bad = [] then Ok names else Error bad
+;;
+
+(* An absent key means the default; a present one must be a non-empty
+   string without surrounding whitespace. Spelled as a match so the rule is
+   visible here rather than hidden in a permissive default. *)
+let typesafeai_string_field ~(path : string) (tbl : Otoml.t) (key : string) ~(absent : string)
+  : (string, parse_error list) result
+  =
+  match exact_non_empty_string_opt_field ~path tbl key with
+  | Ok (Some value) -> Ok value
+  | Ok None -> Ok absent
+  | Error _ as error -> error
+;;
+
+(* [\[typesafeai\]] -- the TypeSafe AI lane; the key is not here. An absent
+   table is {!Runtime_schema.default_typesafeai}; a present one is read
+   strictly, so a misspelt key is a load error rather than a switch that
+   silently did nothing. *)
+let parse_typesafeai (toml : Otoml.t)
+  : (Runtime_schema.typesafeai, parse_error list) result
+  =
+  let path = "typesafeai" in
+  match Otoml.find_opt toml Fun.id [ path ] with
+  | None -> Ok Runtime_schema.default_typesafeai
+  | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as tbl) ->
+    let unknown = unknown_table_keys ~path ~expected:typesafeai_keys entries in
+    let d = Runtime_schema.default_typesafeai in
+    let enabled = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:d.lane_enabled in
+    let endpoint = typesafeai_string_field ~path tbl "endpoint" ~absent:d.lane_endpoint in
+    let model = typesafeai_string_field ~path tbl "model" ~absent:d.lane_model in
+    let board_attention =
+      typed_find_or "a boolean" path tbl "board_attention" Otoml.get_boolean ~default:d.board_attention
+    in
+    let absorb_gate =
+      typed_find_or "a boolean" path tbl "absorb_gate" Otoml.get_boolean ~default:d.absorb_gate
+    in
+    let context_review =
+      typed_find_or "a boolean" path tbl "context_review" Otoml.get_boolean ~default:d.context_review
+    in
+    let skill_applicability =
+      typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
+    in
+    let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
+    (match unknown, enabled, endpoint, model, board_attention, absorb_gate, context_review, skill_applicability, excluded_keepers with
+     | ( []
+       , Ok lane_enabled
+       , Ok lane_endpoint
+       , Ok lane_model
+       , Ok board_attention
+       , Ok absorb_gate
+       , Ok context_review
+       , Ok skill_applicability
+       , Ok excluded_keepers ) ->
+       Ok
+         { Runtime_schema.lane_enabled
+         ; lane_endpoint
+         ; lane_model
+         ; board_attention
+         ; absorb_gate
+         ; context_review
+         ; skill_applicability
+         ; excluded_keepers
+         }
+     | _ ->
+       Error
+         (unknown
+          @ result_errors enabled
+          @ result_errors endpoint
+          @ result_errors model
+          @ result_errors board_attention
+          @ result_errors absorb_gate
+          @ result_errors context_review
+          @ result_errors skill_applicability
+          @ result_errors excluded_keepers))
+  | Some _ -> Error (error path "[typesafeai] must be a TOML table")
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
   let providers_result = parse_providers toml in
@@ -2489,6 +2614,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let exec_ssh_endpoints_result = parse_exec_endpoints toml in
   let egress_allowlists_result = parse_egress_allowlists toml in
   let lsp_servers_result = parse_lsp_servers toml in
+  let typesafeai_result = parse_typesafeai toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs obsolete_namespaces_result
@@ -2502,6 +2628,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs exec_ssh_endpoints_result
     @ errs egress_allowlists_result
     @ errs lsp_servers_result
+    @ errs typesafeai_result
   in
   if all_errors <> []
   then Error all_errors
@@ -2538,6 +2665,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lsp_servers =
       extract_after_all_errors_guard ~label:"lsp_servers" lsp_servers_result
     in
+    let typesafeai = extract_after_all_errors_guard ~label:"typesafeai" typesafeai_result in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)
@@ -2556,6 +2684,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ; exec_ssh_endpoints
         ; egress_allowlists
         ; lsp_servers
+        ; typesafeai
         })
 ;;
 

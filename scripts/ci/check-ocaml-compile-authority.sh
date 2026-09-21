@@ -17,7 +17,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-dune_root="${repo_root}/dune"
 
 fail() {
   echo "OCaml compile authority drift: $*" >&2
@@ -25,31 +24,52 @@ fail() {
 }
 
 
-# The root dune carries the tree-wide warning mask in two (flags (:standard …))
-# lists, dev and release. This used to be checked by matching the whole list as
-# one literal string, which pinned the guard to a single exact spelling: adding
-# -w +32 to that same list satisfied the check's stated intent and broke the
-# check. Assert one flag at a time against the flag lists so another flag can be
-# added without editing this script, while dropping one still fails.
+# The root dune carries the tree-wide warning mask in dev and release. Inspect
+# Dune's effective flags rather than the source layout: whitespace, line breaks,
+# or another flag in the stanza must not change this policy check.
 #
 # -w +32 (unused value declaration) is load-bearing here, not cosmetic. It was
 # previously decided per library -- 84 of the 121 stanzas under lib/ opted in,
 # 37 did not -- and an unreachable value in one of those 37 produced no signal
 # at all. Removing it from the root returns the tree to that state silently.
-#
-# The filter keys on "(:standard -" rather than on any particular flag: the
-# (dirs …) stanza at the top of the file also opens with (:standard, but with
-# nothing after it, while every flag list continues with a flag. Keying on one
-# of the required flags instead would report "0 flag lists" when that same flag
-# is the one missing, which is the case this exists to diagnose.
-flag_lines="$(grep -F -- '(:standard -' "${dune_root}" || true)"
-flag_line_count="$(grep -c . <<<"${flag_lines}" || true)"
-[ "${flag_line_count}" -eq 2 ] \
-  || fail "root dune env must have exactly 2 (:standard …) flag lists (dev, release), found ${flag_line_count}"
-for required_flag in '-w +32' '+69' '-warn-error +a'; do
-  present="$(grep -Fc -- "${required_flag}" <<<"${flag_lines}" || true)"
-  [ "${present}" -eq 2 ] \
-    || fail "root dune env must set ${required_flag} in dev and release, found it in ${present} of 2"
+assert_strict_masc_flags() {
+  local scope="$1"
+  local flags="$2"
+  local previous=""
+  local has_warning_32=0
+  local has_warning_69=0
+  local has_warn_error_all=0
+  local token
+
+  while IFS= read -r token; do
+    case "${previous}" in
+      -w)
+        [[ "${token}" == *+32* ]] && has_warning_32=1
+        [[ "${token}" == *-32* ]] && has_warning_32=0
+        [[ "${token}" == *+69* ]] && has_warning_69=1
+        [[ "${token}" == *-69* ]] && has_warning_69=0
+        ;;
+      -warn-error)
+        [[ "${token}" == *+a* ]] && has_warn_error_all=1
+        ;;
+    esac
+    previous="${token}"
+  done < <(tr '()' '  ' <<<"${flags}" | tr -s '[:space:]' '\n')
+
+  [ "${has_warning_32}" -eq 1 ] \
+    || fail "${scope} flags lost warning 32: ${flags}"
+  [ "${has_warning_69}" -eq 1 ] \
+    || fail "${scope} flags lost warning 69: ${flags}"
+  [ "${has_warn_error_all}" -eq 1 ] \
+    || fail "${scope} flags lost -warn-error +a: ${flags}"
+}
+
+cd "${repo_root}"
+for profile in dev release; do
+  for directory in . lib bin test; do
+    effective_flags="$(dune printenv --profile "${profile}" "${directory}" --field flags)"
+    assert_strict_masc_flags "${profile} (${directory})" "${effective_flags}"
+  done
 done
 
-echo "OCaml compile authority: PASS (root dune sets -w +32, +69 and -warn-error +a in dev and release)"
+echo "OCaml compile authority: PASS (effective dev and release MASC warnings are strict)"

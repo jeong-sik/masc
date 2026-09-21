@@ -846,9 +846,13 @@ let load_default () =
   of_toml_string ~source:"embedded default model catalog" Model_catalog_embedded.contents
 ;;
 
-let lookup_entries entries raw_model_id =
+type lookup_failure =
+  | Malformed_model_id of string
+  | No_such_row
+
+let lookup_entries_result entries raw_model_id =
   match Model_identifiers.Model_id.of_string raw_model_id with
-  | Error _ -> None
+  | Error detail -> Error (Malformed_model_id detail)
   | Ok model_id ->
     let sorted_t =
       List.fast_sort
@@ -858,15 +862,28 @@ let lookup_entries entries raw_model_id =
              (String.length (Model_identifiers.Id_prefix.to_string a.id_prefix)))
         entries
     in
-    List.find_opt
-      (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
-      sorted_t
+    (match
+       List.find_opt
+         (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
+         sorted_t
+     with
+     | Some entry -> Ok entry
+     | None -> Error No_such_row)
+;;
+
+let lookup_result t model_id =
+  t.models
+  |> List.filter (fun entry -> Option.is_none entry.provider_name)
+  |> fun entries -> lookup_entries_result entries model_id
 ;;
 
 let lookup t model_id =
-  t.models
-  |> List.filter (fun entry -> Option.is_none entry.provider_name)
-  |> fun entries -> lookup_entries entries model_id
+  match lookup_result t model_id with
+  | Ok entry -> Some entry
+  | Error No_such_row -> None
+  | Error (Malformed_model_id detail) ->
+    Diag.warn "model_catalog" "lookup refused %S: %s" model_id detail;
+    None
 ;;
 
 (* Wire-kind labels ("openai_compat", "gemini", ...) are what
@@ -915,26 +932,47 @@ let provider_entry_for_label t provider_name =
       t.providers
 ;;
 
+let lookup_for_provider_result t ~provider_name ~model_id =
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error detail -> Error (Malformed_model_id detail)
+  | Ok model_id ->
+    let find_exact label =
+      List.find_opt
+        (fun entry ->
+           match entry.provider_name with
+           | None -> false
+           | Some declared ->
+             String.equal label (normalize_label declared)
+             && Model_identifiers.Model_id.equal_id_prefix
+                  ~prefix:entry.id_prefix
+                  model_id)
+        t.models
+    in
+    let requested = normalize_label provider_name in
+    match find_exact requested with
+    | Some hit -> Ok hit
+    | None ->
+      let canonical = canonical_provider_name t requested in
+      if String.equal canonical requested
+      then Error No_such_row
+      else
+        (match find_exact canonical with
+         | Some hit -> Ok hit
+         | None -> Error No_such_row)
+;;
+
 let lookup_for_provider t ~provider_name ~model_id =
-  let model_id = normalize_label model_id in
-  let find_exact label =
-    List.find_opt
-      (fun entry ->
-         match entry.provider_name with
-         | None -> false
-         | Some declared ->
-           String.equal label (normalize_label declared)
-           && String.equal
-                model_id
-                (normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)))
-      t.models
-  in
-  let requested = normalize_label provider_name in
-  match find_exact requested with
-  | Some _ as hit -> hit
-  | None ->
-    let canonical = canonical_provider_name t requested in
-    if String.equal canonical requested then None else find_exact canonical
+  match lookup_for_provider_result t ~provider_name ~model_id with
+  | Ok entry -> Some entry
+  | Error No_such_row -> None
+  | Error (Malformed_model_id detail) ->
+    Diag.warn
+      "model_catalog"
+      "provider lookup refused model %S for provider %S: %s"
+      model_id
+      provider_name
+      detail;
+    None
 ;;
 
 let provider_label_for_base_url ?getenv t ~kind ~base_url =

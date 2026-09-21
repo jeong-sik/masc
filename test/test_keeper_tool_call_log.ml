@@ -1589,6 +1589,7 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
       ~tool_name:"keeper_wait"
       ~input:(`Assoc [])
       ~output_text:(Tool_result.message result)
+      ~result_bytes:(String.length (Tool_result.message result))
       ~wire_outcome:Tool_result.Unknown
       ~duration_ms:(Tool_result.duration_ms result)
       ~typed_result:result
@@ -1610,6 +1611,36 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
       "deferred is absent from settled per-tool rates"
       true
       Yojson.Safe.Util.(member "by_tool" summary |> to_list |> List.is_empty))
+
+let test_dashboard_aggregate_separates_unsettled_from_malformed () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let row fields =
+      `Assoc
+        ([ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "pending")
+         ; ("result_bytes", `Int 7)
+         ; ("duration_ms", `Float 2.0)
+         ]
+         @ fields)
+    in
+    Dated_jsonl.append store (row [ "wire_outcome", `String "unknown" ]);
+    Dated_jsonl.append store (row []);
+    Dated_jsonl.append store (row [ "disposition", `String "future_state" ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "known unknown wire outcomes stay readable" 2
+      (Safe_ops.json_int ~default:(-1) "unsettled" summary);
+    Alcotest.(check int) "unknown disposition token is malformed" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "unsettled rows stay out of settled total" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
 
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
@@ -2677,6 +2708,8 @@ let () =
             test_dashboard_aggregate_missing_runtime_profile_is_unknown
         ; eio_test "dashboard aggregate keeps deferred neutral"
             test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
+        ; eio_test "dashboard aggregate separates unsettled and malformed"
+            test_dashboard_aggregate_separates_unsettled_from_malformed
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"

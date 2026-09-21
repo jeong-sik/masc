@@ -64,20 +64,31 @@ let thinking_mode_of_record record =
      | _ -> "<missing thinking_enabled field>")
   | _ -> "<non-object record envelope>"
 
-let tool_success_of_record record =
-  match Safe_ops.json_string_opt "disposition" record with
-  | Some "completed" -> Some true
-  | Some "failed" -> Some false
-  | Some "deferred" -> None
-  | Some _ -> None
-  | None ->
-    (match Safe_ops.json_string_opt "wire_outcome" record with
-     | Some "ok" -> Some true
-     | Some "error" -> Some false
-     | Some "unknown" | Some _ | None -> None)
+type tool_record_outcome =
+  | Settled of bool
+  | Deferred
+  | Unsettled
+  | Malformed_outcome
 
-let tool_record_is_deferred record =
-  Safe_ops.json_string_opt "disposition" record = Some "deferred"
+(* Read the closed typed disposition first. An absent disposition is valid for
+   runtime-MCP rows, whose wire outcome is the available boundary. [unknown]
+   and an absent wire outcome mean not yet settled; an unrecognized token or
+   wrong JSON type is producer/consumer schema drift and stays malformed. *)
+let tool_outcome_of_record record =
+  match record with
+  | `Assoc fields ->
+    (match List.assoc_opt "disposition" fields with
+     | Some (`String "completed") -> Settled true
+     | Some (`String "failed") -> Settled false
+     | Some (`String "deferred") -> Deferred
+     | Some _ -> Malformed_outcome
+     | None ->
+       (match List.assoc_opt "wire_outcome" fields with
+        | Some (`String "ok") -> Settled true
+        | Some (`String "error") -> Settled false
+        | Some (`String "unknown") | None -> Unsettled
+        | Some _ -> Malformed_outcome))
+  | _ -> Malformed_outcome
 
 (* Every producer writes [result_bytes] (the [log_call] callers in
    keeper_hooks_agent_core, keeper_tool_composition_surface and
@@ -147,7 +158,7 @@ let source_metadata_fields () =
   Dashboard_tool_source_freshness.keeper_tool_call_io_fields
     ~dashboard_surface ()
 
-let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
+let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malformed =
   `Assoc
     (source_metadata_fields ()
     @ [ ("generated_at", `String (Masc_domain.now_iso ()))
@@ -164,6 +175,7 @@ let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
     ; ("success", `Int 0)
     ; ("failure", `Int 0)
     ; ("deferred", `Int deferred)
+    ; ("unsettled", `Int unsettled)
     ; ("malformed", `Int malformed)
     ; ("success_rate", `Float 0.0)
     ; ("by_tool", `List [])
@@ -179,20 +191,23 @@ let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
 
 (* The payload over already-read [records]; the read is [aggregate]'s. *)
 let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
-  let deferred_records, records = List.partition tool_record_is_deferred records in
-  let deferred = List.length deferred_records in
-  let malformed, records =
+  let deferred, unsettled, malformed, records =
     List.fold_left
-      (fun (malformed, acc) record ->
-        match result_bytes_of_record record, tool_success_of_record record with
-        | Some result_bytes, Some success ->
-          malformed, (record, result_bytes, success) :: acc
-        | (Some _ | None), (Some _ | None) -> malformed + 1, acc)
-      (0, []) records
+      (fun (deferred, unsettled, malformed, acc) record ->
+        match result_bytes_of_record record with
+        | None -> deferred, unsettled, malformed + 1, acc
+        | Some result_bytes ->
+          (match tool_outcome_of_record record with
+           | Settled success ->
+             deferred, unsettled, malformed, (record, result_bytes, success) :: acc
+           | Deferred -> deferred + 1, unsettled, malformed, acc
+           | Unsettled -> deferred, unsettled + 1, malformed, acc
+           | Malformed_outcome -> deferred, unsettled, malformed + 1, acc))
+      (0, 0, 0, []) records
   in
   let records = List.rev records in
   if records = [] then
-    empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed
+    empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malformed
   else
   let total = ref 0 in
   let success = ref 0 in
@@ -401,6 +416,7 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
     ("success", `Int success_n);
     ("failure", `Int (total_n - success_n));
     ("deferred", `Int deferred);
+    ("unsettled", `Int unsettled);
     ("malformed", `Int malformed);
     ("success_rate", `Float (Float.round (rate *. 100.0) /. 100.0));
     ("by_tool", `List by_tool);

@@ -246,6 +246,8 @@ let eval_response_of_yojson json =
       | Some (`Assoc ans_list) ->
         let rec parse_answers acc = function
           | [] -> Ok (List.rev acc)
+          | (id, _) :: _ when List.mem_assoc id acc ->
+            Error (Printf.sprintf "typesafeai: duplicate answer ID %S" id)
           | (id, ans_json) :: rest ->
             let* ans = answer_of_yojson ans_json in
             parse_answers ((id, ans) :: acc) rest

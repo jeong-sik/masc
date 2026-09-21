@@ -95,11 +95,19 @@ def run_case(executable: str, fixture_path: Path) -> None:
                 b"fixture unavailable",
                 b"configured-request-fixture",
             ]
-        elif scenario in ("invalid-json", "invalid-response", "nonfinite-response"):
+        elif scenario in (
+            "invalid-json",
+            "invalid-response",
+            "nonfinite-response",
+            "duplicate-response",
+            "nonutf8-response",
+        ):
             response_marker = {
                 "invalid-json": b"not JSON",
                 "invalid-response": b"malformed-fixture",
                 "nonfinite-response": b"NaN",
+                "duplicate-response": b"duplicate-fixture",
+                "nonutf8-response": b"base64",
             }[scenario]
             needles = [
                 b'"kind": "http_response"',
@@ -214,6 +222,8 @@ def main() -> None:
             "invalid-json",
             "invalid-response",
             "nonfinite-response",
+            "duplicate-response",
+            "nonutf8-response",
             "invalid-answer",
             "memory-write-failure",
         ):

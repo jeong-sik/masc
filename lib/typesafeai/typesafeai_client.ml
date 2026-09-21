@@ -10,6 +10,7 @@ type failure =
   | Transport_failure of string
   | Http_response_failure of
       { status : int
+      ; destination_uri : string
       ; body : string
       ; detail : string
       }
@@ -30,6 +31,7 @@ let redact_diagnostic ~endpoint ~api_key detail =
   |> String_util.replace_substring ~needle:normalized ~by:displayed
   |> String_util.replace_substring ~needle:api_key ~by:"[REDACTED]"
   |> Observability_redact.redact_text
+  |> String_util.sanitize_utf8
 ;;
 
 let transport_failure ~endpoint ~api_key detail =
@@ -38,18 +40,27 @@ let transport_failure ~endpoint ~api_key detail =
 
 let failure_to_string = function
   | Transport_failure detail -> "typesafeai: transport failure: " ^ detail
-  | Http_response_failure { status; detail; _ } ->
-    Printf.sprintf "typesafeai: HTTP %d: %s" status detail
+  | Http_response_failure { status; destination_uri; detail; _ } ->
+    Printf.sprintf "typesafeai: HTTP %d returned by %s: %s" status destination_uri detail
 ;;
 
 let failure_to_yojson = function
   | Transport_failure detail ->
     `Assoc [ "kind", `String "transport"; "detail", `String detail ]
-  | Http_response_failure { status; body; detail } ->
+  | Http_response_failure { status; destination_uri; body; detail } ->
+    let body =
+      if String_util.is_valid_utf8 body then `String body
+      else `Assoc
+        [ "encoding", `String "base64"
+        ; "content", `String (Base64.encode_string body)
+        ; "total_bytes", `Int (String.length body)
+        ]
+    in
     `Assoc
       [ "kind", `String "http_response"
       ; "status", `Int status
-      ; "body", `String body
+      ; "destination_uri", `String destination_uri
+      ; "body", body
       ; "detail", `String detail
       ]
 ;;
@@ -89,11 +100,14 @@ let evaluate
     Error
       (Http_response_failure
          { status
+         ; destination_uri = endpoint_for_observation endpoint
          ; body = response_body
          ; detail = redact_diagnostic ~endpoint ~api_key detail
          })
   in
-  if status = 200
+  if not (String_util.is_valid_utf8 response_body) then
+    failed "response body is not valid UTF-8"
+  else if status = 200
   then
     let* parsed_json =
       match Yojson.Safe.from_string response_body with

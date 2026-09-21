@@ -81,7 +81,6 @@ type start_keepalive_outcome =
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
-  | Keepalive_memory_lane_not_ready of Keeper_memory_lane.lifecycle_open_error
   | Keepalive_launch_callback_failed of string
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error

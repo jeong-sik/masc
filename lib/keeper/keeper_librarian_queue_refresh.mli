@@ -39,11 +39,11 @@ val install : unit -> unit
     this extraction; source selection happens when the latest unit runs. *)
 
 val submit_durable : base_path:string -> keeper_name:string -> unit
-(** Submit disk-selected catch-up after this Keeper's Librarian lifecycle has
-    opened. Each stored progress advance continues to the next unread range;
-    an empty backlog, failure, or disabled/invalid setting ends this wake.
-    Launch admission owns restart catch-up; there is no pre-admission fleet
-    scan and no process-local remembered closure participates. *)
+(** Submit disk-selected catch-up for this Keeper on the server-owned
+    Librarian lane. Each stored progress advance continues to the next unread
+    range; an empty backlog, failure, or disabled/invalid setting ends this
+    wake. Launch admission owns restart catch-up; there is no pre-admission
+    fleet scan and no process-local remembered closure participates. *)
 
 val run_completed_turn : base_path:string -> keeper_name:string -> unit
 (** Drain successful durable Agent-Core ranges, then attempt an official-client

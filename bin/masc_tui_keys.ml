@@ -433,10 +433,8 @@ let for_surface = function
       ; b Act "a" "append slot"
           ~help:"add a failover candidate to this lane's walk order"
       ; b Act "s" "slots"
-          ~help:"open the lane's declared slots in the order it walks them: \
-                 j/k moves the cursor, x drops a slot, J/K reorders, Esc \
-                 closes. A slot publication rejected is listed in its place \
-                 and can be dropped from here"
+          ~help:"edit the lane's declared slots in walk order: x drops, J/K \
+                 reorders, Esc closes"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)

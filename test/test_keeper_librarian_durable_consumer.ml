@@ -200,6 +200,7 @@ let establish_progress config ~trace_id first =
   | Consumer.Baseline_advanced progress | Consumer.Progress_advanced progress ->
     check int "initial end" 1 progress.position.end_atom
   | Consumer.Nothing_to_read
+  | Consumer.Official_advanced _
   | Consumer.Memory_not_committed -> fail "initial range did not advance"
 ;;
 
@@ -272,6 +273,7 @@ let test_n_tick_reads_every_intermediate_turn () =
      check int "all three turns reached" 3 progress.position.end_atom
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "unread range did not commit");
   check (list string) "both unread turns are delivered" [ "turn-2"; "turn-3" ] !carried
 ;;
@@ -292,6 +294,7 @@ let test_failed_commit_and_restart_retry_the_same_range () =
    | Consumer.Memory_not_committed -> ()
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "failed commit advanced the pass");
   let after_failure = read_progress config in
   (match after_failure with
@@ -307,6 +310,7 @@ let test_failed_commit_and_restart_retry_the_same_range () =
      check int "restart reaches retried turn" 2 progress.position.end_atom
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "restart did not retry unread range");
   check (list string) "restart reads identical range" !first !after_restart
 ;;
@@ -330,10 +334,10 @@ let test_committed_range_recovers_after_progress_write_failure () =
   let commit ~expected_revision:_ ~range_id input =
     incr commits;
     committed_inputs := !committed_inputs @ [ text_markers input ];
-    attempted_range := Some range_id;
+    attempted_range := range_id;
     match
       Current.apply_disposition
-        ~durable_range_id:range_id
+        ?durable_range_id:range_id
         ~absorbed:[]
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
@@ -356,6 +360,7 @@ let test_committed_range_recovers_after_progress_write_failure () =
   (match
      Consumer.For_testing.consume_one_with_progress_writer
        ~write_progress_store:fail_progress
+       ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
        ~config
        ~keeper_name
        ~commit
@@ -469,7 +474,7 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
     incr commits;
     match
       Current.apply_disposition
-        ~durable_range_id:range_id
+        ?durable_range_id:range_id
         ~absorbed:[]
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
@@ -492,6 +497,7 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
   (match
      Consumer.For_testing.consume_one_with_progress_writer
        ~write_progress_store:fail_progress
+       ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
        ~config
        ~keeper_name
        ~commit
@@ -535,7 +541,7 @@ let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
     incr commits;
     match
       Current.apply_disposition
-        ~durable_range_id:range_id
+        ?durable_range_id:range_id
         ~absorbed:[]
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
@@ -558,6 +564,7 @@ let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
   (match
      Consumer.For_testing.consume_one_with_progress_writer
        ~write_progress_store:fail_progress
+       ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
        ~config
        ~keeper_name
        ~commit
@@ -613,6 +620,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
    | Consumer.Memory_not_committed -> ()
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "failed historical commit advanced");
   (match !first_context with
    | Some context -> check_no_task "first catch-up" context
@@ -629,6 +637,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
      check int "retried historical range advances" 2 progress.position.end_atom
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "historical retry did not advance");
   (match !retry_context with
    | Some context -> check_no_task "retried catch-up" context
@@ -638,6 +647,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
    | Consumer.Nothing_to_read -> ()
    | Consumer.Baseline_advanced _
    | Consumer.Memory_not_committed
+   | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "quiet tick did not stay quiet")
 ;;
 
@@ -757,6 +767,7 @@ let test_unchanged_boundaries_do_not_require_checkpoint () =
   | Consumer.Nothing_to_read -> ()
   | Consumer.Baseline_advanced _
   | Consumer.Memory_not_committed
+  | Consumer.Official_advanced _
   | Consumer.Progress_advanced _ -> fail "unchanged boundaries did not stop before checkpoint"
 ;;
 
@@ -898,6 +909,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Memory_not_committed -> ()
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "failed range unexpectedly advanced");
   let first_four = first_two @ [ message "turn-3"; message "turn-4" ] in
   append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0
@@ -914,6 +926,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
      check int "bounded retry reaches oldest cut" 2 progress.position.end_atom
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "bounded retry did not advance");
   check (list string) "retry does not grow with later turns" [ "turn-2" ] !retry;
   let remaining = ref [] in
@@ -926,6 +939,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
      check int "bounded catch-up reaches next cut" 3 progress.position.end_atom
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "remaining range did not advance");
   check (list string) "bounded catch-up remains active" [ "turn-3" ] !remaining;
   let final = ref [] in
@@ -938,12 +952,14 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
      check int "bounded catch-up reaches final cut" 4 progress.position.end_atom
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "final range did not advance");
   check (list string) "final turn remains readable" [ "turn-4" ] !final;
   (match consume config (fun ~expected_revision:_ ~range_id:_ _ -> fail "empty range called commit") with
    | Consumer.Nothing_to_read -> ()
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "empty pass did not clear bounded catch-up")
 ;;
 
@@ -964,6 +980,7 @@ let test_last_matching_boundary_wins_when_clock_moves_backward () =
    | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "clock regression range did not advance");
   check (option int) "last appended boundary is authoritative" (Some 3) !selected_turn
 ;;
@@ -978,6 +995,7 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
   (match consume config (fun ~expected_revision:_ ~range_id:_ _ -> true) with
    | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "fixture progress did not advance");
   let messages = first @ [ message "turn-2" ] in
   append_boundary config ~trace_id ~turn:2 ~recorded_at:10.0 messages;
@@ -1010,6 +1028,7 @@ let test_equal_boundary_timestamps_form_an_empty_counterpart_interval () =
   (match consume config (fun ~expected_revision:_ ~range_id:_ _ -> true) with
    | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
+   | Consumer.Official_advanced _
    | Consumer.Memory_not_committed -> fail "fixture progress did not advance");
   let messages = first @ [ message "turn-2" ] in
   append_boundary config ~trace_id ~turn:2 ~recorded_at:20.0 messages;
@@ -1514,6 +1533,7 @@ let test_same_name_clusters_keep_independent_ranges () =
      | Consumer.Progress_advanced _ -> ()
      | Consumer.Nothing_to_read
      | Consumer.Baseline_advanced _
+     | Consumer.Official_advanced _
      | Consumer.Memory_not_committed -> fail "cluster range did not advance");
     !carried
   in
@@ -1553,7 +1573,7 @@ let test_same_name_clusters_keep_independent_commit_receipts () =
     incr commits;
     match
       Current.apply_disposition
-        ~durable_range_id:range_id
+        ?durable_range_id:range_id
         ~absorbed:[]
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
@@ -1578,6 +1598,7 @@ let test_same_name_clusters_keep_independent_commit_receipts () =
     match
       Consumer.For_testing.consume_one_with_progress_writer
         ~write_progress_store:fail_progress
+        ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
         ~config
         ~keeper_name
         ~commit
@@ -1833,6 +1854,196 @@ let test_external_chat_pair_straddling_a_boundary_is_not_duplicated () =
        (read ~after:(Some boundary) ~before:(Time_compat.now () +. 10.0)))
 ;;
 
+(* {1 Official-client turns (RFC §10-3)} *)
+
+module Official = Masc.Keeper_librarian_official_progress
+module History = Masc.Keeper_context_core_history
+
+let append_official_boundary config ~trace_id ~turn ~recorded_at =
+  let record : Boundaries.record =
+    { recorded_at
+    ; event =
+        Boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          ; history_at_start = Boundaries.Continued_history
+          ; position = Boundaries.No_atom_history
+          }
+    }
+  in
+  match
+    Boundaries.append
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      record
+  with
+  | Ok () -> ()
+  | Error error -> fail (Boundaries.append_error_to_string error)
+;;
+
+let session config trace_id =
+  Masc.Keeper_context_core.create_session
+    ~session_id:trace_id
+    ~base_dir:(Masc.Keeper_fs.session_store_path config)
+;;
+
+(* The lines an official-client turn leaves: the user's line, the assistant's,
+   and one observation per tool call. *)
+let write_official_turn config ~trace_id ~turn ~user ~assistant ~tools =
+  let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
+  let session = session config trace_id in
+  History.persist_message ~keeper_name ~turn_ref ~source:"direct_user" session (message user);
+  History.persist_message ~keeper_name ~turn_ref ~source:"direct_assistant" session
+    (Agent_core.Types.make_message
+       ~role:Agent_core.Types.Assistant
+       [ Agent_core.Types.Text assistant ]);
+  List.iter
+    (fun tool_name ->
+       History.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name
+         ~outcome:Tool_result.Ok)
+    tools
+;;
+
+let read_official config =
+  match
+    Official.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  with
+  | Ok cursor -> cursor
+  | Error error -> fail (Official.read_error_to_string error)
+;;
+
+(* A keeper that only ever ran on official-client runtimes: no checkpoint, no
+   atom position. Its turns are read from their fragments, in order, and the
+   official position moves to the last line read. *)
+let test_an_official_only_keeper_is_read_from_its_fragments () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-only" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[ "masc_tasks" ];
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.0;
+  let carried = ref [] in
+  let tools = ref [] in
+  let commits = ref 0 in
+  (match
+     consume config (fun ~expected_revision:_ ~range_id input ->
+       incr commits;
+       carried := text_markers input;
+       tools :=
+         List.map
+           (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name)
+           input.tool_observations;
+       check bool "an official-only pass carries no atom receipt" true (Option.is_none range_id);
+       true)
+   with
+   | Consumer.Official_advanced { atom = None; official } ->
+     check int "the official position is the last line read" 2 official.boundary_line
+   | Consumer.Official_advanced { atom = Some _; _ } -> fail "an atom position appeared from nowhere"
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Memory_not_committed -> fail "official turns were not read");
+  check (list string) "both turns, each in its order" [ "q1"; "a1"; "q2"; "a2" ] !carried;
+  check (list string) "the tool the first turn called" [ "masc_tasks" ] !tools;
+  check int "one Memory commit" 1 !commits;
+  (match read_official config with
+   | Some { Official.boundary_line = 2 } -> ()
+   | Some { Official.boundary_line } -> failf "official position at line %d" boundary_line
+   | None -> fail "no official position was written");
+  match consume config (fun ~expected_revision:_ ~range_id:_ _ -> fail "a second pass read again") with
+  | Consumer.Nothing_to_read -> ()
+  | Consumer.Official_advanced _
+  | Consumer.Baseline_advanced _
+  | Consumer.Progress_advanced _
+  | Consumer.Memory_not_committed -> fail "read turns were read again"
+;;
+
+(* RFC §10-3's counterexample: T1 Agent-Core, T2 official-client, T3
+   Agent-Core. One pass hands the Librarian T2 then T3, by the order of
+   their end lines, and moves both positions. *)
+let test_a_mixed_keeper_is_read_in_line_order () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-mixed" in
+  establish_progress config ~trace_id "t1";
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.0;
+  let messages = [ message "t1"; message "t3" ] in
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  let carried = ref [] in
+  (match
+     consume config (fun ~expected_revision:_ ~range_id input ->
+       carried := text_markers input;
+       check bool "the atoms of the pass carry a receipt" true (Option.is_some range_id);
+       true)
+   with
+   | Consumer.Official_advanced { atom = Some atom; official } ->
+     check int "the atom position reaches T3" 2 atom.position.end_atom;
+     check int "the official position reaches T2's line" 2 official.boundary_line
+   | Consumer.Official_advanced { atom = None; _ } -> fail "T3's atoms were not read"
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Memory_not_committed -> fail "the mixed pass did not advance");
+  check (list string) "T2 before T3, T1 not again" [ "q2"; "a2"; "t3" ] !carried
+;;
+
+(* Lines whose fragments predate turn-named history are passed without a
+   model call; the position still moves so they are not asked for again. *)
+let test_untagged_fragments_are_passed_without_a_commit () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-untagged" in
+  write_meta config trace_id;
+  let path =
+    Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun oc ->
+    Out_channel.output_string oc
+      {|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}
+|});
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  match consume config (fun ~expected_revision:_ ~range_id:_ _ -> fail "nothing to commit") with
+  | Consumer.Official_advanced { atom = None; official } ->
+    check int "the position passes the line" 1 official.boundary_line
+  | Consumer.Official_advanced { atom = Some _; _ }
+  | Consumer.Nothing_to_read
+  | Consumer.Baseline_advanced _
+  | Consumer.Progress_advanced _
+  | Consumer.Memory_not_committed -> fail "the untagged line was not passed"
+;;
+
+(* A history line the decoder refuses, after the first named one, stops the
+   pass with a typed error naming the line; nothing is skipped. *)
+let test_a_refused_fragment_line_stops_the_pass () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-refused-fragment" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[];
+  let path =
+    Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600 path (fun oc ->
+    Out_channel.output_string oc "not json\n");
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  (match
+     Consumer.consume_one ~config ~keeper_name ~commit:(fun ~expected_revision:_ ~range_id:_ _ ->
+       fail "a refused line reached the model")
+   with
+   | Error (Consumer.Fragment_line_unreadable { line = 3; file = Masc.Keeper_turn_fragments.Main; _ }) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the pass read past a refused line");
+  check bool "no official position was written" true (Option.is_none (read_official config))
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -1903,6 +2114,16 @@ let () =
             test_trace_change_without_history_witness_keeps_prior_progress
         ; test_case "new unreadable boundary remains visible" `Quick
             test_new_unreadable_boundary_is_not_hidden_by_preflight
+        ] )
+    ; ( "official-client turns"
+      , [ test_case "an official-only keeper is read from its fragments" `Quick
+            test_an_official_only_keeper_is_read_from_its_fragments
+        ; test_case "a mixed keeper is read in line order" `Quick
+            test_a_mixed_keeper_is_read_in_line_order
+        ; test_case "untagged fragments are passed without a commit" `Quick
+            test_untagged_fragments_are_passed_without_a_commit
+        ; test_case "a refused fragment line stops the pass" `Quick
+            test_a_refused_fragment_line_stops_the_pass
         ] )
     ; ( "production wake"
       , [ test_case "failure stops and a later wake drains successful cuts" `Quick

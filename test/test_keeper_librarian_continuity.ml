@@ -197,8 +197,140 @@ let test_ordinary_baseline_coverage () = with_source @@ fun _env config save _ap
     (P.memory_range_id ~config ~keeper_name suffix |> get).start_atom;
   check bool "normal serial receipt certifies already consumed suffix" true
     (P.memory_committed ~config ~keeper_name suffix |> get)
+let test_fit_largest_request_prefix () = with_source @@ fun _env config save _append boundary ->
+  let messages = List.init 8 (fun index -> message (String.make (index + 1) 'x')) in
+  save messages; boundary ~fresh:true 1 messages;
+  let prepared = prepare config |> some in
+  let original = P.prompt_json prepared |> Yojson.Safe.to_string in
+  let visited = ref [] in
+  let whole = P.fit ~fits:(fun candidate ->
+    visited := P.end_atom candidate :: !visited; Ok true) prepared |> get |> some in
+  check bool "fitting original returned unchanged" true (whole == prepared);
+  check (list int) "whole request tested before search" [8] !visited;
+  let first = P.narrow prepared |> some in
+  ignore (commit config first "Prior work preserved.");
+  let suffix = prepare config |> some in
+  let exact_size candidate = P.prompt_json candidate |> Yojson.Safe.to_string |> String.length in
+  let expected = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
+  let limit = exact_size expected in
+  let fitted = P.fit ~fits:(fun candidate -> Ok (exact_size candidate <= limit)) suffix
+    |> get |> some in
+  check int "largest fitting whole-atom endpoint" 7 (P.end_atom fitted);
+  check string "exact suffix and prior state preserved" (P.prompt_json expected |> Yojson.Safe.to_string)
+    (P.prompt_json fitted |> Yojson.Safe.to_string);
+  check string "frozen original unaffected" original (P.prompt_json prepared |> Yojson.Safe.to_string);
+  let minimum_seen = ref false in
+  check bool "no indivisible atom fits" true
+    (P.fit ~fits:(fun candidate ->
+       if P.end_atom candidate = 5 then minimum_seen := true; Ok false) suffix
+     |> get |> Option.is_none);
+  check bool "minimum remaining atom was tested" true !minimum_seen;
+  check bool "predicate error propagated from search" true
+    (P.fit ~fits:(fun candidate ->
+       if P.end_atom candidate = 8 then Ok false else Error "measurement failed") suffix
+     = Error "measurement failed")
+
+let test_fit_keeps_exact_recovery_range () = with_source @@ fun _env config save _append boundary ->
+  let messages = [message "A"; message "B"; message "C"; message "D"] in
+  save messages; boundary ~fresh:true 1 messages;
+  let partial = prepare config |> some |> P.narrow |> some in
+  record_prepared_memory config partial;
+  let recovery = prepare config |> some in
+  let visited = ref [] in
+  let result = P.fit ~fits:(fun candidate ->
+    visited := P.end_atom candidate :: !visited; Ok false) recovery |> get in
+  check bool "unfit committed interval cannot be split" true (Option.is_none result);
+  check (list int) "only exact recovery interval tested" [2] !visited;
+  let fitted = P.fit ~fits:(fun _ -> Ok true) recovery |> get |> some in
+  check bool "fitting recovery interval returned unchanged" true
+    (fitted == recovery)
+
+let test_queue_reuses_capacity_without_gating_alternatives () =
+  let open Masc in
+  let module F = Exact_output_fixture in
+  let module K = Masc.Keeper_librarian in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Codex = Runtime_codex_app_server in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  F.with_official_client_runtimes @@ fun () ->
+  with_source @@ fun env config save _append boundary ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let base_path = config.Masc.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
+    Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+      keeper_name "Preserve evidence." "docker");
+  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_name; "trace_id", `String trace_id]) |> get in
+  Masc.Keeper_meta_store.replace_snapshot config meta |> get;
+  let instructions = match Masc.Keeper_meta_store.read_effective_meta_presence config keeper_name |> get with
+    | Meta_present meta -> meta.instructions
+    | Meta_absent | Meta_not_current _ -> fail "queue fixture lacks effective metadata" in
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () -> () | Error Already_installed -> fail "queue fixture registry already installed");
+  let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Prompt_defaults.init ();
+  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[F.cli_secondary_runtime; F.cli_primary_runtime]
+    (F.resolver_snapshot ~source:"queue-capacity" []));
+  let source = List.map message [String.make 1000 'a'; String.make 1000 'b';
+    String.make 1000 'c'; String.make 6000 'd'] in
+  save source; boundary ~fresh:true 1 source;
+  let current = Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
+    ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get in
+  let half = prepare config |> some |> P.narrow |> some in
+  let input : K.input =
+    {turn_ref=P.turn_ref half; goal_context=K.No_task; keeper_instructions=instructions;
+     current=Some {K.facts=current.facts};
+     working_context=Masc.Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name;
+     messages=P.messages half; tool_observations=[];counterpart_observations=[]} in
+  let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json half)) ::
+    List.remove_assoc "continuity" (K.prompt_variables input) in
+  let _, prompt = Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.librarian variables |> get in
+  let requirement = Agent_core.Exact_output.make_output_requirement
+    ~schema:Masc.Keeper_structured_output_schema.librarian_current_output_schema
+    ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+  let chars prompt = Codex.prompt_char_count prompt |> get in
+  let max_chars = Masc.Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt |> chars in
+  let oversized = ref 0 and final_calls = ref 0 and alternative_bytes = ref None in
+  let answer = {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|} in
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+    let actual_chars = chars prompt in
+    if String.equal runtime_id F.cli_secondary_runtime then
+      match P.read ~config ~keeper_name |> get with
+      | Some saved when saved.end_atom = 3 -> alternative_bytes := Some actual_chars; Ok answer
+      | _ -> Error (Masc.Fusion_official_client.Setup_failure (Provider_error "fixture unavailable"))
+    else (
+      incr final_calls;
+      if actual_chars > max_chars then (
+        incr oversized;
+        Error (Masc.Fusion_official_client.Codex_failure (Codex.Rpc_error
+          {method_="turn/start";code=Some (-32602);message="fixture capacity";
+           data=Some (`Assoc ["input_error_code", `String "input_too_large";
+             "actual_chars", `Int actual_chars; "max_chars", `Int max_chars])})))
+      else Ok answer)
+  in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:runner ~base_path ~keeper_name ();
+  let saved = P.read ~config ~keeper_name |> get |> some in
+  check int "actual queue publishes every source atom" 4 saved.end_atom;
+  check int "known final-slot bound prevents repeated oversized probes" 1 !oversized;
+  check int "one refusal and two fitted chunks reach final slot" 3 !final_calls;
+  check bool "no-fit source still reaches recovered alternative" true
+    (match !alternative_bytes with Some size -> size > max_chars | None -> false)
+
 let () = run "production continuity pair"
-  ["cycle",[test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
+  ["cycle",[test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
+    test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
+    test_case "largest request-fitting prefix" `Quick test_fit_largest_request_prefix;
+    test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;
     test_case "normal baseline excludes unknown prefix" `Quick test_ordinary_baseline_coverage;test_case "baseline partial bootstrap and recovery" `Quick test_baseline_partial_bootstrap;test_case "executor cancellation joins commit" `Quick test_worker_cancellation_waits_for_commit;
     test_case "Memory frontier proves publication coverage" `Quick test_memory_coverage_required;
     test_case "saved state, suffix, CAS, restart" `Quick test_append_cas_and_restart;

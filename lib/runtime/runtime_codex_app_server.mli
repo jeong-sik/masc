@@ -235,6 +235,11 @@ type error =
             and retrying elsewhere is safe. *)
       }
 
+val prompt_char_count : string -> (int, string) result
+(** Count Unicode scalar values in the exact submitted prompt, matching Codex's
+    input character unit. Reject malformed UTF-8; do not normalize text or count
+    JSON escaping. The caller supplies the final prompt including any suffix. *)
+
 type input_capacity = { actual_chars : int; max_chars : int }
 val input_capacity_refusal : error -> input_capacity option
 (** Decode only a structurally witnessed turn/start input limit refusal.

@@ -754,9 +754,8 @@ let test_checkpoint_inventory_projects_missing_current () =
    says why an apply would be refused; the apply refuses while an atom is
    unread and writes nothing; an apply at the end installs the checkpoint and
    moves the position after it, leaving [boundary_lines_seen] alone. The
-   keeper's Librarian loop is retired around the writes; here it has none,
-   so the retire returns at once and the wake after it finds no server
-   switch and starts nothing. *)
+   server-owned Librarian lane is cancelled and awaited before the writes;
+   here it has no unit, so cancellation returns at once. *)
 let test_purge_moves_the_librarian_position_with_the_checkpoint () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->

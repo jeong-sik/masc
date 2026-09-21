@@ -78,6 +78,7 @@ type selection =
         absorbed by one claim only; [into] is that claim's identity. *)
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
+  ; working_state : string option
   ; working_contexts : Keeper_librarian_context.pocket list
   }
 
@@ -100,6 +101,7 @@ val prompt_variables : input -> (string * string) list
 type parse_error =
   | Top_level_not_object
   | Working_context_invalid of string
+  | Working_state_invalid of string
   | Unexpected_field of string
   | Duplicate_field of string
   | Missing_required_fields

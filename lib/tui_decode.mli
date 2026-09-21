@@ -893,6 +893,28 @@ type memory_librarian_health = {
   mlh_last_failure_kind : string option;
 }
 
+type memory_context_frontier = {
+  mcf_trace_id : string;
+  mcf_end_atom : int;
+  mcf_boundary_line : int;
+}
+type memory_context_input =
+  | Context_summarized of memory_context_frontier
+  | Context_uncompressed
+  | Context_not_applied
+
+type memory_context_prepared = {
+  mcp_prepared_at : float;
+  mcp_runtime_id : string;
+  mcp_input : memory_context_input;
+  mcp_request_bytes : int;
+}
+type memory_context_cycle = {
+  mcc_saved : memory_context_frontier option;
+  mcc_saved_unreadable : bool;
+  mcc_prepared : memory_context_prepared option;
+}
+
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
@@ -905,6 +927,7 @@ type memory_keeper_health = {
   mkh_added : int;
   mkh_removed : int;
   mkh_snapshot_present : bool;
+  mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;
   mkh_vision_ingest_errors : int;

@@ -546,6 +546,61 @@ let test_context_error_records_prior_tool_effect () =
        | Ok _ -> fail "context overflow after a tool effect was not reported")
 ;;
 
+let test_rpc_input_capacity_data () =
+  let module C = Runtime_codex_app_server in
+  let fields = ["input_error_code", `String "input_too_large";
+    "max_chars", `Int 17; "actual_chars", `Int 23] in
+  let cases =
+    [ "structured", Some (`Assoc fields), true
+    ; "absent", None, false
+    ; "null", Some `Null, false
+    ; "generic invalid params", Some (`Assoc ["reason", `String "invalid input"]), false
+    ; "string count", Some (`Assoc (("actual_chars", `String "23") :: List.remove_assoc "actual_chars" fields)), false
+    ; "negative limit", Some (`Assoc (("max_chars", `Int (-1)) :: List.remove_assoc "max_chars" fields)), false
+    ; "not exceeded", Some (`Assoc (("actual_chars", `Int 17) :: List.remove_assoc "actual_chars" fields)), false ] in
+  List.iter (fun (label, data, expected) ->
+    let message = "Input exceeds the maximum length of 1048576 characters." in
+    let error_fields = ["code", `Int (-32602); "message", `String message]
+      @ (match data with None -> [] | Some data -> ["data", data]) in
+    let wire = Yojson.Safe.to_string (`Assoc ["id", `Int 4; "error", `Assoc error_fields]) in
+    with_fixture [init_result; account_chatgpt; thread_result; wire] (fun path ->
+      match run_fixture path with
+      | Error (C.Rpc_error {method_; code; message = actual_message; data = actual_data} as error) ->
+        check string (label ^ " method") "turn/start" method_;
+        check (option int) (label ^ " code") (Some (-32602)) code;
+        check string (label ^ " message") message actual_message;
+        check (option string) (label ^ " data preserved")
+          (Option.map Yojson.Safe.to_string data) (Option.map Yojson.Safe.to_string actual_data);
+        check bool (label ^ " typed capacity") expected (Option.is_some (C.input_capacity_refusal error));
+        if expected then (
+          let capacity = Option.get (C.input_capacity_refusal error) in
+          check int "server actual count" 23 capacity.actual_chars;
+          check int "server limit, not a baked-in cap" 17 capacity.max_chars;
+          List.iter (fun (method_, code) ->
+            check bool "other RPC failures do not authorize narrowing" false
+              (Option.is_some (C.input_capacity_refusal
+                (C.Rpc_error {method_; code; message; data}))))
+            ["thread/start", Some (-32602); "turn/start", Some (-32603);
+             "turn/start", None])
+      | Error error -> fail (C.error_to_string error)
+      | Ok _ -> fail (label ^ " unexpectedly completed"))) cases;
+  let data = `Assoc (("input_error_code", `String "input_too_large") :: fields) in
+  let message = "Input exceeds the maximum length of 1048576 characters." in
+  check bool "duplicate discriminator cannot authorize narrowing" false
+    (Option.is_some (C.input_capacity_refusal
+      (C.Rpc_error {method_ = "turn/start"; code = Some (-32602); message;
+                    data = Some data})));
+  let wire = Yojson.Safe.to_string (`Assoc ["id", `Int 4; "error", `Assoc
+    ["code", `Int (-32602); "message", `String message; "data", data]]) in
+  with_fixture [init_result; account_chatgpt; thread_result; wire] (fun path ->
+    match run_fixture path with
+    | Error (C.Protocol_error _ as error) ->
+      check bool "duplicate wire keys are rejected before RPC classification" false
+        (Option.is_some (C.input_capacity_refusal error))
+    | Error error -> fail (C.error_to_string error)
+    | Ok _ -> fail "duplicate wire keys unexpectedly accepted")
+;;
+
 let test_developer_context_preserves_authority_and_history () =
   List.iter (fun (thread_mode, expected_roles) ->
     let capture_path = Filename.temp_file "masc-codex-context-" ".jsonl" in
@@ -4977,7 +5032,8 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "last projection"
+    [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data] )
+    ; ( "last projection"
       , [ test_case "later claim refusal preserves the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:true)
         ; test_case "a later projection replaces the earlier projection" `Quick

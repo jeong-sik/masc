@@ -47,6 +47,39 @@ type checkpoint_progress =
   | Checkpoint_stage_reached
   | Tool_results_saved
 
+type continuity =
+  | Uncompressed_history
+  | Summarized of
+  { snapshot : Librarian_continuity_snapshot.t
+  ; covered_messages : Agent_core.Types.message list
+  }
+
+let uncompressed_history = Uncompressed_history
+
+let covered_messages ~end_atom messages =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  List.filter_map (fun (message, label) -> match label with
+    | Runtime_model_input_tail_window.Atom atom when atom < end_atom -> Some message
+    | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned -> None)
+    labelled
+;;
+
+let prepare_continuity ~trace_id ~lines ~messages snapshot =
+  Result.map (fun _ ->
+    Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
+    (Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot)
+;;
+
+let validate_continuity ~messages = function
+  | Uncompressed_history -> Ok ()
+  | Summarized continuity ->
+  let current = covered_messages ~end_atom:continuity.snapshot.end_atom messages in
+  if List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages
+  then Ok ()
+  else Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+    { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+;;
+
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
@@ -66,6 +99,7 @@ type try_provider_ctx =
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; continuity : continuity option
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
@@ -698,6 +732,7 @@ let last_resort_demotes ~measure_message_bytes ~base_path messages =
 ;;
 
 let compose_carried_model_input
+      ?continuity
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
       ~(history_digest_at : int -> string option)
@@ -714,20 +749,42 @@ let compose_carried_model_input
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
   let front, outlived_seed =
-    match front with
-    | Some seed ->
+    match continuity, front with
+    | Some _, _ -> None, None
+    | None, Some seed ->
       (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
        | Ok seed -> Some seed, None
        | Error dropped -> None, Some (seed, dropped))
-    | None -> None, None
+    | None, None -> None, None
   in
-  let demote_before = if last_resort then history_atom_count else demote_before in
+  let demote_before =
+    if Option.is_some continuity then 0
+    else if last_resort then history_atom_count else demote_before in
   let planned =
     demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
   in
   let projection, transmitted_bytes, origin =
-    match front with
-    | Some (seed : Keeper_carried_front.seed) ->
+    match continuity, front with
+    | Some (Summarized { snapshot; _ }), _ ->
+      let working : Agent_core.Types.message =
+        { role = Agent_core.Types.User
+        ; content = [ Agent_core.Types.Text
+            ("[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
+             ^ snapshot.working_state) ]
+        ; name = None; tool_call_id = None
+        ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+        }
+      in
+      let projection, transmitted_bytes =
+        Runtime_model_input_tail_window.project_from_atom
+          ~allow_empty_history:true ~measure_message_bytes
+          ~first_atom:snapshot.end_atom
+          (working :: planned.Keeper_model_input_demotion.messages)
+      in
+      projection, transmitted_bytes,
+        Keeper_carried_front.Librarian_snapshot
+          { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
+    | None, Some (seed : Keeper_carried_front.seed) ->
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
@@ -742,7 +799,7 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | None ->
+    | None, None | Some Uncompressed_history, _ ->
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -784,6 +841,7 @@ type request_view =
   }
 
 let request_view
+      ?continuity
       ~provider_config
       ~measure_message_bytes
       ~front
@@ -797,6 +855,7 @@ let request_view
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
+        ?continuity
         ~measure_message_bytes
         ~front
         ~history_digest_at
@@ -953,6 +1012,11 @@ let bounded_model_input_projection
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
+    let ( let* ) = Result.bind in
+    let* () = match ctx.continuity with
+      | None -> Ok ()
+      | Some continuity -> offload_model_input_cpu (fun () -> validate_continuity ~messages continuity)
+    in
     (* [messages] is the durable history, the checkpoint's messages, in which
        the ledger, the seed and the forecast count atoms; the range is
        composed in that vocabulary and the wire's projection runs afterwards
@@ -962,7 +1026,9 @@ let bounded_model_input_projection
         Runtime_model_input_tail_window.atom_opening_digest messages)
     in
     let front, dropped_ledger =
-      carried_front
+      match ctx.continuity with
+      | Some _ -> None, None
+      | None -> carried_front
         ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id
@@ -1030,6 +1096,7 @@ let bounded_model_input_projection
     in
     let view =
       request_view
+        ?continuity:ctx.continuity
         ~provider_config
         ~measure_message_bytes
         ~front
@@ -1194,10 +1261,8 @@ let bounded_model_input_projection
         composed from, whose atom count [history_atom_count] is.
         - (Some, Some): the range carried atoms [first_atom] to the newest.
         - (None, None): the history has no atom; nothing was carried.
-        - (None, Some _): [first_atom] is outside the history, which it is
-          when this request carried no atom of a non-empty one. The
-          composition always carries the newest atom, so it does not occur
-          on this path.
+        - (None, Some _): the saved working state covers every history atom,
+          so the request carries only pinned context and no raw atom.
         - (Some _, None): cannot occur. A front index below the atom count
           puts the newest index at or above it, and both are read from the
           same lookup.
@@ -1430,6 +1495,18 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; pre_dispatch_serialization_observer =
               Some
                 (fun observation ->
+                   let input = match ctx.continuity with
+                     | Some (Summarized {snapshot; _}) ->
+                       Keeper_continuity_observation.Summarized
+                         { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
+                           boundary_line = snapshot.end_boundary_line }
+                     | Some Uncompressed_history -> Keeper_continuity_observation.Uncompressed
+                     | None -> Keeper_continuity_observation.Not_applied in
+                   if Option.is_some ctx.session_id then
+                     Keeper_continuity_observation.record
+                     ~config:(Workspace.default_config ctx.base_path) ~keeper_name:ctx.keeper_name
+                     { prepared_at = Time_compat.now (); runtime_id = ctx.runtime_id; input;
+                       request_bytes = observation.Llm_provider.Request_wire_observer.body_bytes };
                    Option.iter
                      (fun observe ->
                         observe
@@ -2080,16 +2157,17 @@ let run_try_provider_with_carried_range_eviction
       candidate
   =
   let state = new_attempt_state ctx in
-  evict_at_turn_boundary
-    ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
-    ~context_marks:ctx.context_marks state.ledger;
-  match ctx.recovery_view with
-  | Some _ ->
+  if Option.is_none ctx.continuity then
+    evict_at_turn_boundary
+      ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+      ~context_marks:ctx.context_marks state.ledger;
+  match ctx.recovery_view, ctx.continuity with
+  | Some _, _ | None, Some _ ->
     (* The validated semantic view owns retained source obligations. Retrying
        the same view with a shorter range cannot recover it. Final serialized
        request admission still enforces the request-body cap. *)
     run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
-  | None ->
+  | None, None ->
     (* An uncapped runtime retries like any other. #36817 kept such a
        runtime out of the token halving because that walk invented a seed
        from a declared window and ran 18 refusals to zero; this walk moves a

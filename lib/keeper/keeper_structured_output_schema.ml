@@ -70,6 +70,7 @@ let librarian_current_output_schema =
     [ ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
     ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
+    ; "working_state", nullable_string_schema
     ; "working_contexts", array_schema (object_schema
         ~required:["merge_contexts"; "sources"; "context"; "next_steps"]
         [ "merge_contexts", string_array_schema

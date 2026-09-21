@@ -530,6 +530,20 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 - **(나) 턴 도중에도 읽는다.** 도구 경계 checkpoint 가 저장될 때도 Librarian 을 깨운다. 창이 보는 위치는 턴 끝에서만 옮긴다. 턴 도중에 옮기면 Keeper 가 방금 받은 결과를 잃고 접두사 캐시가 깨진다.
 - **(다) 한가할 때도 정리한다.** 읽을 것이 없으면 아직 다시 보지 않은 기억 묶음을 하나씩 본다. 묶음마다 "이 revision 에서 봤다"를 남긴다. 새 정보 없이 같은 기억을 되풀이 판정하지 않기 위해서다. 통째 재작성은 내용이 무너진다(RFC-0456 §4.4, 창 RFC §6.4 의 ACE). 다 봤으면 쉰다.
 - **(라) 하던 일과 창이 보는 위치.** 창이 읽은 위치부터 보내면 그 앞의 턴은 facts 와 받은 일 정리로만 남는다. 지금 프롬프트는 턴 진행과 현재 상태를 facts 에 넣지 말라고 하므로(D4) Keeper 가 방금 하던 일은 남지 않는다. 또 Keeper 의 다음 턴이 Librarian 회차보다 먼저 시작하면 앞 턴 원문이 실리고, 늦게 시작하면 실리지 않는다. 같은 Keeper 가 턴마다 다른 것을 보게 된다. 닫는 방법은 하나다. Librarian 이 "하던 일"을 적고, **(창이 보는 위치, 하던 일)을 한 파일에 한 번의 원자적 쓰기로** 남긴다. 창은 그 파일의 위치를 쓴다. 위치까지는 하던 일이 말하고 위치 뒤는 원문이 말하므로 둘은 겹치지도 비지도 않는다. 진행 파일(Librarian 이 읽은 곳)은 그대로 둔다. 하던 일은 pocket 저장소에 담지 않는다. pocket 은 미처리 source 가 있어야만 존재하고(`keeper_librarian_context.ml` `select`·`commit`), Keeper 에게는 작은 artifact 참조만 주기로 한 설계다(`docs/design/librarian-working-context.md`). 프롬프트와 출력 스키마가 바뀌므로 하네스로 잰 뒤에 연다. **창 RFC §13 의 삭제는 이 단계 뒤에 시작한다.**
+  - 저장·복원 하네스의 첫 단위는 `masc-librarian-continuity capture/restore`다.
+    `capture`는 명시적으로 받은 하던 일 후보와, 재시작 증거부터 완료 경계까지의
+    atom 범위를 한 파일에 원자적으로 쓴다. `restore`는 같은 trace·history 시작
+    경계와 원문 prefix 전체의 digest를 확인한 뒤, 그 저장본의 하던 일과 뒤쪽
+    원문을 함께 내보낸다. 뒤에 턴이 추가되는 것은 허용하고, 같은 trace의
+    restart·prefix 변경·손상된 파일은 거절한다. 마지막 atom까지 보존했으면
+    과거 atom은 남기지 않으며 pinned context는 유지한다.
+    이는 Agent Core checkpoint를 사용하는 offline 저장·조립 검증이다.
+    후보 설명의 의미 보존과 공식 클라이언트 fragment 경계는 별도 검증이 필요하다.
+    하네스가 semantic score나 운영 read position을 생성하지는 않는다.
+    Agent Core 운영 입력은 별도의 `librarian-continuity.json` 쌍을 dispatch마다
+    검증해 고정하고, 덮은 prefix 대신 하던 일을 전달한다. 미처리 suffix는
+    원문 그대로 유지한다. 저장본 없는 경로와 공식 client는 적용 대상이 아니다.
+    연결의 구현과 배포 후 연속 턴 검증은 구분한다(`docs/librarian-continuity-snapshot.md`).
 - **(마) 일을 셋으로 나눈다.** 턴 읽기(facts 전부를 싣지 않는다), 기억 접기(facts 만 본다), 받은 일 정리(지금의 `working_contexts`). 일마다 프롬프트 키, 스키마, 디코더를 따로 둔다. 회차 시간과 실패율(§2.6 의 p90 583초, 실패 15%)을 줄이는 것이 목적이다. 나눌지와 나누는 모양은 하네스가 잰 값으로 정한다. 그때 같이 풀어야 하는 것이 셋 있다. 접기 회차의 커밋이 자기를 다시 깨우지 않아야 한다(`apply_disposition` 은 바뀐 것이 없어도 revision 을 올리고 알림을 낸다). `supersedes` 와 "대체할 말 없이 틀렸다고 밝혀진 사실"을 뺄 자리가 남아야 한다(턴 읽기는 facts 를 못 보고 접기는 대화를 못 본다). 일의 종류를 registry 행에 남기려면 그 행의 엄격한 디코드와 lane 단위 보존을 같이 봐야 한다.
 
 ## 8. 이행
@@ -554,7 +568,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 
 - **서버가 뜰 때 Keeper 목록.** autoboot(`server_bootstrap_loops.ml` 의 `keeper_autoboot`)가 `Runtime_startup_state.await_available` 뒤에 `Keeper_meta_store.keeper_names` 로 디스크의 전체 목록을 이미 든다. 그 목록에서 autoboot 가 띄우지 않은 이름(제외·차단·기동 실패)마다 `submit_durable` 을 한 번 제출한다. 띄운 Keeper 는 launch transaction 이 catch-up 을 제출하므로(#37213) 겹치지 않는다. 나중에 만든 Keeper 는 만들어진 뒤 launch 를 거치므로 같은 길이다. #37213 이 뺀 부팅 스캔은 이 대기 앞에서 돌아 prompt bootstrap·launch 와 부딪힌 것이다.
 - **두 파일의 배포 preflight 등록.** 2026-09-21 확인: `bin/deployment_preflight_helper.ml` 의 `durable_stores` 에 두 파일이 없고, lint(`scripts/ci/check_exact_field_decoder_preflight.py`)는 `exact_field_names_result` 를 모른다(#37019). 읽는 쪽이 들어갔으므로 ①·②·③ 과 같은 스택의 작은 PR(④)로 등록한다.
-- **Keeper 를 지울 때의 순서.** purge 는 `Keeper_memory_lane.cancel_and_await_librarian` 으로 취소를 요청하고 레인이 끝난 것을 확인한 뒤에 두 파일을 지운다. 그 호출은 파일을 지우는 함수 `purge_keeper_artifacts` 안에 있어서 dashboard purge 완료와 configuration 삭제 어느 쪽에서 와도 같다. `request_cancel` 은 다른 domain 의 요청을 거절하므로 owner domain 에서 부른다(`keeper_librarian_queue_refresh.ml` 의 `install` 이 쓰는 `Eio_context.run_on_owner_domain`). 기다림에 시간 상한은 없다 — 취소를 먼저 요청하므로 취소된 fiber 가 풀리는 시간을 추측할 이유가 없다. 지금 purge 가 안전한 것은 실행 중 Keeper 를 거절하기 때문인데, ②가 멈춘 Keeper 를 읽게 하는 순간 그 이유가 사라진다. 그래서 ①이 먼저다.
+- **Keeper 를 지울 때의 순서.** `purge_keeper_artifacts` 는 `Keeper_memory_lane.with_librarian_purge` 안에서 실행 중 작업을 취소·대기하고, 이전 health 관측을 지운 뒤 파일을 삭제한다. 이 구간에 들어온 wake 는 기록하고 버리며, 동시 purge 는 명시적인 오류를 받는다. 삭제가 성공하거나 실패·취소되면 해당 purge 소유자만 제외 상태를 해제한다. 따라서 대기 중 늦게 온 wake 가 새 작업을 시작해 삭제된 파일을 다시 만들 수 없다. `request_cancel` 은 다른 domain 의 요청을 거절하므로 bracket 전체를 owner domain 에서 실행한다. Keeper 의 일반 시작·중지는 이 상태를 바꾸지 않는다.
 - **exact-output registry 가 공개되기 전.** `server_runtime_bootstrap.ml` 은 `configure_exact_output_registry` 가 끝난 뒤에만 `Runtime_startup_state.set Available` 을 부르고, autoboot 는 `await_available` 뒤에 돈다. ②를 autoboot 안, 그 대기 뒤에 두면 새 장치 없이 만족한다.
 - **멈춘 Keeper 의 역할과 task.** `consume_one` 은 `Keeper_meta_store` 로 디스크의 meta 를 읽고 `meta.instructions` 를 싣는다(#37208). 공식 클라이언트 closure 는 owner projection 을 보지만, 그 경로는 방금 턴을 돈 Keeper 에만 있으므로 멈춘 Keeper 에는 닿지 않는다.
 - **취소.** 위에 있던 "밖에서 부른다"는 낡은 문장이었다. `keeper_librarian_runtime.ml` 의 `Cancelled` 갈래는 이미 `Eio.Cancel.protect` 안에서 완료 표시와 실패 저널을 쓴다(2026-08-07 실측을 인용한 주석이 그 자리에 있다). Curator 와 같은 자리이고, 서버 종료 때 Keeper 수만큼 한꺼번에 취소돼도 같다. 고칠 것이 없다.
@@ -640,3 +654,46 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
    **입력 구성 바이트는 도구 본문의 소실량이 아니다.** `Turn_record.input_components`는 Keeper 턴에서 관측한 마지막 요청의 구성 비용이다(`lib/types/turn_record.mli`). `keeper_agent_run.ml`이 넘긴 `input_messages` 전체에서 `Keeper_agent_prompt_metrics.build_ctx_segments`가 도구 호출·결과 바이트를 합하므로, 같은 이력을 다음 요청에 다시 실으면 다시 세어진다. 호출 id·도구 이름·인자도 포함하며, 새 결과량·중복을 제거한 본문량·삭제량을 구분해서 측정하는 값이 아니다.
 
    Claude Code와 Codex는 재개할 때도 MASC의 canonical snapshot을 설정으로 다시 보내고 그 메시지를 `Whole_input_transmitted`로 보고한다. 이 측정에는 클라이언트가 따로 보유한 native 대화·도구 이력이 포함되지 않는다. 따라서 이 합계로 D6의 발생률이나 실행 방식별 소실량을 비교할 수 없다. source로 확인되는 D6의 경계는 `keeper_librarian.ml`의 `text_of_content`가 도구 호출·결과 본문을 생략하고, checkpoint가 없는 턴의 `librarian_messages`가 assistant 메시지만 받는다는 것이다. 실제 본문이 어디에 보관되고 무엇이 빠지는지는 이 프롬프트 입력 계약과 별도로 확인해야 한다(§6).
+
+### 저장된 대화 상태의 생산
+
+`Keeper_librarian_continuity`는 Memory 읽기 위치와 별도로, 현재 Keeper trace의
+완료된 대화 범위를 읽습니다. 경계 로그를 먼저 읽고 정확한 checkpoint를 잠금
+안에서 읽습니다. 저장된 상태가 그 이력과 일치하면 이전 상태와 새 완료 구간만
+모델에 주고, 일치하지 않으면 restart로 증명된 완료 prefix 전체를 줍니다.
+아직 진행 중인 끝부분은 이 입력과 새 frontier에 포함하지 않습니다.
+
+기존 Librarian 호출의 `working_state` 출력은 대화의 작업 상태입니다. 큐 원본의
+`working_contexts`와 장기 Memory 판정은 별도 입력과 출력입니다. 상태와 정확한
+대화 범위는 runtime Keeper 디렉터리의 `librarian-continuity.json`에 한 번에
+저장하며, 이전 pair가 바뀌었으면 오래된 작성자의 결과를 덮어쓰지 않습니다.
+출력이 null이거나 저장에 실패하면 frontier도 전진하지 않습니다. Memory commit
+성공 여부와 읽기 위치는 기존 의미를 유지합니다. 과거 trace의 Memory를 처리하는
+중에도 새 대화 상태의 생산 대상은 현재 Keeper metadata의 trace입니다.
+
+Memory가 이미 읽은 구간이라도 이어갈 상태가 없으면 기존 queue 변경 호출의
+Context-only 경로에서 생산할 수 있습니다. 별도 daemon이나 타이머를 만들지
+않으며, remembered-turn 처리가 있다는 이유로 이 생산을 생략하지 않습니다.
+이 생산 단계 자체는 provider 전송을 자르지 않습니다. 실제 전송 제외는 후속
+소비자가 저장된 pair를 원본 이력에 대조한 뒤 적용해야 합니다.
+
+대화 상태 pair의 publication은 Memory disposition 저장 성공 뒤에 합니다.
+같은 trace·history 시작·끝 경계 줄·atom·digest에 대한 Memory WAL 증거가
+있어야 하며, 좁혀 재시도한 Memory 범위보다 앞선 준비 입력은 게시하지 않습니다.
+WAL은 scope별 마지막 atom 범위만 보존하므로 이 검사는 끝점 일치를 확인하며,
+전체 prefix의 commit 이력을 독립적으로 증명하지는 않습니다. 운영의 atom receipt는
+직렬 durable consumer가 생산합니다. 이 consumer가 Memory commit 또는 그 WAL
+복구 뒤에만 선택 구간의 위치를 전진시키는 불변식과, 준비 입력이 atom 0부터의
+목격된 history 시작을 요구하는 조건을 함께 사용합니다. 목격된 시작이 없는
+baseline은 continuity를 만들지 못합니다. 마지막 receipt의 시작이 0보다 큰
+경우 앞선 범위의 coverage는 이 생산 경로의 불변식에 의존합니다.
+Context-only bootstrap도 같은 끝점 증거와 생산 조건을 사용합니다. executor에 넘긴 실제 파일
+저장과 결과 기록이 끝날 때까지 호출자의 취소를 보호하고, 그 뒤 취소를 다시
+전파합니다. 따라서 종료·purge가 아직 실행 중인 저장 작업을 추월하지 않습니다.
+
+
+### 기존 checkpoint의 continuity 초기화
+
+재시작 기록이 없는 기존 Keeper는 Memory의 baseline을 하던 일 보존 증거로 쓰지 않는다. 실제 locked checkpoint와 완료 경계로 읽기 범위를 잡고, `Captured_checkpoint_prefix`로 출처를 표시한다. 범위 내부의 atom 단위 부분 처리도 허용하되 실제 처리 끝과 이를 보증하는 완료 경계를 구분한다.
+
+일반 durable Memory drain과 continuity 범위는 각자의 receipt scope를 사용한다. 이미 읽은 Memory 범위는 Context-only로 처리하고, 알 수 없는 과거 prefix는 실제 원문을 모델에 제공해 Memory 저장부터 진행한다. 실패 뒤에는 Memory만 저장된 정확한 범위를 먼저 복구한다. 최종 typed 용량 거절만 원문 범위를 좁히며 다른 실패에서는 위치를 유지한다. 전체 source가 저장될 때까지 기존 serial lane에서 이어가며, 별도 daemon이나 임의 크기 계수를 추가하지 않는다.

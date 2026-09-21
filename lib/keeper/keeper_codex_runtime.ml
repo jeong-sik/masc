@@ -370,7 +370,7 @@ let codex_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "%s: %s" stage detail })
-  | Runtime_codex_app_server.Rpc_error { method_; code; message } ->
+  | Runtime_codex_app_server.Rpc_error { method_; code; message; _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "codex_app_server"

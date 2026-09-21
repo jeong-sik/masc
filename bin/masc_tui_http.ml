@@ -1528,6 +1528,18 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
     ]
 
+(** POST /api/v1/runtime/config/routing with [action = "rename"]: give the
+    declared lane [lane] the name [new_lane]. The server rewrites the table
+    header and every reference to it -- assignments and [\[runtime\].default] --
+    in one validated write, because a lane's name is its routing key. *)
+let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
+      ~(new_lane : string) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String lane
+    ; "action", `String "rename"
+    ; "to", `String new_lane
+    ]
+
 (** POST /api/v1/runtime/config/routing with [action = "append"]: add
     [runtime_id] to the end of the standalone lane [name] as runtime.toml
     declares it. The server reads the declared slots under its write lock, so

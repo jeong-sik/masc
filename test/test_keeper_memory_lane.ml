@@ -466,8 +466,108 @@ let test_purge_cancels_running_unit_and_leaves_no_fence () =
       Alcotest.(check bool) "a unit submitted after purge runs" true !after_purge_ran))
 ;;
 
-(* A purge of a Keeper whose lane never ran has nothing to wait for, returns
-   at once, and creates no entry for a Keeper that is being deleted. *)
+(* Real lane cancellation must be followed by deletion under the same
+   exclusion; a second purge cannot release the first one's ownership. *)
+let test_purge_bracket_excludes_late_wakes () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "false") @@ fun () ->
+  Lane.For_testing.reset ();
+  let keeper_name = "purge-bracket" in
+  let root = temp_dir "purge-bracket-" in
+  Fun.protect ~finally:(fun () -> remove_tree root) (fun () ->
+    Eio_main.run @@ fun env ->
+    Masc_test_deps.init_eio_clock env;
+    Eio.Switch.run @@ fun sw ->
+    Lane.init ~sw;
+    let config = Masc.Workspace.default_config base_path in
+    let started, start = Eio.Promise.create () in
+    let never, _ = Eio.Promise.create () in
+    let cancelled = ref false in
+    ignore (Lane.submit ~base_path ~keeper_name (fun () ->
+      Eio.Promise.resolve start ();
+      try Eio.Promise.await never with Eio.Cancel.Cancelled _ as exn ->
+        cancelled := true;
+        Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+          ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+            Alcotest.fail "disabled observer reached model");
+        raise exn));
+    Eio.Promise.await started;
+    (match Domain.join (Domain.spawn (fun () ->
+       Eio_main.run (fun _env ->
+         Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+           Alcotest.fail "wrong-domain purge entered deletion")))) with
+     | Error Lane.Purge_cancel_wrong_domain -> ()
+     | _ -> Alcotest.fail "wrong-domain cancellation was not refused");
+    let deleting, begin_delete = Eio.Promise.create () in
+    let release, finish_delete = Eio.Promise.create () in
+    let path = Filename.concat root "progress" in
+    Out_channel.with_open_bin path (fun oc -> output_string oc "old");
+    let purge = Eio.Fiber.fork_promise ~sw (fun () ->
+      Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+        Alcotest.(check bool) "old work exited before deletion" true !cancelled;
+        Alcotest.(check bool) "old work published its final observation" true
+          (Option.is_some (Queue_refresh.last_measurement ~config ~keeper_name));
+        Queue_refresh.forget_measurement ~config ~keeper_name;
+        Sys.remove path;
+        Eio.Promise.resolve begin_delete ();
+        Eio.Promise.await release)) in
+    Eio.Promise.await deleting;
+    (match Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+       Alcotest.fail "concurrent purge entered deletion") with
+     | Error Lane.Purge_already_in_progress -> ()
+     | _ -> Alcotest.fail "concurrent purge was not refused");
+    (match Lane.submit ~base_path ~keeper_name (fun () ->
+       Out_channel.with_open_bin path (fun oc -> output_string oc "late")) with
+     | Lane.Dropped -> ()
+     | _ -> Alcotest.fail "late wake crossed purge exclusion");
+    Eio.Fiber.yield ();
+    Alcotest.(check bool) "late wake did not recreate deleted progress" false (Sys.file_exists path);
+    Alcotest.(check bool) "old observation cleared after quiescence" true
+      (Option.is_none (Queue_refresh.last_measurement ~config ~keeper_name));
+    Eio.Promise.resolve finish_delete ();
+    (match Eio.Promise.await purge with
+     | Ok (Ok ()) -> ()
+     | _ -> Alcotest.fail "purge did not finish");
+    (match Lane.submit ~base_path ~keeper_name (fun () ->
+       Out_channel.with_open_bin path (fun oc -> output_string oc "new")) with
+     | Lane.Submitted -> ()
+     | _ -> Alcotest.fail "purge exclusion remained after deletion");
+    Lane.For_testing.await_idle ~base_path ~keeper_name;
+    Alcotest.(check bool) "new identity can write after purge" true (Sys.file_exists path))
+;;
+
+let test_purge_bracket_releases_on_failure_and_cancellation () =
+  Lane.For_testing.reset ();
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  Lane.init ~sw;
+  let keeper_name = "purge-failure" in
+  (match Lane.with_librarian_purge ~base_path ~keeper_name (fun () -> Error "delete failed") with
+   | Ok (Error "delete failed") -> ()
+   | _ -> Alcotest.fail "deletion result was changed");
+  (match Lane.with_librarian_purge ~base_path ~keeper_name (fun () -> raise Test_boom) with
+   | exception Test_boom -> ()
+   | _ -> Alcotest.fail "deletion exception was swallowed");
+  let entered, enter = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let purge = Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun cc ->
+      Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+        Eio.Promise.resolve enter cc;
+        Eio.Promise.await never))) in
+  let cc = Eio.Promise.await entered in
+  Eio.Cancel.cancel cc Cancel_lane_test;
+  (match Eio.Promise.await purge with
+   | Error (Eio.Cancel.Cancelled _) -> ()
+   | _ -> Alcotest.fail "purge cancellation was swallowed");
+  let ran = ref false in
+  (match Lane.submit ~base_path ~keeper_name (fun () -> ran := true) with
+   | Lane.Submitted -> ()
+   | _ -> Alcotest.fail "failed purge left an exclusion behind");
+  Lane.For_testing.await_idle ~base_path ~keeper_name;
+  Alcotest.(check bool) "lane accepts after failed/cancelled deletion" true !ran
+;;
+
+(* A cancellation lookup for an unused keeper creates no entry. *)
 let test_purge_with_nothing_running_returns_at_once () =
   Lane.For_testing.reset ();
   (match Lane.cancel_and_await_librarian ~base_path ~keeper_name:"never-ran" with
@@ -663,6 +763,15 @@ let test_durable_drain_publishes_scoped_health () =
       (match (observed ()).last_pass, (observed ()).unread with
        | Queue_refresh.Stopped Masc.Keeper_librarian_durable_consumer.Keeper_meta_absent, None -> ()
        | _ -> Alcotest.fail "missing metadata must replace the old observation");
+      (* Effective metadata requires both its runtime snapshot and declaration.
+         Create the real profile before asking the durable reader to use it. *)
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:root in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+        (fun oc -> Printf.fprintf oc
+          "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+          keeper_name "test durable health" "docker");
+      Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
       (match Masc.Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
        | Ok () -> () | Error detail -> Alcotest.fail detail);
       run ();
@@ -782,6 +891,12 @@ let () =
             "purge cancels the running unit and leaves no fence"
             `Quick
             test_purge_cancels_running_unit_and_leaves_no_fence
+        ; Alcotest.test_case
+            "purge bracket excludes late wakes and concurrent purge"
+            `Quick test_purge_bracket_excludes_late_wakes
+        ; Alcotest.test_case
+            "purge bracket releases on failure and cancellation"
+            `Quick test_purge_bracket_releases_on_failure_and_cancellation
         ; Alcotest.test_case
             "purge with nothing running returns at once"
             `Quick

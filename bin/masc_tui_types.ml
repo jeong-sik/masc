@@ -1490,6 +1490,7 @@ type runtime_lane_row_edit =
   | Drop_candidate
   | Move_candidate of runtime_lane_move
   | Remove_lane
+  | Rename_lane
 
 type runtime_lane_edit =
   | New_lane
@@ -1501,6 +1502,7 @@ let runtime_lane_edit_of_key = function
   | "J" -> Some (Row_edit (Move_candidate Move_down))
   | "K" -> Some (Row_edit (Move_candidate Move_up))
   | "D" -> Some (Row_edit Remove_lane)
+  | "R" -> Some (Row_edit Rename_lane)
   | _ -> None
 ;;
 
@@ -4622,6 +4624,27 @@ let slot_editor_target_name = function
   | Media_failover_slots -> "[runtime].media_failover"
 ;;
 
+(* A name being typed on the Runtime reading. [Renaming_lane] carries the name
+   the lane has now, because the write names both and the prompt shows the
+   one being replaced. *)
+type lane_name_entry =
+  | Naming_new_lane of string
+  | Renaming_lane of
+      { lane : string
+      ; draft : string
+      }
+
+let lane_name_entry_draft = function
+  | Naming_new_lane draft -> draft
+  | Renaming_lane { draft; _ } -> draft
+;;
+
+let lane_name_entry_with_draft entry draft =
+  match entry with
+  | Naming_new_lane _ -> Naming_new_lane draft
+  | Renaming_lane { lane; _ } -> Renaming_lane { lane; draft }
+;;
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5386,8 +5409,11 @@ type state = {
   (* Per list: whether it was read back after the last lane write. *)
   mutable runtime_surface_lane_freshness: runtime_lane_list_freshness;
   mutable standalone_lanes_lane_freshness: runtime_lane_list_freshness;
-  (* The name typed for a new lane, before its first candidate is picked. *)
-  mutable runtime_lane_name_draft: string option;
+  (* The name being typed, and what it is for: a lane about to be created, or
+     one being renamed. One field because one field is on screen -- the two
+     cannot be open at once -- and the purpose rides with it so Enter knows
+     which write it ends in. *)
+  mutable runtime_lane_name_draft: lane_name_entry option;
   (* The lane a second [D] removes. Captured at the first press and dropped
      by any other key, so the second press removes the lane the prompt
      named. *)
@@ -8054,9 +8080,10 @@ let memory_overview_scrolled ?cursor (state : state) =
     match List.nth_opt keepers (max 0 (min cursor (count - 1))) with
     | None -> 0
     | Some keeper ->
-        (* Divider, snapshot, facts, source, Librarian and Vision, then the
+        (* Divider, snapshot, facts, source, Librarian, saved/prepared context
+           and Vision, then the
            selected keeper's read errors and server alerts. *)
-        6 + List.length keeper.mkh_alerts
+        9 + List.length keeper.mkh_alerts
         + (if Option.is_some keeper.mkh_read_error then 1 else 0)
         + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
   in
@@ -8357,15 +8384,18 @@ let runtime_picker_projection (state : state) =
       rlp_providers = providers; rlp_choices = choices })
     state.runtime_lane_pick
 
-(* The one-line prompt the lane editor puts above the Runtime rows: the name
-   being typed for a new lane, or the lane a second [D] would remove. *)
+(* The one-line prompt the lane editor puts above the Runtime rows: a name
+   being typed for a new lane or for a rename, or the lane a second [D] would
+   remove. *)
 type runtime_lane_prompt =
   | Lane_name_prompt of string
+  | Lane_rename_prompt of string * string
   | Lane_remove_prompt of string
 
 let runtime_lane_prompt (state : state) =
   match state.runtime_lane_name_draft, state.runtime_lane_remove_armed with
-  | Some draft, _ -> Some (Lane_name_prompt draft)
+  | Some (Naming_new_lane draft), _ -> Some (Lane_name_prompt draft)
+  | Some (Renaming_lane { lane; draft }), _ -> Some (Lane_rename_prompt (lane, draft))
   | None, Some lane -> Some (Lane_remove_prompt lane)
   | None, None -> None
 
@@ -8441,6 +8471,7 @@ type runtime_lane_write_request =
    without a word. *)
 type runtime_lane_edit_plan =
   | Open_lane_name_field
+  | Open_lane_rename_field of string
   | Arm_lane_removal of string
   | Send_lane_write of
       { lane : string
@@ -8505,6 +8536,12 @@ let plan_runtime_lane_edit (state : state) = function
                (Printf.sprintf
                   "%s is a runtime, not a declared lane; there is no table to remove"
                   lane))
+        | Rename_lane, _ ->
+          (* The name is the routing key, so the writer changes the table and
+             every reference in one write. Nothing to check here beyond having
+             a lane under the cursor: the file decides whether the lane is
+             declared as its own table and whether the new name is free. *)
+          Open_lane_rename_field lane
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->

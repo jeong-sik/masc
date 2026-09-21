@@ -19,6 +19,7 @@ type entry =
     (* The lane of the most recent drain, kept after [librarian_drain] is
        cleared because that lane may still be in its cleanup. A Keeper purge
        waits on it ([cancel_and_await_librarian]). *)
+  ; mutable purge_owner : unit ref option
   }
 
 type outcome =
@@ -52,6 +53,7 @@ let make_entry () =
   ; pending = 0
   ; librarian_drain = None
   ; last_owner_lane = None
+  ; purge_owner = None
   }
 ;;
 
@@ -132,6 +134,7 @@ type librarian_submission =
   | Start_drain of librarian_drain
   | Queue_latest
   | Replace_latest
+  | Purge_in_progress
 
 type librarian_drain_step =
   | Drain_stopped
@@ -140,6 +143,7 @@ type librarian_drain_step =
 
 let librarian_reserve entry f =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
+    if Option.is_some entry.purge_owner then Purge_in_progress else
     match entry.librarian_drain with
     | None ->
       let drain =
@@ -297,8 +301,15 @@ let rec run_librarian_drain ~keeper_name entry drain sw current =
       run_librarian_drain ~keeper_name entry drain sw latest)
 ;;
 
+let drop_during_purge ~keeper_name =
+  record_counter ~keeper_name MemoryLaneDropped;
+  Log.Keeper.info ~keeper_name "Librarian wake discarded while keeper files are being purged";
+  Dropped
+;;
+
 let submit_librarian ~keeper_name entry sw f =
   match librarian_reserve entry f with
+  | Purge_in_progress -> drop_during_purge ~keeper_name
   | Queue_latest ->
     inc_pending ~keeper_name ();
     inc_latest_pending ~keeper_name ();
@@ -372,6 +383,10 @@ let submit_librarian ~keeper_name entry sw f =
 let submit ~base_path ~keeper_name f =
   match current_sw () with
   | None ->
+    let entry = entry_for ~base_path ~keeper_name in
+    if Stdlib.Mutex.protect entry.state_mu (fun () -> Option.is_some entry.purge_owner)
+    then drop_during_purge ~keeper_name
+    else (
     (* Not initialized: run inline. The caller is still inside the per-keeper
        turn lane, so single-fiber-per-keeper memory access is preserved. A
        raising unit is contained and counted rather than escaping. *)
@@ -383,17 +398,19 @@ let submit ~base_path ~keeper_name f =
          "memory lane unit failed (inline): %s"
          (Printexc.to_string exn));
     record_counter ~keeper_name MemoryLaneRanInline;
-    Ran_inline
+    Ran_inline)
   | Some sw ->
     let entry = entry_for ~base_path ~keeper_name in
     submit_librarian ~keeper_name entry sw f
 ;;
 
 type purge_cancel_error =
+  | Purge_already_in_progress
   | Purge_cancel_wrong_domain
   | Purge_cancel_not_committed of exn
 
 let purge_cancel_error_to_string = function
+  | Purge_already_in_progress -> "A Keeper purge already owns this Librarian lane"
   | Purge_cancel_wrong_domain ->
     "Librarian cancellation was requested from a domain that does not own the lane"
   | Purge_cancel_not_committed exn ->
@@ -452,6 +469,29 @@ let cancel_and_await_librarian ~base_path ~keeper_name =
         | Keeper_lane.Cancel_wrong_domain -> Error Purge_cancel_wrong_domain
         | Keeper_lane.Cancel_not_committed exn ->
           Error (Purge_cancel_not_committed exn)))
+;;
+
+let with_librarian_purge ~base_path ~keeper_name action =
+  let entry = entry_for ~base_path ~keeper_name in
+  let identity = ref () in
+  Eio.Switch.run (fun sw ->
+    (* Install release before acquisition; another purge's refusal cannot
+       clear the identity of the caller that actually owns the exclusion. *)
+    Eio.Switch.on_release sw (fun () ->
+      Stdlib.Mutex.protect entry.state_mu (fun () ->
+        match entry.purge_owner with
+        | Some owner when owner == identity -> entry.purge_owner <- None
+        | Some _ | None -> ()));
+    let acquired = Stdlib.Mutex.protect entry.state_mu (fun () ->
+      match entry.purge_owner with
+      | Some _ -> false
+      | None -> entry.purge_owner <- Some identity; true)
+    in
+    if not acquired then Error Purge_already_in_progress
+    else
+      match cancel_and_await_librarian ~base_path ~keeper_name with
+      | Error error -> Error error
+      | Ok () -> Ok (action ()))
 ;;
 
 module For_testing = struct

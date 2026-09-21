@@ -3379,6 +3379,9 @@ let test_decode_repository_requires_resolved_local_path () =
    failed Librarian with no ordinary snapshot may still have source evidence;
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
+let empty_memory_context_cycle =
+  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null]
+
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
     let ordinary_count value = if present then value else 0 in
@@ -3394,6 +3397,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
       ; ("updated_at", if present then `Float 1700000000. else `Null)
+      ; ("context_cycle", empty_memory_context_cycle)
       ; ( "librarian"
         , `Assoc
             [ ("state", `String "drained")
@@ -3439,7 +3443,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v5")
+      [ ("schema", `String "keeper.memory_os.current_health.v6")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
         , `List
@@ -3502,6 +3506,28 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            fields)
     | json -> json
   in
+  let frontier = `Assoc ["trace_id", `String "context-trace";
+    "end_atom", `Int 3; "boundary_line", `Int 5] in
+  let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
+  let prepared = `Assoc ["prepared_at", `Float 1700000000.; "runtime_id", `String "fixture-runtime";
+    "input", input; "request_bytes", `Int 2048] in
+  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared] in
+  let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
+  (match Tui_decode.decode_memory_health_snapshot (context_payload cycle) with
+   | Ok snapshot ->
+     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
+      | Some {mcp_input = Tui_decode.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
+      | _ -> Alcotest.fail "prepared frontier or bytes lost")
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot (context_payload invalid))))
+    [ replace_field "saved_read_error" (`String "snapshot_unreadable") cycle
+    ; replace_field "saved" (replace_field "end_atom" (`Int (-1)) frontier) cycle
+    ; replace_field "prepared" (replace_field "request_bytes" (`Int (-1)) prepared) cycle
+    ; replace_field "prepared" (replace_field "prepared_at" (`Float nan) prepared) cycle
+    ; replace_field "prepared" (replace_field "input" (replace_field "kind" (`String "accepted") input) prepared) cycle
+    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null input) prepared) cycle
+    ];
   let unknown_unread = map_keeper 0
       (fun keeper -> match keeper with
        | `Assoc fields ->
@@ -3701,7 +3727,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v5")
+    [ ("schema", `String "keeper.memory_os.current_health.v6")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
       , `List
@@ -3717,6 +3743,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("removed", `Int 0)
               ; ("snapshot_present", `Bool false)
               ; ("updated_at", `Null)
+              ; ("context_cycle", empty_memory_context_cycle)
               ; ( "librarian"
                 , `Assoc
                     [ ("state", `String "drained")

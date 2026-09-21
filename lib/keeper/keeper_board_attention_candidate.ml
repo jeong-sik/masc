@@ -1850,7 +1850,7 @@ let resumable_with_delivery_failure resumable failure =
     (match pending.last_delivery_failure with
      | Some existing when same_delivery_failure existing failure -> resumable
      | Some _ | None ->
-       Resumable_pending { pending with last_delivery_failure = Some failure })
+       Resumable_pending { last_delivery_failure = Some failure })
   | Resumable_judged judged ->
     (match judged.last_delivery_failure with
      | Some existing when same_delivery_failure existing failure -> resumable

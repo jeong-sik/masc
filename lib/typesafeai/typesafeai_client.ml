@@ -109,7 +109,7 @@ let failure_to_string failure =
     ^ String.concat
         "; "
         (List.map
-           (fun attempt ->
+           (fun (attempt : attempt) ->
               Printf.sprintf
                 "%s (%s): %s"
                 attempt.destination_uri

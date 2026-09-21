@@ -612,7 +612,10 @@ let test_first_board_observation_starts_at_current_head () =
 let test_dashboard_projection_does_not_produce_attention_candidate () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "projection-read-only" in
-  let meta = board_observation_meta keeper_name in
+  let meta =
+    { (board_observation_meta keeper_name) with
+      board_interests = [ "Ambient Board evidence" ] }
+  in
   let entry = Keeper_registry.For_testing.register ~base_path keeper_name meta in
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)

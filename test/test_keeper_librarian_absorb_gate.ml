@@ -786,15 +786,27 @@ let test_run_uses_one_destination_and_model_snapshot () =
   let second = fact (List.nth sources 1) in
   let other = fact "beta ships on fridays and pages the operator" in
   let absorbed = absorbed_into merged [ first ] @ absorbed_into other [ second ] in
-  let report = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~facts:[ first; second ]
+  let observations = ref [] in
+  let run = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~facts:[ first; second ]
+      ~observe:(fun observation -> observations := observation :: !observations)
       ~new_claims:[ merged; other ] ~absorbed () in
-  (match report with
+  (match run with
    | Gate.Skipped _ -> Alcotest.fail "expected evaluations"
    | Gate.Evaluated { evaluations; _ } ->
      List.iter (fun (evaluation : Gate.evaluation) ->
        Alcotest.(check string) "typed evaluation has an observation endpoint"
          initial.base_url evaluation.endpoint) evaluations);
-  let report = Gate.run_result_to_yojson report in
+  let report = Gate.run_result_to_yojson run in
+  (match List.rev !observations with
+   | [ Gate.Incomplete [ first ]; Gate.Incomplete [ again; second ]; Gate.Complete final ] ->
+     Alcotest.(check string) "first completed response is retained in the next snapshot"
+       (Yojson.Safe.to_string first.state) (Yojson.Safe.to_string again.state);
+     Alcotest.(check (list string)) "completed requests stay in dispatch order"
+       [ merged.claim; other.claim ]
+       (List.map (fun (e : Gate.evaluation) -> Yojson.Safe.Util.to_string e.state) [ first; second ]);
+     Alcotest.(check string) "final observation is the actual unchanged result"
+       (Yojson.Safe.to_string report) (Gate.run_result_to_yojson final |> Yojson.Safe.to_string)
+   | _ -> Alcotest.fail "expected two incremental observations and one final result");
   Alcotest.(check int) "both requests use the endpoint captured before dispatch" 2 (F.post_count initial);
   Alcotest.(check int) "the later configuration is not used by this run" 0 (F.post_count alternate);
   let open Yojson.Safe.Util in
@@ -809,6 +821,106 @@ let test_run_uses_one_destination_and_model_snapshot () =
     Alcotest.(check string) "reported model is the transmitted snapshot" "initial-request-model"
       (member "model" request |> to_string))
     (member "evaluations" report |> to_list)
+;;
+
+exception Cancel_gate_fixture
+
+let test_cancelled_next_request_keeps_the_completed_observation () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let second_started, resolve_second_started = Eio.Promise.create () in
+  let release_second, resolve_release_second = Eio.Promise.create () in
+  (* Assertion failures also release the held handler; normal completion may
+     already have released it. *)
+  Eio.Switch.on_release sw (fun () ->
+    ignore (Eio.Promise.try_resolve resolve_release_second ()));
+  let calls = ref 0 in
+  let response = {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":0.9}}}|} in
+  let server = F.start_server ~sw ~net ~clock
+      ~on_request_before_reply:(fun () ->
+        incr calls;
+        if !calls = 2 then begin
+          Eio.Promise.resolve resolve_second_started ();
+          Eio.Promise.await release_second
+        end)
+      (F.Reply response) in
+  let env = Masc_test_deps.with_process_env in
+  env "MASC_TYPESAFEAI_ENDPOINT" (Some server.base_url) @@ fun () ->
+  env "MASC_TYPESAFEAI_MODEL" (Some "request-model") @@ fun () ->
+  let first = fact (List.nth sources 0) in
+  let second = fact (List.nth sources 1) in
+  let other = fact "beta ships on fridays and pages the operator" in
+  let observed = ref [] in
+  let raised_by_gate = ref false in
+  let returned = ref false in
+  let context, resolve_context = Eio.Promise.create () in
+  let finished, resolve_finished = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    (try
+       Eio.Cancel.sub (fun cancellation ->
+         Eio.Promise.resolve resolve_context cancellation;
+         match Gate.run ~clock ~keeper_id:"cancel-observation-fixture"
+             ~observe:(fun observation -> observed := observation :: !observed)
+             ~facts:[ first; second ] ~new_claims:[ merged; other ]
+             ~absorbed:(absorbed_into merged [ first ] @ absorbed_into other [ second ]) () with
+         | _ -> returned := true
+         | exception (Eio.Cancel.Cancelled Cancel_gate_fixture as exn) ->
+           raised_by_gate := true;
+           raise exn)
+     with Eio.Cancel.Cancelled Cancel_gate_fixture -> ());
+    Eio.Promise.resolve resolve_finished ());
+  let await label promise =
+    F.await_within_fixture_budget ~clock ~failure:label promise in
+  let cancellation = await "gate cancellation context" context in
+  await "second HTTP request started" second_started;
+  Eio.Cancel.cancel cancellation Cancel_gate_fixture;
+  await "cancelled gate finished" finished;
+  Eio.Promise.resolve resolve_release_second ();
+  Alcotest.(check bool) "Gate.run itself propagates the original cancellation" true !raised_by_gate;
+  Alcotest.(check bool) "cancellation is not turned into a returned disposition" false !returned;
+  Alcotest.(check int) "the second request reached HTTP before cancellation" 2 (F.post_count server);
+  match List.rev !observed with
+  | [ Gate.Incomplete [ evaluation ] as observation ] ->
+    let sent = List.hd (F.request_bodies server) in
+    Alcotest.(check string) "completed request destination remains inspectable"
+      server.base_url evaluation.endpoint;
+    Alcotest.(check string) "completed request model remains inspectable"
+      "request-model" evaluation.model;
+    let request = T.request_to_yojson ~model:evaluation.model
+        ~state:evaluation.state ~questions:evaluation.questions in
+    Alcotest.(check string) "the completed request context is the HTTP body"
+      (Yojson.Safe.from_string sent |> Yojson.Safe.to_string) (Yojson.Safe.to_string request);
+    (match evaluation.result with
+     | Ok evaluated ->
+       Alcotest.(check string) "completed response hash identifies the sent bytes"
+         Digestif.SHA256.(digest_string sent |> to_hex) evaluated.request_body_sha256;
+       (match evaluated.response.answers with
+        | [ "s0_0", T.Noul_answer { noul } ] ->
+          Alcotest.(check (float 0.)) "raw completed Noul survives cancellation" 0.9 noul
+        | _ -> Alcotest.fail "completed typed response was lost")
+     | Error failure -> Alcotest.fail (Masc.Typesafeai_client.failure_to_string failure));
+    let report = Gate.observation_to_yojson observation in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "the report is explicitly incomplete" "incomplete"
+      (member "status" report |> to_string);
+    Alcotest.(check int) "no response is invented for the cancelled request" 1
+      (member "evaluations" report |> to_list |> List.length);
+    List.iter (fun field ->
+      Alcotest.(check bool) ("no final " ^ field) true (member field report = `Null))
+      [ "applied_absorptions"; "conveyed"; "left"; "conveyed_boundary" ]
+  | _ -> Alcotest.fail "cancellation must leave one incomplete snapshot and no Complete"
+;;
+
+let test_skipped_run_publishes_its_completed_observation () =
+  let observed = ref [] in
+  let run = Gate.run ~keeper_id:"empty-observation-fixture" ~facts:[] ~new_claims:[]
+      ~absorbed:[] ~observe:(fun value -> observed := value :: !observed) () in
+  match !observed with
+  | [ Gate.Complete result ] ->
+    Alcotest.(check string) "a skipped run is complete, not an interrupted evaluation"
+      (Gate.run_result_to_yojson run |> Yojson.Safe.to_string)
+      (Gate.observation_to_yojson (Gate.Complete result) |> Yojson.Safe.to_string)
+  | _ -> Alcotest.fail "skipped run did not publish exactly one completed observation"
 ;;
 
 let test_rejected_response_retains_every_typed_answer () =
@@ -970,6 +1082,10 @@ let () =
             test_open_preserves_unjudged_from_unvisited_groups
         ; Alcotest.test_case "one run uses one endpoint and model snapshot" `Quick
             test_run_uses_one_destination_and_model_snapshot
+        ; Alcotest.test_case "cancelled next request retains its completed observation" `Quick
+            test_cancelled_next_request_keeps_the_completed_observation
+        ; Alcotest.test_case "skipped run publishes its completed observation" `Quick
+            test_skipped_run_publishes_its_completed_observation
         ; Alcotest.test_case "transport diagnostics retain cause without credentials" `Quick
             test_transport_diagnostics_preserve_cause_without_configured_credentials
         ; Alcotest.test_case "failure bodies omit configured credentials" `Quick

@@ -70,11 +70,11 @@ def run_case(executable: str, fixture_path: Path) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"absorb_gate")
         h.drain_until_quiet(process, fd, output)
         first_screen = h.screen_text(bytes(output))
-        status = b"failed" if scenario == "memory-write-failure" else b"succeeded"
+        status = cast(str, run["status"]).encode()
         for needle in (b"absorb_gate", gate["status"].encode(), b"RUN  " + status):
             if needle not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {needle!r}")
-        if gate["status"] != "skipped":
+        if gate["status"] not in ("skipped", "incomplete"):
             boundary = f'"conveyed_boundary": {gate["conveyed_boundary"]}'.encode()
             if boundary not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {boundary!r}")
@@ -83,6 +83,12 @@ def run_case(executable: str, fixture_path: Path) -> None:
 
         if gate["status"] == "skipped":
             needles = [cast(str, gate["reason"]).encode()]
+        elif scenario == "cancel-second-judgment":
+            needles = [
+                b"completed-jev",
+                b"requested-cancel-model",
+                b'"s0_0": 0.875',
+            ]
         elif scenario == "http-failure":
             needles = [
                 b"HTTP 503",
@@ -192,6 +198,8 @@ def run_case(executable: str, fixture_path: Path) -> None:
 def main() -> None:
     executable = h.tui_executable(sys.argv[1])
     producer = str(Path(sys.argv[2]).resolve())
+    cancellation_producer = str(Path(sys.argv[3]).resolve())
+    producer_timeout = 120
     test_dir = Path(__file__).resolve().parent
     environment = os.environ.copy()
     environment["DUNE_SOURCEROOT"] = str(test_dir.parent)
@@ -203,7 +211,7 @@ def main() -> None:
             cwd=test_dir,
             env=environment,
             check=True,
-            timeout=120,
+            timeout=producer_timeout,
         )
         for scenario in (
             "judged",
@@ -220,6 +228,33 @@ def main() -> None:
             "memory-write-failure",
         ):
             run_case(executable, Path(directory, scenario + ".json"))
+        cancelled = subprocess.run(
+            [cancellation_producer, "-v"],
+            cwd=test_dir,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+            timeout=producer_timeout,
+        )
+        print(cancelled.stdout, end="", flush=True)
+        cancelled.check_returncode()
+        partial: list[str] = []
+        prefix = "CANCELLATION_FIXTURE "
+        for line in cancelled.stdout.splitlines():
+            if line.startswith(prefix):
+                encoded = line[len(prefix) :]
+                fixture = cast(dict[str, Any], json.loads(encoded))
+                if fixture["scenario"] == "cancel-second-judgment":
+                    partial.append(encoded)
+        if len(partial) != 1:
+            raise AssertionError(
+                f"expected one cancellation fixture, got {len(partial)}"
+            )
+        fixture_path = Path(directory, "cancel-second-judgment.json")
+        fixture_path.write_text(partial[0], encoding="utf-8")
+        run_case(executable, fixture_path)
     print("Librarian absorb gate durable evidence reaches the TUI: PASS")
 
 

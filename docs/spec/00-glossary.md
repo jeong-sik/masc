@@ -459,6 +459,11 @@ status: reference
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
   참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
   통과율이 아니다. Board의 Choice 판정과도 구분한다.
+  Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
+  Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
+  `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
+  `open`은 검사 실패 후 기존 처리 규칙에 따라 반환한 결과이고, `judged`는 검사를 마친 결과다.
+  취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
 
 **Continuity Measurement (의미 보존 측정)**
 : 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과

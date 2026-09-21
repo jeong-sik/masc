@@ -150,6 +150,15 @@ type run_result =
       ; evaluations : evaluation list
       }
 
+type observation =
+  | Incomplete of evaluation list
+  | Complete of run_result
+(** [Incomplete] contains only requests that returned, in request order.
+    It carries no final absorption decision and cannot be passed to
+    {!absorbed_of_run}. *)
+
+val observation_to_yojson : observation -> Yojson.Safe.t
+
 val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
 val run_result_to_yojson : run_result -> Yojson.Safe.t
 (** Observed gate outcome and the actual evaluation responses, for the
@@ -167,7 +176,8 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     CanAdmin; this payload is not a public or secret-free projection. *)
 
 val run
-  :  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  :  ?observe:(observation -> unit)
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
@@ -177,4 +187,7 @@ val run
 (** Reads {!Typesafeai_config} and judges with {!Typesafeai_client.evaluate}
     when enabled. {!absorbed_of_run} is the unchanged application decision;
     the result also retains skipped reasons and actual request observations
-    for the existing durable Librarian run detail. *)
+    for the existing durable Librarian run detail. [observe] is called after
+    each returned evaluation, before another request can yield, then with
+    [Complete] on normal return. It must only update the caller's in-memory
+    observation without I/O or yielding. Cancellation is propagated unchanged. *)

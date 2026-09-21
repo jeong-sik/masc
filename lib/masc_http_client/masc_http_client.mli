@@ -17,9 +17,8 @@ type response = {
   headers : (string * string) list;
   body : string;
 }
-(** Structured response returned by {!get_response_sync}. Body is
-    fully read into memory; size capped at 8 MB
-    (see {!post_sync} / {!get_response_sync} for the cap details). *)
+(** Structured response returned by {!get_response_sync}. Successful bodies
+    are fully read into memory; GET callers can set [max_body_bytes]. *)
 
 val with_scoped_pool :
   sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> (unit -> 'a) -> 'a
@@ -39,8 +38,6 @@ val default_request_timeout_sec : float
       lets repeated requests against the same host reuse the same TCP+TLS
       session.  Connection cleanup is owned by the pool's idle-eviction
       fiber, not the caller switch.
-    - Cap the response body at 8 MB; oversize bodies surface
-      [Error "masc_http_client: body size exceeds 8 MB"].
     - Convert {!Eio.Cancel.Cancelled} re-raises (cancellation
       propagates); wrap any other exception as
       [Error (Printexc.to_string exn)].
@@ -89,6 +86,7 @@ val patch_sync :
 val get_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
+  ?max_body_bytes:int ->
   url:string ->
   headers:(string * string) list ->
   unit ->
@@ -96,11 +94,14 @@ val get_response_sync :
 (** [get_response_sync ?clock ?timeout_sec ~url ~headers ()] performs
     a [GET url].  Returns [Ok response] with full status / headers /
     body for callers that need to inspect response headers (e.g.
-    link-preview redirect handling). *)
+    link-preview redirect handling). [max_body_bytes] is an optional receive
+    limit, enforced before appending each body chunk; oversized responses
+    fail and their connection is closed. Omission adds no size limit. *)
 
 val get_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
+  ?max_body_bytes:int ->
   url:string ->
   headers:(string * string) list ->
   unit ->

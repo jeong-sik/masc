@@ -664,6 +664,7 @@ let make_hooks
                 typed value crossed from the masc dispatch boundary; without
                 it the row cannot tell a policy rejection from a runtime
                 failure, and cannot represent [Deferred] at all. *)
+             ~wire_outcome:outcome
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence

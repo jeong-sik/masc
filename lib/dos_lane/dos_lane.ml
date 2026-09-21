@@ -14,6 +14,8 @@ type observation = {
   waiting_for_key : bool;
   ticks : int;
   screen_text : string;
+  frame_nonblack : int;
+  frame_ascii : string;
   program : string option;
   files : string list;
 }
@@ -83,10 +85,46 @@ let with_machine f =
 
 (* ---------- observation ---------- *)
 
+(* Graphics modes leave [screen_text] at whatever the text page last held, so
+   a VGA game is invisible to the caller. Two summaries close that gap. Both
+   read the frame the same way real hardware would: a pixel the raster has
+   not written yet reads as black, never as an exception. *)
+let luminance r g b = (r * 30 + g * 59 + b * 11) / 100
+
+let frame_summaries m =
+  let width, height = Dos_machine.frame_dims m in
+  let rgb = Dos_machine.frame_rgb m in
+  let byte i = if i < String.length rgb then Char.code rgb.[i] else 0 in
+  let nonblack = ref 0 in
+  let cols = max 1 (width / 8) and rows = max 1 (height / 16) in
+  let ramp = " .:-=+*#%@" in
+  let b = Buffer.create ((cols + 1) * rows) in
+  for r = 0 to rows - 1 do
+    for c = 0 to cols - 1 do
+      let sum = ref 0 in
+      let lit = ref false in
+      for y = r * 16 to min (r * 16 + 15) (height - 1) do
+        for x = c * 8 to min (c * 8 + 7) (width - 1) do
+          let i = (y * width + x) * 3 in
+          let r' = byte i and g' = byte (i + 1) and b' = byte (i + 2) in
+          if r' > 8 || g' > 8 || b' > 8 then lit := true;
+          sum := !sum + luminance r' g' b'
+        done
+      done;
+      if !lit then incr nonblack;
+      let avg = !sum / (8 * 16) in
+      Buffer.add_char b ramp.[min 9 (avg * 10 / 256)]
+    done;
+    Buffer.add_char b '\n'
+  done;
+  (cols, rows, !nonblack, Buffer.contents b)
+;;
+
 let observe st =
   let m = st.m in
   let cpu = Dos_machine.cpu_of m in
   let width, height = Dos_machine.frame_dims m in
+  let _cols, _rows, nonblack, ascii = frame_summaries m in
   {
     steps = st.steps;
     video_mode = Dos_machine.video_mode m;
@@ -101,6 +139,8 @@ let observe st =
     waiting_for_key = Dos_machine.kbd_waiting m;
     ticks = Dos_machine.tick_count m;
     screen_text = Dos_machine.screen_text_utf8 m;
+    frame_nonblack = nonblack;
+    frame_ascii = ascii;
     program = Some st.program;
     files = Dos_machine.mounted_names m;
   }
@@ -343,6 +383,51 @@ let press ~who ~keys ~steps =
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
            Ok (observe st, ran)))
+;;
+
+(* The mouse is state, not a queue. A key enters the ring and is gone; the
+   cursor and buttons stay where they are put until someone moves them. That
+   is why a click is one call doing two settings -- button down, then button
+   up -- with the run split between them: a game that polls INT 33h or the
+   BIOS data area reads the same press-and-release a human makes of it. The
+   down half waits for ready like a key would, so a text-mode program that
+   reacts and blocks costs no more than it needs; the up half always runs,
+   whatever the down half saw, or the button would stay held for the next
+   caller. A move ([buttons = 0]) sets the position and runs once. *)
+let click ~who ~x ~y ~buttons ~steps =
+  with_machine (fun st ->
+    let width, height = Dos_machine.frame_dims st.m in
+    if x < 0 || y < 0 || x >= width || y >= height then
+      Error
+        (Invalid_request
+           (Printf.sprintf "click must land inside the %dx%d frame, got (%d,%d)"
+              width height x y))
+    else if buttons < 0 || buttons > 2 then
+      Error (Invalid_request "buttons is a bitmask: 0 move, 1 left, 2 right")
+    else
+      match clamp_steps steps with
+      | Error e -> Error e
+      | Ok budget ->
+        append_entry st
+          { at_step = st.steps; who; key_name = Printf.sprintf "mouse(%d,%d,%d)" x y buttons };
+        Dos_machine.set_mouse st.m ~x ~y ~buttons;
+        if buttons = 0 then begin
+          let ran = advance st ~budget ~until_ready:true in
+          Ok (observe st, ran)
+        end
+        else begin
+          let half = max 1 (budget / 2) in
+          let down = advance st ~budget:half ~until_ready:true in
+          Dos_machine.set_mouse st.m ~x ~y ~buttons:0;
+          let up = advance st ~budget:(budget - down.steps_run) ~until_ready:true in
+          Ok
+            ( observe st
+            , { steps_run = down.steps_run + up.steps_run
+              ; settled = down.settled && up.settled
+              ; input_requests = down.input_requests + up.input_requests
+              ; keys_pressed = 0
+              } )
+        end)
 ;;
 
 let type_text ~who ~text ~steps =

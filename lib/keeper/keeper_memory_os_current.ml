@@ -1389,6 +1389,7 @@ let read_journal_tail ~keepers_dir ~keeper_id ~limit =
 ;;
 
 let update_locked_with_error
+      ?on_committed
       ?clock
       ?dropped_statements
       ?before_replace
@@ -1524,53 +1525,64 @@ let update_locked_with_error
                      }))
              |> Result.map_error store_error
          in
-         match Fs_compat.save_file_atomic snapshot_path content with
-         | Ok () ->
-           committed := Some
-             { Keeper_memory_commit_notifications.keepers_dir = notification_keepers_dir
-             ; keeper_id
-             ; store = Ordinary
-             ; revision = next.revision
-             };
-           append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
-           (match durable_range_id with
-            | None -> ()
-            | Some range_id ->
-              (match
-                 write_durable_range_receipts
-                   ~keepers_dir
-                   ~keeper_id
-                   (upsert_durable_range_receipt
-                      durable_range_receipts
-                      (Committed
-                         { range_id
-                         ; snapshot_revision = next.revision
-                         ; snapshot_sha256
-                         }))
-               with
-               | Ok () -> ()
-               | Error detail ->
-                 Log.Keeper.warn
-                   ~keeper_name:keeper_id
-                   "%s; prepared receipt remains recoverable"
-                   detail));
-           List.iter
-             (fun invalidation ->
-                Log.Keeper.info
-                  "memory os support retracted keeper=%s revision=%d memory_id=%s missing_premise_ids=%s"
-                  keeper_id
-                  next.revision
-                  (memory_id invalidation.fact)
-                  (String.concat "," invalidation.missing_premise_ids))
-             next.change.invalidated;
-           Ok next
-         | Error message ->
-           Error
-             (store_error
-                (Printf.sprintf
-                   "current Memory OS atomic write failed path=%s: %s"
-                   snapshot_path
-                   message))))
+         (* schema-compat: Snapshot, journal and range-receipt codecs above are
+            unchanged; this adds a process-local observer to commit effects. *)
+         (* Locks and preparation remain cancellable. Once replacement starts,
+            retain its result and publish commit evidence before cancellation
+            can interrupt the journal/receipt writes for this snapshot. *)
+         let commit () =
+           match Fs_compat.save_file_atomic snapshot_path content with
+           | Ok () ->
+             committed := Some
+               { Keeper_memory_commit_notifications.keepers_dir = notification_keepers_dir
+               ; keeper_id
+               ; store = Ordinary
+               ; revision = next.revision
+               };
+             Option.iter (fun observe -> observe next) on_committed;
+             append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
+             (match durable_range_id with
+              | None -> ()
+              | Some range_id ->
+                (match
+                   write_durable_range_receipts
+                     ~keepers_dir
+                     ~keeper_id
+                     (upsert_durable_range_receipt
+                        durable_range_receipts
+                        (Committed
+                           { range_id
+                           ; snapshot_revision = next.revision
+                           ; snapshot_sha256
+                           }))
+                 with
+                 | Ok () -> ()
+                 | Error detail ->
+                   Log.Keeper.warn
+                     ~keeper_name:keeper_id
+                     "%s; prepared receipt remains recoverable"
+                     detail));
+             List.iter
+               (fun invalidation ->
+                  Log.Keeper.info
+                    "memory os support retracted keeper=%s revision=%d memory_id=%s missing_premise_ids=%s"
+                    keeper_id
+                    next.revision
+                    (memory_id invalidation.fact)
+                    (String.concat "," invalidation.missing_premise_ids))
+               next.change.invalidated;
+             Ok next
+           | Error message ->
+             Error
+               (store_error
+                  (Printf.sprintf
+                     "current Memory OS atomic write failed path=%s: %s"
+                     snapshot_path
+                     message))
+         in
+         match Eio_guard.execution_context () with
+         | Eio_guard.Non_eio -> commit ()
+         | Eio_guard.Eio_fiber -> Eio.Cancel.protect commit))
     in
     (* Dispatch only after BOTH locks have unwound. The marker is set at the
        snapshot commit, so a later journal failure/cancellation cannot suppress
@@ -1584,6 +1596,7 @@ let update_locked_with_error
 ;;
 
 let update_locked
+      ?on_committed
       ?clock
       ?dropped_statements
       ?before_replace
@@ -1594,6 +1607,7 @@ let update_locked
       build
   =
   update_locked_with_error
+    ?on_committed
     ?clock
     ?dropped_statements
     ?before_replace
@@ -1699,6 +1713,7 @@ let make_snapshot
    during the pass: the judgment was about the claim, and a re-observation does
    not answer it. The keeper can state it again on its next turn. *)
 let apply_disposition
+      ?on_committed
       ?clock
       ?dropped_statements
       ?durable_range_id
@@ -1758,6 +1773,7 @@ let apply_disposition
     |> Result.map_error Keeper_memory_absorbed.append_error_to_string
   in
   update_locked
+    ?on_committed
     ?clock
     ?dropped_statements
     ?durable_range_id

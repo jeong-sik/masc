@@ -1677,8 +1677,8 @@ let test_decode_json_response_body_keeps_a_long_json_sentence_whole () =
         ("HTTP 503: " ^ sentence) err
 
 let test_http_error_fallback_and_controls () =
-  Alcotest.(check string) "transport reports its actual URL before the reason"
-    "(http://127.0.0.1:8935/api/overview GET failed: connect backoff)"
+  Alcotest.(check string) "transport reports its reason before the actual URL"
+    "GET failed: connect backoff (http://127.0.0.1:8935/api/overview)"
     (Tui_decode.http_transport_error ~verb:"GET"
       ~url:"http://127.0.0.1:8935/api/overview" ~detail:"connect backoff");
   let decode body =

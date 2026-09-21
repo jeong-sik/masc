@@ -2543,6 +2543,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_pool_body_limit.inc)
 (include stanzas/test_posix_spawn_process_mgr.inc)
 
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
@@ -6591,3 +6592,5 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_jev_readiness)))
+
+(include stanzas/test_pool_h2_request_body.inc)

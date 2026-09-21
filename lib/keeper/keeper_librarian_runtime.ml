@@ -849,6 +849,7 @@ let run_best_effort
            cancellation without changing either the Memory decision or the
            existing failure classification. *)
         let observed_absorb_gate = ref None in
+        let committed_memory = ref None in
         (try
            let result =
              let open Result.Syntax in
@@ -931,6 +932,9 @@ let run_best_effort
              in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
+                 ~on_committed:(fun snapshot ->
+                   committed_memory := Some (snapshot, exact_output, selected_slot, absorb_gate);
+                   on_memory_committed ())
                  ~clock
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
@@ -973,7 +977,6 @@ let run_best_effort
            in
            match result with
            | Ok (snapshot, exact_output, selected_slot, absorb_gate) ->
-             on_memory_committed ();
              complete
                ~selected_slot
                Exact_lane_run_registry.Succeeded
@@ -1035,31 +1038,57 @@ let run_best_effort
             of 23 completed librarian lane runs cancelled, none of them
             represented in the journal.
 
-            Both completion and journal writes run under [Eio.Cancel.protect]:
+            In this cancellation branch, completion and failure-journal writes
+            run under [Eio.Cancel.protect]:
             payload persistence and lock acquisition can yield before the
             registry's transaction protection begins. The surrounding context
             is already cancelled, so protecting only the journal loses both
             records before reaching it. *)
          | Eio.Cancel.Cancelled _ as exn ->
            Eio.Cancel.protect (fun () ->
-             complete
-               Exact_lane_run_registry.Cancelled
-               (failed_output !observed_absorb_gate);
-             record_failure
-               ~keepers_dir
-               ~keeper_id
-               ~trace_id
-               ~kind:Keeper_memory_os_current.Lane_cancelled
-               ~detail:
-                 (Printf.sprintf
-                    "memory os librarian cancelled lane=%s"
-                    exact_lane_id)
-                 (* Cancellation is not the pass declining its own turn, so the
-                    cadence counter remains due. A later turn can schedule a
-                    new pass, but it does not replay this immutable input;
-                    graceful lifecycle boundaries therefore drain accepted
-                    work instead of cancelling it. *)
-               ~cadence_deferred:false);
+             (* Notifications run after the registry commit. A cancellation
+                from that observer must not overwrite a completed outcome. *)
+             let run_completed =
+               List.exists
+                 (fun (run : Exact_lane_run_registry.run) ->
+                    String.equal run.run_id run_id
+                    && match run.status with
+                       | Exact_lane_run_registry.Completed _ -> true
+                       | Running | Completion_persistence_failed _ -> false)
+                 (Exact_lane_run_registry.list_runs registry)
+             in
+             match !committed_memory with
+             | Some (snapshot, exact_output, selected_slot, absorb_gate) ->
+               if not run_completed then
+                 complete ~selected_slot Exact_lane_run_registry.Cancelled
+                   (completed_output ~inp ~exact_output ~absorb_gate snapshot);
+               (* Cadence follows the Memory commit, even when the remaining
+                  side effects of the pass did not all finish. *)
+               cadence_record_success ~keeper_id ~trace_id;
+               Log.Keeper.warn
+                 ~keeper_name:keeper_id
+                 "memory os librarian cancelled after snapshot commit revision=%d; post-commit work may be incomplete"
+                 snapshot.revision
+             | None ->
+               if not run_completed then
+                 complete
+                   Exact_lane_run_registry.Cancelled
+                   (failed_output !observed_absorb_gate);
+               record_failure
+                 ~keepers_dir
+                 ~keeper_id
+                 ~trace_id
+                 ~kind:Keeper_memory_os_current.Lane_cancelled
+                 ~detail:
+                   (Printf.sprintf
+                      "memory os librarian cancelled lane=%s"
+                      exact_lane_id)
+                   (* Cancellation is not the pass declining its own turn, so the
+                      cadence counter remains due. A later turn can schedule a
+                      new pass, but it does not replay this immutable input;
+                      graceful lifecycle boundaries therefore drain accepted
+                      work instead of cancelling it. *)
+                 ~cadence_deferred:false);
            raise exn
          | exn ->
            complete

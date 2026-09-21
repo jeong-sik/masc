@@ -1470,8 +1470,8 @@ let json_error_sentence body =
 let raw_error_body_head_bytes = 240
 
 let http_transport_error ~verb ~url ~detail =
-  Printf.sprintf "(%s %s failed: %s)" (sanitize_terminal_text url)
-    (sanitize_terminal_text verb) (sanitize_terminal_text detail)
+  Printf.sprintf "%s failed: %s (%s)" (sanitize_terminal_text verb)
+    (sanitize_terminal_text detail) (sanitize_terminal_text url)
 
 let http_status_error ~status_code ~body =
   let body = String.trim body in

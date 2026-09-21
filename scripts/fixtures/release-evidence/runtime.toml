@@ -47,6 +47,11 @@ type = "inline"
 value = "release-evidence-loopback"
 
 [models.deepseek-v4-flash]
+# config/runtime.toml declares this on the same row: ollama.com /v1 turns
+# reasoning on when a request carries no control, so a row that says
+# nothing about reasoning is refused before dispatch (#36412) -- here that
+# refusal ended the first Keeper turn before the fixture model saw a request.
+reasoning-uncontrolled = true
 api-name = "deepseek-v4-flash"
 max-context = 32768
 tools-support = true

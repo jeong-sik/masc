@@ -41,6 +41,15 @@ let with_process_env key value f =
   Fun.protect ~finally:(fun () -> install inherited) f
 ;;
 
+(** Publish a [typesafeai] policy for the duration of [f], then restore the
+    one that was published: what [Runtime.set_loaded] does on load, for a test
+    that has no runtime.toml. *)
+let with_typesafeai_policy (policy : Runtime_schema.typesafeai) f =
+  let inherited = Runtime_typesafeai_policy.current () in
+  Runtime_typesafeai_policy.publish policy;
+  Fun.protect ~finally:(fun () -> Runtime_typesafeai_policy.publish inherited) f
+;;
+
 let init_unified_tool_registry () =
   if not (Tool_dispatch.is_tag_registry_initialized ()) then
     (Masc.Unified_tool_registry.register_all ();

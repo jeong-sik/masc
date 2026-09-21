@@ -104,6 +104,7 @@ let report_typed_resource_error ~kind exn =
     let observer = (Atomic.get observers).on_resource_error in
     (match observer ~kind error exn with
      | () -> ()
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception observer_exn ->
        Printf.eprintf
          "fd_accountant: resource-error observer failed kind=%s error=%s \

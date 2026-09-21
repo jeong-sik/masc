@@ -83,7 +83,7 @@ let executable_path () =
     executable_candidate ~cwd ~executable_name:Sys.executable_name ~argv0
   in
   try Unix.realpath path with
-  | exn ->
+  | exn -> (* cancel-guard-ok: Unix.realpath performs no Eio operation. *)
     Log.Identity.warn
       "build_identity: Unix.realpath failed for %s: %s"
       path

@@ -11879,6 +11879,11 @@ def runtime_resolved_response() -> HttpResponse:
             "source": RUNTIME_RESOLVED_PATH,
             "config_path": "/workspace/config/runtime.toml",
             "default_runtime": runtime_a,
+            # The two routes that are not lanes. Both lists are required by
+            # the decoder; empty is a configuration (no vision fleet), and
+            # the declared list is what the editor writes back.
+            "media_failover": [],
+            "media_failover_declared": [],
             "runtimes": [
                 runtime_a,
                 runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),

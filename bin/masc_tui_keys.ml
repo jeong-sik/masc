@@ -118,6 +118,13 @@ let runtime_keys =
   ; Keeper_lanes_only
       (b Act "J/K" "move candidate" ~help:"move the candidate under the cursor down or up its lane")
   ; Keeper_lanes_only
+      (b Act "f" "default runtime"
+         ~help:"replace [runtime].default, what a keeper with no assignment walks")
+  ; Keeper_lanes_only
+      (b Act "m" "vision fleet"
+         ~help:"edit [runtime].media_failover in the slot editor; refused while \
+                boot dropped one of its entries")
+  ; Keeper_lanes_only
       (b Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
                 assigned to it")

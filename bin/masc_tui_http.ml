@@ -1496,6 +1496,27 @@ let post_runtime_lane_action ~host ~port fields =
     |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 ;;
 
+(** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
+    vision read fleet, in order. The endpoint takes the whole list for this
+    route -- it has no per-entry action -- so a caller must know it is sending
+    everything the file should hold. *)
+let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)
+  : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String "media_failover"
+    ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
+
+(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the runtime
+    a keeper with no assignment walks. [None] clears the entry. *)
+let set_runtime_default ~(host : string) ~(port : int)
+      ~(runtime_id : string option) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String "default"
+    ; ( "runtime_id"
+      , match runtime_id with None -> `Null | Some id -> `String id )
+    ]
+
 (** POST /api/v1/runtime/config/routing with [action = "create"]: declare a
     lane under [lane] with [runtime_ids] as its candidates. The server refuses
     a name the file already declares. *)

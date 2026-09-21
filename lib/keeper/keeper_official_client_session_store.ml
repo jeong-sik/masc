@@ -803,43 +803,82 @@ let with_store_lock ~base_path ~keeper_name f =
   with_store_lock_in directory f
 ;;
 
-let prepare_store_lock ~base_path ~keeper_name =
-  let* directory = state_dir ~base_path ~keeper_name in
+let inspect_store_directory directory =
   try
-    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname directory) in
-    Ok directory
+    Fs_compat.inspect_owned_directory_chain
+      ~ownership_root:directory
+      directory
+    |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let clear_then ~base_path ~keeper_name after_clear =
-  let* directory = prepare_store_lock ~base_path ~keeper_name in
-  with_store_lock_in directory (fun directory ->
-    let directory_state =
-      try
-        Fs_compat.inspect_owned_directory_chain
-          ~ownership_root:directory
-          directory
-        |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
+  let* directory = state_dir ~base_path ~keeper_name in
+  match inspect_store_directory directory with
+  | Error _ as error -> error
+  | Ok Fs_compat.Owned_directory_missing ->
+    (* The Owner maintenance slot excludes a same-process claim, and the
+       BasePath process lease excludes another process. Do not create a lock
+       artifact merely to confirm that this optional store is absent. *)
+    Ok (after_clear ())
+  | Ok (Fs_compat.Owned_directory _) ->
+    let body () =
+      match inspect_store_directory directory with
+      | Error _ as error -> error
+      | Ok Fs_compat.Owned_directory_missing -> Ok (after_clear ())
+      | Ok (Fs_compat.Owned_directory _) ->
+        let state_path = Filename.concat directory filename in
+        (match load_path state_path with
+         | Ok (_ : t option) -> ()
+         | Error detail ->
+           Log.Keeper.warn
+             ~keeper_name
+             "official-client session binding could not be read before clear; removing it under the claim lock: %s"
+             detail);
+        (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
+         | Ok () -> Ok (after_clear ())
+         | Error error -> Error (Keeper_fs.durable_remove_error_to_string error))
     in
-    match directory_state with
-    | Error _ as error -> error
-    | Ok Fs_compat.Owned_directory_missing -> Ok (after_clear ())
-    | Ok (Fs_compat.Owned_directory _) ->
-      let state_path = Filename.concat directory filename in
-      let* (_ : t option) = load_path state_path in
-      (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
-       | Ok () -> Ok (after_clear ())
-       | Error error -> Error (Keeper_fs.durable_remove_error_to_string error)))
+    (match with_lock ~lock_path:(store_lock_path directory) body with
+     | File_lock_eio.Lock_not_acquired error ->
+       Error (File_lock_eio.durable_lock_error_to_string error)
+     | File_lock_eio.Body_completed { value; release_error } ->
+       Option.iter
+         (fun error ->
+            Log.Keeper.error
+              ~keeper_name
+              "official-client session clear completed before claim-lock release failed: %s"
+              (File_lock_eio.durable_lock_error_to_string error))
+         release_error;
+       value)
 ;;
 
-let clear ~base_path ~keeper_name =
-  clear_then ~base_path ~keeper_name Fun.id
+let clear_then ~base_path ~keeper_name after_clear =
+  clear_then_with_lock
+    ~with_lock:File_lock_eio.with_durable_lock_observed
+    ~base_path
+    ~keeper_name
+    after_clear
 ;;
+
+module For_testing = struct
+  let clear_then_with_release_failure
+        ~release_failure
+        ~base_path
+        ~keeper_name
+        after_clear
+    =
+    clear_then_with_lock
+      ~with_lock:
+        (File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure
+           ~release_failure)
+      ~base_path
+      ~keeper_name
+      after_clear
+  ;;
+end
 
 let transition ~base_path ~keeper_name ~expected next =
   let* () = validate next in

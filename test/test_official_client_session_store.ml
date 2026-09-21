@@ -81,14 +81,24 @@ let test_clear_missing_state_does_not_create_store () =
   with_workspace "masc-clear-missing-session-" (fun base_path ->
     let keeper_name = "missing-session" in
     let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let keeper_dir = Filename.dirname (Filename.dirname state_path) in
+    Fs_compat.mkdir_p keeper_dir;
+    Unix.chmod keeper_dir 0o500;
     check bool "store starts absent" false (Sys.file_exists (Filename.dirname state_path));
-    (match clear ~base_path ~keeper_name with
-     | Ok () -> ()
-     | Error detail -> fail detail);
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod keeper_dir 0o700)
+      (fun () ->
+         match clear_then ~base_path ~keeper_name Fun.id with
+         | Ok () -> ()
+         | Error detail -> fail detail);
     check bool
       "clear does not create an absent store"
       false
-      (Sys.file_exists (Filename.dirname state_path)))
+      (Sys.file_exists (Filename.dirname state_path));
+    check bool
+      "clear does not create an absent store lock"
+      false
+      (Sys.file_exists (Filename.dirname state_path ^ ".lock")))
 ;;
 
 let test_clear_removes_stale_epoch_claim () =
@@ -103,12 +113,80 @@ let test_clear_removes_stale_epoch_claim () =
         ~owner_epoch
         ~at:1.
     in
-    (match clear ~base_path ~keeper_name with
+    (match clear_then ~base_path ~keeper_name Fun.id with
      | Ok () -> ()
      | Error detail -> fail detail);
     check bool
       "stale process epoch is not treated as live ownership"
       true
+      (load ~base_path ~keeper_name = Ok None))
+;;
+
+let test_clear_then_removes_an_undecodable_binding () =
+  with_workspace "masc-clear-undecodable-session-" (fun base_path ->
+    let keeper_name = "undecodable-session" in
+    let _claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let output = open_out state_path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr output)
+      (fun () -> output_string output "{not-json\n");
+    check bool "the corrupted binding cannot resume" true
+      (Result.is_error (load ~base_path ~keeper_name));
+    let callback_ran =
+      clear_then ~base_path ~keeper_name (fun () -> true) |> Result.get_ok
+    in
+    check bool "paired clear still runs" true callback_ran;
+    check bool "the corrupted binding is removed" false (Sys.file_exists state_path))
+;;
+
+let test_clear_then_preserves_callback_result_after_release_failure () =
+  with_workspace "masc-clear-release-failure-" (fun base_path ->
+    let keeper_name = "release-failure" in
+    let _claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    let lock_path =
+      path ~base_path ~keeper_name
+      |> Result.get_ok
+      |> Filename.dirname
+      |> fun directory -> directory ^ ".lock"
+    in
+    let release_failure =
+      { File_lock_eio.lock_path
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_release_after_clear"
+          ; argument = lock_path
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let result =
+      Keeper_official_client_session_store.For_testing.clear_then_with_release_failure
+        ~release_failure
+        ~base_path
+        ~keeper_name
+        (fun () -> "history-cleared")
+      |> Result.get_ok
+    in
+    check string "completed paired clear result survives" "history-cleared" result;
+    check bool "the binding was removed before release failed" true
       (load ~base_path ~keeper_name = Ok None))
 ;;
 
@@ -1383,6 +1461,10 @@ let () =
             test_clear_missing_state_does_not_create_store
         ; test_case "clear removes stale epoch claim" `Quick
             test_clear_removes_stale_epoch_claim
+        ; test_case "clear removes an undecodable binding" `Quick
+            test_clear_then_removes_an_undecodable_binding
+        ; test_case "clear result survives lock-release failure" `Quick
+            test_clear_then_preserves_callback_result_after_release_failure
         ; test_case "clear fences claim through paired mutation" `Quick
             test_clear_then_fences_new_claim_until_callback_finishes
         ; test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement

@@ -479,8 +479,6 @@ module For_testing : sig
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
-    ?capacity_bytes:int ->
-    ?reserved_bytes:int ->
     Agent_core.Types.message list ->
     composed
 
@@ -496,8 +494,6 @@ module For_testing : sig
       (pending:Keeper_model_input_demotion.pending list ->
        Agent_core.Types.message list ->
        Agent_core.Types.message list) ->
-    ?capacity_bytes:int ->
-    ?reserved_bytes:int ->
     Agent_core.Types.message list ->
     request_view
 

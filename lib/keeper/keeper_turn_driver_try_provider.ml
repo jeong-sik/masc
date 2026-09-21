@@ -704,8 +704,6 @@ let compose_carried_model_input
       ~last_resort
       ~base_path
       ~demote_before
-      ?capacity_bytes
-      ?(reserved_bytes = 0)
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
@@ -745,36 +743,13 @@ let compose_carried_model_input
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
     | None ->
-      (* No front to start from: the newest suffix the request-body cap
-         admits, or the whole history when no cap is declared. Bounding here
-         is what keeps a first assembly on a long history from sending it
-         whole (#37067): the cap is the target's declared request-body
-         ceiling and [project_target] never refuses — an overrun is reported
-         and the provider still judges the request. *)
       let projection, transmitted_bytes =
-        match capacity_bytes with
-        | Some target_bytes ->
-          let target =
-            Runtime_model_input_tail_window.project_target
-              ~measure_message_bytes
-              ~target_bytes
-              ~reserved_bytes
-              planned.Keeper_model_input_demotion.messages
-          in
-          ( target.Runtime_model_input_tail_window.projection
-          , target.Runtime_model_input_tail_window.transmitted_bytes )
-        | None ->
-          Runtime_model_input_tail_window.project_from_atom
-            ~measure_message_bytes
-            ~first_atom:0
-            planned.Keeper_model_input_demotion.messages
+        Runtime_model_input_tail_window.project_from_atom
+          ~measure_message_bytes
+          ~first_atom:0
+          planned.Keeper_model_input_demotion.messages
       in
-      let origin =
-        match capacity_bytes with
-        | Some _ -> Keeper_carried_front.Capacity_bounded
-        | None -> Keeper_carried_front.Whole_history
-      in
-      projection, transmitted_bytes, origin
+      projection, transmitted_bytes, Keeper_carried_front.Whole_history
   in
   { planned
   ; projection
@@ -817,8 +792,6 @@ let request_view
       ~base_path
       ~demote_before
       ~materialize
-      ?capacity_bytes
-      ?(reserved_bytes = 0)
       messages
   =
   let composed =
@@ -830,8 +803,6 @@ let request_view
         ~last_resort
         ~base_path
         ~demote_before
-        ?capacity_bytes
-        ~reserved_bytes
         messages)
   in
   let carried =
@@ -923,16 +894,6 @@ let bounded_model_input_projection
   let reserved_bytes =
     offload_model_input_cpu (fun () ->
       declared_request_reserve_bytes ~system_prompt:ctx.system_prompt ~tools:ctx.tools)
-  in
-  (* The target's declared request-body ceiling, resolved through the route
-     the way the official-client lanes resolve it. [None] when the binding
-     declares none: the first assembly then keeps the whole history, the
-     answer its own projection gives it. Only the no-front composition reads
-     this; a carried front is a position and needs no size bound. *)
-  let capacity_bytes =
-    Option.bind
-      (Runtime.entry_runtime_id_of_route ctx.runtime_id)
-      Runtime.max_prompt_bytes_of_runtime_id
   in
   (* The fixed prefix the ledger compares consecutive requests under: one
      digest per attempt, since the system prompt and tool list are fixed for
@@ -1096,8 +1057,6 @@ let bounded_model_input_projection
               messages
           in
           outcome.Keeper_model_input_demotion.messages)
-        ?capacity_bytes
-        ~reserved_bytes
         messages
     in
     let composed = view.composed in

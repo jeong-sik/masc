@@ -598,8 +598,7 @@ let test_origin_json_names_its_kind () =
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
   check string "evicted" "evicted_after_refusal"
     (kind (Front.Carried (Front.Evicted_after_refusal { retry = 1 })));
-  check string "whole" "whole_history" (kind Front.Whole_history);
-  check string "capacity bounded" "capacity_bounded" (kind Front.Capacity_bounded)
+  check string "whole" "whole_history" (kind Front.Whole_history)
 ;;
 
 let () =

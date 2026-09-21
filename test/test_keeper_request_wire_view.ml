@@ -55,7 +55,7 @@ let seed first_atom : Front.seed =
   | None -> Alcotest.fail "the history has the seed's atom"
 ;;
 
-let view ?capacity_bytes ?reserved_bytes ~front history : Try_provider.request_view =
+let view ~front history : Try_provider.request_view =
   Try_provider.For_testing.request_view
     ~provider_config
     ~measure_message_bytes
@@ -65,8 +65,6 @@ let view ?capacity_bytes ?reserved_bytes ~front history : Try_provider.request_v
     ~base_path:""
     ~demote_before:0
     ~materialize:(fun ~pending:_ messages -> messages)
-    ?capacity_bytes
-    ?reserved_bytes
     history
 ;;
 
@@ -174,35 +172,6 @@ let test_a_declined_projection_hands_over_the_carried_range () =
   Alcotest.(check int) "the carried range stands in" 3 (List.length v.Try_provider.carried)
 ;;
 
-(* The first assembly with no front used to send the whole history: a keeper
-   whose history outgrew its model's declared window re-sent it every turn and
-   was refused (#37067). The declared request-body cap bounds it now, and the
-   origin says so rather than claiming the whole history. *)
-let test_a_frontless_assembly_is_bounded_by_the_declared_capacity () =
-  let whole = view ~front:None history in
-  Alcotest.(check int) "no cap: the whole history" 7
-    (List.length whole.Try_provider.carried);
-  Alcotest.(check string) "no cap: the origin says the whole history" "whole_history"
-    (Front.origin_to_string whole.Try_provider.composed.Try_provider.origin);
-  let bounded = view ~front:None ~capacity_bytes:3 history in
-  let composed = bounded.Try_provider.composed in
-  let observation =
-    match
-      Window.observe
-        ~digest_at:(Window.atom_opening_digest history)
-        ~history_atom_count:composed.Try_provider.history_atom_count
-        composed.Try_provider.projection
-    with
-    | Some observation -> observation
-    | None -> Alcotest.fail "a bounded range that carried atoms reports its window"
-  in
-  Alcotest.(check int) "seven atoms in the history" 7 observation.Window.total_atoms;
-  Alcotest.(check bool) "the cap carried fewer than the whole history" true
-    (observation.Window.transmitted_atoms < 7);
-  Alcotest.(check string) "the origin names the capacity bound" "capacity_bounded"
-    (Front.origin_to_string composed.Try_provider.origin)
-;;
-
 let () =
   Alcotest.run
     "keeper_request_wire_view"
@@ -215,8 +184,6 @@ let () =
             test_a_response_observed_turns_range_is_read_where_it_started
         ; Alcotest.test_case "a declined projection hands over the carried range" `Quick
             test_a_declined_projection_hands_over_the_carried_range
-        ; Alcotest.test_case "a frontless assembly is bounded by the declared capacity" `Quick
-            test_a_frontless_assembly_is_bounded_by_the_declared_capacity
         ] )
     ]
 ;;

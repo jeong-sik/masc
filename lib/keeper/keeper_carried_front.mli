@@ -53,16 +53,8 @@ type seed =
 type origin =
   | Carried of source  (** The front came from a seed. *)
   | Whole_history
-      (** No front to start from and no declared request-body cap: everything,
-          until the first usage on the pair is counted or a refusal halves the
-          range. *)
-  | Capacity_bounded
-      (** No front to start from, and the target's declared request-body cap
-          bounded the range: the newest atoms that fit, not the whole history.
-          The label is distinct from {!Whole_history} because the range it
-          names is not the whole history, and a reader counting
-          [origin=whole_history] must not read a bounded first assembly as an
-          unbounded one. *)
+      (** No front to start from: everything, until the first usage on the
+          pair is counted or a refusal halves the range. *)
 
 val of_ledger : Keeper_model_input_ledger.t -> seed option
 (** The ledger's front with the digest the ledger recorded for it; [None]

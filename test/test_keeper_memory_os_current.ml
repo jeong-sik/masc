@@ -67,6 +67,7 @@ let apply_disposition
       ~keepers_dir
       ?dropped_statements
       ?durable_range_id
+      ?official_range_id
       ?(absorbed = [])
       ?(new_claims = [])
       ()
@@ -74,6 +75,7 @@ let apply_disposition
   Current.apply_disposition
     ?dropped_statements
     ?durable_range_id
+    ?official_range_id
     ~absorbed
     ~keepers_dir
     ~keeper_id:"keeper"
@@ -1148,6 +1150,104 @@ let durable_range_id : Current.durable_range_id =
   ; end_boundary_line = 2
   ; boundary_lines_seen = 2
   }
+;;
+
+let official_range_id : Current.official_range_id =
+  { receipt_scope = durable_range_id.receipt_scope
+  ; after_boundary_line = 2
+  ; turns = [ 3, Masc.Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:1
+            ; 5, Masc.Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:2 ]
+  }
+;;
+
+let read_official ~keepers_dir =
+  Current.committed_official_range ~keepers_dir ~keeper_id:"keeper"
+    ~receipt_scope:official_range_id.receipt_scope
+;;
+
+let require_official ~keepers_dir =
+  match read_official ~keepers_dir with
+  | Ok (Some range) ->
+    check bool "exact official range" true (range = official_range_id)
+  | Ok None -> fail "official receipt missing"
+  | Error detail -> fail detail
+;;
+
+let rewrite_receipts ~keepers_dir transform =
+  let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let json = Yojson.Safe.from_string (Fs_compat.load_file path) in
+  Fs_compat.save_file path (Yojson.Safe.to_string (transform json))
+;;
+
+let map_receipts f = function
+  | `Assoc [ "receipts", `List receipts ] ->
+    `Assoc [ "receipts", `List (List.map f receipts) ]
+  | _ -> fail "expected receipt ledger"
+;;
+
+let map_field key f = function
+  | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+      name, if String.equal name key then f value else value) fields)
+  | _ -> fail "expected object"
+;;
+
+let test_official_receipt_survives_other_commits () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~official_range_id () |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  ignore (apply_disposition ~keepers_dir () |> require_ok);
+  require_official ~keepers_dir
+;;
+
+let test_mixed_receipt_prepared_recovery () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id ~official_range_id () |> require_ok);
+  rewrite_receipts ~keepers_dir (function
+    | `Assoc [ "receipts", `List [ first; second ] ] ->
+      let open Yojson.Safe.Util in
+      check string "same snapshot SHA" (first |> member "snapshot_sha256" |> to_string)
+        (second |> member "snapshot_sha256" |> to_string);
+      check int "same revision" (first |> member "snapshot_revision" |> to_int)
+        (second |> member "snapshot_revision" |> to_int);
+      map_receipts (map_field "state" (fun _ -> `String "prepared"))
+        (`Assoc [ "receipts", `List [ first; second ] ])
+    | _ -> fail "mixed commit did not persist both receipts");
+  require_official ~keepers_dir;
+  (match Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper"
+     ~receipt_scope:durable_range_id.receipt_scope with
+   | Ok (Some range) -> check bool "atom recovered too" true (range = durable_range_id)
+   | Ok None -> fail "atom receipt missing"
+   | Error detail -> fail detail)
+;;
+
+let test_official_receipt_rejects_invalid_identity () =
+  let invalid =
+    [ { official_range_id with turns = [] }
+    ; { official_range_id with turns = List.rev official_range_id.turns }
+    ; { official_range_id with after_boundary_line = 3 }
+    ; { official_range_id with after_boundary_line = -1 }
+    ; { official_range_id with receipt_scope = " " }
+    ]
+  in
+  List.iter (fun official_range_id ->
+    with_temp_keepers @@ fun keepers_dir ->
+    (match apply_disposition ~keepers_dir ~official_range_id () with
+     | Error _ -> ()
+     | Ok _ -> fail "invalid official identity committed");
+    check bool "snapshot not created" false
+      (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"))) invalid;
+  List.iter (fun turns ->
+    with_temp_keepers @@ fun keepers_dir ->
+    ignore (apply_disposition ~keepers_dir ~official_range_id () |> require_ok);
+    rewrite_receipts ~keepers_dir
+      (map_receipts (map_field "range_id" (map_field "range" (map_field "turns" (fun _ -> turns)))));
+    match read_official ~keepers_dir with
+    | Error _ -> ()
+    | Ok _ -> fail "malformed persisted receipt accepted")
+    [ `List []
+    ; `List [ `Assoc [ "line", `Int 3; "turn_ref", `String "invalid" ] ]
+    ; `List [ `Assoc [ "line", `Int 3; "turn_ref", `String "official#1"; "extra", `Bool true ] ]
+    ]
 ;;
 
 let require_no_committed_range ~keepers_dir label =
@@ -2403,6 +2503,12 @@ let () =
             "range receipt survives retract and replace"
             `Quick
             test_committed_range_receipt_survives_retract_and_replace
+        ; test_case "official receipt survives other commits" `Quick
+            test_official_receipt_survives_other_commits
+        ; test_case "mixed receipts recover prepared snapshot" `Quick
+            test_mixed_receipt_prepared_recovery
+        ; test_case "official receipt rejects invalid identity" `Quick
+            test_official_receipt_rejects_invalid_identity
         ; test_case
             "range receipts are scoped per runtime cluster"
             `Quick

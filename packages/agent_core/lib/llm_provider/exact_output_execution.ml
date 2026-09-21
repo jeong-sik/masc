@@ -202,7 +202,11 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
                retry_after_header = raw.retry_after_header } in
            match Exact_output_plan.response_codec plan, receipt.body_receipt with
            | Provider_http_codec.Glm_chat, Http_client.Received body ->
-             (match Backend_glm.check_glm_error body with
+             let envelope =
+               try Backend_glm.check_glm_error body with
+               | Yojson.Safe.Util.Type_error _ -> None
+             in
+             (match envelope with
               | Some { Backend_glm.error_class = Backend_glm.Glm_context_overflow; message; _ } ->
                 Http_client.ProviderFailure
                   { kind = Http_client.Context_overflow { limit = None }; message }

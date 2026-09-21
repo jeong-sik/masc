@@ -2081,7 +2081,10 @@ let test_glm_http_capacity_classification () =
     ~body:{|{"error":{"code":"1302","message":"Too many requests"}}|} ~expected:EO.Rate_limited;
   run_case ~kind:Provider_config.OpenAI_compat ~status:`Bad_request ~body:overflow ~expected:EO.Invalid_request;
   run_case ~kind:Provider_config.Glm ~status:`Bad_request
-    ~body:{|{"error":{"code":"1210","message":"Prompt exceeds max length"}}|} ~expected:EO.Invalid_request
+    ~body:{|{"error":{"code":"1210","message":"Prompt exceeds max length"}}|} ~expected:EO.Invalid_request;
+  List.iter (fun body ->
+    run_case ~kind:Provider_config.Glm ~status:`Bad_request ~body ~expected:EO.Invalid_request)
+    [ {|[]|}; {|{"error":"oops"}|}; {|{"error":{"code":"1261","message":7}}|} ]
 ;;
 
 let () =

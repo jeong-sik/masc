@@ -79,8 +79,19 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   if grep -q 'MASC MCP Server listening' "$log"; then state=listening; break; fi
   sleep 0.2
 done
+# Take the boot process down, but first record how it was doing: a boot that
+# never reached the listening line has two very different causes — the
+# process still working (slow boot) or already dead (crash) — and only the
+# process state and the wait status tell them apart. v0.35.21's linux-x64
+# publish timed out with the log frozen after "[ServerBootstrap] resolved"
+# and no FATAL line, and the only proof the process was still alive came
+# from its SIGTERM shutdown log, which this script discards on every
+# success. Report both before the log tail, so the verdict sits next to the
+# timeout line instead of hiding under thirty log lines.
+kill -0 "$PID" 2>/dev/null && boot_alive=1 || boot_alive=0
 kill "$PID" 2>/dev/null || true
-wait "$PID" 2>/dev/null || true
+boot_status=0
+wait "$PID" 2>/dev/null || boot_status=$?
 PID=""
 
 case "$state" in
@@ -91,6 +102,11 @@ case "$state" in
     ;;
   pending)
     echo "smoke: did not reach listening within ${BOOT_WAIT_SEC}s" >&2
+    if [ "$boot_alive" -eq 1 ]; then
+      echo "smoke: boot process still alive at timeout — slow boot, not a crash" >&2
+    else
+      echo "smoke: boot process exited on its own before the deadline (exit status $boot_status) — crash, not a slow boot" >&2
+    fi
     tail -30 "$log" >&2
     exit "$EXIT_TIMEOUT"
     ;;

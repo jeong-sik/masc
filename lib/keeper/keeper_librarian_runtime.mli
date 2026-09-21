@@ -58,6 +58,11 @@ val preflight_slots
     names its journal kind. *)
 type trigger = Conversation_completed | Queue_changed | Durable_range
 
+type write_scope = Context_only | Context_and_memory
+(** The caller names the evidence's purpose. A queue-source organization pass
+    writes only working Context; remembered conversation and durable ranges
+    retain Memory processing regardless of the wake-up trigger. *)
+
 type input_projection =
   | Recent_window
   | Already_selected_range
@@ -65,10 +70,15 @@ type input_projection =
 val run_best_effort
   :  ?trigger:trigger
   -> ?input_projection:input_projection
+  -> ?write_scope:write_scope
+  -> ?continuity:Keeper_librarian_continuity.prepared
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
+  -> ?on_capacity_refused:(unit -> unit)
+  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
+  -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
        (** Injectable effect edge for the cli lane-slot fallback walked after
            catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
@@ -84,11 +94,16 @@ val run_best_effort
     consumer passes [Already_selected_range], because applying the retired
     recent-message window again would drop the front of the selected range.
     [on_memory_committed] runs only after the current Memory OS snapshot write
-    succeeds. [durable_range_id] is committed through the Memory store's WAL
+    succeeds. [durable_range_id] and [official_range_id] are committed through the Memory store's WAL
     sidecar, so a durable consumer can recover a later progress-file failure
     without submitting the completed-turn range again. *)
 
 module For_testing : sig
+  val commit_continuity
+    : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)
+    -> observe:((Librarian_continuity_snapshot.t, string) result -> unit)
+    -> unit
+
   type classified_error
 
   val classified_error_detail : classified_error -> string

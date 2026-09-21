@@ -587,9 +587,8 @@ let handle
       ~turn_ctx_cell
       ~observation
       ~latency_ms
-      ~degraded_retry_applied
-      ~degraded_retry_runtime
-      ~fallback_reason
+      ~(degraded_retry_applied : Keeper_error_classify.degraded_retry option)
+      ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
       ~keeper_turn_id
       execution_outcome
   =
@@ -693,10 +692,14 @@ let handle
         (decision_outcome_to_label
            (decision_outcome_of_terminal_outcome terminal_outcome))
       ~channel
+      ~execution_path:
+        (match Keeper_execution_outcome.lane execution_outcome with
+         | Keeper_execution_outcome.Direct ->
+           Keeper_unified_metrics_decision.Direct_turn
+         | Keeper_execution_outcome.Autonomous _ ->
+           Keeper_unified_metrics_decision.Autonomous_cycle)
       ~degraded_retry_applied
-      ?degraded_retry_runtime
-      ?fallback_reason:
-        (Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
+      ~degraded_retry_deferred
       ~turn_mode
       ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
       ~result:(Some result)

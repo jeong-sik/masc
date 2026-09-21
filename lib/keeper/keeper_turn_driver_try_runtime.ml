@@ -27,20 +27,26 @@ let accept_no_progress_should_try_next error =
    authorities before advancing to the next candidate. A 402 is the same
    kind of fact about the binding's account (RFC-0440 §3): it cannot pay, so
    the walk moves on; [Error_domain.is_retryable] still refuses a retry of the
-   same candidate, and the quota window records the exhaustion. Official
-   clients carry the same access facts as [Provider] errors. *)
+   same candidate, and the quota window records the exhaustion. A 404 is the
+   same kind of fact about the binding's model: this candidate cannot serve a
+   model it does not have, so the walk moves on to one that can.
+   [Keeper_runtime_failure_route] already routes [NotFound] to
+   [Model_unavailable]; the walk predicate must agree, or the lane stops on a
+   candidate whose model does not exist instead of trying the next one.
+   Official clients carry the same access facts as [Provider] errors. *)
 let candidate_access_should_try_next = function
   | Agent_core.Error.Api
       ( Agent_core.Retry.AuthError _ | Agent_core.Retry.AuthorizationError _
-      | Agent_core.Retry.PaymentRequired _ )
+      | Agent_core.Retry.PaymentRequired _ | Agent_core.Retry.NotFound _ )
     -> true
   | Agent_core.Error.Provider
-      (Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _) ->
+      ( Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _
+      | Llm_provider.Error.NotFound _ ) ->
     true
   | Agent_core.Error.Api
       ( Agent_core.Retry.RateLimited _ | Agent_core.Retry.Overloaded _
       | Agent_core.Retry.ServerError _
-      | Agent_core.Retry.InvalidRequest _ | Agent_core.Retry.NotFound _
+      | Agent_core.Retry.InvalidRequest _
       | Agent_core.Retry.ContextOverflow _ | Agent_core.Retry.InputCapacity _
       | Agent_core.Retry.NetworkError _ | Agent_core.Retry.Timeout _ )
   | Agent_core.Error.Provider _

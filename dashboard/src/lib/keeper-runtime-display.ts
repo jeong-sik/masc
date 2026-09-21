@@ -396,6 +396,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
 const runtimeBlockerLabels = {
   runtime_exhausted: '런타임 후보 소진',
   provider_runtime_error: '런타임 호출 오류',
+  official_client_recovery_required: '공식 클라이언트 세션 복구 필요',
   fiber_unresolved: 'Fiber 미해결',
   stale_termination_storm: 'Stale 종료 폭주',
   heartbeat_failures: '하트비트 실패',

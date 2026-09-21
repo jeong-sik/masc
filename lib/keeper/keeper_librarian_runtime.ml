@@ -122,6 +122,7 @@ type outward_effect =
 
 type exact_execution_error =
   { outward_effect : outward_effect
+  ; capacity_refused : bool
   ; detail : string
   }
 
@@ -197,7 +198,7 @@ let rec extraction_error_to_string = function
   | Execution_clock_unavailable ->
     "memory os librarian execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
-  | Exact_execution_failed { outward_effect; detail } ->
+  | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
       "librarian exact execution failed outward_effect=%s cause=%s"
       (match outward_effect with
@@ -267,8 +268,11 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
-let resolve_librarian_prompt input =
+let resolve_librarian_prompt ?continuity input =
   let variables = Keeper_librarian.prompt_variables input in
+  let variables = match continuity with None -> variables | Some prepared ->
+    ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
+    :: List.remove_assoc "continuity" variables in
   ( variables
   , Result.map
       (fun (resolution, rendered) -> { resolution; rendered })
@@ -439,6 +443,31 @@ let prepare_attempt ~selected_slots messages =
       Exact_setup_failed (Exact_flow_start_failed error))
 ;;
 
+let capacity_refused_by_flow = function
+  | Exact_output.Flow_candidates_exhausted { rejection; _ } ->
+    (match Exact_output.candidate_rejection_disposition rejection with
+     | Input_capacity (Context_window_exceeded _
+         | Token_capacity_rejected (Capacity_input_rejected _)) -> true
+     | _ -> false)
+  | Exact_output.Flow_exact_execution_failed { cause; _ } ->
+    (match cause.Exact_output.cause with
+     | Provider_response_refused
+         { refusal = Request_body_refused | Context_overflow | Input_capacity; _ } -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let extraction_capacity_refused = function
+  | Exact_execution_failed error -> error.capacity_refused
+  | Cli_slots_exhausted { failures; _ } ->
+    (match List.rev failures with
+     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity_refused final
+     | [] -> false)
+  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Cli_prompt_unavailable _ | No_transport_declared
+  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> false
+;;
+
 let exact_execution_error error =
   let outward_effect =
     match Exact_output.flow_execution_error_generation_dispatch error with
@@ -446,7 +475,7 @@ let exact_execution_error error =
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
   let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
-  { outward_effect; detail }
+  { outward_effect; detail; capacity_refused = capacity_refused_by_flow error }
 ;;
 
 (* The librarian's whole prompt is one User message; the cli one-shot needs
@@ -765,7 +794,25 @@ let failed_output = function
     `Assoc [ "absorb_gate", Keeper_librarian_absorb_gate.observation_to_yojson absorb_gate ]
 ;;
 
+type context_write =
+  | Not_attempted
+  | Withheld
+  | Outcome_unconfirmed
+  | Committed of Keeper_librarian_context.version
+  | Write_failed of string
+
+let context_write_json = function
+  | Not_attempted -> `Assoc ["status", `String "not_attempted"]
+  | Withheld -> `Assoc ["status", `String "withheld"]
+  | Outcome_unconfirmed -> `Assoc ["status", `String "outcome_unconfirmed"]
+  | Committed (generation, revision) -> `Assoc ["status", `String "committed";
+      "generation", `String generation; "revision", `Int revision]
+  | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
+;;
+
 type trigger = Conversation_completed | Queue_changed | Durable_range
+
+type write_scope = Context_only | Context_and_memory
 
 type input_projection =
   | Recent_window
@@ -777,11 +824,25 @@ let input_for_projection projection input =
   | Already_selected_range -> input
 ;;
 
+let commit_continuity ~commit ~observe =
+  (* The executor job has its own cancellation scope. Keep its caller alive
+     until all disk effects and their observation finish; shutdown/purge must
+     not run past a detached writer after cancellation of the await. *)
+  Eio.Cancel.protect (fun () ->
+    observe (Domain_pool_ref.submit_io_or_inline commit));
+  Eio.Fiber.check ()
+;;
+
 let run_best_effort
       ?(trigger = Conversation_completed)
       ?(input_projection = Recent_window)
+      ?(write_scope = Context_and_memory)
+      ?continuity
       ?(on_memory_committed = fun () -> ())
+      ?(on_capacity_refused = fun () -> ())
+      ?(on_continuity_committed = fun _ -> ())
       ?durable_range_id
+      ?official_range_id
       ?cli_runner
       ~base_path
       ~keepers_dir
@@ -809,7 +870,7 @@ let run_best_effort
         in
         let prompt_input = input_for_projection input_projection inp in
         let prompt_variables, prompt_material =
-          resolve_librarian_prompt prompt_input
+          resolve_librarian_prompt ?continuity prompt_input
         in
         Exact_lane_run_registry.register_running
           registry
@@ -825,7 +886,26 @@ let run_best_effort
                   ; "message_count", `Int (List.length prompt_input.messages)
                   ; "current_fact_count", `Int current_fact_count
                   ]));
+        let observed_context_review = ref None in
+        let context_write = ref Not_attempted in
+        let continuity_write = ref (`Assoc ["status", `String "not_attempted"]) in
         let complete ?selected_slot outcome output =
+          let output = match continuity, output with
+            | Some _, `Assoc fields -> `Assoc (("continuity_write", !continuity_write) :: fields)
+            | _ -> output in
+          let output = match !observed_context_review, output with
+            | None, _ -> output
+            | Some review, `Assoc fields ->
+              let context = [
+                "context_write", context_write_json !context_write;
+                "context_review", Keeper_librarian_context_review.observation_to_yojson review] in
+              (* Keep the existing absorption report first; both derived-context
+                 evidence and Memory's receipt survive any later cancellation. *)
+              (match fields with
+               | (("absorb_gate", _) as gate) :: rest -> `Assoc (gate :: context @ rest)
+               | _ -> `Assoc (context @ fields))
+            | Some _, _ -> output
+          in
           let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
           let completion =
             Exact_lane_run_registry.mark_completed
@@ -873,6 +953,17 @@ let run_best_effort
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
                 Keeper; original sources remain pending throughout. *)
+             let context_review = Keeper_librarian_context_review.run
+               ~observe:(fun observation -> observed_context_review := Some observation)
+               ~clock ~keeper_id ~input:inp.working_context
+               ~proposed:selection.working_contexts () in
+             if not (Keeper_librarian_context_review.permits_publication context_review) then (
+               context_write := Withheld;
+               Log.Keeper.info ~keeper_name:keeper_id
+                 "working context withheld by review: pockets=%d"
+                 (List.length selection.working_contexts))
+             else (
+             context_write := Outcome_unconfirmed;
              (try match Domain_pool_ref.submit_io_or_inline (fun () ->
                 Keeper_librarian_context.commit ~keepers_dir ~keeper_id
                   ~expected_version:(Option.map Keeper_librarian_context.version inp.working_context.previous)
@@ -885,6 +976,7 @@ let run_best_effort
                       List.mem s.reference references) inp.working_context.sources)
                   selection.working_contexts) with
               | Ok working ->
+                context_write := Committed (Keeper_librarian_context.version working);
                 (match Domain_pool_ref.submit_io_or_inline (fun () ->
                    Keeper_librarian_context_recall.publish ~base_path ~keepers_dir ~keeper_name:keeper_id working) with
                  | Ok () -> ()
@@ -901,12 +993,40 @@ let run_best_effort
                    create a private retry loop. *)
                 if made_progress && remaining then
                   Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:keeper_id
-              | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id
+              | Error detail ->
+                context_write := Write_failed detail;
+                Log.Keeper.warn ~keeper_name:keeper_id
                   "working context not committed; original intake continues: %s" detail
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context commit failed independently of memory: %s" (Printexc.to_string exn));
+                  "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
+             let publish_continuity () =
+               match continuity, selection.working_state with
+              | None, _ -> ()
+              | Some _, None -> continuity_write := `Assoc ["status", `String "not_provided"]
+              | Some prepared, Some working_state ->
+                continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
+                commit_continuity
+                  ~commit:(fun () ->
+                   Keeper_librarian_continuity.commit
+                     ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
+                     ~prepared ~working_state)
+                  ~observe:(function
+                 | Ok snapshot ->
+                   continuity_write := `Assoc
+                     ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
+                      "prefix_sha256", `String snapshot.prefix_sha256];
+                   on_continuity_committed snapshot
+                 | Error detail ->
+                   continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
+                   Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail)
+             in
+             match write_scope with
+             | Context_only ->
+               publish_continuity ();
+               Ok (`Context_organized (exact_output, selected_slot))
+             | Context_and_memory ->
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
                 snapshot this pass read before its provider turn; writing it
@@ -938,6 +1058,7 @@ let run_best_effort
                  ~clock
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
+                 ?official_range_id
                  ~absorbed:(Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate)
                ~keepers_dir
                ~keeper_id
@@ -951,6 +1072,9 @@ let run_best_effort
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })
              in
+             (* Only saved Memory authorizes publishing the corresponding
+                continuity frontier. A failed disposition leaves input intact. *)
+             publish_continuity ();
              (* The snapshot is committed; each supersede the answer stated is
                 now a Revised event on the old id (RFC-0418). A sidecar that
                 cannot be written is said here and does not undo the pass. *)
@@ -973,10 +1097,15 @@ let run_best_effort
                  ~keeper_name:keeper_id
                  "%s"
                  (Keeper_memory_os_events.append_error_to_string error));
-             snapshot, exact_output, selected_slot, absorb_gate
+             `Memory_committed (snapshot, exact_output, selected_slot, absorb_gate)
            in
            match result with
-           | Ok (snapshot, exact_output, selected_slot, absorb_gate) ->
+           | Ok (`Context_organized (exact_output, selected_slot)) ->
+             complete ~selected_slot Exact_lane_run_registry.Succeeded
+               (`Assoc [ "memory_write", `String "skipped_context_only"
+                       ; "exact_output", exact_output ]);
+             Eio.Fiber.check ()
+           | Ok (`Memory_committed (snapshot, exact_output, selected_slot, absorb_gate)) ->
              complete
                ~selected_slot
                Exact_lane_run_registry.Succeeded
@@ -988,8 +1117,12 @@ let run_best_effort
                snapshot.revision
                (List.length snapshot.facts)
                (List.length snapshot.change.added)
-               (List.length snapshot.change.removed)
+               (List.length snapshot.change.removed);
+             (* A completion observer may request cancellation and return
+                normally. Propagate it here even when no later I/O yields. *)
+             Eio.Fiber.check ()
            | Error error ->
+             if extraction_capacity_refused error then on_capacity_refused ();
              let detail = extraction_error_to_string error in
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)
@@ -1029,7 +1162,8 @@ let run_best_effort
                     "memory os librarian failed lane=%s: %s"
                     exact_lane_id
                     detail)
-               ~cadence_deferred:true
+               ~cadence_deferred:true;
+             Eio.Fiber.check ()
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
             journal — the record of what the librarian did on this keeper —
@@ -1141,4 +1275,5 @@ module For_testing = struct
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
   let input_for_projection = input_for_projection
+  let commit_continuity = commit_continuity
 end

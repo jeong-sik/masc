@@ -299,6 +299,13 @@ let node_observation_result (node : Executor.node_result) =
       ; duration_ms = Tool_result.duration_ms node.result }
 ;;
 
+let wire_outcome_of_result : Tool_result.result -> Tool_result.tool_call_outcome =
+  function
+  | Tool_result.Completed _ -> Tool_result.Ok
+  | Tool_result.Deferred _ -> Tool_result.Unknown
+  | Tool_result.Failed _ -> Tool_result.Error
+;;
+
 let node_result_to_json (result : Executor.node_result) =
   `Assoc
     [ "node_id", `String (Keeper_tool_plan.Node_id.to_string result.node_id)
@@ -337,7 +344,7 @@ let observe_node_result
       ~tool_name:result.tool_name
       ~input:result.input
       ~output_text:(Tool_result.message observed_result)
-      ~success:(Tool_result.is_success observed_result)
+      ~wire_outcome:(wire_outcome_of_result observed_result)
       ~duration_ms:(Tool_result.duration_ms observed_result)
       ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)
       ?agent_name:context.agent_name
@@ -405,9 +412,12 @@ let observe_node_result
             (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation) )
       ; "turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
       ; "execution_id", Ids.Execution_id.to_yojson result.execution_id
-      ; "success", `Bool (Tool_result.is_success observed_result)
       ; "duration_ms", `Float (Tool_result.duration_ms observed_result)
       ; "disposition", `String (Tool_result.string_of_disposition observed_result)
+      ; ( "wire_outcome"
+        , `String
+            (Tool_result.string_of_tool_call_outcome
+               (wire_outcome_of_result observed_result)) )
       ; "result_bytes", `Int result.result_bytes
       ; "truncated_to", Json_util.int_opt_to_json result.truncated_to
       ; "planned_index", `Int schedule.planned_index
@@ -462,7 +472,7 @@ let observe_composition_run_summary
       ~tool_name:composition_run_summary_tool_name
       ~input
       ~output_text
-      ~success
+      ~wire_outcome:(if success then Tool_result.Ok else Tool_result.Error)
       ~duration_ms
       ~record_kind:Keeper_tool_call_log.Composition_run
       ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)
@@ -1387,6 +1397,7 @@ let load_instruction_resource location relative_path =
 let make_instruction_skill_tool
       ~(config : Workspace.config)
       ?record_activation
+      ?assess_applicability
       ?on_result
       ~instruction_skills
       ()
@@ -1518,15 +1529,44 @@ let make_instruction_skill_tool
                        wire_bytes
                        Common.max_tool_result_wire_bytes)
                 else
+                  let wire_content, metadata =
+                    match content, assess_applicability with
+                    | Keeper_skill_activation_recorder.Body body, Some assess ->
+                      let assessment = assess ~reference ~body in
+                      let advice = Typesafeai_skill_applicability.model_advice assessment in
+                      let projected = match advice with
+                        | None -> wire_content
+                        | Some text -> text ^ "\n\n--- Skill body ---\n" ^ wire_content in
+                      let fits = String.length projected <= Common.max_tool_result_wire_bytes in
+                      let metadata =
+                        ("skill_applicability", Typesafeai_skill_applicability.to_yojson assessment)
+                        :: ("applicability_advice_in_model_content", `Bool (fits && Option.is_some advice))
+                        :: ("applicability_projection", `String
+                              (match advice with
+                               | None -> "not_requested"
+                               | Some _ -> if fits then "inline" else "omitted_inline_limit"))
+                        :: metadata in
+                      (if fits then projected else wire_content), metadata
+                    | Keeper_skill_activation_recorder.Resource _, _
+                    | Keeper_skill_activation_recorder.Body _, None -> wire_content, metadata
+                  in
                   match record_activation with
                   | Some record ->
                     (match record ~invocation ~content reference with
                      | Error error ->
-                       activation_failure
-                         ~reference
-                         ~tool_name:name
-                         ~start_time
-                         error
+                       let failure = activation_failure ~reference ~tool_name:name ~start_time error in
+                       (match List.assoc_opt "skill_applicability" metadata with
+                        | None -> failure
+                        | Some assessment ->
+                          Tool_result.with_metadata
+                            (`Assoc
+                               [ "reference", Skill_reference.to_yojson reference
+                               ; "skill_tool_use_id", `String skill_tool_use_id
+                               ; "skill_applicability", assessment
+                               ; "applicability_advice_in_model_content", `Bool false
+                               ; "applicability_projection", `String "withheld_activation_failure"
+                               ])
+                            failure)
                      | Ok
                          ( Activation_ledger.Recorded _
                          | Activation_ledger.Already_recorded _ ) ->
@@ -2119,6 +2159,10 @@ let make_tools_with_authority
       @ [ make_instruction_skill_tool
             ~config
             ?record_activation:record_instruction_activation
+            ~assess_applicability:(fun ~reference ~body ->
+              let context = Option.map (fun capture -> (capture ()).Keeper_gate.snapshot) gate_context in
+              Typesafeai_skill_applicability.assess ?clock ~keeper_id:meta.name
+                ~context ~reference ~body ())
             ~instruction_skills:skills
             ()
         ]

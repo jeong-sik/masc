@@ -1,12 +1,24 @@
+(include stanzas/test_librarian_working_state_evaluation.inc)
+(include stanzas/test_librarian_working_state_cli.inc)
+(include stanzas/test_librarian_continuity_snapshot_cli.inc)
+(include stanzas/test_librarian_continuity_snapshot.inc)
+
 (rule
  (alias runtest-test_dashboard_observation_quota)
  (deps test_dashboard_observation_quota.py ../bin/main_eio.exe
   ../scripts/fixtures/release-evidence/runtime.toml)
  (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
 
+(rule
+ (alias runtest-tool-call-sequence-miner)
+ (deps test_tool_call_sequence_miner.py ../scripts/tool-call-sequence-miner.py)
+ (action (run python3 %{dep:test_tool_call_sequence_miner.py})))
+
 (alias
  (name runtest)
- (deps (alias runtest-test_dashboard_observation_quota)))
+ (deps
+  (alias runtest-test_dashboard_observation_quota)
+  (alias runtest-tool-call-sequence-miner)))
 
 (test
  (name test_typesafeai)
@@ -5179,6 +5191,8 @@
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
+(include stanzas/test_keeper_context_core_history.inc)
+(include stanzas/test_keeper_turn_fragments.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
@@ -5250,6 +5264,7 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
+(include stanzas/test_keeper_projection_change.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
 
@@ -5407,6 +5422,9 @@
  (modules test_keeper_task_skill_turn_exact)
  (libraries
   alcotest
+  masc_test_deps
+  exact_output_fixture
+  eio_main
   fs_compat
   masc
   masc.agent_core
@@ -6581,6 +6599,8 @@
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
 
+(include stanzas/test_official_client_claim_cause.inc)
+
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
@@ -6595,3 +6615,20 @@
  (deps (alias runtest-test_tui_jev_readiness)))
 
 (include stanzas/test_pool_h2_request_body.inc)
+
+(include stanzas/test_tui_skill_applicability.inc)
+
+(test
+ (name test_keeper_librarian_context_review)
+ (modules test_keeper_librarian_context_review)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+(include stanzas/test_tui_librarian_context_review.inc)
+
+(include stanzas/test_keeper_continuity_request_view.inc)
+
+(include stanzas/test_keeper_librarian_continuity.inc)
+
+(include stanzas/test_keeper_continuity_dispatch.inc)
+
+(include stanzas/test_keeper_librarian_capacity_callback.inc)

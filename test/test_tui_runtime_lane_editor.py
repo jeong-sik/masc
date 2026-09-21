@@ -106,6 +106,9 @@ class LaneStore:
         exact = self.exact_lane(EXACT_LANE)
         exact["dropped_slots"] = [DROPPED_SLOT]
         self.exact_declared = {EXACT_LANE: [DROPPED_SLOT, *exact["admitted_slots"]]}
+        # The projection now carries the file's own order beside the admission
+        # lists; the fixture serves the one it tracks.
+        exact["declared_slots"] = list(self.exact_declared[EXACT_LANE])
 
     def exact_lane(self, name: str) -> dict:
         return next(lane for lane in self.standalone["lanes"] if lane["lane_id"] == name)
@@ -116,7 +119,13 @@ class LaneStore:
                 self.fail_next_resolved = False
                 return 503, {"error": "resolved unavailable"}
             lanes = [
-                {"id": lane["id"], "runtime_ids": list(lane["runtime_ids"])}
+                {
+                    "id": lane["id"],
+                    "runtime_ids": list(lane["runtime_ids"]),
+                    # Every lane this fixture serves is one its file declares;
+                    # the assignment-made singleton has no row here.
+                    "declared": True,
+                }
                 for lane in self.lanes
             ]
         return 200, {**self.body, "lanes": lanes}
@@ -187,6 +196,7 @@ class LaneStore:
                 lane["admitted_slots"] = [
                     s for s in declared if s not in lane["dropped_slots"]
                 ]
+                lane["declared_slots"] = list(declared)
                 return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":

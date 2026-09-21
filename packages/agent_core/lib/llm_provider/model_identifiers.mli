@@ -80,6 +80,10 @@ module Model_id : sig
   (** Case-insensitive equality (ASCII case folded); no trim, since
       {!of_string} rejects padded input. *)
 
+  val equal_id_prefix : prefix:Id_prefix.t -> t -> bool
+  (** Exact comparison with a catalog row identifier. ASCII case is folded;
+      neither side is trimmed. *)
+
   val starts_with : prefix:Id_prefix.t -> t -> bool
   (** Prefix matching between a catalog row and a requested model id.
       ASCII case is folded on both sides. Escaping through

@@ -863,8 +863,8 @@ let test_projection_failure_keeps_execution_and_wire_outcomes_separate () =
          | _ -> fail "projection failure must write exactly one row"
        in
        let open Yojson.Safe.Util in
-       check bool "legacy success records the final projection failure" false
-         (row |> member "success" |> to_bool);
+       check bool "legacy success field is absent" true
+         (row |> member "success" = `Null);
        check string "typed disposition preserves the completed execution"
          "completed"
          (row |> member "disposition" |> to_string);
@@ -950,7 +950,7 @@ let test_an_unreadable_index_is_an_error_not_an_empty_read () =
        Masc.Keeper_tool_call_log.init ~base_path ();
        Masc.Keeper_tool_call_log.log_call
          ~keeper_name:"blind-keeper" ~tool_name:"keeper_lane_status"
-         ~input:(`Assoc []) ~output_text:"docker" ~success:true ~duration_ms:1.0 ();
+         ~input:(`Assoc []) ~output_text:"docker" ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
        Masc.Keeper_tool_call_log.flush_now ();
        let ledger_dir =
          match Masc.Keeper_tool_call_log.store_dir () with
@@ -1001,7 +1001,8 @@ let test_a_rejected_call_leaves_a_row () =
       | None -> "<absent>"
     in
     check string "the tool that refused" "keeper_broadcast" (field "tool");
-    check string "recorded as a failure" "false" (field "success");
+    check string "recorded wire failure" "error" (field "wire_outcome");
+    check string "legacy success field is absent" "<absent>" (field "success");
     check bool "the argument object it was refused for" true
       (String.length (field "input") > 0);
     check bool "the refusal text" true

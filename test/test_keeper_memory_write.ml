@@ -1032,10 +1032,13 @@ let with_history_search ?(additional_traces = []) ~checkpoint_texts ~current_tex
         ~session_id:trace
         ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config)
     in
-    List.iter
-      (fun text ->
-         Masc.Keeper_context_runtime.persist_message session (user text);
-         Masc.Keeper_context_runtime.persist_message session
+    List.iteri
+      (fun index text ->
+         let turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:(index + 1) in
+         Masc.Keeper_context_runtime.persist_message
+           ~keeper_name:trace ~turn_ref session (user text);
+         Masc.Keeper_context_runtime.persist_message
+           ~keeper_name:trace ~turn_ref session
            (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
               [ Agent_core.Types.Text "Recorded." ]))
       texts;
@@ -1177,7 +1180,10 @@ let test_history_search_reports_read_errors ~malformed () =
     (fun trace ->
        let session = Masc.Keeper_context_runtime.create_session
            ~session_id:trace ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config) in
-       Masc.Keeper_context_runtime.persist_message session
+       Masc.Keeper_context_runtime.persist_message
+         ~keeper_name:meta.name
+         ~turn_ref:(Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:1)
+         session
          (Agent_core.Types.make_message ~role:Agent_core.Types.User
             [ Agent_core.Types.Text "amber database" ]))
     [ current_trace; previous_trace ];
@@ -2287,11 +2293,17 @@ let test_retract_records_a_retraction () =
       ~args:(make_args ~title:"" ~content:"the deploy needs assets")
   in
   let written = write () in
-  let written_id =
-    string_field
-      "memory_id"
-      (Yojson.Safe.from_string written.Masc.Keeper_tool_execution.raw_output)
-  in
+  let written_json = Yojson.Safe.from_string written.Masc.Keeper_tool_execution.raw_output in
+  let written_id = string_field "memory_id" written_json in
+  Alcotest.(check string) "new identity is inserted" "inserted"
+    (string_field "identity_disposition" written_json);
+  let repeated = (write ()).Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string in
+  Alcotest.(check string) "identical write reobserves the existing identity" "reobserved"
+    (string_field "identity_disposition" repeated);
+  Alcotest.(check string) "reobservation keeps the content identity" written_id
+    (string_field "memory_id" repeated);
+  Alcotest.(check int) "reobservation leaves exactly one current fact" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
   let retract id =
     Runtime.keeper_memory_retract_with_outcome
       ~config
@@ -2322,6 +2334,8 @@ let test_retract_records_a_retraction () =
     (json_field "ok" rewritten = `Bool true);
   Alcotest.(check string) "the same claim has the original identity" written_id
     (string_field "memory_id" rewritten);
+  Alcotest.(check string) "retracted identity can be inserted again" "inserted"
+    (string_field "identity_disposition" rewritten);
   (match current_facts ~keepers_dir ~keeper_id:meta.name with
    | [ current ] ->
        let current_id = Masc.Keeper_memory_os_types.memory_id current in

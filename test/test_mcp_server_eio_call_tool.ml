@@ -773,7 +773,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check int "logged row count" 1 (List.length rows);
       let row = List.hd rows in
       check string "tool" "tool_execute" (row |> U.member "tool" |> U.to_string);
-      check bool "success" false (row |> U.member "success" |> U.to_bool);
+      check string "wire outcome" "error"
+        (row |> U.member "wire_outcome" |> U.to_string);
       check string "output" "command exited 1"
         (row |> U.member "output" |> U.to_string);
       check string "lane" "runtime_mcp"

@@ -5254,11 +5254,14 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (post "create" 200
        {|{"lane":"coding","action":"create","runtime_ids":["test_provider.test_model"]}|});
   check bool "the created lane is in the file" true (in_file "[runtime.lanes.coding]");
-  check string "a lane under a runtime id is refused"
-    {|"test_provider.test_model" is a runtime id; a new lane needs a name of its own|}
-    (refusal
-       (post "create under a runtime id" 400
-          {|{"lane":"test_provider.test_model","action":"create","runtime_ids":["test_provider.test_model"]}|}));
+  (* A lane named after a runtime shadows it, which is what the install path
+     writes and what [set] has always produced here; [create] refused it
+     alone. *)
+  ignore
+    (post "create under a runtime id" 200
+       {|{"lane":"test_provider.test_model","action":"create","runtime_ids":["test_provider.test_model"]}|});
+  check bool "the runtime's own lane is in the file" true
+    (in_file {|[runtime.lanes."test_provider.test_model"]|});
   ignore (post "remove" 200 {|{"lane":"coding","action":"remove"}|});
   check bool "the removed lane left the file" false (in_file "[runtime.lanes.coding]");
   ignore
@@ -5934,7 +5937,7 @@ let test_tool_calls_select_keeper_before_limiting () =
       let append keeper index =
         Masc.Keeper_tool_call_log.log_call ~keeper_name:keeper
           ~tool_name:"keeper_lane_status" ~input:(`Assoc ["index", `Int index])
-          ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
+          ~output_text:(string_of_int index) ~wire_outcome:Tool_result.Ok ~duration_ms:1. () in
       for index = 1 to 100 do append "target" index done;
       for index = 1 to 1001 do append "busy-neighbor" index done;
       let entries = tool_call_entries_exn

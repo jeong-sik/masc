@@ -1232,6 +1232,32 @@ let upsert_explicit_fact
   result
 ;;
 
+type memory_write_identity_disposition = Inserted | Reobserved
+
+let memory_write_identity_disposition
+      ~(snapshot : Keeper_memory_os_current.t)
+      ~(fact : Keeper_memory_os_types.fact)
+  =
+  let identity = Keeper_memory_os_types.memory_id fact in
+  let has_identity = List.exists (fun candidate ->
+    String.equal (Keeper_memory_os_types.memory_id candidate) identity) in
+  (* The returned delta was computed under the same lock as the commit.
+     Updating an existing identity can put its old and new payloads in both
+     lists; only an addition without a corresponding removal is insertion. *)
+  if has_identity snapshot.change.added && not (has_identity snapshot.change.removed)
+  then Inserted
+  else Reobserved
+;;
+
+let memory_write_identity_receipt = function
+  | Inserted ->
+    [ "identity_disposition", `String "inserted"
+    ; "what_committed", `String "One current fact was inserted. Its memory_id identifies the exact claim bytes; writing those bytes again reuses this identity, without creating another copy." ]
+  | Reobserved ->
+    [ "identity_disposition", `String "reobserved"
+    ; "what_committed", `String "The existing current fact was re-observed; its observation or support was refreshed. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
+;;
+
 let keeper_memory_write_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -1357,7 +1383,9 @@ let keeper_memory_write_with_outcome
           respond
             ~ok:true
             ~error_kind:No_memory_write_error
-            [ "rows_written", `Int 1
+            (memory_write_identity_receipt
+               (memory_write_identity_disposition ~snapshot ~fact:written_fact)
+             @ [ "rows_written", `Int 1
             ; "revision", `Int snapshot.revision
               (* [recorded_at] echoes the persisted snapshot stamp rather than
                  reading a second clock: the receipt and the stored fact cannot
@@ -1373,7 +1401,7 @@ let keeper_memory_write_with_outcome
             ; ( "memory_id"
               , `String (Keeper_memory_os_types.memory_id written_fact) )
             ; "basis", memory_write_basis_receipt written_fact.basis
-            ]
+            ])
         | None ->
           let detail = "committed current Memory snapshot omitted the written fact" in
           Log.Keeper.warn

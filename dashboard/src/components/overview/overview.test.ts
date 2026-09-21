@@ -1164,6 +1164,7 @@ describe('Overview prototype surface', () => {
         keeper_fleet_safety: {
           running_keeper_fiber_count: 4,
           recovering_keeper_fiber_count: 3,
+          official_client_recovery_required_keeper_count: 2,
           executable_keeper_fiber_count: 7,
         },
       },
@@ -1176,6 +1177,7 @@ describe('Overview prototype surface', () => {
     expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('4')
     expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('3')
     expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('1')
+    expect(container.querySelector('[data-testid="fleet-stat-session-recovery-required"] .v')?.textContent).toBe('2')
 
     keepers.value = []
     shellRuntimeResolution.value = null
@@ -1197,6 +1199,7 @@ describe('Overview prototype surface', () => {
     expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('—')
     expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('—')
     expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="fleet-stat-session-recovery-required"] .v')?.textContent).toBe('—')
 
     keepers.value = []
   })

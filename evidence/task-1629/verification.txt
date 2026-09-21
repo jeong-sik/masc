@@ -1,5 +1,5 @@
 task: task-1629
-head: f173e89
+head: 872d1cf
 pr: https://github.com/jeong-sik/masc/pull/37468
 
 verification:

@@ -1268,7 +1268,7 @@ let () =
             "edit candidates preserve revision identity"
             `Quick
             test_edit_candidates_preserve_revision_identity
-        ; test_case
+        ; Alcotest.test_case
             "distinct comment ids with the same body are distinct candidates"
             `Quick
             test_distinct_comment_ids_with_the_same_body_are_distinct_candidates

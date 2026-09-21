@@ -41,6 +41,7 @@ type board_comment_identity =
 
 type board_signal_kind =
   | Board_post_created
+  | Board_post_updated of { content_updated_at : float }
   | Board_comment_added of board_comment_identity
   | Board_reaction_changed of board_reaction_change
   | Board_vote_cast of board_vote_change

@@ -12,6 +12,7 @@ type post_id = string
 
 type board_stimulus_kind =
   | Post_created
+  | Post_updated of { content_updated_at : float }
   | Comment_added of { comment_id : string; parent_id : string option }
   | Reaction_changed of board_reaction_change
   | Vote_cast of board_vote_change
@@ -358,6 +359,11 @@ let stimulus_identity_equal a b =
   && a.urgency = b.urgency
   &&
   match a.payload, b.payload with
+  | Board_signal {kind=Post_updated left; _}, Board_signal {kind=Post_updated right; _} ->
+    Float.equal left.content_updated_at right.content_updated_at
+  | Board_attention {candidate_id=left_id; signal={kind=Post_updated left; _}},
+    Board_attention {candidate_id=right_id; signal={kind=Post_updated right; _}} ->
+    String.equal left_id right_id && Float.equal left.content_updated_at right.content_updated_at
   | Fusion_completed left, Fusion_completed right ->
     fusion_completion_identity_equal left right
   | Schedule_due _, Schedule_due _ ->
@@ -507,12 +513,14 @@ let urgency_of_string = function
 
 let board_stimulus_kind_to_string = function
   | Post_created -> "post_created"
+  | Post_updated _ -> "post_updated"
   | Comment_added _ -> "comment_added"
   | Reaction_changed _ -> "reaction_changed"
   | Vote_cast _ -> "vote_cast"
 
 let board_stimulus_kind_of_string = function
   | "post_created" -> Ok Post_created
+  | "post_updated" -> Error "post_updated board stimulus requires content_updated_at"
   | "comment_added" -> Error "comment_added board stimulus requires exact comment identity"
   | "reaction_changed" ->
     Error "reaction_changed board stimulus requires reaction payload fields"
@@ -581,6 +589,7 @@ let board_stimulus_fields board =
   @
   match board.kind with
   | Post_created -> []
+  | Post_updated { content_updated_at } -> [ "content_updated_at", `Float content_updated_at ]
   | Comment_added { comment_id; parent_id } ->
     [ "comment_id", `String comment_id
     ; "parent_id", option_json (fun value -> `String value) parent_id
@@ -815,6 +824,14 @@ let payload_of_yojson json =
     let* board_kind = string_field ~context "board_kind" fields in
     let* kind =
       match board_kind with
+      | "post_updated" ->
+        let* () = exact_fields ~context
+          ~expected:([ "kind"; "board_kind"; "author"; "title"; "content";
+            "hearth"; "updated_at_unix"; "content_updated_at" ]
+            @ if kind = "board_attention" then [ "candidate_id" ] else []) fields in
+        let* content_updated_at = float_field ~context "content_updated_at" fields in
+        if Float.is_finite content_updated_at then Ok (Post_updated {content_updated_at})
+        else Error (context ^ ".content_updated_at must be finite")
       | "comment_added" ->
         let* () = exact_fields ~context
             ~expected:

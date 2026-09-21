@@ -205,11 +205,73 @@ let test_no_interests_skips_producer_and_owner_judgment () =
   publish "after-first-cursor"
 ;;
 
+let test_initialized_cursor_receives_each_discoverable_edit () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let meta = keeper_meta ~board_interests:["research"] config "editobserver" in
+  register config meta;
+  let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+    ~title:"Research" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
+  ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+  let _, cursor = Keeper_registry.get_board_cursor ~base_path:config.base_path meta.name in
+  check (option string) "owner cursor is already initialized"
+    (Some (Board.Post_id.to_string post.id)) cursor;
+  Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+  let edit body = get (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
+    ~editor:"editor" ~title:"Research" ~body ~content:body ()) in
+  ignore (edit "First unaddressed revision");
+  check int "initialized cursor cannot suppress first edit" 1 (attention_count config meta.name);
+  ignore (edit "Second unaddressed revision");
+  check int "second edit has its own candidate" 2 (attention_count config meta.name);
+  ignore (edit "Second unaddressed revision");
+  check int "identical edit creates no duplicate candidate" 2 (attention_count config meta.name);
+  check int "discoverable edits still require judgment before direct delivery" 0
+    (queue_length config meta.name)
+;;
+
+let test_queued_edits_keep_their_captured_content () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let meta = keeper_meta config "editreader" in
+  register config meta;
+  let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+    ~title:"Original title" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
+  Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+  let edit title body = get (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
+    ~editor:"editor" ~title ~body ~content:body ()) in
+  let first = edit "First title" "@editreader first captured body" in
+  let second = edit "Second title" "@editreader second captured body" in
+  let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path meta.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "both explicitly addressed edits are durable before consumption" 2
+    (Keeper_event_queue.length queue);
+  let events = Keeper_event_queue.to_list queue |> List.map (fun stimulus ->
+    match Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+    | Ok (Some event) -> event
+    | Ok None -> fail "queued edit disappeared from projection"
+    | Error _ -> fail "queued edit could not read its Board source") in
+  check (list string) "queued titles keep A then B rather than rereading latest B"
+    [first.title; second.title] (List.map (fun event -> event.Keeper_world_observation.title) events);
+  check (list string) "queued bodies keep A then B rather than rereading latest B"
+    [first.body; second.body] (List.map (fun event -> event.Keeper_world_observation.preview) events);
+  check (list (float 0.)) "each projection carries its own persisted content time"
+    [first.content_updated_at; second.content_updated_at]
+    (List.map (fun event -> event.Keeper_world_observation.updated_at) events);
+  List.iter (fun event -> check bool "projection remains a typed edit" true
+    (event.Keeper_world_observation.event_kind = Keeper_world_observation.Board_post_updated)) events
+;;
+
 let () =
   run
     "keeper Board discoverable cursor"
     [ ( "producer and owner boundary"
-      , [ test_case
+      , [ test_case "initialized cursor receives each discoverable edit" `Quick
+            test_initialized_cursor_receives_each_discoverable_edit
+        ; test_case "queued edits preserve captured content before consumption" `Quick
+            test_queued_edits_keep_their_captured_content
+        ; test_case
             "initialized lane defers to owner cursor"
             `Quick
             test_initialized_lane_uses_owner_cursor

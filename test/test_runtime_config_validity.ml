@@ -5143,7 +5143,7 @@ let test_lsp_servers_reads_a_command_per_language () =
    default; present is read strictly, so a misspelt key is a load error. *)
 let typesafeai_table =
   "[typesafeai]\nenabled = false\nendpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
-   board_attention = false\nabsorb_gate = true\ncontext_review = true\n\
+   board_attention = false\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -5156,6 +5156,7 @@ let test_typesafeai_absent_is_the_default () =
     check bool "the Board gate is on" true t.Runtime_schema.board_attention;
     check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
     check bool "Context review is off" false t.Runtime_schema.context_review;
+    check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
     check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
 ;;
 
@@ -5170,6 +5171,7 @@ let test_typesafeai_reads_the_whole_table () =
     check bool "board_attention" false t.Runtime_schema.board_attention;
     check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
     check bool "Context review enabled" true t.Runtime_schema.context_review;
+    check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
     check (list string) "excluded keepers, in order"
       [ "kidsnote-slack-context-collector"; "other" ]
       t.Runtime_schema.excluded_keepers

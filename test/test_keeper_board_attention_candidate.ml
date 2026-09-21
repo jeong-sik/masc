@@ -442,30 +442,95 @@ let expect_record_error ?expected_detail ~base_path label candidate =
   | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
 ;;
 
-(* 요청은 후보와 재료로 만들어지므로 candidate_id 와 signal 이 durable 정체성과
-   다를 수 없다. 전에는 저장된 요청이 그것과 어긋나는지 검사했다. RFC-0424. *)
-let test_singleton_request_is_built_from_candidate_identity () =
+(* 요청은 후보의 현재 signal 과 최소 Keeper 역할로만 만든다. 원장의
+   keeper_context 전체와 pending Board 재료는 이 경계를 넘지 않는다. *)
+let test_judgment_requests_project_only_current_signal_and_keeper_role () =
   let source = signal "post-canonical-request" in
   let original = candidate source in
-  match A.singleton_judgment_request original (material_of source) with
-  | `Assoc [ ("keeper_context", _); ("items", `List [ `Assoc item ]) ] ->
-    Alcotest.(check bool)
-      "item candidate_id is the candidate's own"
-      true
-      (List.assoc_opt "candidate_id" item
-       = Some (`String original.candidate_id));
-    Alcotest.(check bool)
-      "item signal is the candidate's own"
-      true
-      (List.assoc_opt "signal" item = Some (A.signal_to_yojson original.signal));
-    Alcotest.(check bool)
-      "item carries the material post and comments"
-      true
-      (List.assoc_opt "post" item
-       = Some (Masc.Board.post_to_yojson (post_of_signal source))
-       && List.assoc_opt "comments" item
-          = Some (`List [ Masc.Board.comment_to_yojson (comment_of_signal source) ]))
-  | _ -> Alcotest.fail "singleton request did not carry exactly one item"
+  let role =
+    `Assoc
+      [ "name", `String original.keeper_name
+      ; "instructions", `String "continue"
+      ]
+  in
+  let item =
+    `Assoc
+      [ "candidate_id", `String original.candidate_id
+      ; "signal", A.signal_to_yojson original.signal
+      ]
+  in
+  Alcotest.(check bool)
+    "run-record request has the exact narrow shape"
+    true
+    (ok "build judgment request" (A.judgment_request original)
+     = `Assoc
+         [ "candidate_id", `String original.candidate_id
+         ; "signal", A.signal_to_yojson original.signal
+         ; "keeper_role", role
+         ]);
+  Alcotest.(check bool)
+    "singleton request has the exact narrow shape"
+    true
+    (ok "build singleton judgment request" (A.singleton_judgment_request original)
+     = `Assoc [ "keeper_role", role; "items", `List [ item ] ])
+;;
+
+let test_old_relevant_comment_cannot_override_current_unrelated_signal () =
+  let current_signal =
+    { (signal
+         ~content:"Lunch is available in the kitchen."
+         "post-current-unrelated-comment") with
+      kind = Masc.Board_dispatch.Board_comment_added
+    }
+  in
+  let old_relevant_comment =
+    { (comment_of_signal current_signal) with
+      id = comment_id_exn "c-00000000000000000000000000000001"
+    ; content = "@alpha please perform the keeper's specialist review"
+    ; created_at = 1.0
+    }
+  in
+  let current_unrelated_comment =
+    { (comment_of_signal current_signal) with
+      id = comment_id_exn "c-00000000000000000000000000000002"
+    ; content = current_signal.content
+    ; created_at = 2.0
+    }
+  in
+  let original =
+    { (candidate current_signal) with
+      status =
+        A.Pending
+          { last_delivery_failure = None
+          ; material =
+              { post = post_of_signal current_signal
+              ; comments = [ old_relevant_comment; current_unrelated_comment ]
+              }
+          }
+    }
+  in
+  let request =
+    ok
+      "build current-signal-only request"
+      (A.singleton_judgment_request original)
+  in
+  Alcotest.(check bool)
+    "the current unrelated comment is the only Board content sent"
+    true
+    (request
+     = `Assoc
+         [ ( "keeper_role"
+           , `Assoc
+               [ "name", `String "alpha"
+               ; "instructions", `String "continue"
+               ] )
+         ; ( "items"
+           , `List
+               [ `Assoc
+                   [ "candidate_id", `String original.candidate_id
+                   ; "signal", A.signal_to_yojson current_signal
+                   ] ] )
+         ])
 ;;
 
 let test_record_rejects_malformed_without_poisoning_ledger () =
@@ -1277,9 +1342,13 @@ let () =
             `Quick
             test_status_view_preserves_resumability_and_quarantine
         ; Alcotest.test_case
-            "singleton request is built from candidate identity"
+            "judgment requests project only current signal and keeper role"
             `Quick
-            test_singleton_request_is_built_from_candidate_identity
+            test_judgment_requests_project_only_current_signal_and_keeper_role
+        ; Alcotest.test_case
+            "old relevant comment cannot override current unrelated signal"
+            `Quick
+            test_old_relevant_comment_cannot_override_current_unrelated_signal
         ; Alcotest.test_case
             "judgment drops Board evidence and keeps partition identity"
             `Quick

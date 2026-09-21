@@ -44,11 +44,11 @@ type judgment_material =
   ; comments : Board.comment list
   }
 
-(* 판정에 쓰이는 값은 pending 일 때만 읽힌다 ([Keeper_board_attention_exact_flow]
-   의 [prepare] 가 그 밖의 상태를 [Candidate_not_pending] 으로 거부한다). 그래서
-   후보의 필드가 아니라 이 상태가 들고 있다. 소비하면 같이 사라지고, 사라졌다는
-   사실이 그대로 파일에 쓰인다 — 캐시가 곧 쓰기의 원본이므로 메모리와 저장소가
-   같은 말을 계속 한다. RFC-0424. *)
+(* v6 후보 원장은 pending 일 때 Board post/comment 스냅샷을 그대로
+   보존한다. 현재 판정 요청은 이 과거 thread 재료를 보내지 않고 후보의
+   현재 typed signal 만 투영한다. 소비하면 재료도 같이 사라지고, 그 사실이
+   파일에 쓰인다 — 캐시가 곧 쓰기의 원본이므로 메모리와 저장소가 같은
+   말을 계속 한다. RFC-0424. *)
 type pending_state =
   { last_delivery_failure : delivery_failure option
   ; material : judgment_material
@@ -155,9 +155,10 @@ type record_acceptance =
 exception Candidate_unavailable of string
 
 (* v6: the judgment request stopped being a stored field. Its [post] and
-   [comments] moved onto the pending state, where the judgment is the only
-   reader, and [keeper_context] became a candidate field because partition
-   identity is read in every status. [candidate_id] and [signal] are gone: they
+   [comments] moved onto the pending state as retained Board evidence, and
+   [keeper_context] became a candidate field because partition identity is
+   read in every status. The current judgment projection reads neither the
+   post nor comments; it judges only the current signal. [candidate_id] and [signal] are gone: they
    restated the candidate's own fields, and the validator confirmed the two
    agreed on all 13,297 rows measured 2026-09-06. v5 rows carry the old field and
    lack the new one, so the decoder refuses them; v5 ledgers are retired at
@@ -1339,7 +1340,7 @@ let keeper_context_current_fields =
 ;;
 
 let validate_keeper_context ~keeper_name json =
-  let context = "candidate.judgment_request.keeper_context" in
+  let context = "candidate.keeper_context" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
@@ -1390,29 +1391,52 @@ let validate_keeper_context ~keeper_name json =
   Ok (Context_key.to_yojson canonical)
 ;;
 
-(* 요청은 저장된 값을 검사해서 얻는 게 아니라 후보와 재료로 만든다. candidate_id
-   와 signal 이 후보에서 오므로 durable 정체성과 달라질 수 없고, 그래서 그 둘이
-   같은지 확인하던 검증이 없다 — 저장된 13,297행 전부에서 같았던 값들이다.
-   RFC-0424. *)
-let judgment_request_fields candidate material =
-  [ "candidate_id", `String candidate.candidate_id
-  ; "signal", signal_to_yojson candidate.signal
-  ; "post", Board.post_to_yojson material.post
-  ; "comments", `List (List.map Board.comment_to_yojson material.comments)
-  ]
+(* 요청은 후보의 현재 signal 과 Keeper 역할만 투영한다. candidate_id 와
+   signal 이 후보에서 오므로 durable 정체성과 달라질 수 없다. 역할은
+   partition identity 전체를 보내지 않고 이름과 지시만 남긴다. *)
+let keeper_role candidate =
+  let context = "candidate.keeper_context" in
+  let* canonical_context =
+    validate_keeper_context
+      ~keeper_name:candidate.keeper_name
+      candidate.keeper_context
+  in
+  let* fields = assoc ~context canonical_context in
+  let* instructions_json = field ~context "instructions" fields in
+  let* instructions =
+    string_json ~context:(context ^ ".instructions") instructions_json
+  in
+  Ok
+    (`Assoc
+       [ "name", `String candidate.keeper_name
+       ; "instructions", `String instructions
+       ])
 ;;
 
-let judgment_request candidate material =
+let judgment_item candidate =
   `Assoc
-    (judgment_request_fields candidate material
-     @ [ "keeper_context", candidate.keeper_context ])
-;;
-
-let singleton_judgment_request candidate material =
-  `Assoc
-    [ "keeper_context", candidate.keeper_context
-    ; "items", `List [ `Assoc (judgment_request_fields candidate material) ]
+    [ "candidate_id", `String candidate.candidate_id
+    ; "signal", signal_to_yojson candidate.signal
     ]
+;;
+
+let judgment_request candidate =
+  let* role = keeper_role candidate in
+  Ok
+    (`Assoc
+       [ "candidate_id", `String candidate.candidate_id
+       ; "signal", signal_to_yojson candidate.signal
+       ; "keeper_role", role
+       ])
+;;
+
+let singleton_judgment_request candidate =
+  let* role = keeper_role candidate in
+  Ok
+    (`Assoc
+       [ "keeper_role", role
+       ; "items", `List [ judgment_item candidate ]
+       ])
 ;;
 
 let validate_judgment_material ~(signal : Board_dispatch.board_signal) material =

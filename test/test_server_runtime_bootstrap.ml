@@ -1145,7 +1145,7 @@ let test_keeper_tool_call_log_uses_cluster_root () =
               Keeper_tool_call_log.log_call
                 ~keeper_name:"oracle" ~tool_name:"keeper_tasks_list"
                 ~input:(`Assoc []) ~output_text:"ok"
-                ~success:true ~duration_ms:1.0 ();
+                ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
               let expected_dir =
                 Filename.concat
                   (Filename.concat

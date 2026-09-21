@@ -29,7 +29,7 @@ const joinedToolOutput: ToolCallEntry = {
   execution_id: 'exec-context',
   input: { scope: 'current' },
   output: 'context status joined from tool_calls_endpoint',
-  success: true,
+  wire_outcome: 'ok',
   duration_ms: 84,
 }
 

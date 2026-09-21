@@ -1915,6 +1915,53 @@ let read_official config =
   | Error error -> fail (Official.read_error_to_string error)
 ;;
 
+(* Official boundaries never require reopening an unchanged atom checkpoint.
+   A broken checkpoint is a positive control: the next atom boundary must
+   still expose its error rather than silently hiding unread atom work. *)
+let test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms () =
+  let exercise config trace_id current session_dir path =
+    damage_checkpoint Corrupt_checkpoint ~session_dir ~trace_id path;
+    let before = read_progress config in
+    let commits = ref 0 in
+    List.iter (fun turn ->
+      let user = Printf.sprintf "official-q%d" turn in
+      let assistant = Printf.sprintf "official-a%d" turn in
+      write_official_turn config ~trace_id ~turn ~user ~assistant ~tools:[];
+      append_official_boundary config ~trace_id ~turn ~recorded_at:(Float.of_int turn);
+      (match consume config (fun ~expected_revision:_ ~range_id ~official_range_id input ->
+          incr commits;
+          check bool "no atom receipt" true (Option.is_none range_id);
+          check bool "official receipt retained" true (Option.is_some official_range_id);
+          check (list string) "only the new official turn" [user; assistant]
+            (text_markers input);
+          true) with
+       | Consumer.Official_advanced { atom = None; _ } -> ()
+       | _ -> fail "official turn did not advance independently of the checkpoint");
+      check bool "atom position is unchanged" true (read_progress config = before);
+      (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+          fail "quiet wake repeated an official commit") with
+       | Consumer.Nothing_to_read -> ()
+       | _ -> fail "quiet wake changed progress")) [3; 4; 5];
+    check int "each official turn is committed once" 3 !commits;
+    append_boundary config ~trace_id ~turn:6 ~recorded_at:6.
+      (current @ [message "new atom turn"]);
+    match Consumer.consume_one ~config ~keeper_name
+        ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+          fail "corrupt atom checkpoint reached commit") with
+    | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+    | Error error -> fail (Consumer.error_to_string error)
+    | Ok _ -> fail "new atom boundary did not reopen checkpoint"
+  in
+  if with_atoms then with_consumed_shorter_history exercise
+  else with_workspace (fun config ->
+    let trace_id = "official-with-unused-checkpoint" in
+    write_meta config trace_id;
+    save_checkpoint config ~trace_id [] 0;
+    let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+    let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+    exercise config trace_id [] session_dir path)
+;;
+
 (* A keeper that only ever ran on official-client runtimes: no checkpoint, no
    atom position. Its turns are read from their fragments, in order, and the
    official position moves to the last line read. *)
@@ -2290,7 +2337,11 @@ let () =
             test_new_unreadable_boundary_is_not_hidden_by_preflight
         ] )
     ; ( "official-client turns"
-      , [ test_case "an official-only keeper is read from its fragments" `Quick
+      , [ test_case "official turns skip an unchanged atom checkpoint" `Quick
+            (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:true)
+        ; test_case "official-only turns skip an unused checkpoint" `Quick
+            (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:false)
+        ; test_case "an official-only keeper is read from its fragments" `Quick
             test_an_official_only_keeper_is_read_from_its_fragments
         ; test_case "a mixed keeper is read in line order" `Quick
             test_a_mixed_keeper_is_read_in_line_order

@@ -392,7 +392,7 @@ export function ToolQualityPanel() {
   const d = data.value
   if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
   if (error.value) return html`<${ErrorState} message=${error.value} class="m-4" />`
-  if (!d || (d.total === 0 && (d.deferred ?? 0) === 0)) return html`<div class="p-4 text-2xs text-[var(--color-fg-disabled)]">도구 호출 데이터 없음</div>`
+  if (!d || (d.total === 0 && (d.deferred ?? 0) === 0 && (d.unsettled ?? 0) === 0)) return html`<div class="p-4 text-2xs text-[var(--color-fg-disabled)]">도구 호출 데이터 없음</div>`
   const coverageGap = coverageGapDisplay(d)
 
   return html`
@@ -426,7 +426,7 @@ export function ToolQualityPanel() {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
         <div class="text-center">
           <div class="text-lg font-mono ${successColor.value}">${d.success_rate.toFixed(1)}%</div>
           <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">성공률</div>
@@ -444,6 +444,10 @@ export function ToolQualityPanel() {
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--color-status-warn)]">${d.deferred ?? 0}</div>
           <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">대기</div>
+        </div>
+        <div class="text-center">
+          <div class="text-lg font-mono text-[var(--color-status-warn)]">${d.unsettled ?? 0}</div>
+          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">미정산</div>
         </div>
       </div>
 

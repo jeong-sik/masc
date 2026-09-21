@@ -3,13 +3,8 @@ type 'registration_error error =
   | Intake_token_not_live
   | Reservation_unavailable of Keeper_lifecycle_reservation.snapshot
   | Registration_failed of 'registration_error
-  | Lifecycle_open_failed of
-      { error : Keeper_memory_lane.lifecycle_open_error
-      ; rollback_error : string option
-      }
   | Launch_failed of
       { exception_detail : string
-      ; librarian_abort_error : string option
       ; rollback_error : string option
       }
 
@@ -81,19 +76,6 @@ let run
       ~rollback
       launch
   =
-  let abort_open_lifecycle () =
-    match Keeper_memory_lane.abort_librarian ~base_path ~keeper_name with
-    | Ok Keeper_memory_lane.Librarian_abort_idle
-    | Ok Keeper_memory_lane.Librarian_abort_requested
-    | Ok Keeper_memory_lane.Librarian_abort_already_in_progress
-    | Ok (Keeper_memory_lane.Librarian_abort_already_exited _) -> None
-    | Ok (Keeper_memory_lane.Librarian_abort_committed_with_failure exn) ->
-      Some
-        ("Librarian cancellation committed with callback failure: "
-         ^ Printexc.to_string exn)
-    | Error error ->
-      Some (Keeper_memory_lane.librarian_abort_error_to_string error)
-  in
   let run_admitted intake_token =
     let ownership =
       match lifecycle_token with
@@ -123,12 +105,18 @@ let run
            match Eio.Cancel.protect (fun () -> register token intake_token) with
            | Error error -> Error (Registration_failed error)
            | Ok reg ->
-             (match
-                Keeper_memory_lane.begin_librarian_lifecycle
+             (* The Librarian's catch-up is submitted before the launch
+                callback, so no launch path can forget it; the submission is
+                a queue hand-off and the launch does not wait for it (RFC
+                librarian-lifecycle section 4.3, I7). *)
+             (try
+                Keeper_librarian_queue_refresh.submit_durable
                   ~base_path
-                  ~keeper_name
+                  ~keeper_name;
+                Ok (launch intake_token token reg)
               with
-              | Error error ->
+              | exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm dispatches on the exception below and re-throws Cancelled there, after the rollback has run under Eio.Cancel.protect. *)
+                let exception_detail = Printexc.to_string exn in
                 let rollback_error =
                   Eio.Cancel.protect (fun () ->
                     match rollback with
@@ -141,46 +129,9 @@ let run
                           | Ok () -> None
                           | Error detail -> Some detail)))
                 in
-                Error (Lifecycle_open_failed { error; rollback_error })
-              | Ok () ->
-                (try
-                   Ok (launch intake_token token reg)
-                 with
-                 | exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm dispatches on the exception at line 179 and re-throws Cancelled there, after the rollback has run under Eio.Cancel.protect. *)
-                   let exception_detail = Printexc.to_string exn in
-                   let librarian_abort_error, rollback_error =
-                     Eio.Cancel.protect (fun () ->
-                       match rollback with
-                       | Retain_registered ->
-                         (* Retain the registry authority in both cases, but a
-                            pre-start callback failure owns no live fiber that
-                            can settle the Librarian lifecycle. Close that
-                            lifecycle so the exact Offline lane is retryable.
-                            A started lane keeps terminal cleanup ownership. *)
-                         if Keeper_lane.crossed_start_boundary reg.lane
-                         then None, None
-                         else abort_open_lifecycle (), None
-                       | Remove_registered | Restore_previous _ ->
-                         (match reject_for_rollback reg with
-                          | Error detail -> None, Some detail
-                          | Ok () ->
-                            let librarian_abort_error = abort_open_lifecycle () in
-                            let rollback_error =
-                              match rollback_registry rollback token reg with
-                              | Ok () -> None
-                              | Error detail -> Some detail
-                            in
-                            librarian_abort_error, rollback_error))
-                   in
-                   (match exn with
-                    | Eio.Cancel.Cancelled _ -> raise exn
-                    | _ ->
-                      Error
-                        (Launch_failed
-                           { exception_detail
-                           ; librarian_abort_error
-                           ; rollback_error
-                           })))))
+                (match exn with
+                 | Eio.Cancel.Cancelled _ -> raise exn
+                 | _ -> Error (Launch_failed { exception_detail; rollback_error }))))
   in
   match intake_token with
   | Some token ->
@@ -211,69 +162,18 @@ let run
        result)
 ;;
 
-type exit_boundary =
-  | Graceful
-  | Unexpected
-
 let terminalize_safely terminalize =
   try terminalize () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let abort_result ~base_path ~keeper_name =
-  match Keeper_memory_lane.abort_librarian ~base_path ~keeper_name with
-  | Ok Keeper_memory_lane.Librarian_abort_idle
-  | Ok Keeper_memory_lane.Librarian_abort_requested
-  | Ok Keeper_memory_lane.Librarian_abort_already_in_progress
-  | Ok (Keeper_memory_lane.Librarian_abort_already_exited _) -> Ok ()
-  | Ok (Keeper_memory_lane.Librarian_abort_committed_with_failure exn) ->
-    Error
-      ("Librarian cancellation committed with callback failure: "
-       ^ Printexc.to_string exn)
-  | Error error ->
-    Error (Keeper_memory_lane.librarian_abort_error_to_string error)
-;;
-
-let drain_result ~base_path ~keeper_name =
-  match Keeper_memory_lane.drain_and_join_librarian ~base_path ~keeper_name with
-  | Ok Keeper_memory_lane.No_librarian_work
-  | Ok Keeper_memory_lane.Librarian_drained -> Ok ()
-  | Error error ->
-    Error (Keeper_memory_lane.librarian_drain_error_to_string error)
-;;
-
-let combine first_label first second_label second =
-  match first, second with
-  | Ok (), Ok () -> Ok ()
-  | Error detail, Ok () -> Error (first_label ^ " failed: " ^ detail)
-  | Ok (), Error detail -> Error (second_label ^ " failed: " ^ detail)
-  | Error first_detail, Error second_detail ->
-    Error
-      (first_label ^ " failed: " ^ first_detail ^ "; " ^ second_label
-       ^ " failed: " ^ second_detail)
-;;
-
-let finish_lifecycle ~boundary ~base_path ~keeper_name ~terminalize =
+let finish_lifecycle ~terminalize =
   (* Exit settlement commonly runs after the lane has observed cancellation.
-     Keep the ordered Librarian/terminal transaction outside that cancelled
-     context; otherwise the first drain/abort suspension can raise immediately
-     and the lane cleanup may reinterpret a graceful stop as an unexpected
-     abort. *)
+     Keep the terminal publication outside that cancelled context; otherwise
+     its first suspension can raise immediately and the lane cleanup may
+     reinterpret a graceful stop as an unexpected abort. *)
   Eio.Cancel.protect (fun () ->
-    try
-      match boundary with
-      | Graceful ->
-        let librarian = drain_result ~base_path ~keeper_name in
-        let terminal = terminalize_safely terminalize in
-        combine "Librarian cleanup" librarian "terminal cleanup" terminal
-      | Unexpected ->
-        let librarian = abort_result ~base_path ~keeper_name in
-        (* Fence this lifecycle's Librarian intake before publishing a terminal
-           state that may admit its replacement. A name-only abort after
-           publication could otherwise close the newly reopened lifecycle. *)
-        let terminal = terminalize_safely terminalize in
-        combine "Librarian cleanup" librarian "terminal cleanup" terminal
-    with
+    try terminalize_safely terminalize with
     | exn -> Error (Printexc.to_string exn))
 ;;

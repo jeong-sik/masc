@@ -50,6 +50,9 @@ type error =
   | Official_progress_boundary_missing of Keeper_librarian_official_progress.t
       (** The official position names a line that is not an official turn's
           end line. *)
+  | Committed_official_range_mismatch
+      (** A saved Memory receipt names different official turns from the
+          current boundary log. Neither cursor nor Memory may advance. *)
   | Official_range_stopped of
       { line : int
       ; error : Keeper_turn_boundaries.read_error
@@ -76,6 +79,7 @@ val consume_one
   -> commit:
        (expected_revision:int option
         -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
         -> Keeper_librarian.input
         -> bool)
   -> (outcome, error) result
@@ -114,7 +118,14 @@ val consume_one
     checks the original all-unread selection, before process-local retry
     narrowing, and advances to the committed endpoint without calling [commit]
     again. Later Memory writers preserve every runtime cluster's receipt until
-    a newer durable range in that same cluster replaces it. *)
+    a newer durable range in that same cluster replaces it.
+
+    Official-client turns have their own receipt in that same Memory WAL,
+    naming the exact ordered boundary rows and turn references. It is recovered
+    before checkpoint selection or retry narrowing. A mixed Memory commit
+    records both kinds together; a failed write of either progress file never
+    requires synthesizing that committed input again. A receipt whose official
+    identities no longer match the log stops the pass. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)
@@ -124,6 +135,7 @@ val commit_with_runtime
   -> keeper_id:string
   -> expected_revision:int option
   -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
   -> Keeper_librarian.input
   -> bool
 
@@ -144,6 +156,7 @@ module For_testing : sig
     -> commit:
          (expected_revision:int option
           -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
           -> Keeper_librarian.input
           -> bool)
     -> (outcome, error) result

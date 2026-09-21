@@ -139,6 +139,44 @@ let test_purge_preserves_other_cluster () =
     (read_boundaries b = [ Boundaries.History_restarted { trace_id = "trace-b" } ])
 ;;
 
+(* The purge is the one place that stops a Librarian unit early, and it does
+   so before any file goes, whichever operation asked for the purge. *)
+let test_purge_stops_the_running_librarian_unit_first () =
+  with_clusters @@ fun a _b ->
+  let module Lane = Masc.Keeper_memory_lane in
+  Lane.For_testing.reset ();
+  Fun.protect ~finally:Lane.For_testing.reset @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Lane.init ~sw;
+  Fs_compat.mkdir_p (Filename.dirname
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:a.base_path));
+  store_boundary a "trace-a";
+  write_progress a "trace-a";
+  let started, resolve_started = Eio.Promise.create () in
+  let never, _never_resolver = Eio.Promise.create () in
+  let cancelled = ref false in
+  (match Lane.submit ~base_path:a.base_path ~keeper_name (fun () ->
+     Eio.Promise.resolve resolve_started ();
+     try Eio.Promise.await never with
+     | Eio.Cancel.Cancelled _ as exn ->
+       cancelled := true;
+       raise exn) with
+   | Lane.Submitted -> ()
+   | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+     fail "the parked Librarian unit was not submitted");
+  Eio.Promise.await started;
+  (match Server_dashboard_http_delete_actions.For_testing.purge_keeper_artifacts
+    a ~keeper_name ~remove_configuration:false
+    { Masc.Keeper_shutdown_types.requested_name = keeper_name } with
+   | Ok () -> ()
+   | Error detail -> failf "artifact purge: %s" detail);
+  check bool "the unit was cancelled before the files went" true !cancelled;
+  check (option int) "nothing is left running on the lane" (Some 0)
+    (Lane.For_testing.pending ~base_path:a.base_path ~keeper_name);
+  check bool "no progress after the purge" true (read_progress a = None);
+  check bool "no boundaries after the purge" true (read_boundaries a = [])
+;;
+
 let test_reads_do_not_create_runtime_directories () =
   with_clusters @@ fun a _b ->
   let root = Workspace.keepers_runtime_dir a in
@@ -156,6 +194,8 @@ let () =
         ; test_case "progress is not Keeper metadata" `Quick
             test_progress_is_not_a_metadata_record
         ; test_case "purge A preserves B" `Quick test_purge_preserves_other_cluster
+        ; test_case "purge stops the running Librarian unit first" `Quick
+            test_purge_stops_the_running_librarian_unit_first
         ; test_case "reading absent stores creates no directories" `Quick
             test_reads_do_not_create_runtime_directories
         ]

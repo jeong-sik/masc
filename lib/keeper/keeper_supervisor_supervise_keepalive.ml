@@ -219,33 +219,16 @@ let supervise_keepalive
            "supervisor registry turn failure streak unavailable keeper=%s: %s"
            keeper_name
            detail)
-    | Keeper_keepalive_launch_transaction.Lifecycle_open_failed
-        { error; rollback_error } ->
-      Log.Keeper.warn
-        "supervisor launch deferred until Librarian owner exits keeper=%s error=%s%s"
-        meta.name
-        (Keeper_memory_lane.lifecycle_open_error_to_string error)
-        (match rollback_error with
-         | None -> ""
-         | Some detail -> "; rollback failed: " ^ detail);
-      ignore
-        (Keeper_memory_lane.abort_librarian
-           ~base_path
-           ~keeper_name:meta.name
-          : (Keeper_memory_lane.librarian_abort_outcome,
-             Keeper_memory_lane.librarian_abort_error)
-              result)
     | Keeper_keepalive_launch_transaction.Launch_failed
-        { exception_detail; librarian_abort_error; rollback_error } ->
+        { exception_detail; rollback_error } ->
       let cleanup_detail label = function
         | None -> ""
         | Some detail -> "; " ^ label ^ " failed: " ^ detail
       in
       Log.Keeper.error
-        "supervisor launch callback failed keeper=%s error=%s%s%s"
+        "supervisor launch callback failed keeper=%s error=%s%s"
         meta.name
         exception_detail
-        (cleanup_detail "Librarian abort" librarian_abort_error)
         (cleanup_detail "registry rollback" rollback_error)
   in
   let run_launch_transaction ~register ~rollback =

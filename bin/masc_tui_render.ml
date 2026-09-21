@@ -11737,15 +11737,15 @@ let render_keeper_calls (state : state) =
            @ labeled_rows ~call_index ~style:Ansi.dim ~label:"input" call.kc_input
          in
          let output_rows =
-           match
-             Option.bind call.kc_output (fun result ->
-               Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
-           with
+           (* This is the recorded-call inspector. A timeline digest drops
+              structured receipt fields and can hide an assessment behind a
+              later failure; preserve the stored output and let rows scroll. *)
+           match call.kc_output with
            | None -> []
-           | Some digest ->
+           | Some output ->
              labeled_rows ~call_index
                ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
-               ~label:"output" digest
+               ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)
     |> List.concat

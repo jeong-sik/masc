@@ -445,7 +445,10 @@ let prune_raw_traces_after_turn_record
      | Error error ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string RawTraceRetentionSkipped)
-         ~labels:[ "keeper", meta.name ]
+         ~labels:
+           [ "keeper", meta.name
+           ; "reason", Keeper_raw_trace_retention.error_kind error
+           ]
          ();
        Log.Keeper.warn ~keeper_name:meta.name
          "raw-trace retention skipped after TurnRecord commit without gating the turn: %s"

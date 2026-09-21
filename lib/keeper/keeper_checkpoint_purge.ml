@@ -35,8 +35,13 @@ type refusal =
       ; atom_count : int
       }
   | Position_in_other_trace of string
+  | Position_in_other_history of
+      { held : string
+      ; history : string
+      }
   | Rewrite_leaves_no_atoms
   | Position_unreadable of string
+  | Position_invariant_violation of string
 
 let refusal_to_string = function
   | Unread_atoms_present { end_atom; atom_count } ->
@@ -53,8 +58,16 @@ let refusal_to_string = function
       atom_count
   | Position_in_other_trace trace_id ->
     Printf.sprintf "the Librarian position belongs to trace %s" trace_id
+  | Position_in_other_history { held; history } ->
+    Printf.sprintf
+      "the Librarian position belongs to another history (position digest %s, history \
+       digest %s)"
+      held
+      history
   | Rewrite_leaves_no_atoms -> "the rewritten history has no atom to hold a position in"
   | Position_unreadable detail -> "checkpoint position unavailable: " ^ detail
+  | Position_invariant_violation detail ->
+    "checkpoint position invariant violated: " ^ detail
 ;;
 
 let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id ~before ~after =
@@ -64,32 +77,52 @@ let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id 
     if not (String.equal progress.position.trace_id trace_id)
     then Error (Position_in_other_trace progress.position.trace_id)
     else (
-      let _labelled, atom_count = Runtime_model_input_tail_window.annotate before in
-      let end_atom = progress.position.end_atom in
-      if end_atom < atom_count
-      then Error (Unread_atoms_present { end_atom; atom_count })
-      else if end_atom > atom_count
-      then Error (Position_beyond_history { end_atom; atom_count })
-      else (
-        match Keeper_turn_boundaries.position_of_messages after with
-        | Error detail -> Error (Position_unreadable detail)
-        | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
-          Ok
-            (Rebased
-               { before = progress
-               ; after =
-                   { progress with
-                     position = { progress.position with end_atom; last_atom_digest }
-                   }
-               })
-        | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
-        | Ok Keeper_turn_boundaries.No_atom_history ->
-          (* [position_of_messages] answers [Atom_history] or
-             [Empty_atom_history] (its contract); the other two describe a
-             turn's end, not a saved history. *)
-          Error (Position_unreadable "position_of_messages answered no_atom_history")
-        | Ok Keeper_turn_boundaries.Stale_noop ->
-          Error (Position_unreadable "position_of_messages answered stale_noop")))
+      match Keeper_turn_boundaries.position_of_messages before with
+      | Error detail -> Error (Position_unreadable detail)
+      | Ok
+          (Keeper_turn_boundaries.Atom_history
+            { end_atom = atom_count; last_atom_digest = history_digest }) ->
+        let end_atom = progress.position.end_atom in
+        if end_atom < atom_count
+        then Error (Unread_atoms_present { end_atom; atom_count })
+        else if end_atom > atom_count
+        then Error (Position_beyond_history { end_atom; atom_count })
+        else if not (String.equal progress.position.last_atom_digest history_digest)
+        then
+          Error
+            (Position_in_other_history
+               { held = progress.position.last_atom_digest; history = history_digest })
+        else (
+          match Keeper_turn_boundaries.position_of_messages after with
+          | Error detail -> Error (Position_unreadable detail)
+          | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
+            Ok
+              (Rebased
+                 { before = progress
+                 ; after =
+                     { progress with
+                       position = { progress.position with end_atom; last_atom_digest }
+                     }
+                 })
+          | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
+          | Ok Keeper_turn_boundaries.No_atom_history ->
+            Error
+              (Position_invariant_violation
+                 "position_of_messages(after) answered no_atom_history")
+          | Ok Keeper_turn_boundaries.Stale_noop ->
+            Error
+              (Position_invariant_violation
+                 "position_of_messages(after) answered stale_noop"))
+      | Ok Keeper_turn_boundaries.Empty_atom_history ->
+        Error (Unread_atoms_present { end_atom = progress.position.end_atom; atom_count = 0 })
+      | Ok Keeper_turn_boundaries.No_atom_history ->
+        Error
+          (Position_invariant_violation
+             "position_of_messages(before) answered no_atom_history")
+      | Ok Keeper_turn_boundaries.Stale_noop ->
+        Error
+          (Position_invariant_violation
+             "position_of_messages(before) answered stale_noop"))
 ;;
 
 let cleared_tool_result_content =

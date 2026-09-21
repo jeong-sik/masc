@@ -48,7 +48,7 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   (match Masc.Exact_lane_run_registry.install_global registry with
    | Ok () -> () | Error Already_installed -> fail "fixture registry already installed");
   let root=Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
-  Masc.Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Masc.Prompt_defaults.init ();
   ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
     ~cli_slot_ids:[F.cli_primary_runtime] (F.resolver_snapshot ~source:"cancel-recovery" []));

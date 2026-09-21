@@ -1466,9 +1466,18 @@ type runtime_lane_pick =
   | Pick_conversation_lane of string
   | Pick_exact_lane of string
   | Pick_new_lane of string
+  | Pick_media_failover
+      (* Appends to [\[runtime\].media_failover]. The route takes its whole
+         list on the wire, so the pick sends the current order with the choice
+         on the end, and is refused while boot dropped an entry from it. *)
+  | Pick_route_default
+      (* Replaces [\[runtime\].default] rather than appending: the entry holds
+         one runtime, the one a keeper with no assignment walks. *)
 
 let runtime_lane_pick_name = function
   | Pick_conversation_lane lane | Pick_exact_lane lane | Pick_new_lane lane -> lane
+  | Pick_media_failover -> "[runtime].media_failover"
+  | Pick_route_default -> "[runtime].default"
 ;;
 
 (* The lane-editing keys on the Runtime lanes reading. [a] needs no row; the
@@ -2544,11 +2553,22 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
-let runtime_listing_chrome ?(stale_rows = 0) ~error ~action_error ~prompt ~picker_rows () =
+let runtime_listing_chrome
+      ?(stale_rows = 0)
+      ?(route_rows = 0)
+      ?(editor_rows = None)
+      ~error
+      ~action_error
+      ~prompt
+      ~picker_rows
+      ()
+  =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
+  + route_rows
+  + (match editor_rows with None -> 0 | Some count -> 2 + max 1 count)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
 
 (** Dashboard state *)
@@ -4582,14 +4602,25 @@ type local_intervention =
   | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
   | Retained_after_stop
 
-(* The slot editor over the Lanes reading: which standalone lane it was opened
-   on, and where its cursor sits among that lane's declared slots. The slots
-   themselves are read from the lane list each time, so a write followed by a
-   re-read moves the editor with it. *)
-type standalone_slot_editor =
-  { sse_lane : string
-  ; sse_cursor : int
+(* What the slot editor edits: an exact-output lane's declared [slots], or
+   [\[runtime\].media_failover]. Both are an ordered list of runtime ids that
+   something walks in turn, and neither is a conversation lane. *)
+type slot_editor_target =
+  | Exact_lane_slots of string
+  | Media_failover_slots
+
+(* The slot editor: what it was opened on, and where its cursor sits in that
+   list. The list itself is read from the surface each time, so a write
+   followed by a re-read moves the editor with it. *)
+type slot_editor =
+  { se_target : slot_editor_target
+  ; se_cursor : int
   }
+
+let slot_editor_target_name = function
+  | Exact_lane_slots lane -> lane
+  | Media_failover_slots -> "[runtime].media_failover"
+;;
 
 type state = {
   mutable metrics_scroll: int;
@@ -5273,7 +5304,7 @@ type state = {
   (* The slot editor open over the Lanes reading, or [None]. It names the lane
      rather than holding its slots: the list is re-read after every write, and
      a copy taken when the editor opened would go stale in place. *)
-  mutable standalone_slot_editor: standalone_slot_editor option;
+  mutable slot_editor: slot_editor option;
   (* The clients roster, off the ring under Runtime. Lanes is a top-level
      workspace. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
@@ -6971,7 +7002,7 @@ let create_state
   standalone_lanes_inflight = false;
   standalone_lanes_reread_pending = false;
   standalone_lanes_generation = 0;
-  standalone_slot_editor = None;
+  slot_editor = None;
   clients_surface = None;
   clients_surface_error = None;
   clients_surface_inflight = false;
@@ -8296,6 +8327,21 @@ let lane_picker_existing_slots (state : state) = function
          |> Option.value ~default:[])
   | Pick_conversation_lane lane -> conversation_lane_candidates state lane
   | Pick_new_lane _ -> []
+  | Pick_media_failover ->
+    (match state.runtime_surface with
+     | None -> []
+     | Some snapshot ->
+       snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
+  | Pick_route_default ->
+    (* One entry, and a pick replaces it rather than joining it. Listing it
+       here is what marks it "(already a candidate)" in the choices, which is
+       the one thing the reader wants to know before replacing it. *)
+    (match state.runtime_surface with
+     | None -> []
+     | Some snapshot ->
+       (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_default_runtime_id with
+        | Some id -> [ id ]
+        | None -> []))
 
 let runtime_picker_projection (state : state) =
   Option.map (fun pick ->
@@ -8472,40 +8518,57 @@ let plan_runtime_lane_edit (state : state) = function
    admitted it. A declared slot the catalog rejected keeps its place in the
    file, so it is drawn and edited where it sits rather than left out -- the
    admitted list alone cannot say where that is. *)
-type standalone_slot_row =
-  { ssr_slot : string
-  ; ssr_admitted : bool
+type slot_editor_row =
+  { sr_slot : string
+  ; sr_admitted : bool
   }
 
-let standalone_slot_editor_rows (state : state) =
-  match state.standalone_slot_editor, state.standalone_lanes with
-  | None, _ | _, None -> []
-  | Some editor, Some snapshot ->
-    snapshot.Tui_decode.sls_lanes
-    |> List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
-         String.equal lane.Tui_decode.sl_lane_id editor.sse_lane)
-    |> Option.map (fun (lane : Tui_decode.standalone_lane) ->
-         List.map
-           (fun slot ->
-              { ssr_slot = slot
-              ; ssr_admitted =
-                  List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
-              })
-           lane.Tui_decode.sl_declared_slots)
-    |> Option.value ~default:[]
+let slot_editor_rows (state : state) =
+  match state.slot_editor with
+  | None -> []
+  | Some { se_target = Exact_lane_slots lane_id; _ } ->
+    (match state.standalone_lanes with
+     | None -> []
+     | Some snapshot ->
+       snapshot.Tui_decode.sls_lanes
+       |> List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
+            String.equal lane.Tui_decode.sl_lane_id lane_id)
+       |> Option.map (fun (lane : Tui_decode.standalone_lane) ->
+            List.map
+              (fun slot ->
+                 { sr_slot = slot
+                 ; sr_admitted =
+                     List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
+                 })
+              lane.Tui_decode.sl_declared_slots)
+       |> Option.value ~default:[])
+  | Some { se_target = Media_failover_slots; _ } ->
+    (* Edit the file's declaration, not the shorter active fleet. A rejected
+       runtime keeps its position and is marked just like a rejected exact-lane
+       slot, so removing or moving it cannot erase a neighbour by accident. *)
+    (match state.runtime_surface with
+     | None -> []
+     | Some snapshot ->
+       let admitted = snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover in
+       List.map
+         (fun runtime_id ->
+            { sr_slot = runtime_id
+            ; sr_admitted = List.exists (String.equal runtime_id) admitted
+            })
+         snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
 
-let standalone_slot_editor_row (state : state) =
-  match state.standalone_slot_editor with
+let slot_editor_cursor_row (state : state) =
+  match state.slot_editor with
   | None -> None
-  | Some editor -> List.nth_opt (standalone_slot_editor_rows state) editor.sse_cursor
+  | Some editor -> List.nth_opt (slot_editor_rows state) editor.se_cursor
 ;;
 
-type standalone_slot_edit =
+type slot_edit =
   | Drop_slot
   | Move_slot of runtime_lane_move
 
-let standalone_slot_edit_of_key = function
+let slot_edit_of_key = function
   | "x" -> Some Drop_slot
   | "J" -> Some (Move_slot Move_down)
   | "K" -> Some (Move_slot Move_up)
@@ -8517,69 +8580,90 @@ let standalone_slot_edit_of_key = function
    place the file's own order is known -- this list is an admission reading
    with the rejected slots put back, and a lane edited by another writer in
    between would be overwritten by an order built from it. *)
-type standalone_slot_request =
+type slot_write_request =
   | Drop_declared_slot
   | Move_declared_slot of runtime_lane_move
+  | Write_route_order of string list
+      (* [\[runtime\].media_failover] has no per-entry action on the routing
+         endpoint, so the editor writes its complete declared order. *)
 
-type standalone_slot_edit_plan =
+type slot_edit_plan =
   | Send_slot_write of
-      { lane : string
+      { target : slot_editor_target
       ; slot : string
-      ; request : standalone_slot_request
+      ; request : slot_write_request
       ; cursor_after : int option
       }
   | Refuse_slot_edit of runtime_lane_notice
 
-let plan_standalone_slot_edit (state : state) edit =
-  match state.standalone_slot_editor with
+let plan_slot_edit (state : state) edit =
+  match state.slot_editor with
   | None -> Refuse_slot_edit (Lane_write_refused "the slot editor is not open")
   | Some editor ->
-    let rows = standalone_slot_editor_rows state in
+    let rows = slot_editor_rows state in
     let count = List.length rows in
-    (match List.nth_opt rows editor.sse_cursor with
+    let order = List.map (fun row -> row.sr_slot) rows in
+    (match List.nth_opt rows editor.se_cursor with
      | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
      | Some row ->
-       let lane = editor.sse_lane in
-       let slot = row.ssr_slot in
+       let target = editor.se_target in
+       let name = slot_editor_target_name target in
+       let slot = row.sr_slot in
+       let cursor_after_drop =
+         if editor.se_cursor = count - 1 && editor.se_cursor > 0
+         then Some (editor.se_cursor - 1)
+         else None
+       in
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
-         match edit with
-         | Drop_slot ->
-           if count <= 1
-           then
-             (* The writer refuses it too. Saying so here keeps the round trip
-                for edits that can land. *)
-             Refuse_slot_edit
-               (Lane_write_refused
-                  (Printf.sprintf
-                     "%s is the last slot of %s; an exact-output lane needs at least one"
-                     slot
-                     lane))
-           else
-             Send_slot_write
-               { lane
-               ; slot
-               ; request = Drop_declared_slot
-               ; cursor_after =
-                   (if editor.sse_cursor = count - 1
-                    then Some (editor.sse_cursor - 1)
-                    else None)
-               }
-         | Move_slot move ->
+         match target, edit with
+         | Exact_lane_slots _, Drop_slot when count <= 1 ->
+           (* The writer refuses it too. Saying so here keeps the round trip
+              for edits that can land. *)
+           Refuse_slot_edit
+             (Lane_write_refused
+                (Printf.sprintf
+                   "%s is the last slot of %s; an exact-output lane needs at least one"
+                   slot
+                   name))
+         | Exact_lane_slots _, Drop_slot ->
+           Send_slot_write
+             { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
+         | Media_failover_slots, Drop_slot ->
+           (* An empty route is a configuration, not a broken one: it means no
+              vision fleet. So the last entry may go. *)
+           Send_slot_write
+             { target
+             ; slot
+             ; request =
+                 Write_route_order
+                   (List.filteri (fun index _ -> index <> editor.se_cursor) order)
+             ; cursor_after = cursor_after_drop
+             }
+         | _, Move_slot move ->
            let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
-           let target = editor.sse_cursor + by in
-           if target < 0 || target >= count
+           let moved_to = editor.se_cursor + by in
+           if moved_to < 0 || moved_to >= count
            then
              Refuse_slot_edit
-               (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge lane))
-           else
-             Send_slot_write
-               { lane
-               ; slot
-               ; request = Move_declared_slot move
-               ; cursor_after = Some target
-               }))
+               (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge name))
+           else (
+             let request =
+               match target with
+               | Exact_lane_slots _ -> Move_declared_slot move
+               | Media_failover_slots ->
+                 Write_route_order
+                   (List.mapi
+                      (fun index id ->
+                         if index = editor.se_cursor
+                         then List.nth order moved_to
+                         else if index = moved_to
+                         then slot
+                         else id)
+                      order)
+             in
+             Send_slot_write { target; slot; request; cursor_after = Some moved_to })))
 ;;
 
 (* What a Runtime row says about the position it holds in its lane. The
@@ -8780,6 +8864,15 @@ let runtime_surface_listing_chrome state =
     ~action_error:state.runtime_lane_notice
     ~stale_rows:(List.length (runtime_lane_stale_lines state))
     ~prompt:(Option.is_some (runtime_lane_prompt state))
+    (* The two route rows -- [runtime].default and media_failover -- and their
+       divider, drawn above the lane table on the keeper-lane reading. *)
+    ~route_rows:
+      (match state.runtime_mode with Runtime_lanes -> 3 | Runtime_all -> 0)
+    ~editor_rows:
+      (match state.slot_editor with
+       | Some { se_target = Media_failover_slots; _ } ->
+         Some (List.length (slot_editor_rows state))
+       | Some { se_target = Exact_lane_slots _; _ } | None -> None)
     ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
       (runtime_picker_projection state))
     ()

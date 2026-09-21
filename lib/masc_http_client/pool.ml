@@ -177,7 +177,7 @@ let piaf_error_message (err : Piaf.Error.t) =
 let reraise_after_close cleanup exn =
   let bt = Printexc.get_raw_backtrace () in
   (try cleanup () with
-   | cleanup_exn ->
+   | cleanup_exn -> (* cancel-guard-ok: this arm guards cleanup, whose failure must not replace the exception being propagated, and the function's last statement re-raises that exception with its backtrace; the comment above records that cleanup delivers stop signals and is not a cancellation point. *)
      Log.Http.warn "HTTP client scope cleanup: %s"
        (exn_message cleanup_exn));
   Printexc.raise_with_backtrace exn bt

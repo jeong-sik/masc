@@ -165,10 +165,6 @@ def main() -> None:
         config.write_text(
             config_source.read_text()
             .replace("http://127.0.0.1:9/v1", f"http://127.0.0.1:{port}/v1")
-            .replace(
-                "[models.deepseek-v4-flash]\n",
-                "[models.deepseek-v4-flash]\nreasoning-uncontrolled = true\n",
-            )
         )
         cases = []
         provided_question = "What is the cabinet code?"

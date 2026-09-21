@@ -57,6 +57,7 @@ let evaluated answers : Masc.Typesafeai_client.evaluated =
   { response = { model = "actual-judge"; answers; usage = None }
   ; destination_uri = request.endpoint
   ; request_body_sha256 = Digestif.SHA256.(to_hex (digest_string "synthetic request"))
+  ; passed_over = []
   }
 
 let test_judge_boundary () =

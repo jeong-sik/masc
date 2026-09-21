@@ -12,7 +12,7 @@ import json
 import math
 import sys
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Sequence, assert_never
@@ -112,6 +112,8 @@ class CompactCall:
     source_line: int
     tool: str
     outcome: CallOutcome
+    turn: int | None
+    planned_index: int | None
     directed_order_unproven: bool
 
 
@@ -124,6 +126,68 @@ class NgramAggregate:
 
 
 LoadedCall = Call | CompactCall
+
+
+def _source_order(call: LoadedCall) -> tuple[str, int]:
+    if isinstance(call, Call):
+        return call.source.file, call.source.line
+    return call.source_file, call.source_line
+
+
+def _chronological_order(call: LoadedCall) -> tuple[int | float, str, int]:
+    source_file, source_line = _source_order(call)
+    return call.ts, source_file, source_line
+
+
+def _order_turn_calls(
+    calls: list[LoadedCall],
+) -> tuple[list[LoadedCall], Counter[str]]:
+    """Use typed serial order without claiming timestamp contradictions."""
+    chronological = sorted(calls, key=_chronological_order)
+    ordered: list[LoadedCall] = []
+    conflicts: Counter[str] = Counter()
+    index = 0
+    while index < len(chronological):
+        first = chronological[index]
+        if (
+            first.directed_order_unproven
+            or first.turn is None
+            or first.planned_index is None
+        ):
+            ordered.append(first)
+            index += 1
+            continue
+
+        end = index + 1
+        while end < len(chronological):
+            candidate = chronological[end]
+            if (
+                candidate.directed_order_unproven
+                or candidate.turn != first.turn
+                or candidate.planned_index is None
+            ):
+                break
+            end += 1
+
+        segment = sorted(
+            chronological[index:end],
+            key=lambda call: (call.planned_index, *_source_order(call)),
+        )
+        planned_indexes = [call.planned_index for call in segment]
+        conflict = None
+        if len(set(planned_indexes)) != len(planned_indexes):
+            conflict = "duplicate_serial_planned_index"
+        elif any(left.ts > right.ts for left, right in zip(segment, segment[1:])):
+            conflict = "serial_schedule_timestamp_conflict"
+        if conflict is None:
+            ordered.extend(segment)
+        else:
+            ordered.extend(
+                replace(call, directed_order_unproven=True) for call in segment
+            )
+            conflicts[conflict] += len(segment)
+        index = end
+    return ordered, conflicts
 
 
 def _required_string(row: dict[str, Any], name: str) -> str:
@@ -594,6 +658,8 @@ def analyze(
                                     source_line=call.source.line,
                                     tool=call.tool,
                                     outcome=call.outcome,
+                                    turn=call.turn,
+                                    planned_index=call.planned_index,
                                     directed_order_unproven=call.directed_order_unproven,
                                 )
                             )
@@ -602,14 +668,11 @@ def analyze(
         except UnicodeError as exc:
             raise RowError(f"{relative}: cannot read UTF-8 JSONL: {exc}") from exc
 
-    for turn_calls in turns.values():
-        turn_calls.sort(
-            key=lambda call: (
-                call.ts,
-                call.source.file if isinstance(call, Call) else call.source_file,
-                call.source.line if isinstance(call, Call) else call.source_line,
-            )
-        )
+    for turn_key, turn_calls in turns.items():
+        ordered, ordering_conflicts = _order_turn_calls(turn_calls)
+        turns[turn_key] = ordered
+        gap_counts.update(ordering_conflicts)
+        excluded_unordered_calls += ordering_conflicts.total()
     pairs = _ngram_report(
         turns,
         2,

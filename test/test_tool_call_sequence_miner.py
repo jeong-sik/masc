@@ -33,6 +33,7 @@ def fixture_call(
     success: bool = True,
     disposition: str | None = None,
     turn: int = 1,
+    planned_index: int | None = None,
 ) -> dict[str, Any]:
     runtime_contract: dict[str, Any] = {"keeper_name": keeper}
     if trace_id is not None:
@@ -55,7 +56,7 @@ def fixture_call(
         },
         "execution_id": f"exec-{tool}{suffix}",
         "tool_use_id": f"use-{tool}{suffix}",
-        "planned_index": 0,
+        "planned_index": int(ts * 1000) if planned_index is None else planned_index,
         "turn": turn,
         "batch_index": 0,
         "batch_size": 1,
@@ -76,7 +77,9 @@ def write_rows(path: Path, rows: Sequence[dict[str, Any] | str]) -> None:
 class ToolCallSequenceMinerTest(unittest.TestCase):
     def test_schedule_is_named_and_outcome_rollup_is_fail_closed(self) -> None:
         gaps: set[str] = set()
-        schedule = MINER._execution_schedule(fixture_call("scheduled", 1.0), gaps)
+        schedule = MINER._execution_schedule(
+            fixture_call("scheduled", 1.0, planned_index=0), gaps
+        )
 
         self.assertEqual(schedule.turn, 1)
         self.assertEqual(schedule.planned_index, 0)
@@ -98,13 +101,13 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             MINER.CallOutcome.CONFLICT,
         )
 
-    def test_filters_groups_and_orders_by_timestamp_then_source(self) -> None:
+    def test_filters_groups_and_orders_by_serial_schedule(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            first = fixture_call("first", 30.0)
-            second = fixture_call("second", 10.0)
-            tie_a = fixture_call("tie-a", 20.0)
-            tie_b = fixture_call("tie-b", 20.0)
+            first = fixture_call("first", 30.0, planned_index=3)
+            second = fixture_call("second", 10.0, planned_index=0)
+            tie_a = fixture_call("tie-a", 20.0, planned_index=1)
+            tie_b = fixture_call("tie-b", 20.0, planned_index=2)
             composition_node = fixture_call("hidden-node", 15.0)
             composition_node["composition_run_id"] = "run-1"
             aggregate = {
@@ -150,6 +153,35 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             self.assertEqual(tied[0]["execution_id"], "exec-tie-a")
             self.assertEqual(tied[1]["tool_use_id"], "use-tie-b")
             self.assertEqual(report["summary"]["triplet_occurrences"], 2)
+
+    def test_equal_timestamps_follow_serial_planned_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            second = fixture_call("second", 10.0, planned_index=1)
+            first = fixture_call("first", 10.0, planned_index=0)
+            write_rows(root / "calls.jsonl", [second, first])
+
+            report = MINER.analyze(root)
+
+            self.assertEqual(report["pairs"][0]["tools"], ["first", "second"])
+
+    def test_reversed_serial_timestamps_are_not_claimed_as_directed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = fixture_call("first", 20.0, planned_index=0)
+            second = fixture_call("second", 10.0, planned_index=1)
+            write_rows(root / "calls.jsonl", [first, second])
+
+            report = MINER.analyze(root)
+
+            self.assertEqual(report["summary"]["pair_occurrences"], 0)
+            self.assertEqual(report["summary"]["excluded_unordered_calls"], 2)
+            self.assertEqual(
+                report["summary"]["coverage_gap_counts"][
+                    "serial_schedule_timestamp_conflict"
+                ],
+                2,
+            )
 
     def test_aggregates_exact_sequence_without_a_frequency_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

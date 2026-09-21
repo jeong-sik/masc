@@ -14,11 +14,15 @@ type failure =
   | Transport_failure of string
   | Http_response_failure of
       { status : int
+      ; destination_uri : string
       ; body : string
       ; detail : string
       }
 (** A transport diagnostic, or the response the server actually
-    returned. [body] remains a string even when it is invalid JSON.
+    returned. [body] retains the exact received bytes. JSON observations use
+    a string for UTF-8 bodies and the existing [encoding]/[content]/[total_bytes]
+    base64 representation otherwise. Diagnostics are valid UTF-8.
+    [destination_uri] uses the same observation URL as successful responses.
     Response content is private evidence, not guaranteed free of secrets
     that the remote server chose to echo. *)
 

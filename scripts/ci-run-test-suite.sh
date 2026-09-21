@@ -112,6 +112,31 @@ attribute_failures() {
   ' "$1"
 }
 
+# The ledger of suites that left output in the log, in the order dune ran
+# them: the command line dune printed, then the suite's first output line.
+# Dune holds a suite's output until the suite exits, so a log ends with the
+# last suite that finished -- and when dune exits nonzero without printing
+# a failure header, no header reader has anything to resolve and this
+# ledger is the only record of which suites spoke and what they claimed.
+# Run 35545965998 (2026-09-20) is the shape that cost a day: two PASS
+# lines and a BrokenPipe traceback survived in the tail, the failing
+# suite's block was cut off, and the full dune log was not uploaded. A
+# PASS line here is the suite's own verdict, not dune's exit code; a suite
+# that printed nothing (a compile error, a rule that never ran) has no
+# line here and stays the header reader's business.
+suite_output_ledger() {
+  awk '
+    /^\(cd _build\// {
+      if (cmd != "") printf "%s\t%s\n", cmd, (first == "" ? "(no output before the log ends)" : first)
+      cmd = $0; sub(/^\(cd /, "", cmd); sub(/\)$/, "", cmd)
+      first = ""
+      next
+    }
+    cmd != "" && first == "" && $0 !~ /^-+$/ { first = $0 }
+    END { if (cmd != "") printf "%s\t%s\n", cmd, (first == "" ? "(no output before the log ends)" : first) }
+  ' "$1"
+}
+
 extract_failed_names() {
   attribute_failures "$1" | awk -F'\t' '$2 == "failure" && $1 != "-" { print $1 }'
 }
@@ -447,6 +472,30 @@ EOF
   rm -f "$gap_log" "$gap_tsv"
   echo "[test-suite] self-test OK - a header that names no suite is counted, a warning is not"
 
+  # The ledger is what a headerless red has instead of a name: the command
+  # dune printed, then the suite's first output line, in run order. The
+  # shape is run 35545965998's: a BrokenPipe traceback between two suites,
+  # a PASS line that is the suite's own claim, and a suite whose output
+  # never arrived before the log ends.
+  ledger_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-ledger.XXXXXX")"
+  cat > "$ledger_log" <<'EOF'
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keeper_current_failure_pty.py ../bin/masc_tui.exe)
+keeper current failure: PASS
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe)
+tui keyboard PTY regression: PASS
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 38410)
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+(cd _build/default/test && /usr/bin/python3 ./test_tui_lane_pagination.py ../bin/masc_tui.exe)
+EOF
+  ledger="$(suite_output_ledger "$ledger_log" | paste -sd ';' - | tr '\t' '|')"
+  [ "$ledger" = "_build/default/test && /usr/bin/python3 ./test_tui_keeper_current_failure_pty.py ../bin/masc_tui.exe|keeper current failure: PASS;_build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe|tui keyboard PTY regression: PASS;_build/default/test && /usr/bin/python3 ./test_tui_lane_pagination.py ../bin/masc_tui.exe|(no output before the log ends)" ] \
+    || { echo "[test-suite] self-test FAIL - the output ledger misread the run: $ledger" >&2
+         rm -f "$ledger_log"; exit 1; }
+  rm -f "$ledger_log"
+  echo "[test-suite] self-test OK - the output ledger names every suite that spoke, in run order"
+
   # What the deadline snapshot reads from process rows: a dune-run suite, a
   # python rule and a server binary a suite spawned; not a shell.
   running="$(printf '%s\n' \
@@ -663,6 +712,14 @@ awk -F'\t' '$2 == "warning" { print "[test-suite] dune warning, not a failure: "
 # a suite is what makes an unexplained red look like a green.
 if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
   echo "[test-suite] FAIL - dune exited ${rc} and printed no failure header"
+  echo
+  echo "[test-suite] suites that left output in the log (command, first output line; in run order):"
+  suite_output_ledger "$log" | sed 's/^/  /'
+  echo
+  echo "[test-suite] a PASS line above is that suite's own verdict, not dune's exit code:" \
+       "dune exited ${rc} somewhere this log does not name."
+  echo "[test-suite] the full dune log is uploaded as the test-suite-dune-log artifact" \
+       "when the workflow runs this script."
   echo
   tail -60 "$log"
   exit 2

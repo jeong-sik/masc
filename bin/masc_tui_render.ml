@@ -4982,6 +4982,13 @@ let render_lanes_overview (state : state) =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
+         (* The slot editor's heading, its rows and its key line, counted here
+            so the lane detail below gives up the space rather than the
+            editor being drawn past the frame. *)
+         + (match state.standalone_slot_editor with
+            | None -> 0
+            | Some _ ->
+              2 + max 1 (List.length (Masc_tui_types.standalone_slot_editor_rows state)))
        in
        let available =
          max 0
@@ -5025,6 +5032,38 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
+  (* The slot editor the "s" key opens. Its rows are the lane's declared
+     order, which is what the lane walks; a slot publication rejected keeps
+     its place there and is marked rather than left out, because dropping it
+     from the drawing would put the numbers beside the other slots out of step
+     with the file. *)
+  (match state.standalone_slot_editor with
+   | None -> ()
+   | Some editor ->
+       box_line_styled buf cols ~style:(Theme.info ())
+         (Printf.sprintf "  slots of %s — the order this lane walks"
+            (Terminal_text.single_line editor.Masc_tui_types.sse_lane));
+       let slot_rows = Masc_tui_types.standalone_slot_editor_rows state in
+       if slot_rows = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (this lane declares no slot; a slots array is what it walks)"
+       else
+         List.iteri
+           (fun index (row : Masc_tui_types.standalone_slot_row) ->
+              let line =
+                Printf.sprintf "  %s %d  %s%s"
+                  (if index = editor.Masc_tui_types.sse_cursor then ">" else " ")
+                  (index + 1)
+                  (Terminal_text.single_line row.Masc_tui_types.ssr_slot)
+                  (if row.Masc_tui_types.ssr_admitted then ""
+                   else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
+              in
+              if index = editor.Masc_tui_types.sse_cursor then
+                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+              else box_line buf cols line)
+           slot_rows;
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  j/k move · x drop · J/K reorder · Esc close");
   (* The failover-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)

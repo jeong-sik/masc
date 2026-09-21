@@ -1349,6 +1349,52 @@ let test_an_exact_slot_append_keeps_the_declared_order () =
       [ "openai.gpt" ] (exact_lane_slots path "hitl_auto_judge"))
 ;;
 
+(* [drop] and [move] read the same declaration under the same lock, for the
+   same reason: the caller sees the admitted slots and an order rebuilt from
+   them would delete the rest. Each names one slot and the file's order
+   decides where it goes. *)
+let test_an_exact_slot_drop_and_move_read_the_declaration () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention
+      ~slots:[ "catalog.only"; "openai.gpt"; "runpod_mtp.qwen" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen"
+      ~move:Runtime.Move_slot_up ()
+    |> lane_write_ok "move a slot up";
+    Alcotest.(check (list string)) "the slot swapped with the one above it"
+      [ "catalog.only"; "runpod_mtp.qwen"; "openai.gpt" ]
+      (exact_lane_slots path "board_attention_exact");
+    Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"catalog.only" ()
+    |> lane_write_ok "drop the head";
+    Alcotest.(check (list string)) "the rest keep their order"
+      [ "runpod_mtp.qwen"; "openai.gpt" ]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "move past the head" ~path
+      ~names:[ "runpod_mtp.qwen is already first in board_attention_exact" ]
+      (fun () ->
+         Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen"
+           ~move:Runtime.Move_slot_up ());
+    lane_write_refused "drop a slot the lane does not declare" ~path
+      ~names:[ "is not a slot of board_attention_exact"; "runpod_mtp.qwen, openai.gpt" ]
+      (fun () ->
+         Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"catalog.only" ());
+    Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()
+    |> lane_write_ok "drop down to one";
+    (* A lane that resolves to nothing fails the boot fail-closed, so the last
+       slot stays; removing the lane is the other edit. *)
+    lane_write_refused "drop the last slot" ~path
+      ~names:[ "is the last slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ()))
+;;
+
 (* A CLI slot is declared on the lane too. The registry refuses the same id as
    a slot and a CLI slot only as a lane it cannot publish -- and before it is
    published the file is written anyway -- so append and set name the
@@ -3223,6 +3269,10 @@ let () =
             "an exact slot append keeps the declared order"
             `Quick
             test_an_exact_slot_append_keeps_the_declared_order
+        ; Alcotest.test_case
+            "an exact slot drop and move read the declaration"
+            `Quick
+            test_an_exact_slot_drop_and_move_read_the_declaration
         ; Alcotest.test_case
             "an exact append or set refuses a declared CLI slot"
             `Quick

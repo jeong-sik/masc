@@ -4580,6 +4580,15 @@ type local_intervention =
   | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
   | Retained_after_stop
 
+(* The slot editor over the Lanes reading: which standalone lane it was opened
+   on, and where its cursor sits among that lane's declared slots. The slots
+   themselves are read from the lane list each time, so a write followed by a
+   re-read moves the editor with it. *)
+type standalone_slot_editor =
+  { sse_lane : string
+  ; sse_cursor : int
+  }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5259,6 +5268,10 @@ type state = {
      the change it has to show, so one more follows it. *)
   mutable standalone_lanes_reread_pending: bool;
   mutable standalone_lanes_generation: int;
+  (* The slot editor open over the Lanes reading, or [None]. It names the lane
+     rather than holding its slots: the list is re-read after every write, and
+     a copy taken when the editor opened would go stale in place. *)
+  mutable standalone_slot_editor: standalone_slot_editor option;
   (* The clients roster, off the ring under Runtime. Lanes is a top-level
      workspace. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
@@ -6956,6 +6969,7 @@ let create_state
   standalone_lanes_inflight = false;
   standalone_lanes_reread_pending = false;
   standalone_lanes_generation = 0;
+  standalone_slot_editor = None;
   clients_surface = None;
   clients_surface_error = None;
   clients_surface_inflight = false;
@@ -8445,6 +8459,120 @@ let plan_runtime_lane_edit (state : state) = function
              let first_row = state.runtime_cursor - (position - 1) in
              write Write_lane_removal ~cursor_after:(Some (max 0 (first_row - 1)))
            | Some _ | None -> Arm_lane_removal lane)))
+
+(* A row of the slot editor: a slot the lane declares, and whether publication
+   admitted it. A declared slot the catalog rejected keeps its place in the
+   file, so it is drawn and edited where it sits rather than left out -- the
+   admitted list alone cannot say where that is. *)
+type standalone_slot_row =
+  { ssr_slot : string
+  ; ssr_admitted : bool
+  }
+
+let standalone_slot_editor_rows (state : state) =
+  match state.standalone_slot_editor, state.standalone_lanes with
+  | None, _ | _, None -> []
+  | Some editor, Some snapshot ->
+    snapshot.Tui_decode.sls_lanes
+    |> List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
+         String.equal lane.Tui_decode.sl_lane_id editor.sse_lane)
+    |> Option.map (fun (lane : Tui_decode.standalone_lane) ->
+         List.map
+           (fun slot ->
+              { ssr_slot = slot
+              ; ssr_admitted =
+                  List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
+              })
+           lane.Tui_decode.sl_declared_slots)
+    |> Option.value ~default:[]
+;;
+
+let standalone_slot_editor_row (state : state) =
+  match state.standalone_slot_editor with
+  | None -> None
+  | Some editor -> List.nth_opt (standalone_slot_editor_rows state) editor.sse_cursor
+;;
+
+type standalone_slot_edit =
+  | Drop_slot
+  | Move_slot of runtime_lane_move
+
+let standalone_slot_edit_of_key = function
+  | "x" -> Some Drop_slot
+  | "J" -> Some (Move_slot Move_down)
+  | "K" -> Some (Move_slot Move_up)
+  | _ -> None
+;;
+
+(* What the editor sends: one slot and what to do with it, never a rebuilt
+   order. The writer reads the declaration under its lock, which is the only
+   place the file's own order is known -- this list is an admission reading
+   with the rejected slots put back, and a lane edited by another writer in
+   between would be overwritten by an order built from it. *)
+type standalone_slot_request =
+  | Drop_declared_slot
+  | Move_declared_slot of runtime_lane_move
+
+type standalone_slot_edit_plan =
+  | Send_slot_write of
+      { lane : string
+      ; slot : string
+      ; request : standalone_slot_request
+      ; cursor_after : int option
+      }
+  | Refuse_slot_edit of runtime_lane_notice
+
+let plan_standalone_slot_edit (state : state) edit =
+  match state.standalone_slot_editor with
+  | None -> Refuse_slot_edit (Lane_write_refused "the slot editor is not open")
+  | Some editor ->
+    let rows = standalone_slot_editor_rows state in
+    let count = List.length rows in
+    (match List.nth_opt rows editor.sse_cursor with
+     | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
+     | Some row ->
+       let lane = editor.sse_lane in
+       let slot = row.ssr_slot in
+       if runtime_lane_write_busy state
+       then Refuse_slot_edit Lane_write_pending
+       else (
+         match edit with
+         | Drop_slot ->
+           if count <= 1
+           then
+             (* The writer refuses it too. Saying so here keeps the round trip
+                for edits that can land. *)
+             Refuse_slot_edit
+               (Lane_write_refused
+                  (Printf.sprintf
+                     "%s is the last slot of %s; an exact-output lane needs at least one"
+                     slot
+                     lane))
+           else
+             Send_slot_write
+               { lane
+               ; slot
+               ; request = Drop_declared_slot
+               ; cursor_after =
+                   (if editor.sse_cursor = count - 1
+                    then Some (editor.sse_cursor - 1)
+                    else None)
+               }
+         | Move_slot move ->
+           let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
+           let target = editor.sse_cursor + by in
+           if target < 0 || target >= count
+           then
+             Refuse_slot_edit
+               (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge lane))
+           else
+             Send_slot_write
+               { lane
+               ; slot
+               ; request = Move_declared_slot move
+               ; cursor_after = Some target
+               }))
+;;
 
 type runtime_pick_item =
   | Pick_lane of Tui_decode.runtime_resolved_lane

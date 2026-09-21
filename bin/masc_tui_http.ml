@@ -1521,6 +1521,40 @@ let append_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
     ; "runtime_id", `String runtime_id
     ]
 
+(** Which way {!move_exact_lane_slot} walks a slot through the declared
+    order. *)
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+
+(** POST /api/v1/runtime/config/routing with [action = "drop"]: take
+    [runtime_id] out of the standalone lane [name]. Only the one id is sent,
+    for the reason the append gives -- this caller can see the slots the
+    registry admitted, and an order rebuilt from that view would delete every
+    declared slot it rejected. The server refuses a slot the lane does not
+    declare, and its last one. *)
+let drop_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "drop"
+    ; "runtime_id", `String runtime_id
+    ]
+
+(** POST /api/v1/runtime/config/routing with [action = "move"]: exchange
+    [runtime_id] with its neighbour in the lane's declared order. Sent as one
+    id and a direction for the same reason as the drop. The server refuses a
+    slot already at the end the move heads for. *)
+let move_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "move"
+    ; "runtime_id", `String runtime_id
+    ; ( "direction"
+      , `String (match move with Move_slot_up -> "up" | Move_slot_down -> "down") )
+    ]
+
 (** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the
     declared lane [lane]. The server refuses while a keeper still routes
     through it -- an assignment, or [\[runtime\].default] for every keeper

@@ -170,6 +170,36 @@ let test_press_reaches_the_guest_and_the_ledger () =
       fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
 ;;
 
+(* A click is button down, run, button up, run, in one call, sharing one
+   step ceiling -- unlike a key, which is one setting. The machine here is
+   already settled and idling on a key it never gets (hello.com does not
+   read the mouse), so both halves have nothing to react to and the call is
+   evidence of two things at once: the ceiling bounds the sum of both
+   halves rather than doubling it, and the button is put down and taken
+   back up (not left held) without the guest reacting badly to either. *)
+let test_click_reaches_the_guest_and_the_ledger () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let result =
+      dispatch ~base_path ~agent:"vincent" "masc_dos_click"
+        [ ("x", `Int 1); ("y", `Int 1); ("steps", `Int 4) ]
+    in
+    check bool "click succeeds" true (is_completed result);
+    check bool "the guest did not crash" false (bool_field "exited" result);
+    check bool "down and up share one ceiling, not two" true
+      (int_field "steps_run" result <= 4);
+    match Dos_lane.ledger () with
+    | [ entry ] ->
+      check string "the ledger names the caller" "vincent" entry.Dos_lane.who;
+      (* The default buttons is 1 (left); the entry names the button that
+         went down, not the 0 the up half releases it to. *)
+      check string "and the click as mouse(x,y,buttons)" "mouse(1,1,1)"
+        entry.Dos_lane.key_name
+    | entries ->
+      fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
+;;
+
 (* The machine reads a program into guest memory and masc_dos_peek reads guest
    memory back out. A caller-supplied path would therefore be an arbitrary
    host-file read, so only inventory names resolve. *)
@@ -349,6 +379,8 @@ let () =
         ; test_case "inventory" `Quick test_inventory_when_unnamed
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
+        ; test_case "click reaches the guest" `Quick
+            test_click_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key

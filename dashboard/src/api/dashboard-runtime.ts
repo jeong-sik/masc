@@ -51,7 +51,6 @@ export interface DashboardRuntimeRequestConfig {
   response_format?: DashboardRuntimeResponseFormat | null
   has_output_schema?: boolean
   cache_system_prompt?: boolean
-  supports_tool_choice_override?: boolean | null
   supports_structured_output_override?: boolean | null
   has_model_capabilities_override?: boolean
   keep_alive?: string | null
@@ -80,6 +79,8 @@ export interface DashboardRuntimeDeclaredProviderSpec {
   behavior_capabilities?: DashboardRuntimeProviderBehaviorCapabilities | null
   custom_header_count?: number | null
   connect_timeout_s?: number | null
+  /** Total Exact request timeout, including response headers. */
+  exact_body_timeout_s?: number | null
 }
 
 export interface DashboardRuntimeDeclaredModelCapabilities {
@@ -486,7 +487,6 @@ function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig
     response_format: decodeRuntimeResponseFormat(raw.response_format),
     has_output_schema: asBoolean(raw.has_output_schema),
     cache_system_prompt: asBoolean(raw.cache_system_prompt),
-    supports_tool_choice_override: asBoolean(raw.supports_tool_choice_override) ?? null,
     supports_structured_output_override: asBoolean(raw.supports_structured_output_override) ?? null,
     has_model_capabilities_override: asBoolean(raw.has_model_capabilities_override),
     keep_alive: asNullableString(raw.keep_alive),
@@ -523,6 +523,7 @@ function decodeRuntimeDeclaredProviderSpec(raw: unknown): DashboardRuntimeDeclar
     behavior_capabilities: decodeRuntimeProviderBehaviorCapabilities(raw.behavior_capabilities),
     custom_header_count: asNumber(raw.custom_header_count) ?? null,
     connect_timeout_s: asNumber(raw.connect_timeout_s) ?? null,
+    exact_body_timeout_s: asNumber(raw.exact_body_timeout_s) ?? null,
   }
 }
 

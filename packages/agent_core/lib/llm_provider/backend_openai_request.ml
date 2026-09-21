@@ -261,17 +261,14 @@ let effective_max_output_tokens (config : Provider_config.t) =
 (* Shared tool_choice emission gate for the Chat and Responses envelopes.
    Explicit forcing ([Any] / [Tool _]) is caller intent and always reaches
    [effective_tool_choice], which fails closed on unsupported forcing.
-   Advisory [Auto] is emitted only when the model supports tool_choice
-   ([supports_tool_choice_override] wins over the capability record).
+   Advisory [Auto] is emitted only when the resolved capability record says
+   the model supports tool_choice.
    [None_] / absent tool_choice resolve to [None] in
    [effective_tool_choice], so the gate value is irrelevant for them. *)
 let should_emit_tool_choice (config : Provider_config.t) =
   match config.tool_choice with
   | Some (Any | Tool _) -> true
-  | Some (Auto | None_) | None ->
-    (match config.supports_tool_choice_override with
-     | Some v -> v
-     | None -> (capabilities_of_config config).supports_tool_choice)
+  | Some (Auto | None_) | None -> (capabilities_of_config config).supports_tool_choice
 ;;
 
 (** Build Openai Chat Completions request body from {!Provider_config.t}.

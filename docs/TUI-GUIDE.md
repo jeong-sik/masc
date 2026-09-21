@@ -417,6 +417,8 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
+The [Glossary](spec/00-glossary.md#core) uses Lane for Runtime candidate order. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes; this section's existing UI label `Lanes` shows exact-output routes.
+
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.
@@ -798,11 +800,12 @@ of the request: the attributed total and the serialized bytes are measured at
 different points and the gap is not explained, and the arrow into SERIALIZED
 REQUEST is drawn only when both readings describe the same turn. SERIALIZED
 REQUEST is the request the dispatcher actually serialized, in bytes and in the
-provider's own token count. HISTORY REACH is how much of the Keeper's recent
-history that request carried: atoms are the indivisible units a cut falls
-between, so a tool call and the result it answers travel together or not at
-all, and the count says how many stayed behind — which is where "why does it
-not remember that" usually ends. A provider
+provider's own token count. HISTORY REACH shows the last observed history
+range: a wire-shape projection or history prepared for a client. Its runtime
+is not recorded, so the turn's runtime does not identify who measured it.
+Atoms are the indivisible units a cut falls between, keeping a tool call and
+its result together. The count says how many atoms were outside that range;
+it does not prove what the provider received or what a client retained. A provider
 that reports usage across the whole conversation rather than per request
 gets no window percentage here, only the number it reported and a note that
 this request's own share was not. RECENT TURNS, the section at the bottom,

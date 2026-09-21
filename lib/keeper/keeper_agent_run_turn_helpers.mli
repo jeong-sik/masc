@@ -81,12 +81,12 @@ type restart_notice =
       (** The turn starts from no atom and the saved history is known to hold
           none: nothing can be saved before the line. *)
   | Notice_after_first_save
-      (** The turn starts from no atom because its checkpoint could not be
-          loaded. What is saved may still hold atoms; the restart happens only
-          if a save of this turn is accepted, so the line follows the first
-          accepted stage save, or, when no stage save was accepted, the
-          finalize save -- see {!restart_line_owed_at_finalize}. Either way
-          the line is written, and it is written before the line that ends
+      (** The turn starts from no atom because its saved checkpoint version
+          was superseded. What is saved may still hold atoms; the restart
+          happens only if a save of this turn is accepted, so the line follows
+          the first accepted stage save, or, when no stage save was accepted,
+          the finalize save -- see {!restart_line_owed_at_finalize}. Either
+          way the line is written, and it is written before the line that ends
           the turn. *)
 
 (** Pure. Every pair is listed. *)

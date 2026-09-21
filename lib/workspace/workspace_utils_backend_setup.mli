@@ -27,13 +27,18 @@ val resolved_base_escapes_temp_request : string -> string -> bool
     temp-dir base request resolved outside temp. task-351 guard: such a
     resolution must never be honoured, or a test harness can rewrite a live
     workspace (2026-08-25 04:38:30Z incident). *)
-val runtime_base_path_for : string -> string
+type base_path_source =
+  | Explicit of string
+      (** A [--base] or [--base-path] value that [MASC_BASE_PATH] must not
+          replace. *)
+  | Ambient of string
+      (** A path selected from the process environment or current working
+          directory. *)
+
+val runtime_base_path : base_path_source -> string
 (** Resolve the workspace path used for runtime state. Linked worktrees share
     the main checkout's state, while the temp-directory escape guard keeps a
     scratch request inside its requested directory. *)
-val runtime_base_path_for_request : string -> string
-(** Resolve an explicit workspace argument without letting [MASC_BASE_PATH]
-    replace it. Worktree and scratch handling match {!runtime_base_path_for}. *)
 val env_opt : string -> string option
 val sanitize_namespace_segment : string -> string
 (** A bounded filesystem path segment for a logical name.

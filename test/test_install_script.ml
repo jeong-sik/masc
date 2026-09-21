@@ -1767,7 +1767,7 @@ wizard-default = true
       check (list string) "no stale atomic tmp files" [] stale_atomic_tmps)
 ;;
 
-let test_release_checksums_include_model_catalog_overlay_seed () =
+let test_release_checksums_include_runtime_config_seed () =
   let workflow = release_workflow () in
   assert_contains
     "release checksum includes runtime config seeds"
@@ -1843,9 +1843,9 @@ let () =
             `Quick
             test_force_refreshes_same_version_existing_binary
         ; test_case
-            "release checksums include model catalog overlay seed"
+            "release checksums include runtime config seed"
             `Quick
-            test_release_checksums_include_model_catalog_overlay_seed
+            test_release_checksums_include_runtime_config_seed
         ] )
     ; ( "wizard"
       , [ test_case "wizard flags exist" `Quick test_wizard_flags_exist

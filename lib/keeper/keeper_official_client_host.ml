@@ -368,6 +368,144 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
 let measure_message_bytes message = String.length (encode_history_message message)
 ;;
 
+type carried_start_front =
+  | Carried_seed of Keeper_carried_front.source
+      (** The seed named the front: the ledger of an Agent Core pair, the
+          newest completed turn record on this history, or the narrowest
+          range an unfinished turn reached. *)
+  | Lane_cut
+      (** The lane's own cut sits at or past the seed's position, so it named
+          the front. *)
+  | Whole_history
+      (** No seed held and the lane cut nothing: the range starts at the
+          oldest atom and the provider judges it. *)
+
+type carried_start =
+  { messages : Agent_core.Types.message list
+  ; projection : Runtime_model_input_tail_window.projection
+  ; history_atom_count : int
+  ; first_atom : int
+  ; transmitted_bytes : int
+  ; front : carried_start_front
+  }
+
+let carried_start_front_to_string = function
+  | Carried_seed source ->
+    Printf.sprintf "carried:%s" (Keeper_carried_front.source_to_string source)
+  | Lane_cut -> "lane_cut"
+  | Whole_history -> "whole_history"
+;;
+
+(* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
+   front is a position in the keeper's checkpoint history, and an official
+   client cuts from that same history: masc composes the list here and the
+   client assembles the request from it
+   ([Keeper_carried_front.Hands_over_its_own_list]). So a range measured by an
+   Agent Core turn names the same atoms on this lane, and a lane walking to
+   this candidate starts where the last completed turn ended rather than at
+   the oldest atom.
+
+   These lanes hold no ledger: the ledger is written from the usage of a
+   request this process composed ([Keeper_turn_driver_try_provider]), and an
+   official client composes its own. The seed the caller reads is therefore
+   the whole answer, and with no seed the range is the whole history, which
+   the provider then judges — the same two outcomes the Agent Core path has
+   without a ledger.
+
+   [own_first_atom] is the front the calling lane already chose for its own
+   reason — Claude Code cuts its start seed to the runtime's declared
+   max-prompt-bytes — and the range starts at whichever of the two is later,
+   so neither cut is undone by the other. A lane with no cut of its own
+   passes 0.
+
+   Runs on the calling fiber: reading the seed opens the keeper's turn-record
+   store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.
+   The composition it drives is a walk over the whole history, so that part is
+   offloaded. *)
+let carried_start_range ~keeper_name ~runtime_id ~carried_front_seed ~own_first_atom
+      messages
+  =
+  let seed_read =
+    match carried_front_seed with
+    | None -> Keeper_carried_front.no_seed_read
+    | Some read -> read ()
+  in
+  let digest_at, history_atom_count =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      ( Runtime_model_input_tail_window.atom_opening_digest messages
+      , snd (Runtime_model_input_tail_window.annotate messages) ))
+  in
+  Option.iter
+    (fun (unreadable : Keeper_carried_front.unreadable_records) ->
+       Log.Keeper.warn
+         ~keeper_name
+         "model input carried range seed read skipped unreadable turn records \
+          runtime=%s unreadable=%d first_reason=%s"
+         runtime_id
+         unreadable.Keeper_carried_front.count
+         unreadable.Keeper_carried_front.first_reason)
+    seed_read.Keeper_carried_front.unreadable;
+  let seeded_first_atom =
+    match seed_read.Keeper_carried_front.seed with
+    | None -> None
+    | Some seed ->
+      (match Keeper_carried_front.for_history ~digest_at seed with
+       | Ok admitted ->
+         Some
+           ( Keeper_carried_front.clamp
+               ~atom_count:history_atom_count
+               admitted.Keeper_carried_front.first_atom
+           , admitted.Keeper_carried_front.source )
+       | Error dropped ->
+         (* The position names no atom of this history: it is shorter than the
+            front, or a purge put another message under that index. Carrying
+            the newest atom alone from there would never widen again, so the
+            range starts over as with no seed. *)
+         Log.Keeper.warn
+           ~keeper_name
+           "model input carried range dropped its front runtime=%s seed=%s reason=%s \
+            history_atoms=%d: the history does not open that atom with the same \
+            message, and the start seed carries the whole history"
+           runtime_id
+           (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
+           (Keeper_carried_front.dropped_front_to_string dropped)
+           history_atom_count;
+         None)
+  in
+  let first_atom, front =
+    match seeded_first_atom with
+    | Some (first_atom, source) when first_atom >= own_first_atom ->
+      first_atom, Carried_seed source
+    | Some _ | None ->
+      own_first_atom, (if own_first_atom > 0 then Lane_cut else Whole_history)
+  in
+  let projection, transmitted_bytes =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Runtime_model_input_tail_window.project_from_atom
+        ~measure_message_bytes
+        ~first_atom
+        messages)
+  in
+  Log.Keeper.info
+    ~keeper_name
+    "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
+     transmitted_bytes=%d lane_first_atom=%d"
+    runtime_id
+    (carried_start_front_to_string front)
+    projection.Runtime_model_input_tail_window.dropped_atoms
+    (history_atom_count - projection.Runtime_model_input_tail_window.dropped_atoms)
+    history_atom_count
+    transmitted_bytes
+    own_first_atom;
+  { messages = projection.Runtime_model_input_tail_window.messages
+  ; projection
+  ; history_atom_count
+  ; first_atom
+  ; transmitted_bytes
+  ; front
+  }
+;;
+
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort
     =
@@ -1224,7 +1362,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                  { outcome = Terminal_failed _; _ } as stop) ->
                { final_result with success = false; abort_turn = Some stop }
              | None, Some stop -> { final_result with abort_turn = Some stop })
-        | exception exn ->
+        | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-throwing with the original backtrace nine lines down. The site is correct; the marker exists only because the guard reads eight lines. *)
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
             ignore

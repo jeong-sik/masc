@@ -20,20 +20,24 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
-(** What an official-client lane can say about one turn's model input.
+(** What an official-client lane can say about one turn's input handoff.
 
-    [Whole_input_transmitted] carries the list the lane rendered into the
-    request in full, which is what a [Start] does: the seed history, the
-    prompt-context carrier and the goal all leave this process on this turn,
-    so the bytes can be attributed.
+    [Whole_input_transmitted] carries the MASC-prepared messages handed to the
+    client integration. It does not prove that the client placed every byte in
+    the provider request or model context. Starts hand over the seed history.
+    On a Claude Code resume, MASC hands the canonical snapshot over as
+    replacement system-layer configuration, but the client may reuse the
+    session's original system prompt instead; this receipt records the handoff,
+    not what the model read. Codex resume behaviour needs its own evidence and
+    is not inferred from the Claude Code path. Client-owned native conversation
+    and tool history outside the snapshot are not included in this capture.
+    Do not use this receipt to compare per-lane model-input byte totals.
 
-    [Held_by_client_session] is a [Resume]. The client owns the conversation
-    server-side and masc sends only the new turn, so the accumulated history
-    the model reads never crosses this process and no measurement of it exists
-    here. Reporting the local list for these turns attributes bytes that were
-    not sent -- and on Antigravity inverts the record outright, because the
-    carrier that {b is} sent is the one message
-    {!Keeper_agent_prompt_metrics.provider_content_of_transmitted} removes. *)
+    [Held_by_client_session] means that the lane did not retransmit that
+    history, as on Antigravity resume. The current goal and ephemeral context
+    may still be sent. The accumulated client-owned history is not observable
+    here, so attributing the local prepared list would count bytes that were
+    not sent. This distinction is not the [Start]/[Resume] distinction. *)
 type transmitted_model_input =
   | Whole_input_transmitted of Agent_core.Types.message list
   | Held_by_client_session
@@ -187,6 +191,61 @@ val measure_message_bytes : Agent_core.Types.message -> int
     canonical MASC encoding. At or above what any adapter's own rendering
     sends, so a budget checked with this cannot be exceeded downstream. *)
 
+(** Who named the front of a start seed. *)
+type carried_start_front =
+  | Carried_seed of Keeper_carried_front.source
+      (** The seed: the newest completed turn record on this history,
+          whichever runtime measured it, or the narrowest range an unfinished
+          turn reached. *)
+  | Lane_cut
+      (** The lane's own cut, passed as [own_first_atom], sits at or past the
+          seed's position. *)
+  | Whole_history
+      (** No seed held and the lane cut nothing, so the range starts at the
+          oldest atom and the provider judges it. *)
+
+type carried_start =
+  { messages : Agent_core.Types.message list
+        (** The carried range: the atoms from [first_atom], the pinned
+            messages in place, and the preamble when the range opens on a
+            non-[User] message. *)
+  ; projection : Runtime_model_input_tail_window.projection
+  ; history_atom_count : int
+  ; first_atom : int
+  ; transmitted_bytes : int
+  ; front : carried_start_front
+  }
+
+val carried_start_front_to_string : carried_start_front -> string
+
+val carried_start_range
+  :  keeper_name:string
+  -> runtime_id:string
+  -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
+  -> own_first_atom:int
+  -> Agent_core.Types.message list
+  -> carried_start
+(** Where an official client's start seed begins
+    (RFC keeper-context-window-in-tokens §10.4).
+
+    The front is a position in the keeper's checkpoint history and this lane
+    cuts from that same history, so a range an Agent Core turn measured names
+    the same atoms here, and a lane walking to this candidate starts where the
+    last completed turn ended instead of at the oldest atom.
+
+    These lanes hold no ledger — it is written from the usage of a request
+    this process composed, and an official client composes its own — so the
+    caller's seed is the whole answer. Without one the range is the whole
+    history, which the provider then judges: the same two outcomes the Agent
+    Core path has when no ledger answers.
+
+    [own_first_atom] is the front the lane already chose for its own reason
+    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).
+    The range starts at whichever position is later, so neither cut undoes the
+    other; a lane with no cut of its own passes 0. A seed whose index this
+    history does not open with the seed's message is dropped and reported, and
+    the range starts over as with no seed. *)
+
 val prepare_turn :
   runtime_label:string ->
   keeper_name:string ->
@@ -332,10 +391,9 @@ val host_stop_result :
     durable continuation owner, so no Agent Core checkpoint is synthesized.
 
     [usage] is what the adapter could measure before the stop: Claude Code
-    sums the usage of the assistant frames it saw, since the result frame
-    that carries a turn total never arrives after a host stop. [Some] marks
-    the observation [Per_request]; [None] leaves the scope unavailable, which
-    is what every host-stopped turn recorded before 2026-09-03.
+    uses the newest assistant request's usage, since the result frame that
+    carries a turn total never arrives after a host stop. [Some] marks the
+    observation [Per_request]; [None] leaves the scope unavailable.
 
     Non-failed stops carry a one-attempt runtime observation (masc#31312):
     the vendor loop did run to reach this boundary, and a [None] observation

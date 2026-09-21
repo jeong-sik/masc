@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -181,6 +184,47 @@ describe('normalizeTaskStatus', () => {
   it('reports an absent predecessor as null, not undefined', () => {
     expect(normalizeTask({ id: 'task-3', title: 'Root task' }))
       .toMatchObject({ predecessor_task_id: null })
+  })
+
+  // The task status carries the verification question at the top level; the
+  // verify queue keys a stop on it, so dropping it here would re-lock every
+  // cancellation whose request record kept no sentence.
+  it('carries the verification intent through to the store', () => {
+    expect(normalizeTask({
+      id: 'task-4',
+      title: 'Stop request',
+      status: 'awaiting_verification',
+      intent: 'cancel',
+    })).toMatchObject({ verification_intent: 'cancel' })
+  })
+
+  it('reports an unknown verification intent as null', () => {
+    expect(normalizeTask({ id: 'task-5', title: 'Task', intent: 'whatever' }))
+      .toMatchObject({ verification_intent: null })
+  })
+
+  // The intent strings are the backend's, not ours: task_status_to_yojson
+  // writes what verification_intent_to_string returns. A rename there
+  // ("cancel" -> "cancelled") would make this normalizer answer null, which
+  // fails closed as completion and re-locks every stop -- silently, because
+  // the dashboard suite as a whole is not in CI. Reading the OCaml source
+  // here puts this file in the backend-coupled lane
+  // (scripts/ci/list-dashboard-backend-coupled-tests.py), so the rename fails
+  // this assertion instead. The path is relative to this file; a wrong path
+  // throws ENOENT, never a vacuous pass.
+  it('accepts exactly the intents the backend can write', () => {
+    const source = readFileSync(resolve(__dirname, '../../lib/types/types_core.ml'), 'utf8')
+    const fn = source.match(/let verification_intent_to_string = function([\s\S]*?);;/)
+    expect(fn, 'verification_intent_to_string is in lib/types/types_core.ml').not.toBeNull()
+    const backend = [...(fn?.[1] ?? '').matchAll(/->\s*"([^"]+)"/g)]
+      .map((m) => m[1])
+      .filter((intent): intent is string => typeof intent === 'string')
+      .sort()
+    expect(backend).toEqual(['cancel', 'complete'])
+    for (const intent of backend) {
+      expect(normalizeTask({ id: 'task-6', title: 'Task', intent }))
+        .toMatchObject({ verification_intent: intent })
+    }
   })
 
 })

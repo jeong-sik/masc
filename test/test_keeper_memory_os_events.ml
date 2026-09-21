@@ -29,7 +29,7 @@ let retrieved ?trace_id ?memory_id ~at query =
   event ?trace_id ?memory_id ~at (Events.Retrieved { query })
 ;;
 
-let cited ?memory_id ~at tool = event ?memory_id ~at (Events.Cited { tool })
+let retracted ?memory_id ~at () = event ?memory_id ~at Events.Retracted
 
 let revised ~memory_id ~at superseded_by =
   event ~memory_id ~at (Events.Revised { superseded_by })
@@ -74,13 +74,13 @@ let test_round_trip_each_kind () =
        let back = Events.event_of_json (Events.event_to_json e) |> require_ok "decode" in
        check event_testable "round trip" e back)
     [ retrieved ~at:1000. "deploy needs assets"
-    ; cited ~at:1001. "keeper_memory_retract"
+    ; retracted ~at:1001. ()
     ; revised ~memory_id:id_b ~at:1002. id_a
     ; retrieved ~trace_id:"" ~at:1003. "no turn"
     ]
 ;;
 
-let test_wire_carries_one_payload_field () =
+let test_wire_carries_the_kind_payload () =
   let fields = function
     | `Assoc fields -> List.map fst fields |> List.sort String.compare
     | _ -> fail "event json is not an object"
@@ -88,9 +88,9 @@ let test_wire_carries_one_payload_field () =
   check (list string) "retrieved fields"
     [ "kind"; "memory_id"; "query"; "recorded_at"; "trace_id" ]
     (fields (Events.event_to_json (retrieved ~at:1. "q")));
-  check (list string) "cited fields"
-    [ "kind"; "memory_id"; "recorded_at"; "tool"; "trace_id" ]
-    (fields (Events.event_to_json (cited ~at:1. "t")));
+  check (list string) "retracted has no payload field"
+    [ "kind"; "memory_id"; "recorded_at"; "trace_id" ]
+    (fields (Events.event_to_json (retracted ~at:1. ())));
   check (list string) "revised fields"
     [ "kind"; "memory_id"; "recorded_at"; "superseded_by"; "trace_id" ]
     (fields (Events.event_to_json (revised ~memory_id:id_b ~at:1. id_a)))
@@ -115,7 +115,7 @@ let test_decoder_rejects_and_names () =
   check_names "extra field" "reinforcement"
     (require_error "extra"
        (Events.event_of_json (with_field base "reinforcement" (`Int 3))));
-  check_names "payload of another kind" "tool"
+  check_names "undeclared payload" "tool"
     (require_error "wrong payload"
        (Events.event_of_json (with_field base "tool" (`String "x"))));
   check_names "missing payload" "query"
@@ -125,6 +125,13 @@ let test_decoder_rejects_and_names () =
        (Events.event_of_json (with_field base "memory_id" (`String "m1"))));
   check_names "blank query" "query"
     (require_error "blank" (Events.event_of_json (with_field base "query" (`String "  "))));
+  let removed = Events.event_to_json (retracted ~at:1000. ()) in
+  check_names "retraction accepts no tool payload" "tool"
+    (require_error "obsolete payload"
+       (Events.event_of_json (with_field removed "tool" (`String "keeper_memory_retract"))));
+  check_names "the old cited kind is not a retraction alias" "kind"
+    (require_error "obsolete kind"
+       (Events.event_of_json (with_field removed "kind" (`String "cited"))));
   check_names "non-object" "expected"
     (require_error "list" (Events.event_of_json (`List [])));
   let revised_json = Events.event_to_json (revised ~memory_id:id_b ~at:1. id_a) in
@@ -144,12 +151,18 @@ let events_only rows =
     rows
 ;;
 
+let read_ok ~keepers_dir ~keeper_id =
+  match Events.read ~keepers_dir ~keeper_id with
+  | Ok rows -> rows
+  | Error error -> fail (Events.file_read_error_to_string error)
+;;
+
 let test_append_then_read_in_order () =
   with_temp_keepers @@ fun keepers_dir ->
   let keeper_id = "keeper" in
   let written =
     [ retrieved ~at:1000. "first"
-    ; cited ~at:1001. "keeper_memory_retract"
+    ; retracted ~at:1001. ()
     ; revised ~memory_id:id_b ~at:1002. id_a
     ]
   in
@@ -159,14 +172,15 @@ let test_append_then_read_in_order () =
        | Ok () -> ()
        | Error error -> fail (Events.append_error_to_string error))
     written;
-  let rows = Events.read ~keepers_dir ~keeper_id in
+  let rows = read_ok ~keepers_dir ~keeper_id in
   check (list int) "indices follow file order" [ 0; 1; 2 ] (List.map fst rows);
   check (list event_testable) "every row reads back" written (events_only rows)
 ;;
 
 let test_missing_sidecar_reads_as_no_events () =
   with_temp_keepers @@ fun keepers_dir ->
-  check int "no file, no rows" 0 (List.length (Events.read ~keepers_dir ~keeper_id:"nobody"))
+  check int "no file, no rows" 0
+    (List.length (read_ok ~keepers_dir ~keeper_id:"nobody"))
 ;;
 
 let test_unreadable_line_stays_in_the_list () =
@@ -181,7 +195,7 @@ let test_unreadable_line_stays_in_the_list () =
   let oc = open_out path in
   output_string oc (good ^ "\n" ^ "not json\n" ^ "\n" ^ stale ^ "\n" ^ good ^ "\n");
   close_out oc;
-  let rows = Events.read ~keepers_dir ~keeper_id in
+  let rows = read_ok ~keepers_dir ~keeper_id in
   check int "blank line does not count" 4 (List.length rows);
   let tag (index, row) =
     match row with
@@ -212,6 +226,26 @@ let test_append_refuses_what_read_would_refuse () =
     (Sys.file_exists (Events.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
+let test_retraction_hard_cut_preserves_other_rows () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let keeper_id = "keeper" in
+  let old = Events.event_to_json (retracted ~at:1. ()) in
+  let old = with_field old "kind" (`String "cited") in
+  let old = with_field old "tool" (`String "keeper_memory_retract") in
+  let rows = [ old; Events.event_to_json (retracted ~at:2. ());
+               Events.event_to_json (retrieved ~at:3. "kept") ] in
+  List.iter (Fs_compat.append_jsonl
+      (Events.path_for_keepers_dir ~keepers_dir ~keeper_id)) rows;
+  let read = read_ok ~keepers_dir ~keeper_id in
+  (match read with
+   | (0, Error (Events.Malformed _)) :: _ -> ()
+   | _ -> fail "the obsolete cited row must stay as a named read error");
+  check int "all rows stay accounted for" 3 (List.length read);
+  let summary = Events.summary_for ~memory_id:id_a (events_only read) in
+  check int "only the typed retraction is counted" 1 summary.retracted_count;
+  check int "the following retrieval still reads" 1 summary.retrieved_count
+;;
+
 let test_append_all_returns_only_the_failures () =
   with_temp_keepers @@ fun keepers_dir ->
   let keeper_id = "keeper" in
@@ -219,7 +253,7 @@ let test_append_all_returns_only_the_failures () =
     Events.append_all ~keepers_dir ~keeper_id
       [ retrieved ~at:1. "first"
       ; retrieved ~memory_id:"not-an-id" ~at:2. "bad"
-      ; cited ~at:3. "keeper_memory_retract"
+      ; retracted ~at:3. ()
       ]
   in
   check int "one failure back" 1 (List.length failures);
@@ -228,7 +262,18 @@ let test_append_all_returns_only_the_failures () =
      check_names "the failure names the field" "memory_id" (Types.wire_error_to_string error)
    | _ -> fail "expected the invalid event's own rejection");
   check int "the valid ones were written" 2
-    (List.length (events_only (Events.read ~keepers_dir ~keeper_id)))
+    (List.length (events_only (read_ok ~keepers_dir ~keeper_id)))
+;;
+
+let test_sidecar_read_failure_is_not_empty_history () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let parent = Filename.concat keepers_dir "not-a-directory" in
+  Fs_compat.save_file parent "occupied";
+  match Events.read ~keepers_dir:parent ~keeper_id:"keeper" with
+  | Error { path; message = _ } ->
+    check string "failed sidecar path is retained"
+      (Events.path_for_keepers_dir ~keepers_dir:parent ~keeper_id:"keeper") path
+  | Ok _ -> fail "a non-directory sidecar parent must not become empty history"
 ;;
 
 (* ---------- projection ---------- *)
@@ -239,8 +284,8 @@ let test_summary_counts_only_this_fact () =
     ; retrieved ~at:(10. *. day +. 500.) "one again"
     ; retrieved ~at:(12. *. day +. 1.) "later day"
     ; retrieved ~memory_id:id_b ~at:(13. *. day) "another fact"
-    ; cited ~at:(11. *. day) "keeper_memory_retract"
-    ; cited ~memory_id:id_c ~at:(11. *. day) "keeper_memory_retract"
+    ; retracted ~at:(11. *. day) ()
+    ; retracted ~memory_id:id_c ~at:(11. *. day) ()
     ; revised ~memory_id:id_b ~at:(14. *. day) id_a
     ; revised ~memory_id:id_c ~at:(14. *. day) id_a
     ; revised ~memory_id:id_c ~at:(15. *. day) id_a
@@ -252,7 +297,7 @@ let test_summary_counts_only_this_fact () =
   check int "two UTC days, not three retrievals" 2 s.retrieved_distinct_days;
   check (option (float 0.0)) "last retrieval is the latest" (Some (12. *. day +. 1.))
     s.last_retrieved_at;
-  check int "cited once" 1 s.cited_count;
+  check int "retracted once" 1 s.retracted_count;
   check (list string) "revised from both predecessors, once each" [ id_b; id_c ] s.revised_from
 ;;
 
@@ -270,7 +315,7 @@ let test_summary_json_names_every_field () =
   check bool "retrieved_count" true (field "retrieved_count" = `Int 1);
   check bool "retrieved_distinct_days" true (field "retrieved_distinct_days" = `Int 1);
   check bool "last_retrieved_at is the time" true (field "last_retrieved_at" = `Float (10. *. day));
-  check bool "cited_count" true (field "cited_count" = `Int 0);
+  check bool "retracted_count" true (field "retracted_count" = `Int 0);
   check bool "revised_from lists the predecessor" true (field "revised_from" = `List [ `String id_b ]);
   match Events.summary_to_json (Events.summary_for ~memory_id:id_c []) with
   | `Assoc fields -> check bool "never retrieved is null, not zero" true (List.assoc "last_retrieved_at" fields = `Null)
@@ -278,11 +323,11 @@ let test_summary_json_names_every_field () =
 ;;
 
 let test_summary_of_an_unused_fact_is_empty () =
-  let s = Events.summary_for ~memory_id:id_c [ retrieved ~at:1. "q"; cited ~at:2. "t" ] in
+  let s = Events.summary_for ~memory_id:id_c [ retrieved ~at:1. "q"; retracted ~at:2. () ] in
   check int "no retrievals" 0 s.retrieved_count;
   check int "no days" 0 s.retrieved_distinct_days;
   check (option (float 0.0)) "never retrieved" None s.last_retrieved_at;
-  check int "no citations" 0 s.cited_count;
+  check int "no retractions" 0 s.retracted_count;
   check (list string) "no predecessors" [] s.revised_from
 ;;
 
@@ -292,17 +337,21 @@ let () =
     [ ( "codec"
       , [ test_case "fixture ids are memory ids" `Quick test_ids_are_memory_ids
         ; test_case "each kind round-trips" `Quick test_round_trip_each_kind
-        ; test_case "a line carries one payload field" `Quick test_wire_carries_one_payload_field
+        ; test_case "a line carries only its kind payload" `Quick test_wire_carries_the_kind_payload
         ; test_case "the decoder rejects and names the field" `Quick test_decoder_rejects_and_names
         ] )
     ; ( "sidecar"
       , [ test_case "append then read in order" `Quick test_append_then_read_in_order
         ; test_case "a missing file is no events" `Quick test_missing_sidecar_reads_as_no_events
         ; test_case "an unreadable line stays in the list" `Quick test_unreadable_line_stays_in_the_list
+        ; test_case "obsolete citations do not hide the remaining history" `Quick
+            test_retraction_hard_cut_preserves_other_rows
         ; test_case "append refuses what read would refuse" `Quick
             test_append_refuses_what_read_would_refuse
         ; test_case "append_all returns only the failures" `Quick
             test_append_all_returns_only_the_failures
+        ; test_case "a sidecar read failure is not empty history" `Quick
+            test_sidecar_read_failure_is_not_empty_history
         ] )
     ; ( "projection"
       , [ test_case "the summary counts only this fact" `Quick test_summary_counts_only_this_fact

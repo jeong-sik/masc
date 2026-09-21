@@ -70,6 +70,7 @@ type capabilities =
     startup does not use it for admission. [headers] is retained for
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
+let exact_body_timeout_s_key = "exact-body-timeout-s"
 
 type antigravity_effort =
   | Antigravity_low
@@ -118,6 +119,11 @@ type provider =
       On an exact-output lane a target with neither this key nor a body
       budget is rejected at plan admission (Missing_deadline, #36979): the
       wire would otherwise carry no deadline at all. *)
+  ; exact_body_timeout_s : float option
+    (** Explicit total HTTP request deadline for Exact-output calls through
+        this provider, including connection, response headers and the full
+        response body. [None] declares no body deadline. This does not replace
+        [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
@@ -159,50 +165,49 @@ type reasoning_streaming_format =
     duplicated here, to avoid two-SSOT drift. *)
 type model_capabilities =
   { max_output_tokens : int option
-  ; supports_tool_choice : bool
-  ; supports_required_tool_choice : bool
-  ; supports_named_tool_choice : bool
-  ; supports_parallel_tool_calls : bool
+  ; supports_tool_choice : bool option
+  ; supports_required_tool_choice : bool option
+  ; supports_named_tool_choice : bool option
+  ; supports_parallel_tool_calls : bool option
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
   ; reasoning_streaming_format : reasoning_streaming_format option
-  ; supports_image_input : bool
-  ; supports_audio_input : bool
-  ; supports_video_input : bool
-  ; supports_multimodal_inputs : bool
-  ; supports_response_format_json : bool
-  ; supports_structured_output : bool
-  ; supports_system_prompt : bool
-  ; supports_prompt_caching : bool
-  ; supports_top_k : bool
-  ; supports_min_p : bool
-  ; supports_seed : bool
-  ; emits_usage_tokens : bool
+  ; supports_image_input : bool option
+  ; supports_audio_input : bool option
+  ; supports_video_input : bool option
+  ; supports_multimodal_inputs : bool option
+  ; supports_response_format_json : bool option
+  ; supports_structured_output : bool option
+  ; supports_system_prompt : bool option
+  ; supports_prompt_caching : bool option
+  ; supports_top_k : bool option
+  ; supports_min_p : bool option
+  ; supports_seed : bool option
+  ; emits_usage_tokens : bool option
   }
 [@@deriving show, eq]
 
 let model_capabilities_default =
   { max_output_tokens = None
-  ; supports_tool_choice = false
-  ; supports_required_tool_choice = false
-  ; supports_named_tool_choice = false
-  ; supports_parallel_tool_calls = false
+  ; supports_tool_choice = None
+  ; supports_required_tool_choice = None
+  ; supports_named_tool_choice = None
+  ; supports_parallel_tool_calls = None
   ; thinking_control_format = No_thinking_control
   ; declared_thinking_control_format = None
   ; reasoning_streaming_format = None
-  ; supports_image_input = false
-  ; supports_audio_input = false
-  ; supports_video_input = false
-  ; supports_multimodal_inputs = false
-  ; supports_response_format_json = false
-  ; supports_structured_output = false
-  ; supports_system_prompt = false
-  ; supports_prompt_caching = false
-  ; supports_top_k = false
-  ; supports_min_p = false
-  ; supports_seed = false
-  ; (* stricter default: most providers report usage; CLI wrappers opt out *)
-    emits_usage_tokens = true
+  ; supports_image_input = None
+  ; supports_audio_input = None
+  ; supports_video_input = None
+  ; supports_multimodal_inputs = None
+  ; supports_response_format_json = None
+  ; supports_structured_output = None
+  ; supports_system_prompt = None
+  ; supports_prompt_caching = None
+  ; supports_top_k = None
+  ; supports_min_p = None
+  ; supports_seed = None
+  ; emits_usage_tokens = None
   }
 ;;
 

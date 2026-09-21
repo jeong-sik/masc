@@ -71,8 +71,8 @@ let view ~front history : Try_provider.request_view =
 (* A turn that did not finish is read at the position it reached. The range it
    tried is what the next turn sends, so a turn that failed for a reason that
    says nothing about size keeps its range instead of giving up half of it. *)
-let test_an_unfinished_turns_range_is_read_where_it_stopped () =
-  let ceiling = { (seed 0) with Front.source = Front.Unfinished_turn { turn = 9 } } in
+let test_a_response_observed_turns_range_is_read_where_it_started () =
+  let ceiling = { (seed 0) with Front.source = Front.Turn_record { turn = 9 } } in
   let v = view ~front:(Some ceiling) history in
   let composed = v.Try_provider.composed in
   let observation =
@@ -87,7 +87,7 @@ let test_an_unfinished_turns_range_is_read_where_it_stopped () =
   in
   Alcotest.(check int) "the recorded front carries all seven atoms" 7
     observation.Window.transmitted_atoms;
-  Alcotest.(check string) "the origin names the unfinished turn" "unfinished_turn#9"
+  Alcotest.(check string) "the origin names the response-observed turn" "turn_record#9"
     (Front.origin_to_string composed.Try_provider.origin)
 ;;
 
@@ -180,8 +180,8 @@ let () =
             test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes
         ; Alcotest.test_case "projected first the count would be the dialect's" `Quick
             test_projected_first_the_atom_count_would_be_the_dialects
-        ; Alcotest.test_case "an unfinished turn reads where it stopped" `Quick
-            test_an_unfinished_turns_range_is_read_where_it_stopped
+        ; Alcotest.test_case "a response-observed turn reads where it started" `Quick
+            test_a_response_observed_turns_range_is_read_where_it_started
         ; Alcotest.test_case "a declined projection hands over the carried range" `Quick
             test_a_declined_projection_hands_over_the_carried_range
         ] )

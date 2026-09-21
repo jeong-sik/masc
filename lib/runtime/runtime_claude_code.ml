@@ -117,6 +117,10 @@ type assistant_usage =
   ; mutable last : turn_usage option
   }
 
+type observed_usage =
+  | Latest_request of turn_usage
+  | Turn_total of turn_usage
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -126,7 +130,7 @@ type turn_result =
   ; subscription : subscription
   ; rate_limit : rate_limit option
   ; resumed : bool
-  ; usage : turn_usage option
+  ; usage : observed_usage option
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -220,9 +224,8 @@ type error =
   | Stopped_by_host of
       { stop : host_stop
       ; usage : turn_usage option
-        (** Token counts summed over the assistant frames seen before the
-            host ended the turn. The result frame that would carry the turn
-            total never arrives after a host stop. *)
+        (** Latest assistant request's token counts before the host ended
+            the turn. A result total never arrives after a host stop. *)
       }
   | Quota_blocked of
       { api_error_status : int option
@@ -1228,14 +1231,12 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | None -> protocol_error "result message" "successful turn has no text"
     in
     emit_stream_event on_stream_event (Turn_finished { text });
-    (* The result frame's usage is the CLI's sum over the turn's calls. The
-       newest assistant frame is one request's, which is what the turn
-       reports; the frame's figure stands in only when no assistant frame
-       carried usage at all. *)
+    (* Preserve whether the count describes one request or the client turn.
+       A result total cannot stand in for a request's context occupancy. *)
     let usage =
       match assistant_usage.last with
-      | Some last -> Some last
-      | None -> usage
+      | Some last -> Some (Latest_request last)
+      | None -> Option.map (fun total -> Turn_total total) usage
     in
     Ok
       { session_id = expected_session_id
@@ -1404,12 +1405,12 @@ let terminate_spawned_process ~clock proc stdin_w =
   let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
-     | exn ->
+     | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
        Log.Runtime_agent.debug
          "Claude Code stdin close failed: %s"
          (Printexc.to_string exn));
     (try Eio.Process.signal proc Sys.sigterm with
-     | exn ->
+     | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
        Log.Runtime_agent.debug
          "Claude Code termination signal failed: %s"
          (Printexc.to_string exn));
@@ -1424,7 +1425,7 @@ let terminate_spawned_process ~clock proc stdin_w =
            Eio.Process.signal proc Sys.sigkill;
            Eio.Process.await proc |> ignore
          with
-         | exn ->
+         | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
            Log.Runtime_agent.warn
              "Claude Code forced reap failed: %s"
              (Printexc.to_string exn))

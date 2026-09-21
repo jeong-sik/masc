@@ -28,12 +28,13 @@ let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
 let notify_state_change_observer ~keeper_name =
-  try (Atomic.get state_change_observer) () with
-  | exn ->
-    Log.Keeper.warn
-      "reaction ledger state-change observer failed keeper=%s: %s"
-      keeper_name
-      (Printexc.to_string exn)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "reaction ledger state-change observer failed keeper=%s: %s"
+        keeper_name
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ())
 ;;
 
 (* The storage namespace and row schema advance together. Readers inspect

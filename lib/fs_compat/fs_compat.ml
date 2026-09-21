@@ -16,7 +16,6 @@
 open Fs_compat_internal
 
 module Atomic_orphan_size_class = Atomic_orphan_size_class
-module Capability_exact_read = Capability_exact_read
 
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
     Using Atomic.t is required for OCaml 5 multi-domain safety:
@@ -1144,16 +1143,26 @@ let read_dir (path : string) : string list =
 ;;
 
 (** Load entire file contents as string, or [None] when the file is
-    missing. Option-returning sibling of {!load_file} (which raises on a
-    missing path). [Sys_error] from a vanished file (TOCTOU race after the
-    [file_exists] check) is also mapped to [None]; other I/O failures of an
-    existing file propagate as [Sys_error], matching {!load_file}. *)
+    missing. A path lookup failure is not absence. A file that vanishes
+    between lookup and open is also absent; all other I/O failures propagate
+    as [Sys_error], matching {!load_file}. *)
 let load_file_opt (path : string) : string option =
-  if not (file_exists path)
-  then None
-  else (
-    try Some (load_file path) with
-    | Sys_error _ when not (file_exists path) -> None)
+  let missing () =
+    match exact_path_kind path with
+    | Exact_missing -> true
+    | Exact_kind _ | Exact_unknown -> false
+  in
+  try
+    if missing ()
+    then None
+    else (
+      try Some (load_file path) with
+      | Sys_error _ when missing () -> None)
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+    raise
+      (Sys_error
+         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
 ;;
 
 let file_size (path : string) : int option =

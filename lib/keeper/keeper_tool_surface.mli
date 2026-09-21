@@ -33,6 +33,16 @@ val dispatch_keeper_msg
   -> message:Keeper_invocation_contract.direct_message
   -> tool_result
 
+(** Submit through the same resolution and preflight as [dispatch_keeper_msg],
+    returning the canonical Keeper name and the Owner's durable acceptance.
+    Adapters serialize that receipt at their own response boundary. *)
+val submit_keeper_msg
+  :  submitted_by:string
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> _ context
+  -> message:Keeper_invocation_contract.direct_message
+  -> (string * Keeper_owner.operation_acceptance, tool_result) result
+
 module For_testing : sig
   val reset_keeper_list_cache : unit -> unit
 

@@ -167,7 +167,7 @@ let schema_field_types ?base_path id : (string * declared_type) list =
          ~labels:[ "error_kind", "json_parse_error" ]
          ();
        []
-     | exception exn ->
+     | exception exn -> (* cancel-guard-ok: Yojson parsing performs no Eio operation. *)
        let preview_len = min 200 (String.length json_str) in
        Log.Server.warn
          "[sidecar.schema_field_types] id=%s other: %s \

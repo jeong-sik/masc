@@ -15,7 +15,6 @@ type unavailable_reason =
   | Absorb_gate_disabled  (** [\[typesafeai\] absorb_gate = false], the default *)
   | Board_attention_disabled  (** [\[typesafeai\] board_attention = false] *)
   | Context_review_disabled
-  | Skill_applicability_disabled
   | Keeper_excluded
       (** the keeper is named in [\[typesafeai\] excluded_keepers]: nothing of
           it reaches the vendor, whichever gate asks *)
@@ -36,10 +35,6 @@ val board_attention_api_key : keeper_id:string -> (string, unavailable_reason) r
 val context_review_api_key : keeper_id:string -> (string, unavailable_reason) result
 (** Opt-in preservation review of source Context and its proposed summary.
     Disabled by default; lane, key and keeper exclusions still apply. *)
-
-val skill_applicability_api_key : keeper_id:string -> (string, unavailable_reason) result
-(** Opt-in applicability advice for an already authorized Skill read.
-    Disabled by default; advice does not grant execution permission. *)
 
 val is_enabled : unit -> bool
 (** Whether the lane has a key and [\[typesafeai\].enabled] permits use. Also

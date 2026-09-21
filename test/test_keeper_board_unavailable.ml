@@ -707,7 +707,16 @@ let test_board_replay_routes_exact_replies () =
   check int "explicit comment mention replays without prior-parent match" 1
     (List.length (collect bystander));
   check int "explicit audience does not turn into post-author delivery" 0
-    (List.length (collect poster))
+    (List.length (collect poster));
+  Unix.sleepf write_spacing_seconds;
+  (match Board_dispatch.update_post ~post_id ~editor:poster.name
+           ~content:"@reply-bystander mention added by editing" () with
+   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  check int "mention added by editing an old post replays" 1
+    (List.length (collect bystander));
+  ignore (add_comment ~post_id ~author:"external" "unrelated later comment" : string);
+  check int "later comment does not repeat inherited post mention" 0
+    (List.length (collect bystander))
 ;;
 
 let test_accepted_comment_identity_survives_queue_projection () =

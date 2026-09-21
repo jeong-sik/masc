@@ -1317,10 +1317,10 @@ let collect_board_events_with_cursor_policy
         let post_signal : Board_dispatch.board_signal =
           { kind = Board_dispatch.Board_post_created; post_id
           ; author = Board.Agent_id.to_string p.author; title = p.title; content = p.body
-          ; hearth = p.hearth; updated_at = Some p.created_at }
+          ; hearth = p.hearth; updated_at = Some p.content_updated_at }
         in
         let signals =
-          (if signal_after_cursor p p.created_at then [post_signal] else [])
+          (if signal_after_cursor p p.content_updated_at then [post_signal] else [])
           @ List.filter_map (fun (comment : Board.comment) ->
               if not (signal_after_cursor p comment.created_at) then None
               else Some { post_signal with

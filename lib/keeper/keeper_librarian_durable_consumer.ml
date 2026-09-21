@@ -37,6 +37,7 @@ type error =
   | Official_progress_unreadable of O.read_error
   | Official_progress_write_failed of O.write_error
   | Official_progress_boundary_missing of O.t
+  | Committed_official_range_mismatch
   | Official_range_stopped of
       { line : int
       ; error : B.read_error
@@ -109,6 +110,8 @@ let error_to_string = function
   | Progress_write_failed error -> P.write_error_to_string error
   | Official_progress_unreadable error -> O.read_error_to_string error
   | Official_progress_write_failed error -> O.write_error_to_string error
+  | Committed_official_range_mismatch ->
+    "committed official Librarian range no longer matches the turn-boundary log"
   | Official_progress_boundary_missing cursor ->
     Printf.sprintf
       "official read position names no official turn-boundary line line=%d"
@@ -431,6 +434,57 @@ let official_cursor_recorded_at ~lines (cursor : Keeper_librarian_official_progr
   | None -> Error (Official_progress_boundary_missing cursor)
 ;;
 
+(* The Memory WAL, not a successful return from the model, proves which
+   official turns were saved. Repair this cursor before retry narrowing or
+   checkpoint selection; a mixed pass can have saved only its atom cursor. *)
+let recover_official_progress
+      ~write ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor
+  =
+  let ( let* ) = Result.bind in
+  if not (R.may_have_unread_official ~lines ~cursor)
+  then Ok None
+  else
+  let* receipt =
+    Keeper_memory_os_current.committed_official_range
+      ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
+      ~receipt_scope:runtime_keepers_dir
+    |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
+  in
+  match receipt with
+  | None -> Ok None
+  | Some receipt ->
+    let current = match cursor with None -> 0 | Some cursor -> cursor.O.boundary_line in
+    match List.rev receipt.Keeper_memory_os_current.turns with
+    | [] -> Error Committed_official_range_mismatch
+    | (end_line, _) :: _ when current >= end_line -> Ok None
+    | (end_line, _) :: _ ->
+      let start = receipt.Keeper_memory_os_current.after_boundary_line in
+      let selected =
+        R.select_official ~lines:(List.filter (fun (line, _) -> line <= end_line) lines)
+          ~cursor:(if start = 0 then None else Some { O.boundary_line = start })
+          R.All_unread
+      in
+      let matches =
+        match selected with
+        | R.Official_read selected ->
+          let selected = List.filter (fun (turn : R.official_line) -> turn.line <= end_line) selected in
+          List.equal
+            (fun (line, turn_ref) (turn : R.official_line) ->
+               Int.equal line turn.line && Ids.Turn_ref.equal turn_ref turn.turn_ref)
+            receipt.turns selected
+        | R.Nothing_official | R.Official_stop _ -> false
+      in
+      if current < start || not matches
+      then Error Committed_official_range_mismatch
+      else
+        let official = { O.boundary_line = end_line } in
+        match Domain_pool_ref.submit_io_or_inline (fun () ->
+          write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name official)
+        with
+        | Error error -> Error (Official_progress_write_failed error)
+        | Ok () -> Ok (Some (Official_advanced { atom = None; official }))
+;;
+
 let consume_one_with_extent
       ~write_progress_store
       ~write_official_progress_store
@@ -463,6 +517,13 @@ let consume_one_with_extent
         ~keeper_id:keeper_name)
     |> Result.map_error (fun error -> Official_progress_unreadable error)
   in
+  let* recovered =
+    recover_official_progress ~write:write_official_progress_store
+      ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor:official_cursor
+  in
+  match recovered with
+  | Some outcome -> Ok outcome
+  | None ->
   let* meta =
     match
       Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -784,8 +845,20 @@ let consume_one_with_extent
              ~end_boundary_line
              ~boundary_lines_seen)
     in
-    (* Memory first, positions last (I2), and the positions under a cancel
-       shield: a commit that landed must not leave both cursors behind. *)
+    let official_range_id =
+      match official_lines with
+      | [] -> None
+      | _ :: _ ->
+        Some
+          { Keeper_memory_os_current.receipt_scope = runtime_keepers_dir
+          ; after_boundary_line =
+              (match official_cursor with None -> 0 | Some cursor -> cursor.O.boundary_line)
+          ; turns = List.map (fun (turn : R.official_line) -> turn.line, turn.turn_ref) official_lines
+          }
+    in
+    (* Memory first, positions last (I2). Shield the cursor writes once
+       reached; the Memory WAL also repairs an interruption before this
+       function or a failed write of either cursor. *)
     let advance () =
       Eio.Cancel.protect (fun () ->
         let* atom_progress =
@@ -863,7 +936,7 @@ let consume_one_with_extent
         ; counterpart_observations
         }
       in
-      if not (commit ~expected_revision ~range_id:atom_next input)
+      if not (commit ~expected_revision ~range_id:atom_next ~official_range_id input)
       then Ok Memory_not_committed
       else advance ())
 ;;
@@ -916,6 +989,7 @@ let commit_with_runtime
       ~keeper_id
       ~expected_revision
       ~range_id
+      ~official_range_id
       input
   =
   let committed = ref false in
@@ -924,6 +998,7 @@ let commit_with_runtime
     ~input_projection:Keeper_librarian_runtime.Already_selected_range
     ~on_memory_committed:(fun () -> committed := true)
     ?durable_range_id:range_id
+    ?official_range_id
     ~base_path
     ~keepers_dir
     ~keeper_id

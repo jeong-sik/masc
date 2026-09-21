@@ -37,6 +37,7 @@ module For_testing : sig
     -> commit:
          (expected_revision:int option
           -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
           -> Keeper_librarian.input
           -> bool)
     -> unit

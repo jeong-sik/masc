@@ -469,9 +469,10 @@ let recover_official_progress
         | R.Official_read selected ->
           let selected = List.filter (fun (turn : R.official_line) -> turn.line <= end_line) selected in
           List.equal
-            (fun (line, turn_ref) (turn : R.official_line) ->
-               Int.equal line turn.line && Ids.Turn_ref.equal turn_ref turn.turn_ref)
-            receipt.turns selected
+            (fun (line, turn_ref) (other_line, other_ref) ->
+               Int.equal line other_line && Ids.Turn_ref.equal turn_ref other_ref)
+            receipt.turns
+            (List.map (fun (turn : R.official_line) -> turn.line, turn.turn_ref) selected)
         | R.Nothing_official | R.Official_stop _ -> false
       in
       if current < start || not matches

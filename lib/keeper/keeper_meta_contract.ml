@@ -470,7 +470,12 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
-  | Some _ | None -> Runtime.get_default_runtime_id ()
+  (* schema-compat: this changes only the fallback route accessor; no
+     [keeper_meta] wire field or persisted variant is removed. *)
+  (* The route, not the runtime it enters on: [\[runtime\].default] may name a
+     declared lane, and a keeper with no assignment walks that lane's
+     candidates the same way an assigned one does. *)
+  | Some _ | None -> Runtime.get_default_route ()
 ;;
 
 let proactive_cycle_outcome_to_string = function

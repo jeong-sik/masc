@@ -127,9 +127,9 @@ let runtime_keys =
   ; Keeper_lanes_only
       (b Act "R" "rename lane"
          ~help:"give the lane under the cursor another name; the assignments \
-                that route to it are rewritten in the same write. Refused when \
-                [runtime].default names it; move the default first. The field \
-                opens on the name it has now")
+                that route to it and [runtime].default, when it names it, are \
+                rewritten in the same write. The field opens on the name it \
+                has now")
   ; Keeper_lanes_only
       (b Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \

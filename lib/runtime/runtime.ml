@@ -532,8 +532,11 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
        silent fallback removed)"
       config_path
   | Default_runtime_unresolved resolution ->
+    (* The entry names a route: a declared lane or a runtime. The shared
+       suffix counts runtimes alone, so the lane half is said here rather than
+       leaving the reader to think only a runtime was ever allowed. *)
     Printf.sprintf
-      "%s: [runtime].default = %S%s"
+      "%s: [runtime].default = %S%s, and no [runtime.lanes] table declares it"
       config_path
       resolution.unresolved_id
       (resolution_suffix resolution)
@@ -1151,10 +1154,17 @@ let missing_reference_error
 ;;
 
 let degrade_loaded_for_missing_catalog
-    ( (runtimes, configured_default, assignments,
-       media_failover, lanes, lsp_servers, typesafeai) :
+    ( ( runtimes
+      , configured_default
+      , default_route
+      , assignments
+      , media_failover
+      , lanes
+      , lsp_servers
+      , typesafeai ) :
       t list
       * t
+      * string
       * (string * string) list
       * string list
       * Runtime_lane.t list
@@ -1162,6 +1172,7 @@ let degrade_loaded_for_missing_catalog
     (report : missing_catalog_report)
   : ( ( t list
         * t
+        * string
         * (string * string) list
         * string list
         * Runtime_lane.t list
@@ -1279,6 +1290,7 @@ let degrade_loaded_for_missing_catalog
     Ok
       ( ( active_runtimes
         , configured_default
+        , default_route
         , assignments
         , kept_media_failover
         , kept_lanes
@@ -1292,6 +1304,7 @@ let materialize_config
     (cfg : config)
   : ( (t list
        * t
+       * string
        * (string * string) list
        * string list
        * Runtime_lane.t list
@@ -1306,24 +1319,55 @@ let materialize_config
      below can only describe an id something else referenced. *)
   let* () = validate_no_dangling_bindings ~dropped_bindings in
   let assignments = cfg.keeper_assignments in
-  let* rt =
-    match cfg.default_runtime_id with
-    | None -> Error Default_runtime_absent
-    | Some did ->
-      (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
-       | None ->
-         Error
-           (Default_runtime_unresolved
-              (resolution_of ~dropped_bindings
-                 ~runtime_count:(List.length runtimes) did))
-       | Some rt -> Ok rt)
-  in
   (* Assignments name a declared lane or a runtime (RFC-0457), so they are
      validated with the materialized lanes, like every other route id (#25394).
      A typo'd lane candidate can now surface before a typo'd assignment — the
-     lane list the assignment names is the thing that had to exist first. *)
+     lane list the assignment names is the thing that had to exist first.
+
+     Built before the default is resolved, because [\[runtime\].default] is a
+     route of the same kind: it names a lane or a runtime, and the lane list
+     has to exist for the first of those to resolve. *)
   let* lanes =
     lanes_of_decls ~dropped_bindings runtimes cfg.lane_decls
+  in
+  (* The default is two facts, not one. [default_route] is what the file says,
+     and it is what a keeper with no assignment is routed by -- the same string
+     an assignment holds, resolved the same way. [rt] is the runtime that route
+     enters on, which is the lane's head when the route names a lane, and it is
+     what every reader asking for "the default runtime" gets.
+
+     Before this they were one: the default had to name a runtime, so a keeper
+     with no assignment could only walk a lane when the lane carried that
+     runtime's own id -- which made a lane's name a contract, and left the lane
+     the install path writes impossible to rename. *)
+  let* default_route, rt =
+    match cfg.default_runtime_id with
+    | None -> Error Default_runtime_absent
+    | Some did ->
+      let entry_runtime_of_lane lane =
+        match Runtime_lane.ordered_candidates lane with
+        | head :: _ -> List.find_opt (fun (r : t) -> String.equal r.id head) runtimes
+        | [] -> None
+      in
+      (match find_declared_lane lanes did with
+       | Some lane ->
+         (* [lanes_of_decls] resolved every candidate against [runtimes] and
+            refuses an empty lane, so the head is there. *)
+         (match entry_runtime_of_lane lane with
+          | Some rt -> Ok (did, rt)
+          | None ->
+            Error
+              (Default_runtime_unresolved
+                 (resolution_of ~dropped_bindings
+                    ~runtime_count:(List.length runtimes) did)))
+       | None ->
+         (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
+          | None ->
+            Error
+              (Default_runtime_unresolved
+                 (resolution_of ~dropped_bindings
+                    ~runtime_count:(List.length runtimes) did))
+          | Some rt -> Ok (did, rt)))
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
@@ -1348,6 +1392,7 @@ let materialize_config
   let loaded =
     ( runtimes
     , rt
+    , default_route
     , assignments
     , cfg.media_failover
     , lanes
@@ -1360,6 +1405,7 @@ let materialize_config
 let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
+       * string
        * (string * string) list
        * string list
        * Runtime_lane.t list
@@ -1390,8 +1436,18 @@ let load_list_internal_text ~config_path:(_ : string) ~content ~validate_max_con
    back through [lsp_servers]. *)
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
-  |> Result.map (fun ((runtimes, rt, assignments, media_failover, lanes, _lsp_servers, _typesafeai), _) ->
-       (runtimes, rt, assignments, media_failover, lanes))
+  |> Result.map
+       (fun
+         ( ( runtimes
+           , rt
+           , _default_route
+           , assignments
+           , media_failover
+           , lanes
+           , _lsp_servers
+           , _typesafeai )
+         , _ ) ->
+         (runtimes, rt, assignments, media_failover, lanes))
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)
@@ -1402,6 +1458,10 @@ let load_list ~config_path =
     refresh or test restore. *)
 type loaded_state =
   { default_runtime : t option
+  ; default_route : string option
+        (* [\[runtime\].default] as the file writes it: a declared lane's id or
+           a runtime's. It is the route a keeper with no assignment is resolved
+           by, and [default_runtime] is the runtime that route enters on. *)
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
   ; media_failover : string list
@@ -1414,6 +1474,7 @@ type loaded_state =
 
 let empty_loaded_state =
   { default_runtime = None
+  ; default_route = None
   ; runtimes = []
   ; keeper_assignments = []
   ; media_failover = []
@@ -1439,6 +1500,7 @@ let set_loaded
     ~config_path
     ( runtimes
     , rt
+    , default_route
     , assignments
     , media_failover
     , lanes
@@ -1469,6 +1531,7 @@ let set_loaded
   in
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
+    ; default_route = Some default_route
     ; runtimes
     ; keeper_assignments = assignments
     ; media_failover
@@ -1509,7 +1572,7 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1523,12 +1586,12 @@ let init_default_strict ~config_path =
 (* Prepare one immutable runtime publication. Boot and config edits share the
    same catalog exclusion so a save cannot reactivate an unavailable route. *)
 let prepare_degraded_loaded ~config_path
-    (((runtimes, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+    (((runtimes, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
   (* [\[runtime\].media_failover] as the file declares it, read before the
      catalog exclusion below drops what it could not resolve. The surface
      needs both: the admitted list it draws, and what was dropped, which is
      what stops the route being written back from a list missing them. *)
-  let _, _, _, declared_media_failover, _, _, _ = loaded in
+  let _, _, _, _, declared_media_failover, _, _, _ = loaded in
   let* loaded, startup_degradation =
     match missing_runtime_model_capabilities ~config_path runtimes with
     | None -> Ok (loaded, None)
@@ -1536,7 +1599,7 @@ let prepare_degraded_loaded ~config_path
         let* loaded, degradation = degrade_loaded_for_missing_catalog loaded report in
         Ok (loaded, Some degradation)
   in
-  let active_runtimes, _, _, _, _, _, _ = loaded in
+  let active_runtimes, _, _, _, _, _, _, _ = loaded in
   let* () =
     validate_runtime_max_context active_runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)
@@ -1604,6 +1667,19 @@ let default_runtime_id_or_fail () =
        Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
 ;;
 
+(* The route [\[runtime\].default] names, as the file writes it: a declared
+   lane's id or a runtime's. This is what a keeper with no assignment is
+   routed by, resolved through {!resolve_assignment} like any assignment.
+   {!get_default_runtime_id} answers with the runtime that route enters on --
+   the lane's head when the route names a lane -- which is what a reader
+   naming a model wants. The two were one value while the default could only
+   name a runtime. *)
+let get_default_route () =
+  match (runtime_state ()).default_route with
+  | Some route -> route
+  | None -> default_runtime_id_or_fail ()
+;;
+
 let runtimes_and_media_failover () =
   let state = runtime_state () in
   state.runtimes, state.media_failover
@@ -1611,7 +1687,7 @@ let runtimes_and_media_failover () =
 
 (* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
    runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
-   {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
+   {!get_default_route}. The returned id is opaque (masc never parses it;
    only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
    the immutable loaded-state assignment snapshot. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
@@ -3379,15 +3455,16 @@ let lane_references (config : Runtime_schema.config) ~lane_id =
   assignments @ default
 ;;
 
-(* A lane's name is its routing key: [\[runtime.assignments\]] entries name it
-   as a string, and {!resolve_assignment} reads those before it reads a runtime
-   of the same id. So a rename is not a rename of one table -- it is that
-   header and every assignment reference to it, and any file written with some
-   of them changed routes the keepers whose reference was missed to a lane
-   that is no longer there. All of it goes in the one validated write
-   {!edit_runtime_lanes} already commits, which is why this is a writer of its
-   own rather than a remove followed by a create: between those two the file
-   declares no such lane, and the keepers pointing at it would not load. *)
+(* A lane's name is its routing key: [\[runtime.assignments\]] entries and
+   [\[runtime\].default] name it as a string, and {!resolve_assignment} reads
+   those before it reads a runtime of the same id. So a rename is not a rename
+   of one table -- it is that header and every reference to it, and any file
+   written with some of them changed routes the keepers whose reference was
+   missed to a lane that is no longer there. All of it goes in the one
+   validated write {!edit_runtime_lanes} already commits, which is why this is
+   a writer of its own rather than a remove followed by a create: between
+   those two the file declares no such lane, and the keepers pointing at it
+   would not load. *)
 let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
   let* lane_id = validated_lane_id lane_id in
   let* new_lane_id = validated_lane_id new_lane_id in
@@ -3400,46 +3477,49 @@ let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
       else if lane_is_declared config new_lane_id
       then Error (Printf.sprintf "lane %S already exists" new_lane_id)
       else
-        let references = lane_references config ~lane_id in
-        if List.exists (function Default_runtime -> true | Keeper_assignment _ -> false) references
-        then
+        match
+          Toml_line_editor.rename_table
+            content
+            ~path:(lane_table_path lane_id)
+            ~to_path:(lane_table_path new_lane_id)
+        with
+        | Toml_line_editor.Table_rename_conflict ->
+          (* [lane_is_declared] read the parsed config; this reads the text.
+             A file that declares the name some other way -- inline, or
+             through dotted keys -- reaches here. *)
           Error
-            "[runtime].default names this lane; move the default first, then rename"
-        else
-          match
-            Toml_line_editor.rename_table
-              content
-              ~path:(lane_table_path lane_id)
-              ~to_path:(lane_table_path new_lane_id)
-          with
-          | Toml_line_editor.Table_rename_conflict ->
-            (* [lane_is_declared] read the parsed config; this reads the text.
-               A file that declares the name some other way -- inline, or
-               through dotted keys -- reaches here. *)
-            Error
-              (Printf.sprintf
-                 "the file already declares %S; renaming onto it would declare the lane \
-                  twice"
-                 new_lane_id)
-          | Toml_line_editor.Table_rename_absent ->
-            Error
-              (Printf.sprintf
-                 "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
-                  renamed here"
-                 lane_id)
-          | Toml_line_editor.Table_renamed renamed ->
-            Ok
-              (List.fold_left
-                 (fun text reference ->
-                    match reference with
-                    | Keeper_assignment keeper_name ->
-                      update_runtime_assignment_text
-                        text
-                        ~keeper_name
-                        ~runtime_id:new_lane_id
-                    | Default_runtime -> text)
-                 renamed
-                 references))
+            (Printf.sprintf
+               "the file already declares %S; renaming onto it would declare the lane \
+                twice"
+               new_lane_id)
+        | Toml_line_editor.Table_rename_absent ->
+          Error
+            (Printf.sprintf
+               "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
+                renamed here"
+               lane_id)
+        | Toml_line_editor.Table_renamed renamed ->
+          Ok
+            (List.fold_left
+               (fun text reference ->
+                  match reference with
+                  | Keeper_assignment keeper_name ->
+                    update_runtime_assignment_text
+                      text
+                      ~keeper_name
+                      ~runtime_id:new_lane_id
+                  | Default_runtime ->
+                    (* [\[runtime\].default] holds a route, so it takes the new
+                       name like an assignment does. It could not before: the
+                       entry resolved against runtimes alone, which is why a
+                       lane the default reached had to be named after that
+                       runtime and could not be renamed at all. *)
+                    update_runtime_scalar_text
+                      text
+                      ~key:"default"
+                      ~runtime_id:(Some new_lane_id))
+               renamed
+               (lane_references config ~lane_id)))
 ;;
 
 let remove_runtime_lane ?runtime_config_path ~lane_id () =

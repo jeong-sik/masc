@@ -120,9 +120,13 @@ finished; 5,706 failed. Of those, the operator disposition on 5,405 was
 `fail_open_next_runtime` — the turn fell through to the next candidate in its
 lane and carried on.
 
-Current receipts do not use that label for a terminal preflight configuration
-error. They use `operator_action_required` with reason `preflight_config_error`:
-no next runtime is claimed until an operator repairs the configuration.
+Current receipts do not use that label for a terminal refusal before dispatch.
+They use `operator_action_required` with one of two reasons, because the two
+need different operator actions: `config_invalid` when the runtime rejected a
+setting, and `authorization_refused` when the provider refused the request
+under authorization — in practice a weekly or five-hour usage limit, where the
+operator moves the slot rather than editing the configuration. Neither claims
+a next runtime.
 
 Terminal transient network and timeout failures with no observed fallback use
 `retry_later` with reason `transient_runtime_retry`. The current turn ended;

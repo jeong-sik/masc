@@ -55,6 +55,7 @@ let dos_schemas : tool_schema list =
   ; Tool_schemas_misc_toml.dos_screen
   ; Tool_schemas_misc_toml.dos_step
   ; Tool_schemas_misc_toml.dos_press
+  ; Tool_schemas_misc_toml.dos_click
   ; Tool_schemas_misc_toml.dos_type
   ; Tool_schemas_misc_toml.dos_peek
   ]
@@ -188,6 +189,7 @@ type misc_operation =
   | Misc_dos_screen
   | Misc_dos_step
   | Misc_dos_press
+  | Misc_dos_click
   | Misc_dos_type
   | Misc_dos_peek
 [@@deriving enumerate]
@@ -238,6 +240,7 @@ let misc_tool_name = function
   | Misc_dos_screen -> "masc_dos_screen"
   | Misc_dos_step -> "masc_dos_step"
   | Misc_dos_press -> "masc_dos_press"
+  | Misc_dos_click -> "masc_dos_click"
   | Misc_dos_type -> "masc_dos_type"
   | Misc_dos_peek -> "masc_dos_peek"
 ;;
@@ -287,6 +290,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_dos_screen
   | Misc_dos_step
   | Misc_dos_press
+  | Misc_dos_click
   | Misc_dos_type
   | Misc_dos_peek
   | Misc_ask

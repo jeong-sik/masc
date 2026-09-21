@@ -765,6 +765,22 @@ let failed_output = function
     `Assoc [ "absorb_gate", Keeper_librarian_absorb_gate.observation_to_yojson absorb_gate ]
 ;;
 
+type context_write =
+  | Not_attempted
+  | Withheld
+  | Outcome_unconfirmed
+  | Committed of Keeper_librarian_context.version
+  | Write_failed of string
+
+let context_write_json = function
+  | Not_attempted -> `Assoc ["status", `String "not_attempted"]
+  | Withheld -> `Assoc ["status", `String "withheld"]
+  | Outcome_unconfirmed -> `Assoc ["status", `String "outcome_unconfirmed"]
+  | Committed (generation, revision) -> `Assoc ["status", `String "committed";
+      "generation", `String generation; "revision", `Int revision]
+  | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
+;;
+
 type trigger = Conversation_completed | Queue_changed | Durable_range
 
 type input_projection =
@@ -825,7 +841,22 @@ let run_best_effort
                   ; "message_count", `Int (List.length prompt_input.messages)
                   ; "current_fact_count", `Int current_fact_count
                   ]));
+        let observed_context_review = ref None in
+        let context_write = ref Not_attempted in
         let complete ?selected_slot outcome output =
+          let output = match !observed_context_review, output with
+            | None, _ -> output
+            | Some review, `Assoc fields ->
+              let context = [
+                "context_write", context_write_json !context_write;
+                "context_review", Keeper_librarian_context_review.observation_to_yojson review] in
+              (* Keep the existing absorption report first; both derived-context
+                 evidence and Memory's receipt survive any later cancellation. *)
+              (match fields with
+               | (("absorb_gate", _) as gate) :: rest -> `Assoc (gate :: context @ rest)
+               | _ -> `Assoc (context @ fields))
+            | Some _, _ -> output
+          in
           let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
           let completion =
             Exact_lane_run_registry.mark_completed
@@ -849,6 +880,7 @@ let run_best_effort
            cancellation without changing either the Memory decision or the
            existing failure classification. *)
         let observed_absorb_gate = ref None in
+        let committed_memory = ref None in
         (try
            let result =
              let open Result.Syntax in
@@ -872,6 +904,17 @@ let run_best_effort
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
                 Keeper; original sources remain pending throughout. *)
+             let context_review = Keeper_librarian_context_review.run
+               ~observe:(fun observation -> observed_context_review := Some observation)
+               ~clock ~keeper_id ~input:inp.working_context
+               ~proposed:selection.working_contexts () in
+             if not (Keeper_librarian_context_review.permits_publication context_review) then (
+               context_write := Withheld;
+               Log.Keeper.info ~keeper_name:keeper_id
+                 "working context withheld by review: pockets=%d"
+                 (List.length selection.working_contexts))
+             else (
+             context_write := Outcome_unconfirmed;
              (try match Domain_pool_ref.submit_io_or_inline (fun () ->
                 Keeper_librarian_context.commit ~keepers_dir ~keeper_id
                   ~expected_version:(Option.map Keeper_librarian_context.version inp.working_context.previous)
@@ -884,6 +927,7 @@ let run_best_effort
                       List.mem s.reference references) inp.working_context.sources)
                   selection.working_contexts) with
               | Ok working ->
+                context_write := Committed (Keeper_librarian_context.version working);
                 (match Domain_pool_ref.submit_io_or_inline (fun () ->
                    Keeper_librarian_context_recall.publish ~base_path ~keepers_dir ~keeper_name:keeper_id working) with
                  | Ok () -> ()
@@ -900,12 +944,14 @@ let run_best_effort
                    create a private retry loop. *)
                 if made_progress && remaining then
                   Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:keeper_id
-              | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id
+              | Error detail ->
+                context_write := Write_failed detail;
+                Log.Keeper.warn ~keeper_name:keeper_id
                   "working context not committed; original intake continues: %s" detail
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context commit failed independently of memory: %s" (Printexc.to_string exn));
+                  "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
                 snapshot this pass read before its provider turn; writing it
@@ -931,6 +977,9 @@ let run_best_effort
              in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
+                 ~on_committed:(fun snapshot ->
+                   committed_memory := Some (snapshot, exact_output, selected_slot, absorb_gate);
+                   on_memory_committed ())
                  ~clock
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
@@ -973,7 +1022,6 @@ let run_best_effort
            in
            match result with
            | Ok (snapshot, exact_output, selected_slot, absorb_gate) ->
-             on_memory_committed ();
              complete
                ~selected_slot
                Exact_lane_run_registry.Succeeded
@@ -1035,31 +1083,57 @@ let run_best_effort
             of 23 completed librarian lane runs cancelled, none of them
             represented in the journal.
 
-            Both completion and journal writes run under [Eio.Cancel.protect]:
+            In this cancellation branch, completion and failure-journal writes
+            run under [Eio.Cancel.protect]:
             payload persistence and lock acquisition can yield before the
             registry's transaction protection begins. The surrounding context
             is already cancelled, so protecting only the journal loses both
             records before reaching it. *)
          | Eio.Cancel.Cancelled _ as exn ->
            Eio.Cancel.protect (fun () ->
-             complete
-               Exact_lane_run_registry.Cancelled
-               (failed_output !observed_absorb_gate);
-             record_failure
-               ~keepers_dir
-               ~keeper_id
-               ~trace_id
-               ~kind:Keeper_memory_os_current.Lane_cancelled
-               ~detail:
-                 (Printf.sprintf
-                    "memory os librarian cancelled lane=%s"
-                    exact_lane_id)
-                 (* Cancellation is not the pass declining its own turn, so the
-                    cadence counter remains due. A later turn can schedule a
-                    new pass, but it does not replay this immutable input;
-                    graceful lifecycle boundaries therefore drain accepted
-                    work instead of cancelling it. *)
-               ~cadence_deferred:false);
+             (* Notifications run after the registry commit. A cancellation
+                from that observer must not overwrite a completed outcome. *)
+             let run_completed =
+               List.exists
+                 (fun (run : Exact_lane_run_registry.run) ->
+                    String.equal run.run_id run_id
+                    && match run.status with
+                       | Exact_lane_run_registry.Completed _ -> true
+                       | Running | Completion_persistence_failed _ -> false)
+                 (Exact_lane_run_registry.list_runs registry)
+             in
+             match !committed_memory with
+             | Some (snapshot, exact_output, selected_slot, absorb_gate) ->
+               if not run_completed then
+                 complete ~selected_slot Exact_lane_run_registry.Cancelled
+                   (completed_output ~inp ~exact_output ~absorb_gate snapshot);
+               (* Cadence follows the Memory commit, even when the remaining
+                  side effects of the pass did not all finish. *)
+               cadence_record_success ~keeper_id ~trace_id;
+               Log.Keeper.warn
+                 ~keeper_name:keeper_id
+                 "memory os librarian cancelled after snapshot commit revision=%d; post-commit work may be incomplete"
+                 snapshot.revision
+             | None ->
+               if not run_completed then
+                 complete
+                   Exact_lane_run_registry.Cancelled
+                   (failed_output !observed_absorb_gate);
+               record_failure
+                 ~keepers_dir
+                 ~keeper_id
+                 ~trace_id
+                 ~kind:Keeper_memory_os_current.Lane_cancelled
+                 ~detail:
+                   (Printf.sprintf
+                      "memory os librarian cancelled lane=%s"
+                      exact_lane_id)
+                   (* Cancellation is not the pass declining its own turn, so the
+                      cadence counter remains due. A later turn can schedule a
+                      new pass, but it does not replay this immutable input;
+                      graceful lifecycle boundaries therefore drain accepted
+                      work instead of cancelling it. *)
+                 ~cadence_deferred:false);
            raise exn
          | exn ->
            complete

@@ -35,6 +35,15 @@
   (flags
    (:standard -w +32+69 -warn-error +a))))
 
+; Vendored packages are local copies of external sources. Keep the repository's
+; strict warning policy for MASC code, but do not turn vendor warning 69 into a
+; project build error. The subdir stanza applies this override without editing
+; the vendored dune files or weakening warning 32 in the rest of the tree.
+(subdir vendor
+ (env
+  (dev (flags (:standard -w -69)))
+  (release (flags (:standard -w -69)))))
+
 (install
  (package masc)
  (section bin)

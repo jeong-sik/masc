@@ -517,8 +517,9 @@ let terminal_outcome = function
    Jev said and what the lane then decided are read from one entry. *)
 type jev_first =
   | Jev_off
-      (** No [TYPESAFEAI_API_KEY], [MASC_TYPESAFEAI_ENABLED=false], or this
-          gate's own [MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED=false]. *)
+      (** No [TYPESAFEAI_API_KEY], [\[typesafeai\] enabled = false], this
+          gate's own [\[typesafeai\] board_attention = false], or the keeper
+          is in [\[typesafeai\] excluded_keepers] (the log says which). *)
   | Jev_cli_only
       (** Jev is on, but the lane declares no HTTP slot. Jev is asked only in
           front of the HTTP lane. *)
@@ -537,12 +538,20 @@ type jev_first =
   | Jev_failed of { reason : string }
 
 let ask_jev ~clock prepared =
-  if not (Typesafeai_config.is_board_attention_enabled ())
-  then Jev_off
-  else (
-    match Typesafeai_config.api_key () with
-    | None -> Jev_off
-    | Some api_key ->
+  match Typesafeai_config.board_attention_api_key ~keeper_id:prepared.candidate.keeper_name with
+  | Error Typesafeai_config.Keeper_excluded ->
+    (* The record says [off]; this line says why, by name. *)
+    Log.Keeper.info
+      ~keeper_name:prepared.candidate.keeper_name
+      "board attention: this keeper is in [typesafeai].excluded_keepers; Jev not asked";
+    Jev_off
+  | Error
+      ( Typesafeai_config.Lane_disabled | Typesafeai_config.Missing_api_key
+      | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Board_attention_disabled
+      | Typesafeai_config.Context_review_disabled ) ->
+    Jev_off
+  | Ok api_key ->
+    (
       (match prepared.transport with
        | Cli_only _ -> Jev_cli_only
        | Http_flow _ ->

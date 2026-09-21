@@ -111,7 +111,15 @@ let roundtrip_corpus =
     (* config/auth preflight (ranked above provider) *)
   ; "config_error"
   ; "api_error_auth"
+    (* The wire the fleet actually sends. Every authorization refusal in the
+       live receipts arrives as this spelling — 852 of the 2,419 turns the
+       operator-action bucket held between 08-22 and 09-21, against 0 for
+       [api_error_auth]. The corpus covered the spelling that never happens
+       and missed the one that always does, so the equivalence matrix never
+       compared the two classifiers on it. *)
+  ; "api_error_authorization"
   ; "provider_error_auth"
+  ; "provider_error_authorization"
   ; "provider_error_auth:legacy-payload"
   ; "provider_error_invalid_config:field_x"
     (* provider family *)
@@ -163,6 +171,26 @@ let () =
     roundtrip_corpus
 ;;
 
+let authorization_wires =
+  [ "api_error_auth"
+  ; "api_error_authorization"
+  ; "provider_error_auth"
+  ; "provider_error_authorization"
+  ]
+;;
+
+let () =
+  List.iter
+    (fun wire ->
+       match Tr.of_wire wire with
+       | Tr.Authorization_refused carried ->
+         check
+           (Printf.sprintf "authorization priority: %S" wire)
+           (String.equal carried wire)
+       | _ -> check (Printf.sprintf "authorization priority: %S" wire) false)
+    authorization_wires
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 2. (disposition, reason) equivalence vs an independent strict-wire *)
 (*    oracle.                                                           *)
@@ -176,13 +204,20 @@ let frozen_is_transient_provider_runtime_failure terminal_reason =
   || String.equal terminal_reason "api_error_network"
 ;;
 
-let frozen_is_config_or_auth_wire = function
-  | "config_error"
+(* Two predicates in the oracle, matching the two production wire sets.
+   Every wire in either set reaches [Disp_operator_action_required]; the
+   reason is what tells them apart. *)
+let frozen_is_config_invalid_wire = function
+  | "config_error" -> true
+  | wire -> String.starts_with ~prefix:"provider_error_invalid_config:" wire
+;;
+
+let frozen_is_authorization_refused_wire = function
   | "api_error_auth"
   | "api_error_authorization"
   | "provider_error_auth"
   | "provider_error_authorization" -> true
-  | wire -> String.starts_with ~prefix:"provider_error_invalid_config:" wire
+  | _ -> false
 ;;
 
 let frozen_operator_disposition (receipt : R.t)
@@ -194,7 +229,8 @@ let frozen_operator_disposition (receipt : R.t)
     || String.equal terminal_reason "provider_error"
     || String.starts_with ~prefix:"provider_error_" terminal_reason
   in
-  let preflight_config_failure = frozen_is_config_or_auth_wire terminal_reason in
+  let config_invalid = frozen_is_config_invalid_wire terminal_reason in
+  let authorization_refused = frozen_is_authorization_refused_wire terminal_reason in
   if String.equal terminal_reason "runtime_exhausted"
   then R.Disp_fail_open_next_runtime, R.Reason_runtime_exhausted
   else if
@@ -213,8 +249,10 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_unknown, R.Reason_tool_correction_lost
   else if String.equal terminal_reason "terminal_effect_failed"
   then R.Disp_unknown, R.Reason_terminal_effect_failed
-  else if preflight_config_failure
-  then R.Disp_operator_action_required, R.Reason_preflight_config_error
+  else if config_invalid
+  then R.Disp_operator_action_required, R.Reason_config_invalid
+  else if authorization_refused
+  then R.Disp_operator_action_required, R.Reason_authorization_refused
   else if
     provider_runtime_failure
     && (Option.is_some receipt.degraded_retry_applied
@@ -334,7 +372,53 @@ let () =
   in
   check
     "canonical typed config wire requires operator action"
-    (canonical = (R.Disp_operator_action_required, R.Reason_preflight_config_error))
+    (canonical = (R.Disp_operator_action_required, R.Reason_config_invalid));
+  (* The point of the pair: same disposition, different reason. If the two
+     variants are ever collapsed into one, this stops holding. *)
+  let refused =
+    R.operator_disposition
+      { base_receipt with terminal_reason_code = "api_error_authorization" }
+  in
+  check
+    "canonical authorization wire requires operator action under its own reason"
+    (refused = (R.Disp_operator_action_required, R.Reason_authorization_refused));
+  check
+    "a config wire and an authorization wire carry different reasons"
+    (snd canonical <> snd refused);
+  (* Every wire the operator-action bucket accepts, and which half it lands
+     in. Exhaustive with no wildcard, so a variant added later has to be
+     answered here rather than silently reported as "neither". *)
+  let half = function
+    | Tr.Config_invalid _ -> "config"
+    | Tr.Authorization_refused _ -> "authorization"
+    | Tr.Runtime_exhausted _
+    | Tr.Capacity_backpressure _
+    | Tr.Provider_runtime_failure _
+    | Tr.Transcript_corruption _
+    | Tr.Provider_attempt_effect_fenced _
+    | Tr.Tool_correction_lost _
+    | Tr.Accept_rejected _
+    | Tr.Terminal_effect_failed _
+    | Tr.Internal_error _
+    | Tr.Pre_dispatch_success _
+    | Tr.Unknown _ -> "neither"
+  in
+  List.iter
+    (fun (wire, expected) ->
+       let classified = Tr.of_wire wire in
+       check
+         (Printf.sprintf "%S lands in the %s half" wire expected)
+         (String.equal (half classified) expected);
+       check
+         (Printf.sprintf "%S still round-trips after the split" wire)
+         (String.equal (Tr.to_wire classified) wire))
+    [ "config_error", "config"
+    ; "provider_error_invalid_config:multimodal_input", "config"
+    ; "api_error_auth", "authorization"
+    ; "api_error_authorization", "authorization"
+    ; "provider_error_auth", "authorization"
+    ; "provider_error_authorization", "authorization"
+    ]
   ;
   check
     "canonical typed config wire emits operator broadcast"

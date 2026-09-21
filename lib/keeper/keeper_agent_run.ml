@@ -445,7 +445,10 @@ let prune_raw_traces_after_turn_record
      | Error error ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string RawTraceRetentionSkipped)
-         ~labels:[ "keeper", meta.name ]
+         ~labels:
+           [ "keeper", meta.name
+           ; "reason", Keeper_raw_trace_retention.error_kind error
+           ]
          ();
        Log.Keeper.warn ~keeper_name:meta.name
          "raw-trace retention skipped after TurnRecord commit without gating the turn: %s"
@@ -1278,6 +1281,20 @@ let run_turn
     let request_wire_evidence_ref : request_wire_evidence option ref =
       ref None
     in
+    (* What the next provider request of this keeper turn is compared against.
+       Not cleared per runtime attempt: each row names its runtime profile, so
+       a lane switch between two requests stays visible in the rows. *)
+    let previous_request_projection_ref =
+      ref Keeper_projection_change.No_request_yet
+    in
+    (* The message digests this keeper turn has computed. Kept apart from the
+       comparison state above: a request left undigested breaks the pair the
+       next row compares, not the digest of a message that did not change.
+       Only this turn fiber writes it after an awaited CPU job succeeds. A
+       cancelled await leaves that job with a private snapshot, so a later
+       runtime attempt cannot overlap with a worker reading or writing this
+       table. *)
+    let request_digest_memo = Keeper_projection_change.create_digest_memo () in
     (* Kept apart from the evidence cells rather than folded into them: the
        window cut is observed before serialization, so a turn whose request was
        refused at the wire has a real cut and no wire observation. Sharing one
@@ -1684,6 +1701,13 @@ let run_turn
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
+                           (* Official-client lanes send their requests
+                              through their own client and never reach the
+                              wire observation below, so the next AGENT_CORE
+                              request cannot be compared with the one before
+                              this. *)
+                           previous_request_projection_ref
+                           := Keeper_projection_change.Request_not_digested;
                            record_transmitted_model_input
                              ~runtime_id
                              ~tools
@@ -1735,7 +1759,34 @@ let run_turn
                              ; wire_tools = request_tools
                              }
                            in
-                           request_wire_evidence_ref := Some wire_evidence)
+                           request_wire_evidence_ref := Some wire_evidence;
+                           (* The provider content, not the projected list:
+                              AGENT_CORE appends the extra-system-context
+                              carrier after the history of every request, so
+                              when a request only extends the history, the
+                              previous request's carrier sits where the new
+                              history starts and every comparison would report
+                              a divergence at that position. *)
+                           previous_request_projection_ref
+                           := (if not (Keeper_wire_capture.enabled ())
+                               then Keeper_projection_change.Request_not_digested
+                               else
+                                 match !current_request_provider_content_ref with
+                                 | Some (Ok provider_content) ->
+                                   Keeper_wire_capture
+                                   .capture_request_projection_change
+                                     ~masc_root:(Workspace.masc_root_dir config)
+                                     ~keeper_name:meta.name
+                                     ~turn_id:manifest_keeper_turn_id
+                                     ~agent_core_turn:acc.current_turn
+                                     ~trace_id:meta.runtime.trace_id
+                                     ~runtime_profile:runtime_id
+                                     ~memo:request_digest_memo
+                                     ~previous:!previous_request_projection_ref
+                                     ~tools:request_tools
+                                     ~messages:provider_content
+                                 | Some (Error _) | None ->
+                                   Keeper_projection_change.Request_not_digested))
                       ~on_official_client_result_handoff:
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:

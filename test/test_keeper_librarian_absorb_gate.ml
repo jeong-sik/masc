@@ -220,13 +220,14 @@ let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
 ;;
 
 type runtime_case =
-  | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run
+  | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Excluded_run
   | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure
 
 let runtime_case_name = function
   | Judged_run -> "judged"
   | Gate_disabled_run -> "disabled"
+  | Excluded_run -> "excluded"
   | Lane_disabled_run -> "lane-disabled"
   | Missing_key_run -> "missing-key"
   | Http_failure -> "http-failure"
@@ -245,12 +246,13 @@ let invalid_response_body = function
   | Nonfinite_response_run -> Some {|{"model":"nonfinite-fixture","answers":{"s0_0":{"type":"noul","noul":NaN},"s1_0":{"type":"noul","noul":0.0}}}|}
   | Duplicate_response_run -> Some {|{"model":"duplicate-fixture","answers":{"s0_0":{"type":"noul","noul":1.0},"s0_0":{"type":"noul","noul":0.0}}}|}
   | Nonutf8_response_run -> Some ("{\"model\":\"binary-" ^ String.make 1 (Char.chr 255) ^ "\",\"answers\":{}}")
-  | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run
+  | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run
   | Http_failure | Invalid_answer_run | Memory_write_failure -> None
 ;;
 
 let runtime_skip_reason = function
   | Gate_disabled_run -> Some "absorb_gate_disabled"
+  | Excluded_run -> Some "keeper_excluded"
   | Lane_disabled_run -> Some "lane_disabled"
   | Missing_key_run -> Some "missing_api_key"
   | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
@@ -323,7 +325,7 @@ let run_runtime_evidence ?fixture_dir () =
       | Judged_run -> claims @
           [ `Assoc [ "claim", `String (String.make 70000 'x' ^ "EXACT_OUTPUT_TAIL")
                    ; "category", `String "fact" ] ]
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
+      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure -> claims
     in
     let answer = `Assoc
@@ -367,14 +369,14 @@ let run_runtime_evidence ?fixture_dir () =
             Alcotest.fail "the directory must fail the Memory file read"
           with Sys_error _ as exn ->
             observed_storage_error := Some (Printexc.to_string exn))
-       | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
+       | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
       match scenario with
       | Http_failure -> Cohttp_eio.Server.respond_string
           ~status:`Service_unavailable ~body:"fixture unavailable" ()
       | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run ->
         Cohttp_eio.Server.respond_string ~status:`OK
           ~body:(Option.get (invalid_response_body scenario)) ()
-      | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Invalid_answer_run | Memory_write_failure ->
+      | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Invalid_answer_run | Memory_write_failure ->
         Cohttp_eio.Server.respond_string ~status:`OK ~body:jev_response ()
     in
     let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
@@ -400,15 +402,18 @@ let run_runtime_evidence ?fixture_dir () =
     let requested_model = "configured-request-fixture" in
     Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY"
       (if scenario = Missing_key_run then None else Some "synthetic-jev-key") (fun () ->
-      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED"
-        (Some (if scenario = Lane_disabled_run then "false" else "true")) (fun () ->
-      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED"
-        (Some (if scenario = Gate_disabled_run then "false" else "true")) (fun () ->
-        Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some jev_uri) (fun () ->
-          Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" (Some requested_model) (fun () ->
+      Masc_test_deps.with_typesafeai_policy
+        { Runtime_schema.default_typesafeai with
+          lane_enabled = scenario <> Lane_disabled_run
+        ; lane_endpoint = jev_uri
+        ; lane_model = requested_model
+        ; absorb_gate = scenario <> Gate_disabled_run
+        ; excluded_keepers = (if scenario = Excluded_run then [ keeper_id ] else [])
+        }
+        (fun () ->
           Masc.Keeper_librarian_runtime.run_best_effort
             ~trigger:Masc.Keeper_librarian_runtime.Queue_changed
-            ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input)))));
+            ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input));
     Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
     Alcotest.(check int) "JEV request count"
       (if Option.is_some (runtime_skip_reason scenario) then 0 else 1) (List.length !jev_requests);
@@ -439,7 +444,7 @@ let run_runtime_evidence ?fixture_dir () =
        Alcotest.(check string) "the actual storage exception reaches run detail"
          expected
          (member "detail" original |> string)
-     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
+     | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
     let replayed = Runs.get (Runs.replay registry_path) ~run_id:run.run_id |> Option.get in
     check_json "the full execution evidence survives disk replay"
       original (Runs.run_to_yojson replayed);
@@ -450,11 +455,11 @@ let run_runtime_evidence ?fixture_dir () =
     let gate = member "absorb_gate" output in
     let expected_status = match scenario with
       | Judged_run | Memory_write_failure -> "judged"
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run -> "skipped"
+      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> "skipped"
       | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> "open" in
     Alcotest.(check string) "gate status" expected_status (member "status" gate |> string);
     (match scenario with
-     | Gate_disabled_run | Lane_disabled_run | Missing_key_run ->
+     | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run ->
        Alcotest.(check string) "the actual unavailability is retained"
          (Option.get (runtime_skip_reason scenario)) (member "reason" gate |> string);
        check_json "a skipped gate has no applied boundary" `Null
@@ -534,18 +539,18 @@ let run_runtime_evidence ?fixture_dir () =
             Alcotest.(check (float 0.)) ("raw probability " ^ qid) expected
               (member qid (member "answers" evaluation) |> Yojson.Safe.Util.to_float))
             [ "s0_0", 1.0; "s1_0", 0.0 ]
-        | Gate_disabled_run | Lane_disabled_run | Missing_key_run -> Alcotest.fail "disabled scenario cannot evaluate"));
+        | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> Alcotest.fail "disabled scenario cannot evaluate"));
     (match scenario with
      | Memory_write_failure ->
        Unix.rmdir current_path;
        Unix.rename saved_path current_path
-     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
+     | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
     let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
       | Some snapshot -> snapshot
       | None -> Alcotest.fail "current snapshot is missing" in
     let expected_facts = match scenario with
       | Judged_run -> b :: untouched :: selection.new_claims
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> untouched :: selection.new_claims
+      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> untouched :: selection.new_claims
       | Memory_write_failure -> seeded.facts in
     Alcotest.(check (list string)) "correct originals remain current"
       (List.sort String.compare (List.map id expected_facts))
@@ -556,7 +561,7 @@ let run_runtime_evidence ?fixture_dir () =
       | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
     let archived = match scenario with
       | Judged_run -> [ a.claim ]
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> [ a.claim; b.claim ]
+      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> [ a.claim; b.claim ]
       | Memory_write_failure -> [] in
     Alcotest.(check (list string)) "only applied originals are archived"
       (List.sort String.compare archived)
@@ -572,7 +577,7 @@ let run_runtime_evidence ?fixture_dir () =
         ~exact_runs:[ replayed ] ~verification_runs:[] ~goal_verification_runs:[] |> require in
       Yojson.Safe.to_file (Filename.concat directory (case_name ^ ".json"))
         (`Assoc [ "scenario", `String case_name; "detail", detail; "page", page ])) fixture_dir)
-    [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run
+    [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run; Excluded_run
     ; Http_failure; Invalid_json_run; Invalid_response_run; Nonfinite_response_run
     ; Duplicate_response_run; Nonutf8_response_run
     ; Invalid_answer_run; Memory_write_failure ]
@@ -685,10 +690,9 @@ let with_gate_http_fixture f =
   Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
   @@ fun () ->
   Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
-  let env = Masc_test_deps.with_process_env in
-  env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
-  env "MASC_TYPESAFEAI_ENABLED" (Some "true") @@ fun () ->
-  env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with absorb_gate = true } @@ fun () ->
   f ~sw ~net ~clock
 ;;
 
@@ -775,13 +779,19 @@ let test_run_uses_one_destination_and_model_snapshot () =
   let alternate = F.start_server ~sw ~net ~clock (F.Reply response) in
   let initial = F.start_server ~sw ~net ~clock
       ~on_request_before_reply:(fun () ->
-        Unix.putenv "MASC_TYPESAFEAI_ENDPOINT" alternate.base_url;
-        Unix.putenv "MASC_TYPESAFEAI_MODEL" "changed-after-first-request")
+        (* A new table published mid-run must not move the run's requests. *)
+        Runtime_typesafeai_policy.publish
+          { (Runtime_typesafeai_policy.current ()) with
+            lane_endpoint = alternate.base_url
+          ; lane_model = "changed-after-first-request"
+          })
       (F.Reply response) in
-  let env = Masc_test_deps.with_process_env in
   let configured_endpoint = initial.base_url ^ "?access=fixture-query#fixture-fragment" in
-  env "MASC_TYPESAFEAI_ENDPOINT" (Some configured_endpoint) @@ fun () ->
-  env "MASC_TYPESAFEAI_MODEL" (Some "initial-request-model") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with
+      lane_endpoint = configured_endpoint
+    ; lane_model = "initial-request-model"
+    } @@ fun () ->
   let first = fact (List.nth sources 0) in
   let second = fact (List.nth sources 1) in
   let other = fact "beta ships on fridays and pages the operator" in
@@ -844,9 +854,11 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
           Eio.Promise.await release_second
         end)
       (F.Reply response) in
-  let env = Masc_test_deps.with_process_env in
-  env "MASC_TYPESAFEAI_ENDPOINT" (Some server.base_url) @@ fun () ->
-  env "MASC_TYPESAFEAI_MODEL" (Some "request-model") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with
+      lane_endpoint = server.base_url
+    ; lane_model = "request-model"
+    } @@ fun () ->
   let first = fact (List.nth sources 0) in
   let second = fact (List.nth sources 1) in
   let other = fact "beta ships on fridays and pages the operator" in
@@ -923,6 +935,27 @@ let test_skipped_run_publishes_its_completed_observation () =
   | _ -> Alcotest.fail "skipped run did not publish exactly one completed observation"
 ;;
 
+(* A keeper named in [typesafeai].excluded_keepers: the run is skipped by
+   that name, every absorption is applied as answered, and nothing is sent,
+   whatever the key says. *)
+let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
+  let facts = List.map fact sources in
+  let absorbed = absorbed_into merged facts in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with
+      lane_endpoint = "http://127.0.0.1:9/never-reached"
+    ; absorb_gate = true
+    ; excluded_keepers = [ "kept-home" ]
+    } @@ fun () ->
+  match Gate.run ~keeper_id:"kept-home" ~facts ~new_claims:[ merged ] ~absorbed () with
+  | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Keeper_excluded; absorbed = applied } ->
+    Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
+  | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
+    Alcotest.fail "the run was skipped for a reason other than the exclusion"
+  | Gate.Evaluated _ -> Alcotest.fail "an excluded keeper's memories were sent"
+;;
+
 let test_rejected_response_retains_every_typed_answer () =
   with_gate_http_fixture @@ fun ~sw ~net ~clock ->
   let module F = Exact_output_fixture in
@@ -940,7 +973,8 @@ let test_rejected_response_retains_every_typed_answer () =
   let server = F.start_server ~sw ~net ~clock (F.Replies
     (List.map (fun (_, answers) -> Yojson.Safe.to_string
        (`Assoc [ "model", `String "invalid-response-model"; "answers", answers ])) cases)) in
-  Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some server.base_url) @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with lane_endpoint = server.base_url } @@ fun () ->
   let facts = List.map fact sources in
   List.iter (fun (label, expected) ->
     let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~facts
@@ -1086,6 +1120,8 @@ let () =
             test_cancelled_next_request_keeps_the_completed_observation
         ; Alcotest.test_case "skipped run publishes its completed observation" `Quick
             test_skipped_run_publishes_its_completed_observation
+        ; Alcotest.test_case "an excluded keeper is applied as answered without a request" `Quick
+            test_an_excluded_keeper_is_applied_as_answered_without_a_request
         ; Alcotest.test_case "transport diagnostics retain cause without credentials" `Quick
             test_transport_diagnostics_preserve_cause_without_configured_credentials
         ; Alcotest.test_case "failure bodies omit configured credentials" `Quick

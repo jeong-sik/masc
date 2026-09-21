@@ -73,11 +73,6 @@ let input_timeout_seconds schedule ~now_ns ~maximum =
         else
           min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0)
 
-let nonnegative_width width = max 0 width
-
-let keeper_context_bar_width ~inner_width =
-  nonnegative_width (min 30 (inner_width - 40))
-
 let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
   let line_count = max 0 line_count in
   let content_height = max 0 content_height in
@@ -243,100 +238,6 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
     max 0 (available - attention_rows - task_error_rows - task_rows)
   in
   { attention_rows; task_error_rows; task_rows; filler_rows }
-
-type board_read_allocation = {
-  body_rows : int;
-  comment_rows : int;
-}
-
-(* What the comments may take. Five rows was a flat constant, so a forty-reply
-   thread got five rows on an eighty-row terminal exactly as it did on a
-   twenty-row one, and reading it meant scrolling the whole post past first.
-
-   Two claims replace it. Rows the body does not need belong to the comments:
-   a ten-line post on a sixty-row pane left twenty-four rows of filler under
-   it while the thread was cut at five. And where the body does want the whole
-   pane, the comments still take a share of it rather than a constant.
-
-   A third, not a half: at a half the two are the same size and the post one
-   came to read stops being the larger thing on the screen. The floor keeps
-   every short pane drawing exactly what it drew before. *)
-let board_comment_share = 3
-let board_comment_floor_rows = 5
-
-(* The box the pane draws: its top and bottom, the title, two dividers, the
-   heading and the author. *)
-let board_read_box_rows = 7
-
-(* The key footer the surface writes under that box. It was not counted here,
-   so the box filled the surface on its own and the footer landed on the row
-   the composer owns -- z:wide, Y:copy link, c:reply and Left/Esc:back were
-   drawn every frame and reached the screen in none of them. *)
-let board_read_footer_rows = 1
-
-(* The "post rows X-Y of Z" line, which the pane writes only when the post or
-   the thread has more lines than it can show. It was not counted either, so
-   an overflowing post pushed the footer one row further out than a short one
-   did. *)
-let board_read_position_rows = 1
-
-let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
-  (* Keep one body row when the post has body text, then give comments the
-     smaller of what they need and what they may take. *)
-  let comment_count = max 0 comment_count in
-  let comment_chrome_rows = if comment_count > 0 then 2 else 0 in
-  let allocate ~position_rows =
-    let available =
-      max 0
-        (terminal_rows - board_read_box_rows - board_read_footer_rows
-         - comment_chrome_rows - position_rows)
-    in
-    let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
-    let comment_ceiling =
-      max board_comment_floor_rows
-        (max
-           (available - max 0 body_line_count)
-           (available / board_comment_share))
-    in
-    let comment_rows =
-      min (min comment_ceiling comment_count)
-        (max 0 (available - minimum_body_rows))
-    in
-    let body_rows = max 0 (available - comment_rows) in
-    { body_rows; comment_rows }
-  in
-  (* The position line appears exactly when something does not fit, which is a
-     property of the allocation it has to fit beside. Taking a row away can
-     only make more of the content overflow, never less, so asking once more
-     with the row reserved settles it. *)
-  let unpositioned = allocate ~position_rows:0 in
-  if
-    body_line_count > unpositioned.body_rows
-    || comment_count > unpositioned.comment_rows
-  then allocate ~position_rows:board_read_position_rows
-  else unpositioned
-
-type board_read_scroll = {
-  normalized_scroll : int;
-  body_offset : int;
-  comment_offset : int;
-}
-
-let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
-    ~comment_rows scroll =
-  let body_line_count = max 0 body_line_count in
-  let body_rows = max 0 body_rows in
-  let comment_count = max 0 comment_count in
-  let comment_rows = max 0 comment_rows in
-  let maximum_body_offset = max 0 (body_line_count - body_rows) in
-  let maximum_comment_offset = max 0 (comment_count - comment_rows) in
-  let maximum_scroll = maximum_body_offset + maximum_comment_offset in
-  let normalized_scroll = max 0 (min scroll maximum_scroll) in
-  let body_offset = min normalized_scroll maximum_body_offset in
-  let comment_offset =
-    min maximum_comment_offset (normalized_scroll - body_offset)
-  in
-  { normalized_scroll; body_offset; comment_offset }
 
 (* Keeper roster columns.
 

@@ -922,6 +922,7 @@ let test_an_expiring_token_is_exchanged_and_stored () =
        ~provider
        { Keeper_oauth_client_store.client_id = "client-abc"
        ; client_secret = None
+       ; secret_expires_at = None
        ; scopes = []
        }
    with
@@ -1037,6 +1038,7 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
        ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity") ~provider
        { Keeper_oauth_client_store.client_id = "client-abc"
        ; client_secret = None
+       ; secret_expires_at = None
        ; scopes = []
        }
    with

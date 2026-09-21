@@ -289,6 +289,10 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some
         (Tool_misc_dos_lane.handle_press ~tool_name:name ~start_time:start
            ~who:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_dos_click ->
+      Some
+        (Tool_misc_dos_lane.handle_click ~tool_name:name ~start_time:start
+           ~who:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_dos_type ->
       Some
         (Tool_misc_dos_lane.handle_type ~tool_name:name ~start_time:start
@@ -343,6 +347,7 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_dos_load
   | Tool_schemas_misc.Misc_dos_eject
   | Tool_schemas_misc.Misc_dos_press
+  | Tool_schemas_misc.Misc_dos_click
   | Tool_schemas_misc.Misc_dos_type
   | Tool_schemas_misc.Misc_dos_step
   (* Starting and stopping the automation browser changes its lifecycle. *)

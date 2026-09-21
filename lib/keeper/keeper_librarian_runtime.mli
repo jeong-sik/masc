@@ -58,6 +58,11 @@ val preflight_slots
     names its journal kind. *)
 type trigger = Conversation_completed | Queue_changed | Durable_range
 
+type write_scope = Context_only | Context_and_memory
+(** The caller names the evidence's purpose. A queue-source organization pass
+    writes only working Context; remembered conversation and durable ranges
+    retain Memory processing regardless of the wake-up trigger. *)
+
 type input_projection =
   | Recent_window
   | Already_selected_range
@@ -65,6 +70,7 @@ type input_projection =
 val run_best_effort
   :  ?trigger:trigger
   -> ?input_projection:input_projection
+  -> ?write_scope:write_scope
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)

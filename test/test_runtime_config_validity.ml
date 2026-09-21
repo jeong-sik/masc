@@ -1596,11 +1596,15 @@ let catalog_decided_capability_pairs
   ; "emits-usage-tokens", emits_usage_tokens, resolved.emits_usage_tokens
   ]
 
-(* The number of seed lines writing one of those twelve today. Pinned rather
-   than left open because a walk that finds nothing looks the same as a walk
-   whose matcher is broken. The change that removes the inert lines takes this
-   to zero; until then a diff here means the seed moved. *)
-let seed_catalog_decided_capability_lines = 13
+(* The seed writes none of those twelve. A count of zero is the weakest kind of
+   assertion on its own — a walk that reached nothing produces the same zero —
+   so the models below are named as proof that the walk arrived. Both keep a
+   [capabilities] block the catalog answers for, so losing either means the
+   catalog stopped being installed or the branch stopped being taken, not that
+   the seed got tidier. *)
+let seed_catalog_decided_capability_lines = 0
+
+let seed_models_whose_capabilities_the_catalog_decides = [ "glm-5-3"; "minimax-m3" ]
 
 (* Prints every seed line that writes one of the twelve next to the value the
    runtime resolves, and fails when the two disagree. A disagreement is not a
@@ -1616,6 +1620,7 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
     | Error detail -> fail detail
   in
   let written = ref 0 in
+  let visited = ref [] in
   let disagreements = ref [] in
   List.iter
     (fun (runtime : Runtime.t) ->
@@ -1642,6 +1647,7 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
           with
           | None -> ()
           | Some _ ->
+            visited := runtime.model.id :: !visited;
             (match Llm_provider.Provider_config.capabilities_for_config_model config with
              | None ->
                failf "%s: no resolved capabilities for a catalogued model" runtime.id
@@ -1674,6 +1680,13 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
                            :: !disagreements)
                  (catalog_decided_capability_pairs declared resolved))))
     runtimes;
+  List.iter
+    (fun model_id ->
+       check bool
+         (Printf.sprintf "walked the catalogued capabilities block of %s" model_id)
+         true
+         (List.exists (String.equal model_id) !visited))
+    seed_models_whose_capabilities_the_catalog_decides;
   check int
     "seed lines writing a key the catalog row decides"
     seed_catalog_decided_capability_lines

@@ -239,6 +239,7 @@ def main() -> None:
             "disabled",
             "lane-disabled",
             "missing-key",
+            "excluded",
             "http-failure",
             "invalid-json",
             "invalid-response",

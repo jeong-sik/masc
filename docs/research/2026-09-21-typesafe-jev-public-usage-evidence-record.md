@@ -67,7 +67,7 @@
 - 확인일시: 2026-09-21T01:02:00+09:00
 - 신뢰도: Medium (OpenRouter 공식 페이지를 직접 못 읽음. 이 Mac 에서 `GET /api/v1/models` 446개에 `jev`/`typesafe` 0건은 확인 — 결정 모델은 그 목록에 안 실림)
 - 내용: `POST https://openrouter.ai/api/alpha/decisions`, 모델 `typesafe/jev-1.13`, 본문 모양은 TypeSafe 와 같음(`model`, `state`, `questions`), 응답에 `id`·`provider`·`usage.cost` 추가, 32k, $0.042/1M 입력, 오류 봉투 `{"error":{code,message}}`, 402(크레딧). 베타.
-- 설계 반영: `MASC_TYPESAFEAI_ENDPOINT`·`MASC_TYPESAFEAI_MODEL` 로 예비 경로 가능. 오류 해석은 확인 필요(`{"detail"}` vs `{"error"}`).
+- 설계 반영: `[typesafeai] endpoint`·`model` 로 예비 경로 가능. 오류 해석은 확인 필요(`{"detail"}` vs `{"error"}`).
 
 ### 7. 에이전트 스킬
 

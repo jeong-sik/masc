@@ -60,9 +60,17 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # binding for it.
 
 # TypeSafe AI (System One Jev) Opt-in Integration
-# Calibrated probabilistic decisions for the board_attention_exact lane only.
-# A non-blank TYPESAFEAI_API_KEY turns it on. MASC_TYPESAFEAI_ENABLED=false
-# turns it off even with a key; the variable cannot turn it on without one.
+# Calibrated probabilistic decisions for the board_attention_exact lane and
+# the librarian absorb gate (RFC-librarian-absorb-gate).
+# A non-blank TYPESAFEAI_API_KEY in the environment (the one secret) turns it
+# on. Everything else about the lane is the [typesafeai] table (sample at the
+# end of this block; absent means the defaults shown there; a misspelt key is
+# a load error): enabled = false turns the lane off even with a key and cannot
+# turn it on without one; endpoint and model choose the route;
+# board_attention is this gate; absorb_gate is the librarian absorb gate
+# (off unless true); excluded_keepers names keepers that neither gate ever
+# asks the vendor about, so their posts, context and memories never leave
+# the machine (a name that is no keeper is reported at boot).
 # When enabled, MASC POSTs the TYPESAFEAI_API_KEY as an Authorization bearer
 # credential to the configured TypeSafe AI endpoint. The JSON body's top-level
 # fields are model, state, and questions. state.items[0] contains candidate_id;
@@ -82,6 +90,14 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # not-relevant answer or a failed call is judged again by the
 # board_attention_exact slots below. So only a relevant answer saves an
 # LLM call, and every other candidate waits for Jev and then the LLM.
+#
+# [typesafeai]
+# enabled = true
+# endpoint = "https://api.typesafe.ai/v1/systemone"
+# model = "jev-latest"
+# board_attention = true
+# absorb_gate = false
+# excluded_keepers = []
 
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]

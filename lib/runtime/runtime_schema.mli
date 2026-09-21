@@ -304,6 +304,30 @@ type exact_output_lane_decl =
 
 (** {1 Top-level config} *)
 
+(** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. The key stays in
+    the environment ([TYPESAFEAI_API_KEY]); everything else about the lane is
+    here. [lane_enabled] turns the lane off; it cannot turn it on without a
+    key. Two gates ask the vendor: [board_attention] (the Board attention
+    judgment, {!Keeper_board_attention_exact_flow}, which sends the post and
+    the keeper's context) and [absorb_gate] (the librarian absorb gate,
+    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Both reach
+    the same endpoint, so one [excluded_keepers] answers for both: a keeper
+    named there is never asked about, whichever gate asks. *)
+type typesafeai =
+  { lane_enabled : bool
+  ; lane_endpoint : string
+  ; lane_model : string
+  ; board_attention : bool
+  ; absorb_gate : bool
+  ; excluded_keepers : string list
+  }
+[@@deriving show, eq]
+
+val default_typesafeai : typesafeai
+(** What an absent [\[typesafeai\]] table means: the lane on when a key is
+    set, the vendor's endpoint and latest model, Board attention on, the absorb
+    gate off. *)
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -340,6 +364,8 @@ type config =
         Replaces {!Lsp_process_manager.command_of_language} for that language
         and no other. A key naming no language, or a value that is not a
         non-empty array of strings, is refused at load. *)
+  ; typesafeai : typesafeai
+    (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list
     (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
         reach (RFC-0415). A keeper with no entry has an empty allowlist,

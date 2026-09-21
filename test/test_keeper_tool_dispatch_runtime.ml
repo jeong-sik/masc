@@ -6749,10 +6749,15 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
               | None -> fail "expected a durable composition run summary"
             in
             check
-              (option bool)
-              "run summary records terminal success"
-              (Some true)
-              (Safe_ops.json_bool_opt "success" summary_row);
+              (option string)
+              "run summary records terminal disposition"
+              (Some "completed")
+              (Safe_ops.json_string_opt "disposition" summary_row);
+            check
+              (option string)
+              "run summary records terminal wire outcome"
+              (Some "ok")
+              (Safe_ops.json_string_opt "wire_outcome" summary_row);
             check bool
               "run summary records total duration"
               true
@@ -6810,9 +6815,14 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
               (Safe_ops.json_string_opt "type" committed_refresh);
             check
               (option bool)
-              "commit refresh carries node success"
-              (Safe_ops.json_bool_opt "success" committed_row)
+              "commit refresh omits the success shadow"
+              None
               (Safe_ops.json_bool_opt "success" committed_refresh);
+            check
+              (option string)
+              "commit refresh carries node wire outcome"
+              (Safe_ops.json_string_opt "wire_outcome" committed_row)
+              (Safe_ops.json_string_opt "wire_outcome" committed_refresh);
             check
               (option (float 0.000_001))
               "commit refresh carries node duration"

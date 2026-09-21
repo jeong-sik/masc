@@ -1178,7 +1178,7 @@ let test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled () =
            | Some `Stopped -> "stopped"
            | Some (`Crashed reason) -> "crashed:" ^ reason))
 
-let test_direct_stop_resolves_done_after_librarian_drain_failure () =
+let test_direct_stop_ignores_server_owned_librarian_failure () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   R.For_testing.clear ();
@@ -1252,10 +1252,10 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
       | Masc.Keeper_keepalive.Keeper_not_registered ->
         fail "failed-drain keeper disappeared before joined stop"
       | Masc.Keeper_keepalive.Keeper_joined
-          { terminal = `Stopped; lane_exit = { cleanup_error = Some _; _ } } -> ()
+          { terminal = `Stopped; lane_exit = { cleanup_error = None; _ } } -> ()
       | Masc.Keeper_keepalive.Keeper_joined
-          { terminal = `Stopped; lane_exit = { cleanup_error = None; _ } } ->
-        fail "failed Librarian drain was not preserved as lane cleanup evidence"
+          { terminal = `Stopped; lane_exit = { cleanup_error = Some _; _ } } ->
+        fail "server-owned Librarian failure leaked into the Keeper lifecycle lane"
       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
         fail ("failed Librarian drain changed explicit stop into crash: " ^ reason))
 
@@ -5499,8 +5499,8 @@ let () =
         test_cross_domain_shutdown_submit;
       test_case "cancelled launch owner rolls back under launch reservation" `Quick
         test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
-      test_case "stop resolves done after Librarian drain failure" `Quick
-        test_direct_stop_resolves_done_after_librarian_drain_failure;
+      test_case "stop ignores server-owned Librarian failure" `Quick
+        test_direct_stop_ignores_server_owned_librarian_failure;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick

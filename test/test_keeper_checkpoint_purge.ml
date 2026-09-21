@@ -687,7 +687,6 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
        | Error detail -> Alcotest.failf "fixture checkpoint: %s" detail);
       let original = In_channel.with_open_bin checkpoint_path In_channel.input_all in
       let before = workspace_contents owner_root in
-      let runtime_entries = Sys.readdir runtime_root |> Array.to_list in
       let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
       let write_progress ~end_atom =
         match
@@ -773,7 +772,8 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
       run_cli [ "--base"; base_path; "--apply" ];
       let backup_dirs =
         Sys.readdir runtime_root |> Array.to_list
-        |> List.filter (fun name -> not (List.mem name runtime_entries))
+        |> List.filter (String.starts_with
+             ~prefix:("backups-checkpoint-purge-" ^ checkpoint.session_id ^ "-"))
       in
       let backup_dir = match backup_dirs with
         | [ name ] -> Filename.concat runtime_root name

@@ -23,7 +23,7 @@ function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
     tool: 'keeper_context_status',
     input: {},
     output: 'context ok',
-    success: true,
+    wire_outcome: 'ok',
     duration_ms: 12,
     ...overrides,
   }
@@ -74,10 +74,10 @@ describe('tool-call-output-store', () => {
   it('keeps colliding execution IDs separate by exact Keeper identity', () => {
     recordToolCallOutputs([
       toolCall({ keeper: 'writer', execution_id: 'shared', output: 'writer output', duration_ms: 12 }),
-      toolCall({ keeper: 'peer', execution_id: 'shared', output: 'peer output', success: false, duration_ms: 9000 }),
+      toolCall({ keeper: 'peer', execution_id: 'shared', output: 'peer output', wire_outcome: 'error', duration_ms: 9000 }),
     ])
     expect(lookupToolCallOutput('writer', 'shared')?.output).toBe('writer output')
-    expect(lookupToolCallOutput('peer', 'shared')?.success).toBe(false)
+    expect(lookupToolCallOutput('peer', 'shared')?.wire_outcome).toBe('error')
     expect(lookupToolCallOutput(null, 'shared')).toBeNull()
     expect(lookupToolCallOutput('unrelated', 'shared')).toBeNull()
   })

@@ -16,11 +16,12 @@ let check_json label expected actual =
   Alcotest.(check string) label (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
 
 type scenario = Faithful | Rejected | Uncertain | Missing | Invalid | Http_failure
-  | Excluded | Stale | Cancel_absorb | Cancel_review
+  | Excluded | Stale | Cancel_absorb | Cancel_review | Context_only | Conversation_queue
 let name = function Faithful -> "faithful" | Rejected -> "needs-revision"
   | Uncertain -> "insufficient" | Missing -> "missing-answer" | Invalid -> "invalid-answer"
   | Http_failure -> "http-failure" | Excluded -> "excluded" | Stale -> "stale"
   | Cancel_absorb -> "cancel-after-context" | Cancel_review -> "cancel-review"
+  | Context_only -> "context-only" | Conversation_queue -> "conversation-queue"
 let verdict = function Rejected -> "needs_revision" | Uncertain -> "insufficient_evidence"
   | _ -> "faithful"
 let pocket sources context : Context.pocket =
@@ -67,6 +68,13 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
       ~category:Types.Fact ~now:100. ~origin:{kind = Types.Authored; trace_id = keeper_id} in
   let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
       ~source:{kind = Current.Librarian; trace_id = keeper_id} ~facts:[fact] () |> require in
+  let seeded = if scenario = Context_only then
+      Current.apply_disposition ~keepers_dir ~keeper_id ~now:101.
+        ~source:{kind = Current.Librarian; trace_id = keeper_id}
+        ~official_range_id:{receipt_scope = keepers_dir; after_boundary_line = 0;
+          turns = [1, Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1]}
+        ~absorbed:[] ~new_claims:[] () |> require
+    else seeded in
   let memory_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let memory_before = Fs_compat.load_file memory_path in
   let working_context : Context.input =
@@ -76,14 +84,19 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
     {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
      goal_context = Keeper_librarian.No_task; keeper_instructions = "Preserve pending approval.";
      current = Some {facts = seeded.facts}; working_context;
-     messages = []; tool_observations = []; counterpart_observations = []} in
+     messages = (if scenario = Conversation_queue then
+       [Agent_core.Types.make_message ~role:Agent_core.Types.User
+          [Agent_core.Types.Text "Replace the outdated publication note."]] else []);
+     tool_observations = []; counterpart_observations = []} in
   let proposal = `Assoc ["merge_contexts", `List [`String alias]; "sources", `List [`String "s1"];
     "context", `String (if scenario = Rejected then "The user approved publication." else "The user asks for progress; publication still needs approval.");
     "next_steps", `List [`String "Answer progress without publishing"]] in
   let claims = if scenario = Cancel_absorb then
       [`Assoc ["claim", `String "Publication of the draft needs prior approval.";
         "category", `String "fact"; "absorbs", `List [`String "m1"]]] else [] in
-  let answer = `Assoc ["new_claims", `List claims; "dropped", `List [];
+  let dropped = if scenario = Context_only || scenario = Conversation_queue then
+    [`Assoc ["memory_id", `String "m1"; "reason", `String "The note is outdated."]] else [] in
+  let answer = `Assoc ["new_claims", `List claims; "dropped", `List dropped;
     "working_contexts", `List [proposal]] in
   let librarian = Fixture.start_server ~sw ~net ~clock
       (Fixture.Reply (Fixture.openai_response answer)) in
@@ -131,7 +144,12 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
       lane_endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port;
       lane_model = "requested-context-fixture"; context_review = true; absorb_gate = true;
       excluded_keepers = if scenario = Excluded then [keeper_id] else []} @@ fun () ->
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id in
+  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let receipt_before = Fs_compat.load_file_opt receipt_path in
+  let journal_before = Fs_compat.load_file_opt journal_path in
   let run () = Runtime.run_best_effort ~trigger:Runtime.Queue_changed
+      ~write_scope:(if scenario = Context_only then Runtime.Context_only else Runtime.Context_and_memory)
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
   if scenario = Cancel_absorb || scenario = Cancel_review then (
     let scope, publish_scope = Eio.Promise.create () in
@@ -166,14 +184,27 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
     Alcotest.(check int) "accepted or unassessed batch commits once" (previous.revision + 1) after.revision;
     Alcotest.(check bool) "new source enters the organized snapshot" true
       (List.exists (fun (s : Context.source) -> s.reference = sc.reference) after.sources));
-  if scenario = Cancel_absorb || scenario = Cancel_review then
+  if scenario = Cancel_absorb || scenario = Cancel_review || scenario = Context_only then
     Alcotest.(check string) "Context commit is independent of uncommitted Memory"
       memory_before (Fs_compat.load_file memory_path);
+  if scenario = Context_only then (
+    Alcotest.(check (option string)) "Context-only preserves Memory journal" journal_before
+      (Fs_compat.load_file_opt journal_path);
+    Alcotest.(check (option string)) "Context-only preserves Memory receipt" receipt_before
+      (Fs_compat.load_file_opt receipt_path));
+  if scenario = Conversation_queue then (
+    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require |> Option.get in
+    Alcotest.(check int) "queue-triggered conversation still commits Memory" (seeded.revision + 1) current.revision;
+    Alcotest.(check int) "conversation evidence applies its disposition" 0 (List.length current.facts));
   let run = match List.filter (fun (r : Runs.run) -> r.actor = keeper_id) (Runs.list_runs registry) with
     | [run] -> Runs.get registry ~run_id:run.run_id |> Option.get
     | _ -> Alcotest.fail "expected one run" in
   let output = match run.status with Runs.Completed {output; _} -> output
     | _ -> Alcotest.fail "runtime did not persist terminal evidence" in
+  if scenario = Context_only then (
+    Alcotest.(check string) "explicit Context-only result" "skipped_context_only"
+      (member "memory_write" output |> text);
+    check_json "no absorb pass was run" `Null (member "absorb_gate" output));
   let review = member "context_review" output and write = member "context_write" output in
   Alcotest.(check string) "publication outcome is explicit"
     (if scenario = Cancel_review then "not_attempted" else if scenario = Rejected then "withheld" else if scenario = Stale then "failed" else "committed")
@@ -223,4 +254,4 @@ let () =
     List.iter (fun scenario -> test_case ~base_path ~registry ~fixture_dir:Sys.argv.(2) scenario ()) cases
   else Alcotest.run "Librarian Context review"
     ["real runtime", List.map (fun scenario -> Alcotest.test_case (name scenario) `Quick
-      (test_case ~base_path ~registry scenario)) cases]
+      (test_case ~base_path ~registry scenario)) (cases @ [Context_only; Conversation_queue])]

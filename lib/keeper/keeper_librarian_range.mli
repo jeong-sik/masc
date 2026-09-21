@@ -85,8 +85,9 @@ val may_have_unread :
     so the full selector can report the mismatch. [false] proves
     that the current restart segment contains no position beyond the durable
     cursor. Segment selection is shared with {!select}; already-seen restarts
-    still exclude earlier histories. A changed whole-log row count, later
-    restart, or later current-segment atom position returns [true]; the full
+    still exclude earlier histories. Unreadable complete rows, a shortened log, a later
+    restart, or a new current-segment atom boundary returns [true]. Appended
+    official-only rows do not require an atom checkpoint read. The full
     selector still validates unreadable lines and checkpoint digests. *)
 
 (** [lines] is {!Keeper_turn_boundaries.read}'s answer. [messages] are the

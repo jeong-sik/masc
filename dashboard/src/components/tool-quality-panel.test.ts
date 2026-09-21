@@ -193,6 +193,30 @@ describe('ToolQualityPanel', () => {
     expect(container.textContent).toContain('1')
   })
 
+  it('renders unsettled observations without calling them malformed or empty', async () => {
+    const fetchToolQuality = vi.fn().mockResolvedValue({
+      ...payload,
+      total: 0,
+      success: 0,
+      failure: 0,
+      deferred: 0,
+      unsettled: 2,
+      malformed: 0,
+      success_rate: 0,
+    })
+    const { ToolQualityPanel } = await loadPanel({ fetchToolQuality })
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).not.toContain('도구 호출 데이터 없음')
+    expect(container.textContent).toContain('미정산')
+    expect(container.textContent).toContain('2')
+  })
+
   it('normalizes missing tool metric fields before rendering', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithMissingToolMetrics))
     vi.stubGlobal('fetch', fetchMock)

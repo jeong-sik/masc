@@ -652,9 +652,11 @@ let consume_one_with_extent
   (* A keeper that has only ever run on official-client runtimes has no
      checkpoint and no atom position: its atoms are nothing to read, and its
      official lines are read below. A missing checkpoint with a position is
-     the error it always was. *)
+     still an error when unread atom work requires that checkpoint. *)
   let current_selection ?progress () =
-    match load_checkpoint current_trace_id, progress with
+    if not (R.may_have_unread ~trace_id:current_trace_id ~lines ~progress)
+    then Ok (current_trace_id, progress, [], R.Nothing_to_read)
+    else match load_checkpoint current_trace_id, progress with
     | Error Keeper_checkpoint_store.Not_found, None ->
       Ok (current_trace_id, None, [], R.Nothing_to_read)
     | Error error, _ -> Error (Checkpoint_unreadable error)

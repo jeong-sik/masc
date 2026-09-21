@@ -467,9 +467,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let provider_health_json = `Null in
 
           let history_path =
-            Filename.concat
-              (Filename.concat (Keeper_types_profile.session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id))
-              "history.jsonl"
+            Keeper_types_support.keeper_history_path
+              config
+              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
           in
           let ( conversation_tail,
                 k2k_recent,

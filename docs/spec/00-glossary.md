@@ -337,6 +337,19 @@ status: reference
 
 ## Continuity
 
+**Autoboot Exclusion Reason (자동 부팅 제외 이유)**
+: 설정상 부팅 가능한데도 `bootable_keeper_names`에서 의도적으로 빠진 Keeper의
+  닫힌 이유. `Paused`·`Declarative_autoboot_disabled`·`Autoboot_disabled`·
+  `Shutdown_admission_fence` 넷이다. 앞의 셋은 Keeper 설정에서 유도되지만
+  `Shutdown_admission_fence`는 아니다 — durable shutdown operation이 아직 그
+  Keeper의 admission을 소유하고 있어, autoboot 호출자가 boot-scan shutdown
+  inventory(`blocked_keeper_names`)를 들고 표시한다. boot recovery가 회수
+  가능한 operation을 같은 bootstrap에서 정산하면 supervisor의 주기 pass가 그
+  Keeper를 등록한다. 배제된 Keeper는 excluded list에 찍는다 — 2026-07-21
+  wedge에서는 한 Keeper가 boot set과 excluded list 양쪽에서 조용히 빠져
+  장애가 autoboot 보고에서 보이지 않았다.
+  → [keeper_runtime.mli](../../lib/keeper/keeper_runtime.mli)
+
 **Checkpoint**
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
   (`<trace 디렉터리>/<trace id>.json`)다. 실행 중에는

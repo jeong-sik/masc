@@ -6,6 +6,12 @@ module Librarian = Keeper_librarian
 module Memory = Keeper_memory_os_types
 module Runtime = Keeper_librarian_runtime
 
+let ordinary_requirement =
+  Agent_core.Exact_output.make_output_requirement
+    ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+    ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path
   then
@@ -342,7 +348,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
     publish [ "librarian-first"; "librarian-bad" ]
   in
   (match
-     Runtime.preflight_slots ~selected_slots ~messages:[ message "one small prompt" ]
+     Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots ~messages:[ message "one small prompt" ]
    with
    | Ok preflight ->
      check (list string)
@@ -381,7 +387,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
      check int "the only usable slot was attempted" 1 (Fixture.post_count first));
   let selected_slots = publish [ "librarian-bad" ] in
   match
-    Runtime.preflight_slots ~selected_slots ~messages:[ message "one small prompt" ]
+    Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots ~messages:[ message "one small prompt" ]
   with
   | Ok _ -> fail "a ladder with no projectable slot passed pre-flight"
   | Error error ->
@@ -400,7 +406,7 @@ let test_an_empty_ladder_reports_nothing () =
       ~role:Agent_core.Types.User
       [ Agent_core.Types.Text "one small prompt" ]
   in
-  match Runtime.preflight_slots ~selected_slots:[] ~messages:[ message ] with
+  match Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots:[] ~messages:[ message ] with
   | Ok preflight ->
     check int "no selected slots" 0 (List.length preflight.Runtime.selected_slots);
     check (list (pair string string)) "nothing to exclude" [] preflight.Runtime.unusable

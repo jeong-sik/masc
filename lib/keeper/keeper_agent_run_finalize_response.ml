@@ -33,9 +33,7 @@ let record_turn_boundary
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~turn_ref
-      ~session
       ~checkpoint_owner
-      ~tool_observations
       ~history_at_start
       ~restart_notice_pending
       saved_checkpoint
@@ -52,19 +50,6 @@ let record_turn_boundary
       ()
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  (* This function owns the durable commit order for a finished turn. Keeping
-     the observations here makes it impossible to move them below the turn's
-     end line without changing this function. *)
-  List.iter
-    (fun (detail : Keeper_agent_result.tool_call_detail) ->
-       Keeper_context_runtime.persist_tool_observation
-         ~keeper_name:meta.name
-         ~turn_ref
-         session
-         ~tool_name:
-           (Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
-         ~outcome:detail.execution_outcome)
-    tool_observations;
   (* Outside the position below, and before the line that ends the turn.
      Before, because a reader takes a restart that follows a line as proof
      that the line's history is gone and would drop this turn's own atoms.
@@ -208,6 +193,24 @@ let finalize
              [ Agent_core.Types.Text response_text ]);
         capture_replay_response ~response_text)
   in
+  (* An official-client turn has no AGENT_CORE checkpoint, so its tool calls
+     live nowhere durable but here. The lines go down before the turn's end
+     line: a reader takes that line as the cut and then asks for this turn's
+     fragments, so a fragment written after it could be read as absent. An
+     agent-core turn's calls are atoms of its checkpoint and are not repeated. *)
+  (match checkpoint_owner with
+   | Runtime_execution.Official_client ->
+     List.iter
+       (fun (detail : Keeper_agent_result.tool_call_detail) ->
+          Keeper_context_runtime.persist_tool_observation
+            ~keeper_name:meta.name
+            ~turn_ref
+            session
+            ~tool_name:
+              (Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
+            ~outcome:detail.execution_outcome)
+       (List.rev acc.tool_calls)
+   | Runtime_execution.Masc_agent_core -> ());
   let save_agent_core_checkpoint result_checkpoint =
     let checkpoint, source_already_persisted =
         Keeper_replay_checkpoint.select_finalization_checkpoint
@@ -349,12 +352,7 @@ let finalize
       ~config
       ~meta
       ~turn_ref
-      ~session
       ~checkpoint_owner
-      ~tool_observations:
-        (match checkpoint_owner with
-         | Runtime_execution.Official_client -> List.rev acc.tool_calls
-         | Runtime_execution.Masc_agent_core -> [])
       ~history_at_start
       ~restart_notice_pending
       saved_checkpoint;

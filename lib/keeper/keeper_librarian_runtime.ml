@@ -977,29 +977,21 @@ let run_best_effort
                  (Keeper_memory_os_events.append_error_to_string error));
              snapshot, exact_output, selected_slot, absorb_gate
            in
-           (* The registry row and the journal line are the record of what this
-              pass did. A cancellation that lands while they are being written
-              -- the server going down, a purge retiring the loop -- waits until
-              both are down, so the two records agree with each other and with
-              the Memory commit that preceded them. The cancellation branch
-              below then finds the row completed and does not write a second. *)
            match result with
            | Ok (snapshot, exact_output, selected_slot, absorb_gate) ->
-             Eio.Cancel.protect (fun () ->
-               complete
-                 ~selected_slot
-                 Exact_lane_run_registry.Succeeded
-                 (completed_output ~inp ~exact_output ~absorb_gate snapshot);
-               cadence_record_success ~keeper_id ~trace_id;
-               Log.Keeper.info
-                 ~keeper_name:keeper_id
-                 "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
-                 snapshot.revision
-                 (List.length snapshot.facts)
-                 (List.length snapshot.change.added)
-                 (List.length snapshot.change.removed))
+             complete
+               ~selected_slot
+               Exact_lane_run_registry.Succeeded
+               (completed_output ~inp ~exact_output ~absorb_gate snapshot);
+             cadence_record_success ~keeper_id ~trace_id;
+             Log.Keeper.info
+               ~keeper_name:keeper_id
+               "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
+               snapshot.revision
+               (List.length snapshot.facts)
+               (List.length snapshot.change.added)
+               (List.length snapshot.change.removed)
            | Error error ->
-             Eio.Cancel.protect (fun () ->
              let detail = extraction_error_to_string error in
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)
@@ -1039,7 +1031,7 @@ let run_best_effort
                     "memory os librarian failed lane=%s: %s"
                     exact_lane_id
                     detail)
-               ~cadence_deferred:true)
+               ~cadence_deferred:true
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
             journal — the record of what the librarian did on this keeper —

@@ -195,7 +195,8 @@ val committed_durable_range
     scope's commit. *)
 
 val apply_disposition
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?on_committed:(t -> unit)
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
@@ -222,6 +223,11 @@ val apply_disposition
     A fact the decision never mentions is left alone. A retired fact is retired
     even if the keeper re-observed it during the pass: the judgment was about
     the claim, and a re-observation does not answer it.
+
+    [on_committed] observes the successful snapshot replacement before any
+    later journal, receipt, unlock or notification can be interrupted. It runs
+    once under the store locks and must only update caller-owned in-memory
+    state: no I/O, yielding or exceptions. It is not a scheduling callback.
 
     [durable_range_id] joins this disposition to the completed-turn range that
     produced it. The store writes a prepared transaction receipt

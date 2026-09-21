@@ -205,18 +205,6 @@ type transition_error =
   ; cleanup_failures : failure list
   }
 
-type callback_and_release_failure =
-  { store_effect : transition_effect
-  ; callback : Eio.Exn.with_bt
-  ; release : failure
-  }
-
-(** An unexpected callback exception and the exact resource-release failure
-    occurred at the same private scope. Neither cause is relabelled or
-    discarded. *)
-exception Resource_scope_callback_and_release_failed of
-  callback_and_release_failure
-
 (** Raised as the reason inside [Eio.Cancel.Cancelled] whenever cancellation is
     observed after a meaningful store effect, or when cancellation cleanup
     fails. The original reason, effect, and cleanup failures remain available. *)

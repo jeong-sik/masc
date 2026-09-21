@@ -14,6 +14,7 @@ type seed =
 
 type origin =
   | Carried of source
+  | Librarian_snapshot of { end_atom : int; boundary_line : int }
   | Whole_history
 
 let of_ledger (ledger : Keeper_model_input_ledger.t) =
@@ -191,11 +192,15 @@ let seed_to_json (seed : seed) =
 ;;
 
 let origin_to_string = function
+  | Librarian_snapshot _ -> "librarian_snapshot"
   | Carried source -> source_to_string source
   | Whole_history -> "whole_history"
 ;;
 
 let origin_to_json = function
+  | Librarian_snapshot { end_atom; boundary_line } ->
+    `Assoc [ "kind", `String "librarian_snapshot"; "end_atom", `Int end_atom;
+             "boundary_line", `Int boundary_line ]
   | Carried Ledger -> `Assoc [ "kind", `String "ledger" ]
   | Carried (Turn_record { turn }) ->
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]

@@ -193,7 +193,13 @@ let run ~trigger ~base_path ~keeper_name =
     let handled = attempt_remembered ~base_path ~keeper_name
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~meta ~sources_changed ~trigger in
-    if sources_changed && not handled then (
+    let continuity = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_librarian_continuity.prepare_committed ~config:(Workspace.default_config base_path)
+        ~keeper_name ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)) in
+    let continuity = match continuity with
+      | Ok value -> value
+      | Error detail -> Log.Keeper.warn ~keeper_name "continuity source unavailable: %s" detail; None in
+    if (sources_changed && not handled) || Option.is_some continuity then (
       match Domain_pool_ref.submit_io_or_inline (fun () ->
         Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
       | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
@@ -215,6 +221,7 @@ let run ~trigger ~base_path ~keeper_name =
           ; messages = []; tool_observations = []; counterpart_observations = [] } in
         Keeper_librarian_runtime.run_best_effort ~trigger:Queue_changed
           ~write_scope:Keeper_librarian_runtime.Context_only
+          ?continuity
           ~base_path ~keepers_dir ~keeper_id:keeper_name
           ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
   | (Disabled | Invalid), _

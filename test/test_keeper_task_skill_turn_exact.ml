@@ -944,6 +944,23 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   check bool "existing activation failure evidence remains" true
     (Tool_result.data result |> member "skill_activation_error" <> `Null);
   let sent = Exact_output_fixture.post_count server in
+  let no_context_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+      ~assess_applicability:(fun ~reference ~body ->
+        Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
+          ~context:None ~reference ~body ())
+      ~on_result:(fun ~input:_ result -> captured := Some result)
+      ~instruction_skills:[ instruction_skill reference selected.skill ] () in
+  let unchanged_body = run_skill_tool no_context_tool (Reference.to_yojson reference) in
+  check string "missing Context leaves the exact Skill body unchanged" frozen_body unchanged_body;
+  check int "missing Context sends no request" sent (Exact_output_fixture.post_count server);
+  let unavailable_metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
+  check string "missing Context remains observable" "unavailable"
+    (unavailable_metadata |> member "skill_applicability" |> member "status" |> to_string);
+  check string "missing Context reason remains explicit" "turn_context_unavailable"
+    (unavailable_metadata |> member "skill_applicability" |> member "reason" |> to_string);
+  check bool "no preflight judgment is presented to the model" false
+    (unavailable_metadata |> member "applicability_advice_in_model_content" |> to_bool);
   ignore (run_skill_tool tool (`Assoc [ "name", `String "guide" ]));
   check int "unavailable reference does not call JEV" sent (Exact_output_fixture.post_count server);
   List.iter (fun policy ->

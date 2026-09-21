@@ -1224,13 +1224,17 @@ let stub_discover
 let never_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
   Alcotest.fail "registered a client when one was already configured"
 
-let credentials ?secret ?(scopes = []) client_id =
-  { Keeper_oauth_client_store.client_id; client_secret = secret; scopes }
+let credentials ?secret ?secret_expires_at ?(scopes = []) client_id =
+  { Keeper_oauth_client_store.client_id
+  ; client_secret = secret
+  ; secret_expires_at
+  ; scopes
+  }
 
-let start_login ?(configured = None) ~discover ~register provider table =
+let start_login ?(configured = None) ?(now = 0.0) ~discover ~register provider table =
   Keeper_oauth_session.start ~discover ~register ~provider ~configured
     ~client_name:"masc" ~redirect_uri ~keeper:"oauth-fixture" ~pending:table
-    ~now:0.0 ~ttl_sec:600.0 ()
+    ~now ~ttl_sec:600.0 ()
 
 let test_start_uses_a_configured_client_rather_than_registering () =
   let provider = load_or_fail atlassian_toml in
@@ -1262,6 +1266,7 @@ let test_start_registers_when_nobody_configured_one () =
     Ok
       { Keeper_oauth_registration.client_id = "freshly-registered"
       ; client_secret = None
+      ; secret_expires_at = None
       ; issued_at = 1.0
       }
   in
@@ -1337,6 +1342,7 @@ let test_a_registration_with_no_secret_is_a_public_client () =
     Ok
       { Keeper_oauth_registration.client_id = "public-anyway"
       ; client_secret = None
+      ; secret_expires_at = None
       ; issued_at = 1.0
       }
   in
@@ -1351,6 +1357,82 @@ let test_a_registration_with_no_secret_is_a_public_client () =
       Alcotest.failf "a login was refused on metadata alone: %s"
         (Keeper_oauth_session.start_error_to_string err)
 
+(* RFC 7591 section 3.2.1 requires client_secret_expires_at beside an issued
+   secret, and the four cases below are the whole of what this install can
+   read off a stored pair. Each says which way a login goes, so a change that
+   collapses them has to answer here.
+
+   The observation that drove them: Supabase issued a confidential client,
+   the deadline went unread, and months later every login reached the token
+   endpoint with an id the server answered as "Unrecognized client_id". *)
+
+let registers_as ~client_id =
+  let fired = ref false in
+  let register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
+    fired := true;
+    Ok
+      { Keeper_oauth_registration.client_id
+      ; client_secret = None
+      ; secret_expires_at = None
+      ; issued_at = 1.0
+      }
+  in
+  (fired, register)
+
+let started_client_id = function
+  | Ok started ->
+    started.Keeper_oauth_session.credentials.Keeper_oauth_client_store.client_id
+  | Error err ->
+    Alcotest.failf "start failed: %s" (Keeper_oauth_session.start_error_to_string err)
+
+let test_a_lapsed_registration_is_replaced () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let fired, register = registers_as ~client_id:"replacement" in
+  let configured =
+    Some (credentials ~secret:"s3cret" ~secret_expires_at:100.0 "lapsed")
+  in
+  let got = start_login ~configured ~now:101.0 ~discover:(stub_discover ()) ~register provider table in
+  check str "the login carries the new id" "replacement" (started_client_id got);
+  Alcotest.(check bool) "a deadline behind us registers again" true !fired
+
+let test_a_registration_that_never_expires_is_kept () =
+  (* Zero is the server saying the secret does not lapse. Reading it as a
+     date in 1970 would register over a client that is still good. *)
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let configured =
+    Some (credentials ~secret:"s3cret" ~secret_expires_at:0.0 "evergreen")
+  in
+  let got =
+    start_login ~configured ~now:1.7e9 ~discover:(stub_discover ())
+      ~register:never_register provider table
+  in
+  check str "the stored client is reused" "evergreen" (started_client_id got)
+
+let test_a_secret_with_no_recorded_deadline_is_replaced () =
+  (* The Supabase case. A secret was issued, so a deadline came with it and
+     this install did not write it down. Its real value is unknown and may be
+     behind us, and the only way to find out is the login that fails. *)
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let fired, register = registers_as ~client_id:"replacement" in
+  let configured = Some (credentials ~secret:"s3cret" "undated") in
+  let got = start_login ~configured ~now:1.7e9 ~discover:(stub_discover ()) ~register provider table in
+  check str "the login carries the new id" "replacement" (started_client_id got);
+  Alcotest.(check bool) "an unknown deadline registers again" true !fired
+
+let test_a_public_client_outlives_any_deadline () =
+  (* No secret, nothing to lapse. This is why an install that registered a
+     public client keeps working while a confidential one stops. *)
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let got =
+    start_login ~configured:(Some (credentials "public")) ~now:1.7e9
+      ~discover:(stub_discover ()) ~register:never_register provider table
+  in
+  check str "the stored client is reused" "public" (started_client_id got)
+
 let test_a_secret_from_registration_is_kept () =
   (* monday.com answers a request for a public client with a secret, which is
      it saying its token endpoint wants one. Dropping it would leave the
@@ -1361,6 +1443,7 @@ let test_a_secret_from_registration_is_kept () =
     Ok
       { Keeper_oauth_registration.client_id = "confidential"
       ; client_secret = Some "s3cret"
+      ; secret_expires_at = None
       ; issued_at = 1.0
       }
   in
@@ -1755,6 +1838,14 @@ let () =
             test_a_registration_with_no_secret_is_a_public_client;
           Alcotest.test_case "a secret from registration is kept" `Quick
             test_a_secret_from_registration_is_kept;
+          Alcotest.test_case "a lapsed registration is replaced" `Quick
+            test_a_lapsed_registration_is_replaced;
+          Alcotest.test_case "expiry zero means the client is kept" `Quick
+            test_a_registration_that_never_expires_is_kept;
+          Alcotest.test_case "a secret with no recorded deadline is replaced" `Quick
+            test_a_secret_with_no_recorded_deadline_is_replaced;
+          Alcotest.test_case "a public client outlives any deadline" `Quick
+            test_a_public_client_outlives_any_deadline;
           Alcotest.test_case "a secret rides along on the redemption" `Quick
             test_a_secret_rides_along_on_the_redemption;
           Alcotest.test_case "no secret means no parameter" `Quick

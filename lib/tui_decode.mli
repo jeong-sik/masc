@@ -2518,7 +2518,7 @@ val is_success_http_status : int -> bool
 val http_status_error : status_code:int -> body:string -> string
 (** A non-2xx answer as one terminal-safe line: [HTTP <status>: ] and then the
     body's ["error"] sentence when it has one, otherwise the body's head. *)
-(** Transport owns the target URL; keep it before the verbose failure reason. *)
+(** Keep the failure reason visible before the target URL on narrow rows. *)
 val http_transport_error : verb:string -> url:string -> detail:string -> string
 val decode_json_response_body :
   allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result

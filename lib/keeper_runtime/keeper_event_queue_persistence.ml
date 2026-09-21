@@ -6,6 +6,7 @@ let install_state_change_observer observer = Atomic.set state_change_observer ob
 
 let notify_state_change_observer ~keeper_name =
   try (Atomic.get state_change_observer) () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn
       "event queue state-change observer failed keeper=%s: %s"

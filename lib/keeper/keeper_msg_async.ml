@@ -2680,9 +2680,17 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
               durably_accepted := true;
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
-        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn ->
-          background_start_failed (Printexc.to_string exn))))))
+          (* The request is already persisted and no worker scope was
+             admitted, so this Lost status is the only record that it will
+             never run. Write it on the cancelled path too, before the
+             exception leaves -- [set_status_protected] completes while
+             unwinding. *)
+          let backtrace = Printexc.get_raw_backtrace () in
+          let outcome = background_start_failed (Printexc.to_string exn) in
+          (match exn with
+           | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace exn backtrace
+           | _ -> outcome))))))
      with
      | Lane_admission_timeout lane ->
        (* Submission-lane admission expired before any reservation existed,

@@ -177,7 +177,7 @@ let piaf_error_message (err : Piaf.Error.t) =
 let reraise_after_close cleanup exn =
   let bt = Printexc.get_raw_backtrace () in
   (try cleanup () with
-   | cleanup_exn ->
+   | cleanup_exn -> (* cancel-guard-ok: this arm guards cleanup, whose failure must not replace the exception being propagated, and the function's last statement re-raises that exception with its backtrace; the comment above records that cleanup delivers stop signals and is not a cancellation point. *)
      Log.Http.warn "HTTP client scope cleanup: %s"
        (exn_message cleanup_exn));
   Printexc.raise_with_backtrace exn bt
@@ -783,10 +783,49 @@ let ensure_host_header ~uri headers =
       Some (("host", Printf.sprintf "%s:%d" host port) :: headers)
     | (Some _ | None), _ -> if headers = [] then None else Some headers)
 
+(* Enforce an explicit caller limit before retaining a body chunk. A refused
+   body remains unread; the request owner closes that connection on Error. *)
+let read_response_body ?max_body_bytes ~status body =
+  match max_body_bytes with
+  | None -> Piaf.Body.to_string body
+  | Some limit ->
+    let too_large () =
+      Error (`Msg (Printf.sprintf "HTTP %d: body exceeds %d bytes" status limit))
+    in
+    match Piaf.Body.length body with
+    | `Fixed length when Int64.compare length (Int64.of_int limit) > 0 ->
+      too_large ()
+    | `Fixed _ | `Chunked | `Unknown | `Close_delimited | `Error _ ->
+      let buffer = Buffer.create 0 in
+      let exception Body_limit_exceeded in
+      try
+        match Piaf.Body.iter_string body ~f:(fun chunk ->
+          if String.length chunk > limit - Buffer.length buffer then
+            raise Body_limit_exceeded;
+          Buffer.add_string buffer chunk) with
+        | Ok () -> Ok (Buffer.contents buffer)
+        | Error _ as error -> error
+      with Body_limit_exceeded -> too_large ()
+
+(* A fixed-length stream waits for the transport to flush its payload before
+   closing the writer. Piaf's eager string body closes before flushing; H2
+   0.13 can then emit END_STREAM while bytes remain behind a closed send
+   window. Preserve Content-Length and let the peer's window govern progress. *)
+let request_body body =
+  let length = String.length body in
+  let pending = ref (Some
+    (Piaf.IOVec.make (Bigstringaf.of_string ~off:0 ~len:length body)
+       ~off:0 ~len:length)) in
+  let stream = Piaf.Stream.from ~f:(fun () ->
+    let chunk = !pending in
+    pending := None;
+    chunk) in
+  Piaf.Body.of_stream ~length:(`Fixed (Int64.of_int length)) stream
+
 (* Wrap a single request: acquire-or-create client, send, release.
    Errors return [Error string]; the connection is dropped (close)
    on error, parked on success. *)
-let do_request t ?headers ?body ~method_ uri : (response, string) result =
+let do_request t ?headers ?body ?max_body_bytes ~method_ uri : (response, string) result =
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
@@ -814,7 +853,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
       end
     in
     let path = path_and_query uri in
-    let body_piaf = Option.map Piaf.Body.of_string body in
+    let body_piaf = Option.map request_body body in
     Fun.protect
       ~finally:(fun () ->
         close_unreleased_client released release_once)
@@ -845,7 +884,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
           in
           let body_result =
             with_client_scope client ~on_error:(fun exn -> `Exn exn)
-              (fun () -> Piaf.Body.to_string (Piaf.Response.body resp)) in
+              (fun () -> read_response_body ?max_body_bytes ~status (Piaf.Response.body resp)) in
           (match body_result with
            | Error err ->
              release_once ~close_only:true;
@@ -868,10 +907,13 @@ let with_optional_timeout
   | _ -> f ()
 
 let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
-    ?timeout_seconds ~method_ ~url ?headers ?body () =
-  with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
-  let uri = Uri.of_string url in
-  do_request t ?headers ?body ~method_ uri
+    ?timeout_seconds ?max_body_bytes ~method_ ~url ?headers ?body () =
+  match max_body_bytes with
+  | Some limit when limit < 0 -> Error "max_body_bytes must be non-negative"
+  | Some _ | None ->
+    with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
+    let uri = Uri.of_string url in
+    do_request t ?headers ?body ?max_body_bytes ~method_ uri
 
 (* ── RFC-0129: idle-timeout request with streaming progress ────── *)
 
@@ -1011,7 +1053,7 @@ let do_request_streaming
       end
     in
     let path = path_and_query uri in
-    let body_piaf = Option.map Piaf.Body.of_string body in
+    let body_piaf = Option.map request_body body in
     Fun.protect
       ~finally:(fun () -> close_unreleased_client released release_once)
       (fun () ->
@@ -1108,6 +1150,7 @@ let stats t : stats =
 (* ── Test-only ─────────────────────────────────────────────────── *)
 
 module For_testing = struct
+  let request_body = request_body
   let with_request_timeout ~clock ~timeout_seconds f =
     with_optional_timeout ~clock ~timeout_seconds f
 

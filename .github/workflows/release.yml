@@ -555,9 +555,17 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
+      - name: Assemble the release body from the changelog
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
+        run: |
+          python3 scripts/ci/changelog-section.py \
+            "${GITHUB_REF_NAME#v}" CHANGELOG.md release-body.md
+          head -40 release-body.md
+
       - name: Create Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
         uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*
+          body_path: release-body.md
           generate_release_notes: true

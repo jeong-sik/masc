@@ -1630,9 +1630,14 @@ let run_named
 	          let config = Workspace.default_config base_path in
 	          match Keeper_librarian_continuity.read ~config ~keeper_name with
 	          | Error detail ->
-	            Log.Keeper.info
+	            (* Not the same as [Ok None]: the file may hold a position this
+	               turn cannot see. The seed still stands — it is validated
+	               against this history on its own — so the turn goes on without
+	               a Librarian front, and the failure is said out loud rather
+	               than reported as "nothing absorbed". *)
+	            Log.Keeper.warn
 	              ~keeper_name
-	              "official client start seed reads no librarian position: %s"
+	              "official client start seed cannot read the librarian position: %s"
 	              detail;
 	            None
 	          | Ok None -> None
@@ -1643,9 +1648,9 @@ let run_named
 	                 ~keeper_id:keeper_name
 	             with
 	             | Error detail ->
-	               Log.Keeper.info
+	               Log.Keeper.warn
 	                 ~keeper_name
-	                 "official client start seed reads no turn boundaries: %s"
+	                 "official client start seed cannot read the turn boundaries: %s"
 	                 detail;
 	               None
 	             | Ok lines -> Some (trace_id, lines, snapshot))))

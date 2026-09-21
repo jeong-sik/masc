@@ -1201,7 +1201,7 @@ let reconcile_owner_with
             Error
               (Owner_reconciliation_cancelled
                  { owner; reason; backtrace })
-          | exception terminalization_exception ->
+          | exception terminalization_exception -> (* cancel-guard-ok: the scrutinee cannot raise Cancelled -- the hook is (fun () -> ()) on every production path and finish_reconciliation_terminal's body is wholly Eio.Cancel.protect *)
             let terminalization_backtrace = Printexc.get_raw_backtrace () in
             Printexc.raise_with_backtrace
               (Reconciliation_cancellation_terminalization_failed
@@ -1224,7 +1224,7 @@ let reconcile_owner_with
           Error
             (Owner_reconciliation_crashed
                { owner; exception_; backtrace })
-        | exception terminalization_exception ->
+        | exception terminalization_exception -> (* cancel-guard-ok: same as the cancellation arm above -- the hook cannot raise in production and finish_reconciliation_terminal runs under Eio.Cancel.protect *)
           let terminalization_backtrace = Printexc.get_raw_backtrace () in
           Printexc.raise_with_backtrace
             (Reconciliation_crash_terminalization_failed
@@ -1817,6 +1817,13 @@ module For_testing = struct
            { during_borrow; after_release; close_completed }
        | exception (Invariant_violation invariant) ->
          Single_borrow_invariant invariant
+       (* [release] takes a mutex, and waiting for one is a cancellation point
+          even with [~protect:true], which covers only the critical section
+          (eio_mutex.mli:30). Recording that cancellation as evidence would
+          hand the probe's caller a verdict and let it keep asserting after
+          its own fiber was cancelled. No consumer asserts on a cancellation:
+          both turn [Single_borrow_raised] into a failure message. *)
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exception_ ->
          let backtrace = Printexc.get_raw_backtrace () in
          Single_borrow_raised { exception_; backtrace })

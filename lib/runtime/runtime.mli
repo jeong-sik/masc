@@ -451,7 +451,7 @@ val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned
     in [\[runtime.assignments\]] (runtime.toml SSOT) — a declared lane name or a
     runtime id — or [None] when no explicit assignment exists (caller falls back
-    to {!get_default_runtime_id}). It is a routing label, not necessarily a
+    to {!get_default_route}). It is a routing label, not necessarily a
     materialized binding: pass it to {!resolve_assignment} to walk the lane, or
     to {!entry_runtime_id_of_route} for the binding the turn opens first. The id is opaque (only the AGENT_CORE adapter parses
     it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
@@ -778,8 +778,18 @@ val pricing_of_runtime_id : string -> float option * float option
     turn-record writer (RFC-0233 §8) so the dashboard renders actual cost or
     absence rather than a fabricated Claude default. *)
 
+val get_default_route : unit -> string
+(** [\[runtime\].default] as the file writes it: a declared lane's id or a
+    runtime's. A keeper with no assignment is routed by this, resolved through
+    {!resolve_assignment} like any assignment, so the default walks a lane's
+    candidates whenever it names one. {!get_default_runtime_id} answers with
+    the runtime that route enters on. Raises when no runtime is loaded, like
+    {!get_default_runtime_id}. *)
+
 val get_default_runtime_id : unit -> string
-(** @raise Failure if {!init_default} has not run. No silent fallback
+(** The runtime binding where the current default route enters: the route
+    itself may be a lane name, which {!get_default_route} returns instead.
+    @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a
     recoverable condition. Callers must invoke this at runtime, never as a
     module-level [let] binding (would crash config-less test binaries). *)
@@ -944,6 +954,27 @@ val create_runtime_lane :
     writes exactly that pair, so refusing it here left the install path's own
     output beyond an operator's reach. The Runtime surface marks which lanes a
     table declares. *)
+
+val rename_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  new_lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Rename [\[runtime.lanes."<lane_id>"\]] to [new_lane_id] and rewrite every
+    reference to it in the same validated write: the [\[runtime.assignments\]]
+    entries that name it, and [\[runtime\].default] when it does. A lane's name
+    is its routing key ({!resolve_assignment} reads a lane before a runtime of
+    the same id), so a file written with a reference missed would route those
+    keepers to a lane that is no longer declared -- which is also why this is
+    not a remove followed by a create.
+
+    Refused when the file does not declare [lane_id], when it already declares
+    [new_lane_id] (as a lane or as a header the line editor can see), and when
+    the lane is not written as its own table.
+
+    [\[runtime\].default] takes the new name like an assignment does, because
+    it holds a route ({!get_default_route}). *)
 
 val remove_runtime_lane :
   ?runtime_config_path:string ->

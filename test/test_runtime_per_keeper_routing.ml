@@ -1366,6 +1366,112 @@ let test_an_exact_slot_append_keeps_the_declared_order () =
       [ "openai.gpt" ] (exact_lane_slots path "hitl_auto_judge"))
 ;;
 
+(* A lane's name is its routing key, so a rename is the table header and every
+   reference to it -- assignments, and [runtime].default when it names the lane
+   -- in the one write. A file written with a reference missed would route
+   those keepers to a lane that is no longer declared. *)
+let test_a_rename_carries_the_references_with_it () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"coding" ~runtime_ids:[ "openai.gpt"; "openai.small" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path
+      ~keeper_name:"routingtest" ~runtime_id:"coding" ()
+    |> lane_write_ok "route a keeper through it";
+    Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+      ~new_lane_id:"pairing" ()
+    |> lane_write_ok "rename it";
+    let text = Fs_compat.load_file path in
+    Alcotest.(check bool) "the table took the new name" true
+      (String_util.contains_substring text "[runtime.lanes.pairing]");
+    Alcotest.(check bool) "the old table is gone" false
+      (String_util.contains_substring text "[runtime.lanes.coding]");
+    Alcotest.(check bool) "no reference is left on the old name" false
+      (String_util.contains_substring text "\"coding\"");
+    Alcotest.(check (option (list string))) "the candidates came with it"
+      (Some [ "openai.gpt"; "openai.small" ])
+      (Option.map Runtime_lane.ordered_candidates (Runtime.get_lane_by_id "pairing"));
+    Alcotest.(check (option string)) "the keeper routes to the new name"
+      (Some "pairing") (Runtime.runtime_id_for_keeper "routingtest");
+    (* The reference the rename rewrote is the one [remove] refuses on, so
+       reading it back through that refusal proves both ends moved. *)
+    lane_write_refused "remove the renamed lane" ~path
+      ~names:[ "lane \"pairing\" is in use by" ]
+      (fun () ->
+         Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"pairing" ()))
+;;
+
+(* The name the rename takes has to be free, and the lane it renames has to be
+   a table this editor wrote. *)
+let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"coding" ~runtime_ids:[ "openai.gpt" ] ()
+    |> lane_write_ok "declare one";
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"pairing" ~runtime_ids:[ "openai.small" ] ()
+    |> lane_write_ok "declare another";
+    lane_write_refused "rename onto a declared lane" ~path
+      ~names:[ "lane \"pairing\" already exists" ]
+      (fun () ->
+         Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+           ~new_lane_id:"pairing" ());
+    lane_write_refused "rename a lane the file does not declare" ~path
+      ~names:[ "lane \"absent\" is not declared in [runtime.lanes]" ]
+      (fun () ->
+         Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"absent"
+           ~new_lane_id:"present" ());
+    lane_write_refused "rename to the name it has" ~path
+      ~names:[ "already has that name" ]
+      (fun () ->
+         Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+           ~new_lane_id:"coding" ());
+    ())
+;;
+
+(* [\[runtime\].default] holds a route, so the rename takes it with the rest.
+   While the entry resolved against runtimes alone, a lane the default reached
+   had to carry that runtime's own id and could not be renamed at all. *)
+let test_a_rename_carries_the_default_route_too () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
+    |> lane_write_ok "declare the lane the default reaches";
+    Runtime.rename_runtime_lane ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~new_lane_id:"primary" ()
+    |> lane_write_ok "rename it";
+    Alcotest.(check string) "the default follows the lane" "primary"
+      (Runtime.get_default_route ());
+    Alcotest.(check string) "and still enters on the lane's head" "runpod_mtp.qwen"
+      (Runtime.get_default_runtime_id ());
+    (* A keeper with no assignment walks the renamed lane, candidates and all. *)
+    match Runtime.resolve_assignment (Runtime.get_default_route ()) with
+    | `Lane lane ->
+      Alcotest.(check (list string)) "the default walks the lane"
+        [ "runpod_mtp.qwen"; "openai.gpt" ]
+        (Runtime_lane.ordered_candidates lane)
+    | `Missing | `Unavailable _ -> Alcotest.fail "the renamed default resolves to nothing")
+;;
+
+(* A default that names a lane with a name of its own, which the entry refused
+   before: it was resolved against runtimes alone. *)
+let test_the_default_may_name_a_lane () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"coding" ~runtime_ids:[ "openai.gpt"; "openai.small" ] ()
+    |> lane_write_ok "declare a lane with its own name";
+    Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"coding" ()
+    |> lane_write_ok "point the default at it";
+    Alcotest.(check string) "the route is the lane" "coding" (Runtime.get_default_route ());
+    Alcotest.(check string) "the runtime it enters on is the lane's head" "openai.gpt"
+      (Runtime.get_default_runtime_id ());
+    (* Removing it is still refused, and for the same reason as before. *)
+    lane_write_refused "remove the lane the default names" ~path
+      ~names:[ "[runtime].default" ]
+      (fun () ->
+         Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
+;;
+
 (* [drop] and [move] read the same declaration under the same lock, for the
    same reason: the caller sees the admitted slots and an order rebuilt from
    them would delete the rest. Each names one slot and the file's order
@@ -3286,6 +3392,22 @@ let () =
             "an exact slot append keeps the declared order"
             `Quick
             test_an_exact_slot_append_keeps_the_declared_order
+        ; Alcotest.test_case
+            "a rename carries the references with it"
+            `Quick
+            test_a_rename_carries_the_references_with_it
+        ; Alcotest.test_case
+            "a rename refuses a name in use and an absent table"
+            `Quick
+            test_a_rename_refuses_a_name_in_use_and_an_absent_table
+        ; Alcotest.test_case
+            "a rename carries the default route too"
+            `Quick
+            test_a_rename_carries_the_default_route_too
+        ; Alcotest.test_case
+            "the default may name a lane"
+            `Quick
+            test_the_default_may_name_a_lane
         ; Alcotest.test_case
             "an exact slot drop and move read the declaration"
             `Quick

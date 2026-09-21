@@ -121,7 +121,11 @@ let assignment_target (default : Runtime.t option) (keeper_name : string)
   =
   match Runtime.runtime_id_for_keeper keeper_name with
   | Some id when String.trim id <> "" -> "explicit", Some (String.trim id)
-  | Some _ | None -> "default", Option.map (fun (rt : Runtime.t) -> rt.id) default
+  | Some _ | None ->
+    (* The route the default names, which is what [resolve_assignment] is given
+       for a keeper with no assignment; [default] is only the runtime it enters
+       on. *)
+    "default", Option.map (fun (_ : Runtime.t) -> Runtime.get_default_route ()) default
 ;;
 
 let assignment_json (default : Runtime.t option) (keeper_name : string) : Yojson.Safe.t =

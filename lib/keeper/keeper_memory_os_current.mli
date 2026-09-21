@@ -100,6 +100,8 @@ type librarian_failure_kind =
           journal from a turn on which the librarian never ran. *)
   | Unhandled_exception
 
+val librarian_failure_kind_to_string : librarian_failure_kind -> string
+
 (** One decoded journal line. A committed pass carries the revision it wrote;
     a failed pass has no revision, no source, and no change, so the two are
     separate constructors rather than one record with optional fields — a

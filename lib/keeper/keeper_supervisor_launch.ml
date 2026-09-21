@@ -330,7 +330,7 @@ let launch_supervised_fiber_body
                    ();
                Ok ()
              in
-             (* See terminalize_normal: it logs and publishes every failure. *)
+             (* See [fork_body]: [finish_lifecycle] stores this result for lane cleanup. *)
              ignore (finish_lifecycle terminalize_normal : (unit, string) result)
            with
            | Eio.Cancel.Cancelled cause ->
@@ -400,7 +400,7 @@ let launch_supervised_fiber_body
                  ();
              Ok ()
              in
-             (* See terminalize_crash: it logs and publishes every failure. *)
+             (* See [fork_body]: [finish_lifecycle] stores this result for lane cleanup. *)
              ignore (finish_lifecycle terminalize_crash : (unit, string) result))
         ~finally:(fun () ->
           (* Finally runs best-effort. Cleanup is advisory and the

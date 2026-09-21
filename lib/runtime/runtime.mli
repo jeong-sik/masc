@@ -500,33 +500,86 @@ val verifier_exact_lane_id : string
     lane id (RFC-0361 D7(a)). *)
 
 val verifier_runtime_admission : t -> (unit, string) result
-(** Actual verifier candidates must expose mediated tools without native reads.
-    Agent Core and Claude Code meet this boundary; other official clients do not. *)
+(** The one answer to "can this runtime judge a completion review?", used by
+    lane resolution, readiness, dispatch and the runtime-file writer.
+
+    A verifier candidate must expose mediated tools without native reads, which
+    Agent Core and Claude Code meet and other official clients do not. An Agent
+    Core binding must additionally take inline tools and a system prompt,
+    because the review is dispatched with required tools and the managed
+    verification.system prompt: without either, the dispatch is refused one
+    attempt later by [Keeper_required_tools] or by AGENT_CORE's
+    [Unsupported_system_prompt] (#37382). *)
 
 val verifier_cli_slot_admission : runtime_id:string -> (unit, string) result
 (** Admit the exact official-client binding with required tool support, without
     expanding any same-named Keeper lane. Lane-only IDs, Agent Core runtimes,
     and clients without native-tool suppression are refused. *)
 
-val verifier_exact_lane_slot_ids : unit -> (string list, string) result
-(** Admitted API slot ids followed by declared official-client slot ids from the
-    published exact-output registry — the single provider-selection SSOT for
-    completion-authority judgement calls. [Error] names why the lane cannot
-    judge (registry not published, lane unconfigured, or no admitted slots);
-    there is no fallback to another route. Declared official-client ids are
-    carried as declared; {!verifier_exact_lane_readiness} is what asks the
-    runtime table whether they resolve. *)
+val verifier_cli_slot_admission_in
+  :  runtimes:t list
+  -> lane_ids:string list
+  -> runtime_id:string
+  -> (unit, string) result
+(** {!verifier_cli_slot_admission} over an explicit runtime table, for the
+    runtime-file writer, which judges the table it just parsed rather than the
+    loaded one. Both entry points must reach the same verdict: a slot one
+    spelling admits and another refuses is what #37179 was. *)
 
-val verifier_exact_lane_readiness : unit -> (unit, string) result
+type verifier_slot_rejection =
+  { position : int
+  ; slot_id : string
+  ; detail : string
+  }
+(** One declared [verifier_exact] slot the lane cannot judge through.
+    [position] counts from 1 across the whole lane declaration, catalog slots
+    first, so it names the same line of runtime.toml as the registry's own
+    rejected-slot report. *)
+
+type verifier_exact_lane_slots =
+  { admitted_catalog_slot_ids : string list
+  ; admitted_cli_slot_ids : string list
+  ; slot_rejections : verifier_slot_rejection list
+  }
+
+val verifier_slot_rejection_to_string : verifier_slot_rejection -> string
+
+val verifier_catalog_slot_admission : runtime_id:string -> (unit, string) result
+(** {!verifier_runtime_admission} for an id written in [verifier_exact.slots].
+    Judgement dispatches that id alone, so it must name a configured runtime;
+    whether the same id is also an exact-output target is the registry's
+    question, not this one. *)
+
+val verifier_exact_lane_admission
+  :  declared:Runtime_schema.exact_output_lane_decl
+  -> registry_admitted_catalog_slots:string list
+  -> verifier_exact_lane_slots
+(** Split one declared lane into the ids that can judge and the ones that
+    cannot, numbering positions from the declaration so a rejected sibling does
+    not shift them. A catalog slot absent from
+    [registry_admitted_catalog_slots] is skipped rather than rejected again:
+    publication already reports it, with a cause this module cannot see. *)
+
+val verifier_exact_lane_resolution : unit -> (verifier_exact_lane_slots, string) result
+(** {!verifier_exact_lane_admission} applied to the published lane. The
+    registry carries the ids verbatim because only this module holds the
+    runtime table that answers admission. *)
+
+val verifier_exact_lane_slot_ids : unit -> (string list, string) result
+(** The slot ids this lane can judge through, catalog first then official
+    clients, in declaration order — the single provider-selection SSOT for
+    completion-authority judgement calls. [Error] names why the lane cannot
+    judge (registry not published, lane unconfigured, or every declared slot
+    rejected); there is no fallback to another route. *)
+
+val verifier_exact_lane_readiness : unit -> (verifier_slot_rejection list, string) result
 (** Whether the [verifier_exact] lane has a slot that can be dispatched now,
     for a caller that reports authority readiness rather than walking the lane.
-    [Ok ()] needs one admitted API route with a materialized candidate that
-    takes both the verdict tool and a system prompt, or one cli slot naming a materialized official-client runtime
-    that can supply the verdict tool with native tools disabled.
-    [Error] names incompatible slots, which
-    {!verifier_exact_lane_slot_ids} cannot: it carries declared
-    ids verbatim, so a typo there reads as a configured judge until the review
-    reaches dispatch. *)
+    [Ok] carries the declared slots the lane cannot judge through, so a short
+    lane says why it is short; [Error] names every rejection. This answers from
+    the same admission as {!verifier_exact_lane_slot_ids}: the two used to
+    apply different predicates to catalog slots, and that disagreement let the
+    authority start on a lane that refused every review (#37382). *)
 
 val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
 (** Validate one configured direct slot. A declared CLI slot retains its
@@ -901,17 +954,33 @@ val remove_runtime_lane :
 
 val set_exact_output_lane_slots :
   ?runtime_config_path:string ->
-  lane_name:string ->
+  lane:exact_lane ->
   slots:string list ->
   unit ->
   (config_commit_receipt, string) result
-(** Persist [\[runtime.exact_output_lanes."<lane_name>"\]].slots the same way
+(** Persist [\[runtime.exact_output_lanes.<id>\]].slots the same way
     {!set_runtime_lane_candidates} persists conversation-lane candidates: the
     SSOT writer, full validation, atomic write, cache refresh. The list order
-    is the walk order of the lane. Creates the lane table when the name has
-    none. An empty [slots] is rejected — mandatory exact lanes fail the boot
-    fail-closed without one, so a lane that resolves to nothing is not the
-    edit an operator is making. *)
+    is the walk order of the lane. An empty [slots] is rejected — mandatory
+    exact lanes fail the boot fail-closed without one, so a lane that resolves
+    to nothing is not the edit an operator is making. A lane the file does not
+    declare yet gets its table; [lane] is one of the lanes the server runs, so
+    that table is read. A lane the file declares other than as its own table
+    (inline, or through dotted keys) is refused rather than declared twice, and
+    so is a slot the lane already declares as a CLI slot. *)
+
+val append_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Add [slot] to the end of [\[runtime.exact_output_lanes.<id>\]].slots as
+    the file declares them, read under the runtime.toml write lock, and commit
+    the result like {!set_exact_output_lane_slots}. Declared slots the
+    exact-output registry did not admit stay in place. Refused, by name, when
+    the lane already declares [slot] as a slot or as a CLI slot. Tables are
+    created and refused as {!set_exact_output_lane_slots} says. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

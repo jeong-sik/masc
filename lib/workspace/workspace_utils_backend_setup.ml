@@ -239,6 +239,27 @@ let is_temp_scratch_dir path =
 let resolved_base_escapes_temp_request requested resolved =
   is_temp_scratch_dir requested && not (is_temp_scratch_dir resolved)
 
+let keep_runtime_base_path_inside_request base_path resolved =
+  match resolved with
+  | resolved when resolved_base_escapes_temp_request base_path resolved ->
+      Log.Backend.error
+        "task-351 guard: keeping scratch base %s for temp-dir request"
+        base_path;
+      base_path
+  | resolved -> resolved
+
+type base_path_source =
+  | Explicit of string
+  | Ambient of string
+
+let runtime_base_path source =
+  let base_path, resolved =
+    match source with
+    | Explicit base_path -> base_path, resolve_requested_base_path base_path
+    | Ambient base_path -> base_path, resolve_masc_base_path base_path
+  in
+  keep_runtime_base_path_inside_request base_path resolved
+
 (* ============================================ *)
 (* Environment helpers                          *)
 (* ============================================ *)
@@ -311,11 +332,7 @@ let sanitize_namespace_segment name =
     if head = "" then "x-" ^ digest else head ^ "-" ^ digest)
 
 let backend_config_for base_path =
-  let cluster_name =
-    match env_opt "MASC_CLUSTER_NAME" with
-    | Some name -> name
-    | None -> "default"
-  in
+  let cluster_name = Env_config_core.cluster_name () in
   let masc_root = Common.masc_dir_from_base_path ~base_path in
   let cluster_segment =
     match cluster_name with
@@ -404,18 +421,7 @@ let reset_default_config_cache () =
 
 let build_default_config base_path =
   (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
-  let resolved_path =
-    match resolve_masc_base_path base_path with
-    | resolved when resolved_base_escapes_temp_request base_path resolved ->
-        (* task-351: a temp-dir request must never resolve to production.
-           [resolve_masc_base_path] already logged the escape; keep the
-           scratch dir as the base so all writes stay quarantined. *)
-        Log.Backend.error
-          "task-351 guard: keeping scratch base %s for temp-dir request"
-          base_path;
-        base_path
-    | resolved -> resolved
-  in
+  let resolved_path = runtime_base_path (Ambient base_path) in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   (* #10919: this factory is invoked per-tool-dispatch (8 call sites:
@@ -460,16 +466,7 @@ let default_config base_path =
     [on_backend_ready] is called after backend creation, allowing callers
     to initialize dependent systems (e.g., Board) without Workspace depending on them. *)
 let default_config_uncached ?(on_backend_ready = fun _backend -> ()) base_path =
-  let resolved_path =
-    match resolve_masc_base_path base_path with
-    | resolved when resolved_base_escapes_temp_request base_path resolved ->
-        Log.Backend.error
-          "task-351 guard: keeping scratch base %s for temp-dir request \
-           (resolved %s rejected)"
-          base_path resolved;
-        base_path
-    | resolved -> resolved
-  in
+  let resolved_path = runtime_base_path (Ambient base_path) in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   (* #10919: same noise pattern as [default_config]; demote success

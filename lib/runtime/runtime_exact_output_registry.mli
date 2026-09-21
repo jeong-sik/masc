@@ -129,6 +129,15 @@ val current : unit -> (t, publication_error) result
 
 val rejected_slots : t -> rejected_slot list
 
+val declared_lane
+  :  t
+  -> lane_id:string
+  -> Runtime_schema.exact_output_lane_decl option
+(** The lane exactly as runtime.toml declared it, before admission dropped
+    anything. A caller that reports a slot's position needs this: the admitted
+    lists alone cannot say which line of the file a slot came from once a
+    sibling was rejected. *)
+
 val diagnose_rejected_slot
   :  t
   -> rejected_slot

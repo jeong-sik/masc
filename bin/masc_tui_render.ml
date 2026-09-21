@@ -122,14 +122,9 @@ let acting_pane_columns (state : state) ~terminal_cols =
   then Masc_tui_acting_pane.pane_cols
   else 0
 
-let format_context_tokens tokens =
-  if tokens >= 1_000_000 then
-    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
-    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
-  else if tokens >= 1_000 then
-    Printf.sprintf "%dk" (tokens / 1_000)
-  else
-    Printf.sprintf "%d" tokens
+(* The runtime picker measures this string to decide its column widths, so the
+   format lives beside that arithmetic. *)
+let format_context_tokens = Masc_tui_types.format_context_tokens
 
 let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list =
   let default_target =
@@ -145,13 +140,7 @@ let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list
               String.equal a.ra_keeper k.k_name)
            state.runtime_assignments
        with
-       | Some a ->
-           (match a.ra_target_id with
-            | Some target -> String.equal target lane_id
-            | None ->
-                match default_target with
-                | Some def -> String.equal def lane_id
-                | None -> false)
+       | Some a -> runtime_assignment_targets a lane_id
        | None ->
            match default_target with
            | Some def -> String.equal def lane_id
@@ -171,13 +160,7 @@ let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keepe
               String.equal a.ra_keeper k.k_name)
            state.runtime_assignments
        with
-       | Some a ->
-           (match a.ra_target_id with
-            | Some target -> String.equal target runtime_id
-            | None ->
-                match default_target with
-                | Some def -> String.equal def runtime_id
-                | None -> false)
+       | Some a -> runtime_assignment_targets a runtime_id
        | None ->
            match default_target with
            | Some def -> String.equal def runtime_id
@@ -4237,19 +4220,7 @@ let keeper_operations_preview (state : state) =
                     String.equal a.ra_keeper keeper.k_name)
                  state.runtime_assignments
              with
-             | Some a ->
-                 let is_l =
-                   match a.ra_target_id with
-                   | Some tid ->
-                       List.exists
-                         (fun (l : Tui_decode.runtime_resolved_lane) ->
-                            String.equal l.rrl_id tid)
-                         state.runtime_lanes
-                   | None -> false
-                 in
-                 Printf.sprintf " \xc2\xb7 target %s (%s)"
-                   (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
-                   (if is_l then "lane" else "model")
+             | Some a -> " \xc2\xb7 target " ^ runtime_assignment_label a
              | None ->
                  match state.runtime_surface with
                  | Some s ->
@@ -4686,11 +4657,12 @@ let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
    clipping. Keep those facts in a wrapped selected-row block underneath the
    four-row matrix. The order is the execution contract: admitted catalog
    slots first, official-client runtimes only after catalog exhaustion. *)
-(* A refusal is bad news about the key pressed; a pending write and an unread
-   list are warnings about what the screen shows. *)
+(* A refusal is bad news about the key pressed; a pending write is a warning
+   about what the screen shows, as is a list that may be stale
+   ([Masc_tui_types.runtime_lane_stale_lines], drawn in warn). *)
 let runtime_lane_notice_style = function
   | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
-  | Masc_tui_types.Lane_write_pending | Masc_tui_types.Lane_list_unread _ -> Theme.warn ()
+  | Masc_tui_types.Lane_write_pending -> Theme.warn ()
 
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let ordered values =
@@ -4717,7 +4689,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   let output_meaning, evidence_contract =
     if exact_lane Masc.Exact_lane_run_registry.Board_attention then
       ( "Output meaning: the accepted candidate judgment JSON."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
+      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output and outcome. HTTP/CLI attribution uses selected slot; Vendor System One provenance stays in Output." )
     else if exact_lane Masc.Exact_lane_run_registry.Hitl_auto_judge then
       ( "Output meaning: the validated and durably settled approval-context judgment summary."
       , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
@@ -4771,6 +4743,18 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
     | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
   in
+  let jev_lines =
+    match lane.sl_jev with
+    | None -> []
+    | Some Tui_decode.Jev_off -> wrap (Theme.recede ()) "JEV OFF"
+    | Some Tui_decode.Jev_cli_only ->
+      wrap (Theme.recede ()) "JEV unavailable: Board lane is CLI-only"
+    | Some Tui_decode.Jev_lane_unavailable ->
+      wrap (Theme.warn ()) "JEV unavailable: Board lane is not ready"
+    | Some (Tui_decode.Jev_configured { model }) ->
+      wrap Ansi.reset
+        (Printf.sprintf "JEV CONFIGURED \xc2\xb7 %s" (Terminal_text.single_line model))
+  in
   let run_stats =
     let total = lane.sl_retained_run_count in
     if total > 0 then
@@ -4815,6 +4799,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
          (Terminal_text.single_line lane.sl_lane_id))
+  @ jev_lines
   @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
       run_stats
   @ slot_distribution
@@ -4994,6 +4979,7 @@ let render_lanes_overview (state : state) =
        let action_error_rows =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
+         + List.length (Masc_tui_types.runtime_lane_stale_lines state)
        in
        let available =
          max 0
@@ -5032,6 +5018,11 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
          ("  " ^ Keeper_chat.terminal_safe_text
                    (Masc_tui_types.runtime_lane_notice_text notice)));
+  List.iter
+    (fun line ->
+       box_line_styled buf cols ~style:(Theme.warn ())
+         ("  " ^ Keeper_chat.terminal_safe_text line))
+    (Masc_tui_types.runtime_lane_stale_lines state);
   (* The failover-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
@@ -5249,34 +5240,117 @@ let render_lane_run_list (state : state) ~lane_id =
        ~hints:Masc_tui_keys.footer_hints_lanes_run_list);
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
 
-(* A payload renders whole up to a bound; past it the frame shows the head and
-   says so, rather than hanging the TUI on the kind of body that made the
-   listing drop payloads. The cut lands on a line boundary so no multibyte
-   sequence is split. *)
+(* The total preview includes labels, fences and notices. Complete payloads
+   that fit stay complete; oversized fields share the space left after each
+   field's minimum preview. If even those minima do not fit, preserve the
+   original prefix and name the omitted suffix count. Stored bytes do not change. *)
 let lane_run_render_max_bytes = 65536
 
 let lane_run_payload_lines ~width json =
-  let full = Yojson.Safe.pretty_to_string json in
-  let text, truncated =
-    if String.length full <= lane_run_render_max_bytes then full, false
-    else
-      let cut =
-        match String.rindex_from_opt full lane_run_render_max_bytes '\n' with
-        | Some newline -> newline
-        | None -> lane_run_render_max_bytes
+  let fence = fenced_document_text ~language:"json" in
+  let prepare_document value =
+    let full = Yojson.Safe.pretty_to_string value in
+    let full_document = fence full in
+    let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full) in
+    full, full_document, notice
+  in
+  let minimum_document_bytes (full, full_document, notice) =
+    min (String.length full_document)
+      (String.length full_document - String.length full + String.length notice + 1)
+  in
+  let render_document ~budget (full, full_document, notice) =
+    let preview =
+      if String.length full_document <= budget then Some (full_document, [])
+      else
+        let wrapper_bytes = String.length full_document - String.length full in
+        let room = budget - wrapper_bytes - String.length notice - 1 in
+        if room < 0 then None
+        else
+          let cut =
+            match String.rindex_from_opt full room '\n' with
+            | Some newline -> newline
+            | None -> String_util.utf8_char_boundary full room
+          in
+          Some (fence (String.sub full 0 cut), [ Theme.warn (), notice ])
+    in
+    Option.map
+      (fun (document, notices) ->
+        let used =
+          String.length document
+          + List.fold_left (fun n (_, text) -> n + String.length text + 1) 0 notices
+        in
+        let lines =
+          document_markdown ~width document
+          |> List.map (fun line -> Ansi.reset, line)
+        in
+        used, lines @ notices)
+      preview
+  in
+  let document_lines ~budget prepared =
+    match render_document ~budget prepared with
+    | Some (_, lines) -> lines
+    | None -> [ Theme.warn (), "… payload not rendered" ]
+  in
+  match json with
+  | `Assoc (_ :: _ as fields) ->
+    let omitted count = Printf.sprintf "… %d more field(s) not rendered" count in
+    let fields =
+      List.mapi
+        (fun index (name, value) ->
+          let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
+          let heading_bytes = String.length heading + 1 in
+          let ((_, full_document, _) as prepared) = prepare_document value in
+          ( index, heading, heading_bytes, prepared
+          , heading_bytes + minimum_document_bytes prepared
+          , heading_bytes + String.length full_document ))
+        fields
+    in
+    let render_field budget (_, heading, heading_bytes, prepared, _, _) =
+      (Ansi.bold, heading)
+      :: document_lines ~budget:(budget - heading_bytes) prepared
+    in
+    let total = List.fold_left (fun n (_, _, _, _, _, bytes) -> n + bytes) 0 fields in
+    if total <= lane_run_render_max_bytes then
+      List.concat_map (fun ((_, _, _, _, _, bytes) as field) -> render_field bytes field) fields
+    else begin
+      let minimum_total fields =
+        List.fold_left (fun n (_, _, _, _, bytes, _) -> n + bytes) 0 fields
       in
-      String.sub full 0 cut, true
-  in
-  let rendered =
-    fenced_document_text ~language:"json" text
-    |> document_markdown ~width
-    |> List.map (fun line -> Ansi.reset, line)
-  in
-  if truncated then
-    rendered
-    @ [ ( Theme.warn ()
-        , Printf.sprintf "… truncated, total %d bytes" (String.length full) ) ]
-  else rendered
+      let notice_bytes = function None -> 0 | Some text -> String.length text + 1 in
+      let fields, suffix_notice =
+        if minimum_total fields <= lane_run_render_max_bytes then fields, None
+        else
+          let rec prefix used remaining notice acc = function
+            | [] -> List.rev acc, None
+            | ((_, _, _, _, minimum, _) as field) :: rest ->
+              let next_notice =
+                if List.is_empty rest then None else Some (omitted (remaining - 1))
+              in
+              if used + minimum + notice_bytes next_notice <= lane_run_render_max_bytes then
+                prefix (used + minimum) (remaining - 1) next_notice (field :: acc) rest
+              else List.rev acc, notice
+          in
+          let count = List.length fields in
+          prefix 0 count (Some (omitted count)) [] fields
+      in
+      let needed (_, _, _, _, minimum, full) = full - minimum in
+      let ranked = List.stable_sort (fun a b -> Int.compare (needed a) (needed b)) fields in
+      let rec allocate extra remaining = function
+        | [] -> []
+        | ((_, _, _, _, minimum, _) as field) :: rest ->
+          let added = min (needed field) (extra / remaining) in
+          (field, minimum + added) :: allocate (extra - added) (remaining - 1) rest
+      in
+      let extra = lane_run_render_max_bytes - notice_bytes suffix_notice - minimum_total fields in
+      let allocated =
+        allocate extra (List.length fields) ranked
+        |> List.sort (fun ((a, _, _, _, _, _), _) ((b, _, _, _, _, _), _) -> Int.compare a b)
+      in
+      let lines = List.concat_map (fun (field, budget) -> render_field budget field) allocated in
+      match suffix_notice with None -> lines | Some text -> lines @ [ Theme.warn (), text ]
+    end
+  | _ ->
+    document_lines ~budget:lane_run_render_max_bytes (prepare_document json)
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_decision with
@@ -5435,9 +5509,32 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
   in
   let slot =
-    match detail.lrd_selected_slot with
-    | None -> ""
-    | Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+    match detail.lrd_answer_source, detail.lrd_selected_slot with
+    | Some _, _ | None, None -> ""
+    | None, Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+  in
+  let answer_source =
+    match detail.lrd_answer_source with
+    | None -> []
+    | Some (Tui_decode.Lane_run_answer_exact_attempt slot) ->
+      [ Ansi.reset, "  ANSWER  EXACT · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_cli_slot slot) ->
+      [ Ansi.reset, "  ANSWER  CLI · " ^ Terminal_text.single_line slot ]
+    | Some (Tui_decode.Lane_run_answer_vendor_system_one { model; endpoint = _ }) ->
+      [ ( Ansi.reset
+        , "  ANSWER  VENDOR SYSTEM ONE · "
+          ^ Terminal_text.single_line model
+          ^ " · NO EXACT-FLOW RECEIPT" ) ]
+  in
+  let failure =
+    match detail.lrd_failure with
+    | None -> []
+    | Some failure ->
+      [ ( Theme.bad ()
+        , Printf.sprintf
+            "  FAILURE  %s  ·  %s"
+            (Terminal_text.single_line failure.lrf_code)
+            (Terminal_text.single_line failure.lrf_detail) ) ]
   in
   let decision_style, decision = lane_run_decision_badge detail in
   let tool_style, tools = lane_run_tool_summary detail.lrd_tool_evidence in
@@ -5464,13 +5561,15 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
            (Tui_decode.lane_run_status_label detail.lrd_status))
         Ansi.reset )
   ]
+  @ failure
+  @ answer_source
   @ gate_judgment
   @ [ tool_style, "  " ^ tools; skill_style, "  " ^ skills ]
 
 let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_run_kind, detail.lrd_tool_evidence with
   | Tui_decode.Lane_run_exact_output, _ ->
-    "INPUT · PROMPT PAYLOAD", "OUTPUT · MODEL RESPONSE"
+    "INPUT · RUN INPUT", "OUTPUT · RUN RESULT"
   | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
     Tui_decode.Lane_run_tools_observed tools ->
     ( "INPUT · VERIFICATION REQUEST"
@@ -5525,6 +5624,11 @@ let lane_run_split_line buf cols ~left_width ~left ~right =
     (styled left_width left ^ Theme.recede () ^ divider ^ Ansi.reset
      ^ styled right_width right)
 
+(* Top, header, its divider, bottom and footer. A loaded run also draws
+   the divider beneath its summary. Split panes use one payload row for titles. *)
+let lane_run_chrome_rows_without_summary = framed_chrome_rows
+let lane_run_chrome_rows = lane_run_chrome_rows_without_summary + 1
+
 let render_lane_run_detail (state : state) ~run_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -5550,7 +5654,7 @@ let render_lane_run_detail (state : state) ~run_id =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text error);
        if Option.is_none detail then box_divider buf cols);
-  let error_rows =
+  let chrome_rows_for_error =
     match detail, state.lane_run_detail_error with
     | Some _, Some _ -> 1
     | None, Some _ -> 2
@@ -5559,22 +5663,28 @@ let render_lane_run_detail (state : state) ~run_id =
   (* The position the footer carries: [None] where the drawing already says
      it -- nothing to read yet, or two panes whose titles each name their
      own window. *)
-  let scroll, position =
+  let scroll, position, content_height =
     match detail, state.lane_run_detail_error with
     | None, error ->
-      let content_height = max 1 (rows - 5 - error_rows) in
+      let filler_rows = max 1 (rows - lane_run_chrome_rows_without_summary - chrome_rows_for_error) in
       let line =
         match error with
         | None -> Ansi.dim, "  (loading exact run record)"
         | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
-      for _ = 2 to content_height do
+      for _ = 2 to filler_rows do
         box_empty buf cols
       done;
-      0, None
+      0, None, 0
     | Some detail, (Some _ | None) ->
       let summary = lane_run_summary_lines detail in
+      let payload_rows =
+        max 0
+          (rows - List.length summary - lane_run_chrome_rows - chrome_rows_for_error)
+      in
+      let title_rows = if cols >= keeper_split_threshold_cols then 1 else 0 in
+      let content_height = max 0 (payload_rows - title_rows) in
       List.iter
         (fun (style, line) -> box_line_styled buf cols ~style line)
         summary;
@@ -5588,13 +5698,9 @@ let render_lane_run_detail (state : state) ~run_id =
           lane_run_input_lines ~width:left_width detail
         in
         let output_lines = lane_run_output_lines ~width:right_width detail in
-        let payload_rows =
-          max 0 (rows - List.length summary - 6 - error_rows)
-        in
         if payload_rows = 0
-        then 0, None
+        then 0, None, content_height
         else begin
-          let content_height = payload_rows - 1 in
           let input_max_scroll =
             if content_height = 0
             then 0
@@ -5636,15 +5742,12 @@ let render_lane_run_detail (state : state) ~run_id =
             in
             lane_run_split_line buf cols ~left_width ~left ~right
           done;
-          scroll, None
+          scroll, None, content_height
         end
       end
       else begin
         let lines =
           lane_run_stacked_lines ~width:(max 1 (cols - 8)) detail
-        in
-        let content_height =
-          max 0 (rows - List.length summary - 6 - error_rows)
         in
         let max_scroll =
           if content_height = 0
@@ -5658,14 +5761,16 @@ let render_lane_run_detail (state : state) ~run_id =
           | None -> box_empty buf cols
           | Some (style, line) -> box_line_styled buf cols ~style line
         done;
-        scroll, Some (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines))
+        scroll,
+        Some (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)),
+        content_height
       end
   in
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail ~position));
-  finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
+  finish_surface state ~clamped:(Lane_run_detail_scroll { scroll; content_height })
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
 (* The clients roster: everyone attached to this workspace in one reading —
@@ -6113,6 +6218,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        else Ansi.dim ^ "no" ^ Ansi.reset);
     add_empty ();
 
+    (* The live roster owns this reading, including its absence after a
+       successful turn. Neither historical last_error nor the last outcome
+       can answer for the current failure. *)
+    add_section "Current failure";
+    let failure_tone, failure_text =
+      match (keeper_reading state k).Keeper_control.liveness with
+      | Keeper_control.Present runtime ->
+          (match runtime.kr_runtime_blocker_summary with
+           | Some summary -> Theme.bad (), summary
+           | None -> Ansi.dim, "none")
+      | Keeper_control.Unobserved -> Ansi.dim, "unread"
+      | Keeper_control.Absent -> Ansi.dim, "absent from live roster"
+      | Keeper_control.Invalid detail -> Theme.bad (), "config error: " ^ detail
+    in
+    let indent = "  " in
+    Message_layout.wrap_words
+      ~max_cells:(max 1 (inner - Message_layout.display_width indent))
+      (Terminal_text.single_line failure_text)
+    |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
+    add_empty ();
+
     (* Gate section. Two settings with similar names decide different things,
        so both are named rather than merged: YOLO is the in-memory stance that
        stops this chat asking and a restart clears, while the Gate mode is
@@ -6237,23 +6363,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
            String.equal a.ra_keeper k.k_name)
         state.runtime_assignments
     in
-    let target_str, is_lane =
+    let target_str =
       match assignment with
-      | Some a ->
-          let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
-          let is_l =
-            match a.ra_target_id with
-            | Some tid ->
-                List.exists
-                  (fun (l : Tui_decode.runtime_resolved_lane) ->
-                     String.equal l.rrl_id tid)
-                  state.runtime_lanes
-            | None -> false
-          in
-          Printf.sprintf "%s (%s, %s)" target
-            (if is_l then "lane" else "model")
-            (Terminal_text.single_line a.ra_source),
-          is_l
+      | Some a -> runtime_assignment_label a
       | None ->
           let def_name =
             match state.runtime_surface with
@@ -6263,11 +6375,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  | None -> "inherited")
             | None -> "inherited"
           in
-          Printf.sprintf "default (%s)" def_name, false
+          Printf.sprintf "default (%s)" def_name
     in
     add_row "Runtime Target:" target_str;
     (match assignment with
-     | Some { ra_target_id = Some tid; _ } when is_lane ->
+     | Some { ra_resolution = Runtime_assignment_lane tid; _ } ->
          (match
             List.find_opt
               (fun (l : Tui_decode.runtime_resolved_lane) ->
@@ -6289,24 +6401,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                | first :: _ -> add_row "Head Candidate:" first
                | [] -> ())
           | None -> ())
-     | Some { ra_target_id = Some tid; _ } ->
-         (match state.runtime_surface with
-          | Some snap ->
-              (match
-                 List.find_opt
-                   (fun (ro : Tui_decode.runtime_option) -> String.equal ro.ro_id tid)
-                   snap.rss_resolved.rrs_runtimes
-               with
-               | Some ro ->
-                   add_row "Model Context:"
-                     (Printf.sprintf "%s \xc2\xb7 max output %s"
-                        (format_context_tokens ro.ro_effective_max_context)
-                        (match ro.ro_max_output_tokens with
-                         | Some t -> format_context_tokens t
-                         | None -> "default"))
-               | None -> ())
-          | None -> ())
-     | None | Some { ra_target_id = None; _ } ->
+     | Some
+         { ra_resolution =
+             (Runtime_assignment_missing | Runtime_assignment_unavailable _)
+         ; _
+         } ->
+       ()
+     | None ->
          (match state.runtime_surface with
           | Some snap ->
               (match snap.rss_resolved.rrs_default_runtime_id with
@@ -10843,6 +10944,17 @@ let render_runtime (state : state) =
          ("  " ^ Keeper_chat.terminal_safe_text
                    (Masc_tui_types.runtime_lane_notice_text notice));
        c.push_divider ());
+  (* Counted in [runtime_surface_listing_chrome] as one row each and a
+     divider. *)
+  (match Masc_tui_types.runtime_lane_stale_lines state with
+   | [] -> ()
+   | lines ->
+       List.iter
+         (fun line ->
+            c.push_styled ~style:(Theme.warn ())
+              ("  " ^ Keeper_chat.terminal_safe_text line))
+         lines;
+       c.push_divider ());
   (* Counted in [runtime_surface_listing_chrome] as two rows, like the refusal
      above, so the footer keeps its row while the prompt is up. *)
   (match Masc_tui_types.runtime_lane_prompt state with
@@ -11705,29 +11817,14 @@ let render_runtime_pick (state : state) =
           | None -> false)
         state.runtime_assignments
     with
-    | Some a ->
-        let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
-        let kind =
-          match a.ra_target_id with
-          | Some tid
-            when List.exists
-                   (fun (l : Tui_decode.runtime_resolved_lane) ->
-                     String.equal l.rrl_id tid)
-                   state.runtime_lanes ->
-              "lane"
-          | Some _ -> "model"
-          | None -> "default"
-        in
-        Printf.sprintf "%s (%s, %s)%s"
-          target kind
-          (Terminal_text.single_line a.ra_source)
-          (match a.ra_unavailable_reason with
-           | None -> ""
-           | Some reason -> " — unavailable: " ^ Terminal_text.single_line reason)
+    | Some a -> runtime_assignment_label a
     | None -> "-"
   in
   let items = Masc_tui_types.runtime_picker_items state in
   let count = List.length items in
+  let target_width, route_width =
+    Masc_tui_types.runtime_pick_column_widths ~cols items
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -11745,11 +11842,15 @@ let render_runtime_pick (state : state) =
             c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
             1
         | None ->
+            (* The kind badge is 7 cells ("[LANE] ", "[MODEL]"), so the
+               first header cell spans badge and target, as the rows do. *)
             let header =
               Printf.sprintf "  %s  %s  %s"
-                (fit_width "KIND   TARGET" 33)
-                (fit_width "CONFIGURED ROUTE / MODEL" (max 24 (cols - 62)))
-                "PROPERTIES / FAILOVER"
+                (fit_width "KIND   TARGET" (7 + target_width))
+                (fit_width "CONFIGURED ROUTE / MODEL" route_width)
+                (fit_width "PROPERTIES / FAILOVER"
+                   (Masc_tui_types.runtime_pick_properties_room ~cols
+                      ~target:target_width ~route:route_width))
             in
             c.push (Ansi.dim ^ header ^ Ansi.reset);
             1
@@ -11764,42 +11865,43 @@ let render_runtime_pick (state : state) =
         (fun idx item ->
           if idx >= scroll_offset && idx < scroll_offset + height then begin
             let line =
-              match item with
-              | Masc_tui_types.Pick_lane lane ->
-                  let kind_badge = Ansi.cyan ^ "[LANE] " ^ Ansi.reset in
-                  let target = fit_width (Terminal_text.single_line lane.rrl_id) 24 in
-                  let chain =
-                    String.concat " \xe2\x86\x92 "
-                      (List.map
-                         (fun id ->
-                            match String.split_on_char '.' id with
-                            | [ _prov; model ] -> model
-                            | _ -> id)
-                         lane.rrl_runtime_ids)
-                  in
-                  let hops = Printf.sprintf "(%d hops)" (List.length lane.rrl_runtime_ids) in
-                  let route_col = fit_width (Terminal_text.single_line chain) (max 24 (cols - 62)) in
-                  Printf.sprintf "%s%s  %s  %s" kind_badge target route_col hops
-              | Masc_tui_types.Pick_model option ->
-                  let kind_badge = Ansi.dim ^ "[MODEL]" ^ Ansi.reset in
-                  let target = fit_width (Terminal_text.single_line option.ro_id) 24 in
-                  let model_desc =
-                    fit_width
-                      (Terminal_text.single_line
-                         (option.ro_provider ^ " / " ^ option.ro_model))
-                      (max 24 (cols - 62))
-                  in
-                  let ctx =
-                    Printf.sprintf "[%s ctx]"
-                      (format_context_tokens option.ro_effective_max_context)
-                  in
-                  let def = if option.ro_is_default then " [default]" else "" in
-                  let quota =
-                    if option.ro_quota_exhausted then " " ^ (Theme.warn ()) ^ "[quota exhausted]" ^ Ansi.reset
-                    else ""
-                  in
-                  Printf.sprintf "%s%s  %s  %s%s%s"
-                    kind_badge target model_desc ctx def quota
+              (* The target column draws ids, and an id tells its neighbours
+                 apart at both ends: [claude_code.claude-sonnet-5-low] and
+                 [-high] share everything but the last four cells, which a
+                 head-keeping cut drops. [fit_middle] keeps both ends, which
+                 is what it says it is for. *)
+              let badge, target, route_col =
+                match item with
+                | Masc_tui_types.Pick_lane lane ->
+                    let chain =
+                      String.concat " \xe2\x86\x92 "
+                        (List.map
+                           (fun id ->
+                              match String.split_on_char '.' id with
+                              | [ _prov; model ] -> model
+                              | _ -> id)
+                           lane.rrl_runtime_ids)
+                    in
+                    ( Ansi.cyan ^ "[LANE] " ^ Ansi.reset
+                    , Message_layout.fit_middle target_width (Terminal_text.single_line lane.rrl_id)
+                    , fit_width (Terminal_text.single_line chain) route_width )
+                | Masc_tui_types.Pick_model option ->
+                    ( Ansi.dim ^ "[MODEL]" ^ Ansi.reset
+                    , Message_layout.fit_middle target_width (Terminal_text.single_line option.ro_id)
+                    , fit_width
+                        (Terminal_text.single_line
+                           (option.ro_provider ^ " / " ^ option.ro_model))
+                        route_width )
+              in
+              let facts =
+                Masc_tui_types.runtime_pick_visible_facts ~cols item
+                |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
+                     if fact.rpf_warn
+                     then (Theme.warn ()) ^ fact.rpf_text ^ Ansi.reset
+                     else fact.rpf_text)
+                |> String.concat " "
+              in
+              Printf.sprintf "%s%s  %s  %s" badge target route_col facts
             in
             c.push
               (if idx = state.runtime_pick_cursor then

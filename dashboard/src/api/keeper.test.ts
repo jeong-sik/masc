@@ -979,6 +979,8 @@ describe('keeper lifecycle', () => {
         keeper: 'keeper-test',
         deleted_snapshot_ids: ['agent-core-snapshot-1.json'],
         missing_snapshot_ids: [],
+        refused_snapshot_ids: [],
+        failed_snapshot_ids: [],
         inventory: {
           keeper: 'keeper-test',
           trace_id: 'trace-keeper-test',

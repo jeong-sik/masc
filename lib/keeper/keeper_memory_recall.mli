@@ -53,15 +53,17 @@ val record_memory_recall_read_error :
 
 (** {1 User Message Extraction} *)
 
-val recent_user_messages :
-  Agent_core.Types.message list -> max_n:int -> string list
+val user_messages_newest_first : Agent_core.Types.message list -> string list
 
 val load_history_user_messages_result :
   path:string ->
-  max_n:int ->
-  (string list, Keeper_memory_recall_exn_class.t) result
-(** Typed history loader.  On [Error class] the caller can distinguish
-    "no user messages in the history file" ([Ok []]) from "the history
-    file read failed" ([Error class]).
-
-    @since RFC-0149 §3.1 *)
+  limit:int ->
+  accept:(string -> bool) ->
+  (string list, Keeper_memory_recall_exn_class.t) result * int
+(** Scan retained user messages newest-first until [limit] messages satisfy
+    [accept], or the file ends. Internal History sources remain excluded.
+    There is no raw-row or candidate-message cap. A missing file is [Ok []];
+    other read failures are [Error class]. The second value counts visited
+    rows that could not be decoded, including those visited before a failure.
+    [accept] runs on the calling fiber. Its effects are not rolled back on
+    [Error], so callers must keep tentative selection state local to this read. *)

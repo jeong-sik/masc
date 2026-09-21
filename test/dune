@@ -14,9 +14,49 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_keeper_librarian_absorb_gate)
+ (modules test_keeper_librarian_absorb_gate)
+ (deps fixtures/librarian_statements_golden.json)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+; The reference cut (scripts/librarian/statements.py, the scorer of issue
+; #37079) must still write the golden the OCaml test above reads.
+(rule
+ (alias runtest-librarian-statements-golden)
+ (deps ../scripts/librarian/statements.py fixtures/librarian_statements_golden.json)
+ (action
+  (run python3 %{dep:../scripts/librarian/statements.py} --check
+   %{dep:fixtures/librarian_statements_golden.json})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-librarian-statements-golden)))
+
+(test
+ (name test_librarian_continuity_report)
+ (modules test_librarian_continuity_report)
+ (libraries alcotest masc yojson digestif))
+
+(rule
+ (alias runtest-test_librarian_continuity_cli)
+ (deps test_librarian_continuity_cli.py ../bin/masc_librarian_continuity.exe
+  ../scripts/fixtures/release-evidence/runtime.toml)
+ (action (run python3 %{dep:test_librarian_continuity_cli.py}
+  --binary %{dep:../bin/masc_librarian_continuity.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_librarian_continuity_cli)))
+
+(test
  (name test_keeper_peer_artifact)
  (modules test_keeper_peer_artifact)
  (libraries masc_test_deps))
+
+(test
+ (name test_keeper_skill_validate)
+ (modules test_keeper_skill_validate)
+ (libraries masc_test_deps masc.skill_snapshot_service))
 
 (test
  (name test_keeper_request_failure)
@@ -1016,7 +1056,11 @@
 (test
  (name test_keeper_checkpoint_purge)
  (modules test_keeper_checkpoint_purge)
- (libraries alcotest masc_test_deps))
+ (libraries alcotest masc_test_deps)
+ (deps ../bin/masc_checkpoint_purge.exe)
+ (action
+  (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
+   (run %{test}))))
 
 
 (test
@@ -1962,6 +2006,17 @@
  (modules test_cancel_safe)
  (libraries alcotest masc_cancel_safe eio eio_main))
 
+; The metric store is on the same contract: a counter bumped inside a
+; cancelled fiber must not turn the cancellation into a warning (#37349).
+; The AST cases read the store's source, so it is a dep -- without it dune
+; caches a pass and never re-runs them when the store changes.
+
+(test
+ (name test_otel_metric_store_cancel)
+ (modules test_otel_metric_store_cancel)
+ (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
+ (libraries alcotest ast_grep otel_metric_store eio eio_main))
+
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library
  (name exact_output_fixture)
@@ -2012,6 +2067,12 @@
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
 
+; Real Keeper/Board completion and durable ACK; CI supplies Docker explicitly.
+(test
+ (name test_keeper_board_turn_ack)
+ (modules test_keeper_board_turn_ack)
+ (libraries masc_test_deps exact_output_fixture eio_main unix))
+
 ; Production Board-attention adapter proof over the provider-neutral AGENT_CORE lane.
 (test
  (name test_keeper_board_attention_exact_flow)
@@ -2028,8 +2089,8 @@
 ; prepare / finalize) that #25969 left unreachable when it moved production to
 ; peek/ack, and that is now removed.
 
-; Process-isolated proof that exact-output bootstrap honors full catalog
-; replacement precedence over deployment overlays and AGENT_CORE embedded targets.
+; Process-isolated proof that exact-output bootstrap uses an explicit full
+; catalog replacement and runtime target declarations instead of embedded rows.
 (test
  (name test_exact_output_catalog_precedence)
  (modules
@@ -2755,6 +2816,7 @@
 (include stanzas/test_masc_test_deps_fixture_sandbox.inc)
 
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
+(include stanzas/test_runtime_agent_streaming_capability.inc)
 
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
@@ -4142,6 +4204,15 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
 
+(rule
+ (alias runtest-test_tui_fixture_shutdown)
+ (deps test_tui_fixture_shutdown.py test_tui_keyboard_input.py)
+ (action (run python3 %{dep:test_tui_fixture_shutdown.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_fixture_shutdown)))
+
 ; The harness decides what runs from --list, --scenario and the family name
 ; before a terminal opens, and no rule here passes either flag. This suite
 ; drives that choice with a stand-in binary, and holds the harness's family
@@ -4983,7 +5054,9 @@
 (test
  (name test_tui_footer_status_items)
  (modules test_tui_footer_status_items)
- (libraries alcotest str masc_tui_footer masc_tui_message_layout))
+ (libraries alcotest str unix
+  masc_tui_footer masc_tui_message_layout
+  masc_tui_keys masc_tui_render_prim masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_answering)
@@ -5104,7 +5177,10 @@
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
+(include stanzas/test_keeper_librarian_store_scope.inc)
 (include stanzas/test_keeper_librarian_range.inc)
+(include stanzas/test_keeper_librarian_durable_consumer.inc)
+(include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
 (include stanzas/test_keeper_gate_replay.inc)
@@ -5128,6 +5204,7 @@
 
 (include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)
+(include stanzas/test_exact_output_runtime_deadline.inc)
 
 ; The tool-call quality benchmark reads its case set and evidence fixture from
 ; repo-root JSON (benchmarks/data, test/fixtures) rather than from sandbox
@@ -5200,9 +5277,12 @@
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
+(include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
+(include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
+(include stanzas/test_tui_lane_run_paging.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)
 
@@ -5739,7 +5819,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule
@@ -5861,6 +5941,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
+
+(rule
+ (alias runtest-test_tui_approvals_ring_pty)
+ (deps test_tui_approvals_ring_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_approvals_ring_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_approvals_ring_pty)))
 
 (rule
  (alias runtest-test_tui_memory_fact_detail_pty)
@@ -6023,6 +6113,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_lane_payload_availability)))
+
+(rule
+ (alias runtest-test_tui_board_answer_source)
+ (deps test_tui_board_answer_source.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_board_answer_source.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_board_answer_source)))
 
 (rule
  (alias runtest-test_tui_lane_detail_owner)
@@ -6464,3 +6564,16 @@
  (name test_tui_fork_guard)
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
+
+(include stanzas/test_tui_keeper_current_failure_pty.inc)
+
+(include stanzas/test_exact_output_runtime_reasoning.inc)
+
+(rule
+ (alias runtest-test_tui_jev_readiness)
+ (deps test_tui_jev_readiness.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_jev_readiness.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_jev_readiness)))

@@ -458,6 +458,24 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Orchestration _
          | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)
 
+(** The labelled retry a deferred lane stands for: the runtime the lane names
+    next, and why the failure that deferred it is continuable.
+    [Deferred_runtime_lane] is the label when that failure carries no
+    continuation reason of its own.
+
+    Three sites spelled this projection out by hand -- the unified turn's
+    [initial_turn_state], and the receipt's inbound hint and outbound
+    deferral -- so the fallback label had to be kept in step three times. *)
+let degraded_retry_of_deferred_lane
+      (lane : Keeper_turn_driver.deferred_runtime_lane)
+  =
+  let fallback_reason =
+    match recoverable_runtime_failure_reason lane.failure with
+    | Some reason -> reason
+    | None -> Deferred_runtime_lane
+  in
+  { next_runtime = lane.next_runtime_id; fallback_reason }
+
 (** [true] only for the typed API-side 400 rejection. Rendered provider text
     carries no recovery authority. *)
 let is_invalid_request_error : Agent_core.Error.t -> bool = function

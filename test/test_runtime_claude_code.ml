@@ -540,10 +540,8 @@ let test_dynamic_tool_bytes_counts_every_field () =
     (Runtime_claude_code.dynamic_tool_bytes [ tool; tool ])
 ;;
 
-(* The keeper side of this runtime hardcoded [usage = None] while the
-   antigravity runtime fills the same slot from its CLI stream, which is why
-   official-client turns carry no input_tokens (#28023). Reading it here is what
-   lets a turn record the size it actually sent. *)
+(* A result-only aggregate remains observable, but does not measure one request's
+   input window. Preserve both its counts and its client-turn provenance. *)
 let test_result_usage_is_carried () =
   with_fixture [ Emit assistant; Emit result_with_usage ] (fun path ->
     match run_fixture path with
@@ -551,7 +549,9 @@ let test_result_usage_is_carried () =
     | Ok turn ->
       (match turn.usage with
        | None -> fail "usage block was dropped"
-       | Some usage ->
+       | Some (Runtime_claude_code.Latest_request _) ->
+         fail "a result-only aggregate was labelled as the latest request"
+       | Some (Runtime_claude_code.Turn_total usage) ->
          (* turn_usage keeps the CLI's exclusive wire counts as-is; the
             inclusive normalization happens in the keeper's api_usage
             mapping. The frame's cache_read 42 must survive the parse and
@@ -560,6 +560,28 @@ let test_result_usage_is_carried () =
          check int "output tokens" 789 usage.output_tokens;
          check int "cache read carried" 42 usage.cache_read_input_tokens;
          check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens))
+;;
+
+let test_latest_request_usage_outranks_result_total () =
+  with_fixture
+    [ Emit assistant_with_usage_a
+    ; Emit assistant_with_usage_b
+    ; Emit assistant
+    ; Emit result_with_usage
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+        match turn.usage with
+        | Some (Runtime_claude_code.Latest_request usage) ->
+          check int "latest counted input, not sum or result total" 200 usage.input_tokens;
+          check int "latest counted output" 20 usage.output_tokens;
+          check int "latest cache read" 5 usage.cache_read_input_tokens;
+          check int "latest absent cache creation" 0 usage.cache_creation_input_tokens
+        | Some (Runtime_claude_code.Turn_total _) ->
+          fail "result total replaced the counted assistant request"
+        | None -> fail "a later uncounted assistant erased the latest usage")
 ;;
 
 (* A usage block the CLI shapes differently must not fail the turn: the text is
@@ -2222,6 +2244,8 @@ let () =
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
         ; test_case "result usage is carried" `Quick test_result_usage_is_carried
+        ; test_case "latest request usage outranks result total" `Quick
+            test_latest_request_usage_outranks_result_total
         ; test_case
             "dynamic tool bytes counts every field"
             `Quick

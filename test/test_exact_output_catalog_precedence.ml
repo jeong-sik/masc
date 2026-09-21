@@ -522,7 +522,9 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
         readiness one. with_configured_verifier_cli materializes this official
         client, so here readiness has to accept it... *)
      (match Runtime.verifier_exact_lane_readiness () with
-      | Ok () -> ()
+      | Ok [] -> ()
+      | Ok (_ :: _) ->
+        Alcotest.fail "readiness rejected a cli slot the runtime table admits"
       | Error detail ->
         Alcotest.failf "readiness refused a configured official client: %s" detail));
   (* ...and refuse the same lane once its cli slot names nothing in the runtime
@@ -540,7 +542,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
           "readiness names the cli slot that resolves to no runtime"
           true
           (String_util.contains_substring detail unmaterialized)
-      | Ok () ->
+      | Ok _ ->
         Alcotest.fail "readiness accepted a cli slot with no materialized runtime"));
   (match Registry.publish
       ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = [] } ] snapshot with
@@ -851,11 +853,30 @@ require_lane_slots
             | Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
             | Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
                 (Registry.lane_resolution_error_to_string error))
-         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact"; "verifier_exact" ];
+         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact" ];
+       (* verifier_exact dispatches each slot as a judge. Codex cannot, and
+          this fixture declares no verifier_exact lane for setup to keep, so
+          the lane stays unwritten rather than carrying a slot that would
+          refuse every review (#37179). *)
+       (match protocol, Registry.resolve_lane registry ~lane_id:"verifier_exact" with
+        | "codex-app-server", Error (Registry.Exact_lane_unconfigured _) -> ()
+        | "codex-app-server", Ok _ ->
+          Alcotest.fail "setup provisioned a verifier lane Codex can never judge on"
+        | "codex-app-server", Error error ->
+          Alcotest.failf "unexpected verifier lane failure: %s"
+            (Registry.lane_resolution_error_to_string error)
+        | _, Ok { selected_slots = []; cli_slots } ->
+          Alcotest.(check (list string)) (protocol ^ " verifier_exact")
+            [ runtime_id ] cli_slots
+        | _, Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
+        | _, Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
+            (Registry.lane_resolution_error_to_string error));
        (match protocol, Runtime.verifier_exact_lane_slot_ids () with
         | "codex-app-server", Error detail ->
-          Alcotest.(check string) "Codex still requires native-tool suppression"
-            (runtime_id ^ ": completion verifier requires native-tool suppression, which this client does not support") detail
+          Alcotest.(check string) "an unwritten verifier lane reads as unconfigured"
+            (Registry.lane_resolution_error_to_string
+               (Registry.Exact_lane_unconfigured { lane_id = "verifier_exact" }))
+            detail
         | "codex-app-server", Ok _ -> Alcotest.fail "unsafe Codex verifier was admitted"
         | _, Error detail -> Alcotest.fail detail
         | _, Ok slots -> Alcotest.(check (list string))
@@ -1008,6 +1029,80 @@ let test_catalog_absent_assignments_names_only_retired_targets () =
          ])
 ;;
 
+(* The Lanes view lists only the slots the registry admitted. An append reads
+   the slots the file declares, so a slot the registry dropped is still
+   declared after it, and the replaced registry still drops it rather than
+   losing it from the file. *)
+let test_an_append_keeps_a_slot_the_registry_dropped () =
+  with_temp_dir "exact-append-dropped" @@ fun root ->
+  let saved = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore saved;
+      ignore (Registry.unpublish ()))
+  @@ fun () ->
+  let path = Filename.concat root "runtime.toml" in
+  let dropped = "not-in-frozen-catalog" in
+  write_file path
+    (runtime_toml ~include_board_attention:false replacement_target
+     ^ Printf.sprintf
+         "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S, %S]\n"
+         dropped
+         replacement_target);
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "runtime initialization failed: %s" detail);
+  let declared () =
+    match Runtime_toml.parse_string (Fs_compat.load_file path) with
+    | Error _ -> Alcotest.fail "the written runtime.toml does not parse"
+    | Ok config -> config.Runtime_schema.exact_output_lane_decls
+  in
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "append-dropped"; contents = replacement_catalog })
+  in
+  let dropped_on_board registry =
+    Registry.rejected_slots registry
+    |> List.filter_map (fun (slot : Registry.rejected_slot) ->
+      if String.equal slot.lane_id "board_attention_exact" then Some slot.slot_id else None)
+  in
+  (match Runtime.publish_exact_output_registry ~lanes:(declared ()) snapshot with
+   | Ok registry ->
+     Alcotest.(check (list string)) "the registry drops the unknown slot" [ dropped ]
+       (dropped_on_board registry)
+   | Error detail -> Alcotest.failf "publication failed: %s" detail);
+  (match
+     Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+       ~lane:Runtime.Board_attention ~slot:replacement_secondary_target ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "append failed: %s" detail);
+  (match
+     List.find_opt
+       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+          String.equal lane.id "board_attention_exact")
+       (declared ())
+   with
+   | Some lane ->
+     Alcotest.(check (list string)) "the dropped slot is still declared, in front"
+       [ dropped; replacement_target; replacement_secondary_target ] lane.slot_ids
+   | None -> Alcotest.fail "the append lost the lane");
+  match Registry.current () with
+  | Error error -> Alcotest.failf "no registry after the append: %s"
+                     (Registry.publication_error_to_string error)
+  | Ok registry ->
+    Alcotest.(check (list string)) "the replaced registry still drops it" [ dropped ]
+      (dropped_on_board registry);
+    (match Registry.resolve_lane registry ~lane_id:"board_attention_exact" with
+     | Ok { selected_slots; _ } ->
+       Alcotest.(check (list string)) "the appended slot is admitted after the kept one"
+         [ replacement_target; replacement_secondary_target ]
+         (List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) selected_slots)
+     | Error error -> Alcotest.failf "the lane does not resolve: %s"
+                        (Registry.lane_resolution_error_to_string error))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1073,5 +1168,9 @@ let () =
             "cli slots survive resolution and keep a lane alive"
             `Quick
             test_cli_slots_survive_resolution_and_keep_a_lane_alive
+        ; Alcotest.test_case
+            "an append keeps a slot the registry dropped"
+            `Quick
+            test_an_append_keeps_a_slot_the_registry_dropped
         ] ) ]
 ;;

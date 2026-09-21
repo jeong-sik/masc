@@ -284,6 +284,7 @@ let launch_supervised_fiber_body
                (fun () ->
                   Keeper_keepalive.run_heartbeat_loop
                     ~proactive_warmup_sec
+                    ~registry_entry:reg
                     ctx
                     meta
                     reg.fiber_stop
@@ -730,4 +731,3 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
     ~load_or_materialize_keeper_meta
     ctx
 ;;
-

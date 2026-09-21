@@ -144,6 +144,9 @@ let run
                 Error (Lifecycle_open_failed { error; rollback_error })
               | Ok () ->
                 (try
+                   Keeper_librarian_queue_refresh.submit_durable
+                     ~base_path
+                     ~keeper_name;
                    Ok (launch intake_token token reg)
                  with
                  | exn ->

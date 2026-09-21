@@ -693,7 +693,9 @@ export function PostDetail({ post }: { post: BoardPost }) {
         testId="board-post-turn-inspector"
         keeperName=${turnKeeperName}
         subtitle=${originTurnRef ? `원본 턴 · ${originTurnRef}` : null}
-        initialTurnRef=${originTurnRef}
+        anchor=${originTurnRef === null
+          ? { kind: 'unreferenced' }
+          : { kind: 'ref', value: originTurnRef }}
         open=${turnInspectorOpen}
         onClose=${() => setTurnInspectorOpen(false)}
       />

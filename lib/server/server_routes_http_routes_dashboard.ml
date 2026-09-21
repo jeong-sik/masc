@@ -158,7 +158,7 @@ let handle_execute_output_stream ~sw ~clock request reqd =
            then (
              closed := true;
              try Httpun.Body.Writer.close writer with
-             | exn ->
+             | exn -> (* cancel-guard-ok: httpun's dependency closure is bigstringaf, angstrom, faraday and httpun-types with no eio, so Httpun.Body.Writer.close performs no Eio operation. *)
                Log.Dashboard.warn
                  "execute output stream close failed: %s"
                  (Printexc.to_string exn))

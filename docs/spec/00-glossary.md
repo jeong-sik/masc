@@ -147,6 +147,19 @@ status: reference
 **Board**
 : 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
 
+**Broadcast**
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) 워크스페이스 broadcast: `Workspace.broadcast
+  ~audience:Workspace_broadcast.Fleet_conversation`으로 모든 Keeper의 대화창에 닿는
+  발화. 입구는 Keeper 도구 `keeper_broadcast`, MCP 도구 `masc_broadcast`, 운영자
+  제어(`lib/operator/operator_control.ml`), dashboard HTTP
+  (`lib/server/server_routes_http_dashboard_handlers.ml`),
+  gRPC(`lib/server/masc_grpc_service.ml`)다. (2) SSE broadcast: 서버가 연결된 client
+  전부의 stream에 event를 밀어 넣는 전송 동작(`09-server-transport.md`).
+  (3) Board `audience`의 `Broadcast`: 글을 특정 대상 없이 모두에게 라우팅하는 값
+  (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
+  (`lib/masc_log/log.ml`).
+
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
@@ -442,11 +455,19 @@ status: reference
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
 
-**JEV**
-: Board의 주의 대상 선택이나 Librarian의 기억 흡수 검사에 쓰는 TypeSafe AI 평가 모델.
-  Librarian은 새 claim이 흡수할 원문을 전달하는지 묻고, 반환된 Noul 판정값과
-  적용 기준을 기록한다. 이 판정 기록은 Memory 저장 성공과 별개다.
-  실행의 `run.status`와 판정 기록의 `absorb_gate.status`도 구분한다.
-  `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단되기 전에 완료된 응답만 담는다.
+**JEV / Noul**
+: JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
+  참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
+  통과율이 아니다. Board의 Choice 판정과도 구분한다.
+  Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
+  Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
+  `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
   `open`은 검사 실패 후 기존 처리 규칙에 따라 반환한 결과이고, `judged`는 검사를 마친 결과다.
   취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
+
+**Continuity Measurement (의미 보존 측정)**
+: 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
+  비교해 그 답을 평가하는 관측. `masc-librarian-continuity`는 명시한 합성
+  입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
+  게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
+  Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.

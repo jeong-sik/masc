@@ -44,8 +44,10 @@ assert_strict_root_flags() {
   while IFS= read -r token; do
     case "${previous}" in
       -w)
-        [[ "${token}" == *32* ]] && has_warning_32=1
-        [[ "${token}" == *69* ]] && has_warning_69=1
+        [[ "${token}" == *+32* ]] && has_warning_32=1
+        [[ "${token}" == *-32* ]] && has_warning_32=0
+        [[ "${token}" == *+69* ]] && has_warning_69=1
+        [[ "${token}" == *-69* ]] && has_warning_69=0
         ;;
       -warn-error)
         [[ "${token}" == *+a* ]] && has_warn_error_all=1

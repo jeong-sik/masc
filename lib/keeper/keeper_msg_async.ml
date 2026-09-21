@@ -2461,7 +2461,8 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
              match callback request_id with
              | Ok () -> Ok ()
              | Error _ as error -> error
-             | exception exn -> Error (Printexc.to_string exn)) (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
+             | exception exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
+               Error (Printexc.to_string exn))
        in
        (match acceptance_result with
         | Error reason ->

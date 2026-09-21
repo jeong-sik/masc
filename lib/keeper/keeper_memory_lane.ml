@@ -481,6 +481,7 @@ module For_testing = struct
           | None -> entry.last_owner_lane)
     in
     Option.iter
+      (* See [await_idle]: only the exit boundary matters to this test seam. *)
       (fun owner_lane -> ignore (Keeper_lane.await_exit owner_lane : Keeper_lane.exit))
       owner_lane
   ;;

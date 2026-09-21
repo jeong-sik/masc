@@ -2164,7 +2164,7 @@ let start_keeper_loops
           state
       with
       | () -> Ok ()
-      | exception exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: the captured exception is dispatched at line 2192, where an Eio.Cancel.Cancelled arm re-throws it with its backtrace. *)
+      | exception exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: PROVISIONAL, delete with #37372. The captured exception is dispatched at line 2192, where an Eio.Cancel.Cancelled arm re-throws it with its backtrace. *)
     in
     (match outcome with
      | Ok () ->

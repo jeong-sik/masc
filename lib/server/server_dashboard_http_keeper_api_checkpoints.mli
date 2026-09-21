@@ -49,7 +49,14 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_librarian_coordinates_present
+  | Purge_librarian_position_unreadable of string
+      (** The Librarian progress file exists and cannot be read. Never taken
+          as "no position": that would let a rewrite pass over what it
+          holds. *)
+  | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
+  | Purge_librarian_position_not_written of string
+      (** The checkpoint was installed and the position write after it
+          failed. *)
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
@@ -59,10 +66,12 @@ val purge_error_to_string : purge_error -> string
 (** Deterministically preview or apply the fixed checkpoint purge policy.
     Preview is read-only and reports whether apply is currently allowed.
     Apply requires the Keeper to be fully absent from the runtime registry and
-    serializes that check with same-Keeper boot registration. A rewrite that
-    changes the History endpoint is refused while turn-boundary or Librarian
-    progress coordinates exist. The canonical checkpoint is installed only
-    if its exact source reference is unchanged. *)
+    serializes that check with same-Keeper boot registration. A rewrite is
+    refused while the Librarian has atoms left to read
+    ({!Keeper_checkpoint_purge.librarian_rebase}); otherwise apply retires
+    the keeper's Librarian loop, installs the checkpoint, writes the rebased
+    position after it and wakes the loop. The canonical checkpoint is
+    installed only if its exact source reference is unchanged. *)
 val purge_current :
   Workspace.config ->
   keeper_name:string ->

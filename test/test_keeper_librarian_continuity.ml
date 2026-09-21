@@ -32,30 +32,16 @@ let with_source f =
       history_at_start=(if fresh then B.Fresh_history else B.Continued_history);
       position=B.position_of_messages messages |> get}) in
   f env config save append boundary
-let prepare config = P.prepare ~config ~keeper_name ~trace_id |> get
-let record_memory config =
-  let lines=B.read ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name |> get in
-  let session_dir=Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
-  let checkpoint=match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
-    | Ok value -> value | Error _ -> fail "fixture checkpoint absent" in
-  match Masc.Keeper_librarian_range.select ~trace_id ~lines ~progress:None
-    ~messages:(C.exact_snapshot_messages checkpoint) Masc.Keeper_librarian_range.All_unread with
-  | Masc.Keeper_librarian_range.Read {range;boundary_lines_seen} ->
-    let end_boundary_line=List.find_map (function
-      | line,Ok {B.event=B.Turn_ended {position=B.Atom_history {end_atom;last_atom_digest};_};_}
-        when line>=range.history_start_boundary_line && end_atom=range.end_atom
-          && last_atom_digest=range.last_atom_digest -> Some line | _ -> None) lines |> some in
-    let range_id : Masc.Keeper_memory_os_current.durable_range_id =
-      {receipt_scope=Masc.Workspace.keepers_runtime_dir config;trace_id;
-       history_start_boundary_line=range.history_start_boundary_line;start_atom=range.start_atom;
-       end_atom=range.end_atom;last_atom_digest=range.last_atom_digest;end_boundary_line;boundary_lines_seen} in
-    ignore (Masc.Keeper_memory_os_current.apply_disposition ~durable_range_id:range_id
-      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
-      ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
-      ~absorbed:[] ~new_claims:[] () |> get)
-  | _ -> fail "fixture lacks completed range"
+let prepare config = P.prepare ~config ~keeper_name ~trace_id () |> get
+let record_prepared_memory config prepared =
+  let range_id = P.memory_range_id ~config ~keeper_name prepared |> get in
+  ignore (Masc.Keeper_memory_os_current.apply_disposition ~durable_range_id:range_id
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
+    ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
+    ~absorbed:[] ~new_claims:[] () |> get)
+let record_memory config = record_prepared_memory config (prepare config |> some)
 let commit config prepared text =
-  record_memory config;
+  record_prepared_memory config prepared;
   P.commit ~config ~keeper_name ~prepared ~working_state:text |> get
 let test_append_cas_and_restart () = with_source @@ fun _env config save append boundary ->
   let prefix=[message "Keep the deployment pending approval."] in
@@ -146,16 +132,74 @@ let test_memory_coverage_required () = with_source @@ fun _env config save _appe
   check bool "no Memory receipt cannot authorize prefix removal" true
     (Result.is_error (P.commit ~config ~keeper_name ~prepared ~working_state:"First fact"));
   record_memory config;
-  check bool "exact saved Memory permits queue bootstrap" true
-    (P.prepare_committed ~config ~keeper_name ~trace_id |> get |> Option.is_some);
+  check bool "exact saved Memory permits publication" true
+    (P.memory_committed ~config ~keeper_name prepared |> get);
   let next=first@[message "New fact not yet in Memory"] in save next;boundary ~fresh:false 2 next;
+  let recovered=prepare config |> some in
+  check int "appended turns do not expand unpublished Memory commit" 1 (P.end_atom recovered);
+  check bool "old receipt is recoverable with newly appended boundary" true
+    (P.memory_committed ~config ~keeper_name recovered |> get);
+  ignore (P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"First fact" |> get);
+  let newer=prepare config |> some in
+  check int "after publication next source advances" 2 (P.end_atom newer);
+  check bool "earlier receipt cannot cover new suffix" false
+    (P.memory_committed ~config ~keeper_name newer |> get)
+let test_baseline_partial_bootstrap () = with_source @@ fun _env config save _append boundary ->
+  let prefix=[message "A";message "B";message "C";message "D"] in
+  save prefix; boundary ~fresh:false 10 prefix;
+  let all=prepare config |> some in
+  check int "existing history is real source" 4 (List.length (P.messages all));
+  let partial=P.narrow all |> some in
+  check int "capacity retry uses whole atom midpoint" 2 (P.end_atom partial);
+  record_prepared_memory config partial;
+  let expanded=prefix@[message "E"] in save expanded;boundary ~fresh:false 11 expanded;
+  let recovered=prepare config |> some in
+  check int "failed publication recovers the actual narrowed source" 2 (P.end_atom recovered);
+  check bool "recovered Memory is not reapplied" true
+    (P.memory_committed ~config ~keeper_name recovered |> get);
+  let saved=P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"A and B" |> get in
+  check bool "explicit captured provenance" true (saved.origin=S.Captured_checkpoint_prefix);
+  check int "partial cut is independent of real completed anchor" 5 saved.covering_end_atom;
+  let later=prepare config |> some in
+  check int "remaining source is still supplied" 3 (List.length (P.messages later));
+  let receipt=P.memory_range_id ~config ~keeper_name later |> get in
+  check int "next read starts exactly after captured prefix" 2 receipt.start_atom;
+  let ordinary=Masc.Keeper_memory_os_current.committed_durable_range
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
+    ~keeper_id:keeper_name ~receipt_scope:(Masc.Workspace.keepers_runtime_dir config) |> get in
+  check bool "bootstrap does not manufacture ordinary consumer progress" true (Option.is_none ordinary)
+let record_ordinary config prepared ~start_atom =
+  let own=P.memory_range_id ~config ~keeper_name prepared |> get in
+  let range_id={own with Masc.Keeper_memory_os_current.receipt_scope=Masc.Workspace.keepers_runtime_dir config;
+    start_atom} in
+  ignore (Masc.Keeper_memory_os_current.apply_disposition ~durable_range_id:range_id
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
+    ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
+    ~absorbed:[] ~new_claims:[] () |> get)
+let test_ordinary_witnessed_coverage () = with_source @@ fun _env config save _append boundary ->
+  let prefix=[message "A";message "B"] in save prefix;boundary ~fresh:true 1 prefix;
   let prepared=prepare config |> some in
-  check bool "earlier saved Memory cannot cover newer prepared prefix" true
-    (Result.is_error (P.commit ~config ~keeper_name ~prepared ~working_state:"Both facts"));
-  check bool "queue bootstrap also requires exact committed coverage" true
-    (P.prepare_committed ~config ~keeper_name ~trace_id |> get |> Option.is_none)
+  record_ordinary config prepared ~start_atom:0;
+  check bool "serial witnessed Memory already read this prefix" true
+    (P.memory_committed ~config ~keeper_name prepared |> get);
+  ignore (P.commit ~config ~keeper_name ~prepared ~working_state:"A and B" |> get)
+let test_ordinary_baseline_coverage () = with_source @@ fun _env config save _append boundary ->
+  let baseline=[message "A";message "B"] in save baseline;boundary ~fresh:false 1 baseline;
+  let full=baseline@[message "C";message "D"] in save full;boundary ~fresh:false 2 full;
+  let all=prepare config |> some in
+  record_ordinary config all ~start_atom:2;
+  check bool "normal receipt never certifies unknown baseline prefix" false
+    (P.memory_committed ~config ~keeper_name all |> get);
+  let prefix=P.narrow all |> some in
+  ignore (commit config prefix "A and B");
+  let suffix=prepare config |> some in
+  check int "next source starts after baseline" 2
+    (P.memory_range_id ~config ~keeper_name suffix |> get).start_atom;
+  check bool "normal serial receipt certifies already consumed suffix" true
+    (P.memory_committed ~config ~keeper_name suffix |> get)
 let () = run "production continuity pair"
-  ["cycle",[test_case "executor cancellation joins commit" `Quick test_worker_cancellation_waits_for_commit;
+  ["cycle",[test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
+    test_case "normal baseline excludes unknown prefix" `Quick test_ordinary_baseline_coverage;test_case "baseline partial bootstrap and recovery" `Quick test_baseline_partial_bootstrap;test_case "executor cancellation joins commit" `Quick test_worker_cancellation_waits_for_commit;
     test_case "Memory frontier proves publication coverage" `Quick test_memory_coverage_required;
     test_case "saved state, suffix, CAS, restart" `Quick test_append_cas_and_restart;
     test_case "failed generation keeps prior coverage" `Quick test_failed_state_keeps_old_frontier]]

@@ -114,8 +114,29 @@ let test_file_pair () =
     expect_error "corrupt snapshot accepted" (S.load ~path))
 ;;
 
+let test_captured_partial_prefix () =
+  let lines=[1, boundary ~fresh:false history] in
+  let snapshot=S.capture_checkpoint_prefix ~end_atom:1 ~trace_id ~lines ~messages:history
+    ~working_state:state () |> require in
+  check int "real completed anchor" 2 snapshot.covering_end_atom;
+  check int "cut at whole first atom" 1 snapshot.end_atom;
+  let restored=S.restore ~trace_id ~lines ~messages:history snapshot |> require in
+  check bool "assistant and tool result retained together" true
+    (restored.messages=[pinned;assistant;tool]);
+  expect_error "changed captured prefix accepted"
+    (S.restore ~trace_id ~lines ~messages:[pinned;msg T.User "Changed";assistant;tool] snapshot);
+  expect_error "different real covering turn accepted"
+    (S.restore ~trace_id ~lines:[1,boundary ~fresh:false ~turn:2 history] ~messages:history snapshot);
+  check bool "explicit source survives codec" true ((S.of_json (S.to_json snapshot) |> require) = snapshot);
+  expect_error "cut outside completed prefix accepted"
+    (S.capture_checkpoint_prefix ~end_atom:3 ~trace_id ~lines ~messages:history ~working_state:state ());
+  let whole=S.capture_checkpoint_prefix ~trace_id ~lines ~messages:history ~working_state:state () |> require in
+  check bool "whole assistant atom includes tool result" true
+    ((S.restore ~trace_id ~lines ~messages:history whole |> require).messages=[pinned])
+;;
+
 let () = run "offline continuity snapshot"
-  ["pair", [test_case "append and complete prefix" `Quick test_restore_append_and_all_covered;
+  ["pair", [test_case "captured partial prefix" `Quick test_captured_partial_prefix;test_case "append and complete prefix" `Quick test_restore_append_and_all_covered;
             test_case "source identities" `Quick test_identity_rejections;
             test_case "restart witness required" `Quick test_capture_requires_witness;
             test_case "strict codec" `Quick test_exact_codec;

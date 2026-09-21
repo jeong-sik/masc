@@ -690,3 +690,10 @@ baseline은 continuity를 만들지 못합니다. 마지막 receipt의 시작이
 Context-only bootstrap도 같은 끝점 증거와 생산 조건을 사용합니다. executor에 넘긴 실제 파일
 저장과 결과 기록이 끝날 때까지 호출자의 취소를 보호하고, 그 뒤 취소를 다시
 전파합니다. 따라서 종료·purge가 아직 실행 중인 저장 작업을 추월하지 않습니다.
+
+
+### 기존 checkpoint의 continuity 초기화
+
+재시작 기록이 없는 기존 Keeper는 Memory의 baseline을 하던 일 보존 증거로 쓰지 않는다. 실제 locked checkpoint와 완료 경계로 읽기 범위를 잡고, `Captured_checkpoint_prefix`로 출처를 표시한다. 범위 내부의 atom 단위 부분 처리도 허용하되 실제 처리 끝과 이를 보증하는 완료 경계를 구분한다.
+
+일반 durable Memory drain과 continuity 범위는 각자의 receipt scope를 사용한다. 이미 읽은 Memory 범위는 Context-only로 처리하고, 알 수 없는 과거 prefix는 실제 원문을 모델에 제공해 Memory 저장부터 진행한다. 실패 뒤에는 Memory만 저장된 정확한 범위를 먼저 복구한다. 최종 typed 용량 거절만 원문 범위를 좁히며 다른 실패에서는 위치를 유지한다. 전체 source가 저장될 때까지 기존 serial lane에서 이어가며, 별도 daemon이나 임의 크기 계수를 추가하지 않는다.

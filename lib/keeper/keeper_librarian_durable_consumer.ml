@@ -1078,19 +1078,7 @@ let commit_with_runtime
       input
   =
   let committed = ref false in
-  let continuity = Domain_pool_ref.submit_io_or_inline (fun () ->
-    let config = Workspace.default_config base_path in
-    match Keeper_meta_store.read_effective_meta_presence config keeper_id with
-    | Ok (Keeper_meta_store.Meta_present meta) ->
-      Keeper_librarian_continuity.prepare ~config ~keeper_name:keeper_id
-        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    | Ok Keeper_meta_store.Meta_absent -> Ok None
-    | Ok (Keeper_meta_store.Meta_not_current detail) | Error detail -> Error detail) in
-  let continuity = match continuity with
-    | Ok value -> value
-    | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id "continuity source unavailable: %s" detail; None in
   Keeper_librarian_runtime.run_best_effort
-    ?continuity
     ~trigger:Keeper_librarian_runtime.Durable_range
     ~input_projection:Keeper_librarian_runtime.Already_selected_range
     ~on_memory_committed:(fun () -> committed := true)

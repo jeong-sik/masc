@@ -484,6 +484,7 @@ let validate_current_lease keys target =
        let observation =
          try Ok (Eio_guard.run_in_systhread ~label:"durable-dir-cached-chain" (fun () ->
            observe_cached_owned_chain cache keys)) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Error (Operation_failed (exn, Printexc.get_raw_backtrace ()))
        in
        Eio_guard.check_if_ready ();

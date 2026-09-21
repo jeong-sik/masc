@@ -105,6 +105,30 @@ val select
   -> extent
   -> selection
 
+(** How many finished turns of [trace_id] lie beyond the read position (RFC
+    §4.9, invariant I4). Only [Turn_ended] lines whose endpoint matches the
+    loaded checkpoint are counted (§4.4 row 2a): a line of a history that has
+    been renumbered is not a turn this keeper can read. A restart line is not
+    a turn. A refused line does not hide the turns that can be counted --
+    that a round is stopped is what {!select} says, and the number is how far
+    behind it is standing.
+
+    [None] when the position names no atom of this checkpoint and no restart
+    line explains it (row 5). Every line would then look unread, and the
+    count would say the whole history is behind when what is wrong is the
+    position.
+
+    With no position, the smallest cut point becomes the baseline and nothing
+    before it is read, so it is not counted as unread. *)
+val unread_turns
+  :  trace_id:string
+  -> lines:
+       (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
+         list
+  -> progress:Keeper_librarian_progress.t option
+  -> messages:Agent_core.Types.message list
+  -> int option
+
 (** What the progress file holds once the round that read [selection] has
     saved what it learned: [Some] for [Read] and [Baseline], [None] for every
     selection that reads nothing. [boundary_lines_seen] is the count taken
@@ -164,6 +188,15 @@ val select_official
   -> cursor:Keeper_librarian_official_progress.t option
   -> extent
   -> official_selection
+
+(** Official-client turns beyond the cursor (RFC §4.9). Refused lines are not
+    counted and do not hide the candidates beside them. *)
+val unread_official_turns
+  :  lines:
+       (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
+         list
+  -> cursor:Keeper_librarian_official_progress.t option
+  -> int
 
 (** Whether {!select_official} could return anything but [Nothing_official]:
     a candidate or a refused line beyond the cursor. *)

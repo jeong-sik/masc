@@ -952,11 +952,63 @@ let test_remembered_turn_uses_current_policy () =
   | _ -> Alcotest.fail "current policy was not delivered with completed evidence"
 ;;
 
+let test_durable_drain_publishes_scoped_health () =
+  let root = temp_dir "test-durable-health-" in
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  let prior = Sys.getenv_opt env_key in
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv env_key (Option.value ~default:"" prior);
+    Config_dir_resolver.reset ();
+    remove_tree root)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Masc_test_deps.init_eio_clock env;
+      let config = Masc.Workspace.default_config root in
+      ignore (Masc.Workspace.init config ~agent_name:None);
+      Config_dir_resolver.reset ();
+      let keeper_name = "health-observed" in
+      let run () = Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+        ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+          Alcotest.fail "empty history must not call the model") in
+      let observed () =
+        match Queue_refresh.last_measurement ~config ~keeper_name with
+        | Some value -> value
+        | None -> Alcotest.fail "durable drain did not publish an observation"
+      in
+      Unix.putenv env_key "false";
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Off, None -> ()
+       | _ -> Alcotest.fail "disabled drain must not measure lag");
+      Unix.putenv env_key "true";
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Stopped Masc.Keeper_librarian_durable_consumer.Keeper_meta_absent, None -> ()
+       | _ -> Alcotest.fail "missing metadata must replace the old observation");
+      (match Masc.Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Drained, Some { atoms = 0; official = 0 } -> ()
+       | _ -> Alcotest.fail "empty real source must publish drained with zero lag");
+      let other = Masc.Workspace.default_config (Filename.concat root "other-runtime") in
+      Alcotest.(check bool) "same name in another runtime has no borrowed observation" true
+        (Option.is_none (Queue_refresh.last_measurement ~config:other ~keeper_name));
+      Unix.putenv env_key "false";
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Off, None -> ()
+       | _ -> Alcotest.fail "off must replace the earlier successful count"))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
     [ ( "lane"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "durable drain publishes scoped health" `Quick
+            test_durable_drain_publishes_scoped_health
+        ; Alcotest.test_case
             "queue coalescing preserves completed-turn evidence"
             `Quick test_queue_coalescing_preserves_completed_turn
         ; Alcotest.test_case

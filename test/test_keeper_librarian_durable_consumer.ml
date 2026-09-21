@@ -278,6 +278,36 @@ let test_n_tick_reads_every_intermediate_turn () =
   check (list string) "both unread turns are delivered" [ "turn-2"; "turn-3" ] !carried
 ;;
 
+(* RFC §4.9, invariant I4. The count is read-only and comes from the same
+   files a pass reads: two turns end after the position, so two are behind,
+   and a pass that reads them leaves none. *)
+let test_unread_turns_counts_what_a_pass_has_left () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-unread" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let messages = first_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  (match Consumer.unread_turns ~config ~keeper_name with
+   | Ok { atoms; official } ->
+     check int "two turns are behind" 2 atoms;
+     check int "no official turn" 0 official
+   | Error error -> fail (Consumer.error_to_string error));
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true) with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "unread range did not commit");
+  match Consumer.unread_turns ~config ~keeper_name with
+  | Ok { atoms; official } ->
+    check int "nothing is behind after the pass" 0 atoms;
+    check int "and no official turn" 0 official
+  | Error error -> fail (Consumer.error_to_string error)
+;;
+
 let test_failed_commit_and_restart_retry_the_same_range () =
   with_workspace @@ fun config ->
   let trace_id = "trace-retry" in
@@ -1461,6 +1491,10 @@ let test_seen_restart_skips_checkpoint fault () =
        | Ok Consumer.Nothing_to_read -> ()
        | Ok _ -> fail "quiet tick changed progress"
        | Error error -> fail (Consumer.error_to_string error));
+      (match Consumer.unread_turns ~config ~keeper_name with
+       | Ok { atoms = 0; official = 0 } -> ()
+       | Ok _ -> fail "quiet count reports unread history"
+       | Error error -> fail (Consumer.error_to_string error));
       check string "quiet tick preserves actual progress bytes" before
         (Fs_compat.load_file progress_path)) [1; 2; 3]
 ;;
@@ -2273,6 +2307,8 @@ let () =
             test_n_tick_reads_every_intermediate_turn
         ; test_case "Agent-Core handoff retains pending official evidence" `Quick
             test_agent_core_handoff_retains_pending_official_evidence
+        ; test_case "unread turns counts what a pass has left" `Quick
+            test_unread_turns_counts_what_a_pass_has_left
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
         ; test_case "committed range repairs failed progress after restart" `Quick

@@ -24,6 +24,7 @@ type error =
   | Progress_unreadable of P.read_error
   | Checkpoint_unreadable of Keeper_checkpoint_store.checkpoint_load_error
   | Position_in_other_trace of P.position
+  | Position_not_in_history of P.position
   | Range_stopped of R.stop
   | Range_end_boundary_missing of R.range
   | Progress_boundary_missing of P.position
@@ -86,6 +87,12 @@ let error_to_string = function
       "librarian position belongs to trace=%s end_atom=%d"
       position.P.trace_id
       position.end_atom
+  | Position_not_in_history position ->
+    Printf.sprintf
+      "librarian position is not a place in this history trace=%s end_atom=%d digest=%s"
+      position.P.trace_id
+      position.end_atom
+      position.last_atom_digest
   | Range_stopped stop -> range_stop_to_string stop
   | Range_end_boundary_missing range ->
     Printf.sprintf
@@ -486,14 +493,18 @@ let recover_official_progress
         | Ok () -> Ok (Some (Official_advanced { atom = None; official }))
 ;;
 
-let consume_one_with_extent
-      ~write_progress_store
-      ~write_official_progress_store
-      ~extent
-      ~config
-      ~keeper_name
-      ~commit
-  =
+(* Durable inputs shared by the consumer and its read-only lag observation.
+   Metadata is read separately so a committed receipt can repair progress
+   even when the Keeper metadata is temporarily unavailable. *)
+type positions =
+  { runtime_keepers_dir : string
+  ; memory_keepers_dir : string
+  ; lines : (int * (B.record, B.read_error) result) list
+  ; progress : P.t option
+  ; official_cursor : Keeper_librarian_official_progress.t option
+  }
+
+let read_positions ~config ~keeper_name =
   let ( let* ) = Result.bind in
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let memory_keepers_dir =
@@ -518,6 +529,91 @@ let consume_one_with_extent
         ~keeper_id:keeper_name)
     |> Result.map_error (fun error -> Official_progress_unreadable error)
   in
+  Ok { runtime_keepers_dir; memory_keepers_dir; lines; progress; official_cursor }
+;;
+
+let read_meta ~config ~keeper_name =
+  match Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_meta_store.read_effective_meta_presence config keeper_name) with
+  | Ok (Keeper_meta_store.Meta_present meta) -> Ok meta
+  | Ok Keeper_meta_store.Meta_absent -> Error Keeper_meta_absent
+  | Ok (Keeper_meta_store.Meta_not_current detail) -> Error (Keeper_meta_unreadable detail)
+  | Error detail -> Error (Keeper_meta_unreadable detail)
+;;
+
+let load_current_checkpoint ~config ~trace_id =
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id)
+;;
+
+type unread =
+  { atoms : int
+  ; official : int
+  }
+
+(* RFC §4.9, invariant I4. Read-only: the number the operator surfaces show,
+   taken from the same files a pass reads. A keeper that never ran on
+   AGENT_CORE has no checkpoint, so its atoms are nothing to count and its
+   official lines are counted alone. *)
+let unread_turns ~config ~keeper_name =
+  let ( let* ) = Result.bind in
+  let* positions = read_positions ~config ~keeper_name in
+  let* meta = read_meta ~config ~keeper_name in
+  let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let official =
+    R.unread_official_turns ~lines:positions.lines ~cursor:positions.official_cursor
+  in
+  match positions.progress with
+  | Some { P.position; _ } when not (String.equal position.trace_id current_trace_id)
+    ->
+    (* A pass would drain that trace's own checkpoint first; which of its
+       turns are behind is a question about a history this keeper has left. *)
+    Error (Position_in_other_trace position)
+  | Some _ | None ->
+    let* atoms =
+      if not (R.may_have_unread ~trace_id:current_trace_id
+        ~lines:positions.lines ~progress:positions.progress)
+      then Ok (Some 0)
+      else match load_current_checkpoint ~config ~trace_id:current_trace_id with
+      | Error Keeper_checkpoint_store.Not_found when Option.is_none positions.progress ->
+        Ok (Some 0)
+      | Error error -> Error (Checkpoint_unreadable error)
+      | Ok checkpoint ->
+        Ok
+          (R.unread_turns
+             ~trace_id:current_trace_id
+             ~lines:positions.lines
+             ~progress:positions.progress
+             ~messages:checkpoint.Agent_core.Checkpoint.messages)
+    in
+    (match atoms, positions.progress with
+     | Some atoms, (Some _ | None) -> Ok { atoms; official }
+     | None, Some { P.position; _ } -> Error (Position_not_in_history position)
+     | None, None ->
+       (* [R.unread_turns] answers [None] only for a position it could not
+          place, and there is none here. *)
+       invalid_arg "librarian unread turns: no position and no count")
+;;
+
+let consume_one_with_extent
+      ~write_progress_store
+      ~write_official_progress_store
+      ~extent
+      ~config
+      ~keeper_name
+      ~commit
+  =
+  let ( let* ) = Result.bind in
+  let* { runtime_keepers_dir
+       ; memory_keepers_dir
+       ; lines
+       ; progress
+       ; official_cursor
+       }
+    =
+    read_positions ~config ~keeper_name
+  in
   let* recovered =
     recover_official_progress ~write:write_official_progress_store
       ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor:official_cursor
@@ -525,17 +621,7 @@ let consume_one_with_extent
   match recovered with
   | Some outcome -> Ok outcome
   | None ->
-  let* meta =
-    match
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_meta_store.read_effective_meta_presence config keeper_name)
-    with
-    | Ok (Keeper_meta_store.Meta_present meta) -> Ok meta
-    | Ok Keeper_meta_store.Meta_absent -> Error Keeper_meta_absent
-    | Ok (Keeper_meta_store.Meta_not_current detail) ->
-      Error (Keeper_meta_unreadable detail)
-    | Error detail -> Error (Keeper_meta_unreadable detail)
-  in
+  let* meta = read_meta ~config ~keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let progress_is_current =
     match progress with
@@ -548,11 +634,7 @@ let consume_one_with_extent
     && not (R.may_have_unread_official ~lines ~cursor:official_cursor)
   then Ok Nothing_to_read
   else
-  let load_checkpoint trace_id =
-    let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
-    Domain_pool_ref.submit_io_or_inline (fun () ->
-      Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id)
-  in
+  let load_checkpoint trace_id = load_current_checkpoint ~config ~trace_id in
   (* A keeper that has only ever run on official-client runtimes has no
      checkpoint and no atom position: its atoms are nothing to read, and its
      official lines are read below. A missing checkpoint with a position is

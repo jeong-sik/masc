@@ -5669,12 +5669,12 @@ let measurement_output_preview ~width ~output_path lines =
         let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) text in
         List.rev ((style, prefix) :: reversed), true
   in
-  let preview, truncated = take lane_run_render_max_bytes [] lines in
+  let preview, truncated = take lane_run_preview_source_max_bytes [] lines in
   let notice =
     if truncated then
       [ Theme.warn (), Printf.sprintf
           "PREVIEW · output truncated at %d bytes; full report: %s"
-          lane_run_render_max_bytes output_path ]
+          lane_run_preview_source_max_bytes output_path ]
     else []
   in
   measurement_text_lines ~width (notice @ preview)

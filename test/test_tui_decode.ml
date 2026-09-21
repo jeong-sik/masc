@@ -4180,6 +4180,11 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
     lane_id label =
+  let jev =
+    if String.equal lane_id "board_attention_exact"
+    then [ "jev", `Assoc [ "state", `String "off" ] ]
+    else []
+  in
   `Assoc
     ([ "lane_id", `String lane_id
      ; "label", `String label
@@ -4204,7 +4209,13 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
-    ])
+    ]
+     @ jev)
+
+let replace_assoc_field name value = function
+  | `Assoc fields ->
+    `Assoc ((name, value) :: List.remove_assoc name fields)
+  | _ -> Alcotest.fail "expected an object fixture"
 
 (* The server collapses "nobody configured this lane" and "the registry could
    not be read" into one status word, and keeps them apart only in
@@ -4216,7 +4227,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
      Only the board lane's state varies. *)
   let snapshot configuration_state =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -4279,7 +4290,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
 let test_decode_standalone_lane_keeps_the_run_start () =
   let json =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -4344,7 +4355,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -4357,8 +4368,8 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
-      (* Against the fixture, not a literal: this read "all four lanes" 4 and
-         a fifth known lane broke it without anything about decoding changing. *)
+      (* Against the fixture, not a literal: adding a known lane must not
+         leave a stale expected count behind. *)
       Alcotest.(check int) "every lane in the fixture survives" (List.length lanes)
         (List.length snapshot.sls_lanes);
       let first = List.hd snapshot.sls_lanes in
@@ -4380,12 +4391,111 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         | Some lane -> lane
         | None -> Alcotest.fail "the verifier lane did not survive the decode"
       in
-      Alcotest.(check (option string)) "older v1 row remains readable" None
+      Alcotest.(check (option string)) "absent purpose remains explicit" None
         verifier.sl_purpose;
       Alcotest.(check string)
         "none retained"
         "none retained"
         (Tui_decode.standalone_lane_status_to_string verifier.sl_status)
+
+let test_decode_standalone_lane_jev_is_typed_and_required () =
+  let snapshot board =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
+      ; "generated_at", `String "2026-09-20T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 0
+      ; "exact_run_source_total", `Int 0
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            [ board
+            ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
+            ; standalone_lane_json "librarian_exact" "Librarian"
+            ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
+            ; standalone_lane_json "verifier_exact" "Verifier"
+            ] )
+      ]
+  in
+  let decode_board board =
+    match Tui_decode.decode_standalone_lanes_snapshot (snapshot board) with
+    | Error detail -> Error detail
+    | Ok snapshot ->
+      (match
+         List.find_opt
+           (fun (lane : Tui_decode.standalone_lane) ->
+              String.equal lane.sl_lane_id "board_attention_exact")
+           snapshot.sls_lanes
+       with
+       | Some lane -> Ok lane.sl_jev
+       | None -> Error "board lane missing")
+  in
+  let board = standalone_lane_json "board_attention_exact" "Board Attention" in
+  (match decode_board board with
+   | Ok (Some Tui_decode.Jev_off) -> ()
+   | Ok _ -> Alcotest.fail "off JEV state decoded to the wrong variant"
+   | Error detail -> Alcotest.fail detail);
+  let enabled =
+    replace_assoc_field "jev"
+      (`Assoc [ "state", `String "configured"; "model", `String "jev-next" ])
+      board
+  in
+  (match decode_board enabled with
+   | Ok (Some (Tui_decode.Jev_configured { model })) ->
+     Alcotest.(check string) "enabled model" "jev-next" model
+   | Ok _ -> Alcotest.fail "enabled JEV state decoded to the wrong variant"
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun model ->
+       let blank =
+         replace_assoc_field "jev"
+           (`Assoc [ "state", `String "configured"; "model", `String model ])
+           board
+       in
+       match decode_board blank with
+       | Ok _ -> Alcotest.fail "a blank JEV model decoded"
+       | Error detail ->
+         Alcotest.(check bool) "blank model fails closed" true
+           (String_util.contains_substring detail
+              "JEV model must be a non-empty string"))
+    [ ""; " \t " ];
+  List.iter
+    (fun (state, expected) ->
+       let unavailable =
+         replace_assoc_field "jev" (`Assoc [ "state", `String state ]) board
+       in
+       match decode_board unavailable with
+       | Ok (Some actual) ->
+         Alcotest.(check bool) "unavailable reason survives decoding" true
+           (actual = expected)
+       | Ok None -> Alcotest.fail "unavailable JEV state disappeared"
+       | Error detail -> Alcotest.fail detail)
+    [ "cli_only", Tui_decode.Jev_cli_only
+    ; "lane_unavailable", Tui_decode.Jev_lane_unavailable ];
+  List.iter
+    (fun state ->
+       let unknown =
+         replace_assoc_field "jev"
+           (`Assoc [ "state", `String state; "model", `String "jev-next" ]) board
+       in
+       match decode_board unknown with
+       | Ok _ -> Alcotest.fail "an unknown JEV state decoded"
+       | Error detail ->
+         Alcotest.(check bool) "unknown state fails closed" true
+           (String_util.contains_substring detail
+              ("standalone lane JEV state: unknown value " ^ state)))
+    [ "warming"; "on" ];
+  let without_jev =
+    match board with
+    | `Assoc fields -> `Assoc (List.remove_assoc "jev" fields)
+    | _ -> Alcotest.fail "expected an object fixture"
+  in
+  match decode_board without_jev with
+  | Ok _ -> Alcotest.fail "the Board lane decoded without its JEV projection"
+  | Error detail ->
+    Alcotest.(check bool) "missing projection fails closed" true
+      (String_util.contains_substring detail "missing required field 'jev'")
 
 (* The screen draws these words in a column sized for the longest one. *)
 let test_every_lane_status_word_fits_its_column () =
@@ -4501,7 +4611,7 @@ let test_decode_standalone_lanes_rejects_duplicate_ids () =
   let duplicate = standalone_lane_json "board_attention_exact" "Board" in
   let json =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -9091,7 +9201,57 @@ let test_decode_file_change_reads_an_insert () =
         | Tui_decode.Fc_inserted { line; text } ->
           Alcotest.(check int) "line" 3 line;
           Alcotest.(check string) "the comment line" "# masc(alpha): why" text
-        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _ -> Alcotest.fail "expected an insert")
+        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _
+        | Tui_decode.Fc_materialized _ -> Alcotest.fail "expected an insert")
+     | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
+;;
+
+let test_decode_file_change_reads_a_materialize () =
+  (* [keeper_artifact_transfer materialize] writes a blob's bytes into a file.
+     The projection sends the blob's coordinates, not its text, so the reader
+     must accept the kind instead of rejecting the whole snapshot. *)
+  let sha256 = String.make 64 'a' in
+  let change =
+    `Assoc
+      [ ("at", `Float 1.)
+      ; ("keeper", `String "alpha")
+      ; ("turn", `Null)
+      ; ("task_id", `Null)
+      ; ("execution_id", `String "exec-1")
+      ; ("line_evidence", `Null)
+      ; ( "location"
+        , `Assoc
+            [ ("kind", `String "absolute"); ("path", `String "/tmp/poster.png") ] )
+      ; ( "change"
+        , `Assoc
+            [ ("kind", `String "materialize")
+            ; ("sha256", `String sha256)
+            ; ("bytes", `Int 4096)
+            ] )
+      ; ("succeeded", `Bool true)
+      ]
+  in
+  let snapshot =
+    `Assoc
+      [ ("keeper", `String "alpha")
+      ; ("window_hours", `Float 1.)
+      ; ("calls_in_window", `Int 1)
+      ; ("changes", `List [ change ])
+      ; ("over_budget", `Int 0)
+      ; ("malformed", `Int 0)
+      ]
+  in
+  match Tui_decode.decode_file_change_snapshot snapshot with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    (match snapshot.Tui_decode.fcs_changes with
+     | [ change ] ->
+       (match change.Tui_decode.fc_kind with
+        | Tui_decode.Fc_materialized { sha256 = got; bytes } ->
+          Alcotest.(check string) "the blob's sha256" sha256 got;
+          Alcotest.(check int) "the blob's byte count" 4096 bytes
+        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _
+        | Tui_decode.Fc_inserted _ -> Alcotest.fail "expected a materialize")
      | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
 ;;
 
@@ -9343,6 +9503,8 @@ let () =
           test_decode_standalone_lanes_keeps_running_and_no_retained_observation;
         Alcotest.test_case "keeps the newest run's start" `Quick
           test_decode_standalone_lane_keeps_the_run_start;
+        Alcotest.test_case "JEV state is typed and required" `Quick
+          test_decode_standalone_lane_jev_is_typed_and_required;
         Alcotest.test_case "rejects duplicate lane ids" `Quick
           test_decode_standalone_lanes_rejects_duplicate_ids;
         Alcotest.test_case "every lane status word fits its column" `Quick
@@ -9839,5 +10001,8 @@ let () =
           test_required_display_keeps_rfc3339_string_verbatim
       ] );
     ( "file change"
-    , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert ] );
+    , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
+      ; Alcotest.test_case "reads a materialize" `Quick
+          test_decode_file_change_reads_a_materialize
+      ] );
   ]

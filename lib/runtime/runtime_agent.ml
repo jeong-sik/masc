@@ -693,11 +693,17 @@ let apply_runtime_model_input_capabilities
      Provider-level caps may be broader than the selected model; media input
      must fail closed before dispatch rather than letting a provider 400 leak
      back as a late runtime error. *)
+  (* Fail closed on absence too: an unwritten media flag is [false], not the
+     provider's preset. This is the one place where [None] does not mean "the
+     layer below decides" (#37435).
+     DET-OK: absence is the operator withholding the modality, so [false] is
+     the stated contract rather than a fallback for a missing value. *)
+  let declared field = Option.value field ~default:false in
   { caps with
-    supports_multimodal_inputs = model_caps.supports_multimodal_inputs;
-    supports_image_input = model_caps.supports_image_input;
-    supports_audio_input = model_caps.supports_audio_input;
-    supports_video_input = model_caps.supports_video_input;
+    supports_multimodal_inputs = declared model_caps.supports_multimodal_inputs;
+    supports_image_input = declared model_caps.supports_image_input;
+    supports_audio_input = declared model_caps.supports_audio_input;
+    supports_video_input = declared model_caps.supports_video_input;
   }
 
 (* A model declaration cannot make its host transport carry a media block.

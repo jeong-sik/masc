@@ -19,6 +19,11 @@
  (deps fixtures/librarian_statements_golden.json)
  (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
 
+(test
+ (name test_keeper_librarian_cancellation)
+ (modules test_keeper_librarian_cancellation)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
 ; The reference cut (scripts/librarian/statements.py, the scorer of issue
 ; #37079) must still write the golden the OCaml test above reads.
 (rule
@@ -35,7 +40,18 @@
 (test
  (name test_librarian_continuity_report)
  (modules test_librarian_continuity_report)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc yojson digestif))
+
+(rule
+ (alias runtest-test_librarian_continuity_cli)
+ (deps test_librarian_continuity_cli.py ../bin/masc_librarian_continuity.exe
+  ../scripts/fixtures/release-evidence/runtime.toml)
+ (action (run python3 %{dep:test_librarian_continuity_cli.py}
+  --binary %{dep:../bin/masc_librarian_continuity.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_librarian_continuity_cli)))
 
 (test
  (name test_keeper_peer_artifact)
@@ -2357,6 +2373,7 @@
 (include stanzas/test_trailing_slash_rules.inc)
 (include stanzas/test_repos_relative_path.inc)
 (include stanzas/test_metric_zero_cell_declaration.inc)
+(include stanzas/test_model_capability_presence.inc)
 (include stanzas/test_rfc3339_format_owner.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
@@ -3558,6 +3575,11 @@
  (libraries alcotest fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
 
 (test
+ (name test_tui_measurement)
+ (modules test_tui_measurement)
+ (libraries alcotest digestif masc masc_tui_types yojson))
+
+(test
  (name test_tui_command)
  (modules test_tui_command)
  (libraries alcotest masc_tui_command masc_tui_mcp yojson))
@@ -4192,6 +4214,15 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
+
+(rule
+ (alias runtest-test_tui_fixture_shutdown)
+ (deps test_tui_fixture_shutdown.py test_tui_keyboard_input.py)
+ (action (run python3 %{dep:test_tui_fixture_shutdown.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_fixture_shutdown)))
 
 ; The harness decides what runs from --list, --scenario and the family name
 ; before a terminal opens, and no rule here passes either flag. This suite
@@ -5034,7 +5065,9 @@
 (test
  (name test_tui_footer_status_items)
  (modules test_tui_footer_status_items)
- (libraries alcotest str masc_tui_footer masc_tui_message_layout))
+ (libraries alcotest str unix
+  masc_tui_footer masc_tui_message_layout
+  masc_tui_keys masc_tui_render_prim masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_answering)
@@ -5141,14 +5174,6 @@
   masc_tui_render_schedule
   masc_tui_terminal_write_repair
   unix))
-
-(test
- (name test_fs_compat_capability_exact_read)
- (modules test_fs_compat_capability_exact_read)
- (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)
- (deps
-  ../lib/fs_compat/fs_compat.mli
-  ../lib/fs_compat/capability_exact_read_stubs.c))
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
@@ -5257,9 +5282,11 @@
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
+(include stanzas/test_tui_librarian_absorb_gate.inc)
 (include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
+(include stanzas/test_tui_lane_run_paging.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)
 
@@ -6092,6 +6119,16 @@
  (deps (alias runtest-test_tui_lane_payload_availability)))
 
 (rule
+ (alias runtest-test_tui_measurement_pty)
+ (deps test_tui_measurement_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_measurement_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_measurement_pty)))
+
+(rule
  (alias runtest-test_tui_board_answer_source)
  (deps test_tui_board_answer_source.py test_tui_keyboard_input.py)
  (action
@@ -6545,3 +6582,12 @@
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
+
+(rule
+ (alias runtest-test_tui_jev_readiness)
+ (deps test_tui_jev_readiness.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_jev_readiness.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_jev_readiness)))

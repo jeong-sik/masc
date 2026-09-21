@@ -25,6 +25,7 @@ const lane = (lane_id, label) => ({
   retained_run_count: lane_id === run.lane ? 1 : 0, running_count: 0,
   succeeded_count: lane_id === run.lane ? 1 : 0, failed_count: 0, cancelled_count: 0,
   last_started_at: null, last_terminal_at: null, last_outcome: null, p50_elapsed_s: null, selected_slots: [],
+  ...(lane_id === 'board_attention_exact' ? { jev: { state: 'off' } } : {}),
 })
 const browser = await chromium.launch({ headless: true })
 const errors = [], requests = []
@@ -40,7 +41,7 @@ try {
     if (path.endsWith('/exact-lane-runs/' + run.run_id)) body = { generated_at: empty.generated_at, run: detail }
     else if (path.endsWith('/exact-lane-runs')) body = { ...empty, runs: [run], count: 1, total: 1, has_more: false }
     else if (path.endsWith('/standalone-lanes')) body = {
-      schema: 'masc.standalone_llm_lanes.v1', generated_at: empty.generated_at, observed_at_unix: 1786200001,
+      schema: 'masc.standalone_llm_lanes.v2', generated_at: empty.generated_at, observed_at_unix: 1786200001,
       observation_only: true, exact_run_projection_count: 1, exact_run_source_total: 1, exact_run_projection_truncated: false,
       lanes: [lane('librarian_exact', 'Librarian'), lane('hitl_auto_judge', 'Auto Judge'),
         lane('board_attention_exact', 'Board Attention'), lane('verifier_exact', 'Verifier'),

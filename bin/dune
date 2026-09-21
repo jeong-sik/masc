@@ -1122,7 +1122,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
   masc_tui_answering
@@ -1433,6 +1433,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  digestif
+  masc.string_util
   masc.keeper_runtime
   masc.voice_wizard
   masc.voice_setup
@@ -1770,3 +1772,12 @@
  (public_name masc-librarian-replay)
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver masc.agent_core masc.masc_types masc.keeper_registry yojson unix))
+
+(executable
+ (name masc_librarian_continuity)
+ (modules masc_librarian_continuity)
+ (public_name masc-librarian-continuity)
+ (package masc)
+ (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
+  masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
+  masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat digestif eio eio_main yojson))

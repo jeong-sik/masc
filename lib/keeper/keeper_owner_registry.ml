@@ -148,6 +148,7 @@ let prepare_operation_store_path pool keeper_name =
              (Printf.sprintf "Keeper runtime path is not a directory: %s" keeper_dir))
       else Ok path)
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Error
       (Keeper_owner.Store_unavailable

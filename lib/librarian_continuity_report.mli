@@ -11,9 +11,15 @@ type answer_context =
   ; unread : string
   }
 [@@deriving yojson]
-type case = { id : string; source : source_turn; context : answer_context }
+type case =
+  { id : string
+  ; source : source_turn
+  ; context : answer_context
+  ; question : string option
+  }
 [@@deriving yojson]
-type dataset = { synthetic : bool; cases : case list } [@@deriving yojson]
+type provenance = Synthetic [@@deriving yojson]
+type dataset = { provenance : provenance; cases : case list } [@@deriving yojson]
 
 type prompt = { system : string; user : string } [@@deriving yojson]
 type generation_request =
@@ -27,6 +33,7 @@ type text_response = { response_id : string; model : string; text : string }
 [@@deriving yojson]
 type generation = { request : generation_request; response : text_response }
 [@@deriving yojson]
+type question = Provided of string | Generated of generation [@@deriving yojson]
 type failed_generation =
   { request : generation_request
   ; error : string
@@ -56,15 +63,17 @@ type failed_judgment = { request : judge_request; error : string } [@@deriving y
 type progress =
   | Not_started
   | Question_failed of failed_generation
-  | Question_ready of generation
-  | Answer_failed of generation * failed_generation
-  | Answer_ready of generation * generation
-  | Judge_failed of generation * generation * failed_judgment
-  | Scored of generation * generation * judgment
+  | Question_ready of question
+  | Answer_failed of question * failed_generation
+  | Answer_ready of { question : question; answer : generation }
+  | Judge_failed of
+      { question : question; answer : generation; failure : failed_judgment }
+  | Scored of { question : question; answer : generation; judgment : judgment }
 [@@deriving yojson]
 type sample = { case : case; progress : progress } [@@deriving yojson]
 type t =
   { schema : string
+  ; provenance : provenance
   ; run_id : string
   ; started_at : string
   ; input_path : string
@@ -79,10 +88,12 @@ type t =
 val schema : string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
-(** Checks schema, unique sample IDs and finite probabilities in [0,1]. *)
+(** Checks schema, provenance, unique sample IDs, judge request identities and
+    finite probabilities in [0,1]. *)
 val parse_dataset : Yojson.Safe.t -> (dataset, string) result
-(** Requires explicit synthetic input, nonempty cases and unique IDs. *)
-val sha256 : string -> string
+(** Requires explicit synthetic input, nonempty cases, unique IDs and nonblank
+    provided questions. [None] requests question generation. *)
+val question_text : question -> string
 val question_prompt : source_turn -> prompt
 val answer_prompt : question:string -> answer_context -> prompt
 (** This boundary cannot access the reference source turn. *)

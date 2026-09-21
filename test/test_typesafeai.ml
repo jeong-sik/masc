@@ -148,6 +148,88 @@ let test_choice_response_rejects_empty_probabilities () =
   | Ok _ -> Alcotest.fail "choice response accepted empty probabilities"
 ;;
 
+let test_response_rejects_every_nonfinite_answer_field () =
+  let forms =
+    [ "noul", (fun number -> Printf.sprintf {|{"type":"noul","noul":%s}|} number)
+    ; "choice confidence",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"choice","choice":"yes","confidence":%s,"probabilities":{"yes":1}}|}
+          number)
+    ; "choice probability",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"choice","choice":"yes","confidence":1,"probabilities":{"yes":%s}}|}
+          number)
+    ; "score",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":%s,"confidence":1,"probabilities":{"0":1}}|}
+          number)
+    ; "score confidence",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":0,"confidence":%s,"probabilities":{"0":1}}|}
+          number)
+    ; "score probability",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":0,"confidence":1,"probabilities":{"0":%s}}|}
+          number)
+    ]
+  in
+  List.iter (fun (field, form) ->
+    List.iter (fun number ->
+      let answer = form number in
+      let response =
+        Yojson.Safe.from_string
+          (Printf.sprintf {|{"model":"jev-test","answers":{"q":%s}}|} answer)
+      in
+      match T.eval_response_of_yojson response with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "accepted non-finite %s: %s" field number)
+      [ "NaN"; "Infinity"; "-Infinity"; "1e400"; "-1e400" ]) forms
+;;
+
+let test_response_preserves_answers_with_unknown_usage () =
+  let counts input output =
+    `Assoc [ "input_tokens", input; "output_tokens", output ]
+  in
+  let cases =
+    [ "absent", None, None
+    ; "null", Some `Null, None
+    ; "not an object", Some (`String "unknown"), None
+    ; "empty object", Some (`Assoc []), None
+    ; "missing input", Some (`Assoc [ "output_tokens", `Int 0 ]), None
+    ; "missing output", Some (`Assoc [ "input_tokens", `Int 12 ]), None
+    ; "string input", Some (counts (`String "12") (`Int 0)), None
+    ; "string output", Some (counts (`Int 12) (`String "0")), None
+    ; "float input", Some (counts (`Float 12.0) (`Int 0)), None
+    ; "float output", Some (counts (`Int 12) (`Float 0.0)), None
+    ; "negative input", Some (counts (`Int (-1)) (`Int 0)), None
+    ; "negative output", Some (counts (`Int 12) (`Int (-1))), None
+    ; "measured zero", Some (counts (`Int 0) (`Int 0)), Some (0, 0)
+    ; "measured counts", Some (counts (`Int 12) (`Int 3)), Some (12, 3)
+    ]
+  in
+  List.iter (fun (label, usage, expected) ->
+    let response =
+      `Assoc
+        ([ "model", `String "jev-test"
+         ; "answers", `Assoc [ "q", `Assoc [ "type", `String "noul"; "noul", `Int 1 ] ]
+         ] @ match usage with None -> [] | Some usage -> [ "usage", usage ])
+    in
+    match T.eval_response_of_yojson response with
+    | Error detail -> Alcotest.failf "%s usage rejected a valid answer: %s" label detail
+    | Ok response ->
+      (match response.answers with
+       | [ "q", T.Noul_answer { noul = 1.0 } ] -> ()
+       | _ -> Alcotest.failf "%s usage changed the answer" label);
+      Alcotest.(check (option (pair int int))) label expected
+        (Option.map (fun (usage : T.usage) -> usage.input_tokens, usage.output_tokens)
+           response.usage)) cases
+;;
+
 type team =
   | Frontend
   | Backend
@@ -228,13 +310,64 @@ let test_config_defaults () =
   Alcotest.(check string) "default model" "jev-latest" C.default_model
 ;;
 
+let with_jev_config ~api_key ~enabled ~model f =
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" api_key (fun () ->
+    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENABLED" enabled (fun () ->
+      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" model (fun () ->
+        Masc_test_deps.with_process_env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None f)))
+;;
+
+let test_config_readiness_is_typed_and_credential_free () =
+  List.iter
+    (fun value ->
+       Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" value (fun () ->
+         Alcotest.(check string) "absent or blank endpoint uses the HTTP default"
+           C.default_endpoint (C.endpoint ())))
+    [ None; Some ""; Some " \t " ];
+  Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT"
+    (Some "  https://fixture.invalid/systemone  ") (fun () ->
+      Alcotest.(check string) "explicit endpoint is trimmed"
+        "https://fixture.invalid/systemone" (C.endpoint ()));
+  with_jev_config ~api_key:None ~enabled:(Some "true") ~model:(Some "unused")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> ()
+       | C.Configured _ -> Alcotest.fail "a missing key reported JEV configured");
+  with_jev_config
+    ~api_key:(Some "secret-not-for-projection")
+    ~enabled:(Some "false")
+    ~model:(Some "unused")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> ()
+       | C.Configured _ -> Alcotest.fail "an explicit disable reported JEV configured");
+  with_jev_config
+    ~api_key:(Some "secret-not-for-projection")
+    ~enabled:(Some "true")
+    ~model:(Some "  jev-next  ")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> Alcotest.fail "an enabled configuration reported JEV off"
+       | C.Configured { model } ->
+         Alcotest.(check string) "readiness carries a trimmed model" "jev-next" model);
+  with_jev_config
+    ~api_key:(Some "secret-not-for-projection")
+    ~enabled:(Some "true")
+    ~model:(Some " \t ")
+    (fun () ->
+       match C.readiness () with
+       | C.Off -> Alcotest.fail "a blank model disabled an otherwise configured JEV"
+       | C.Configured { model } ->
+         Alcotest.(check string) "blank model uses the default" C.default_model model)
+;;
+
 (* Each gate has its own switch on top of the lane's: a key turns the lane
    on, and a gate can still be turned off by name without touching the other. *)
 let test_each_gate_has_its_own_switch () =
   let env = Masc_test_deps.with_process_env in
   let with_key f = env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") f in
   let lane_on f = env "MASC_TYPESAFEAI_ENABLED" None f in
-  let gates () = C.is_board_attention_enabled (), C.is_absorb_gate_enabled () in
+  let gates () = C.is_board_attention_enabled (), Result.is_ok (C.absorb_gate_api_key ()) in
   with_key (fun () ->
     lane_on (fun () ->
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
@@ -244,6 +377,9 @@ let test_each_gate_has_its_own_switch () =
             (true, false) (gates ())));
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" (Some "false") (fun () ->
         env "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") (fun () ->
+          (match C.readiness () with
+           | C.Off -> ()
+           | C.Configured _ -> Alcotest.fail "a disabled Board gate reported JEV configured");
           Alcotest.(check (pair bool bool)) "each switch reaches only its own gate"
             (false, true) (gates ())));
       env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" None (fun () ->
@@ -262,6 +398,7 @@ let test_each_gate_has_its_own_switch () =
           (false, false) (gates ()))))
 ;;
 
+
 let () =
   Alcotest.run "typesafeai"
     [ ( "codecs"
@@ -275,6 +412,14 @@ let () =
             "choice response rejects empty probabilities"
             `Quick
             test_choice_response_rejects_empty_probabilities
+        ; Alcotest.test_case
+            "every non-finite answer field is rejected"
+            `Quick
+            test_response_rejects_every_nonfinite_answer_field
+        ; Alcotest.test_case
+            "unknown usage preserves valid answers without inventing zero"
+            `Quick
+            test_response_preserves_answers_with_unknown_usage
         ; Alcotest.test_case
             "choice set builds the request and decodes the answer"
             `Quick
@@ -290,8 +435,11 @@ let () =
         ] )
     ; ( "config"
       , [ Alcotest.test_case "defaults" `Quick test_config_defaults
+        ; Alcotest.test_case "typed credential-free readiness" `Quick
+            test_config_readiness_is_typed_and_credential_free
         ; Alcotest.test_case "each gate has its own switch" `Quick
             test_each_gate_has_its_own_switch
         ] )
+
     ]
 ;;

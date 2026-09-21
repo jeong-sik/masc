@@ -1601,15 +1601,8 @@ let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
 
 let default_runtime_id_or_fail () =
-  let state = runtime_state () in
-  (* The route as written, not the binding it opened: [runtime_id_of_meta]
-     hands this to [resolve_assignment] for every keeper without an
-     assignment, and a lane name must survive that round trip. *)
-  match state.default_runtime with
-  | Some rt ->
-    (match state.default_route_id with
-     | Some route_id -> route_id
-     | None -> rt.id)
+  match (runtime_state ()).default_runtime with
+  | Some rt -> rt.id
   | None when Runtime_startup_state.requires_setup () ->
     let message = match Runtime_startup_state.get () with
       | Setup_required reason -> Runtime_startup_state.message reason
@@ -1622,6 +1615,18 @@ let default_runtime_id_or_fail () =
        Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
 ;;
 
+(* The route [\[runtime\].default] names, as the file writes it: a declared
+   lane's id or a runtime's. This is what a keeper with no assignment is
+   routed by, resolved through {!resolve_assignment} like any assignment.
+   {!get_default_runtime_id} answers with the runtime that route enters on --
+   the lane's head when the route names a lane -- which is what a reader
+   naming a model wants. *)
+let get_default_route () =
+  match (runtime_state ()).default_route_id with
+  | Some route_id -> route_id
+  | None -> default_runtime_id_or_fail ()
+;;
+
 let runtimes_and_media_failover () =
   let state = runtime_state () in
   state.runtimes, state.media_failover
@@ -1629,7 +1634,7 @@ let runtimes_and_media_failover () =
 
 (* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
    runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
-   {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
+   {!get_default_route}. The returned id is opaque (masc never parses it;
    only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
    the immutable loaded-state assignment snapshot. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =

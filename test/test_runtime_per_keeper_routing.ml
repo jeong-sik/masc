@@ -1185,11 +1185,15 @@ let test_the_default_may_name_a_lane () =
     Alcotest.(check string)
       "the default keeps the lane name it was given"
       "fallback-ladder"
+      (Runtime.get_default_route ());
+    Alcotest.(check string)
+      "the default runtime is the lane's entry binding"
+      "openai.gpt"
       (Runtime.get_default_runtime_id ());
     Alcotest.(check (option string))
       "an unassigned keeper opens the lane's entry runtime"
       (Some "openai.gpt")
-      (Runtime.entry_runtime_id_of_route (Runtime.get_default_runtime_id ())))
+      (Runtime.entry_runtime_id_of_route (Runtime.get_default_route ())))
 ;;
 
 (* A new lane under a runtime id would take over that runtime for every keeper

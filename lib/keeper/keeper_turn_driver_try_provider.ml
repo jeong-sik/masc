@@ -777,33 +777,10 @@ let compose_carried_model_input
       in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
-          ~allow_empty_history:true ~measure_message_bytes
+          ~allow_empty_history:true
+          ~history_already_announced:true ~measure_message_bytes
           ~first_atom:snapshot.end_atom
           (working :: planned.Keeper_model_input_demotion.messages)
-      in
-      (* The working-state summary already says what the clamp would announce
-         with a synthetic preamble: when every atom this pass carried in is
-         dropped, [assemble_with_preamble] cannot see that [working] already
-         covers the cut history, so it prepends "older turns are omitted"
-         beside a message that already is that coverage. Strip the preamble
-         only in that exact boundary (all atoms dropped, some atom existed);
-         a history that is not fully covered still needs it. *)
-      let projection, transmitted_bytes =
-        if projection.Runtime_model_input_tail_window.atom_count > 0
-           && projection.Runtime_model_input_tail_window.dropped_atoms
-              >= projection.Runtime_model_input_tail_window.atom_count
-        then (
-          let removed, messages =
-            List.partition
-              Runtime_model_input_tail_window.is_synthetic_preamble
-              projection.Runtime_model_input_tail_window.messages
-          in
-          match removed with
-          | [] -> projection, transmitted_bytes
-          | preamble :: _ ->
-            ( { projection with Runtime_model_input_tail_window.messages }
-            , transmitted_bytes - measure_message_bytes preamble ))
-        else projection, transmitted_bytes
       in
       projection, transmitted_bytes,
         Keeper_carried_front.Librarian_snapshot

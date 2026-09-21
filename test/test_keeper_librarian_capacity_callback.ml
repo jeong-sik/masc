@@ -80,6 +80,7 @@ let test_prefit_real_continuity ~base_path () =
   let module B = Keeper_turn_boundaries in
   let module C = Keeper_checkpoint_store in
   let module Current = Keeper_memory_os_current in
+  let module Context = Keeper_librarian_context in
   let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let some = function Some value -> value | None -> Alcotest.fail "missing continuity source" in
   Fixture.with_official_client_runtimes @@ fun () ->
@@ -90,11 +91,34 @@ let test_prefit_real_continuity ~base_path () =
   let keeper_id = "prefit-real-continuity" and trace_id = "prefit-source" in
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let queued_source : Context.source =
+    {reference="pending-chat"; content=`String "Unrelated pending question."} in
+  let pocket : Context.pocket =
+    {id="pending-pocket"; merge_contexts=[]; sources=[queued_source.reference];
+     context="An unresolved question still needs an answer.";
+     next_steps=["Answer the original question."]; completeness=Context.Current} in
+  let previous_context = Context.commit ~keepers_dir ~keeper_id
+      ~expected_version:None ~execution_basis:"pending-execution"
+      ~sources:[queued_source] [pocket] |> get in
+  let context_path = Context.path ~keepers_dir ~keeper_id in
+  let context_before = Fs_compat.load_file_opt context_path |> some in
+  let working_context : Context.input =
+    {sources=[queued_source]; previous=Some previous_context; unavailable=[];
+     execution_basis=Some "pending-execution"} in
   let source = List.init 4 (fun index -> Agent_core.Types.user_msg
     (string_of_int index ^ String.make 2000 'a')) in
+  let pending =
+    [Agent_core.Types.user_msg "Do not publish before explicit approval.";
+     Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+       [Agent_core.Types.ToolUse {id="pending-read";name="read_file";input=`Assoc []}];
+     { (Agent_core.Types.make_message ~role:Agent_core.Types.Tool
+       [Agent_core.Types.ToolResult {tool_use_id="pending-read";content="Unpublished patch";
+         outcome=Agent_core.Types.Tool_succeeded;json=None;content_blocks=None}])
+       with tool_call_id=Some "pending-read" }] in
+  let canonical = source @ pending in
   let checkpoint : Agent_core.Checkpoint.t =
     {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
-     agent_name=keeper_id; model="fixture"; system_prompt=None; messages=source;
+     agent_name=keeper_id; model="fixture"; system_prompt=None; messages=canonical;
      usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
      tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
      top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
@@ -118,11 +142,12 @@ let test_prefit_real_continuity ~base_path () =
     {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
      keeper_instructions="Preserve evidence.";
      current=Option.map (fun (s : Current.t) -> {Keeper_librarian.facts=s.facts}) current;
-     working_context=Keeper_librarian_context.empty; messages=P.messages prepared;
+     working_context; messages=P.messages prepared;
      tool_observations=[];counterpart_observations=[]} in
   (* Independently measure the exact prompt contract to derive the fixture's
      server limit, including template, current facts, continuity and schema. *)
   let rendered prepared input =
+    let input = {input with Keeper_librarian.working_context=Context.empty} in
     let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json prepared))
       :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input) in
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
@@ -150,15 +175,24 @@ let test_prefit_real_continuity ~base_path () =
       Ok (Yojson.Safe.to_string (`Assoc [
         "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
         "working_state", `String state])) in
-    let committed = ref false in
+    let committed = ref false and memory_committed = ref false in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     Runtime.run_best_effort ~trigger:Runtime.Durable_range
       ~input_projection:Runtime.Already_selected_range ~continuity:prepared
       ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
       ~cli_runner:runner ~on_continuity_committed:(fun _ -> committed:=true)
+      ~on_memory_committed:(fun () -> memory_committed:=true)
       ~base_path ~keepers_dir ~keeper_id
       ~expected_revision:(Option.map (fun (s : Current.t) -> s.revision) current) input;
-    Alcotest.(check bool) "actual Memory and continuity publication completed" true !committed in
+    Alcotest.(check bool) "actual Memory publication completed" true !memory_committed;
+    Alcotest.(check bool) "actual continuity publication completed" true !committed;
+    let saved = P.read ~config ~keeper_name:keeper_id |> get |> some in
+    Alcotest.(check int) "stored frontier advances to the selected atom group"
+      (P.end_atom prepared) saved.end_atom;
+    Alcotest.(check bool) "stored Memory receipt covers the selected atom group" true
+      (P.memory_committed ~config ~keeper_name:keeper_id prepared |> get);
+    Alcotest.(check string) "continuity leaves pending context bytes unchanged"
+      context_before (Fs_compat.load_file_opt context_path |> some) in
   let fit prepared = Runtime.fit_continuity ~capacity ~base_path ~keeper_id
       ~input:(input prepared) prepared |> get |> some in
   let first = fit full in
@@ -175,12 +209,39 @@ let test_prefit_real_continuity ~base_path () =
   let second = fit next in
   Alcotest.(check int) "second pass accounts for growing overhead" 3 (P.end_atom second);
   execute second "State through the third atom.";
-  Alcotest.(check int) "only two fitted requests were dispatched" 2 (List.length !calls);
+  let last = fit (prepare ()) in
+  Alcotest.(check int) "final selected group reaches the completed boundary" 4 (P.end_atom last);
+  execute last "Completed history is saved; publication still requires explicit approval.";
+  Alcotest.(check int) "only the three fitted groups were dispatched" 3 (List.length !calls);
+  Alcotest.(check bool) "no completed work remains; unfinished work is not selected" true
+    (P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> Option.is_none);
+  let snapshot = P.read ~config ~keeper_name:keeper_id |> get |> some in
+  let lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id |> get in
+  let module Driver = Keeper_turn_driver_try_provider in
+  let continuity = Driver.prepare_continuity ~trace_id ~lines ~messages:canonical snapshot
+    |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
+  let provider_config = Agent_core.Llm_provider.Provider_config.make
+    ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"continuity-cycle-fixture" ~base_url:"https://provider.example" () in
+  let view = Driver.For_testing.request_view
+    ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
+    ~measure_message_bytes:(fun message -> String.length
+      (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
+    ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
+    ~last_resort:false ~base_path ~demote_before:0
+    ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
+  let wire = view.wire
+    |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in
+  let summaries, suffix = List.partition (fun (message : Agent_core.Types.message) ->
+    message.metadata = Agent_core.Types.Extra_system_context_provenance.metadata) wire in
+  Alcotest.(check int) "next request contains exactly one saved working state" 1 (List.length summaries);
+  Alcotest.(check bool) "next request preserves unfinished user and tool exchange exactly" true
+    (List.equal Agent_core.Types.Message_value.equal pending suffix);
   let after = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
     | Ok value -> C.exact_snapshot_messages value
     | Error _ -> Alcotest.fail "source checkpoint disappeared" in
   Alcotest.(check bool) "source checkpoint is unchanged" true
-    (List.equal Agent_core.Types.Message_value.equal source after)
+    (List.equal Agent_core.Types.Message_value.equal canonical after)
 
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
@@ -209,7 +270,7 @@ let () =
     test_callback ~cli_errors ~base_path ~registry ~keeper_id:name
       ~first_overflow:false ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
-    ["continuity prefit", [Alcotest.test_case "two productive passes respect learned bound" `Quick
+    ["continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
        (test_prefit_real_continuity ~base_path)];
      "actual HTTP outcomes", [
       case "capacity-final" false `OK 1;

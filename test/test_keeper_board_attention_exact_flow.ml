@@ -70,68 +70,16 @@ let prepare_exact ~net candidate =
     candidate
 ;;
 
-let post_id_exn raw =
-  match Board.Post_id.of_string raw with
-  | Ok id -> id
-  | Error _ -> Alcotest.failf "invalid Board post id fixture: %s" raw
-;;
-
-let agent_id_exn raw =
-  match Board.Agent_id.of_string raw with
-  | Ok id -> id
-  | Error _ -> Alcotest.failf "invalid Board agent id fixture: %s" raw
-;;
-
-let comment_id_exn raw =
-  match Board.Comment_id.of_string raw with
-  | Ok id -> id
-  | Error _ -> Alcotest.failf "invalid Board comment id fixture: %s" raw
-;;
-
 let signal post_id : Board_dispatch.board_signal =
   { kind = Board_dispatch.Board_post_created
   ; post_id
+  ; comment_id = None
+  ; parent_id = None
   ; author = "external-author"
   ; title = "Board update"
   ; content = "Persisted Board evidence"
   ; hearth = Some "hearth-1"
   ; updated_at = Some 42.0
-  }
-;;
-
-let post_of_signal (signal : Board_dispatch.board_signal) : Board.post =
-  { id = post_id_exn signal.post_id
-  ; author = agent_id_exn signal.author
-  ; title = signal.title
-  ; body = signal.content
-  ; post_kind = Board.Human_post
-  ; meta_json = None
-  ; visibility = Board.Public
-  ; created_at = 1.0
-  ; updated_at = Option.value signal.updated_at ~default:1.0
-  ; expires_at = 3601.0
-  ; votes_up = 0
-  ; votes_down = 0
-  ; reply_count = 0
-  ; pinned = false
-  ; hearth = signal.hearth
-  ; thread_id = None
-  ; origin = None
-  }
-;;
-
-let comment_of_signal (signal : Board_dispatch.board_signal) : Board.comment =
-  (* A comment id must have the shape [Comment_id.generate] mints; derive one
-     from the post id so the fixture stays deterministic per post. *)
-  { id = comment_id_exn (Printf.sprintf "c-%032x" (Hashtbl.hash signal.post_id))
-  ; post_id = post_id_exn signal.post_id
-  ; parent_id = None
-  ; author = agent_id_exn "comment-author"
-  ; content = "Canonical Board comment"
-  ; created_at = 2.0
-  ; expires_at = 3602.0
-  ; votes_up = 0
-  ; votes_down = 0
   }
 ;;
 
@@ -146,17 +94,9 @@ let candidate post_id : Candidate.candidate =
   ; keeper_context =
       `Assoc
         [ "lane_keeper_name", `String keeper_name
-        ; "keeper_record_id", `Null
-        ; "keeper_runtime_uid", `Null
-        ; "instructions", `String "continue"
-        ; "current_task_id", `Null
-        ; "mention_keeper_ids", `List [ `String keeper_name ]
+        ; "board_interests", `List [ `String "runtime" ]
         ]
-  ; status =
-      Candidate.Pending
-        { last_delivery_failure = None
-        ; material = { post = post_of_signal signal; comments = [ comment_of_signal signal ] }
-        }
+  ; status = Candidate.Pending { last_delivery_failure = None }
   }
 ;;
 
@@ -527,11 +467,6 @@ let test_missing_lane_is_setup_error_without_dispatch () =
 
 let test_prepare_resumable_status_gate () =
   let pending = candidate "board-attention-gate" in
-  let material =
-    match Candidate.pending_judgment_material pending.Candidate.status with
-    | Some material -> material
-    | None -> Alcotest.fail "pending fixture carries no judgment material"
-  in
   let quarantine : Candidate.quarantine =
     { quarantine_id = "ba-quarantine-gate"
     ; partition_id = "ba-root-gate"
@@ -541,7 +476,7 @@ let test_prepare_resumable_status_gate () =
     ; attempt_provenance = None
     ; quarantined_at = 2.0
     ; prior_status =
-        Candidate.Resumable_pending { last_delivery_failure = None; material }
+        Candidate.Resumable_pending { last_delivery_failure = None }
     }
   in
   let quarantined phase =
@@ -1827,14 +1762,14 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
               Alcotest.(check (option string))
                 "relevant requires the current signal, not capability overlap"
                 (Some
-                   "The current signal itself directly addresses this keeper, requests or assigns the role described by its instructions, or contains a concrete request specific to that role; general topic or capability overlap alone is insufficient.")
+                   "The current signal itself requires this keeper's concrete attention, review, or action for one of keeper_role.board_interests; general topic or capability overlap alone is insufficient.")
                 (match List.assoc_opt "relevant" criteria with
                  | Some (`String description) -> Some description
                  | Some _ | None -> None);
               Alcotest.(check (option string))
-                "not relevant includes broad capability overlap"
+                "not relevant includes broad interest overlap"
                 (Some
-                   "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with the keeper's broad capabilities, or does not require this keeper to act.")
+                   "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act.")
                 (match List.assoc_opt "not_relevant" criteria with
                  | Some (`String description) -> Some description
                  | Some _ | None -> None)

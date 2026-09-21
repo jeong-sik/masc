@@ -420,54 +420,42 @@ let record_board_attention_candidate
       ~(meta : keeper_meta)
       (signal : Board_dispatch.board_signal)
   =
-  match
+  let candidate =
     Keeper_board_attention_candidate.of_board_signal
       ~meta
       ~recorded_at:(Time_compat.now ())
       signal
+  in
+  match
+    Keeper_board_attention_candidate.record_and_wake
+      ~base_path:config.base_path
+      candidate
   with
-  | Keeper_world_observation_board_signal.Unavailable unavailable ->
+  | Ok acceptance ->
+    let persistence =
+      match acceptance.persistence with
+      | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
+      | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+      ~labels:
+        [ ("keeper", meta.name)
+        ; ("kind", signal_kind_label)
+        ; ("audience", audience_label)
+        ; ("persistence", persistence)
+        ]
+      ()
+  | Error err ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string KeepaliveSignalFailures)
-      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_evidence_read") ]
+      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
       ();
     Log.Keeper.warn
-      "board attention evidence unavailable: keeper=%s post=%s error=%s"
+      "board attention candidate record failed: keeper=%s post=%s error=%s"
       meta.name
       signal.post_id
-      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-  | Keeper_world_observation_board_signal.Available candidate ->
-    (match
-       Keeper_board_attention_candidate.record_and_wake
-         ~base_path:config.base_path
-         candidate
-     with
-     | Ok acceptance ->
-       let persistence =
-         match acceptance.persistence with
-         | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
-         | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
-       in
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-         ~labels:
-           [ ("keeper", meta.name)
-           ; ("kind", signal_kind_label)
-           ; ("audience", audience_label)
-           ; ("persistence", persistence)
-           ]
-         ()
-     | Error err ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string KeepaliveSignalFailures)
-         ~labels:
-           [ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
-         ();
-       Log.Keeper.warn
-         "board attention candidate record failed: keeper=%s post=%s error=%s"
-         meta.name
-         signal.post_id
-         err)
+      err
 ;;
 
 let deliver_addressed_board_signal
@@ -931,4 +919,3 @@ let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path keeper_name event
-

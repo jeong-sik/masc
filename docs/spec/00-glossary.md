@@ -75,7 +75,9 @@ status: reference
   targetless discovery를 끈다. 정확한 Keeper 지목과 broadcast, 이미 참여한 thread의
   전달에는 영향을 주지 않으며 Task 할당이나 실행 권한도 아니다.
   `mention_targets`는 정확한 주소 토큰이고 `board_interests`는 의미 판정의 입력이므로
-  서로 fallback하지 않는다.
+  서로 fallback하지 않는다. v7 판정 경계는 현재 typed signal과
+  `keeper_role {name, board_interests}`만 사용한다. 과거 post/comment thread,
+  instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
 
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의

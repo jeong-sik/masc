@@ -77,44 +77,13 @@ let delivered label = function
 let signal post_id : Masc.Board_dispatch.board_signal =
   { kind = Masc.Board_dispatch.Board_post_created
   ; post_id
+  ; comment_id = None
+  ; parent_id = None
   ; author = "external-author"
   ; title = "Board update"
   ; content = "Persisted Board evidence"
   ; hearth = Some "hearth-1"
   ; updated_at = Some 42.0
-  }
-;;
-
-let post_id_exn value =
-  match Masc.Board.Post_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board post id fixture: " ^ value)
-;;
-
-let agent_id_exn value =
-  match Masc.Board.Agent_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board agent id fixture: " ^ value)
-;;
-
-let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post =
-  { id = post_id_exn signal.post_id
-  ; author = agent_id_exn signal.author
-  ; title = signal.title
-  ; body = signal.content
-  ; post_kind = Masc.Board.Human_post
-  ; meta_json = None
-  ; visibility = Masc.Board.Public
-  ; created_at = 1.0
-  ; updated_at = Option.value signal.updated_at ~default:1.0
-  ; expires_at = 3601.0
-  ; votes_up = 0
-  ; votes_down = 0
-  ; reply_count = 0
-  ; pinned = false
-  ; hearth = signal.hearth
-  ; thread_id = None
-  ; origin = None
   }
 ;;
 
@@ -129,17 +98,9 @@ let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   ; keeper_context =
       `Assoc
         [ "lane_keeper_name", `String keeper_name
-        ; "keeper_record_id", `Null
-        ; "keeper_runtime_uid", `Null
-        ; "instructions", `String "continue"
-        ; "current_task_id", `Null
-        ; "mention_keeper_ids", `List [ `String keeper_name ]
+        ; "board_interests", `List [ `String "runtime" ]
         ]
-  ; status =
-      A.Pending
-        { last_delivery_failure = None
-        ; material = { post = post_of_signal signal; comments = [] }
-        }
+  ; status = A.Pending { last_delivery_failure = None }
   }
 ;;
 

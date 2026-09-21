@@ -222,6 +222,8 @@ let board_signal_of_board_stimulus
        | Keeper_event_queue.Vote_cast vote ->
          Board_dispatch.Board_vote_cast (board_vote_change_of_queue vote))
   ; post_id
+  ; comment_id = None
+  ; parent_id = None
   ; author = bs.author
   ; title = bs.title
   ; content = bs.content

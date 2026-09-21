@@ -371,7 +371,9 @@ let test_contains_substring_special_chars () =
    ============================================================ *)
 
 let test_safe_filename_normal () =
-  check string "normal" "hello_world" (Workspace_utils.safe_filename "hello_world")
+  (* #36487: '_' is no longer a passthrough byte — it doubles as the escape
+     lead, so it must always be escaped itself to stay unambiguous. *)
+  check string "normal" "hello_5fworld" (Workspace_utils.safe_filename "hello_world")
 
 let test_safe_filename_alphanumeric () =
   check string "alphanumeric" "test123" (Workspace_utils.safe_filename "test123")
@@ -383,7 +385,8 @@ let test_safe_filename_with_dash () =
   check string "dash preserved" "my-file" (Workspace_utils.safe_filename "my-file")
 
 let test_safe_filename_with_underscore () =
-  check string "underscore preserved" "my_file" (Workspace_utils.safe_filename "my_file")
+  (* #36487: underscore now escapes (see test_safe_filename_normal above). *)
+  check string "underscore escaped" "my_5ffile" (Workspace_utils.safe_filename "my_file")
 
 let test_safe_filename_special_chars () =
   (* Special chars get hex-encoded: @ -> _40 (0x40 = 64 = '@') *)

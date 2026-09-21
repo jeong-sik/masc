@@ -1,0 +1,65 @@
+diff --git a/test/test_tui_context_tokens.ml b/test/test_tui_context_tokens.ml
+index 3f417580..4c3e3d33 100644
+--- a/test/test_tui_context_tokens.ml
++++ b/test/test_tui_context_tokens.ml
+@@ -275,6 +275,50 @@ let test_the_page_note_says_why_this_turn_was_refused () =
+   Alcotest.(check bool) "and the note never claims the body was missing" false
+     (says "carried no serialized body" rows)
+ 
++(* The composition shown is not always the latest turn: when the keeper kept
++   turning after its last attributed row, [attributed] is older than
++   [latest]. Its bytes must then be read at the attributed turn's own ratio,
++   not the latest turn's. Here the attributed turn carried 100,000 tokens
++   over 200,000 wire bytes (2.00 bytes per token) while the latest carried
++   18,000 over 560,513 (31.14): 8,192 schema bytes read at the attributed
++   ratio is 4,096 tokens, at the latest ratio 263. *)
++let test_attributed_rows_read_at_the_attributed_turns_ratio () =
++  let latest = record ~wire:(Some 560_513) ~scope:per_request () in
++  let older =
++    { (record ~tokens:(Some 100_000) ~wire:(Some 200_000) ~scope:per_request ()) with
++      absolute_turn = 4070
++    }
++  in
++  let components =
++    match older.Turn_record.input_components with
++    | Some components -> components
++    | None -> []
++  in
++  let selection : Masc_tui_context_inspector.selection =
++    { latest
++    ; attributed =
++        Some { record = older; components; turns_behind_latest = 1 }
++    ; recent = []
++    ; rows = [ latest; older ]
++    }
++  in
++  let rows =
++    Masc_tui_render_prim.context_composition_lines ~cols:140 ~turn_back:0
++      ~forecast:(Error "next-request not fetched") selection
++  in
++  match find "Tool schemas" rows with
++  | None -> Alcotest.fail "the tool schemas row is drawn"
++  | Some row ->
++      Alcotest.(check bool)
++        "the attributed row reads at the attributed turn's ratio" true
++        (contains (approx ^ "  4.1k tok") row);
++      Alcotest.(check bool) "and not at the latest turn's ratio" false
++        (contains (approx ^ "   263 tok") row);
++      Alcotest.(check bool) "the note names the attributed turn's ratio" true
++        (says "2.00 bytes per provider-counted token" rows);
++      Alcotest.(check bool) "the gap names the older turn" true
++        (says "Measured on turn #4070, 1 turns before" rows)
++
+ let () =
+   Alcotest.run "tui_context_tokens"
+     [ ( "composition"
+@@ -290,6 +334,9 @@ let () =
+             `Quick test_a_count_of_unknown_scope_never_becomes_the_ratio
+         ; Alcotest.test_case "the page note says why this turn was refused"
+             `Quick test_the_page_note_says_why_this_turn_was_refused
++        ; Alcotest.test_case
++            "attributed rows read at the attributed turn's ratio" `Quick
++            test_attributed_rows_read_at_the_attributed_turns_ratio
+         ] )
+     ; ( "serialized request"
+       , [ Alcotest.test_case "the band leads with the provider's count" `Quick

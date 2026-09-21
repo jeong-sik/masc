@@ -162,6 +162,13 @@ val max_process_capture_tail_bytes : int
     truncation marker rather than dropped silently. *)
 
 val safe_filename : string -> string
-(** Fold a value into one path component: lowercase, keep [a-z0-9._-], and
-    escape anything else as [_XX]. Every layer that turns a name into a file
-    name goes through this, so a name cannot mean two files. *)
+(** Fold a value into one path component, injectively: keep [a-z0-9.-]
+    byte-for-byte and escape every other byte — including [_] and every
+    uppercase ASCII letter — as [_XX] (lowercase hex of the byte). [_] never
+    survives unescaped, so it can only ever open an [_XX] escape triplet;
+    that keeps the encoding unambiguous to decode left to right, and
+    therefore injective. Every layer that turns a name into a file name goes
+    through this, so a name cannot mean two files (#36487: the previous
+    version lowercased letters and let [_] double as both a literal and its
+    own escape lead, so ["Foo"]/["foo"] and ["a:b"]/["a_3ab"] each folded to
+    one name). *)

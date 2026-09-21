@@ -529,9 +529,11 @@ let test_safe_filename () =
   check bool "no angle" false (String.contains result '<')
 
 let test_safe_filename_valid () =
+  (* #36487: '_' now escapes to "_5f" (it doubles as the escape lead, so it
+     must not survive unescaped — see lib/core/common.ml [safe_filename]). *)
   let input = "valid_file-name.txt" in
   let result = Workspace_utils.safe_filename input in
-  check string "unchanged" input result
+  check string "underscore escaped, rest unchanged" "valid_5ffile-name.txt" result
 
 (* ============================================================ *)
 (* Workspace_utils.validation Tests                                   *)

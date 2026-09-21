@@ -1,0 +1,53 @@
+diff --git a/bin/masc_tui_render_prim.ml b/bin/masc_tui_render_prim.ml
+index 0d4b25b8..6f5d5864 100644
+--- a/bin/masc_tui_render_prim.ml
++++ b/bin/masc_tui_render_prim.ml
+@@ -3459,11 +3459,19 @@ let context_composition_lines ~cols ~turn_back
+           min context_flow_label_cells
+             (max 10 (width - source_width - context_flow_row_chrome_cells))
+         in
++        (* The rows describe [attributed], which is not always the record the
++           band above reads: when the keeper kept turning after its last
++           attributed row, the composition is older than [latest] and its
++           bytes must be read at its own ratio, not the latest turn's. *)
++        let attributed_scale =
++          Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows attributed
++        in
+         (* The row's size in the unit the window is sized in. The bytes it
+            was read from stand once under the rows, beside the basis. *)
+         let token_cell bytes =
+           Printf.sprintf "\xe2\x89\x88%6s tok"
+-            (Inspector.format_tokens (Masc_tui_token_scale.estimate scale bytes))
++            (Inspector.format_tokens
++               (Masc_tui_token_scale.estimate attributed_scale bytes))
+         in
+         let rows =
+           List.concat_map
+@@ -3521,21 +3529,22 @@ let context_composition_lines ~cols ~turn_back
+                      around it, so the two are compared on one turn and not \
+                      expected to match. Read the shares as proportions and the \
+                      request band as this turn's size."
+-                    (Masc_tui_token_scale.format_estimate scale total)
+-                    (Masc_tui_token_scale.format_estimate scale observation.body_bytes))
++                    (Masc_tui_token_scale.format_estimate attributed_scale total)
++                    (Masc_tui_token_scale.format_estimate attributed_scale
++                       observation.body_bytes))
+            | Some _ ->
+                prose
+                  (Printf.sprintf
+                     "%s tok attributed here; the serialized request recorded \
+                      no size to set it against."
+-                    (Masc_tui_token_scale.format_estimate scale total))
++                    (Masc_tui_token_scale.format_estimate attributed_scale total))
+            | None ->
+                prose
+                  (Printf.sprintf
+                     "%s tok attributed here. No body was serialized on this \
+                      lane, so there is no request figure to set it against."
+-                    (Masc_tui_token_scale.format_estimate scale total)))
+-          @ prose (Masc_tui_token_scale.note scale)
++                    (Masc_tui_token_scale.format_estimate attributed_scale total)))
++          @ prose (Masc_tui_token_scale.note attributed_scale)
+         in
+         (* The arrow says the rows above are what the request below is made
+            of. Drawn only when both readings are the same turn: where the

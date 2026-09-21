@@ -215,19 +215,30 @@ let max_process_capture_tail_bytes = 256 * 1024
    its credential paths by concatenating [agent_name] raw while the workspace
    layer sanitised the same value. Two answers for one question, and the
    unsanitised one was the layer holding tokens. *)
+
+(* [safe_filename] used to lowercase every letter and pass ['_'] through
+   unescaped while also using ['_'] as its own escape lead. Both choices
+   break the "a name cannot mean two files" contract the .mli promises:
+   ["Foo"] and ["foo"] folded to the same ["foo"], and ["a:b"] escaped to
+   ["a_3ab"] — the exact bytes a literal ["a_3ab"] passes through unchanged.
+   #36487 has both examples measured against this function as it stood.
+
+   The fix is to stop giving ['_'] two jobs. [_safe_byte] is now exactly the
+   byte-for-byte passthrough set, and it excludes ['_'] and every uppercase
+   letter, so ['_'] can only ever appear in the output as the lead byte of an
+   [_XX] escape triplet — never as a literal, never as part of a passed-through
+   run. That makes decoding (and therefore this encoding) unambiguous: a
+   left-to-right reader either sees ['_'] and consumes the fixed-width triplet
+   after it, or sees anything else and consumes exactly one literal byte.
+   Two different inputs can no longer land on the same output. *)
+let safe_filename_passthrough_byte c =
+  (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '.' || c = '-'
+
 let safe_filename name =
   let buf = Buffer.create (String.length name * 3) in
   String.iter
     (fun c ->
-      let c_lower = Char.lowercase_ascii c in
-      let valid =
-        (c_lower >= 'a' && c_lower <= 'z')
-        || (c_lower >= '0' && c_lower <= '9')
-        || c_lower = '.'
-        || c_lower = '_'
-        || c_lower = '-'
-      in
-      if valid then Buffer.add_char buf c_lower
+      if safe_filename_passthrough_byte c then Buffer.add_char buf c
       else Printf.bprintf buf "_%02x" (Char.code c))
     name;
   Buffer.contents buf

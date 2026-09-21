@@ -12839,16 +12839,24 @@ let render_prompt_registry (state : state) =
   in
   box_top buf cols;
   let before =
-    Printf.sprintf "%s  %s%s · %s%s%s  "
+    (* The held-back notice sits right after the title, ahead of the count
+       and the mode label. config_pane_title cuts this row from its own
+       tail when it does not fit (below), and a warning an operator cannot
+       see without landing on the row is worth more than the count or the
+       mode text that now pays for it. *)
+    let held_back_notice =
+      match held_back with
+      | [] -> ""
+      | entries ->
+        Printf.sprintf "%s적용 안 된 오버라이드 %d개%s  " (Theme.warn ())
+          (List.length entries) Ansi.reset
+    in
+    Printf.sprintf "%s  %s%s%s · %s%s  "
       (screen_title " MASC 프롬프트")
+      held_back_notice
       Ansi.dim count_text
       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
       Ansi.reset
-      (match held_back with
-       | [] -> ""
-       | entries ->
-         Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
-           (List.length entries) Ansi.reset)
   in
   box_line buf cols
     (config_pane_title ~cols ~before state);

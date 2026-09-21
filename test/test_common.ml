@@ -89,8 +89,30 @@ let test_safe_filename_is_identity_on_live_names () =
     (fun name -> check string name name (Common.safe_filename name))
     [ "codex-mcp-client"; "dashboard-admin-deft-cobra"; "keeper-base-agent" ]
 
-let test_safe_filename_folds_case () =
-  check string "uppercase folds" "keeper-base" (Common.safe_filename "Keeper-Base")
+let test_safe_filename_escapes_case_instead_of_folding () =
+  (* #36487: this used to fold to "keeper-base", which is exactly how two
+     differently-cased names collided. Uppercase now takes the same escape
+     path as any other byte outside [a-z0-9.-]. *)
+  check string "uppercase escapes, does not fold" "_4beeper-_42ase"
+    (Common.safe_filename "Keeper-Base")
+
+let test_safe_filename_distinguishes_case () =
+  (* The collision #36487 measured directly: "Foo" and "foo" used to both
+     fold to "foo". *)
+  check bool "Foo <> foo after safe_filename" true
+    (Common.safe_filename "Foo" <> Common.safe_filename "foo")
+
+let test_safe_filename_distinguishes_escape_from_literal_underscore () =
+  (* The second collision #36487 measured: escaping ':' as "_3a" produced
+     the same bytes as the literal name "a_3ab", because '_' passed through
+     unescaped while also serving as the escape lead. '_' is now escaped
+     like any other non-passthrough byte, so it can only appear in the
+     output as the lead byte of an "_XX" triplet. *)
+  check bool "a:b <> a_3ab after safe_filename" true
+    (Common.safe_filename "a:b" <> Common.safe_filename "a_3ab")
+
+let test_safe_filename_escapes_literal_underscore () =
+  check string "underscore escapes to _5f" "a_5fb" (Common.safe_filename "a_b")
 
 let test_frontmatter_crlf_delimiter_is_seen () =
   (* Two of the three readers this replaced matched "---" exactly, so a file
@@ -238,7 +260,13 @@ let () =
     "safe_filename", [
       test_case "neutralizes separators" `Quick test_safe_filename_neutralizes_separators;
       test_case "identity on live names" `Quick test_safe_filename_is_identity_on_live_names;
-      test_case "folds case" `Quick test_safe_filename_folds_case;
+      test_case "escapes case instead of folding" `Quick
+        test_safe_filename_escapes_case_instead_of_folding;
+      test_case "distinguishes case (#36487)" `Quick test_safe_filename_distinguishes_case;
+      test_case "distinguishes escape from literal underscore (#36487)" `Quick
+        test_safe_filename_distinguishes_escape_from_literal_underscore;
+      test_case "escapes literal underscore" `Quick
+        test_safe_filename_escapes_literal_underscore;
     ];
     "frontmatter", [
     test_case "body keeps the trailing newline" `Quick test_frontmatter_body_keeps_the_trailing_newline;

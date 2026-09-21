@@ -536,6 +536,7 @@ let profile_cache_scope () =
     let resolution = Config_dir_resolver.resolve () in
     resolution.config_root.path
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     (* resolver failure fallback uses env only as a cache-key salt;
        profile parsing remains explicit and the cache miss path revalidates

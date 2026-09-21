@@ -961,6 +961,25 @@ let lane_run_list_limit = 50
    would truncate anyway. *)
 let lane_run_detail_max_body_bytes = 4 * 1024 * 1024
 
+let fetch_measurement_artifact ~host ~port ~sha256 =
+  match Tool_blob_store.validate_sha256 sha256 with
+  | Error error -> Error (Tool_blob_store.invalid_sha256_to_string error)
+  | Ok () ->
+    (match http_get ~host ~port ~path:("/api/v1/artifacts/" ^ sha256) with
+     | Error detail -> Error ("Measurement artifact request failed: " ^ detail)
+     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+       Error (named_refusal "Measurement artifact" ~status ~body)
+     | Ok (_, body) when String.length body > lane_run_detail_max_body_bytes ->
+       Error
+         (Printf.sprintf
+            "Measurement artifact is %d bytes; the inspector limit is %d bytes"
+            (String.length body) lane_run_detail_max_body_bytes)
+     | Ok (_, body) ->
+       (match Yojson.Safe.from_string body with
+        | json -> Masc_tui_types.Measurement.decode_artifact ~sha256 json
+        | exception Yojson.Json_error detail ->
+          Error ("Measurement artifact response is not JSON: " ^ detail)))
+
 (** One server-filtered page, with the exact continuation cursor retained. *)
 let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
     (Masc.Tui_decode.lane_run_page, string) result =
@@ -1495,6 +1514,20 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
     ]
 
+(** POST /api/v1/runtime/config/routing with [action = "append"]: add
+    [runtime_id] to the end of the standalone lane [name] as runtime.toml
+    declares it. The server reads the declared slots under its write lock, so
+    a declared slot the registry did not admit stays, and a slot another
+    writer added in between is kept. The server refuses an id the lane already
+    declares. *)
+let append_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "append"
+    ; "runtime_id", `String runtime_id
+    ]
+
 (** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the
     declared lane [lane]. The server refuses while a keeper still routes
     through it -- an assignment, or [\[runtime\].default] for every keeper
@@ -1723,9 +1756,9 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
 
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server
-    stamps the author from the agent header, so the payload carries text
-    only. The response is the tools envelope [{ok, message}]; interpreting it
-    stays with the caller. *)
+    stamps the author from the HTTP auth resolver, so the payload carries
+    text only. The response is the tools envelope [{ok, message}]; interpreting
+    it stays with the caller. *)
 let post_board_new ~(host : string) ~(port : int) ~(title : string)
     ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
   let hearth_field =
@@ -1784,8 +1817,8 @@ let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_vote"
     ~body:(Yojson.Safe.to_string payload)
 
-(** POST /api/v1/tools/masc_board_comment. The author is stamped by the
-    route from the agent header, exactly as for a new post. *)
+(** POST /api/v1/tools/masc_board_comment. The route stamps the author from the
+    HTTP auth resolver, exactly as for a new post. *)
 let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =

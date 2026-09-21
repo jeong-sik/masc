@@ -153,6 +153,17 @@ let test_single_block_is_not_evictable () =
     (unchanged_reason (Range.after_overflow ~marks:None t))
 ;;
 
+let test_unnamed_carried_range_is_not_evictable () =
+  let observed = ledger ~total:(Some 1_000) measured_four in
+  let t = { observed with last = { observed.last with ends = Ledger.No_atom_carried } } in
+  let expected = Range.Unchanged Range.Nothing_evictable in
+  check bool "decision stays unchanged" true
+    (Range.at_turn_boundary ~marks:(marks ~high:950 ~low:500) t = expected);
+  let applied, step = Range.apply_turn_boundary ~marks:(marks ~high:950 ~low:500) t in
+  check bool "application preserves the ledger" true (applied = t);
+  check bool "application preserves the decision" true (step = expected)
+;;
+
 let test_overflow_without_marks_takes_one_block () =
   let t = ledger ~total:(Some 1_000) measured_four in
   let blocks, atoms, tokens, first_atom, projected = evicted (Range.after_overflow ~marks:None t) in
@@ -248,6 +259,7 @@ let () =
         ; test_case "unknown block ends the walk" `Quick
             test_unknown_block_leaves_whole_and_ends_the_walk
         ; test_case "single block" `Quick test_single_block_is_not_evictable
+        ; test_case "unnamed carried range" `Quick test_unnamed_carried_range_is_not_evictable
         ; test_case "cold block first" `Quick
             test_cold_start_block_first_leaves_alone_with_the_total_unknown
         ; test_case "total equal to high water" `Quick test_total_at_the_high_water_mark_is_within

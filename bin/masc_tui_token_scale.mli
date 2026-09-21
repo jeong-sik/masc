@@ -9,6 +9,8 @@
 type own_ratio_refusal =
   | No_body  (** No serialized body passed through masc for this record. *)
   | No_count  (** A body, but the provider reported no input count. *)
+  | Turn_total_count
+      (** Sum over a client turn's requests, not one request. *)
   | Cumulative_count
       (** The count covers the whole conversation, not this request. *)
   | Unknown_scope  (** The provider did not say what the count covers. *)

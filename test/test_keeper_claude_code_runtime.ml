@@ -374,6 +374,60 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                        invalid_arg "event_capture requires event_bus"))))))
 ;;
 
+let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
+    ~cache_read_input_tokens () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture frames (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"USAGE_SCOPE" () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok turn ->
+           (match turn.response.usage with
+            | None -> fail "known CLI usage was dropped"
+            | Some usage ->
+              check int "inclusive input preserved" input_tokens usage.input_tokens;
+              check int "output preserved" output_tokens usage.output_tokens;
+              check int "cache read preserved" cache_read_input_tokens
+                usage.cache_read_input_tokens;
+              check int "absent cache creation remains zero" 0
+                usage.cache_creation_input_tokens);
+           (match turn.runtime_observation with
+            | None -> fail "runtime observation was dropped"
+            | Some observation ->
+              check string "scope follows the usage producer" expected_scope
+                (Runtime_usage_scope.to_string observation.usage_scope))))
+;;
+
+let result_with_aggregate_usage =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage","result":"USAGE_OK","api_error_status":null,"usage":{"input_tokens":123456,"output_tokens":789,"cache_read_input_tokens":42}}|}
+;;
+
+let test_result_only_usage_keeps_client_turn_scope () =
+  check_usage_scope
+    ~frames:
+      [ Emit (assistant ~turn_id:"usage" "USAGE_OK")
+      ; Emit result_with_aggregate_usage
+      ]
+    ~expected_scope:"turn_total"
+    ~input_tokens:123498 ~output_tokens:789 ~cache_read_input_tokens:42 ()
+;;
+
+let test_latest_request_usage_outranks_client_turn_total () =
+  let counted_assistant =
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-counted","message":{"id":"msg-counted","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"USAGE_OK"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
+  in
+  check_usage_scope
+    ~frames:
+      [ Emit counted_assistant
+      ; Emit (assistant ~turn_id:"uncounted" "USAGE_OK")
+      ; Emit result_with_aggregate_usage
+      ]
+    ~expected_scope:"per_request"
+    ~input_tokens:205 ~output_tokens:20 ~cache_read_input_tokens:5 ()
+;;
+
 let checkpoint_with_messages
       (messages : Agent_core.Types.message list)
   : Agent_core.Checkpoint.t
@@ -1933,10 +1987,239 @@ let test_a_closed_client_connection_is_typed () =
       (Agent_core.Error.to_string other)
 ;;
 
+(* A start seed begins where the last completed turn's range did, whichever
+   runtime measured it: this lane cuts from the keeper's checkpoint history
+   like every Agent Core candidate, so the same position names the same atoms
+   (RFC keeper-context-window-in-tokens §10.4). The declared ceiling keeps its
+   own cut and the later of the two positions wins, so a ceiling never widens
+   a seeded range and a seed never widens the ceiling's. *)
+let start_seed_history () =
+  let message role text : Agent_core.Types.message =
+    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  List.concat
+    (List.init 60 (fun i ->
+       [ message Agent_core.Types.User (Printf.sprintf "ask %02d" i)
+       ; message Agent_core.Types.Assistant (Printf.sprintf "answer %02d" i)
+       ]))
+;;
+
+let completed_record ~messages ~transmitted : Turn_record.t =
+  let total_atoms = snd (Runtime_model_input_tail_window.annotate messages) in
+  let front_atom_digest =
+    match
+      Runtime_model_input_tail_window.atom_opening_digest
+        messages
+        (total_atoms - transmitted)
+    with
+    | Some digest -> digest
+    | None -> fail "the record's own history has that atom"
+  in
+  { execution_ids = []
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
+  ; turn_kind = Turn_record.Direct
+  ; trace_id = "trace-1"
+  ; absolute_turn = 1260
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1260
+  ; blocks = []
+  ; input_components = None
+  ; tool_surface_ref = None
+  ; runtime_profile = "kimi_coding.kimi-k3"
+  ; selected_model = None
+  ; finish_reason = Some "completed"
+  ; context_window = None
+  ; price_input_per_million = None
+  ; price_output_per_million = None
+  ; request_latency_ms = None
+  ; ttfrc_ms = None
+  ; request_wire_observation = None
+  ; model_input_window =
+      Some
+        { Turn_record.transmitted_atoms = transmitted
+        ; total_atoms
+        ; measurement = Turn_record.Wire_shape
+        ; front_atom_digest
+        }
+  ; response_observed_model_input =
+      Some
+        { runtime_profile = "kimi_coding.kimi-k3"
+        ; window =
+            { transmitted_atoms = transmitted
+            ; total_atoms
+            ; measurement = Turn_record.Wire_shape
+            ; front_atom_digest
+            }
+        }
+  ; raw_trace_run_ref = None
+  ; sampling =
+      { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+  ; usage =
+      { input_tokens = None
+      ; output_tokens = None
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Per_request
+      }
+  ; ts = 0.
+  }
+;;
+
+let seed_read_of records =
+  { Keeper_carried_front.seed =
+      Keeper_carried_front.of_records
+        ~trace_id:"trace-1"
+        records
+  ; unreadable = None
+  }
+;;
+
+(* What the Agent Core path composes for the same front, so the assertion is
+   "the same range", not "this many atoms". *)
+let agent_core_range ~front messages =
+  (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
+     ~measure_message_bytes:(Keeper_context_core.message_measurer ())
+     ~front
+     ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+     ~last_resort:false
+     ~base_path:""
+     ~demote_before:0
+     messages)
+    .Keeper_turn_driver_try_provider.projection
+    .Runtime_model_input_tail_window.messages
+;;
+
+let encoded = List.map Keeper_official_client_host.encode_history_message
+
+let test_a_start_seed_begins_at_the_carried_front () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read)
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~front:seed_read.Keeper_carried_front.seed messages))
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "the reading counts the whole history" 120
+         observation.Runtime_model_input_tail_window.total_atoms;
+       check int "and says seven atoms went" 7
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* The declared ceiling names a front of its own. When it is the later of the
+   two, it decides, so the shrink ladder that answers a typed overflow
+   (#37063) keeps narrowing a seeded start instead of being widened back by
+   the seed on the retry. *)
+let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
+  (* The zero-history floor is what the framing alone costs; two more
+     messages above it leaves the exact cut room for about two atoms, well
+     inside the seed's seven and far below the 60-atom quantum, so the cut is
+     exact rather than quantized. *)
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let newest_two =
+    match List.rev messages with
+    | newest :: before :: _ -> measure newest + measure before
+    | _ -> fail "the history has at least two messages"
+  in
+  let capacity_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        messages
+    with
+    | Some floor_bytes -> floor_bytes + newest_two
+    | None -> fail "a history this long has a framed floor"
+  in
+  let ceiling_only =
+    match
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        messages
+    with
+    | Ok projection -> projection
+    | Error error ->
+      fail (Runtime_model_input_tail_window.budget_error_to_string error)
+  in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read)
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check bool "the ceiling cuts deeper than the seed here" true
+      (ceiling_only.Runtime_model_input_tail_window.dropped_atoms > 113);
+    check bool "and still carries the turn" true
+      (ceiling_only.Runtime_model_input_tail_window.dropped_atoms < 120);
+    check (list string) "so the ceiling decides the range"
+      (encoded ceiling_only.Runtime_model_input_tail_window.messages)
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "and the reading is the ceiling's"
+         (120 - ceiling_only.Runtime_model_input_tail_window.dropped_atoms)
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* Cold start: no record on this history names a front, so the range is the
+   whole history and the provider judges it. *)
+let test_a_cold_start_seed_carries_the_whole_history () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read_of [])
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~front:None messages))
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "every atom went" 120
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
     [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    ; ( "usage scope"
+      , [ test_case "result-only usage keeps client-turn scope" `Quick
+            test_result_only_usage_keeps_client_turn_scope
+        ; test_case "latest request outranks client-turn total" `Quick
+            test_latest_request_usage_outranks_client_turn_total
+        ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case
@@ -2043,6 +2326,20 @@ let () =
             "a closed client connection is typed"
             `Quick
             test_a_closed_client_connection_is_typed
+        ] )
+    ; ( "start seed"
+      , [ test_case
+            "a start seed begins at the carried front"
+            `Quick
+            test_a_start_seed_begins_at_the_carried_front
+        ; test_case
+            "the declared ceiling wins when it cuts deeper"
+            `Quick
+            test_the_declared_ceiling_wins_when_it_cuts_deeper
+        ; test_case
+            "a cold start seed carries the whole history"
+            `Quick
+            test_a_cold_start_seed_carries_the_whole_history
         ] )
     ]
 ;;

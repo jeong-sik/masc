@@ -555,6 +555,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                | Checkpoints.Purge_keeper_not_found _ -> `Not_found
                | Purge_keeper_active _
                | Purge_checkpoint_invalid _
+               | Purge_librarian_coordinates_present
                | Purge_source_changed -> `Conflict
                | Purge_checkpoint_unavailable _
                | Purge_backup_failed _
@@ -599,9 +600,28 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                  respond_error ~status:`Not_found ~ok:false reqd msg
              | Ok trace_id ->
                  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
-                 let (deleted, missing) =
+                 let delete_results =
                    Keeper_checkpoint_store.delete_agent_core_history_files
                      ~session_dir ~snapshot_ids
+                 in
+                 let deleted, missing, refused, failed =
+                   List.fold_left
+                     (fun (deleted, missing, refused, failed) -> function
+                       | Keeper_checkpoint_store.History_deleted id ->
+                         id :: deleted, missing, refused, failed
+                       | Keeper_checkpoint_store.History_missing id ->
+                         deleted, id :: missing, refused, failed
+                       | Keeper_checkpoint_store.History_refused id ->
+                         deleted, missing, id :: refused, failed
+                       | Keeper_checkpoint_store.History_removal_failed id ->
+                         deleted, missing, refused, id :: failed)
+                     ([], [], [], [])
+                     delete_results
+                   |> fun (deleted, missing, refused, failed) ->
+                   ( List.rev deleted
+                   , List.rev missing
+                   , List.rev refused
+                   , List.rev failed )
                  in
                  let (_status, inventory) =
                    keeper_checkpoint_inventory_json config name
@@ -614,6 +634,8 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                         ("keeper", `String name);
                         ("deleted_snapshot_ids", `List (List.map (fun id -> `String id) deleted));
                         ("missing_snapshot_ids", `List (List.map (fun id -> `String id) missing));
+                        ("refused_snapshot_ids", `List (List.map (fun id -> `String id) refused));
+                        ("failed_snapshot_ids", `List (List.map (fun id -> `String id) failed));
                         ("inventory", inventory);
                    ])
                    reqd)
@@ -893,7 +915,11 @@ let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event 
   Dashboard_cache.invalidate_prefix
     (Printf.sprintf "dashboard:fleet-composite:%s" config.base_path);
   match runtime_event with
-  | Some event -> refresh_keeper_execution_surfaces ~config ~name event
+  | Some event ->
+      (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+      ignore
+        (refresh_keeper_execution_surfaces ~config ~name event
+          : Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh)
   | None -> invalidate_keeper_execution_surfaces ~config ()
 
 let respond_config_sync_error
@@ -1615,11 +1641,14 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             directive;
           (match plain_directive with
            | Plain_pause ->
-             refresh_keeper_execution_surfaces
-               ~config
-               ~name
-               (Keeper_lifecycle_events.Phase_event
-                  Keeper_state_machine.Paused)
+             (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+             ignore
+               (refresh_keeper_execution_surfaces
+                  ~config
+                  ~name
+                  (Keeper_lifecycle_events.Phase_event
+                     Keeper_state_machine.Paused)
+                 : Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh)
            | Plain_wakeup ->
              invalidate_keeper_execution_surfaces ~config ());
           Http.Response.json_value ~compress:true ~request:req

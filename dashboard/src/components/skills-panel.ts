@@ -670,9 +670,6 @@ export function SkillsPanel() {
     return html`<${EmptyState} message=${stateMessage(res.state)} />`
   }
   const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.surfaces))
-  if (rows.length === 0 && res.snapshot.rejections.length === 0) {
-    return html`<${EmptyState} message="The published snapshot lists no skills." />`
-  }
   return html`
     <${SurfaceCard} testId="skills-panel">
       <div class="mb-3 flex items-center justify-between gap-2">
@@ -797,7 +794,9 @@ export function SkillsPanel() {
             `
           })}
         </tbody>
-      </table>` : html`<div class="ss-muted py-3" data-testid="skills-no-valid">No valid Skills are published.</div>`}
+      </table>` : res.snapshot.rejections.length > 0
+        ? html`<div class="ss-muted py-3" data-testid="skills-no-valid">No valid Skills are published.</div>`
+        : html`<${EmptyState} message="The published snapshot lists no skills." />`}
       ${res.snapshot.rejections.length > 0 ? html`
         <div class="mt-4" data-testid="skill-rejections">
           <strong>Rejected source candidates</strong>

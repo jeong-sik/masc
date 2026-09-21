@@ -1514,24 +1514,29 @@ type runtime_lane_write =
          list launched after it is the first to carry the write. *)
 
 (* What the lane editor says about its last key or write. Both the Runtime
-   and the Lanes view draw it. *)
+   and the Lanes view draw it, and a new view, a moved cursor or a newly
+   opened field ends it. *)
 type runtime_lane_notice =
   | Lane_write_refused of string
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
       (* A key that would write, pressed while the previous write is out. *)
-  | Lane_list_unread of string
-      (* The re-read after a write failed; the list on screen is the one
-         from before the write. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
-  | Lane_list_unread detail ->
-    "the lane list could not be re-read after the change and may be stale: " ^ detail
+
+(* Whether a list on screen carries the last lane write. It is not about a
+   key, so it is kept apart from the notice: only a load of that list sets it.
+   The awaited re-read failing leaves the order from before the write on
+   screen, and the next load of the list that comes back ends it. No key and
+   no dismissal reaches it. *)
+type runtime_lane_list_freshness =
+  | Lane_list_read
+  | Lane_list_unread of string
 
 (** Stable identity of the Runtime row opened for detail. The cursor is only a
     position and can move to another runtime after refresh; detail stays bound
@@ -1570,6 +1575,60 @@ type lanes_mode =
   | Lanes_overview
   | Lanes_run_list of string
   | Lanes_run_detail of string * string
+  | Lanes_measurement_detail of string
+
+module Measurement = struct
+  module R = Masc.Librarian_continuity_report
+
+  type t = { report : R.t; context_hashes : (string * string) list }
+
+  type counts = { scored : int; failed : int; incomplete : int }
+
+  let counts (report : R.t) =
+    List.fold_left
+      (fun counts (sample : R.sample) ->
+        match sample.progress with
+        | R.Scored _ -> { counts with scored = counts.scored + 1 }
+        | R.Question_failed _ | R.Answer_failed _ | R.Judge_failed _ ->
+          { counts with failed = counts.failed + 1 }
+        | R.Not_started | R.Question_ready _ | R.Answer_ready _ ->
+          { counts with incomplete = counts.incomplete + 1 })
+      { scored = 0; failed = 0; incomplete = 0 }
+      report.samples
+
+  let decode_artifact ~sha256 json =
+    match Tool_blob_store.validate_sha256 sha256 with
+    | Error error -> Error (Tool_blob_store.invalid_sha256_to_string error)
+    | Ok () ->
+      let field name = match json with
+        | `Assoc fields -> List.assoc_opt name fields
+        | _ -> None in
+      (match field "sha256", field "bytes", field "content" with
+       | Some (`String actual), Some (`Int bytes), Some (`String content) ->
+         if not (String.equal actual sha256) then
+           Error ("Measurement artifact SHA " ^ actual ^ " differs from requested " ^ sha256)
+         else if bytes <> String.length content then
+           Error (Printf.sprintf "Measurement artifact declares %d bytes but carries %d"
+                    bytes (String.length content))
+         else
+           let content_sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
+           if not (String.equal content_sha256 sha256) then
+             Error ("Measurement artifact content hashes to " ^ content_sha256
+                    ^ ", expected " ^ sha256)
+           else
+             (match Yojson.Safe.from_string content with
+              | json ->
+                Result.map (fun (report : R.t) ->
+                  let context_hashes = List.map (fun (sample : R.sample) ->
+                    sample.case.id,
+                    Digestif.SHA256.(to_hex (digest_string
+                      (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context)))))
+                    report.samples in
+                  { report; context_hashes }) (R.of_yojson json)
+              | exception Yojson.Json_error detail ->
+                Error ("Measurement artifact is not JSON: " ^ detail))
+       | _ -> Error "Measurement artifact response requires sha256, bytes and content fields")
+end
 
 (** One authority for the Fusion surface's list/detail state. The top-level
     [surface] only says Fusion is open; it does not repeat this mode. *)
@@ -2483,9 +2542,10 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
-let runtime_listing_chrome ~error ~action_error ~prompt ~picker_rows =
+let runtime_listing_chrome ?(stale_rows = 0) ~error ~action_error ~prompt ~picker_rows () =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
+  + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
 
@@ -5223,9 +5283,12 @@ type state = {
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
+  mutable measurement_report: Measurement.t option;
   mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
+  (* A projection of the last rendered payload, not another layout formula. *)
+  mutable lane_run_detail_content_height: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
      not projected is simply absent from this list, which the Secrets tab
      shows as "no projection" rather than as an empty credential set. *)
@@ -5274,6 +5337,9 @@ type state = {
   mutable runtime_lane_pick: runtime_lane_pick option;
   mutable runtime_lane_pick_cursor: int;
   mutable runtime_lane_notice: runtime_lane_notice option;
+  (* Per list: whether it was read back after the last lane write. *)
+  mutable runtime_surface_lane_freshness: runtime_lane_list_freshness;
+  mutable standalone_lanes_lane_freshness: runtime_lane_list_freshness;
   (* The name typed for a new lane, before its first candidate is picked. *)
   mutable runtime_lane_name_draft: string option;
   (* The lane a second [D] removes. Captured at the first press and dropped
@@ -5730,6 +5796,19 @@ type state = {
    because this module cannot see a frame. *)
 (* Browser is an operator reader inside Connectors. A retained
    reader model must not change chrome after the operator leaves its view. *)
+let accept_measurement_artifact state ~sha256 ~generation result =
+  match state.lanes_mode with
+  | Lanes_measurement_detail selected
+    when generation = state.lane_run_detail_generation
+         && String.equal selected sha256 ->
+      (match result with
+       | Ok report ->
+           state.measurement_report <- Some report;
+           state.lane_run_detail_error <- None
+       | Error detail -> state.lane_run_detail_error <- Some detail)
+  | Lanes_measurement_detail _ | Lanes_run_detail _
+  | Lanes_overview | Lanes_run_list _ -> ()
+
 let browser_lane_on_screen (state : state) =
   match state.view, state.browser_lane_visibility with
   | Connectors, Browser_lane_shown _ -> state.browser_lane
@@ -6894,9 +6973,11 @@ let create_state
   lane_runs_cursor = 0;
   lane_runs_scroll = 0;
   lane_run_detail = None;
+  measurement_report = None;
   lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
+  lane_run_detail_content_height = 0;
   keeper_secrets = [];
   lanes_error = None;
   lanes_action_error = None;
@@ -6936,6 +7017,8 @@ let create_state
   runtime_lane_pick = None;
   runtime_lane_pick_cursor = 0;
   runtime_lane_notice = None;
+  runtime_surface_lane_freshness = Lane_list_read;
+  standalone_lanes_lane_freshness = Lane_list_read;
   runtime_lane_name_draft = None;
   runtime_lane_remove_armed = None;
   runtime_lane_cursor_after_write = None;
@@ -7475,7 +7558,7 @@ type clamped_scroll =
   | Runtime_detail_scroll of int
   | System_log_detail_scroll of int
   | Planning_detail_scroll of int
-  | Lane_run_detail_scroll of int
+  | Lane_run_detail_scroll of { scroll : int; content_height : int }
   (* An open diff's rows are built by the drawing, out of the recorded before
      and after text, so the keypress cannot count them. It steps unbounded and
      the frame reports back what it could actually use: without that report
@@ -7560,7 +7643,9 @@ let apply_clamped_scroll (state : state) = function
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
-  | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
+  | Lane_run_detail_scroll { scroll; content_height } ->
+      state.lane_run_detail_scroll <- scroll;
+      state.lane_run_detail_content_height <- content_height
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
   | Repository_changes_diff_scroll value ->
       state.repository_changes_diff_scroll <- value
@@ -7691,6 +7776,30 @@ let standalone_lanes_chrome ~row_count ~error ~truncated =
   2 + evidence_rows + stale_error_row + (if truncated then 1 else 0)
 ;;
 
+let dismiss_runtime_lane_notice (state : state) = state.runtime_lane_notice <- None
+
+let set_runtime_lane_list_freshness (state : state) list freshness =
+  match list with
+  | Runtime_surface_list -> state.runtime_surface_lane_freshness <- freshness
+  | Standalone_lanes_list -> state.standalone_lanes_lane_freshness <- freshness
+
+(* The lines saying a list may be stale, one per list whose read-back failed.
+   Both views draw them under the notice. *)
+let runtime_lane_stale_lines (state : state) =
+  let line name = function
+    | Lane_list_read -> None
+    | Lane_list_unread detail ->
+      Some
+        (Printf.sprintf
+           "the %s could not be re-read after the change and may be stale: %s"
+           name
+           detail)
+  in
+  List.filter_map Fun.id
+    [ line "lane list" state.runtime_surface_lane_freshness
+    ; line "standalone lane list" state.standalone_lanes_lane_freshness
+    ]
+
 let lanes_scrolled (state : state) =
   match state.lanes_mode with
   | Lanes_run_list _ ->
@@ -7704,7 +7813,7 @@ let lanes_scrolled (state : state) =
       ; sc_overflow_takes_row = true
       ; sc_preview_keep = None
       }
-  | Lanes_run_detail _ ->
+  | Lanes_run_detail _ | Lanes_measurement_detail _ ->
       (* The detail's lines are built by the drawing; the frame reports the
          clamp through [clamped_scroll], so no count is knowable here. *)
       { sc_count = 0
@@ -7727,6 +7836,7 @@ let lanes_scrolled (state : state) =
            | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
       + (if Option.is_some state.lanes_action_error then 1 else 0)
       + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + List.length (runtime_lane_stale_lines state)
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -8149,9 +8259,13 @@ let swap_candidates order i j =
     Some (List.mapi (fun k id -> if k = i then at_j else if k = j then at_i else id) order)
 
 (* The picker serves both lane kinds. A conversation lane reads its current
-   order from the runtime surface's resolved lanes; an exact-output lane reads
-   its walk order from the standalone-lane observation, which carries the
-   admitted slots. A lane being created has no candidates yet. *)
+   order from the runtime surface's resolved lanes, and a pick writes that
+   order back with the new candidate on the end. An exact-output lane's ids
+   are every one the standalone-lane observation names -- admitted slots, CLI
+   slots and the declared slots the registry dropped. The picker ranks those
+   last, and picking one is refused before anything is sent. The pick itself
+   is an append the server applies to the declared order, never a write of
+   this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
   | Pick_exact_lane name ->
     (match state.standalone_lanes with
@@ -8160,7 +8274,9 @@ let lane_picker_existing_slots (state : state) = function
          snapshot.Tui_decode.sls_lanes
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
               String.equal row.Tui_decode.sl_lane_id name)
-         |> Option.map (fun row -> row.Tui_decode.sl_admitted_slots)
+         |> Option.map (fun row ->
+              row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
+              @ row.Tui_decode.sl_dropped_slots)
          |> Option.value ~default:[])
   | Pick_conversation_lane lane -> conversation_lane_candidates state lane
   | Pick_new_lane _ -> []
@@ -8196,6 +8312,22 @@ let runtime_lane_write_busy (state : state) =
   | Lane_write_idle -> false
   | Lane_write_posting | Lane_write_rereading _ -> true
 
+(* Candidate edits replace the conversation lane's whole order. After its
+   awaited read-back fails, that order is only evidence of the state before
+   the last write; sending it again could restore a candidate another writer
+   removed. Keep the refusal typed by the list state rather than guessing
+   freshness from elapsed time or the notice text. *)
+let runtime_lane_candidate_write_refusal (state : state) =
+  if runtime_lane_write_busy state
+  then Some Lane_write_pending
+  else
+    match state.runtime_surface_lane_freshness with
+    | Lane_list_read -> None
+    | Lane_list_unread _ ->
+      Some
+        (Lane_write_refused
+           "the lane list may be stale; reload it before changing candidates")
+
 let runtime_lane_list_generation (state : state) = function
   | Runtime_surface_list -> state.runtime_surface_generation
   | Standalone_lanes_list -> state.standalone_lanes_generation
@@ -8219,18 +8351,23 @@ let settle_runtime_lane_write (state : state) ~written = function
     state.runtime_lane_notice <- Some (Lane_write_refused detail);
     state.runtime_lane_write <- Lane_write_idle
 
-(* A load of [list] with [generation] landed. When it is the re-read a write
-   waits for, lane edits open again: with the "still being written" line
-   cleared if the list came back, or with a line saying it did not. *)
+(* A load of [list] with [generation] landed. Any load of it that comes back
+   ends the line saying it may be stale. When it is the re-read a write waits
+   for, lane edits open again, and a failed one leaves that line. *)
 let runtime_lane_list_reread (state : state) ~list ~generation result =
+  (match result with
+   | Ok () -> set_runtime_lane_list_freshness state list Lane_list_read
+   | Error _ -> ());
   match state.runtime_lane_write with
   | Lane_write_rereading (written, answered_at)
     when same_runtime_lane_list written list && generation > answered_at ->
     state.runtime_lane_write <- Lane_write_idle;
-    (match result, state.runtime_lane_notice with
-     | Error detail, _ -> state.runtime_lane_notice <- Some (Lane_list_unread detail)
-     | Ok (), Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Ok (), (Some (Lane_write_refused _ | Lane_list_unread _) | None) -> ())
+    (match result with
+     | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
+     | Ok () -> ());
+    (match state.runtime_lane_notice with
+     | Some Lane_write_pending -> state.runtime_lane_notice <- None
+     | Some (Lane_write_refused _) | None -> ())
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
@@ -8272,8 +8409,10 @@ let plan_runtime_lane_edit (state : state) = function
          then Refuse_lane_edit Lane_write_pending
          else Send_lane_write { lane; request; cursor_after }
        in
-       (match row_edit with
-        | Drop_candidate ->
+       (match row_edit, runtime_lane_candidate_write_refusal state with
+        | (Drop_candidate | Move_candidate _), Some notice ->
+          Refuse_lane_edit notice
+        | Drop_candidate, None ->
           (* Dropping the lane's last row leaves the cursor on the row that
              will be the lane's new last one, not on whatever follows it. *)
           let cursor_after =
@@ -8285,7 +8424,7 @@ let plan_runtime_lane_edit (state : state) = function
             (Write_lane_order
                (List.filter (fun id -> not (String.equal id runtime_id)) order))
             ~cursor_after
-        | Move_candidate move ->
+        | Move_candidate move, None ->
           let by, edge =
             match move with
             | Move_down -> 1, "last"
@@ -8298,7 +8437,7 @@ let plan_runtime_lane_edit (state : state) = function
                   (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
-        | Remove_lane ->
+        | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->
              (* The lane's rows leave the list; the cursor goes to the row
@@ -8323,12 +8462,159 @@ let runtime_pick_item_id = function
   | Pick_lane lane -> lane.Tui_decode.rrl_id
   | Pick_model model -> model.Tui_decode.ro_id
 
+(* Target and route column widths for the runtime picker. Bindings of one
+   model that differ only in reasoning effort share provider, model and
+   context; their ids ([claude_code.claude-sonnet-5-low], [-high]) are the
+   text that tells them apart, and at a fixed 24 cells every one of them was
+   cut to the same [claude_code.claude-sonn…]. The target column therefore
+   takes the longest id, and the route column, which repeats provider and
+   model, gives up that room. Neither goes below the 24 cells both had. *)
+let runtime_pick_min_column_cells = 24
+
+(* The context size as the row writes it. It lives here, not in the renderer,
+   because the width calculation below measures the same string the renderer
+   draws; a format that changed in one place and not the other would put the
+   row back over the frame. *)
+let format_context_tokens tokens =
+  if tokens >= 1_000_000 then
+    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
+    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
+  else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
+  else Printf.sprintf "%d" tokens
+
+(* What the row says after the two columns. [rpf_warn] asks the renderer for
+   the warning colour; the text is the same either way, and the width below
+   counts it either way. *)
+type runtime_pick_fact =
+  { rpf_text : string
+  ; rpf_warn : bool
+  }
+
+let runtime_pick_facts = function
+  | Pick_lane lane ->
+    [ { rpf_text =
+          Printf.sprintf "(%d hops)" (List.length lane.Tui_decode.rrl_runtime_ids)
+      ; rpf_warn = false
+      }
+    ]
+  | Pick_model option ->
+    let fact text = { rpf_text = text; rpf_warn = false } in
+    let context =
+      fact
+        (Printf.sprintf "[%s ctx]"
+           (format_context_tokens option.Tui_decode.ro_effective_max_context))
+    in
+    let effort =
+      match option.Tui_decode.ro_declared_reasoning_effort with
+      | Some effort ->
+        [ fact
+            (Printf.sprintf "[effort %s]"
+               (Tui_decode.runtime_reasoning_effort_label effort))
+        ]
+      | None -> []
+    in
+    let default = if option.Tui_decode.ro_is_default then [ fact "[default]" ] else [] in
+    let quota =
+      if option.Tui_decode.ro_quota_exhausted
+      then [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
+      else []
+    in
+    (context :: effort) @ default @ quota
+
+(* One space between facts, the way the renderer joins them. *)
+let runtime_pick_facts_width facts =
+  List.fold_left
+    (fun cells fact -> cells + Masc_tui_message_layout.display_width fact.rpf_text)
+    0
+    facts
+  + max 0 (List.length facts - 1)
+
+(* Everything in the row that is not one of the two columns and not the facts:
+   the cursor mark, the kind badge, and the two-space gap on each side of the
+   route column. The row the renderer draws is
+   [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
+let runtime_pick_fixed_cells = 2 + 7 + 2 + 2
+
+(* What is left for the facts once the chrome and the two column floors are
+   paid. At 80 columns that is 15 cells, which one fact fills. *)
+let runtime_pick_tail_budget ~cols =
+  max 0
+    (Masc_tui_frame.inner_width ~cols
+     - runtime_pick_fixed_cells
+     - (2 * runtime_pick_min_column_cells))
+
+(* The facts a row can afford, dropped from the front.
+
+   [runtime_pick_facts] lists them least decisive first. The context size is
+   the same for every binding of one model, and the reasoning step has a
+   second spelling in the id the target column draws ([…-sonnet-5-high]),
+   while [quota exhausted] is said nowhere else on the row. When even one
+   fact is too wide it is cut rather than dropped, so a narrow terminal shows
+   the start of the warning instead of an empty properties column. *)
+let runtime_pick_visible_facts ~cols item =
+  let budget = runtime_pick_tail_budget ~cols in
+  let rec trim = function
+    | [] -> []
+    | [ last ] when runtime_pick_facts_width [ last ] > budget ->
+      if budget <= 0
+      then []
+      else
+        [ { last with
+            rpf_text = Masc_tui_message_layout.fit_width last.rpf_text budget
+          }
+        ]
+    | _ :: rest as all ->
+      if runtime_pick_facts_width all <= budget then all else trim rest
+  in
+  trim (runtime_pick_facts item)
+
+let runtime_pick_tail_width ~cols item =
+  runtime_pick_facts_width (runtime_pick_visible_facts ~cols item)
+
+(* What the frame leaves for the properties once the chrome and the two
+   columns are drawn. The header's own label is cut to it, so the row that
+   names the column cannot be the one that overruns the frame. *)
+let runtime_pick_properties_room ~cols ~target ~route =
+  max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - target - route)
+
+let runtime_pick_column_widths ~cols items =
+  let longest_id =
+    List.fold_left
+      (fun longest item ->
+        max longest
+          (Masc_tui_message_layout.display_width
+             (Tui_decode.sanitize_terminal_text (runtime_pick_item_id item))))
+      0 items
+  in
+  (* The columns divide what is left after the facts. The earlier budget
+     subtracted a constant 62 that predated the effort fact, and every cell
+     the facts grew past it ran off the right edge: a default row lost its
+     whole [default], and [effort medium] drew as [effort me. *)
+  let longest_tail =
+    List.fold_left
+      (fun longest item -> max longest (runtime_pick_tail_width ~cols item))
+      0
+      items
+  in
+  let shared =
+    max
+      (2 * runtime_pick_min_column_cells)
+      (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - longest_tail)
+  in
+  let target =
+    max runtime_pick_min_column_cells
+      (min longest_id (shared - runtime_pick_min_column_cells))
+  in
+  target, shared - target
+
 let runtime_surface_listing_chrome state =
   runtime_listing_chrome ~error:state.runtime_surface_error
     ~action_error:state.runtime_lane_notice
+    ~stale_rows:(List.length (runtime_lane_stale_lines state))
     ~prompt:(Option.is_some (runtime_lane_prompt state))
     ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
       (runtime_picker_projection state))
+    ()
 
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
@@ -8403,7 +8689,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           }
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ -> None
+       | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
        | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
   | Clients ->
       listing ~error:state.clients_surface_error
@@ -8551,11 +8837,27 @@ let approval_items (state : state) =
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
+(* Everything on the Approvals surface waiting on the operator: the three
+   approval row kinds plus the questions keepers have open. The surface
+   answers both -- that is why it fetches asks -- so its ring entry, badge
+   and alert colour must all count the same thing. One count here, not
+   three copies that can drift: with zero approvals and one open question
+   the entry still has to be reachable, or the question has nowhere to be
+   seen from. The badge number is therefore the SUM of approval rows and open
+   questions, not an approval count: a badge of 3 may be three approvals,
+   three questions, or a mix. *)
+let approvals_surface_pending (state : state) =
+  List.length (approval_items state)
+  +
+  match state.asks_snapshot with
+  | Some snapshot -> List.length (Masc_tui_ask_projection.open_rows snapshot)
+  | None -> 0
+
 let is_surface_active (state : state) (s : surface) =
   match s with
   | Metrics -> false
   | Approvals ->
-      state.view = Approvals || List.length (approval_items state) > 0
+      state.view = Approvals || approvals_surface_pending state > 0
   | _ -> true
 ;;
 
@@ -8711,7 +9013,7 @@ let surface_row_texts (state : state) : surface -> string list option =
       else None
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> None
        | Lanes_overview ->
            let standalone =
              match state.standalone_lanes with

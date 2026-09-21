@@ -8,6 +8,8 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
   | Clock_required_for_timeout -> "clock required for timeout"
   | Frozen_request_mismatch -> "frozen request mismatch"
   | Completion_failed -> "completion failed"
+  | Response_body_deadline_exceeded ->
+    "total request deadline exceeded while reading response body"
   | Provider_response_refused { http_status; refusal } ->
     Printf.sprintf
       "provider refused (http_status=%d refusal=%s)"
@@ -21,18 +23,18 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
   | Internal_non_json_output -> "internal non-json output"
 ;;
 
-(* [flow_evidence] is a private agent-core type with no constructor outside agent core,
-   so the assembled line cannot be built in a test. The part that decides what
-   the line says is split out here, where it can. That gap is why the label
-   collapse below survived: the leaf renderer [execution_cause_detail] was
-   covered, and the caller that failed to use it was not. *)
+(* [flow_evidence] is a private agent-core type with no constructor outside
+   agent core. The candidate-rejected branch is covered through an actual
+   flow. The execution-failed branch is exhaustively matched here, while its
+   cause wording is covered by the leaf renderer test. *)
 let advance_failure_kind : Exact_output.flow_advance_failure_snapshot -> string * string
   = function
   | Exact_output.Flow_advance_candidate_rejected rejection ->
-    (Exact_output.candidate_rejection_identity rejection).candidate_id, "candidate_rejected"
-  (* [execution_error_cause] distinguishes eleven outcomes — a quota refusal,
+    ( (Exact_output.candidate_rejection_identity rejection).candidate_id
+    , "candidate_rejected cause=" ^ Exact_output.candidate_rejection_reason rejection )
+  (* [execution_error_cause] distinguishes outcomes — a quota refusal,
      an output budget spent before the answer, invalid JSON, an HTTP refusal
-     with its status. Rendering only "execution_failed" collapsed all eleven
+     with its status. Rendering only "execution_failed" collapsed them
      into one label, and this advance is the only place a losing slot is
      recorded: it left no other trace, so "why did the first slot lose the
      run" had no answer anywhere. Observed 2026-08-07: the librarian advanced
@@ -140,12 +142,12 @@ let rejection_disposition_detail : Exact_output.candidate_rejection_disposition 
 
 let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_receipt) =
   Printf.sprintf
-    "slot=%s %s"
+    "slot=%s %s cause=%s"
     (Exact_output.candidate_rejection_identity rejection).candidate_id
     (Exact_output.candidate_rejection_disposition rejection
      |> rejection_disposition_detail)
+    (Exact_output.candidate_rejection_reason rejection)
 ;;
-
 
 (* Log lines are single-line records; the excerpt bound keeps one failed call
    from flooding them while the sha256 keeps the full body identifiable in
@@ -205,4 +207,66 @@ let candidates_exhausted_detail ~rejection ~evidence =
     "%s; flow=[%s]"
     (candidate_rejection_detail rejection)
     (flow_evidence_detail evidence)
+;;
+
+let attempt_start_error_detail = function
+  | Exact_output.Call_id_generation_failed detail ->
+    Printf.sprintf "call_id_generation_failed detail=%S" detail
+;;
+
+let measurement_start_error_detail = function
+  | Exact_output.Measurement_operation_id_generation_failed detail ->
+    Printf.sprintf "operation_id_generation_failed detail=%S" detail
+  | Exact_output.Measurement_clock_required_for_timeout ->
+    "measurement_clock_required_for_timeout"
+;;
+
+let attempt_start_failure_detail
+      (candidate : Exact_output.flow_candidate_visit)
+      cause
+      evidence
+  =
+  Printf.sprintf
+    "slot=%s cause=%s; flow=[%s]"
+    candidate.identity.candidate_id
+    (attempt_start_error_detail cause)
+    (flow_evidence_detail evidence)
+;;
+
+let measurement_start_failure_detail
+      (candidate : Exact_output.flow_candidate_visit)
+      cause
+      evidence
+  =
+  Printf.sprintf
+    "slot=%s cause=%s; flow=[%s]"
+    candidate.identity.candidate_id
+    (measurement_start_error_detail cause)
+    (flow_evidence_detail evidence)
+;;
+
+(* One line for a terminal flow error. The static labels stay as prefixes so
+   log greps keep working; the payload a branch carries (failing slot, typed
+   cause, raw provider body, flow journey) follows the label instead of being
+   dropped. The callback arms read "unexpected" because every caller that
+   renders through here passes callbacks that cannot fail; a lane whose
+   callbacks can fail maps those arms to its own errors first. *)
+let flow_execution_error_detail : _ Exact_output.flow_execution_error -> string =
+  function
+  | Flow_attempt_already_started _ -> "attempt_already_started"
+  | Flow_attempt_start_failed { candidate; cause; evidence } ->
+    "attempt_start_failed: "
+    ^ attempt_start_failure_detail candidate cause evidence
+  | Flow_measurement_start_failed { candidate; cause; evidence } ->
+    "measurement_start_failed: "
+    ^ measurement_start_failure_detail candidate cause evidence
+  | Flow_candidates_exhausted { rejection; evidence } ->
+    "candidates_exhausted: " ^ candidates_exhausted_detail ~rejection ~evidence
+  | Flow_before_measurement_dispatch_callback_failed _
+  | Flow_measurement_terminal_callback_failed _
+  | Flow_before_dispatch_callback_failed _
+  | Flow_before_advance_callback_failed _ -> "unexpected_callback_failure"
+  | Flow_exact_execution_failed { candidate; cause; evidence } ->
+    "agent_core_execution_failed: "
+    ^ execution_failure_detail ~candidate ~cause ~evidence
 ;;

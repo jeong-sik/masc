@@ -313,6 +313,9 @@ let parse_failure ~path json =
      | Some (`String "completion_failed_before_dispatch") ->
        let* _ = exact_assoc ~path [ "kind" ] json in
        Ok Completion_failed_before_dispatch
+     | Some (`String "response_body_deadline_exceeded") ->
+       let* _ = exact_assoc ~path [ "kind" ] json in
+       Ok Response_body_deadline_exceeded
      | Some (`String "serialized_request_refused") ->
        let* fields = exact_assoc ~path [ "kind"; "http_status" ] json in
        let* http_status = int_field ~path fields "http_status" in
@@ -321,6 +324,14 @@ let parse_failure ~path json =
        let* fields = exact_assoc ~path [ "kind"; "http_status" ] json in
        let* http_status = int_field ~path fields "http_status" in
        Ok (Rate_limited { http_status })
+     | Some (`String "overloaded") ->
+       let* fields = exact_assoc ~path [ "kind"; "http_status" ] json in
+       let* http_status = int_field ~path fields "http_status" in
+       Ok (Overloaded { http_status })
+     | Some (`String "server_error") ->
+       let* fields = exact_assoc ~path [ "kind"; "http_status" ] json in
+       let* http_status = int_field ~path fields "http_status" in
+       Ok (Server_error { http_status })
      | Some (`String "invalid_json_output") ->
        let* _ = exact_assoc ~path [ "kind" ] json in
        Ok Invalid_json_output

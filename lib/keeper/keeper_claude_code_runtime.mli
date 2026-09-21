@@ -33,6 +33,22 @@ module For_testing : sig
   (** Deterministic durable identity used when a dynamic-tool host stop arrives
       before Claude emits its terminal result-frame turn id. *)
 
+  val start_seed_projection
+    :  capacity_bytes:int
+    -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
+    -> ?on_model_input_window_observation:
+         (Runtime_model_input_tail_window.window_observation -> unit)
+    -> keeper_name:string
+    -> runtime_id:string
+    -> Agent_core.Types.message list
+    -> (Agent_core.Types.message list, Agent_core.Error.t) result
+  (** The start seed this lane composes: the declared ceiling's cut and the
+      seeded front, whichever names the later atom. Pinned by
+      [test_keeper_claude_code_runtime]. *)
+
+  val unbounded_capacity_bytes : int
+  (** [capacity_bytes] for a runtime that declares no max-prompt-bytes. *)
+
   val recovery_failure_of_client_error
     :  Runtime_claude_code.error
     -> Keeper_official_client_session_store.recovery_failure
@@ -64,6 +80,7 @@ val run :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -81,6 +98,15 @@ val run :
     reading through [Keeper_turn_driver]'s callback of that name; without it
     here, every official-client turn record was written with no window and no
     input composition, which is what [/context] reads.
+
+    [carried_front_seed] names where the start seed begins: the range the
+    newest completed turn record on this history carried, whichever runtime
+    measured it ({!Keeper_official_client_host.carried_start_range}). The
+    declared max-prompt-bytes ceiling still cuts, and the range starts at
+    whichever of the two positions is later, so a turn seeded from a narrow
+    range does not widen it and the ceiling does not undo the seed. A caller
+    that passes none starts a start seed at the oldest atom, inside the
+    ceiling.
 
     [on_transmitted_model_input] fires once per attempt, after the capacity
     window has cut the history and before the prompt is built. Required rather

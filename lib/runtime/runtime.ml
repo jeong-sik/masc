@@ -988,19 +988,6 @@ let exact_lane_supports_cli_tail = function
   | Workspace_curator -> false
 ;;
 
-let verifier_exact_slot_ids_of_lane_decls
-      (decls : Runtime_schema.exact_output_lane_decl list)
-  =
-  match
-    List.find_opt
-      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id verifier_exact_lane_id)
-      decls
-  with
-  | None -> []
-  | Some lane -> lane.slot_ids
-;;
-
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
    twice. The exact registry admits them against the AGENT_CORE catalog, and
    completion-authority judgement admits each one through
@@ -1011,23 +998,42 @@ let verifier_exact_slot_ids_of_lane_decls
    sent judgements to such an id 113 times, one failure each, and the trace
    was a Board post per attempt rather than a config that refused to load.
 
+   [cli_slots] are read the same way, through [verifier_cli_slot_admission].
+   An id that cannot judge is dropped from the lane and reported rather than
+   failing the lane, because first-run setup in v0.35.15-20 wrote exactly such
+   an id and refusing it at load would stop those configs from loading
+   (#37179).
+
    The sibling lanes are deliberately not checked here. They dispatch through
-   the registry alone, so a catalog-only target id is right for them, and
-   [hitl_auto_judge] holds one today. *)
+   the registry alone, so a catalog-only target id is right for their slots,
+   and [hitl_auto_judge] holds one today; their CLI slots answer an
+   unresolved id with a typed error at execution and walk on. *)
 let verifier_exact_slot_references
       (decls : Runtime_schema.exact_output_lane_decl list)
   =
-  List.map
-    (fun id ->
-       { site =
-           Printf.sprintf
-             "[runtime.exact_output_lanes.%s].slots"
-             verifier_exact_lane_id
-       ; shape = List_entry
-       ; id
-       ; domain = Runtime_only
-       })
-    (verifier_exact_slot_ids_of_lane_decls decls)
+  let references key ids =
+    List.map
+      (fun id ->
+         { site =
+             Printf.sprintf
+               "[runtime.exact_output_lanes.%s].%s"
+               verifier_exact_lane_id
+               key
+         ; shape = List_entry
+         ; id
+         ; domain = Runtime_only
+         })
+      ids
+  in
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id verifier_exact_lane_id)
+      decls
+  with
+  | None -> []
+  | Some lane ->
+    references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
@@ -1609,8 +1615,27 @@ let dashboard_runtime_defaults_snapshot () =
    completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
    lane cannot judge (registry not published, lane unconfigured, or no admitted
    slots); there is no fallback to another route. *)
+(* The one answer to "can this runtime judge a completion review?".
+
+   A review is dispatched with [Keeper_required_tools.Required] and the managed
+   verification.system prompt, so the two Agent Core conditions below are not
+   extra caution: [Keeper_required_tools.check_provider] refuses a binding
+   without inline tools, and AGENT_CORE refuses a request carrying a system
+   prompt to a model that takes none ([Unsupported_system_prompt]). Reading
+   them here moves those refusals ahead of the dispatch instead of paying one
+   failed attempt per review to rediscover them (#37382). Both read the same
+   capabilities the dispatch path reads — no caller passes a capability
+   override to either. *)
 let verifier_runtime_admission (runtime : t) =
   match runtime.execution with
+  | Runtime_execution.Agent_core provider
+    when not (Provider_tool_support.provider_supports_inline_tools provider) ->
+    Error (runtime.id ^ ": completion verifier requires a binding that takes inline tools")
+  | Runtime_execution.Agent_core provider
+    when not
+           (Provider_tool_support.agent_core_capabilities_of_config provider)
+             .Llm_provider.Capabilities.supports_system_prompt ->
+    Error (runtime.id ^ ": completion verifier requires a model that takes a system prompt")
   | Runtime_execution.Agent_core _ -> Ok ()
   | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
   | Runtime_execution.Claude_code _ ->
@@ -1619,12 +1644,16 @@ let verifier_runtime_admission (runtime : t) =
     Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
 ;;
 
-let verifier_cli_slot_admission ~runtime_id =
-  let state = runtime_state () in
+(* The one answer to "can this id judge as a [verifier_exact] cli slot?", over
+   an explicit runtime table. The runtime-file writer reads the table it just
+   parsed, dispatch and readiness read the loaded one; both must reach the same
+   verdict, because a slot admitted by one spelling and refused by the other is
+   what #37179 was. *)
+let verifier_cli_slot_admission_in ~runtimes ~lane_ids ~runtime_id =
   (* Verifier slots name direct bindings even when ordinary Keeper routing
      declares a same-named failover lane. Never resolve that lane here. *)
-  match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
-  | None when List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes ->
+  match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
+  | None when List.exists (String.equal runtime_id) lane_ids ->
     Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
   | None -> Error (runtime_id ^ ": verifier CLI runtime is not configured")
   | Some runtime ->
@@ -1635,60 +1664,127 @@ let verifier_cli_slot_admission ~runtime_id =
      | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admission runtime)
 ;;
 
-let verifier_exact_lane_slot_ids () =
-  match Runtime_exact_output_registry.current () with
-  | Error error ->
-    Error (Runtime_exact_output_registry.publication_error_to_string error)
-  | Ok registry ->
-    (match
-       Runtime_exact_output_registry.resolve_lane
-         registry
-         ~lane_id:verifier_exact_lane_id
-     with
-     | Ok { selected_slots; cli_slots } ->
-       let rec admit = function
-         | [] -> Ok ()
-         | runtime_id :: rest ->
-           Result.bind (verifier_cli_slot_admission ~runtime_id) (fun () -> admit rest)
-       in
-       Result.map (fun () ->
-         List.map
-            (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-            selected_slots
-          @ cli_slots) (admit cli_slots)
-     | Error error ->
-       Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
-;;
-
-(* Readiness uses the same configured direct-runtime admission as dispatch. *)
-let verifier_cli_slot_rejection slot_id =
-  match verifier_cli_slot_admission ~runtime_id:slot_id with
-  | Ok () -> None | Error detail -> Some detail
-;;
-
-let verifier_api_slot_ready slot_id =
+let verifier_cli_slot_admission ~runtime_id =
   let state = runtime_state () in
-  let candidates = [slot_id] in
-  List.exists (fun id ->
-    match List.find_opt (fun (runtime : t) -> runtime.id = id) state.runtimes with
-    | None -> false
-    | Some runtime ->
-      match runtime.execution with
-      | Runtime_execution.Agent_core provider ->
-        (* The review always sends the managed verification.system prompt, and
-           an exact-output request carrying a system prompt to a model that
-           does not take one is refused as Unsupported_system_prompt. *)
-        Provider_tool_support.provider_supports_inline_tools provider
-        && (Provider_tool_support.agent_core_capabilities_of_config provider)
-             .Llm_provider.Capabilities.supports_system_prompt
-      | Runtime_execution.Claude_code _
-      | Runtime_execution.Codex_app_server _
-      | Runtime_execution.Antigravity_cli _ ->
-        Runtime_execution.supports_native_none runtime.execution && runtime.model.tools_support)
-    candidates
+  verifier_cli_slot_admission_in
+    ~runtimes:state.runtimes
+    ~lane_ids:(List.map (fun (lane : Runtime_lane.t) -> lane.id) state.lanes)
+    ~runtime_id
 ;;
 
-let verifier_exact_lane_readiness () =
+(* One declared [verifier_exact] slot the lane cannot judge through.
+   [position] counts from 1 across the whole lane declaration, catalog slots
+   first, so it names the same line of runtime.toml as the registry's own
+   rejected-slot report. *)
+type verifier_slot_rejection =
+  { position : int
+  ; slot_id : string
+  ; detail : string
+  }
+
+type verifier_exact_lane_slots =
+  { admitted_catalog_slot_ids : string list
+  ; admitted_cli_slot_ids : string list
+  ; slot_rejections : verifier_slot_rejection list
+  }
+
+let verifier_slot_rejection_to_string (rejection : verifier_slot_rejection) =
+  Printf.sprintf
+    "slot %d (%S) cannot judge: %s"
+    rejection.position
+    rejection.slot_id
+    rejection.detail
+;;
+
+(* A catalog slot of this lane names a runtime id, because judgement dispatches
+   that id alone ([verifier_exact_slot_admission]); the same id must also be an
+   exact-output target, which the registry answers separately. A cli slot must
+   additionally be an official client, which is why the two entry points differ
+   while the verdict behind them does not. *)
+let verifier_catalog_slot_admission ~runtime_id =
+  match
+    List.find_opt
+      (fun (runtime : t) -> String.equal runtime.id runtime_id)
+      (runtime_state ()).runtimes
+  with
+  | None -> Error (runtime_id ^ ": verifier slot names no configured runtime")
+  | Some runtime -> verifier_runtime_admission runtime
+;;
+
+(* Walk the lane exactly as runtime.toml declared it and split it into the ids
+   that can judge and the ones that cannot. Positions come from the declaration
+   rather than from the admitted lists, so a rejected sibling does not shift
+   the numbers a report prints.
+
+   [registry_admitted_catalog_slots] are the catalog slots publication kept.
+   A catalog slot the registry itself dropped is skipped here rather than
+   rejected again: the boot report already names it, with the cause this
+   module cannot see (#37179 reports the runtime-table cause only).
+
+   Before #37382 the catalog slots were handed out with no admission check at
+   all, so a binding that takes no inline tools or no system prompt was
+   dispatched and refused one attempt later, per review, forever. *)
+type verifier_slot_verdict =
+  | Slot_admitted
+  | Slot_reported_by_publication
+  | Slot_rejected of string
+
+let verifier_exact_lane_admission
+      ~(declared : Runtime_schema.exact_output_lane_decl)
+      ~registry_admitted_catalog_slots
+  =
+  let rec walk position admitted rejected classify = function
+    | [] -> List.rev admitted, List.rev rejected, position
+    | slot_id :: rest ->
+      (match classify slot_id with
+       | Slot_admitted -> walk (position + 1) (slot_id :: admitted) rejected classify rest
+       | Slot_reported_by_publication ->
+         walk (position + 1) admitted rejected classify rest
+       | Slot_rejected detail ->
+         walk
+           (position + 1)
+           admitted
+           ({ position; slot_id; detail } :: rejected)
+           classify
+           rest)
+  in
+  let admitted_catalog_slot_ids, catalog_rejections, next_position =
+    walk
+      1
+      []
+      []
+      (fun slot_id ->
+         if not (List.exists (String.equal slot_id) registry_admitted_catalog_slots)
+         then Slot_reported_by_publication
+         else (
+           match verifier_catalog_slot_admission ~runtime_id:slot_id with
+           | Ok () -> Slot_admitted
+           | Error detail -> Slot_rejected detail))
+      declared.slot_ids
+  in
+  let admitted_cli_slot_ids, cli_rejections, _ =
+    walk
+      next_position
+      []
+      []
+      (fun slot_id ->
+         match verifier_cli_slot_admission ~runtime_id:slot_id with
+         | Ok () -> Slot_admitted
+         | Error detail -> Slot_rejected detail)
+      declared.cli_slot_ids
+  in
+  { admitted_catalog_slot_ids
+  ; admitted_cli_slot_ids
+  ; slot_rejections = catalog_rejections @ cli_rejections
+  }
+;;
+
+(* The published lane split into what can judge and what cannot. The registry
+   carries the ids verbatim because only [Runtime] holds the runtime table that
+   answers admission, and that table changes only through a reload that
+   republishes the registry — so this stays a projection of the declaration
+   rather than a second copy of it. *)
+let verifier_exact_lane_resolution () =
   match Runtime_exact_output_registry.current () with
   | Error error ->
     Error (Runtime_exact_output_registry.publication_error_to_string error)
@@ -1700,27 +1796,65 @@ let verifier_exact_lane_readiness () =
      with
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error)
-     | Ok { selected_slots; cli_slots } ->
-       let dispatchable, rejected =
-         List.fold_left
-           (fun (dispatchable, rejected) slot_id ->
-              match verifier_cli_slot_rejection slot_id with
-              | None -> dispatchable + 1, rejected
-              | Some detail -> dispatchable, detail :: rejected)
-           (0, [])
-           cli_slots
-       in
-       if List.exists (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-            verifier_api_slot_ready slot.slot_id) selected_slots || dispatchable > 0
-       then Ok ()
-       else
-         Error
-           (Printf.sprintf
-              "verifier_exact has no dispatchable slot: %s"
-              (String.concat "; "
-                (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-                   Printf.sprintf "%S has no materialized candidate with required tools and a system prompt" slot.slot_id)
-                   selected_slots @ List.rev rejected))))
+     | Ok { selected_slots; cli_slots = _ } ->
+       (match
+          Runtime_exact_output_registry.declared_lane
+            registry
+            ~lane_id:verifier_exact_lane_id
+        with
+        | None ->
+          (* [resolve_lane] answered [Ok], so the registry admitted this lane
+             from a declaration it still holds. *)
+          Error
+            (Runtime_exact_output_registry.lane_resolution_error_to_string
+               (Runtime_exact_output_registry.Exact_lane_unconfigured
+                  { lane_id = verifier_exact_lane_id }))
+        | Some declared ->
+          Ok
+            (verifier_exact_lane_admission
+               ~declared
+               ~registry_admitted_catalog_slots:
+                 (List.map
+                    (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                       slot.slot_id)
+                    selected_slots))))
+;;
+
+let verifier_exact_lane_slot_ids () =
+  Result.bind (verifier_exact_lane_resolution ()) (fun lane ->
+    match
+      lane.admitted_catalog_slot_ids @ lane.admitted_cli_slot_ids, lane.slot_rejections
+    with
+    (* [resolve_lane] answers [Ok] only when the lane declares at least one
+       slot, so nothing admitted means every declared slot was rejected —
+       either by publication or by the runtime table. *)
+    | [], rejections ->
+      Error
+        (Printf.sprintf
+           "verifier_exact has no slot that can judge: %s"
+           (String.concat "; " (List.map verifier_slot_rejection_to_string rejections)))
+    | (_ :: _ as slot_ids), _ -> Ok slot_ids)
+;;
+
+(* [Ok] carries the declared slots this lane cannot judge through, so a caller
+   that reports readiness can also say why the lane is short of the
+   declaration. An empty list means the whole declaration is usable.
+
+   Readiness and {!verifier_exact_lane_slot_ids} now answer from one
+   admission. They used to disagree — readiness applied a second, stricter
+   predicate to catalog slots — and that disagreement is what let the
+   completion authority start on a lane that refused every review. *)
+let verifier_exact_lane_readiness () =
+  Result.bind (verifier_exact_lane_resolution ()) (fun lane ->
+    match lane.admitted_catalog_slot_ids, lane.admitted_cli_slot_ids with
+    | [], [] ->
+      Error
+        (Printf.sprintf
+           "verifier_exact has no dispatchable slot: %s"
+           (String.concat
+              "; "
+              (List.map verifier_slot_rejection_to_string lane.slot_rejections)))
+    | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
 (* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
@@ -3004,19 +3138,77 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           if bind_imp then update_runtime_assignment_text next ~keeper_name:"imp" ~runtime_id
           else next
         in
+        (* [verifier_exact] dispatches each slot as a judge, so a slot it cannot
+           judge through is written once and then refuses every completion
+           review (#37179). Setup writes this lane only with what it can
+           actually run: the chosen runtime when that runtime can judge —
+           pointing the lanes at the selected runtime is what [--setup-lanes]
+           means — otherwise whatever the file already declares that still
+           can, because there is nothing to point it at. The
+           declared cli slots are kept for the same reason the declared HTTP
+           slots are — [--setup-lanes] also runs against an operator's existing
+           config through [Runtime_setup_batch], where erasing them would
+           delete the only working judge.
+
+           With nothing left the lane is not written at all: it is not a
+           mandatory lane, and a declared lane with neither transport is a
+           publication error that would stop the whole registry from loading. *)
+        let declared_verifier_lane =
+          List.find_opt
+            (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+               String.equal lane.id verifier_exact_lane_id)
+            config.exact_output_lane_decls
+        in
+        let declared_lane_ids =
+          List.map (fun (lane : Runtime_schema.lane_decl) -> lane.id) config.lane_decls
+        in
+        let judgeable_declared_verifier_slots =
+          match declared_verifier_lane with
+          | None -> []
+          | Some lane ->
+            List.filter
+              (fun slot_id ->
+                 match
+                   List.find_opt
+                     (fun (candidate : t) -> String.equal candidate.id slot_id)
+                     runtimes
+                 with
+                 | None -> false
+                 | Some candidate -> Result.is_ok (verifier_runtime_admission candidate))
+              lane.slot_ids
+        in
+        let judgeable_declared_verifier_cli_slots =
+          match declared_verifier_lane with
+          | None -> []
+          | Some lane ->
+            List.filter
+              (fun slot_id ->
+                 Result.is_ok
+                   (verifier_cli_slot_admission_in
+                      ~runtimes
+                      ~lane_ids:declared_lane_ids
+                      ~runtime_id:slot_id))
+              lane.cli_slot_ids
+        in
+        let lane_slot_values lane =
+          match lane, verifier_runtime_admission runtime with
+          | Verifier, Ok () -> slots, cli_slots
+          | Verifier, Error _ ->
+            judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
+          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator), _ ->
+            slots, (if exact_lane_supports_cli_tail lane then cli_slots else [])
+        in
         let next =
           List.fold_left
             (fun content lane ->
               let lane_id = exact_lane_id lane in
               let path = "runtime.exact_output_lanes." ^ lane_id in
-              let lane_cli_slots =
-                if exact_lane_supports_cli_tail lane then cli_slots else []
-              in
-              if slots = [] && lane_cli_slots = []
+              let lane_slots, lane_cli_slots = lane_slot_values lane in
+              if lane_slots = [] && lane_cli_slots = []
               then content
               else
                 let content =
-                  Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots
+                  Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane_slots
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
@@ -3177,28 +3369,41 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
 ;;
 
 (* Exact-output lanes name their walk order in [slots]; the routing API edits
-   them the same way conversation lanes edit [candidates]. *)
-let exact_lane_table_path lane_name =
-  let bare =
-    String.for_all
-      (function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false)
-      lane_name
-  in
-  if bare && not (String.equal lane_name "")
-  then Printf.sprintf "runtime.exact_output_lanes.%s" lane_name
-  else
-    (* [escape_string] escapes the contents; the quotes are the caller's. *)
-    Printf.sprintf "runtime.exact_output_lanes.\"%s\"" (Toml_line_editor.escape_string lane_name)
+   them the same way conversation lanes edit [candidates]. Every exact lane id
+   is a bare key. *)
+let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ exact_lane_id lane
+
+let exact_lane_decl (config : Runtime_schema.config) lane =
+  List.find_opt
+    (fun (decl : Runtime_schema.exact_output_lane_decl) ->
+       String.equal decl.id (exact_lane_id lane))
+    config.exact_output_lane_decls
 ;;
 
-let set_exact_output_lane_slots ?runtime_config_path ~lane_name ~slots () =
-  let lane_name = String.trim lane_name in
+(* The line editor writes an exact lane as its own
+   [runtime.exact_output_lanes.<id>] table. A lane the file declares any other
+   way -- inline under [runtime.exact_output_lanes], or through dotted keys --
+   has no such header, and the editor would add one, which declares the lane a
+   second time and fails the whole file. A lane the file does not declare yet
+   gets its table. *)
+let exact_lane_editable ~content (config : Runtime_schema.config) lane =
+  let path = exact_lane_table_path lane in
+  let lines, _trailing_newline = Toml_line_editor.split_lines content in
+  match exact_lane_decl config lane with
+  | None -> Ok ()
+  | Some _ when List.exists (Toml_line_editor.is_table ~path) lines -> Ok ()
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "exact-output lane %s is not written as its own [%s] table, so it cannot be \
+          edited here"
+         (exact_lane_id lane)
+         path)
+;;
+
+let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
   let slots = List.map String.trim slots in
-  if String.equal lane_name ""
-  then Error "exact-output lane name must not be empty"
-  else if contains_newline lane_name
-  then Error "exact-output lane name must not contain newlines"
-  else if slots = []
+  if slots = []
   then
     (* Mandatory exact lanes fail the boot fail-closed without a slot; a lane
        that resolves to nothing is not the edit an operator is making. *)
@@ -3207,20 +3412,61 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane_name ~slots () =
   then Error "slots must not contain empty entries"
   else if List.exists contains_newline slots
   then Error "slots must not contain newlines"
-  else (
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* locked =
-      with_runtime_config_write_lock path (fun () ->
-        let* content = load_file_result path in
-        let next =
-          Toml_line_editor.edit_table_multiline_array
-            content
-            ~path:(exact_lane_table_path lane_name)
-            ~key:"slots"
-            ~values:slots
-        in
-        commit_runtime_config_text ~path next)
-    in
-    let* receipt = locked.value in
-    Ok (attach_lock_warnings locked.warnings receipt))
+  else
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let* () = exact_lane_editable ~content config lane in
+      let cli_slots =
+        match exact_lane_decl config lane with
+        | Some decl -> decl.cli_slot_ids
+        | None -> []
+      in
+      (* Checked here, not left to the registry: before the registry is
+         published the commit writes the file without it, and the next
+         publication then fails for every lane. *)
+      match List.find_opt (fun slot -> List.mem slot cli_slots) slots with
+      | Some slot ->
+        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (exact_lane_id lane))
+      | None ->
+        Ok
+          (Toml_line_editor.edit_table_multiline_array
+             content
+             ~path:(exact_lane_table_path lane)
+             ~key:"slots"
+             ~values:slots))
+;;
+
+(* The order an operator extends is the one the file declares. The standalone
+   lane projection shows the slots the registry admitted, which leaves out a
+   declared slot the catalog rejected; a whole order rebuilt from that view and
+   written with [set_exact_output_lane_slots] deleted every such slot. Reading
+   the declaration under the write lock keeps it, and a second writer's slot
+   written in between is read too. An id the lane already declares, as a slot
+   or as a CLI slot, is refused by name: the registry would refuse the
+   duplicate too, but only as a lane it cannot publish. *)
+let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
+  let slot = String.trim slot in
+  let lane_id = exact_lane_id lane in
+  if String.equal slot ""
+  then Error "slot must not be empty"
+  else if contains_newline slot
+  then Error "slot must not contain newlines"
+  else
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      let* () = exact_lane_editable ~content config lane in
+      let slots, cli_slots =
+        match exact_lane_decl config lane with
+        | Some decl -> decl.slot_ids, decl.cli_slot_ids
+        | None -> [], []
+      in
+      if List.exists (String.equal slot) slots
+      then Error (Printf.sprintf "%s is already a slot of %s" slot lane_id)
+      else if List.exists (String.equal slot) cli_slots
+      then Error (Printf.sprintf "%s is already a CLI slot of %s" slot lane_id)
+      else
+        Ok
+          (Toml_line_editor.edit_table_multiline_array
+             content
+             ~path:(exact_lane_table_path lane)
+             ~key:"slots"
+             ~values:(slots @ [ slot ])))
 ;;

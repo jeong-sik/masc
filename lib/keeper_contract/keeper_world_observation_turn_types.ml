@@ -73,6 +73,7 @@ type turn_reason =
   | Task_outcome_pending
   | Task_cancellation_pending
   | Workspace_message_pending
+  | Deferred_runtime_lane_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -107,6 +108,7 @@ let turn_reason_to_string = function
   | Task_outcome_pending -> "task_outcome_pending"
   | Task_cancellation_pending -> "task_cancellation_pending"
   | Workspace_message_pending -> "workspace_message_pending"
+  | Deferred_runtime_lane_pending -> "deferred_runtime_lane_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
   | Task_backlog _ -> "task_backlog"

@@ -509,7 +509,7 @@ let run_runtime_evidence ?fixture_dir () =
           Alcotest.(check int) "actual successful HTTP status survives decoding failure" 200
             (member "status" refusal |> Yojson.Safe.Util.to_int);
           let original_body = Option.get (invalid_response_body scenario) in
-          let body = member "body" failure in
+          let body = member "body" refusal in
           let restored = match body with
             | `String body -> body
             | body ->
@@ -523,9 +523,9 @@ let run_runtime_evidence ?fixture_dir () =
           Alcotest.(check string) "the exact returned body survives durable replay"
             original_body restored;
           Alcotest.(check string) "failure destination is retained for all consumers"
-            displayed_jev_uri (member "destination_uri" failure |> string);
+            displayed_jev_uri (member "destination_uri" refusal |> string);
           Alcotest.(check bool) "typed failure diagnostic is retained" true
-            (String.length (member "detail" failure |> string) > 0);
+            (String.length (member "detail" refusal |> string) > 0);
           List.iter (fun key -> check_json ("decode failure does not invent " ^ key)
             `Null (member key evaluation)) [ "model"; "answers"; "request_body_sha256" ]
         | Invalid_answer_run ->

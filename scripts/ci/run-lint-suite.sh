@@ -67,6 +67,12 @@ blocking_lints() {
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
+  # The tag workflow publishes this section as the release page body
+  # (scripts/ci/changelog-section.py). Checking it on every PR means a version
+  # bump without a section -- or with two -- fails here, before a tag does.
+  run_lint "CHANGELOG has one section for this version" \
+    python3 scripts/ci/changelog-section.py \
+    "$(sed -n 's/^(version \([0-9.]*\))$/\1/p' dune-project)" CHANGELOG.md /dev/null
   run_lint "Logging consistency" bash scripts/ci/check-logging-consistency.sh
   run_lint "Issue taxonomy parser and reconciliation" node scripts/test-issue-taxonomy-core.cjs
   run_self_test_when_changed "OCaml test suite reporter self-test" \

@@ -42,6 +42,18 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
+**Cluster**
+: `.masc/` 상태 디렉터리 레이아웃을 가르는 이름 범위(`MASC_CLUSTER_NAME`). 기본값은
+  `default`이며 그때 경로는 `<base>/.masc/`다. 다른 이름은
+  `<base>/.masc/clusters/<sanitized>/`를 쓴다. TUI 개요의 `Cluster:` 행이 이 값을
+  보여준다. Turn Boundary와 Read Position 같은 runtime 좌표는 선택한 cluster의
+  디렉터리에만 의미가 있고, 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
+  Memory OS와 Working Context는 cluster가 아니라 Keeper 이름에 귀속되므로 cluster
+  간에 공유된다.
+  → [masc_root_dir_from](../../lib/workspace/workspace_utils_paths_backend.mli),
+  [backend_config_for](../../lib/workspace/workspace_utils_backend_setup.mli),
+  [cluster_name](../../lib/config/env_config_core.mli)
+
 **Workspace Heartbeat**
 : `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
   `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
@@ -166,7 +178,9 @@ status: reference
   Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
   `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
   판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
-  구간의 소유자다.
+  구간의 소유자다. `AwaitingVerification`은 `Held_pending_verdict`로 claim에
+  응답하므로 Keeper가 다시 맡을 수 없다. 완료·취소 verdict는 Keeper action이
+  아니라 system LLM 또는 인증된 운영자의 authority 경계에서만 적용된다.
 
 **Evidence**
 : 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
@@ -177,7 +191,10 @@ status: reference
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
   `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
-  `Completed`가 된다(`lib/goal/goal_phase.mli`).
+  `Completed`가 된다(`lib/goal/goal_phase.mli`). `Verifying` 중에도 연결된
+  Task는 계속 진행할 수 있다. 완료 verdict는 verifier가 기록하고, 사람의
+  확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
+  `admits_self_directed_progress`가 이 경계를 정의한다.
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와

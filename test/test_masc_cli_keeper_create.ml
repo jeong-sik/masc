@@ -29,6 +29,7 @@ let minimal_flags : C.flags =
   ; microvm_backend = None
   ; remote_endpoint = None
   ; mention_targets = []
+  ; board_interests = []
   ; skills = None
   ; max_context_override = None
   ; activation_mode = None
@@ -43,6 +44,7 @@ let every_flag : C.flags =
   ; microvm_backend = None
   ; remote_endpoint = Some "gondolin"
   ; mention_targets = [ "scout" ]
+  ; board_interests = [ "web research" ]
   ; skills = Some [ "web-search" ]
   ; max_context_override = Some 120_000
   ; activation_mode = Some "on_demand"
@@ -152,6 +154,16 @@ let test_declaration_keys_are_all_known_turn_up_args () =
             (String.equal key)
             Masc.Keeper_turn_up_args.known_turn_up_args))
     keys
+;;
+
+let test_declaration_carries_board_interests () =
+  let json = declaration_exn "Board interests" every_flag in
+  check
+    bool
+    "semantic interests reach keeper_up"
+    true
+    (field "Board interests" "board_interests" json
+     = Some (`List [ `String "web research" ]))
 ;;
 
 (* The parity claim, made enforceable: nothing the editor form can say is out
@@ -371,6 +383,8 @@ let () =
             test_declaration_keys_are_all_known_turn_up_args
         ; test_case "explicit backend reaches the declaration" `Quick
             test_declaration_carries_explicit_microvm_backend
+        ; test_case "Board interests reach the declaration" `Quick
+            test_declaration_carries_board_interests
         ; test_case
             "every creation stem field is reachable by flag"
             `Quick

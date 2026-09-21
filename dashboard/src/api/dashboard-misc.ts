@@ -11,7 +11,7 @@ import { asNumber, isRecord } from '../components/common/normalize'
 export type KeeperMemoryHealthAlertCode =
   | 'snapshot_read_error'
   | 'source_snapshot_read_error'
-  | 'librarian_lane_busy'
+  | 'librarian_stopped'
   | 'librarian_failures'
   | 'librarian_starvation'
   | 'vision_ingest_errors'
@@ -21,7 +21,7 @@ export type KeeperMemoryHealthAlertSeverity = 'warn' | 'error'
 export type KeeperMemoryHealthAlertTarget =
   | 'snapshot_read_error'
   | 'source_snapshot_read_error'
-  | 'librarian_lane_busy'
+  | 'librarian_stopped'
   | 'librarian_failures'
   | 'librarian_starvation'
   | 'vision_ingest_errors'
@@ -35,7 +35,7 @@ const KEEPER_MEMORY_HEALTH_ALERT_SEVERITY: Record<
 > = {
   snapshot_read_error: 'warn',
   source_snapshot_read_error: 'warn',
-  librarian_lane_busy: 'warn',
+  librarian_stopped: 'warn',
   librarian_failures: 'warn',
   librarian_starvation: 'error',
   vision_ingest_errors: 'warn',
@@ -54,6 +54,27 @@ export interface KeeperMemoryHealthVisionErrorReason {
   count: number
 }
 
+// RFC librarian-lifecycle §4.9. What the keeper's Librarian loop measured
+// when its last pass ended. A null count is "not measured", not zero: the
+// loop is not running yet, or it could not place the read position.
+export type KeeperMemoryHealthLibrarianState =
+  | 'off'
+  | 'lane_unconfigured'
+  | 'drained'
+  | 'not_committed'
+  | 'stopped'
+  | 'raised'
+
+export interface KeeperMemoryHealthLibrarian {
+  state: KeeperMemoryHealthLibrarianState | null
+  detail: string | null
+  measured_at: number | null
+  unread_atom_turns: number | null
+  unread_official_turns: number | null
+  last_success_at: number | null
+  last_failure_kind: string | null
+}
+
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
@@ -66,7 +87,7 @@ export interface KeeperMemoryHealthKeeperEntry {
   added: number
   removed: number
   snapshot_present: boolean
-  librarian_lane_busy: number
+  librarian: KeeperMemoryHealthLibrarian
   librarian_failures: number
   vision_ingest_errors: number
   vision_ingest_error_reasons: KeeperMemoryHealthVisionErrorReason[]
@@ -81,9 +102,8 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v4'
+  schema: 'keeper.memory_os.current_health.v5'
   generated_at: number
-  cadence_counter_entries: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
     facts: number
@@ -96,7 +116,7 @@ export interface KeeperMemoryHealthResponse {
     source_facts: number
     source_invalidations: number
     source_snapshot_bytes: number
-    librarian_lane_busy: number
+    librarian_unread_turns: number | null
     librarian_failures: number
     vision_ingest_errors: number
     read_errors: number
@@ -109,7 +129,7 @@ export interface KeeperMemoryHealthResponse {
     keepers_with_alerts: number
     snapshot_read_error_keepers: number
     source_snapshot_read_error_keepers: number
-    librarian_lane_busy_keepers: number
+    librarian_stopped_keepers: number
     librarian_starving_keepers: number
   }
 }
@@ -144,7 +164,7 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
   const code =
     raw.code === 'snapshot_read_error'
     || raw.code === 'source_snapshot_read_error'
-    || raw.code === 'librarian_lane_busy'
+    || raw.code === 'librarian_stopped'
     || raw.code === 'librarian_failures'
     || raw.code === 'librarian_starvation'
     || raw.code === 'vision_ingest_errors'
@@ -153,7 +173,7 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
   const target =
     raw.target === 'snapshot_read_error'
     || raw.target === 'source_snapshot_read_error'
-    || raw.target === 'librarian_lane_busy'
+    || raw.target === 'librarian_stopped'
     || raw.target === 'librarian_failures'
     || raw.target === 'librarian_starvation'
     || raw.target === 'vision_ingest_errors'
@@ -185,6 +205,66 @@ function decodeVisionErrorReason(raw: unknown): KeeperMemoryHealthVisionErrorRea
   return reason === null || count === null || count === 0 ? null : { reason, count }
 }
 
+const KEEPER_MEMORY_HEALTH_LIBRARIAN_STATES: readonly KeeperMemoryHealthLibrarianState[] = [
+  'off',
+  'lane_unconfigured',
+  'drained',
+  'not_committed',
+  'stopped',
+  'raised',
+]
+
+function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibrarian | null {
+  if (!isRecord(raw) || !exactKeys(raw, [
+    'state',
+    'detail',
+    'measured_at',
+    'unread_atom_turns',
+    'unread_official_turns',
+    'last_success_at',
+    'last_failure_kind',
+  ])) return null
+  const state = raw.state === null
+    ? null
+    : KEEPER_MEMORY_HEALTH_LIBRARIAN_STATES.find(known => known === raw.state) ?? null
+  if (raw.state !== null && state === null) return null
+  const detail = raw.detail === null ? null : nonEmptyString(raw.detail)
+  if (raw.detail !== null && detail === null) return null
+  const measured_at = raw.measured_at === null ? null : finiteNumber(raw.measured_at)
+  if (raw.measured_at !== null && (measured_at === null || measured_at < 0)) return null
+  const unread_atom_turns = raw.unread_atom_turns === null
+    ? null
+    : nonNegativeInteger(raw.unread_atom_turns)
+  if (raw.unread_atom_turns !== null && unread_atom_turns === null) return null
+  const unread_official_turns = raw.unread_official_turns === null
+    ? null
+    : nonNegativeInteger(raw.unread_official_turns)
+  if (raw.unread_official_turns !== null && unread_official_turns === null) return null
+  const last_success_at = raw.last_success_at === null
+    ? null
+    : finiteNumber(raw.last_success_at)
+  if (raw.last_success_at !== null && (last_success_at === null || last_success_at < 0)) {
+    return null
+  }
+  const last_failure_kind = raw.last_failure_kind === null
+    ? null
+    : nonEmptyString(raw.last_failure_kind)
+  if (raw.last_failure_kind !== null && last_failure_kind === null) return null
+  // A count with no time it was taken at has nothing to say how old it is.
+  if (measured_at === null && (unread_atom_turns !== null || unread_official_turns !== null)) {
+    return null
+  }
+  return {
+    state,
+    detail,
+    measured_at,
+    unread_atom_turns,
+    unread_official_turns,
+    last_success_at,
+    last_failure_kind,
+  }
+}
+
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
   if (!isRecord(raw) || !exactKeys(raw, [
     'keeper_id',
@@ -198,7 +278,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'added',
     'removed',
     'snapshot_present',
-    'librarian_lane_busy',
+    'librarian',
     'librarian_failures',
     'vision_ingest_errors',
     'vision_ingest_error_reasons',
@@ -224,7 +304,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const snapshot_present = typeof raw.snapshot_present === 'boolean'
     ? raw.snapshot_present
     : null
-  const librarian_lane_busy = nonNegativeInteger(raw.librarian_lane_busy)
+  const librarian = decodeKeeperMemoryHealthLibrarian(raw.librarian)
   const librarian_failures = nonNegativeInteger(raw.librarian_failures)
   const vision_ingest_errors = nonNegativeInteger(raw.vision_ingest_errors)
   const vision_ingest_error_reasons = Array.isArray(raw.vision_ingest_error_reasons)
@@ -259,7 +339,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || (raw.updated_at !== null && updated_at === null)
     || (updated_at !== null && updated_at < 0)
     || (updated_at !== null) !== snapshot_present
-    || librarian_lane_busy === null
+    || librarian === null
     || librarian_failures === null
     || vision_ingest_errors === null
     || vision_ingest_error_reasons === null
@@ -291,7 +371,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     added,
     removed,
     snapshot_present,
-    librarian_lane_busy,
+    librarian,
     librarian_failures,
     vision_ingest_errors,
     vision_ingest_error_reasons: visionReasons,
@@ -310,20 +390,17 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
   if (!isRecord(raw) || !exactKeys(raw, [
     'schema',
     'generated_at',
-    'cadence_counter_entries',
     'keepers',
     'totals',
     'alert_summary',
   ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v4') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v5') return null
   const generated_at = finiteNumber(raw.generated_at)
-  const cadence_counter_entries = nonNegativeInteger(raw.cadence_counter_entries)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)
     : null
   if (
     generated_at === null
-    || cadence_counter_entries === null
     || keepers === null
     || keepers.some(entry => entry === null)
     || !isRecord(raw.totals)
@@ -345,7 +422,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'source_facts',
     'source_invalidations',
     'source_snapshot_bytes',
-    'librarian_lane_busy',
+    'librarian_unread_turns',
     'librarian_failures',
     'vision_ingest_errors',
     'read_errors',
@@ -362,7 +439,11 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     source_facts: sum(entry => entry.source_facts),
     source_invalidations: sum(entry => entry.source_invalidations),
     source_snapshot_bytes: sum(entry => entry.source_snapshot_bytes),
-    librarian_lane_busy: sum(entry => entry.librarian_lane_busy),
+    librarian_unread_turns: entries.reduce<number | null>((total, entry) => {
+      const { unread_atom_turns: atoms, unread_official_turns: official } = entry.librarian
+      return total === null || atoms === null || official === null
+        ? null : total + atoms + official
+    }, 0),
     librarian_failures: sum(entry => entry.librarian_failures),
     vision_ingest_errors: sum(entry => entry.vision_ingest_errors),
     read_errors: sum(entry => entry.read_error === null ? 0 : 1),
@@ -377,7 +458,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'keepers_with_alerts',
     'snapshot_read_error_keepers',
     'source_snapshot_read_error_keepers',
-    'librarian_lane_busy_keepers',
+    'librarian_stopped_keepers',
     'librarian_starving_keepers',
   ])) return null
   const totalAlerts = sum(entry => entry.alerts.length)
@@ -391,7 +472,13 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     snapshot_read_error_keepers: sum(entry => entry.read_error === null ? 0 : 1),
     source_snapshot_read_error_keepers: sum(entry =>
       entry.source_read_error === null ? 0 : 1),
-    librarian_lane_busy_keepers: sum(entry => entry.librarian_lane_busy > 0 ? 1 : 0),
+    librarian_stopped_keepers: sum(entry =>
+      entry.librarian.state === 'lane_unconfigured'
+      || entry.librarian.state === 'not_committed'
+      || entry.librarian.state === 'stopped'
+      || entry.librarian.state === 'raised'
+        ? 1
+        : 0),
     librarian_starving_keepers: sum(entry =>
       entry.librarian_failures > 0 && !entry.snapshot_present ? 1 : 0),
   }
@@ -402,7 +489,6 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
   return {
     schema: raw.schema,
     generated_at,
-    cadence_counter_entries,
     keepers: entries,
     totals: expectedTotals,
     alert_summary: expectedAlertSummary,

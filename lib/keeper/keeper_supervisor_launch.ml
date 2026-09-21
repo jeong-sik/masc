@@ -74,13 +74,9 @@ let launch_supervised_fiber_body
   then (* test no-op launch: nothing forked, but not a fork rejection *) Ok ()
   else (
     let lifecycle_result = Atomic.make None in
-    let finish_lifecycle boundary terminalize =
+    let finish_lifecycle terminalize =
       let result =
-        Keeper_keepalive_launch_transaction.finish_lifecycle
-          ~boundary
-          ~base_path
-          ~keeper_name:meta.name
-          ~terminalize
+        Keeper_keepalive_launch_transaction.finish_lifecycle ~terminalize
       in
       Atomic.set lifecycle_result (Some result);
       result
@@ -128,9 +124,8 @@ let launch_supervised_fiber_body
             match Atomic.get lifecycle_result with
             | Some result -> result
             | None ->
-              finish_lifecycle
-                Keeper_keepalive_launch_transaction.Unexpected
-                (fun () -> Error "supervisor lane exited without terminal disposition"))
+              finish_lifecycle (fun () ->
+                Error "supervisor lane exited without terminal disposition"))
       with
       | Ok () -> Ok ()
       | Error error ->
@@ -335,12 +330,8 @@ let launch_supervised_fiber_body
                    ();
                Ok ()
              in
-             (* See terminalize_normal: it logs and publishes every failure. *)
-             ignore
-               (finish_lifecycle
-                  Keeper_keepalive_launch_transaction.Graceful
-                  terminalize_normal
-                : (unit, string) result)
+             (* See [fork_body]: [finish_lifecycle] stores this result for lane cleanup. *)
+             ignore (finish_lifecycle terminalize_normal : (unit, string) result)
            with
            | Eio.Cancel.Cancelled cause ->
              (match Keeper_lane.classify_cancellation_cause cause with
@@ -409,12 +400,8 @@ let launch_supervised_fiber_body
                  ();
              Ok ()
              in
-             (* See terminalize_crash: it logs and publishes every failure. *)
-             ignore
-               (finish_lifecycle
-                  Keeper_keepalive_launch_transaction.Unexpected
-                  terminalize_crash
-                : (unit, string) result))
+             (* See [fork_body]: [finish_lifecycle] stores this result for lane cleanup. *)
+             ignore (finish_lifecycle terminalize_crash : (unit, string) result))
         ~finally:(fun () ->
           (* Finally runs best-effort. Cleanup is advisory and the
            state-machine events already fired on the body's happy and error
@@ -431,13 +418,6 @@ let launch_supervised_fiber_body
             Keeper_turn_attempt_observer.reset_keeper ~base_path ~keeper:meta.name;
             if not (Atomic.get resolved)
             then (
-              let boundary =
-                if
-                  Shutdown.is_shutting_down_global ()
-                  || Atomic.get cancelled_by_shutdown_request
-                then Keeper_keepalive_launch_transaction.Graceful
-                else Keeper_keepalive_launch_transaction.Unexpected
-              in
               let terminalize_unresolved () =
               if Shutdown.is_shutting_down_global ()
               then (
@@ -583,8 +563,7 @@ let launch_supervised_fiber_body
                 Ok ()
               in
               ignore
-                (finish_lifecycle boundary terminalize_unresolved
-                  : (unit, string) result)))
+                (finish_lifecycle terminalize_unresolved : (unit, string) result)))
           with
           | Cleanup_completed -> ()
           | Cleanup_cancelled ->

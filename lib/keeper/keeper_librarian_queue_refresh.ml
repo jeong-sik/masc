@@ -71,48 +71,102 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
     true
   | Some _ | None -> false
 
-let rec run_durable_with_commit ~config ~keeper_name ~commit =
-  match Env_config.KeeperMemoryOs.librarian_config_state () with
-  | Disabled | Invalid -> ()
-  | Enabled ->
-    (match
-       Keeper_librarian_durable_consumer.consume_one
-         ~config
-         ~keeper_name
-         ~commit
-     with
-     | Ok
-         (Keeper_librarian_durable_consumer.Nothing_to_read
-         | Memory_not_committed) -> ()
-     | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
-       (* A stored advance can leave unread cuts, including after the first
-          baseline or a successful small retry. Continue on that evidence;
-          failures wait for another wake, and every pass rechecks the toggle. *)
-       run_durable_with_commit ~config ~keeper_name ~commit
-     | Error Keeper_librarian_durable_consumer.Keeper_meta_absent -> ()
-     | Error error ->
-       Log.Keeper.warn
-         ~keeper_name
-         "durable Librarian range not consumed: %s"
-         (Keeper_librarian_durable_consumer.error_to_string error))
+type pass_end =
+  | Off
+  | Lane_unconfigured
+  | Drained
+  | Not_committed
+  | Stopped of Keeper_librarian_durable_consumer.error
+  | Raised of string
+
+type measurement =
+  { measured_at : float
+  ; last_pass : pass_end
+  ; unread : Keeper_librarian_durable_consumer.unread option
+  }
+
+let measurements : ((string * string), measurement) Hashtbl.t = Hashtbl.create 16
+let measurements_mu = Stdlib.Mutex.create ()
+
+let measurement_key ~config ~keeper_name =
+  Workspace.keepers_runtime_dir config, keeper_name
+;;
+
+let last_measurement ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt measurements key)
+;;
+
+let publish_measurement ~config ~keeper_name ~last_pass ~unread =
+  let key = measurement_key ~config ~keeper_name in
+  let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace measurements key measurement)
+;;
+
+let measure_unread ~config ~keeper_name =
+  try
+    match Keeper_librarian_durable_consumer.unread_turns ~config ~keeper_name with
+    | Ok unread -> Some unread
+    | Error error ->
+      Log.Keeper.warn ~keeper_name "Librarian unread count unavailable: %s"
+        (Keeper_librarian_durable_consumer.error_to_string error);
+      None
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    (* Observation failure must not change the durable drain's result. *)
+    Log.Keeper.warn ~keeper_name "Librarian unread count raised: %s" (Printexc.to_string exn);
+    None
+;;
+
+let uncommitted_pass () =
+  match Runtime_exact_output_registry.current () with
+  | Error _ -> Lane_unconfigured
+  | Ok registry ->
+    let lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian in
+    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+    | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> Lane_unconfigured
+    | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> Not_committed
+;;
+
+let run_durable_with_commit ~config ~keeper_name ~commit =
+  let rec drain () =
+    match Env_config.KeeperMemoryOs.librarian_config_state () with
+    | Disabled | Invalid -> Off
+    | Enabled ->
+      match Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name ~commit with
+      | Ok Keeper_librarian_durable_consumer.Nothing_to_read -> Drained
+      | Ok Memory_not_committed -> uncommitted_pass ()
+      | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+        (* Only stored progress continues the existing drain; observations
+           below never control its scheduling or admission. *)
+        drain ()
+      | Error error ->
+        Log.Keeper.warn ~keeper_name "durable Librarian range not consumed: %s"
+          (Keeper_librarian_durable_consumer.error_to_string error);
+        Stopped error
+  in
+  try
+    let last_pass = drain () in
+    let unread = match last_pass with Off -> None | _ -> measure_unread ~config ~keeper_name in
+    publish_measurement ~config ~keeper_name ~last_pass ~unread
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    (* Do not run another filesystem read in the cancelled context. Replace
+       any older success observation before preserving cancellation. *)
+    publish_measurement ~config ~keeper_name ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None;
+    raise exn
+  | exn ->
+    publish_measurement ~config ~keeper_name ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None;
+    raise exn
 ;;
 
 let run_durable ~base_path ~keeper_name =
-  match Env_config.KeeperMemoryOs.librarian_config_state () with
-  | Disabled | Invalid -> ()
-  | Enabled ->
-    let config = Workspace.default_config base_path in
-    let memory_keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path ~base_path
-    in
-    run_durable_with_commit
-      ~config
-      ~keeper_name
-      ~commit:
-        (Keeper_librarian_durable_consumer.commit_with_runtime
-           ~base_path
-           ~keepers_dir:memory_keepers_dir
-           ~keeper_id:keeper_name)
+  let config = Workspace.default_config base_path in
+  let memory_keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  run_durable_with_commit ~config ~keeper_name
+    ~commit:(Keeper_librarian_durable_consumer.commit_with_runtime
+      ~base_path ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name)
 ;;
 
 let run ~trigger ~base_path ~keeper_name =
@@ -185,6 +239,16 @@ let submit_durable ~base_path ~keeper_name =
       run_durable ~base_path ~keeper_name)
   in
   ()
+;;
+
+let unlaunched_keeper_names ~persisted ~launched =
+  List.filter (fun name -> not (List.mem name launched)) persisted
+;;
+
+let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
+  let names = unlaunched_keeper_names ~persisted ~launched in
+  List.iter (fun keeper_name -> submit_durable ~base_path ~keeper_name) names;
+  names
 ;;
 
 module For_testing = struct

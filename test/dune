@@ -6616,4 +6616,8 @@
 
 (include stanzas/test_tui_librarian_context_review.inc)
 
+(include stanzas/test_keeper_continuity_request_view.inc)
+
 (include stanzas/test_keeper_librarian_continuity.inc)
+
+(include stanzas/test_keeper_continuity_dispatch.inc)

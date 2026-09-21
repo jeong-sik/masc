@@ -42,7 +42,7 @@ let of_board_audience = function
 let classify ~visibility signal =
   let board_audience =
     match signal.Board_dispatch.kind with
-    | Board_dispatch.Board_post_created ->
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
       Board.audience_for_post
         ~visibility
         ~title:signal.title
@@ -93,6 +93,7 @@ let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signa
           | Board_dispatch.Board_comment_added _ when meta.board_interests <> [] ->
             Board_signal.Available Judge_discoverable
           | Board_dispatch.Board_post_created
+          | Board_dispatch.Board_post_updated _
           | Board_dispatch.Board_comment_added _
           | Board_dispatch.Board_reaction_changed _
           | Board_dispatch.Board_vote_cast _ -> Board_signal.Available Ignore))

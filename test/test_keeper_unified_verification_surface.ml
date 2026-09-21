@@ -752,6 +752,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
     check string "typed pointer survives the projection" wake.schedule_id
       carried.Keeper_event_queue.schedule_id
   | WO.Board_post_created
+   | WO.Board_post_updated
   | WO.Board_comment_added
   | WO.Board_reaction_changed _
   | WO.Board_vote_cast _

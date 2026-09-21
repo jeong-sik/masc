@@ -1090,6 +1090,7 @@ let heartbeat_event_intake
                 event.Keeper_world_observation.post_id
                 meta_after_triage.name
             | Keeper_world_observation.Board_post_created
+  | Keeper_world_observation.Board_post_updated
             | Keeper_world_observation.Board_comment_added
             | Keeper_world_observation.Board_reaction_changed _
             | Keeper_world_observation.Board_vote_cast _

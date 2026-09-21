@@ -6,7 +6,8 @@ module P = Keeper_librarian_progress
 module Window = Runtime_model_input_tail_window
 
 type range =
-  { start_atom : int
+  { history_start_boundary_line : int
+  ; start_atom : int
   ; end_atom : int
   ; last_atom_digest : string
   }
@@ -85,6 +86,42 @@ let is_restart (written : B.record) =
     false
 ;;
 
+(* A seen restart still excludes older endpoints. Share this source-order
+   segment between the checkpoint preflight and the full selector. *)
+let current_history_lines own =
+  List.fold_left
+    (fun current ((_, written) as row) ->
+       if is_restart written then [ row ] else row :: current)
+    []
+    own
+  |> List.rev
+;;
+
+let may_have_unread ~trace_id ~lines ~progress =
+  match progress with
+  | None -> complete_line_count lines > 0
+  | Some ({ P.position; boundary_lines_seen } : P.t) ->
+    let trace_changed = not (String.equal trace_id position.trace_id) in
+    let line_count_changed = complete_line_count lines <> boundary_lines_seen in
+    trace_changed
+    || line_count_changed
+    || List.exists
+         (fun (line, (written : B.record)) ->
+            let restarted_after_progress =
+              line > boundary_lines_seen && is_restart written
+            in
+            let extends_position =
+              match written.event with
+              | B.Turn_ended { position = B.Atom_history { end_atom; _ }; _ } ->
+                end_atom > position.end_atom
+              | B.Turn_ended
+                  { position = B.Empty_atom_history | B.No_atom_history | B.Stale_noop; _ }
+              | B.History_restarted _ -> false
+            in
+            restarted_after_progress || extends_position)
+         (current_history_lines (lines_of_trace ~trace_id lines))
+;;
+
 let matches_checkpoint ~digest_at ~atom_count ~end_atom ~digest =
   end_atom <= atom_count
   &&
@@ -93,9 +130,9 @@ let matches_checkpoint ~digest_at ~atom_count ~end_atom ~digest =
   | None -> false
 ;;
 
-(* Row 2a: a line of the current history. Lines of an earlier history of the
-   trace, and lines for a history that was never stored, do not match and are
-   left out without being an error. *)
+(* Row 2a: an endpoint must match the loaded checkpoint. Repeated messages
+   can also match an earlier history, so [select] first discards cut points
+   before the latest restart of this trace. A mismatching line is not an error. *)
 let cut_point ~digest_at ~atom_count (written : B.record) =
   match written.event with
   | B.Turn_ended
@@ -154,7 +191,16 @@ let select ~trace_id ~lines ~progress ~messages extent =
        let boundary_lines_seen = complete_line_count lines in
        let _labelled, atom_count = Window.annotate messages in
        let digest_at = Window.atom_opening_digest messages in
-       let cuts = List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written) own in
+       let current_history = current_history_lines own in
+       let history_start_boundary_line =
+         match current_history with
+         | (line, _) :: _ -> Some line
+         | [] -> None
+       in
+       let cuts =
+         current_history
+         |> List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written)
+       in
        (* Row 3c: a restart line beyond the count the progress file holds was
           appended after the position last moved. It wins over a position that
           seems to match: a digest carries no index and no time. *)
@@ -203,7 +249,18 @@ let select ~trace_id ~lines ~progress ~messages extent =
           (match chosen with
            | None -> Nothing_to_read
            | Some (end_atom, last_atom_digest) ->
-             Read { range = { start_atom; end_atom; last_atom_digest }; boundary_lines_seen })))
+             (match history_start_boundary_line with
+              | None -> Nothing_to_read
+              | Some history_start_boundary_line ->
+                Read
+                  { range =
+                      { history_start_boundary_line
+                      ; start_atom
+                      ; end_atom
+                      ; last_atom_digest
+                      }
+                  ; boundary_lines_seen
+                  }))))
 ;;
 
 let progress_after ~trace_id = function

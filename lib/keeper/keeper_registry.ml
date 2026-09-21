@@ -17,11 +17,12 @@ let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
 let notify_state_change_observer () =
-  try (Atomic.get state_change_observer) () with
-  | exn ->
-    Log.Keeper.warn
-      "registry state-change observer failed: %s"
-      (Printexc.to_string exn)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "registry state-change observer failed: %s"
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ())
 ;;
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
@@ -320,6 +321,25 @@ let exact_update_succeeded entry ~site = function
       site
       (registry_entry_validation_error_to_string validation_error);
     false
+;;
+
+let replace_heartbeat_failure_reason expected replacement =
+  let replaced = ref false in
+  let result =
+    update_entry_exact expected (fun latest ->
+      match latest.last_failure_reason with
+      | Some (Heartbeat_consecutive_failures _) ->
+        replaced := true;
+        { latest with last_failure_reason = replacement }
+      | Some _ | None ->
+        replaced := false;
+        latest)
+  in
+  exact_update_succeeded
+    expected
+    ~site:"heartbeat_failure_reason_recovery"
+    result
+  && !replaced
 ;;
 
 let started_at ~base_path name =

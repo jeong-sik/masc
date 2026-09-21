@@ -214,9 +214,10 @@ let record_pre_dispatch_terminal_observation
     ; runtime_lane_attempt_count = 1
     ; runtime_fallback_applied = false
     ; runtime_outcome = Keeper_execution_receipt.Runtime_not_dispatched
-    ; degraded_retry_applied = false
-    ; degraded_retry_runtime = None
-    ; fallback_reason = None
+      (* A pre-dispatch receipt never reached a provider, so it took up no
+         deferred lane, and it ends before the walk that could defer one. *)
+    ; degraded_retry_applied = None
+    ; degraded_retry_deferred = None
     ; stop_reason = None
     ; error_kind
     ; error_message

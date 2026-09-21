@@ -564,9 +564,13 @@ type karma_event = {
 }
 
 type store = {
+  (** Derived last full-load outcomes; never persisted as another authority.
+      A failed snapshot read blocks mutations that could rewrite that source. *)
   mutable posts_load_result : (unit, string) result;
   mutable comments_load_result : (unit, string) result;
-  (** Derived last full-load outcome; never persisted as another authority. *)
+  mutable votes_load_result : (unit, string) result;
+  mutable reactions_load_result : (unit, string) result;
+  mutable sub_boards_load_result : (unit, string) result;
   workspace_masc_dir: string option;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;

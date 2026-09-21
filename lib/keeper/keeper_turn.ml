@@ -1097,7 +1097,7 @@ let run_keeper_invocation_turn_admitted
       Eio.Cancel.protect (fun () ->
         Keeper_registry.mark_turn_finished ~base_path name)
     with
-    | exn ->
+    | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
       log_keeper_exn ~label:"mark_turn_finished in chat turn cleanup" exn
   in
   match

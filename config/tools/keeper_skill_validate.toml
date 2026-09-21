@@ -1,0 +1,16 @@
+name = "keeper_skill_validate"
+description = """
+Validate a proposed SKILL.md from an exported artifact against the Skill package and composition rules. Pass the exact artifact object returned by keeper_artifact_transfer and the proposed package directory identity. Returns static validation findings; it does not publish or execute the Skill."""
+additional_properties = false
+
+[[params]]
+name = "artifact"
+type = "object"
+required = true
+description = "Exact artifact object returned by keeper_artifact_transfer export for the proposed SKILL.md."
+
+[[params]]
+name = "package_id"
+type = "string"
+required = true
+description = "Proposed Skill package directory identity."

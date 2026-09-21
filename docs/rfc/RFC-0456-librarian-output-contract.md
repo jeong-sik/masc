@@ -280,11 +280,17 @@ id 하나다. `translate_revisions` (`:448-466`) 도 1:1 로 매핑한다. 24개
 "Revised from" 은 바뀌지 않는다. 합침의 1:N 은 `absorbs` 가 맡는다.
 
 **검색한다.** `keeper_memory_search` 의 source 에 `absorbed` 를 더하고, `all` 도 흡수 기록을
-읽는다. 결과 한 건:
+읽는다. 기본 검색(source 없음, `memory`)도 현재 사실과 함께 흡수 기록을 읽는다(2026-09-21 개정:
+keeper 는 대개 기본으로 묻고, 흡수 기록은 그 keeper 가 알던 원문이다. 현재 사실만 읽던 09-18~20 의
+재현에서 0건으로 끝난 검색 755건 중 86건이 흡수 기록으로 답했다). 묶은 claim 이 같은 검색에 답하면 그 claim 이 흡수한 기록은
+결과에서 뺀다 — claim 이 그 기록을 대신 말하는 것이 흡수의 뜻이고, 둘을 같이 내면 묶기를 검색이 되돌리는 셈이다. 대화 이력은 `all` 만 읽는다. 결과 한 건:
 
 ```
-{ text, category, memory_id, into, into_current, absorbed_at, store: "absorbed_memory" }
+{ text, category, memory_id, basis, into, into_current, absorbed_at, store: "absorbed_memory" }
 ```
+
+`basis`는 흡수 기록에 저장된 원래 사실의 근거다. Board 글·댓글 ID도 그대로 반환하므로
+원문 출처를 다시 열 수 있다. 새 claim에 그 근거를 자동 상속하는 것은 아니다.
 
 `into_current` 는 `into` 가 지금 현재 사실인지다. `into` 가 나중에 다시 흡수되거나 지워져도
 사슬을 따라가지 않는다. `into_current = false` 가 그 사실을 알린다. 흡수 기록을 찾은 검색은
@@ -321,19 +327,19 @@ type summary =
   { retrieved_count : int
   ; retrieved_distinct_days : int
   ; last_retrieved_at : float option
-  ; cited_count : int
+  ; retracted_count : int
   ; revised_from : string list }
 ```
 
-몇 번 조회됐고, 언제 마지막으로 조회됐고, 몇 번 인용됐는지 **전부 세고 있다.**
-그리고 이 값은 TUI 로 간다 — `masc_tui_render_memory.ml:377,383` 이 `retrieved_count`
-와 `cited_count` 를 그리고, `masc_tui_types.ml:3164` 에 "Retrieved (Most)" 정렬이 있다.
+몇 번 조회됐고 언제 마지막으로 조회됐는지는 사용 기록이다. `retracted_count` 는 사용 강도가
+아니라 같은 claim 의 과거 철회 이력이다. 이 값들은 TUI 로 가지만, 기억을 남길지 판단하는
+근거로 섞어 쓰면 안 된다.
 
 **운영자는 이 숫자를 본다. 무엇을 잊을지 정하는 판정자만 못 본다.**
 
 이미 기록된 값을 그대로 넣는다. 파생 수치·점수·나이 구간은 만들지 않는다.
 
-> m212 · lesson · 2026-08-30 기록 · 이후 같은 내용 재관측 없음 · 조회 0회 · 인용 0회 ·
+> m212 · lesson · 2026-08-30 기록 · 이후 같은 내용 재관측 없음 · 조회 0회 ·
 > 출처: board p-c627b3…
 
 오래된 것이 버릴 이유가 되는 것이 아니라 **판단의 재료**가 된다. 3주 된 운영자 계약은

@@ -5,10 +5,8 @@ module W = Keeper_memory_os_types
 module Window = Runtime_model_input_tail_window
 
 let ( let* ) = Result.bind
-let suffix = ".turn-boundaries.jsonl"
-
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ suffix)
+  Filename.concat (Filename.concat keepers_dir keeper_id) "turn-boundaries.jsonl"
 ;;
 
 type position =

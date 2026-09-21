@@ -29,6 +29,82 @@ The case catalog is `benchmarks/data/tool_call_quality_cases.json`. The live
 mode starts an isolated local server, executes the cases, writes raw evidence,
 and passes it through the benchmark CLI.
 
+## Librarian Continuity Measurement
+
+`masc-librarian-continuity` measures answers produced from explicit synthetic
+snapshots. It generates a question from a reference turn, then answers in a fresh,
+tool-free context containing only that question, the supplied facts, and unread
+text. TypeSafe JEV Noul evaluates the answer against the reference. The existing
+`masc-librarian-replay` remains a separate, read-only structural replay.
+
+With an installed CLI, a configured Agent Core runtime, and the existing
+`TYPESAFEAI_API_KEY` configuration:
+
+```bash
+masc-librarian-continuity \
+  --config /path/to/runtime.toml \
+  --runtime '<configured-runtime-id>' \
+  --input benchmarks/data/librarian_continuity_synthetic.json \
+  --output /path/to/continuity-report.json \
+  --publish-base-path /path/to/masc-workspace
+```
+
+The runtime ID selects the question/answer model; the existing TypeSafe model
+and endpoint configuration selects the judge. This command supports Agent Core
+API runtimes. CLI runtime transports are rejected explicitly. It does not read
+live Keeper history or change Memory, Librarian progress, or scheduling.
+
+The output file is the canonical report. Choose a new output path: existing
+files, including the input dataset, are refused before model calls. The report
+is saved before any sample starts
+and after each stage, retaining provider failures and incomplete work. Exit 0
+means every sample was scored; exit 1 means some samples remain failed or
+incomplete; exit 2 means configuration, input or report persistence failed.
+No exit code depends on a Noul score threshold. Each scored sample keeps its actual response
+models, question, answer, context, criteria and raw probability. Generation
+request hashes describe prepared bytes before dispatch; they alone do not prove
+that the remote provider received a request.
+
+`--publish-base-path` is optional. It publishes the same final bytes in the
+selected server's artifact store and prints their SHA. The artifact is a view
+copy and may be collected when no durable consumer references it; keep the
+output file. A failed copy is reported as `publication_error` in stdout JSON
+and does not change the measurement's exit code or its retained report.
+
+In that server's TUI, enter `/measurement <sha256>` to inspect the report.
+The TUI counts every scored, failed and incomplete sample. Its text preview
+shows raw probabilities and per-sample details within a 64 KiB output limit;
+later probabilities or failure stages may be omitted. When truncated, the
+preview says so and names the complete report file. The input pane also shows
+the published blob SHA; the original output file remains authoritative. Read
+that file for the full distribution and every failure stage. The TUI does not
+turn a probability into a pass, coverage percentage or operational Librarian
+verdict.
+
+Each case declares `question`: a fixed string skips question generation; `null`
+asks the selected runtime to generate one from the reference. The report records
+provided and generated questions as different types; a provided question has no
+invented model response metadata. Keep fixed questions unchanged when comparing
+models or context snapshots. A rerun writes a new report; it does not resume an
+old run.
+
+The checked-in catalog has two controls (verbatim fact present/absent), three
+semantic cases, and one generated-question example. The controls check whether
+the measurement distinguishes available and unavailable information. The
+semantic cases retain a rule in different words, retain its duration while
+losing its temperature condition, or retain the complete rule only in unread
+text. They test whether the same fixed question remains answerable from each
+snapshot. A partial context need not produce a middle probability: Noul judges
+the complete stated proposition, not the fraction of facts retained.
+
+These synthetic cases do not establish continuity across a live Keeper's
+Librarian updates or long-running fleet behavior. That requires separately
+chosen snapshots and operational evidence.
+
+[Source: official Noul contract](https://docs.typesafe.ai/primitives/noul),
+checked 2026-09-21 KST: Noul is the probability that the stated proposition is
+true, not a measure of the degree of memory retained.
+
 ## Isolated Server Ports
 
 An isolated benchmark or campaign server must not bind the production ports

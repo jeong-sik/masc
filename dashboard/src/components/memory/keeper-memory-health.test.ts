@@ -31,7 +31,7 @@ function makeEntry(
     added: 2,
     removed: 1,
     snapshot_present: true,
-    context_cycle: { saved: null, saved_read_error: null, prepared: null },
+    context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
     librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
       last_success_at: null, last_failure_kind: null },
@@ -72,7 +72,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v6',
+    schema: 'keeper.memory_os.current_health.v7',
     generated_at: 1_700_000_000,
     keepers,
     totals: {

@@ -32,6 +32,7 @@ let test_config_writes_are_dropped () =
   let written =
     { meta with
       activation_mode = Masc.Keeper_activation_mode.Manual
+    ; input_policy = Keeper_input_policy.Wide
     ; mention_targets = [ "someone" ]
     ; board_interests = [ "MASC runtime" ]
     ; always_allow = Some true
@@ -43,6 +44,15 @@ let test_config_writes_are_dropped () =
     }
   in
   let decoded = round_trip written in
+  Alcotest.(check bool) "input policy is TOML-owned" true (decoded.input_policy = Keeper_input_policy.Small);
+  let defaults = {Keeper_types_profile.empty_keeper_profile_defaults with
+    sandbox_profile=Some Keeper_types_profile.Docker; input_policy=Some Keeper_input_policy.Wide} in
+  let effective defaults meta = match Keeper_meta_contract.effective_meta_of_profile_defaults defaults meta with
+    | Ok effective -> effective | Error detail -> Alcotest.fail detail in
+  let wide = effective defaults decoded in
+  Alcotest.(check bool) "TOML wide policy overlays runtime state" true (wide.input_policy = Keeper_input_policy.Wide);
+  let small = effective {defaults with input_policy=None} wide in
+  Alcotest.(check bool) "omission resets cached policy to declared default" true (small.input_policy = Keeper_input_policy.Small);
   Alcotest.(check bool) "autoboot_enabled is not durable" true (Masc.Keeper_activation_mode.restore_owner decoded.activation_mode);
   Alcotest.(check (list string)) "mention_targets is not durable" [] decoded.mention_targets;
   Alcotest.(check (list string)) "board_interests is not durable" [] decoded.board_interests;

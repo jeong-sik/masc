@@ -51,3 +51,18 @@ masc-librarian-continuity compare \
 이미 일반 Memory consumer가 읽었다는 근거가 있는 범위는 하던 일만 저장한다. 그 밖의 실제 새 source는 Memory와 하던 일을 같은 회차에서 생성한다. Memory WAL의 receipt scope를 continuity 파일 경로로 분리하므로 부분 처리가 일반 consumer의 위치를 전진시키지 않는다. Memory 저장 뒤 하던 일 저장이 실패하면, 다음 wake는 그 정확한 범위를 먼저 복구하며 Memory에 다시 적용하지 않는다. 완료된 checkpoint prefix는 기존 durable consumer와 동일하게 이후 변경되지 않는다는 전제를 쓴다.
 
 입력에서 원문을 제외할 수 있는 위치는 하던 일 저장본의 원자적 쓰기가 성공한 뒤에만 움직인다. 원본 checkpoint는 계속 남는다. snapshot codec에는 출처와 covering boundary가 필수이며, 이전 artifact를 위한 변환 reader는 제공하지 않는다. 새 배포에서 생성한 저장본으로 검증한다.
+
+
+## 선택 가능한 작은 입력
+
+Keeper 설정 `input_policy`는 `small`(기본)과 `wide` 중 하나다. `keeper_up`과 설정 API,
+대시보드 및 TUI에서 변경한다. `small`은 검증된 완료 턴의 도구 결과 본문을 기존 원문
+보관소에 저장하고 조회 참조로 보낸다. 실제로 제공된 원문 조회 도구가 있어야 적용한다.
+저장에 실패하면 해당 본문을 유지한다. 완료 경계 뒤의 진행 중인 작업, 일반 대화와
+아직 정리되지 않은 의무는 생략하지 않는다. `wide`는 남은 도구 결과 본문도 함께 보낸다.
+두 방식 모두 저장된 요약의 보존 범위를 검증하며 원본 checkpoint를 바꾸지 않는다.
+
+`max_context_override`는 기존 토큰 Cap이다. 낮게 설정하는 것과 작은 입력을 구성하는
+것은 별개이며, 남은 용량을 채우기 위해 이력을 늘리지 않는다. 비도구 원문이나 진행 중인
+작업 자체가 크면 작은 방식에서도 요청이 클 수 있다. 공식 클라이언트에는 이 Agent Core
+본문 투영을 적용하지 않으며, 로그의 `context_owner`와 적용 여부로 구분한다.

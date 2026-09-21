@@ -2145,6 +2145,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         { name = live_name
         ; runtime_id_opt = None
         ; activation_mode_opt = None
+        ; input_policy_opt = None
         ; mention_targets_opt = None
         ; board_interests_opt = None
         ; max_context_override_opt = None
@@ -2433,6 +2434,7 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         { name
         ; runtime_id_opt = None
         ; activation_mode_opt = None
+        ; input_policy_opt = None
         ; mention_targets_opt = None
         ; board_interests_opt = None
         ; max_context_override_opt = None
@@ -2613,6 +2615,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         { name
         ; runtime_id_opt = None
         ; activation_mode_opt = Some Masc.Keeper_activation_mode.On_demand
+        ; input_policy_opt = None
         ; mention_targets_opt = None
         ; board_interests_opt = None
         ; max_context_override_opt = None
@@ -5392,6 +5395,7 @@ let test_field_only_update_honors_toml_declared_profile () =
         { name
         ; runtime_id_opt = None
         ; activation_mode_opt = None
+        ; input_policy_opt = Some Masc.Keeper_input_policy.Wide
         ; mention_targets_opt = None
         ; board_interests_opt = None
         ; max_context_override_opt = None
@@ -5436,6 +5440,11 @@ let test_field_only_update_honors_toml_declared_profile () =
         "field-only update on a TOML-declared docker keeper succeeds"
         true
         (Keeper_types_profile.tool_result_success result);
+      (match Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+          ~base_path:base_dir name with
+       | Ok defaults -> check bool "requested policy persisted to authoritative TOML" true
+           (defaults.input_policy = Some Masc.Keeper_input_policy.Wide)
+       | Error error -> fail (Keeper_types_profile.keeper_toml_load_error_to_string error));
       ignore
         (Masc.Keeper_keepalive.stop_keepalive_and_await
            ~base_path:config.base_path

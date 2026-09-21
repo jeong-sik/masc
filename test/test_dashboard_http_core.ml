@@ -4818,6 +4818,17 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
+let test_config_patch_input_policy () =
+  let meta = shrink_base_meta () in
+  List.iter (fun wire ->
+    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", `String wire] with
+    | Ok () -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
+  List.iter (fun value ->
+    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", value] with
+    | Error _ -> () | Ok () -> Alcotest.fail "invalid config policy accepted")
+    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
+;;
+
 let test_config_patch_accepts_typed_skills () =
   let meta = shrink_base_meta () in
   let validate fields =
@@ -6344,6 +6355,7 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
+          test_case "config patch input policy" `Quick test_config_patch_input_policy;
           test_case "config patch shape-checks remote_endpoint" `Quick
             test_config_patch_remote_endpoint_shape;
           test_case "config POST atomically restarts runtime" `Quick

@@ -27,6 +27,7 @@ type context_cycle =
   { saved : Keeper_continuity_observation.frontier option
   ; saved_read_error : string option
   ; prepared : Keeper_continuity_observation.t option
+  ; synthesis : Keeper_continuity_observation.synthesis option
   }
 
 let context_cycle ~config ~keeper_name =
@@ -39,7 +40,8 @@ let context_cycle ~config ~keeper_name =
     | Error _ -> None, Some "snapshot_unreadable"
   in
   { saved; saved_read_error;
-    prepared = Keeper_continuity_observation.latest ~config ~keeper_name }
+    prepared = Keeper_continuity_observation.latest ~config ~keeper_name;
+    synthesis = Keeper_continuity_observation.latest_synthesis ~config ~keeper_name }
 ;;
 
 let context_cycle_to_json cycle =
@@ -57,7 +59,8 @@ let context_cycle_to_json cycle =
       "input", `Assoc ["kind", `String kind; "frontier", nullable frontier saved_frontier]] in
   `Assoc ["saved", nullable frontier cycle.saved;
     "saved_read_error", nullable (fun value -> `String value) cycle.saved_read_error;
-    "prepared", nullable prepared cycle.prepared]
+    "prepared", nullable prepared cycle.prepared;
+    "synthesis", nullable Keeper_continuity_observation.synthesis_to_json cycle.synthesis]
 ;;
 
 type keeper_health =
@@ -584,7 +587,7 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v6"
+    [ "schema", `String "keeper.memory_os.current_health.v7"
     ; "generated_at", `Float generated_at
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"

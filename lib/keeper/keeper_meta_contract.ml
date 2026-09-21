@@ -269,6 +269,7 @@ type keeper_meta =
         transcript-corruption reset-required paths may write it. [None] while
         paused is a fail-closed unclassified state that requires operator
         action. *)
+  ; input_policy : Keeper_input_policy.t
   ; activation_mode : Keeper_activation_mode.t
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
@@ -390,6 +391,7 @@ let effective_meta_of_profile_defaults
         { meta with
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
+          input_policy = apply_profile_default defaults.input_policy Keeper_input_policy.default;
           activation_mode =
             apply_profile_default defaults.activation_mode meta.activation_mode;
           mention_targets =

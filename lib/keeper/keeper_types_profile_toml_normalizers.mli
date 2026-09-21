@@ -55,6 +55,7 @@ type keeper_profile_defaults =
   manifest_path : string option;
   instructions : string option;
   activation_mode : Keeper_activation_mode.t option;
+  input_policy : Keeper_input_policy.t option;
   mention_targets : string list;
   board_interests : string list;
   sandbox_profile :

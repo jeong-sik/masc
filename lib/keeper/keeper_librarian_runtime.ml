@@ -268,7 +268,16 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
+(* Completed-history synthesis and pending-input organization own different
+   sources and stores. A continuity pass must neither organize nor publish the
+   live queue; its source is the exact prepared checkpoint interval. *)
+let input_for_continuity continuity (input : Keeper_librarian.input) =
+  match continuity with
+  | None -> input
+  | Some _ -> { input with working_context = Keeper_librarian_context.empty }
+
 let resolve_librarian_prompt ?continuity input =
+  let input = input_for_continuity continuity input in
   let variables = Keeper_librarian.prompt_variables input in
   let variables = match continuity with None -> variables | Some prepared ->
     ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
@@ -890,7 +899,8 @@ let run_best_effort
           | None -> 0
           | Some current -> List.length current.facts
         in
-        let prompt_input = input_for_projection input_projection inp in
+        let prompt_input = input_for_projection input_projection inp
+          |> input_for_continuity continuity in
         let prompt_variables, prompt_material =
           resolve_librarian_prompt ?continuity prompt_input
         in
@@ -975,6 +985,9 @@ let run_best_effort
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
                 Keeper; original sources remain pending throughout. *)
+             (match continuity with
+             | Some _ -> ()
+             | None ->
              let context_review = Keeper_librarian_context_review.run
                ~observe:(fun observation -> observed_context_review := Some observation)
                ~clock ~keeper_id ~input:inp.working_context
@@ -1022,7 +1035,7 @@ let run_best_effort
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
+                  "working context commit failed independently of memory: %s" (Printexc.to_string exn))));
              let publish_continuity () =
                match continuity, selection.working_state with
               | None, _ -> ()

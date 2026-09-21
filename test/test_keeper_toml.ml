@@ -813,6 +813,24 @@ let test_tool_deny_parses_absent_empty_and_exact_values () =
     inherited.tool_deny
 ;;
 
+let test_input_policies () =
+  let parse body =
+    let doc = match TL.parse_toml ("[keeper]\n" ^ body ^ "\n") with
+      | Ok doc -> doc | Error error -> fail error in
+    KTP.profile_defaults_of_toml doc in
+  List.iter (fun wire ->
+    match parse (Printf.sprintf "input_policy = %S" wire) with
+    | Ok defaults -> check (option string) "typed TOML policy" (Some wire)
+        (Option.map Masc.Keeper_input_policy.to_string defaults.input_policy)
+    | Error error -> fail error) ["small"; "wide"];
+  List.iter (fun value -> match parse ("input_policy = " ^ value) with
+    | Error _ -> () | Ok _ -> fail "invalid TOML input policy accepted")
+    ["\"automatic\""; "true"; "42"];
+  match parse "" with
+  | Ok defaults -> check bool "absence leaves profile inheritance open" true (defaults.input_policy = None)
+  | Error error -> fail error
+;;
+
 let test_activation_modes () =
   List.iter (fun (wire, restores, spontaneous) ->
     let doc = match TL.parse_toml (Printf.sprintf "[keeper]\nactivation_mode = %S\n" wire) with
@@ -2129,6 +2147,7 @@ let () =
           test_case "rejects unknown [keeper.tools] sibling" `Quick
             test_profile_rejects_unknown_tools_sibling_key;
           test_case "activation modes" `Quick test_activation_modes;
+          test_case "input policies" `Quick test_input_policies;
           test_case "full" `Quick test_profile_full;
           test_case "rejects wrong known-field shape" `Quick
             test_profile_rejects_wrong_known_field_shape;

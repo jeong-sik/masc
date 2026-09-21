@@ -93,7 +93,7 @@ export function KeeperClearContextDialog({
           <${TextArea}
             inputRef=${reasonRef}
             class="!bg-[var(--color-bg-surface)] !min-h-[112px] !text-sm leading-paragraph"
-            placeholder="예: 손상된 checkpoint 대화 기록 제거"
+            placeholder="예: 불필요해진 대화 기록 정리"
             ariaLabel="비우기 사유"
             disabled=${pending}
             value=${reason}
@@ -116,7 +116,7 @@ export function KeeperClearContextDialog({
         </label>
 
         <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)] v2-monitoring-panel">
-          마지막 수단용 액션입니다. 손상된 checkpoint 대화가 다시 로드될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
+          정상적으로 읽을 수 있는 checkpoint의 대화 기록을 비웁니다. 파일을 읽거나 해석하지 못하면 오류를 반환하고 원본을 그대로 둡니다. 손상된 파일을 복구하는 기능은 아닙니다.
         </div>
 
         <div class="flex items-center justify-end gap-2 v2-monitoring-toolbar">

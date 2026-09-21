@@ -895,10 +895,12 @@ let log_call
            | None -> [])
       in
       let wire_outcome_field =
-        match wire_outcome with
-        | Some outcome ->
-          [ "wire_outcome", `String (Tool_result.string_of_tool_call_outcome outcome) ]
-        | None -> []
+        let outcome =
+          match wire_outcome with
+          | Some outcome -> outcome
+          | None -> Tool_result.Unknown
+        in
+        [ "wire_outcome", `String (Tool_result.string_of_tool_call_outcome outcome) ]
       in
       let file_change_evidence_field =
         match file_change_evidence with

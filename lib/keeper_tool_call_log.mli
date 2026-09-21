@@ -262,7 +262,9 @@ val log_call :
     [batch_size], and [execution_mode] preserve Agent Core's actual schedule
     rather than inferring concurrency from timing. [wire_outcome] is the
     separate AGENT_CORE response projection; it does not replace the MASC
-    execution [disposition]. A completed or deferred execution may therefore
+    execution [disposition]. When the caller has no projection observation,
+    the row records [Tool_result.Unknown] rather than omitting the field. A
+    completed or deferred execution may therefore
     have [wire_outcome=error] when result delivery fails afterwards.
     [typed_result] serializes the producer-owned disposition when it is
     available. Any canonical normalized artifact references in its typed data

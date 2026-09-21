@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.35.22] - 2026-09-23
+
+> Before you upgrade: move TypeSafe AI settings into `runtime.toml`'s `[typesafeai]` table; only `TYPESAFEAI_API_KEY` remains in the environment (#37453). Runtime receipts now distinguish invalid configuration from provider authorization refusal, so update any tooling that reads the old `preflight_config_error` reason (#37457). Remove the 13 unused seed capability entries from `config/runtime.toml`; capability behavior is unchanged because those entries were never consumed (#37491).
+
+*Tag date is provisional and must be updated to the tag commit's UTC date before publishing.*
+
+### Upgrade notes
+
+- TypeSafe AI settings now live in `runtime.toml` under `[typesafeai]`; the previous `MASC_TYPESAFEAI_*` environment variables are no longer read.
+- Operator-facing failure reasons now separate invalid configuration from provider authorization refusal, making the next action clearer in the dashboard and receipts.
+- Unused seed capability entries were removed; installations should rely on the catalog's capability data instead.
+
+### Added
+
+- DOS graphics sessions now show whether a frame contains visible pixels and support a click action for mouse-driven games (#37402).
+- The librarian preserves committed Memory snapshots and completed-run evidence when cancellation arrives after the commit (#37464).
+- Runtime details now show every provider-supplied probe limitation, so operators can see what a reachability check does not prove (#37346).
+- The runtime lane list now distinguishes declared lanes from one-candidate runtime fallback lanes and hides the latter from the keeper picker (#37475).
+- Large JEV requests over HTTP/2 now flush their complete bodies reliably instead of failing with a protocol error (#37500).
+- Librarian publishing can review received-work context against its source material and explicitly withhold only the derived publication when revision is needed (#37512).
+- Skill reads can include exact JEV applicability advice in the model-visible content, with inspectable advice receipts in the TUI (#37514).
+
+### Changed
+
+- A provider response with no text, thinking, or tool call is now settled as an observed response instead of being retried as an unseen server failure (#37206).
+- Gateway readers now document and consistently treat cancellation as an intentional shutdown rather than a connection failure (#37481).
+- The owner-child cancellation marker is retained only after both cancellation paths were verified, making the lifecycle evidence match the runtime tree (#37488).
+- The release workflow now publishes the matching CHANGELOG section as part of the release page body (#37470).
+- OAuth client registrations now read and honor secret expiration, re-registering stale or incomplete confidential clients while preserving public clients (#37496).
+
+### Fixed
+
+- Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
+- The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).
+- The strict runtime-config check now excludes vendored warning policy from MASC's warning gate without weakening MASC source checks (#37315).
+- Raw trace retention now uses the strict TurnRecord format and stops before deleting rows that predate the required response-observed field (#37465).
+
+### Internal
+
+- Added regression coverage for DOS click registration, mutation classification, and the no-machine refusal path (#37489).
+- Added explicit tests for the TUI's GitHub-token text-input ownership while typing (#37502).
+- Removed two unhandled resource-scope callback exceptions and documented the remaining intentional catch points (#37473).
+- Split the gateway cancellation guard's measurement fixtures from the runtime behavior so the guard reports its actual arm set (#37476).
+- Improved release smoke diagnostics to report whether a timed-out boot process was still alive or had already crashed (#37509).
+
 ## [0.35.21] - 2026-09-21
 
 ### Upgrade notes

@@ -543,7 +543,10 @@ let model_capabilities_override_of_model_spec
          let stated field ~default = Option.value field ~default in
          (* Media input stays fail-closed: MASC's model spec is the SSOT for
             it ([Runtime_agent.apply_runtime_model_input_capabilities]), so an
-            unwritten media flag is [false], never the wire's preset. *)
+            unwritten media flag is [false], never the wire's preset.
+            DET-OK: here the default IS the contract, not a stand-in for a
+            value that went missing — absence means the operator did not
+            grant the modality. *)
          let media field = Option.value field ~default:false in
          { base with
            max_context_tokens = spec.max_context

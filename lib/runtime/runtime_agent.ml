@@ -695,7 +695,9 @@ let apply_runtime_model_input_capabilities
      back as a late runtime error. *)
   (* Fail closed on absence too: an unwritten media flag is [false], not the
      provider's preset. This is the one place where [None] does not mean "the
-     layer below decides" (#37435). *)
+     layer below decides" (#37435).
+     DET-OK: absence is the operator withholding the modality, so [false] is
+     the stated contract rather than a fallback for a missing value. *)
   let declared field = Option.value field ~default:false in
   { caps with
     supports_multimodal_inputs = declared model_caps.supports_multimodal_inputs;

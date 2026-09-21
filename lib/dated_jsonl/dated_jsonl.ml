@@ -1105,12 +1105,14 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
              if day_is_in_range m d
              then begin
                let path = Filename.concat month_path d in
-               match open_in_bin path with
-               | exception Sys_error _ as exn ->
+               match Unix.openfile path [ Unix.O_RDONLY ] 0 with
+               | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
                  (* Retention snapshots names before reading them. A later
-                    day may disappear after a newer day's callback yields. *)
-                 if Sys.file_exists path then raise exn
-               | input ->
+                    day or its month may disappear after a newer day's
+                    callback yields. Other open failures stay observable. *)
+                 ()
+               | descriptor ->
+                 let input = Unix.in_channel_of_descr descriptor in
                  Fun.protect
                    ~finally:(fun () -> close_in_noerr input)
                    (fun () ->

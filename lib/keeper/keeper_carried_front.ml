@@ -100,9 +100,10 @@ type unreadable_records =
 type seed_read =
   { seed : seed option
   ; unreadable : unreadable_records option
+  ; boundary_error : string option
   }
 
-let no_seed_read = { seed = None; unreadable = None }
+let no_seed_read = { seed = None; unreadable = None; boundary_error = None }
 
 (* A JSON row that does not decode as a turn record gives no seed, and it is
    counted: "no record" and "records that could not be decoded" are different
@@ -123,44 +124,60 @@ let seed_read_of_rows ~trace_id rows =
       ([], None)
       rows
   in
-  { seed = of_records ~trace_id (List.rev records_rev); unreadable }
+  { seed = of_records ~trace_id (List.rev records_rev)
+  ; unreadable
+  ; boundary_error = None
+  }
 ;;
 
-let latest_history_restart_at ~config ~keeper_name ~trace_id =
-  Keeper_turn_boundaries.read
-    ~keepers_dir:(Workspace.keepers_runtime_dir config)
-    ~keeper_id:keeper_name
-  |> Result.bind (fun lines ->
-    List.fold_left
-      (fun latest (line, decoded) ->
-         match latest, decoded with
-         | Error _ as error, _ -> error
-         | Ok _, Error error ->
-           Error
-             (Printf.sprintf
-                "turn boundary line %d: %s"
-                line
-                (Keeper_turn_boundaries.read_error_to_string error))
-         | ( Ok _,
-             Ok
-               { Keeper_turn_boundaries.recorded_at
-               ; event = Keeper_turn_boundaries.History_restarted { trace_id = restarted }
-               } )
-           when String.equal restarted trace_id ->
-           Ok (Some recorded_at)
-         | Ok latest, Ok _ -> Ok latest)
-      (Ok None)
-      lines)
+let current_generation_floor ~config ~keeper_name ~trace_id =
+  Result.bind
+    (Keeper_turn_boundaries.read
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name)
+    (fun lines ->
+       List.fold_left
+         (fun state (line, decoded) ->
+            match state, decoded with
+            | Error _ as error, _ -> error
+            | Ok _, Error error ->
+              Error
+                (Printf.sprintf
+                   "turn boundary line %d: %s"
+                   line
+                   (Keeper_turn_boundaries.read_error_to_string error))
+            | ( Ok (latest_turn, floor),
+                Ok
+                  { Keeper_turn_boundaries.event =
+                      Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
+                  ; _
+                  } )
+              when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
+              let turn = Ids.Turn_ref.absolute_turn turn_ref in
+              Ok (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn), floor)
+            | ( Ok (latest_turn, _),
+                Ok
+                  { Keeper_turn_boundaries.event =
+                      Keeper_turn_boundaries.History_restarted { trace_id = restarted }
+                  ; _
+                  } )
+              when String.equal restarted trace_id ->
+              Ok (latest_turn, latest_turn)
+            | Ok state, Ok _ -> Ok state)
+         (Ok (None, None))
+         lines
+       |> Result.map snd)
 ;;
 
 let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  match latest_history_restart_at ~config ~keeper_name ~trace_id with
+  match current_generation_floor ~config ~keeper_name ~trace_id with
   | Error detail ->
     { seed = None
-    ; unreadable = Some { count = 1; first_reason = "turn boundary read failed: " ^ detail }
+    ; unreadable = None
+    ; boundary_error = Some detail
     }
-  | Ok restarted_at ->
+  | Ok generation_floor ->
     let unreadable = ref None in
     let exception Trace_boundary in
     (* Count observations, not intervening rows. A direct retry may reuse its
@@ -174,8 +191,8 @@ let read_seed ~config ~keeper_name ~trace_id =
           | Ok record when not (String.equal record.Turn_record.trace_id trace_id) ->
             raise_notrace Trace_boundary
           | Ok record
-            when (match restarted_at with
-                  | Some at -> record.Turn_record.ts <= at
+            when (match generation_floor with
+                  | Some floor -> record.Turn_record.absolute_turn <= floor
                   | None -> false) ->
             raise_notrace Trace_boundary
           | Ok record -> of_records ~trace_id [ record ]
@@ -189,7 +206,10 @@ let read_seed ~config ~keeper_name ~trace_id =
             None)
       with Trace_boundary -> []
     in
-    { seed = List.nth_opt seeds 0; unreadable = !unreadable }
+    { seed = List.nth_opt seeds 0
+    ; unreadable = !unreadable
+    ; boundary_error = None
+    }
 ;;
 
 type dropped_front =

@@ -116,10 +116,15 @@ type seed_read =
         (** [None] when every record read decoded. A seed is looked for among
             the records that did, so [seed = None] with [Some _] here is
             "records unreadable", not "no record". *)
+  ; boundary_error : string option
+        (** A refusal from the turn-boundary store that defines the current
+            history generation. Kept separate from [unreadable], whose count
+            is only for TurnRecord rows. A boundary error admits no seed. *)
   }
 
 val no_seed_read : seed_read
-(** No seed and nothing unreadable: a caller that reads no records. *)
+(** No seed, unreadable record, or boundary error: a caller that reads no
+    records. *)
 
 val seed_read_of_rows
   :  trace_id:string
@@ -134,15 +139,17 @@ val read_seed
   -> trace_id:string
   -> seed_read
 (** The last stored response observation in the current history generation,
-    scanning newest first until a match, a different trace, or the latest
-    [History_restarted] boundary. Unobserved rows do not hide an older seed
-    within that generation. Storage order also resolves direct retries that
-    reuse a turn number. Unreadable rows visited before the match are counted;
-    rows older than the match or generation boundary are not read. A boundary
-    store read failure returns no seed and is reported as unreadable rather
-    than admitting a possibly stale front. Reads on the calling fiber; the
-    turn driver calls it once per provider attempt, and only while the pair
-    has no ledger. *)
+    scanning newest first until a match, a different trace, or a turn at or
+    before the latest [History_restarted] boundary. The boundary is expressed
+    in the same [absolute_turn] coordinate as TurnRecord: it is the highest
+    completed turn preceding that restart in file order, never a wall-clock
+    comparison. Unobserved rows do not hide an older seed within that
+    generation. Storage order also resolves direct retries that reuse a turn
+    number. Unreadable rows visited before the match are counted; rows older
+    than the match or generation boundary are not read. A boundary-store read
+    failure returns no seed and is reported in [boundary_error]. Reads on the
+    calling fiber; the turn driver calls it once per provider attempt, and
+    only while the pair has no ledger. *)
 
 (** Why {!for_history} dropped a seed. *)
 type dropped_front =

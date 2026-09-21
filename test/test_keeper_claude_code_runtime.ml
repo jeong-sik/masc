@@ -2071,6 +2071,7 @@ let seed_read_of records =
         ~trace_id:"trace-1"
         records
   ; unreadable = None
+  ; boundary_error = None
   }
 ;;
 

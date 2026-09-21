@@ -21,7 +21,6 @@ let record
       ?(response_observed = true)
       ?response_runtime
       ?(trace = "trace-1")
-      ?(ts = 0.)
       ~turn
       window
   : Turn_record.t
@@ -80,7 +79,7 @@ let record
       ; cache_read_input_tokens = None
       ; scope = Runtime_usage_scope.Per_request
       }
-  ; ts
+  ; ts = 0.
   }
 ;;
 
@@ -577,17 +576,29 @@ let test_read_seed_counts_only_unreadable_rows_visited_before_the_response () =
 let test_read_seed_stops_at_history_restart () =
   with_turn_record_store @@ fun config store ->
   Dated_jsonl.append store
-    (Turn_record.to_json (record ~turn:1 ~ts:1. (Some (30, 100))));
-  Keeper_turn_boundaries.append
+    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
+  Masc.Keeper_turn_boundaries.append
+    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+    ~keeper_id:"alpha"
+    { recorded_at = 1.
+    ; event =
+        Masc.Keeper_turn_boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+          ; history_at_start = Masc.Keeper_turn_boundaries.Continued_history
+          ; position = Masc.Keeper_turn_boundaries.Stale_noop
+          }
+    }
+  |> Result.get_ok;
+  Masc.Keeper_turn_boundaries.append
     ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
     ~keeper_id:"alpha"
     { recorded_at = 2.
-    ; event = Keeper_turn_boundaries.History_restarted { trace_id = "trace-1" }
+    ; event = Masc.Keeper_turn_boundaries.History_restarted { trace_id = "trace-1" }
     }
   |> Result.get_ok;
   Dated_jsonl.append store
     (Turn_record.to_json
-       (record ~turn:2 ~ts:3. ~finish:None ~response_observed:false None));
+       (record ~turn:2 ~finish:None ~response_observed:false None));
   let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
   check bool "the pre-clear response is not a seed" true (Option.is_none read.Front.seed)
 ;;
@@ -604,6 +615,28 @@ let test_read_seed_stops_at_previous_trace () =
   check bool "the prior trace does not supply a seed" true (Option.is_none read.Front.seed);
   check bool "rows older than the trace boundary are not decoded" true
     (Option.is_none read.Front.unreadable)
+;;
+
+let test_read_seed_keeps_boundary_errors_out_of_the_record_count () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
+  let path =
+    Masc.Keeper_turn_boundaries.path_for_keepers_dir
+      ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+      ~keeper_id:"alpha"
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let output = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output "{not-json\n");
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "an unknown boundary admits no seed" true (Option.is_none read.Front.seed);
+  check bool "no TurnRecord was counted unreadable" true
+    (Option.is_none read.Front.unreadable);
+  check bool "the boundary failure has its own channel" true
+    (Option.is_some read.Front.boundary_error)
 ;;
 
 let test_clamp_keeps_the_front_on_an_atom () =
@@ -674,6 +707,8 @@ let () =
             test_read_seed_stops_at_history_restart
         ; test_case "previous trace fences older retained rows" `Quick
             test_read_seed_stops_at_previous_trace
+        ; test_case "boundary errors are not TurnRecord errors" `Quick
+            test_read_seed_keeps_boundary_errors_out_of_the_record_count
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

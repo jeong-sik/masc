@@ -153,6 +153,28 @@ describe('VerifyQueue', () => {
     expect(container.querySelector('.vq-clear')).toBeTruthy()
   })
 
+  // task-1612: an approved STOP is a cancellation, not a completion. The
+  // session banner must say so — otherwise the operator's one click, made
+  // precisely to stop the task, reads back as "task → done".
+  it('labels an approved stop as task → cancelled, never task → done', async () => {
+    tasks.value = [makeTask({ contract: { completion_contract: [] }, verification_intent: 'cancel' })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{ cancellation_reason: null }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    fireEvent.click(screen.getByText('✓ 중단 승인'))
+    await waitFor(() => {
+      expect(container.querySelector('.vq-verdict.approved')).toBeTruthy()
+    })
+    const body = container.querySelector('.vq-verdict-body')?.textContent ?? ''
+    expect(body).toContain('중단 승인')
+    expect(body).toContain('task → cancelled')
+    expect(body).not.toContain('task → done')
+  })
+
   it('collects a reject reason via chips and commits a reject verdict', async () => {
     tasks.value = [makeTask()]
     const { container } = render(html`<${VerifyQueue} />`)
@@ -239,11 +261,10 @@ describe('VerifyQueue', () => {
     expect(submitted.some(t => t?.includes('제출'))).toBe(true)
   })
 
-  // The operator judging a stop reads the producer's sentence and nothing
-  // else. Until the record kept a copy of it, that sentence existed only in
-  // the body of an unlisted Board post and never reached this screen.
+  // The status decides that this is a stop. The request contributes only the
+  // sentence the operator reads.
   it('names a stop and shows the reason the producer gave', () => {
-    tasks.value = [makeTask()]
+    tasks.value = [makeTask({ verification_intent: 'cancel' })]
     mockState.value = {
       loading: false,
       error: null,
@@ -258,6 +279,45 @@ describe('VerifyQueue', () => {
     expect(notes.some(t => t.includes('상류에서 닫혔다'))).toBe(true)
   })
 
+  it('does not let a request reason override a completion intent', () => {
+    tasks.value = [makeTask({
+      contract: { completion_contract: [] },
+      verification_intent: 'complete',
+    })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{
+        cancellation_reason: 'stale request copy',
+      }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 승인 · 통과') as HTMLButtonElement
+    expect(approve.disabled).toBe(true)
+    expect(container.querySelector('.vq-card.pinned')).toBeFalsy()
+    const notes = [...container.querySelectorAll('.vq-note')].map(n => n.textContent ?? '')
+    expect(notes.some(t => t.includes('중단 요청'))).toBe(false)
+  })
+
+  it('fails closed when intent is unknown even if a request reason exists', () => {
+    tasks.value = [makeTask({
+      contract: { completion_contract: [] },
+      verification_intent: null,
+    })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{
+        cancellation_reason: 'untrusted request copy',
+      }]),
+    }
+    render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 승인 · 통과') as HTMLButtonElement
+    expect(approve.disabled).toBe(true)
+  })
+
   // Null is not "a completion": a stop submitted before the record kept the
   // copy has none either, so the card must not label it.
   it('does not call a request a stop when the record states no reason', () => {
@@ -266,6 +326,64 @@ describe('VerifyQueue', () => {
 
     const notes = [...container.querySelectorAll('.vq-note')].map(n => n.textContent ?? '')
     expect(notes.some(t => t.includes('중단 요청'))).toBe(false)
+  })
+
+  // A stop is approvable without the completion gate. The reliable signal is
+  // the task status intent, so this holds even for a stop whose request record
+  // kept no sentence (null cancellation_reason) on a task with no contract —
+  // the exact shape the queue could never approve before.
+  it('approves a stop from its status intent alone, with no gate and no reason', async () => {
+    tasks.value = [makeTask({ contract: { completion_contract: [] }, verification_intent: 'cancel' })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{ cancellation_reason: null }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 중단 승인') as HTMLButtonElement
+    expect(approve.disabled).toBe(false)
+    const stopNote = container.querySelector('.vq-note.rerun')?.textContent ?? ''
+    expect(stopNote).toContain('중단 요청')
+    expect(stopNote).not.toContain('사유 미기록')
+    expect(stopNote).not.toContain('제출 시점')
+    // a stop is decidable, so the card is pinned and the bar counts it ready —
+    // an empty completion gate must not hide it from the operator
+    expect(container.querySelector('.vq-card.pinned')).toBeTruthy()
+    expect(container.querySelector('.vq-bar-stats')?.textContent).toContain('승인 준비')
+
+    fireEvent.click(approve)
+    await waitFor(() => {
+      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', decision: 'approve' })
+    })
+  })
+
+  // A stop that carries its sentence still approves, and the gate is untouched.
+  it('approves a stop that carries its sentence, gate untouched', () => {
+    tasks.value = [makeTask({ verification_intent: 'cancel' })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{
+        cancellation_reason: '이 태스크가 답하는 이슈가 상류에서 닫혔다',
+      }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 중단 승인') as HTMLButtonElement
+    expect(approve.disabled).toBe(false)
+    // the completion gate is untouched and still unconfirmed
+    expect(container.querySelector('.vq-gate-h .n')?.textContent).toBe('0/2 확인')
+  })
+
+  // A completion keeps the completion gate: with no contract clause there is
+  // nothing confirmed, so its approve stays locked.
+  it('keeps a completion gated when no clause is confirmed', () => {
+    tasks.value = [makeTask({ contract: { completion_contract: [] }, verification_intent: 'complete' })]
+    render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 승인 · 통과') as HTMLButtonElement
+    expect(approve.disabled).toBe(true)
   })
 
   it('renders a rerun note and handoff note from task fields', () => {

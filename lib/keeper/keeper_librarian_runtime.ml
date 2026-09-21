@@ -798,6 +798,7 @@ let run_best_effort
       ?(input_projection = Recent_window)
       ?(on_memory_committed = fun () -> ())
       ?durable_range_id
+      ?official_range_id
       ?cli_runner
       ~base_path
       ~keepers_dir
@@ -983,6 +984,7 @@ let run_best_effort
                  ~clock
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
+                 ?official_range_id
                  ~absorbed:(Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate)
                ~keepers_dir
                ~keeper_id

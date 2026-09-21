@@ -4,6 +4,7 @@
 module B = Keeper_turn_boundaries
 module P = Keeper_librarian_progress
 module Window = Runtime_model_input_tail_window
+module O = Keeper_librarian_official_progress
 
 type range =
   { history_start_boundary_line : int
@@ -286,4 +287,84 @@ let slice messages (range : range) =
          if atom >= range.start_atom && atom < range.end_atom then Some message else None
        | Window.Pinned -> None)
     labelled
+;;
+
+type official_line =
+  { line : int
+  ; turn_ref : Ids.Turn_ref.t
+  ; recorded_at : float
+  }
+
+type official_selection =
+  | Official_read of official_line list
+  | Nothing_official
+  | Official_stop of
+      { line : int
+      ; error : B.read_error
+      }
+
+let cursor_line = function
+  | None -> 0
+  | Some { O.boundary_line } -> boundary_line
+;;
+
+let official_candidate (line, read) =
+  match read with
+  | Ok
+      ({ recorded_at
+       ; event =
+           B.Turn_ended { turn_ref; history_at_start = _; position = B.No_atom_history }
+       } : B.record) -> Some { line; turn_ref; recorded_at }
+  | Ok
+      { B.event =
+          B.Turn_ended
+            { position = B.Atom_history _ | B.Empty_atom_history | B.Stale_noop; _ }
+      ; _
+      }
+  | Ok { B.event = B.History_restarted _; _ }
+  | Error _ -> None
+;;
+
+let select_official ~lines ~cursor extent =
+  let after = cursor_line cursor in
+  let beyond = List.filter (fun (line, _) -> line > after) lines in
+  match List.find_opt (fun (_, read) -> match read with Error (B.Not_json _ | B.Malformed _) -> true | Error B.Incomplete_line | Ok _ -> false) beyond with
+  | Some (line, Error error) -> Official_stop { line; error }
+  | Some (_, Ok _) | None ->
+    (match List.filter_map official_candidate beyond with
+     | [] -> Nothing_official
+     | first :: rest ->
+       (match extent with
+        | To_first_cut_point -> Official_read [ first ]
+        | All_unread -> Official_read (first :: rest)))
+;;
+
+let may_have_unread_official ~lines ~cursor =
+  match select_official ~lines ~cursor All_unread with
+  | Official_read _ | Official_stop _ -> true
+  | Nothing_official -> false
+;;
+
+type atom_cut =
+  { cut_line : int
+  ; cut_end_atom : int
+  ; cut_recorded_at : float
+  ; cut_turn_ref : Ids.Turn_ref.t
+  }
+
+let cut_lines ~trace_id ~lines ~messages (range : range) =
+  let _labelled, atom_count = Window.annotate messages in
+  let digest_at = Window.atom_opening_digest messages in
+  current_history_lines (lines_of_trace ~trace_id lines)
+  |> List.filter_map (fun (line, (written : B.record)) ->
+    match cut_point ~digest_at ~atom_count written, written.event with
+    | Some (end_atom, _), B.Turn_ended { turn_ref; _ }
+      when end_atom > range.start_atom && end_atom <= range.end_atom ->
+      Some
+        { cut_line = line
+        ; cut_end_atom = end_atom
+        ; cut_recorded_at = written.recorded_at
+        ; cut_turn_ref = turn_ref
+        }
+    | Some _, (B.Turn_ended _ | B.History_restarted _) | None, _ -> None)
 ;;

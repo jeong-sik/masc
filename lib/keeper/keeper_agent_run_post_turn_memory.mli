@@ -13,8 +13,6 @@ val run :
   meta:Keeper_meta_contract.keeper_meta ->
   turn:int ->
   agent_core_turn_count:int ->
-  tool_observations:Keeper_librarian.tool_observation list ->
-  librarian_messages:Agent_core.Types.message list ->
   checkpoint_owner:Runtime_execution.checkpoint_owner ->
   post_turn_t0:float ->
   inference_telemetry:Agent_core.Types.inference_telemetry option ->
@@ -30,10 +28,10 @@ val run :
     [inference_telemetry] is [result.response.telemetry] from the AGENT_CORE
     result; it is optional because some providers do not emit telemetry.
 
-    Agent-Core turns wake the durable consumer after the checkpoint boundary
-    is stored and discard any remembered direct closure. Official-client turns
-    retain the direct input path until they have a durable history source.
-    Disabled or invalid configuration submits neither path. *)
+    Every turn wakes the durable consumer after its end line is stored and
+    discards any remembered direct closure: an Agent-Core turn is read from
+    its checkpoint, an official-client turn from the history fragments its
+    [turn_ref] names. Disabled or invalid configuration wakes nothing. *)
 
 module For_testing : sig
   val goal_context_for_task :

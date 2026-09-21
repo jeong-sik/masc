@@ -72,7 +72,7 @@ let protected_references ~config ~keeper_name ~dir =
       | Dated_jsonl.Malformed_json { path; line_number; detail } :: _ ->
         Error (Malformed_turn_record { path; line_number; detail })
       | Dated_jsonl.Parsed json :: rest ->
-        (match Turn_record.raw_trace_reachability_root_of_json json with
+        (match Turn_record.of_json json with
          | Error detail -> Error (Incompatible_turn_record detail)
          | Ok record when not (String.equal record.keeper keeper_name) ->
            Error

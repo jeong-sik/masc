@@ -65,12 +65,12 @@ let librarian_dropped_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let librarian_current_output_schema =
+let librarian_output_schema ~working_state =
   let fields =
     [ ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
     ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
-    ; "working_state", nullable_string_schema
+    ; "working_state", working_state
     ; "working_contexts", array_schema (object_schema
         ~required:["merge_contexts"; "sources"; "context"; "next_steps"]
         [ "merge_contexts", string_array_schema
@@ -81,6 +81,15 @@ let librarian_current_output_schema =
     ]
   in
   object_schema ~required:(List.map fst fields) fields
+;;
+
+let librarian_current_output_schema =
+  librarian_output_schema ~working_state:nullable_string_schema
+;;
+
+let librarian_continuity_output_schema =
+  librarian_output_schema
+    ~working_state:(`Assoc ["type", `String "string"; "minLength", `Int 1])
 ;;
 
 let board_attention_judgment_batch_output_schema =

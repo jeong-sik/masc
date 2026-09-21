@@ -66,7 +66,7 @@ let with_statement db sql f =
   | statement ->
     let outcome =
       try `Result (f statement) with
-      | exn -> `Exception exn (* cancel-guard-ok: the exception is stashed as `Exception and re-raised at line 94 once the statement is finalized. *)
+      | exn -> `Exception exn (* cancel-guard-ok: PROVISIONAL, delete with #37372. The exception is stashed as `Exception and re-raised at line 94 once the statement is finalized. *)
     in
     let finalized =
       match Sqlite3.finalize statement with
@@ -97,7 +97,7 @@ let with_statement db sql f =
 let with_database db f =
   let outcome =
     try `Result (f db) with
-    | exn -> `Exception exn (* cancel-guard-ok: the exception is stashed as `Exception and re-raised once the database is closed. *)
+    | exn -> `Exception exn (* cancel-guard-ok: PROVISIONAL, delete with #37372. The exception is stashed as `Exception and re-raised once the database is closed. *)
   in
   let closed =
     match Sqlite3.db_close db with

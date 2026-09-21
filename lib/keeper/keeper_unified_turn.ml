@@ -1365,6 +1365,23 @@ let run_keeper_cycle
                     ~observation
                     ~latency_ms
                     ~outcome:"error"
+                    (* The only site that names its own path rather than
+                       deriving it. It is a constant because the lane is this
+                       function's identity, not data it holds: [run_keeper_cycle]
+                       has one production caller,
+                       [Keeper_heartbeat_loop_cycle.run_keeper_cycle_admitted],
+                       and the direct lane runs
+                       [Keeper_turn.run_keeper_msg_turn_admitted] instead and
+                       never arrives here.
+
+                       What makes it wrong: a direct turn reaching this failure
+                       path, or [run_keeper_cycle] gaining a caller outside the
+                       heartbeat loop. Nothing would fail — the row would just
+                       say autonomous_cycle for a direct turn, and a provenance
+                       column that lies is worse than none. Whoever adds either
+                       has to derive this the way
+                       [Keeper_unified_turn_success.handle] does, from
+                       [Keeper_execution_outcome.lane]. *)
                     ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
                     ~degraded_retry_applied
                     ~degraded_retry_deferred

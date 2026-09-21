@@ -546,6 +546,36 @@ let test_context_error_records_prior_tool_effect () =
        | Ok _ -> fail "context overflow after a tool effect was not reported")
 ;;
 
+let test_prompt_char_count () =
+  let count = Runtime_codex_app_server.prompt_char_count in
+  List.iter (fun (label, input, expected) ->
+    match count input with
+    | Ok actual -> check int label expected actual
+    | Error detail -> fail detail)
+    [ "empty", "", 0
+    ; "ASCII", "hello", 5
+    ; "Korean and astral are one scalar each", "한😀", 2
+    ; "combining sequence is two scalars", "e\xcc\x81", 2
+    ; "precomposed scalar is one", "é", 1
+    ; "literal JSON special characters", "\"\\\n", 3
+    ; "NUL remains one scalar", "\000", 1
+    ; "largest Unicode scalar", "\xf4\x8f\xbf\xbf", 1
+    ; "full submitted prompt includes suffix", "한\n\n{}", 5 ];
+  List.iter (fun malformed ->
+    match count malformed with
+    | Error _ -> ()
+    | Ok _ -> fail "malformed UTF-8 cannot supply a capacity measurement")
+    [ "\x80"; "\xc0\xaf"; "\xed\xa0\x80"; "\xf4\x90\x80\x80";
+      "\xe2\x82"; "valid prefix\xff" ];
+  let measured prompt = match count prompt with
+    | Ok count -> count | Error detail -> fail detail in
+  let server_limit = 2 in
+  check bool "equal to the server limit fits" true
+    (measured "한😀" <= server_limit);
+  check bool "one scalar beyond the server limit does not fit" false
+    (measured "한😀a" <= server_limit)
+;;
+
 let test_rpc_input_capacity_data () =
   let module C = Runtime_codex_app_server in
   let fields = ["input_error_code", `String "input_too_large";
@@ -5032,7 +5062,7 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data] )
+    [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
       , [ test_case "later claim refusal preserves the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:true)

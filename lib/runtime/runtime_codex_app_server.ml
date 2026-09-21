@@ -268,6 +268,23 @@ let permissions_profile_of_posture = function
          "Codex cannot disable its built-in tools; use native read or full")
 ;;
 
+(* Match Codex UserInput::Text.text.chars().count(), not UTF-8 bytes or
+   grapheme clusters. Source: openai/codex 8f2c15c39871c0698cd76a22ae239d36f7e8c9b8,
+   codex-rs/app-server-protocol/src/protocol/v2/turn.rs, text_char_count.
+   Our turn/start sends one text input containing exactly [prompt]. *)
+let prompt_char_count prompt =
+  let length = String.length prompt in
+  let rec count offset chars =
+    if offset = length then Ok chars
+    else
+      let decoded = String.get_utf_8_uchar prompt offset in
+      if Uchar.utf_decode_is_valid decoded then
+        count (offset + Uchar.utf_decode_length decoded) (chars + 1)
+      else Error "Codex prompt contains malformed UTF-8"
+  in
+  count 0 0
+;;
+
 type input_capacity = { actual_chars : int; max_chars : int }
 
 (* Codex app-server reports this typed data independently of its human message:

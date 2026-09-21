@@ -221,7 +221,8 @@ let handle_keeper_reset ctx args : tool_result =
 type keeper_clear_report =
   | Clear_meta_unreadable of string
   | Clear_meta_missing
-  | Clear_checkpoint_unreadable of string
+  | Clear_checkpoint_unreadable of
+      { path : string; error : Keeper_checkpoint_store.checkpoint_load_error }
   | Clear_no_checkpoint
   | Clear_checkpoint_loaded of
       keeper_meta * session_context * working_context
@@ -284,17 +285,21 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Error detail -> Clear_meta_unreadable detail
         | Ok None -> Clear_meta_missing
         | Ok (Some (_, meta)) ->
-          let session, checkpoint =
-            Keeper_context_runtime.load_context_from_checkpoint_classified
-              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+          let session =
+            Keeper_context_runtime.create_session ~session_id:trace_id
               ~base_dir
           in
-          (match checkpoint with
-           | Keeper_context_runtime.Checkpoint_absent -> Clear_no_checkpoint
-           | Keeper_context_runtime.Checkpoint_unread error ->
+          (match Keeper_checkpoint_store.load_agent_core
+                   ~session_dir:session.session_dir ~session_id:trace_id with
+           | Error Not_found -> Clear_no_checkpoint
+           | Error error ->
              Clear_checkpoint_unreadable
-               (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
-           | Keeper_context_runtime.Checkpoint_loaded wctx ->
+               { path = Keeper_checkpoint_store.agent_core_checkpoint_path
+                   ~session_dir:session.session_dir ~session_id:trace_id
+               ; error }
+           | Ok checkpoint ->
+             let wctx = Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint in
              Clear_checkpoint_loaded (meta, session, wctx))
       in
       let checkpoint_found =
@@ -306,20 +311,20 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           | Clear_no_checkpoint ) ->
           false
       in
-      (* Record the operator event; it changes no lifecycle condition. *)
-      Keeper_context_runtime.dispatch_keeper_phase_event
-        ~config ~keeper_name:name
-        (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
-      (* Clear registry failure state *)
-      ignore
-        (Keeper_turn_failure_streak.reset
-           ~base_path:config.base_path
-           ~keeper_name:name);
       (* [line_error]: the history was emptied and its [history_restarted] line
          could not be written. That does not fail the clear, as a turn's line
          does not fail the turn: it is logged, counted and named in the
          result. *)
       let cleared ?line_error ~cleared_message_count () =
+        (* Only a confirmed clear resets the prior turn failure observation. *)
+        Keeper_context_runtime.dispatch_keeper_phase_event
+          ~config ~keeper_name:name
+          (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
+        (* See Keeper_turn_failure_streak.reset: failure is logged and retains the streak. *)
+        ignore
+          (Keeper_turn_failure_streak.reset
+             ~base_path:config.base_path
+             ~keeper_name:name);
         Log.Keeper.warn
           "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
           name reason preserve_system cleared_message_count;
@@ -372,6 +377,20 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
          message count. *)
       let result =
         match report with
+        | Clear_checkpoint_unreadable { path; error } ->
+          let detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error in
+          Log.Keeper.error
+            "%s: history not cleared: checkpoint could not be read at %s: %s"
+            name path detail;
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history not cleared: checkpoint could not be read at %s: %s"
+                 path detail)
+            [ "name", `String name; "checkpoint_path", `String path ]
         | Clear_meta_unreadable detail ->
           Log.Keeper.error
             "%s: operator clear did not look for a checkpoint (reason=%s): keeper meta \
@@ -397,19 +416,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             ~code:Tool_args.Precondition_failed
             ~message:
               "history not cleared: the keeper meta disappeared after name resolution, so its checkpoint and official-client session were left untouched. Run masc_keeper_clear again."
-            []
-        | Clear_checkpoint_unreadable detail ->
-          Log.Keeper.error
-            "%s: operator clear could not read the checkpoint (reason=%s): %s"
-            name reason detail;
-          keeper_clear_failure
-            ~class_:Tool_result.Runtime_failure
-            ~effect_disposition:Tool_result.Proven_pre_effect
-            ~code:Tool_args.Internal_error
-            ~message:
-              (Printf.sprintf
-                 "history not cleared: the checkpoint exists but could not be read, so it and the official-client session were left untouched: %s. Run masc_keeper_clear again."
-                 detail)
             []
         | Clear_no_checkpoint ->
           clear_official_client_session_then (fun () ->

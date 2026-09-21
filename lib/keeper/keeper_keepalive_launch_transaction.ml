@@ -149,7 +149,7 @@ let run
                      ~keeper_name;
                    Ok (launch intake_token token reg)
                  with
-                 | exn ->
+                 | exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm dispatches on the exception at line 179 and re-throws Cancelled there, after the rollback has run under Eio.Cancel.protect. *)
                    let exception_detail = Printexc.to_string exn in
                    let librarian_abort_error, rollback_error =
                      Eio.Cancel.protect (fun () ->
@@ -220,6 +220,7 @@ type exit_boundary =
 
 let terminalize_safely terminalize =
   try terminalize () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 ;;
 

@@ -128,6 +128,42 @@ Memory OS의 Librarian은 관련 기억(`m1`, `m2`)을 새 claim으로 묶고, �
 
 측정 스크립트는 저장소에 넣지 않았다. §5 Phase 1 마이너가 이 정의를 코드로 옮긴다.
 
+### 1.2.2 §3.1 은 이미 쓰이는 컴포지션 7개를 하나도 만들어 내지 못한다 (2026-09-20)
+
+§1.2.1 은 기록에서 새 후보가 몇 개 나오는지 셌다. 반대쪽도 물어야 한다. 저장소가 이미 담고 있고 Keeper 들이 지금 쓰는 컴포지션을, §3.1 은 같은 기록만 보고 다시 만들어 낼 수 있나.
+
+`skills/*/SKILL.md` 의 컴포지션은 7개다. 그 가운데 셋은 노드끼리 출력을 넘기지 않는다(`kind = "output"` 참조가 0개). §3.1 조건 2 는 앞 도구의 출력 pointer 가 뒤 도구의 입력 필드로 사상되기를 요구하므로, 이 셋은 모양 때문에 후보가 될 수 없다. 나머지 넷은 출력 참조를 가지고 있어 조건 2 가 볼 수 있는 모양인데, §1.2.1 의 판정에서 넷 다 떨어진다.
+
+| 컴포지션 | 노드 사이 이어짐 | §1.2.1 의 판정 |
+|---|---|---|
+| `prior-art` | 없음 | 조건 2 가 후보로 올릴 수 없다 |
+| `sangokushi-2-end-command` | 없음 | 같다. `masc_msx_press → masc_msx_screen` 에서 JSON 값이 넘어가지도 않는다 |
+| `work-intake` | 없음 | 같다. §1.2.1 이 이미 적었다 |
+| `browser-live-follow-read` | `BrowserInteract → BrowserRead` (`/tabId`, `/destinationUrl`, `/navigationSource`) | 조건 2 를 통과한 넷에 없다. 통과한 것은 반대 방향인 `BrowserRead → BrowserInteract` 다 |
+| `browser-navigate-read` | `BrowserGoto → BrowserRead` (`/url`) | 통과한 넷에 없다 |
+| `msx-observe` | `masc_msx_screen → keeper_analyze_image` (`/artifact`) | 통과하지 못한다. 판정할 수 있는 2,323번 중 1번이 이어지지 않는다 |
+| `run-and-read` | `keeper_spawn → keeper_spawn_wait`·`keeper_spawn_read` (`/handle`) | 통과하지 못한다. `keeper_spawn → keeper_spawn_wait` 가 1,854번 중 1,673번만 이어진다 |
+
+§3.1 이 "지금 쓸 수 있다"고 올린 것은 `keeper_spawn → keeper_spawn_wait → keeper_spawn_stop` 하나인데, `keeper_spawn_stop` 은 저장소의 어느 `SKILL.md` 에도 없다. 사람이 묶은 일곱은 전부 떨어지고, 아무도 묶지 않은 하나가 올라온다.
+
+이 실측이 반증하는 것과 반증하지 않는 것을 갈라 둔다.
+
+- 반증하는 것: "기록을 읽으면 쓸 만한 컴포지션이 나온다"는 전제. 지금 쓰이는 7개를 기준으로 하면 재현율은 0/7 이다. 조건 2 는 그 가운데 셋을 모양 때문에 아예 보지 못한다.
+- 반증하지 않는 것: §3.1 조건이 안전한지. 조건 2 는 어긋나는 발생이 하나만 있어도 떨어뜨리고, 그 엄격함이 이 결과를 만든다. 느슨하게 하면 재현율과 함께 잘못된 컴포지션도 오른다. 어느 쪽이 나은지는 이 실측이 답하지 않는다.
+
+### 1.2.3 이 작업 공간에서 컴포지션이 실제로 움직인 모양 (2026-09-20)
+
+`<base-path>/.masc/skill-composition-evidence-v1/` 에 실행 기록 17건이 있고, `reference.identity.package_id` 는 12개다. 7개는 저장소의 그 7개다. 나머지 다섯(`plan-intake`, `done-evidence`, `background-snapshot`, `mission-snapshot`, `what-arrived`)은 지금 `<base-path>/.masc/skills/` 에 없다. 돌았고, 지워졌다.
+
+- 다섯의 도구 집합은 서로 포개진다. `background-snapshot` ⊂ `plan-intake` ⊂ `mission-snapshot` 이고, `what-arrived` ⊂ `work-intake` 다.
+- `jazz-developer` 는 `background-snapshot`(도구 2개)을 09-14 19:07Z 에 돌리고, 5.9시간 뒤 `mission-snapshot`(4개)을 돌렸다. 뒤엣것이 앞엣것의 도구를 담는다.
+- `goo-yang-bong` 은 `work-intake` 를 돌린 지 193초 뒤에 `what-arrived` 를 돌렸다.
+- `done-evidence` 는 노드가 하나(`keeper_lane_status`)다.
+
+읽는 방법의 한계를 적어 둔다. `executor_settlements` 는 그 실행에서 실제로 끝난 노드만 적으므로, 위 도구 집합은 기록들의 합집합이지 정의가 아니다. 지워진 다섯은 정의가 남아 있지 않아 이 합집합이 알 수 있는 전부다.
+
+이 기록은 겹침의 방향까지는 말하지 않는다. `plan-intake`(도구 3개)가 `background-snapshot`(2개)보다 먼저이고, 만든 Keeper 도 다르다. 말하는 것은 이것이다. 이 창에서 컴포지션이 움직인 모양은 서로 겹치는 것들이 나란히 만들어지고 지워지는 쪽이었고, 그 겹침을 하나로 합치는 일은 §3.1 이 푸는 문제가 아니다. §3.1 은 아직 컴포지션이 없는 새 시퀀스를 찾는다.
+
 ### 1.3 일하는 Keeper가 직접 만들 때의 우려 (`keeper-writes-own-compositions` 검토)
 `RFC-keeper-writes-own-compositions`는 일하는 키퍼가 런타임에 `keeper_compose_save`로 제안하자고 했다. 이 RFC가 보는 우려는 둘이다. `keeper_compose_save`는 구현된 적이 없어서 둘 다 잰 값은 없다.
 1. **작업 방해(Task Distraction)**: 코딩/디버깅 턴에 복잡한 TOML DAG를 조립하느라 에이전트의 주의력과 토큰이 그쪽으로 샐 수 있다.
@@ -320,3 +356,5 @@ Tool Librarian은 다음 3가지 조건을 모두 충족할 때만 컴포지션 
 관측한 기록에서는 Shell IR의 도구 연결이 성공하지 않았고, 수동 컴포지션에도 샌드박스 실패가 있었다. 이 결과만으로 자동 생성이 수동 작성보다 낫거나 §3.1의 조건이 충분하다고 결론 내릴 수는 없다.
 
 Tool Librarian 자동화는 검토 중인 제안이다. 채택 여부를 정하려면 기존 컴포지션을 재현하는 범위, 잘못된 후보, 실제 실행의 안전성을 비교해야 한다. 이 RFC의 관측 기록은 그 비교의 근거이며, 자동 생성·검증·승인이 구현되었다는 증거가 아니다.
+
+그 셋 가운데 첫째는 §1.2.2 가 이미 쟀다. 저장소가 담고 있고 지금 쓰이는 컴포지션 7개 가운데, §3.1 조건 2 가 볼 수 있는 넷에서 되살아나는 것은 0개이고, 나머지 셋은 노드 사이에 출력을 넘기지 않아 조건 2 의 시야 밖이다. 구현에 들어가기 전에 셋 중 하나를 정해야 한다. 조건 2 를 그 일곱이 통과하도록 고칠지, 이미 쓰이는 것을 재현하지 못한다는 사실을 받아들이고 새 시퀀스만 찾을지, 아니면 손으로 묶은 일곱이 이미 있는 지금은 만들지 않을지.

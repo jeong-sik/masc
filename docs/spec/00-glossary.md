@@ -147,6 +147,19 @@ status: reference
 **Board**
 : 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
 
+**Broadcast**
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) 워크스페이스 broadcast: `Workspace.broadcast
+  ~audience:Workspace_broadcast.Fleet_conversation`으로 모든 Keeper의 대화창에 닿는
+  발화. 입구는 Keeper 도구 `keeper_broadcast`, MCP 도구 `masc_broadcast`, 운영자
+  제어(`lib/operator/operator_control.ml`), dashboard HTTP
+  (`lib/server/server_routes_http_dashboard_handlers.ml`),
+  gRPC(`lib/server/masc_grpc_service.ml`)다. (2) SSE broadcast: 서버가 연결된 client
+  전부의 stream에 event를 밀어 넣는 전송 동작(`09-server-transport.md`).
+  (3) Board `audience`의 `Broadcast`: 글을 특정 대상 없이 모두에게 라우팅하는 값
+  (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
+  (`lib/masc_log/log.ml`).
+
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
@@ -442,3 +455,15 @@ status: reference
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
+
+**JEV / Noul**
+: JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
+  참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
+  통과율이 아니다. Board의 Choice 판정과도 구분한다.
+
+**Continuity Measurement (의미 보존 측정)**
+: 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
+  비교해 그 답을 평가하는 관측. `masc-librarian-continuity`는 명시한 합성
+  입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
+  게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
+  Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.

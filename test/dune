@@ -3424,7 +3424,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_image_preview
+ (libraries masc_tui_link_preview masc_tui_image_preview
   alcotest
   ast_grep
   astring

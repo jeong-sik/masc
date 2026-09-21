@@ -418,6 +418,23 @@ let test_prune_fails_open_on_incompatible_turn_record () =
   Alcotest.(check bool) "orphan survives fail-open cleanup" true
     (Sys.file_exists orphan)
 
+let test_retention_error_kinds_are_bounded () =
+  let module R = Keeper_raw_trace_retention in
+  List.iter
+    (fun (expected, error) ->
+      Alcotest.(check string) expected expected (R.error_kind error))
+    [ "turn_record_store_unreadable", R.Turn_record_store_unreadable "detail"
+    ; ( "malformed_turn_record"
+      , R.Malformed_turn_record
+          { path = "turns.jsonl"; line_number = Some 1; detail = "detail" } )
+    ; "incompatible_turn_record", R.Incompatible_turn_record "detail"
+    ; ( "wrong_keeper_turn_record"
+      , R.Wrong_keeper_turn_record { expected = "keeper-a"; actual = "keeper-b" } )
+    ; "invalid_raw_trace_reference", R.Invalid_raw_trace_reference "trace.jsonl"
+    ; "raw_trace_directory_unreadable", R.Raw_trace_directory_unreadable "detail"
+    ]
+;;
+
 let test_prune_refuses_a_pre_response_observation_turn_record () =
   with_workspace @@ fun config ->
   let meta = make_test_meta () in
@@ -824,6 +841,8 @@ let () =
             test_prune_preserves_current_references_and_removes_orphans;
           Alcotest.test_case "retention fails open on incompatible record" `Quick
             test_prune_fails_open_on_incompatible_turn_record;
+          Alcotest.test_case "retention error kinds stay bounded" `Quick
+            test_retention_error_kinds_are_bounded;
           Alcotest.test_case "retention preserves the TurnRecord hard cut" `Quick
             test_prune_refuses_a_pre_response_observation_turn_record;
           Alcotest.test_case "retention syscalls yield and finish before cancelled caller" `Quick

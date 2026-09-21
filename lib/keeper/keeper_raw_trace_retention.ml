@@ -37,6 +37,15 @@ type error =
   | Invalid_raw_trace_reference of string
   | Raw_trace_directory_unreadable of string
 
+let error_kind = function
+  | Turn_record_store_unreadable _ -> "turn_record_store_unreadable"
+  | Malformed_turn_record _ -> "malformed_turn_record"
+  | Incompatible_turn_record _ -> "incompatible_turn_record"
+  | Wrong_keeper_turn_record _ -> "wrong_keeper_turn_record"
+  | Invalid_raw_trace_reference _ -> "invalid_raw_trace_reference"
+  | Raw_trace_directory_unreadable _ -> "raw_trace_directory_unreadable"
+;;
+
 let error_to_string = function
   | Turn_record_store_unreadable detail ->
     Printf.sprintf "cannot read current TurnRecord window: %s" detail

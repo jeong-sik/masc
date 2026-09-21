@@ -43,7 +43,7 @@ let test_empty_picker_keeps_its_explanation () =
 let test_lane_prompt_keeps_footer_space () =
   let state = state () in
   check_layout state 12;
-  state.runtime_lane_name_draft <- Some "coding";
+  state.runtime_lane_name_draft <- Some (Naming_new_lane "coding");
   check_layout state 14;
   state.runtime_lane_name_draft <- None;
   state.runtime_lane_remove_armed <- Some "coding";
@@ -95,6 +95,7 @@ let stale_text state =
 
 let plan_text = function
   | Open_lane_name_field -> "open the name field"
+  | Open_lane_rename_field lane -> "rename " ^ lane
   | Arm_lane_removal lane -> "arm " ^ lane
   | Send_lane_write { lane; request; cursor_after } ->
     Printf.sprintf "write %s %s, cursor %s" lane
@@ -267,6 +268,14 @@ let test_a_new_view_ends_what_a_key_said () =
     Alcotest.(check string) (notice_text (Some notice)) "no line"
       (notice_text state.runtime_lane_notice))
     [ Lane_write_refused "HTTP 400: no"; Lane_write_pending ]
+
+(* [R] opens the field on the name the lane has now, so the common edit --
+   changing part of it -- starts from what is there rather than from empty. *)
+let test_a_rename_opens_the_field_on_the_current_name () =
+  let state = lane_state () in
+  expect_plan "the lane under the cursor" state (Row_edit Rename_lane) "rename primary";
+  state.runtime_cursor <- 2;
+  expect_plan "the next lane" state (Row_edit Rename_lane) "rename solo"
 
 let test_lane_keys_parse_to_edits () =
   let parsed key = Option.map (fun edit -> plan_text (plan_runtime_lane_edit (lane_state ()) edit))
@@ -600,6 +609,8 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "a lane edit sends the whole order" `Quick test_a_lane_edit_sends_the_whole_order;
       Alcotest.test_case "a lane edit waits for the previous write" `Quick test_a_lane_edit_waits_for_the_previous_write;
       Alcotest.test_case "lane keys parse to edits" `Quick test_lane_keys_parse_to_edits;
+      Alcotest.test_case "a rename opens the field on the current name" `Quick
+        test_a_rename_opens_the_field_on_the_current_name;
       Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
       Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
       Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;

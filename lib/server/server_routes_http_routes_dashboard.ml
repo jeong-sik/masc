@@ -590,6 +590,7 @@ type runtime_route_body =
   | Runtime_route_runtime_ids of runtime_route_lane * string list
   | Runtime_route_lane_created of string * string list
   | Runtime_route_lane_removed of string
+  | Runtime_route_lane_renamed of string * string
   | Runtime_route_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_route_exact_slot_dropped of Runtime.exact_lane * string
   | Runtime_route_exact_slot_moved of
@@ -607,6 +608,7 @@ type runtime_lane_action =
   | Lane_set
   | Lane_create
   | Lane_remove
+  | Lane_rename
   | Lane_append
   | Lane_drop
   | Lane_move
@@ -617,13 +619,15 @@ let parse_runtime_lane_action json =
   | Some (`String "set") -> Ok Lane_set
   | Some (`String "create") -> Ok Lane_create
   | Some (`String "remove") -> Ok Lane_remove
+  | Some (`String "rename") -> Ok Lane_rename
   | Some (`String "append") -> Ok Lane_append
   | Some (`String "drop") -> Ok Lane_drop
   | Some (`String "move") -> Ok Lane_move
   | Some (`String other) ->
     Error
       (Printf.sprintf
-         "unknown lane action: %s (expected set, create, remove, append, drop or move)"
+         "unknown lane action: %s (expected set, create, remove, rename, append, drop \
+          or move)"
          other)
   | Some _ -> Error "action must be a string"
 
@@ -687,6 +691,24 @@ let parse_create_route_body json lane =
      | Error _ as err -> err
      | Ok runtime_ids -> Ok (Runtime_route_lane_created (lane, runtime_ids)))
 
+(* A rename names the lane it renames and the name it takes. Both are read as
+   routing labels: a new name that reads as one of the other routes this
+   endpoint edits would be a lane nothing can address. *)
+let parse_rename_route_body json lane =
+  match parse_runtime_route_lane lane with
+  | Ok (Runtime_named_lane lane_id) ->
+    (match required_string_field json "to" with
+     | Error _ as err -> err
+     | Ok new_lane_id ->
+       (match parse_runtime_route_lane new_lane_id with
+        | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
+          Error (Printf.sprintf "%S names another route, not a lane" new_lane_id)
+        | Ok (Runtime_named_lane _) | Error _ ->
+          Ok (Runtime_route_lane_renamed (lane_id, new_lane_id))))
+  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
+    Error (Printf.sprintf "%S names another route, not a lane" lane)
+  | Error _ as err -> err
+
 let parse_remove_route_body lane =
   match parse_runtime_route_lane lane with
   | Ok (Runtime_named_lane lane_id) -> Ok (Runtime_route_lane_removed lane_id)
@@ -741,6 +763,7 @@ let parse_runtime_route_body body_str =
        | Ok lane, Ok Lane_set -> parse_set_route_body json lane
        | Ok lane, Ok Lane_create -> parse_create_route_body json lane
        | Ok lane, Ok Lane_remove -> parse_remove_route_body lane
+       | Ok lane, Ok Lane_rename -> parse_rename_route_body json lane
        | Ok lane, Ok Lane_append -> parse_append_route_body json lane
        | Ok lane, Ok Lane_drop ->
          parse_exact_slot_route_body json lane ~verb:"drop" ~build:(fun exact runtime_id ->
@@ -786,6 +809,7 @@ type runtime_config_write_operation =
   | Runtime_config_routing_list of runtime_route_lane * string list
   | Runtime_config_lane_created of string * string list
   | Runtime_config_lane_removed of string
+  | Runtime_config_lane_renamed of string * string
   | Runtime_config_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_config_exact_slot_dropped of Runtime.exact_lane * string
   | Runtime_config_exact_slot_moved of
@@ -824,6 +848,12 @@ let runtime_config_write_operation_details = function
     [ ("operation", `String "routing")
     ; ("lane", `String lane_id)
     ; ("action", `String "remove")
+    ]
+  | Runtime_config_lane_renamed (lane_id, new_lane_id) ->
+    [ ("operation", `String "routing")
+    ; ("lane", `String lane_id)
+    ; ("action", `String "rename")
+    ; ("to", `String new_lane_id)
     ]
   | Runtime_config_exact_slot_appended (exact, runtime_id) ->
     [ ("operation", `String "routing")
@@ -866,6 +896,7 @@ let runtime_config_write_operation_label = function
   | Runtime_config_raw_save -> "raw_save"
   | Runtime_config_routing _ | Runtime_config_routing_list _
   | Runtime_config_lane_created _ | Runtime_config_lane_removed _
+  | Runtime_config_lane_renamed _
   | Runtime_config_exact_slot_appended _ | Runtime_config_exact_slot_dropped _
   | Runtime_config_exact_slot_moved _ -> "routing"
   | Runtime_config_assignment _ -> "assignment"
@@ -1191,6 +1222,15 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+  | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
+    let operation = Runtime_config_lane_renamed (lane_id, new_lane_id) in
+    (match Runtime.rename_runtime_lane ~lane_id ~new_lane_id () with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
     let operation = Runtime_config_exact_slot_appended (exact, runtime_id) in
     (match Runtime.append_exact_output_lane_slot ~lane:exact ~slot:runtime_id () with
@@ -1286,6 +1326,8 @@ module For_testing = struct
     | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
         Ok (lane_id, "create", runtime_ids)
     | Ok (Runtime_route_lane_removed lane_id) -> Ok (lane_id, "remove", [])
+    | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
+        Ok (lane_id, "rename", [ new_lane_id ])
     | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
         Ok ("exact/" ^ Runtime.exact_lane_id exact, "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->

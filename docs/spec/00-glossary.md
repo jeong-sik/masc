@@ -167,7 +167,9 @@ status: reference
   Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
   `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
   판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
-  구간의 소유자다.
+  구간의 소유자다. `AwaitingVerification`은 `Held_pending_verdict`로 claim에
+  응답하므로 Keeper가 다시 맡을 수 없다. 완료·취소 verdict는 Keeper action이
+  아니라 system LLM 또는 인증된 운영자의 authority 경계에서만 적용된다.
 
 **Evidence**
 : 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
@@ -178,7 +180,10 @@ status: reference
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
   `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
-  `Completed`가 된다(`lib/goal/goal_phase.mli`).
+  `Completed`가 된다(`lib/goal/goal_phase.mli`). `Verifying` 중에도 연결된
+  Task는 계속 진행할 수 있다. 완료 verdict는 verifier가 기록하고, 사람의
+  확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
+  `admits_self_directed_progress`가 이 경계를 정의한다.
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와

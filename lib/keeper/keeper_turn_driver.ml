@@ -1545,26 +1545,30 @@ let run_named
 	     to the next). *)
       (* Freeze the pair for the whole dispatch, including provider failover.
          The checkpoint remains the source of every atom index. *)
-      let continuity = Domain_pool_ref.submit_io_or_inline (fun () ->
-        let config = Workspace.default_config base_path in
-          let ( let* ) = Result.bind in
-          let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
-          match saved, session_id with
-          | None, _ | Some _, None -> Ok None
-          | Some snapshot, Some trace_id ->
-            let* lines = Keeper_turn_boundaries.read
-              ~keepers_dir:(Workspace.keepers_runtime_dir config)
-              ~keeper_id:keeper_name in
-            match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
-              ~messages:initial_messages snapshot with
-            | Ok restored -> Ok (Some restored)
-            | Error (Librarian_continuity_snapshot.Trace_mismatch
-                     | Librarian_continuity_snapshot.History_changed
-                     | Librarian_continuity_snapshot.Uncovered_history) ->
-              Log.Keeper.info ~keeper_name
-                "Librarian continuity belongs to an earlier history; sending current history in full";
-              Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
-            | Error error -> Error (Librarian_continuity_snapshot.error_to_string error))
+      let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+        match session_id, recovery_view with
+        | None, _ | _, Some _ -> Ok None
+        | Some trace_id, None ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            let config = Workspace.default_config base_path in
+            let ( let* ) = Result.bind in
+            let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
+            match saved with
+            | None -> Ok None
+            | Some snapshot ->
+              let* lines = Keeper_turn_boundaries.read
+                ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                ~keeper_id:keeper_name in
+              match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
+                ~messages:initial_messages snapshot with
+              | Ok restored -> Ok (Some restored)
+              | Error (Librarian_continuity_snapshot.Trace_mismatch
+                       | Librarian_continuity_snapshot.History_changed
+                       | Librarian_continuity_snapshot.Uncovered_history) ->
+                Log.Keeper.info ~keeper_name
+                  "Librarian continuity belongs to an earlier history; sending current history in full";
+                Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
+              | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
       in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client
@@ -2426,6 +2430,7 @@ let run_named
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Agent_core runtime_provider_config ->
+       let continuity = Eio.Lazy.force continuity in
        (match
           match continuity, recovery_view with
           | Error detail, None ->

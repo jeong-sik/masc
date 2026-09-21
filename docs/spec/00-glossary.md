@@ -441,3 +441,15 @@ status: reference
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
+
+**JEV / Noul**
+: JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
+  참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
+  통과율이 아니다. Board의 Choice 판정과도 구분한다.
+
+**Continuity Measurement (의미 보존 측정)**
+: 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
+  비교해 그 답을 평가하는 관측. `masc-librarian-continuity`는 명시한 합성
+  입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
+  게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
+  Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.

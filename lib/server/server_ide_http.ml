@@ -254,6 +254,7 @@ let runtime_id_and_branch state =
     if Fs_compat.file_exists head_path
     then (
       match Fs_compat.load_file head_path with
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | exception exn ->
         Log.Server.warn
           "build_presence_snapshot: read %s failed, defaulting branch to 'main': %s"

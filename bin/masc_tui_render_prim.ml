@@ -906,7 +906,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
                 (match change.fc_kind with
                  | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
                    Pane.File_edited
-                 | Masc.Tui_decode.Fc_written _ -> Pane.File_written)
+                 | Masc.Tui_decode.Fc_written _
+                 | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
             ; file_succeeded = change.fc_succeeded
             ; file_at = change.fc_at
             ; file_where = file_change_evidence_label change.fc_line_evidence

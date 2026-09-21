@@ -2053,11 +2053,43 @@ let test_gemini_nonempty_request_path_rejected_before_resolution () =
   | Ok _ | Error _ -> fail "nonempty Gemini request_path must fail before resolution"
 ;;
 
+let test_glm_http_capacity_classification () =
+  let run_case ~kind ~status ~body ~expected =
+    let result, posts, _, _ =
+      with_server ~status ~response:body
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      let entry = catalog_entry ~id:"glm-refusal" ~kind ~base_url
+        ~request_path:"/v1/chat/completions"
+        ~capabilities:(capabilities ~native:true ~json:true) () in
+      with_catalog [entry] @@ fun snapshot ->
+      execute_once ~net ~clock (attempt (flow snapshot "glm-refusal" EO.Json_syntax))
+    in
+    check int "one real HTTP dispatch" 1 posts;
+    match result with
+    | Error {EO.receipt; cause=EO.Provider_response_refused {http_status;refusal};
+             raw_response=Some raw;_} ->
+      check int "actual HTTP status retained" (Cohttp.Code.code_of_status status) http_status;
+      check bool "typed refusal" true (refusal=expected);
+      check string "original envelope retained" body raw.body;
+      check_receipt "GLM refusal" ~phase:EO.Response_received ~dispatch_count:1
+        ~http_status:(Some http_status) receipt
+    | _ -> fail "GLM HTTP refusal lost its typed cause or evidence"
+  in
+  let overflow={|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|} in
+  run_case ~kind:Provider_config.Glm ~status:`Bad_request ~body:overflow ~expected:EO.Context_overflow;
+  run_case ~kind:Provider_config.Glm ~status:`Too_many_requests
+    ~body:{|{"error":{"code":"1302","message":"Too many requests"}}|} ~expected:EO.Rate_limited;
+  run_case ~kind:Provider_config.OpenAI_compat ~status:`Bad_request ~body:overflow ~expected:EO.Invalid_request;
+  run_case ~kind:Provider_config.Glm ~status:`Bad_request
+    ~body:{|{"error":{"code":"1210","message":"Prompt exceeds max length"}}|} ~expected:EO.Invalid_request
+;;
+
 let () =
   run
     "exact-output-single-surface"
     [ ( "surface"
-      , [ test_case
+      , [ test_case "GLM HTTP capacity classification" `Quick test_glm_http_capacity_classification
+        ; test_case
             "capability tier table"
             `Quick
             test_tier_table_and_provider_schema_rejection

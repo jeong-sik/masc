@@ -196,15 +196,21 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
              Some (raw_response_evidence raw receipt.response_header_evidence)
            | Http_client.Not_received_in_window -> None
          in
-         error
-           ?raw_response
-           (response_received_receipt raw.status)
-           (Provider_error
-              (Http_client.HttpError
-                 { code = raw.status
-                 ; body = receipt.body_receipt
-                 ; retry_after_header = raw.retry_after_header
-                 }))
+         let provider_error =
+           let refusal = Http_client.HttpError
+             { code = raw.status; body = receipt.body_receipt;
+               retry_after_header = raw.retry_after_header } in
+           match Exact_output_plan.response_codec plan, receipt.body_receipt with
+           | Provider_http_codec.Glm_chat, Http_client.Received body ->
+             (match Backend_glm.check_glm_error body with
+              | Some { Backend_glm.error_class = Backend_glm.Glm_context_overflow; message; _ } ->
+                Http_client.ProviderFailure
+                  { kind = Http_client.Context_overflow { limit = None }; message }
+              | Some _ | None -> refusal)
+           | _ -> refusal
+         in
+         error ?raw_response (response_received_receipt raw.status)
+           (Provider_error provider_error)
        | Ok receipt ->
          let raw = receipt.response in
          let raw_response =

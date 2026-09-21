@@ -240,6 +240,8 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_added = facts
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
+  ; mkh_context_cycle =
+      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None }
   ; mkh_librarian =
       { Decode.mlh_state = Some "drained"
       ; mlh_detail = None
@@ -310,6 +312,12 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
 let test_render_memory_body_with_keepers () =
   let state = make_state () in
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
+  let keeper = {keeper with mkh_context_cycle =
+    {mcc_saved = Some {mcf_trace_id = "saved-trace"; mcf_end_atom = 5; mcf_boundary_line = 9};
+     mcc_saved_unreadable = false;
+     mcc_prepared = Some {mcp_prepared_at = 1000.; mcp_runtime_id = "fixture-runtime";
+       mcp_input = Decode.Context_summarized {mcf_trace_id = "prepared-trace"; mcf_end_atom = 3; mcf_boundary_line = 6};
+       mcp_request_bytes = 2048}}} in
   let health : Decode.memory_health_snapshot =
     { mhs_generated_at = 1000.0
     ; mhs_keepers = [ keeper ]
@@ -335,16 +343,20 @@ let test_render_memory_body_with_keepers () =
   state.memory_health_cursor <- 0;
   let selected_called = ref false in
   let selected_str = ref "" in
-  let count = ref 0 in
+  let count = ref 0 and lines = ref [] in
   Render_memory.render_memory_body
     ~cols:100
     ~budget:20
     state
-    ~push:(fun _ -> incr count)
-    ~push_styled:(fun ~style:_ _ -> incr count)
+    ~push:(fun line -> lines := line :: !lines; incr count)
+    ~push_styled:(fun ~style:_ line -> lines := line :: !lines; incr count)
     ~push_selected:(fun s -> selected_called := true; selected_str := s; incr count)
     ~push_divider:(fun () -> incr count)
     ~push_empty:(fun () -> incr count);
+  let text = String.concat "\n" !lines in
+  check bool "saved context shown independently" true (contains "Context saved · atom 5" text);
+  check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
+  check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
   check bool "selected row was called" true !selected_called;
   check string "push_selected received stripped string" (Masc_tui_theme.strip_sgr !selected_str) !selected_str;
   check bool "rows rendered" true (!count > 0 && !count <= 20)
@@ -851,7 +863,7 @@ let test_render_memory_overflow_selection () =
     ; mhs_error_alerts = 0
     ; mhs_starving_keepers = 0
     };
-  let rows = 21 in
+  let rows = 24 in
   let budget = rows - Masc_tui_frame.chrome_rows in
   let height layout =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.Types.sc_chrome

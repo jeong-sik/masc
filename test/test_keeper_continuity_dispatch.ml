@@ -103,7 +103,20 @@ candidates = ["refused.sample", "accepted.sample"]
   check bool "paired working state reaches actual peer" true
     (content ("[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
       ^ working_state));
-  check string "dispatch does not rewrite saved pair" saved_before (Fs_compat.load_file path)
+  check string "dispatch does not rewrite saved pair" saved_before (Fs_compat.load_file path);
+  let observed = match Keeper_continuity_observation.latest ~config ~keeper_name with
+    | Some observed -> observed | None -> fail "serialized request observation missing" in
+  check string "observation names the fallback runtime" "accepted.sample" observed.runtime_id;
+  check int "observation counts actual serialized body bytes"
+    (String.length (List.hd (Fixture.request_bodies accepted))) observed.request_bytes;
+  (match observed.input with
+   | Keeper_continuity_observation.Summarized frontier ->
+     check string "observed source trace" trace_id frontier.trace_id;
+     check int "observed source frontier" snapshot.end_atom frontier.end_atom
+   | _ -> fail "actual request was not attributed to its saved context");
+  Keeper_continuity_observation.forget ~config ~keeper_name;
+  check bool "cleanup removes process observation" true
+    (Option.is_none (Keeper_continuity_observation.latest ~config ~keeper_name))
 ;;
 
 let () = run "continuity HTTP dispatch"

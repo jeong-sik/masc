@@ -1495,6 +1495,18 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; pre_dispatch_serialization_observer =
               Some
                 (fun observation ->
+                   let input = match ctx.continuity with
+                     | Some (Summarized {snapshot; _}) ->
+                       Keeper_continuity_observation.Summarized
+                         { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
+                           boundary_line = snapshot.end_boundary_line }
+                     | Some Uncompressed_history -> Keeper_continuity_observation.Uncompressed
+                     | None -> Keeper_continuity_observation.Not_applied in
+                   if Option.is_some ctx.session_id then
+                     Keeper_continuity_observation.record
+                     ~config:(Workspace.default_config ctx.base_path) ~keeper_name:ctx.keeper_name
+                     { prepared_at = Time_compat.now (); runtime_id = ctx.runtime_id; input;
+                       request_bytes = observation.Llm_provider.Request_wire_observer.body_bytes };
                    Option.iter
                      (fun observe ->
                         observe

@@ -138,6 +138,11 @@ val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> strin
     range identity to the exact shared Memory snapshot revision and bytes
     produced from it. *)
 
+val durable_range_receipt_count : keepers_dir:string -> keeper_id:string -> (int, string) result
+(** How many receipts the sidecar holds, read with the production decoder and
+    nothing written back: [Ok 0] for no file, [Error] for a file the decoder
+    refuses. For the deployment preflight. *)
+
 (** Record a librarian pass that produced no snapshot. The commit path already
     journals its own line, so this is the failure counterpart and never runs
     after a successful commit. Append failure degrades to a warning: the pass

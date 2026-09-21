@@ -319,6 +319,10 @@ let read_durable_range_receipts ~keepers_dir ~keeper_id =
          (Printexc.to_string exn))
 ;;
 
+let durable_range_receipt_count ~keepers_dir ~keeper_id =
+  Result.map List.length (read_durable_range_receipts ~keepers_dir ~keeper_id)
+;;
+
 let write_durable_range_receipts ~keepers_dir ~keeper_id receipts =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
   Fs_compat.save_file_atomic_strict path

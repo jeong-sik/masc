@@ -44,7 +44,7 @@ related: ["0044", "0418"]
 
 | | 어디 | 무엇을 보나 | 못 읽으면 |
 |---|---|---|---|
-| `validate-stores` | `deploy.sh` 4단계, preflight helper | keeper meta, memory current, memory source, paused-work 영수증, board posts, provider-input, turn record, 공식 클라이언트 세션 — 8종 | **배포 중단**, exit 1 |
+| `validate-stores` | `deploy.sh` 4단계, preflight helper | keeper meta, memory current, memory source, paused-work 영수증, board posts, provider-input, turn record, 공식 클라이언트 세션, turn-boundary 로그, Librarian 읽은 위치, Librarian 공식 턴 위치, Librarian 범위 영수증 — 12종 | **배포 중단**, exit 1 |
 | boot reconcile | 바이너리 부팅, keeper 루프 전 | keeper meta, memory current — 2종 | **옮기고 계속** |
 
 두 게이트는 같은 디코더를 쓴다. 답이 다른 것은 정책이다.

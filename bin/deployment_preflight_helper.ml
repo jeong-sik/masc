@@ -1067,6 +1067,138 @@ let official_client_session_store =
   }
 ;;
 
+(* The Librarian's four files under the selected cluster's runtime keepers
+   directory and the memory keepers directory (RFC librarian-lifecycle
+   §4.6). Each keeper is a subdirectory of the runtime keepers directory. *)
+let runtime_keeper_ids ~base_path =
+  let keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+  match Sys.readdir keepers_dir with
+  | entries ->
+    Array.to_list entries
+    |> List.filter (fun entry -> Sys.is_directory (Filename.concat keepers_dir entry))
+    |> List.sort String.compare
+  | exception Sys_error _ -> []
+;;
+
+let turn_boundary_store =
+  { store = "turn boundary log"
+  ; on_refusal =
+      "a newline-terminated row the decoder refuses stops that keeper's \
+       Librarian pass with Unreadable_line until a restart row of the same \
+       trace follows it, or with Official_range_stopped for good; the row is \
+       neither dropped nor rewritten, and a purge of the keeper is the remedy"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+         List.fold_left
+           (fun report keeper_id ->
+              let* report = report in
+              match Masc.Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
+              | Error detail -> Error (keeper_id ^ ": " ^ detail)
+              | Ok lines ->
+                Ok
+                  (List.fold_left
+                     (fun report (line, decoded) ->
+                        match decoded with
+                        | Ok _ -> count_row report (Ok ())
+                        | Error Masc.Keeper_turn_boundaries.Incomplete_line -> report
+                        | Error error ->
+                          count_row
+                            report
+                            (Error
+                               (Printf.sprintf
+                                  "%s line %d: %s"
+                                  keeper_id
+                                  line
+                                  (Masc.Keeper_turn_boundaries.read_error_to_string error))))
+                     report
+                     lines))
+           (Ok empty_report)
+           (runtime_keeper_ids ~base_path))
+  }
+;;
+
+let librarian_progress_store =
+  { store = "librarian read position"
+  ; on_refusal =
+      "an unreadable or malformed file stops that keeper's Librarian pass with \
+       Progress_unreadable; it is never read as never-read, and the remedy is \
+       a purge of the keeper"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+         Ok
+           (List.fold_left
+              (fun report keeper_id ->
+                 match Masc.Keeper_librarian_progress.read ~keepers_dir ~keeper_id with
+                 | Ok None -> report
+                 | Ok (Some _) -> count_row report (Ok ())
+                 | Error error ->
+                   count_row
+                     report
+                     (Error
+                        (keeper_id
+                         ^ ": "
+                         ^ Masc.Keeper_librarian_progress.read_error_to_string error)))
+              empty_report
+              (runtime_keeper_ids ~base_path)))
+  }
+;;
+
+let librarian_official_progress_store =
+  { store = "librarian official-turn position"
+  ; on_refusal =
+      "an unreadable or malformed file stops that keeper's Librarian pass with \
+       Official_progress_unreadable; it is never read as never-read, and the \
+       remedy is a purge of the keeper"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+         Ok
+           (List.fold_left
+              (fun report keeper_id ->
+                 match
+                   Masc.Keeper_librarian_official_progress.read ~keepers_dir ~keeper_id
+                 with
+                 | Ok None -> report
+                 | Ok (Some _) -> count_row report (Ok ())
+                 | Error error ->
+                   count_row
+                     report
+                     (Error
+                        (keeper_id
+                         ^ ": "
+                         ^ Masc.Keeper_librarian_official_progress.read_error_to_string
+                             error)))
+              empty_report
+              (runtime_keeper_ids ~base_path)))
+  }
+;;
+
+let librarian_range_receipt_store =
+  { store = "librarian range receipt"
+  ; on_refusal =
+      "every Memory write for that keeper is refused, because each writer \
+       reads the receipts first, and the Librarian pass stops with \
+       Memory_snapshot_unreadable"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+         Ok
+           (Masc.Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir
+            |> List.fold_left
+                 (fun report keeper_id ->
+                    match
+                      Masc.Keeper_memory_os_current.durable_range_receipt_count
+                        ~keepers_dir
+                        ~keeper_id
+                    with
+                    | Ok receipts -> { report with rows = report.rows + receipts }
+                    | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
 let durable_stores =
   [ keeper_meta_store
   ; official_client_session_store
@@ -1076,6 +1208,10 @@ let durable_stores =
   ; board_posts_store
   ; provider_input_store
   ; turn_record_store
+  ; turn_boundary_store
+  ; librarian_progress_store
+  ; librarian_official_progress_store
+  ; librarian_range_receipt_store
   ]
 ;;
 

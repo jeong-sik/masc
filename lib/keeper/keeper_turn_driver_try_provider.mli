@@ -43,6 +43,13 @@ type continuity
 val uncompressed_history : continuity
 (** A fresh history cannot use an older snapshot or an older eviction front. *)
 
+val completed_history_end :
+  trace_id:string ->
+  lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
+  messages:Agent_core.Types.message list -> (int, Librarian_continuity_snapshot.error) result
+(** The last verified completed atom endpoint. An attempt seed is not proof that
+    resumed work completed; callers retain original bodies when no proof exists. *)
+
 val prepare_continuity :
   trace_id:string ->
   lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
@@ -67,6 +74,8 @@ type try_provider_ctx =
         (** The durable seed, read only when neither the pair's ledger nor a
             refusal in this turn supplies the front. *)
   ; continuity : continuity option
+  ; input_policy : Keeper_input_policy.t
+  ; completed_end_atom : int
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate
             of this turn. A valid later front takes precedence over the
@@ -492,6 +501,7 @@ module For_testing : sig
   val message_measurement_hash : Agent_core.Types.message -> int
 
   val compose_carried_model_input :
+    ?input_policy:Keeper_input_policy.t ->
     ?continuity:continuity ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
@@ -503,6 +513,7 @@ module For_testing : sig
     composed
 
   val request_view :
+    ?input_policy:Keeper_input_policy.t ->
     ?continuity:continuity ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->

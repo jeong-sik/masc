@@ -7,7 +7,7 @@ type match_result =
 
 type board_observation_kind =
   | Observed_post_created
-  | Observed_comment_added
+  | Observed_comment_added of { comment_id : string; parent_id : string option }
   | Observed_reaction_changed of Board_dispatch.board_reaction_change
   | Observed_vote_cast of Board_dispatch.board_vote_change
 
@@ -20,8 +20,7 @@ type board_observation =
   ; hearth : string option
   ; updated_at : float option
   }
-(** Lossy durable-queue projection. Unlike [Board_dispatch.board_signal], a
-    comment observation does not claim to carry the accepted comment id. *)
+(** Durable queue observation, including the producer-issued comment identity. *)
 
 type board_read_operation =
   | Get_post
@@ -84,13 +83,12 @@ val board_observation_of_board_stimulus
   :  post_id:string
   -> Keeper_event_queue.board_stimulus
   -> board_observation
-(** Read the queue payload as the lossy observation it is. *)
+(** Preserve the queued signal, including comment and parent identities. *)
 
 val board_stimulus_of_board_signal
   :  Board_dispatch.board_signal
   -> Keeper_event_queue.board_stimulus
-(** Project a live signal into the existing durable queue shape. Comment
-    identity remains owned by the Board record and attention candidate. *)
+(** Preserve live signal identity and content in the durable queue. *)
 
 (* [post_id_string] is how [cursor_token_of_post] below keys a post; that is
    its only caller. *)

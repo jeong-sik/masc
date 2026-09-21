@@ -30,7 +30,7 @@ type post_id = string
 
 type board_stimulus_kind =
   | Post_created
-  | Comment_added
+  | Comment_added of { comment_id : string; parent_id : string option }
   | Reaction_changed of board_reaction_change
   | Vote_cast of board_vote_change
       (** A vote landed on the post or on one of its comments. The queue is a

@@ -561,7 +561,7 @@ let pending_board_event_kind_of_observation
   =
   match observation.kind with
   | Board_signal.Observed_post_created -> Board_post_created
-  | Board_signal.Observed_comment_added -> Board_comment_added
+  | Board_signal.Observed_comment_added _ -> Board_comment_added
   | Board_signal.Observed_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
   | Board_signal.Observed_vote_cast vote -> Board_vote_cast vote
@@ -595,7 +595,7 @@ let pending_board_event_of_board_observation
     let comment_derived =
       match observation.kind with
       | Board_signal.Observed_post_created -> Ok (None, None, None)
-      | Board_signal.Observed_comment_added ->
+      | Board_signal.Observed_comment_added _ ->
         (match check_self_comment_status ~self_ids ~post_id:observation.post_id with
          | Board_signal.Unavailable unavailable -> Error unavailable
          | Board_signal.Available (`New_external (replies, author, preview)) ->

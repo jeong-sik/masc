@@ -1,10 +1,11 @@
-(** Keeper_unified_turn — Single entry point for keeper cycles via Agent_core.Agent.run().
+(** MASC orchestration of a Keeper turn.
 
-    Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
-    observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
-    The model decides what to do; code only enforces safety and observes results.
+    Observes current state, prepares the turn prompt and calls
+    [Keeper_agent_run.run_turn] through [Keeper_unified_turn_execution].
+    [Keeper_turn_driver] dispatches each runtime attempt to AGENT_CORE or an
+    official client according to [Runtime_execution.t].
 
-    @since Unified Keeper Loop *)
+    Error classification predicates are in [Keeper_error_classify]. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -552,9 +553,7 @@ let run_keeper_cycle
     ; last_execution = None
     ; degraded_retry_info
     ; deferred_runtime_lane = None
-    ; runtime_rotation_attempts = []
     ; failure_reason = None
-    ; retry_phase_started_at = None
     ; runtime_attempt_errors = []
     ; lane_terminal_error = None
     }
@@ -1017,7 +1016,18 @@ let run_keeper_cycle
            [protect] cannot park the caller.
 
            [Cancelled] is counted and logged like any other failure. A silent
-           arm here is why a skipped cleanup left no evidence at all. *)
+           arm here is why a skipped cleanup left no evidence at all.
+
+           The two [Otel_metric_store.inc_counter] bumps below are the tail of
+           each handler arm, outside [Eio.Cancel.protect]. Neither can raise
+           today: the store swallows every failure of its own and re-raises
+           only [Cancelled], which cannot originate under it (#37349). That
+           matters because a raise out of [cleanup ()] skips the
+           [Printexc.raise_with_backtrace] that carries the turn's own
+           exception, and the turn would then report the cleanup's failure
+           instead of its own. If the store ever gains a suspending call, wrap
+           these two bumps the way [Keeper_vision_tool] wraps its cancelled
+           observation. *)
                  let cleanup () =
                    (try Eio.Cancel.protect unsubscribe_event_bus with
                     | e ->
@@ -1053,15 +1063,9 @@ let run_keeper_cycle
                      | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
-                       let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
-                         =
-                         Keeper_unified_turn_retry_setup.build
-                           ~now:(fun () -> Eio.Time.now clock)
-                       in
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
-                           { attempt = 1
-                           ; base_dir
+                           { base_dir
                            ; build_turn_prompt
                            ; channel
                            ; continuation_channel = continuation_channel_of_wake wake
@@ -1094,7 +1098,6 @@ let run_keeper_cycle
                            ~initial_execution
                            ~turn_state
                            ~before_dispatch_authority
-                           ~current_turn_phase_elapsed_ms
                            ~user_message
                            ~registry_base_path
                            ~record_streaming_cancelled_observation
@@ -1146,22 +1149,16 @@ let run_keeper_cycle
                    Keeper_runtime_manifest.Event_bus_correlated
                in
                let degraded_retry_info = turn_state.degraded_retry_info in
-               (* [degraded_retry_info] is seeded at [initial_turn_state] from the
+               (* These three feed the decision record below, and nothing else:
+                  the execution receipt now reports the two lanes on its own,
+                  in [Keeper_agent_run_receipt].
+
+                  [degraded_retry_info] is seeded at [initial_turn_state] from the
                   [deferred_runtime_lane] argument -- a hint a *previous* turn left
                   behind -- and no path in this turn writes it. Its presence says a
-                  deferred lane is pending, not that a retry ran.
-
-                  Applied means this turn actually ran on the runtime the hint
-                  named. Presence alone reported "applied" on every turn carrying a
-                  hint, which is why fsm-hub.ts could never render its "retry
-                  queued" branch, and why an operator reading a receipt saw a retry
-                  that had not happened -- carrying a [fallback_reason] computed
-                  from the earlier turn's failure rather than this turn's. Observed
-                  2026-08-27 on a live receipt whose own error was an invalid
-                  request while the reason read rate_limit.
-
-                  The comparison lives in [Keeper_unified_turn_types] so it can be
-                  exercised without standing up a keeper cycle. *)
+                  deferred lane is pending, not that a retry ran, which is why the
+                  comparison in [Keeper_unified_turn_types] stands between it and
+                  the label. *)
                let degraded_retry_applied =
                  degraded_retry_applied_for_turn
                    ~degraded_retry_info
@@ -1419,22 +1416,6 @@ let run_keeper_cycle
                     ~before:meta
                     ~after:updated_meta
                   |> ignore;
-                  (* Finish the Keeper Owner commit and its exact registry
-                     projection before storing the live failure observation.
-                     The two registry writes must not race on different entry
-                     snapshots. *)
-                  (match
-                     registry_failure_reason_of_terminal_reason
-                       ~core_error:err
-                       terminal_reason
-                       ~raw_error:e_str
-                   with
-                   | Some failure_reason ->
-                     Keeper_registry.set_failure_reason
-                       ~base_path:config.base_path
-                       meta.name
-                       (Some failure_reason)
-                   | None -> ());
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
@@ -1472,9 +1453,12 @@ let run_keeper_cycle
                       ; "class", Keeper_runtime_failure_route.route_class_label failure_route
                       ]
                     ();
+                  (* The Owner commit above must finish before this live
+                     observation replaces the registry's failure cause. *)
                   Keeper_unified_turn_failure.record_failure_observation
                     ~config
                     ~meta
+                    ~terminal_reason
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths

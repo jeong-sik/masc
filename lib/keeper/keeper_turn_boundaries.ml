@@ -5,10 +5,8 @@ module W = Keeper_memory_os_types
 module Window = Runtime_model_input_tail_window
 
 let ( let* ) = Result.bind
-let suffix = ".turn-boundaries.jsonl"
-
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ suffix)
+  Filename.concat (Filename.concat keepers_dir keeper_id) "turn-boundaries.jsonl"
 ;;
 
 type position =
@@ -30,7 +28,7 @@ type event =
       ; history_at_start : history_at_start
       ; position : position
       }
-  | History_empty of { trace_id : string }
+  | History_restarted of { trace_id : string }
 
 type record =
   { recorded_at : float
@@ -69,7 +67,7 @@ let field_end_atom = "end_atom"
 let field_last_atom_digest = "last_atom_digest"
 let field_trace_id = "trace_id"
 let kind_turn_ended = "turn_ended"
-let kind_history_empty = "history_empty"
+let kind_history_restarted = "history_restarted"
 let kind_atom_history = "atom_history"
 let kind_empty_atom_history = "empty_atom_history"
 let kind_no_atom_history = "no_atom_history"
@@ -81,7 +79,7 @@ let turn_ended_fields =
   [ field_kind; field_recorded_at; field_turn_ref; field_history_at_start; field_position ]
 ;;
 
-let history_empty_fields = [ field_kind; field_recorded_at; field_trace_id ]
+let history_restarted_fields = [ field_kind; field_recorded_at; field_trace_id ]
 let atom_history_fields = [ field_kind; field_end_atom; field_last_atom_digest ]
 let bare_position_fields = [ field_kind ]
 let non_blank s = not (String.equal (String.trim s) "")
@@ -120,7 +118,7 @@ let validate (r : record) =
     in
     let* () = W.wire_at (W.Wire_field field_position) (validate_position position) in
     Ok r
-  | History_empty { trace_id } ->
+  | History_restarted { trace_id } ->
     if non_blank trace_id
     then Ok r
     else W.wire_fail [ W.Wire_field field_trace_id ] W.Blank_string
@@ -153,9 +151,9 @@ let record_to_json (r : record) =
       ; field_history_at_start, `String (history_at_start_to_string history_at_start)
       ; field_position, position_to_json position
       ]
-  | History_empty { trace_id } ->
+  | History_restarted { trace_id } ->
     `Assoc
-      [ field_kind, `String kind_history_empty
+      [ field_kind, `String kind_history_restarted
       ; field_recorded_at, `Float r.recorded_at
       ; field_trace_id, `String trace_id
       ]
@@ -222,12 +220,12 @@ let record_of_json (json : Yojson.Safe.t) =
         W.wire_at (W.Wire_field field_position) (position_of_json position_json)
       in
       validate { recorded_at; event = Turn_ended { turn_ref; history_at_start; position } })
-    else if String.equal kind kind_history_empty
+    else if String.equal kind kind_history_restarted
     then (
-      let* () = W.exact_field_names_result history_empty_fields assoc in
+      let* () = W.exact_field_names_result history_restarted_fields assoc in
       let* recorded_at = W.wire_number_field field_recorded_at assoc in
       let* trace_id = W.wire_string_field field_trace_id assoc in
-      validate { recorded_at; event = History_empty { trace_id } })
+      validate { recorded_at; event = History_restarted { trace_id } })
     else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     W.wire_here W.Expected_object

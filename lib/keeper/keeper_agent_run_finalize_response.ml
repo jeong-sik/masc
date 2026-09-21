@@ -28,14 +28,14 @@ let turn_boundary_position ~checkpoint_owner saved_checkpoint =
    built or written is reported and the turn still finishes. That holds for an
    exception as well as an [Error]: past this point the turn has a saved
    checkpoint and no receipt yet, so nothing raised here may escape except a
-   cancellation. After a transient failure the next line's span covers both
-   turns; a torn tail is different, see {!Keeper_turn_boundaries}. *)
+   cancellation. After a failure the next line's span covers both turns. *)
 let record_turn_boundary
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~turn
       ~checkpoint_owner
       ~history_at_start
+      ~restart_notice_pending
       saved_checkpoint
   =
   let not_recorded ~site detail =
@@ -49,12 +49,28 @@ let record_turn_boundary
       ~labels:[ "keeper", meta.name; "site", site ]
       ()
   in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  (* Outside the position below, and before the line that ends the turn.
+     Before, because a reader takes a restart that follows a line as proof
+     that the line's history is gone and would drop this turn's own atoms.
+     Outside, because this line carries no position: a turn whose digest
+     cannot be built still restarted the history, and tying the two together
+     would lose both records of that restart on one failure. *)
+  if
+    Keeper_agent_run_turn_helpers.restart_line_owed_at_finalize
+      ~notice_pending:(Atomic.exchange restart_notice_pending false)
+      ~saved_checkpoint_present:(Option.is_some saved_checkpoint)
+  then
+    Keeper_agent_run_turn_helpers.record_history_restart
+      ~config
+      ~keeper_name:meta.name
+      ~trace_id
+      Keeper_agent_run_turn_helpers.After_first_save;
   match turn_boundary_position ~checkpoint_owner saved_checkpoint with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> not_recorded ~site:"position" (Printexc.to_string exn)
   | Error detail -> not_recorded ~site:"position" detail
   | Ok position ->
-    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
       ; event =
@@ -67,9 +83,7 @@ let record_turn_boundary
     in
     (match
        Keeper_turn_boundaries.append
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:meta.name
          record
      with
@@ -101,6 +115,7 @@ let finalize
     ~max_context
     ~checkpoint_owner
     ~history_at_start
+    ~(restart_notice_pending : bool Atomic.t)
     ~official_client_settlement
     ~history_messages
     ~prompt_metrics
@@ -320,6 +335,7 @@ let finalize
       ~turn:manifest_keeper_turn_id
       ~checkpoint_owner
       ~history_at_start
+      ~restart_notice_pending
       saved_checkpoint;
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
@@ -353,6 +369,7 @@ let finalize
       ~agent_core_turn_count:result.turns
       ~tool_observations:librarian_tool_observations
       ~librarian_messages
+      ~checkpoint_owner
       ~post_turn_t0
       ~inference_telemetry:result.response.telemetry
       ();
@@ -380,6 +397,8 @@ let finalize
            | None, _ -> Keeper_usage_resolution.Unavailable
            | Some _, Some { usage_scope = Runtime_usage_scope.Per_request; _ } ->
              Keeper_usage_resolution.Per_request
+           | Some _, Some { usage_scope = Runtime_usage_scope.Turn_total; _ } ->
+             Keeper_usage_resolution.Turn_total
            | ( Some _
              , Some
                  { usage_scope = Runtime_usage_scope.Conversation_cumulative

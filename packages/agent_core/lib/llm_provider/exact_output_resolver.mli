@@ -19,7 +19,7 @@ type catalog_document =
   ; contents : string
   }
 
-(** One exact-output slot: which binding it names, and the deadlines that
+(** One exact-output slot: which binding it names, and the request controls and deadlines that
     binding runs under. The caller already holds these as typed values -- a
     deployment's runtime bindings -- so they arrive as values rather than as a
     TOML document to re-parse. [target_ref] is the slot id the lane
@@ -29,28 +29,31 @@ type declared_target =
   ; provider_ref : string
   ; model_id : string
   ; enable_thinking : bool option
+  ; reasoning_effort : Reasoning_effort.t option
+      (** The binding's explicit effort. [None] leaves the request unspecified.
+          Runtime bindings supply this typed value. Target documents have no
+          effort field and leave it [None]. *)
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
+  ; api_key_env : string option
+      (** Which environment name holds this slot's credential. [None] keeps the
+          catalog row's name; a deployment that reads a different one says so
+          in its binding, and that is the authority. *)
   }
 
 type resolver_catalog_input =
   | Embedded_default
-  | Embedded_with_overlay of catalog_document
-      (** The embedded catalog with a second document merged over it. A
-          deployment supplies no such document: its provider and model facts
-          are catalog rows, and its slots arrive as {!Embedded_with_targets}.
-          The callers left are tests that assemble a synthetic catalog. *)
   | Embedded_with_targets of declared_target list
       (** The embedded catalog for provider and model facts, plus the slots the
           caller declares. The embedded catalog carries no [[targets]] of its
           own, so these are the whole target set. *)
   | Full_replacement of catalog_document
   | Full_replacement_file of string
-(** Which catalog bytes [load_resolver_snapshot] starts from. The overlay
-    variants layer declared rows on top of the embedded default; a full
-    replacement supplies the whole catalog. The overlay's model identities
-    must stay unique against the base — a colliding overlay row is rejected
-    during snapshot loading rather than silently shadowing. *)
+(** Which catalog bytes [load_resolver_snapshot] starts from. Embedded inputs
+    use the packaged provider/model catalog and may add the complete set of
+    runtime target bindings; a full replacement supplies the whole catalog,
+    including its targets. Provider, model, and target identities must each be
+    unique within the selected catalog. *)
 
 type target_ref_error =
   | Empty_target_ref
@@ -59,15 +62,12 @@ type target_ref_error =
 type resolver_catalog_source =
   | Embedded_catalog
   | Full_replacement_catalog
-  | Overlay_catalog
 
 type resolver_collision =
   | Duplicate_provider_identity
   | Duplicate_model_identity
   | Duplicate_target_identity
   | Provider_alias_shadow
-  | Target_identity_shadow
-  | Model_identity_shadow
 
 type resolver_binding_component =
   | Target_provider

@@ -17,11 +17,18 @@ val handle_keeper_lifecycle_post :
     contract: the body carries the TOML-level settings and a changed keeper is
     intentionally stopped and restarted by that contract. *)
 
+type surface_refresh =
+  | Surfaces_refreshed
+  | Surfaces_partly_dropped of string list
+(** Which cache prefixes a refresh could not drop. [Surfaces_partly_dropped]
+    names them, so a caller that cannot leave a Keeper's caches half-dropped
+    reacts to the fact instead of to the warning text (#37175). *)
+
 val refresh_keeper_execution_surfaces :
   config:Workspace.config ->
   name:string ->
   Keeper_lifecycle_events.lifecycle_event ->
-  unit
+  surface_refresh
 (** Invalidate caches and patch execution-surface dependents after a keeper
     lifecycle transition. *)
 

@@ -168,14 +168,11 @@ def main():
     runtime = runtime.replace('default = "ollama_cloud.deepseek-v4-flash"', 'default = "primary.sample"')
     runtime = runtime.replace('is-default = true', 'is-default = false')
     runtime += '\n[runtime.lanes."primary.sample"]\ncandidates = ["primary.sample", "alternate.sample"]\n'
-    overlay = (fixture_dir / 'agent-core-models-overlay.toml').read_text()
     for name in ['primary', 'alternate']:
         endpoint = f'http://127.0.0.1:{provider_port}/{name}'
         runtime += f'\n[providers.{name}]\nprotocol = "openai-compatible-http"\nendpoint = "{endpoint}"\n[{name}.sample]\n'
-        overlay += f'\n[[providers]]\nid = "{name}"\nkind = "openai_compat"\nbase_url = "{endpoint}"\nrequest_path = "/chat/completions"\napi_key_env = ""\ncapabilities_base = "openai_chat"\n\n[[models]]\nid_prefix = "resume-fixture"\nprovider_name = "{name}"\nbase = "openai_chat"\nmax_context_tokens = 131072\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n'
     runtime += '\n[models.sample]\napi-name = "resume-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = false\n'
     (config / 'runtime.toml').write_text(runtime)
-    (config / 'agent-core-models-overlay.toml').write_text(overlay)
     env = {k: v for k, v in os.environ.items() if not any(s in k for s in ['TOKEN', 'API_KEY', 'SECRET'])}
     token = secrets.token_hex(32)
     env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='true', MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED='false')

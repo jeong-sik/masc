@@ -10,13 +10,27 @@
     What is drawn is a closed set. [graph] and [flowchart] in the four
     directions, with rectangular, rounded and diamond nodes, solid, dotted
     and thick edges, edge labels in both spellings, chains and [&] groups.
+    [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
+    state boxes, initial and terminal [[*]] pseudo-states, [-->] transitions
+    and their labels, state descriptions, [<<choice>>] states drawn as a
+    diamond, and composite states drawn as titled boxes around their members.
+    A [[*]] inside a composite state is that state's own start or end. A
+    composite state may open on an id the source named before, and the box
+    is then that state; a state named inside several composite states is
+    drawn in the last of them, which is where Mermaid places it. A
+    composite state that this would put inside itself is refused.
+    [<<fork>>] and [<<join>>] states are drawn as a thick bar across the
+    flow, without their id, as Mermaid draws them. A state id is
+    one token of letters, digits, [_] or non-ASCII text. A [note left of] or
+    [note right of] a state, on one line or running to [end note], is read
+    and its text is not drawn.
     [sequenceDiagram] draws participants, lifelines, messages with their
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the
     kind or the line, and the caller shows the source under that name. Nothing is guessed. [subgraph] blocks are
-    read and their nodes drawn, but the grouping box itself is not
-    (RFC-0429 §3.3); [classDef], [class], [style], [linkStyle] and [click]
-    statements are accepted and change nothing on a text canvas.
+    drawn as titled bounding boxes around their members (RFC-0429 §3.3);
+    [classDef], [class], [style] and [click] statements, and [linkStyle] in
+    a flowchart, are accepted and change nothing on a text canvas.
 
     Layout is layered: back edges are turned around so the rest is a DAG,
     layers come from the longest path, an edge across several layers gets a
@@ -31,12 +45,33 @@ type direction =
   | Right_left
 
 type shape =
-  | Rect  (** [id[label]], [id[[label]]], [id>label]] *)
-  | Round  (** [id(label)], [id([label])], [id[(label)]], [id((label))] *)
+  | Rect  (** [id[label]], [id>label]] *)
+  | Round  (** [id(label)] *)
   | Diamond  (** [id{label}], [id{{label}}]; drawn as a box whose label wears ⟨ ⟩ *)
+  | Database  (** [id[(label)]]; drawn as a cylinder box with ╓ ╖ ╙ ╜ corners and ║ sides *)
+  | Subroutine  (** [id[[label]]]; drawn as a double-line box with ╔ ╗ ╚ ╝ corners and ║ ═ borders *)
+  | Stadium  (** [id([label])]; drawn with rounded ends *)
+  | Circle  (** [id((label))]; drawn as a circle node *)
+  | Bar  (** a state diagram's [<<fork>>] or [<<join>>]; a thick line across the flow *)
+
+(** Where a state diagram's [[*]] was written: at the top of the diagram, or
+    inside the composite state of that id. Each has a start and an end of
+    its own. *)
+type scope =
+  | Top_level
+  | Inside of string
+
+(** What names a node. A state diagram's [[*]] names no state: it is where
+    its scope starts on the left of a transition, and where it ends on the
+    right. Those are nodes of their own, and none of them can meet a state
+    the source named. *)
+type node_id =
+  | Named of string  (** an id the source wrote *)
+  | Initial of scope  (** [[*] --> X] *)
+  | Final of scope  (** [X --> [*]] *)
 
 type node = {
-  id : string;
+  id : node_id;
   label : string;
   shape : shape;
 }
@@ -47,8 +82,8 @@ type line_style =
   | Thick
 
 type edge = {
-  from_id : string;
-  to_id : string;
+  from_id : node_id;
+  to_id : node_id;
   directed : bool;  (** [-->] against [---] *)
   style : line_style;
   label : string option;
@@ -68,7 +103,7 @@ type group = {
   group_id : string;
   group_label : string;  (** the title on the box, [group_id] when untitled *)
   group_direction : direction option;
-  group_nodes : string list;  (** ids declared directly inside, source order *)
+  group_nodes : node_id list;  (** ids declared directly inside, source order *)
   group_children : group list;
 }
 

@@ -384,6 +384,13 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_librarian_range_receipt_artifact ->
+    Some
+      (Keeper_memory_os_current.durable_range_receipt_path
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
   | Keeper_memory_source_current_artifact ->
     Some
       (Keeper_memory_source_current.path_for_keepers_dir
@@ -416,16 +423,12 @@ let keeper_artifact_path config keeper_name artifact =
   | Keeper_turn_boundaries_artifact ->
     Some
       (Keeper_turn_boundaries.path_for_keepers_dir
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:keeper_name)
   | Keeper_librarian_progress_artifact ->
     Some
       (Keeper_librarian_progress.path_for_keepers_dir
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:keeper_name)
   | Keeper_playground_bundles_artifact -> None
   | Keeper_configuration_artifact ->
@@ -554,6 +557,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
+            | Keeper_librarian_range_receipt_artifact
             | Keeper_memory_source_current_artifact
             | Keeper_working_context_recall_artifact
             | Keeper_working_context_artifact
@@ -580,6 +584,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_metrics_store_artifact
                | Keeper_root_logs_artifact
                | Keeper_memory_current_artifact
+               | Keeper_librarian_range_receipt_artifact
                | Keeper_memory_source_current_artifact
                | Keeper_working_context_recall_artifact
                | Keeper_working_context_artifact
@@ -651,6 +656,10 @@ let handle_keeper_lifecycle_completion config operation = function
   | Supervisor_cleaned as action ->
     Keeper_supervisor_cleanup.handle_completion config operation action
 ;;
+
+module For_testing = struct
+  let purge_keeper_artifacts = purge_keeper_artifacts
+end
 
 let keeper_purge_resolve_status = function
   | Keeper_dashboard_purge.Empty_requested_name -> `Bad_request

@@ -671,30 +671,56 @@ let parse_provider (id : string) (tbl : Otoml.t)
          | None -> None
          | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
        in
-       (* Optional per-provider connect/headers timeout override (agent-core boundary).
-          Absent (most providers) leaves the AGENT_CORE kind-based default in force. *)
+       (* Optional per-provider bound on the phase before the response headers
+          (agent-core boundary). There is no kind-based default behind it:
+          [resolve_explicit_deadline] maps [None] to [Unbounded]
+          (http_client.ml). A keeper turn is still bounded by the keeper's
+          first-event budget, but an exact-output slot is not, which is why
+          plan admission refuses a target carrying neither deadline. *)
+       (* The dialect an endpoint speaks, for an endpoint AGENT_CORE has no
+          provider row for. Only [protocol] is required: it names the request
+          shape, and for a catalogued provider the catalog row names the
+          dialect. The two are not the same fact — glm-coding speaks GLM over
+          an OpenAI-compatible shape — so an uncatalogued endpoint has to say
+          which one it is or nothing can choose its capability base. *)
+       let wire_kind_result =
+         match typed_find "a string" path tbl "kind" Otoml.get_string with
+         | Error errors -> Error errors
+         | Ok None -> Ok None
+         | Ok (Some raw) ->
+           (match Llm_provider.Provider_config.provider_kind_of_string raw with
+            | Some kind -> Ok (Some kind)
+            | None ->
+              Error
+                (error
+                   (path ^ ".kind")
+                   (Printf.sprintf
+                      "unknown kind %S — expected one of %s"
+                      raw
+                      (String.concat
+                         ", "
+                         (List.map
+                            Llm_provider.Provider_config.string_of_provider_kind
+                            Llm_provider.Provider_config.all_provider_kinds)))))
+       in
        let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
        let connect_timeout_result =
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match
-          ( capabilities_result
-          , enabled_result
-          , healthcheck_result
-          , connect_timeout_result
-          , is_non_interactive_result )
-        with
-        | Error errs, _, _, _, _
-        | _, Error errs, _, _, _
-        | _, _, Error errs, _, _
-        | _, _, _, Error errs, _
-        | _, _, _, _, Error errs -> Error errs
-        | ( Ok capabilities
-          , Ok enabled_opt
-          , Ok healthcheck_path
-          , Ok connect_timeout_s
-          , Ok is_non_interactive ) ->
+       let exact_body_timeout_key = Runtime_schema.exact_body_timeout_s_key in
+       let exact_body_timeout_result =
+         strict_float_find path tbl exact_body_timeout_key
+         |> positive_finite_float_opt_field ~path ~key:exact_body_timeout_key
+       in
+       (let ( let* ) = Result.bind in
+        let* capabilities = capabilities_result in
+        let* enabled_opt = enabled_result in
+        let* healthcheck_path = healthcheck_result in
+        let* connect_timeout_s = connect_timeout_result in
+        let* exact_body_timeout_s = exact_body_timeout_result in
+        let* is_non_interactive = is_non_interactive_result in
+        let* wire_kind = wire_kind_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -702,6 +728,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; display_name
             ; protocol
             ; api_format
+            ; wire_kind
             ; transport
             ; is_non_interactive
             ; credentials
@@ -709,6 +736,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; healthcheck_path
             ; headers
             ; connect_timeout_s
+            ; exact_body_timeout_s
             ; antigravity_cli
             }))
 ;;
@@ -1787,6 +1815,10 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let wizard_default_result =
     typed_find "a boolean" path tbl "wizard-default" Otoml.get_boolean
   in
+  let disable_parallel_tool_use_result =
+    typed_find_or "a boolean" path tbl "disable-parallel-tool-use"
+      Otoml.get_boolean ~default:false
+  in
   let max_concurrent_result =
     match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
     | Ok None -> Ok None
@@ -1898,6 +1930,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     (* DET-OK: omitted means not selected for install wizard. *)
   in
   let* max_concurrent = max_concurrent_result in
+  let* disable_parallel_tool_use = disable_parallel_tool_use_result in
   let* context_marks = context_marks_result in
   let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
@@ -1914,6 +1947,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; is_default
     ; wizard_default
     ; max_concurrent
+    ; disable_parallel_tool_use
     ; context_marks
     ; max_tokens
     ; price_input
@@ -1936,6 +1970,7 @@ let binding_keys =
   ; "is-default"
   ; "wizard-default"
   ; "max-concurrent"
+  ; "disable-parallel-tool-use"
   ; "context-high-water-tokens"
   ; "context-low-water-tokens"
   ; "max-tokens"

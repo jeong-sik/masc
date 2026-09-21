@@ -1,8 +1,8 @@
 (** Tests for {!Masc.Keeper_turn_boundaries} (RFC librarian-lifecycle §4.6):
     the line a finished keeper turn leaves to say where its saved atom history
-    ended, and the line that says a history holds no atom, which
-    {!Masc.Keeper_history_clear} leaves once it has emptied one and a turn
-    leaves when it starts from one. *)
+    ended, and the line that says the atoms of a trace are numbered from zero
+    again, which {!Masc.Keeper_history_clear} leaves once it has emptied a
+    history and a turn leaves when it starts one over. *)
 
 open Alcotest
 
@@ -48,11 +48,26 @@ let record
   }
 ;;
 
-let history_empty ?(trace_id = "trace") () : Boundaries.record =
-  { Boundaries.recorded_at = 200.0; event = Boundaries.History_empty { trace_id } }
+let history_restarted ?(trace_id = "trace") () : Boundaries.record =
+  { Boundaries.recorded_at = 200.0; event = Boundaries.History_restarted { trace_id } }
 ;;
 
 let atom_history = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "digest" }
+
+(* The compiler keeps the two lists below honest. A constructor added to either
+   type makes one of these matches inexhaustive and the build stops, so a list
+   named for every kind cannot quietly hold fewer than every kind. Without them
+   the round-trip test keeps its name and covers one case less. *)
+let _every_position_is_listed : Boundaries.position -> unit = function
+  | Boundaries.Atom_history _
+  | Boundaries.Empty_atom_history
+  | Boundaries.No_atom_history
+  | Boundaries.Stale_noop -> ()
+;;
+
+let _every_history_at_start_is_listed : Boundaries.history_at_start -> unit = function
+  | Boundaries.Fresh_history | Boundaries.Continued_history -> ()
+;;
 
 let every_position =
   [ atom_history
@@ -80,11 +95,11 @@ let record_equal (left : Boundaries.record) (right : Boundaries.record) =
     Ids.Turn_ref.equal left_ref right_ref
     && left_start = right_start
     && left_position = right_position
-  | ( Boundaries.History_empty { trace_id = left_trace }
-    , Boundaries.History_empty { trace_id = right_trace } ) ->
+  | ( Boundaries.History_restarted { trace_id = left_trace }
+    , Boundaries.History_restarted { trace_id = right_trace } ) ->
     String.equal left_trace right_trace
-  | Boundaries.Turn_ended _, Boundaries.History_empty _
-  | Boundaries.History_empty _, Boundaries.Turn_ended _ -> false
+  | Boundaries.Turn_ended _, Boundaries.History_restarted _
+  | Boundaries.History_restarted _, Boundaries.Turn_ended _ -> false
 ;;
 
 let record_t : Boundaries.record testable = testable print_record record_equal
@@ -105,9 +120,9 @@ let test_every_position_kind_round_trips () =
               failf "round trip rejected: %s" (Wire.wire_error_to_string error))
          every_position)
     every_history_at_start;
-  let written = history_empty () in
+  let written = history_restarted () in
   match Boundaries.record_of_json (Boundaries.record_to_json written) with
-  | Ok decoded -> check record_t "an empty history round trips" written decoded
+  | Ok decoded -> check record_t "a restart line round trips" written decoded
   | Error error -> failf "round trip rejected: %s" (Wire.wire_error_to_string error)
 ;;
 
@@ -129,10 +144,10 @@ let test_the_line_a_turn_writes () =
 (* The line is not a turn's, so it names the trace and nothing of a turn: no
    turn reference, and no position, since a history with no atom has only one.
    Its kind says what the writer saw and not that the writer was a clear. *)
-let test_the_line_for_an_empty_history () =
-  check string "an empty history"
-    {|{"kind":"history_empty","recorded_at":200.0,"trace_id":"trace"}|}
-    (Yojson.Safe.to_string (Boundaries.record_to_json (history_empty ())))
+let test_the_line_for_a_restart () =
+  check string "a restart line"
+    {|{"kind":"history_restarted","recorded_at":200.0,"trace_id":"trace"}|}
+    (Yojson.Safe.to_string (Boundaries.record_to_json (history_restarted ())))
 ;;
 
 let fields_of label (json : Yojson.Safe.t) =
@@ -199,24 +214,24 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
     (with_fields (replacing "kind" (`String "no_such_line")) (record atom_history));
   (* A kind names its own field set: a turn's fields under another kind are the
      wrong fields, not a turn line with a different tag. *)
-  check_rejection "a turn's fields under the kind of an empty history"
+  check_rejection "a turn's fields under the kind of a restart line"
     ~path:[]
     ~reason:
       (Wire.Field_set_mismatch
          { missing = [ "trace_id" ]
          ; unexpected = [ "history_at_start"; "position"; "turn_ref" ]
          })
-    (with_fields (replacing "kind" (`String "history_empty")) (record atom_history));
-  check_rejection "an empty history that does not name its trace"
+    (with_fields (replacing "kind" (`String "history_restarted")) (record atom_history));
+  check_rejection "a restart line that does not name its trace"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = [ "trace_id" ]; unexpected = [] })
-    (with_fields (without "trace_id") (history_empty ()));
-  check_rejection "an empty history that states a position"
+    (with_fields (without "trace_id") (history_restarted ()));
+  check_rejection "a restart line that states a position"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = []; unexpected = [ "position" ] })
     (with_fields
        (fun fields -> fields @ [ "position", `Assoc [ "kind", `String "empty_atom_history" ] ])
-       (history_empty ()));
+       (history_restarted ()));
   check_rejection "a line without its kind"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = [ "kind" ]; unexpected = [] })
@@ -238,10 +253,10 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
 ;;
 
 let test_decode_refuses_values_no_writer_writes () =
-  check_rejection "an empty history of no trace"
+  check_rejection "a restart line of no trace"
     ~path:[ Wire.Wire_field "trace_id" ]
     ~reason:Wire.Blank_string
-    (with_fields (replacing "trace_id" (`String " ")) (history_empty ()));
+    (with_fields (replacing "trace_id" (`String " ")) (history_restarted ()));
   check_rejection "an atom history that ends before its first atom"
     ~path:[ Wire.Wire_field "position"; Wire.Wire_field "end_atom" ]
     ~reason:Wire.Not_positive
@@ -354,7 +369,7 @@ let test_appended_lines_read_back_in_order () =
     (List.length (read_lines ~keepers_dir));
   let written =
     List.mapi (fun index position -> record ~turn:(index + 1) position) every_position
-    @ [ history_empty () ]
+    @ [ history_restarted () ]
   in
   List.iter
     (fun line ->
@@ -365,7 +380,7 @@ let test_appended_lines_read_back_in_order () =
   check (list (pair int record_t)) "one numbered line per append, in the order appended"
     (List.mapi (fun index line -> index + 1, line) written)
     (read_lines ~keepers_dir);
-  check string "the file the RFC names" "keeper.turn-boundaries.jsonl"
+  check string "the file the RFC names" "turn-boundaries.jsonl"
     (Filename.basename (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
@@ -384,14 +399,13 @@ let test_a_line_no_reader_decodes_is_not_written () =
            (Boundaries.append_error_to_string error)
        | Ok () -> failf "%s: written" label)
     [ "a turn reference no reader can parse", record ~trace_id:"" Boundaries.No_atom_history
-    ; "an empty history of no trace", history_empty ~trace_id:"" ()
+    ; "a restart line of no trace", history_restarted ~trace_id:"" ()
     ];
   check int "nothing was written" 0 (List.length (read_lines ~keepers_dir))
 ;;
 
-(* The log lives in the config keepers directory, outside the runtime
-   directory the purge removes: without a plan entry a purged keeper leaves it
-   to a later keeper with the same name. *)
+(* The cluster-local log and read position are named together in the artifact
+   plan, so a same-name successor cannot inherit only half of the pair. *)
 let test_purge_plan_removes_the_turn_boundary_log () =
   let module Shutdown = Masc.Keeper_shutdown_types in
   let context = { Shutdown.requested_name = keeper_id } in
@@ -400,11 +414,24 @@ let test_purge_plan_removes_the_turn_boundary_log () =
     (List.exists (fun entry -> entry = Shutdown.Keeper_turn_boundaries_artifact) plan)
 ;;
 
-(* A store whose last append never completed: it ends mid-line, and refuses
-   every append until process-start recovery truncates the torn tail. *)
+(* A store no append can open: a directory sits where the file goes. *)
+let block_the_store ~keepers_dir =
+  Fs_compat.mkdir_p (Filename.dirname
+    (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id));
+  Unix.mkdir (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id) 0o700
+;;
+
+let the_store_is_still_blocked ~keepers_dir =
+  let path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  check bool "the refused line changed the store" true
+    (Sys.is_directory path && Array.length (Sys.readdir path) = 0)
+;;
+
+(* A store whose last append never completed: it ends mid-line. *)
 let plant_torn_tail ~keepers_dir =
   let torn = {|{"kind":"turn_ended"|} in
-  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p (Filename.dirname
+    (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id));
   let store =
     Unix.openfile
       (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id)
@@ -528,11 +555,11 @@ let test_a_clear_empties_the_history_and_then_says_so () =
   check position_t "the saved history holds no atom" Boundaries.Empty_atom_history
     (position_of "cleared history" after);
   match read_lines ~keepers_dir with
-  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_empty { trace_id } })
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id } })
     ] ->
     check string "the line names the trace the checkpoint is saved under" cleared_trace
       trace_id
-  | lines -> failf "expected one history_empty line, read %d" (List.length lines)
+  | lines -> failf "expected one history_restarted line, read %d" (List.length lines)
 ;;
 
 (* The store refuses a checkpoint older than the one it holds: a turn saved
@@ -554,20 +581,35 @@ let test_a_superseded_clear_writes_nothing () =
     (List.length (read_lines ~keepers_dir))
 ;;
 
-(* A store that ends mid-line refuses every append. The history is emptied all
-   the same, so the outcome has to say the line is missing: the turns that
-   follow are refused their lines as well, so until the torn tail is repaired
-   nothing explains why the history started over. *)
+(* The history is emptied even when the store refuses the line, so the outcome
+   has to say the line is missing: until a later turn writes it, nothing in the
+   store explains why the history started over. *)
 let test_a_clear_whose_line_is_refused_says_so () =
   with_saved_history ~turn_count:3
   @@ fun ~keepers_dir ~base_dir ~session context ->
-  plant_torn_tail ~keepers_dir;
+  block_the_store ~keepers_dir;
   (match clear ~keepers_dir ~session context with
    | Clear.Cleared { cleared_message_count = _; marker = Error _ } -> ()
    | (Clear.Cleared { marker = Ok (); _ } | Clear.Superseded _ | Clear.Save_unconfirmed _) as
      other -> failf "expected a cleared history with no line: %s" (describe_outcome other));
   check bool "the history was emptied" true
     (List.for_all is_system (saved_messages ~base_dir))
+;;
+
+(* A crash part way through an append leaves the store ending mid-line. The
+   clear's line still lands: the append cuts the fragment and writes after the
+   last complete line. *)
+let test_a_torn_tail_does_not_cost_the_clear_its_line () =
+  with_saved_history ~turn_count:3
+  @@ fun ~keepers_dir ~base_dir:_ ~session context ->
+  plant_torn_tail ~keepers_dir;
+  (match clear ~keepers_dir ~session context with
+   | Clear.Cleared { cleared_message_count = _; marker = Ok () } -> ()
+   | (Clear.Cleared { marker = Error _; _ } | Clear.Superseded _ | Clear.Save_unconfirmed _)
+     as other -> failf "expected a cleared history and its line: %s" (describe_outcome other));
+  match read_lines ~keepers_dir with
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted _ }) ] -> ()
+  | lines -> failf "expected the restart line alone, read %d" (List.length lines)
 ;;
 
 (* {1 The start of a turn} *)
@@ -578,66 +620,121 @@ let started_trace = "trace-started"
 
 (* A workspace, and the keepers directory the turns of its keepers write to. *)
 let with_workspace f =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Eio_main.run
   @@ fun _env ->
   let base_path = Filename.temp_dir "turn-start-" "" in
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () ->
-       f
-         ~config:(Masc.Workspace.default_config base_path)
-         ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path))
+       let config = Masc.Workspace.default_config base_path in
+       f ~config ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config))
 ;;
 
-let start_turn ~config history_at_start =
-  Turn_helpers.record_empty_history_at_turn_start
+module Run_context = Masc.Keeper_run_context
+
+let describe_notice = function
+  | Turn_helpers.No_restart_notice -> "none"
+  | Turn_helpers.Notice_at_turn_start -> "at turn start"
+  | Turn_helpers.Notice_after_first_save -> "after the first accepted save"
+;;
+
+(* A reader may act on a restart line as soon as it sees it, so the line must
+   not be ahead of the restart. A turn that knows the saved history holds no
+   atom can say so at once. A turn whose checkpoint version was superseded has not
+   seen the saved history, which may still hold atoms: if it said so at its
+   start, a reader could re-read the old history, pass the line, and have no
+   line left when a save of that turn then replaces the history. *)
+let test_the_notice_follows_what_the_turn_saw () =
+  let expect label history_at_start saved_history notice =
+    check string label notice
+      (describe_notice (Turn_helpers.restart_notice history_at_start saved_history))
+  in
+  expect "loaded, and it holds no atom" Boundaries.Fresh_history
+    Run_context.Saved_history_loaded "at turn start";
+  expect "nothing is saved" Boundaries.Fresh_history Run_context.Saved_history_absent
+    "at turn start";
+  expect "the checkpoint version was superseded" Boundaries.Fresh_history Run_context.Saved_history_superseded
+    "after the first accepted save";
+  expect "a history with atoms" Boundaries.Continued_history
+    Run_context.Saved_history_loaded "none";
+  (* A continued history is a loaded one; the other two pairs cannot arise and
+     are listed so that the function is total without a wildcard. *)
+  expect "continued, absent" Boundaries.Continued_history Run_context.Saved_history_absent
+    "none";
+  expect "continued, superseded" Boundaries.Continued_history Run_context.Saved_history_superseded
+    "none"
+;;
+
+let record_restart ~config site =
+  Turn_helpers.record_history_restart
     ~config
     ~keeper_name:keeper_id
     ~trace_id:started_trace
-    history_at_start
+    site
 ;;
 
-let turn_start_failures () =
+let restart_failures site =
   Masc.Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string TurnBoundaryFailures)
-    ~labels:[ "keeper", keeper_id; "site", "turn_start" ]
+    ~labels:[ "keeper", keeper_id; "site", Turn_helpers.restart_site_label site ]
     ()
 ;;
 
-(* The turn has saved nothing yet. Whatever it saves first, and whether or not
-   it reaches its end, the store already says its atoms are numbered from
-   zero. *)
-let test_a_turn_that_starts_from_no_atom_says_so () =
+(* Both sites write the same line: a reader has no use for which one it was. *)
+let test_a_restart_is_recorded_from_either_site () =
   with_workspace
   @@ fun ~config ~keepers_dir ->
-  start_turn ~config Boundaries.Fresh_history;
+  record_restart ~config Turn_helpers.At_turn_start;
+  record_restart ~config Turn_helpers.After_first_save;
   match read_lines ~keepers_dir with
-  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_empty { trace_id } }) ]
-    -> check string "the line names the turn's trace" started_trace trace_id
-  | lines -> failf "expected one empty-history line, read %d" (List.length lines)
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id = first } })
+    ; (2, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id = second } })
+    ] ->
+    check string "the first line names the turn's trace" started_trace first;
+    check string "the second line names the turn's trace" started_trace second
+  | lines -> failf "expected two restart lines, read %d" (List.length lines)
 ;;
 
-(* The end an earlier line states is where this turn starts. *)
-let test_a_turn_that_continues_a_history_writes_nothing () =
-  with_workspace
-  @@ fun ~config ~keepers_dir ->
-  start_turn ~config Boundaries.Continued_history;
-  check int "no line" 0 (List.length (read_lines ~keepers_dir))
-;;
-
-(* The turn has not run yet, and a line the store refuses is no reason not to
-   run it: the refusal is counted, nothing is raised, and the store is left as
-   it was. *)
+(* A line the store refuses is no reason to stop the turn: the refusal is
+   counted under the site that tried, nothing is raised, and the store is left
+   as it was. *)
 let test_a_refused_line_does_not_stop_the_turn () =
   with_workspace
   @@ fun ~config ~keepers_dir ->
-  plant_torn_tail ~keepers_dir;
-  let before = turn_start_failures () in
-  start_turn ~config Boundaries.Fresh_history;
-  check (float 0.0001) "the refusal is counted" (before +. 1.0) (turn_start_failures ());
-  match Boundaries.read ~keepers_dir ~keeper_id with
-  | Ok [ (1, Error Boundaries.Incomplete_line) ] -> ()
-  | Ok _ | Error _ -> fail "the refused line changed the store"
+  block_the_store ~keepers_dir;
+  List.iter
+    (fun site ->
+       let before = restart_failures site in
+       record_restart ~config site;
+       check (float 0.0001)
+         ("the refusal is counted: " ^ Turn_helpers.restart_site_label site)
+         (before +. 1.0)
+         (restart_failures site))
+    [ Turn_helpers.At_turn_start; Turn_helpers.After_first_save ];
+  the_store_is_still_blocked ~keepers_dir
+;;
+
+(* Every pair. The one that is easy to get wrong is a turn whose finalize save
+   the store refused as stale: it replaced nothing, so it restarts nothing and
+   owes no line. Writing one there puts a restart ahead of lines that are
+   still live, and a reader drops every atom before a restart.
+
+   The turn's position says the same thing, but this does not read it: a
+   position can fail to be built and this cannot, and both records of one
+   restart -- this line and the turn's end line -- must not fail together. *)
+let test_only_an_accepted_finalize_save_owes_the_line () =
+  let owed ~notice_pending ~saved_checkpoint_present =
+    Turn_helpers.restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present
+  in
+  check bool "pending, and this turn's save landed" true
+    (owed ~notice_pending:true ~saved_checkpoint_present:true);
+  check bool "pending, but the store kept its own checkpoint" false
+    (owed ~notice_pending:true ~saved_checkpoint_present:false);
+  check bool "a stage save already wrote the line" false
+    (owed ~notice_pending:false ~saved_checkpoint_present:true);
+  check bool "nothing pending and nothing saved" false
+    (owed ~notice_pending:false ~saved_checkpoint_present:false)
 ;;
 
 let () =
@@ -647,8 +744,8 @@ let () =
       , [ test_case "every position kind round trips" `Quick
             test_every_position_kind_round_trips
         ; test_case "the line a turn writes" `Quick test_the_line_a_turn_writes
-        ; test_case "the line for an empty history" `Quick
-            test_the_line_for_an_empty_history
+        ; test_case "the line for a restart" `Quick
+            test_the_line_for_a_restart
         ; test_case "refuses what its kind does not carry" `Quick
             test_decode_refuses_what_its_kind_does_not_carry
         ; test_case "refuses values no writer writes" `Quick
@@ -676,14 +773,18 @@ let () =
             test_a_superseded_clear_writes_nothing
         ; test_case "a clear whose line is refused says so" `Quick
             test_a_clear_whose_line_is_refused_says_so
+        ; test_case "a torn tail does not cost the clear its line" `Quick
+            test_a_torn_tail_does_not_cost_the_clear_its_line
         ] )
-    ; ( "turn start"
-      , [ test_case "a turn that starts from no atom says so" `Quick
-            test_a_turn_that_starts_from_no_atom_says_so
-        ; test_case "a turn that continues a history writes nothing" `Quick
-            test_a_turn_that_continues_a_history_writes_nothing
+    ; ( "restart notice"
+      , [ test_case "the notice follows what the turn saw" `Quick
+            test_the_notice_follows_what_the_turn_saw
+        ; test_case "a restart is recorded from either site" `Quick
+            test_a_restart_is_recorded_from_either_site
         ; test_case "a refused line does not stop the turn" `Quick
             test_a_refused_line_does_not_stop_the_turn
+        ; test_case "only an accepted finalize save owes the line" `Quick
+            test_only_an_accepted_finalize_save_owes_the_line
         ] )
     ]
 ;;

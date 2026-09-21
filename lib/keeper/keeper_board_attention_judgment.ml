@@ -1,6 +1,7 @@
 type decision =
   | Relevant
   | Not_relevant
+[@@deriving enumerate]
 
 type t =
   { decision : decision
@@ -12,12 +13,14 @@ let decision_to_string = function
   | Not_relevant -> "not_relevant"
 ;;
 
-let decision_tokens = [ decision_to_string Relevant; decision_to_string Not_relevant ]
+let decision_tokens = List.map decision_to_string all_of_decision
 
-let decision_of_string = function
-  | "relevant" -> Some Relevant
-  | "not_relevant" -> Some Not_relevant
-  | _ -> None
+(* Read back through the same labels the tokens are written with, so a label
+   exists in one place. *)
+let decision_of_string raw =
+  List.find_opt
+    (fun decision -> String.equal (decision_to_string decision) raw)
+    all_of_decision
 ;;
 
 let to_yojson verdict =

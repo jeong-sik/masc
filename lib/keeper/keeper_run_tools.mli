@@ -113,7 +113,6 @@ val prepare_agent_setup
   -> keeper_turn_id:int
   -> turn_kind:Turn_record.turn_kind
   -> runtime_id:string
-  -> is_retry:bool
   -> config_root:string
   -> runtime_config_path:string option
   -> skill_snapshot:Skill_catalog_snapshot.t

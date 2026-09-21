@@ -733,10 +733,6 @@ let test_release_requires_advertised_binary_assets () =
     "release fails when required asset is absent"
     workflow
     "required release asset missing: $asset";
-  assert_contains
-    "release hashes seeded model catalog overlay"
-    workflow
-    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_quickstart_defaults_to_workspace_only () =
@@ -1771,16 +1767,12 @@ wizard-default = true
       check (list string) "no stale atomic tmp files" [] stale_atomic_tmps)
 ;;
 
-let test_release_checksums_include_model_catalog_overlay_seed () =
+let test_release_checksums_include_runtime_config_seed () =
   let workflow = release_workflow () in
   assert_contains
     "release checksum includes runtime config seeds"
     workflow
     "(cd ../config && sha256sum runtime.toml) >> SHA256SUMS";
-  assert_contains
-    "release checksum includes model catalog overlay seed"
-    workflow
-    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_team_flag_and_seed_exist () =
@@ -1851,9 +1843,9 @@ let () =
             `Quick
             test_force_refreshes_same_version_existing_binary
         ; test_case
-            "release checksums include model catalog overlay seed"
+            "release checksums include runtime config seed"
             `Quick
-            test_release_checksums_include_model_catalog_overlay_seed
+            test_release_checksums_include_runtime_config_seed
         ] )
     ; ( "wizard"
       , [ test_case "wizard flags exist" `Quick test_wizard_flags_exist

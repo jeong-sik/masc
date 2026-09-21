@@ -28,9 +28,7 @@ type turn_state =
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   ; degraded_retry_info : Keeper_error_classify.degraded_retry option
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
-  ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
-  ; retry_phase_started_at : float option
   ; runtime_attempt_errors : runtime_attempt_error list
     (** Every candidate the runtime walk attempted and that ended in an
         error this turn, in walk order, each with its own error and dispatch
@@ -140,17 +138,18 @@ val degraded_retry_applied_for_turn :
   last_execution:Keeper_turn_runtime_budget.runtime_execution option ->
   bool
 (** Whether the deferred lane a previous turn hinted at is the lane this turn
-    actually ran on.
+    actually ran on. Reader: the unified path's decision record only. The
+    execution receipt answers the same question for itself in
+    [Keeper_agent_run_receipt.degraded_retry_taken_up].
 
     [turn_state.degraded_retry_info] is seeded at [initial_turn_state] from the
     [deferred_runtime_lane] argument and nothing writes it afterwards, so its
-    presence means a deferred lane is pending — not that a retry ran. Reporting
-    presence as "applied" told an operator a retry had happened on turns where
-    none had, and attached a [fallback_reason] derived from the earlier turn's
-    failure to this turn's receipt.
+    presence means a deferred lane is pending — not that a retry ran.
 
     Returns [false] when no execution was recorded: nothing ran, so nothing was
-    applied. *)
+    applied. That is the condition doing the work here, because
+    [Keeper_unified_turn.main_path] routes a turn carrying a hint to
+    [hint.next_runtime_id]: when both sides are present they agree. *)
 
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t

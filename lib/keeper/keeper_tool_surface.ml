@@ -219,6 +219,8 @@ let handle_keeper_reset ctx args : tool_result =
    is not a keeper with nothing to clear: its checkpoint was never looked up. *)
 type keeper_clear_report =
   | Clear_meta_unreadable of string
+  | Clear_checkpoint_unreadable of
+      { path : string; error : Keeper_checkpoint_store.checkpoint_load_error }
   | Clear_no_checkpoint
   | Clear_attempted of Keeper_history_clear.outcome
 
@@ -244,8 +246,9 @@ let keeper_clear_failure
 (** Last-resort context clear.
 
     Drops all conversation messages from the keeper's checkpoint file,
-    optionally preserving the system prompt.  Dispatches
-    [Operator_clear_requested] to reset overflow-related FSM conditions. *)
+    optionally preserving the system prompt. The Owner's maintenance slot
+    excludes turns from the checkpoint read through its save and restart line.
+    A busy Owner refuses the clear without cancelling its current turn. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_clear_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
@@ -257,6 +260,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         (validation_error_data
            "reason is required for masc_keeper_clear (audit trail)")
     else
+    let clear_idle () =
     (* Registry race guard: if the keeper disappeared between
        [resolve_keeper_name] and [get], abort cleanly rather than silently
        proceed with a half-applied clear. *)
@@ -276,19 +280,24 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Error detail -> Clear_meta_unreadable detail
         | Ok None -> Clear_no_checkpoint
         | Ok (Some (_, meta)) ->
-          let session, ctx_opt =
-            Keeper_context_runtime.load_context_from_checkpoint
-              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+          let session =
+            Keeper_context_runtime.create_session ~session_id:trace_id
               ~base_dir
           in
-          (match ctx_opt with
-           | None -> Clear_no_checkpoint
-           | Some wctx ->
+          (match Keeper_checkpoint_store.load_agent_core
+                   ~session_dir:session.session_dir ~session_id:trace_id with
+           | Error Not_found -> Clear_no_checkpoint
+           | Error error ->
+             Clear_checkpoint_unreadable
+               { path = Keeper_checkpoint_store.agent_core_checkpoint_path
+                   ~session_dir:session.session_dir ~session_id:trace_id
+               ; error }
+           | Ok checkpoint ->
+             let wctx = Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint in
              Clear_attempted
                (Keeper_history_clear.clear
-                  ~keepers_dir:
-                    (Config_dir_resolver.keepers_dir_for_base_path
-                       ~base_path:config.base_path)
+                  ~keepers_dir:(Workspace.keepers_runtime_dir config)
                   ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                   ~keeper_name:meta.name
                   ~session
@@ -298,22 +307,23 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       let checkpoint_found =
         match report with
         | Clear_attempted _ -> true
-        | Clear_meta_unreadable _ | Clear_no_checkpoint -> false
+        | Clear_meta_unreadable _ | Clear_checkpoint_unreadable _
+        | Clear_no_checkpoint -> false
       in
-      (* Dispatch FSM event to clear overflow conditions *)
-      Keeper_context_runtime.dispatch_keeper_phase_event
-        ~config ~keeper_name:name
-        (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
-      (* Clear registry failure state *)
-      ignore
-        (Keeper_turn_failure_streak.reset
-           ~base_path:config.base_path
-           ~keeper_name:name);
-      (* [line_error]: the history was emptied and its [history_empty] line
+      (* [line_error]: the history was emptied and its [history_restarted] line
          could not be written. That does not fail the clear, as a turn's line
          does not fail the turn: it is logged, counted and named in the
          result. *)
       let cleared ?line_error ~cleared_message_count () =
+        (* Only a confirmed clear resets the prior turn failure observation. *)
+        Keeper_context_runtime.dispatch_keeper_phase_event
+          ~config ~keeper_name:name
+          (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
+        (* See Keeper_turn_failure_streak.reset: failure is logged and retains the streak. *)
+        ignore
+          (Keeper_turn_failure_streak.reset
+             ~base_path:config.base_path
+             ~keeper_name:name);
         Log.Keeper.warn
           "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
           name reason preserve_system cleared_message_count;
@@ -321,7 +331,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           (`Assoc
             ((match line_error with
               | None -> []
-              | Some detail -> [ "history_empty_line_error", `String detail ])
+              | Some detail -> [ "history_restart_line_error", `String detail ])
              @ [
                  ("name", `String name);
                  ("phase_before", `String phase_before);
@@ -340,6 +350,20 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
          message count. *)
       let result =
         match report with
+        | Clear_checkpoint_unreadable { path; error } ->
+          let detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error in
+          Log.Keeper.error
+            "%s: history not cleared: checkpoint could not be read at %s: %s"
+            name path detail;
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history not cleared: checkpoint could not be read at %s: %s"
+                 path detail)
+            [ "name", `String name; "checkpoint_path", `String path ]
         | Clear_meta_unreadable detail ->
           Log.Keeper.error
             "%s: operator clear did not look for a checkpoint (reason=%s): keeper meta \
@@ -364,7 +388,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           ->
           Log.Keeper.error
             "%s: context cleared by operator (reason=%s, cleared=%d msgs) but the \
-             history_empty line was not written: %s"
+             history_restarted line was not written: %s"
             name reason cleared_message_count detail;
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string TurnBoundaryFailures)
@@ -410,6 +434,39 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
       result
+    in
+    match
+      Keeper_owner_registry.run_maintenance_if_idle
+        ~base_path:config.base_path ~keeper_name:name clear_idle
+    with
+    | Ok (`Ran result) -> result
+    | Ok (`Busy block) ->
+      keeper_clear_failure
+        ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        ~code:Tool_args.Conflict
+        ~message:
+          ("history not cleared: " ^ Keeper_owner.autonomous_block_to_string block
+           ^ ". Wait for or stop the current turn, then retry the clear.")
+        [ "name", `String name ]
+    | Error error ->
+      let effect_disposition, message =
+        match error with
+        | Keeper_owner_registry.Command_lookup_failed _
+        | Keeper_owner_registry.Command_lifecycle_reserved _ ->
+            Tool_result.Proven_pre_effect, "history not cleared: Keeper owner unavailable: "
+        | Keeper_owner_registry.Command_rejected _ ->
+            (* Owner shutdown can interrupt maintenance after its save. *)
+            Tool_result.Effect_outcome_unknown,
+            "history clear was not confirmed; the checkpoint may have changed: "
+      in
+      keeper_clear_failure
+        ~class_:Tool_result.Dependency_unavailable
+        ~effect_disposition
+        ~code:Tool_args.Precondition_failed
+        ~message:
+          (message ^ Keeper_owner_registry.command_error_to_string error)
+        [ "name", `String name ]
 
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
@@ -484,6 +541,16 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_
   tool_result_with_tool_name
     ~tool_name:name
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx message)
+;;
+
+let submit_keeper_msg ~submitted_by ?continuation_channel ctx ~message =
+  let name = Keeper_tool_name.(to_string Keeper_msg) in
+  let ctx = resolve_ctx ctx ~name in
+  Keeper_tool_surface_ops.submit_keeper_msg
+    ?continuation_channel ~submitted_by ctx message
+  |> Result.map_error (fun error ->
+         tool_result_of_handler_error error
+         |> tool_result_with_tool_name ~tool_name:name)
 ;;
 
 let dispatch_keeper_msg_stream_admitted

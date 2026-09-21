@@ -4,7 +4,7 @@ Observed source: main `1f7ec8a587`. Audit item7 retained a repeated Execute coun
 
 ## Required behavior
 
-Fresh B must not inherit A's counts. Explicit Resume A must retain A's counts across B, provider changes, checkpoints and restart. A repeat split2+2 across execution attempts must still reach the existing detector threshold. Current receipts must contain only their own tool observations. No prompt-string, task-name, last-user, `is_retry`, trace-ID or per-run reset heuristic supplies this contract.
+Fresh B must not inherit A's counts. Explicit Resume A must retain A's counts across B, provider changes, checkpoints and restart. A repeat split2+2 across execution attempts must still reach the existing detector threshold. Current receipts must contain only their own tool observations. No prompt-string, task-name, last-user, trace-ID or per-run reset heuristic supplies this contract.
 
 ## Actual producer boundaries
 

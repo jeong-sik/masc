@@ -526,6 +526,44 @@ let test_naming_a_session_does_not_open_one () =
         (Sys.file_exists session.session_dir))
 ;;
 
+(* "There is no checkpoint" and "the checkpoint could not be read" are different
+   facts: after the second, the saved history may still be there. The plain
+   loader answers [None] for both; the classified one keeps them apart. *)
+let describe_load = function
+  | C.Checkpoint_loaded _ -> "loaded"
+  | C.Checkpoint_absent -> "absent"
+  | C.Checkpoint_unread _ -> "unread"
+;;
+
+let test_a_missing_checkpoint_is_not_an_unreadable_one () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-load-classified-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let _session, missing =
+        C.load_context_from_checkpoint_classified ~trace_id:"never-written" ~base_dir
+      in
+      Alcotest.(check string) "no file" "absent" (describe_load missing);
+      let trace_id = "written-badly" in
+      let session = C.create_session ~session_id:trace_id ~base_dir in
+      Fs_compat.mkdir_p session.session_dir;
+      Out_channel.with_open_bin
+        (Masc.Keeper_checkpoint_store.agent_core_checkpoint_path
+           ~session_dir:session.session_dir
+           ~session_id:trace_id)
+        (fun channel -> Out_channel.output_string channel "{ not a checkpoint");
+      let _session, unreadable =
+        C.load_context_from_checkpoint_classified ~trace_id ~base_dir
+      in
+      Alcotest.(check string) "a file that does not parse" "unread"
+        (describe_load unreadable);
+      let _session, plain = C.load_context_from_checkpoint ~trace_id ~base_dir in
+      Alcotest.(check bool) "the plain loader still answers None" true
+        (Option.is_none plain))
+;;
+
 let () =
   Alcotest.run "keeper_context_core_dedup"
     [
@@ -567,6 +605,8 @@ let () =
         ] );
       ( "session_dir",
         [
+          Alcotest.test_case "a missing checkpoint is not an unreadable one" `Quick
+            test_a_missing_checkpoint_is_not_an_unreadable_one;
           Alcotest.test_case "naming a session does not open one" `Quick
             test_naming_a_session_does_not_open_one;
         ] );

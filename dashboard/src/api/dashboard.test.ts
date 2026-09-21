@@ -1562,7 +1562,7 @@ describe('fetchDashboardFullHealth', () => {
         last_error_age_sec: null,
       },
       keeper_event_queue: {
-        schema: 'masc.keeper_event_queue.fleet_summary.v6',
+        schema: 'masc.keeper_event_queue.fleet_summary.v7',
         status: 'warning',
         operator_action_required: false,
         status_reasons: ['runnable_backlog=18'],
@@ -1625,6 +1625,7 @@ describe('fetchDashboardFullHealth', () => {
       last_error_age_sec: null,
     })
     expect(result.keeper_event_queue).toMatchObject({
+      schema: 'masc.keeper_event_queue.fleet_summary.v7',
       status: 'warning',
       backlog_clean: false,
       storage_integrity: { status: 'ok', counts_complete: true },
@@ -4404,7 +4405,6 @@ describe('fetchRuntimeProviders', () => {
               },
               has_output_schema: true,
               cache_system_prompt: true,
-              supports_tool_choice_override: true,
               supports_structured_output_override: null,
               has_model_capabilities_override: true,
               keep_alive: '30m',
@@ -4472,6 +4472,7 @@ describe('fetchRuntimeProviders', () => {
                 },
                 custom_header_count: 2,
                 connect_timeout_s: 120,
+                exact_body_timeout_s: 0.125,
               },
               model: {
                 id: 'qwen',
@@ -4577,7 +4578,7 @@ describe('fetchRuntimeProviders', () => {
           dropped_lanes: [
             { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
           ],
-          next_action: 'Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).',
+          next_action: 'Add a row for each to the AGENT_CORE embedded catalog.',
         },
         config_path: '/tmp/masc-test/runtime.toml',
       }), {
@@ -4642,6 +4643,8 @@ describe('fetchRuntimeProviders', () => {
     ])
     expect(result.providers[0]?.declared_spec?.source).toBe('runtime.toml')
     expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')
+    expect(result.providers[0]?.declared_spec?.provider?.connect_timeout_s).toBe(120)
+    expect(result.providers[0]?.declared_spec?.provider?.exact_body_timeout_s).toBe(0.125)
     expect(
       result.providers[0]?.declared_spec?.provider?.behavior_capabilities
         ?.supports_inline_tools,

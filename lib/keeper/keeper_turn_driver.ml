@@ -873,9 +873,28 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->
           ()
-        (* The candidate answered, badly; RFC-0458 §5 leaves these without
-           evidence until a measurement says otherwise. *)
-        | Keeper_runtime_failure_route.Rotate_now _ -> ()
+        (* A credential denial says this candidate could not answer, while a
+           sibling may use another credential. Preserve that typed route into
+           the next walk without inventing an expiry or excluding the path. *)
+        | Keeper_runtime_failure_route.Rotate_now
+            { rotate = Keeper_runtime_failure_route.Auth_failed } ->
+          note_failed_attempt Runtime_candidate_backpressure.Access_refused
+        (* These candidates answered, or the failure says nothing durable
+           about their ability to answer a later turn. *)
+        | Keeper_runtime_failure_route.Rotate_now
+            { rotate =
+                ( Keeper_runtime_failure_route.Model_unavailable
+                | Keeper_runtime_failure_route.Resumable_cli_session
+                | Keeper_runtime_failure_route.Candidates_filtered
+                | Keeper_runtime_failure_route.Runtime_exhausted
+                | Keeper_runtime_failure_route.No_progress_empty
+                | Keeper_runtime_failure_route.No_progress_thinking_only
+                | Keeper_runtime_failure_route.No_progress_truncated
+                | Keeper_runtime_failure_route.Refusal_body_not_received
+                | Keeper_runtime_failure_route.Generation_repeated
+                | Keeper_runtime_failure_route.Attempt_rejected )
+            } ->
+          ()
         (* The turn's input or MASC itself failed; another candidate would not
            do better, so this is no evidence about this one. *)
         | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());
@@ -1108,22 +1127,24 @@ let dedupe_runtimes_preserve_order runtimes =
   in
   loop [] [] runtimes
 
-(* RFC-0440: a live lane reroutes over the lane, then [runtime.media_failover],
-   then the other declared runtimes, so an image turn on a lane whose capable
-   head is down reaches a capable runtime declared elsewhere. The set is held
-   in the same quota and backpressure order the lane itself uses
-   ([demote_unavailable_candidates]): a candidate whose account answered a hard
-   quota rejection earlier moves behind the live ones, so the reroute picks a
-   live candidate instead of the first declared one. A deferred lane offers no
-   candidates: its walk dispatches the frozen suffix ([lane_candidate_ids] in
-   [run_agent_turn]), so a decision that moved the head would be recorded as a
-   reroute the walk never performs. *)
+(* A live lane reroutes an image turn over its own candidates only. The lane is
+   the whole list of runtimes this keeper may call; [runtime.media_failover] is
+   the vision tool's fleet and never a turn's dispatch target. When no lane
+   candidate takes the image, the decision is [No_capable_runtime] and the
+   per-attempt projection turns the image into a reading for the runtime that
+   runs the turn. The set is held in the same quota and backpressure order the
+   lane itself uses ([demote_unavailable_candidates]): a candidate whose
+   account answered a hard quota rejection earlier moves behind the live ones,
+   so the reroute picks a live candidate instead of the first declared one. A
+   deferred lane offers no candidates: its walk dispatches the frozen suffix
+   ([lane_candidate_ids] in [run_agent_turn]), so a decision that moved the
+   head would be recorded as a reroute the walk never performs. *)
 let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
     ~remaining_runtimes =
   match deferred_runtime_lane with
   | Some _ -> []
   | None ->
-    Runtime_agent.media_candidates ~lane:(first_candidate :: remaining_runtimes)
+    dedupe_runtimes_preserve_order (first_candidate :: remaining_runtimes)
     |> demote_unavailable_candidates
          ~now
          ~quota_scope_of:(fun (runtime : Runtime.t) ->
@@ -1131,34 +1152,18 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
          ~candidate_backpressure_of:(fun (runtime : Runtime.t) ->
            Some runtime.Runtime.candidate_backpressure)
 
-(* RFC-0440 §3: the media walk (every candidate that takes the media, live ones
-   first), then the lane's remaining candidates as the degrade tail — per-attempt
-   projection drops the image there (PR-C replaces this tail with delegation). A
-   text turn has an empty media walk and keeps [first_runtime :: remaining_runtimes].
+(* The media walk (every lane candidate that takes the media, live ones first),
+   then the rest of the lane in its declared order as the degrade tail, where
+   per-attempt projection turns the image into a reading. A text turn has an
+   empty media walk and walks the lane as declared.
 
-   The walk leads, [first_runtime] does not. Putting the dispatch head at 0
-   unconditionally undid the liveness ordering in the one case it is needed:
-   when the assigned runtime takes the media itself,
+   The walk leads, not the lane head. When the head takes the media itself,
    [decide_modality_reroute_for_runtime_candidates] answers [No_reroute_needed]
-   on capability alone and never looks at the account, so a head already
-   exhausted by a 402/429 stayed in front of the live out-of-lane candidate and
-   every image turn hit it first again. When the head is live it is the walk's
-   own head, so leading with the walk changes nothing; after a reroute the
-   target is the walk head for the same reason, and the dedupe drops the second
-   mention either way.
-
-   [assigned_runtime] closes the list. A reroute replaces the head with an
-   out-of-lane media runtime, so on a single-candidate text lane the assigned
-   runtime appeared nowhere: every media candidate answering 402 exhausted the
-   loop into an error instead of reaching the assigned runtime, whose
-   per-attempt projection is what drops the image and delegates. It is the last
-   entry because it is the degrade, not a candidate for the media. Whenever it
-   is already the head or already in the walk the dedupe drops this mention, so
-   a text turn and an un-rerouted media turn keep the list they had. *)
-let attempt_runtimes_for_turn ~media_walk ~assigned_runtime ~first_runtime
-    ~remaining_runtimes =
-  dedupe_runtimes_preserve_order
-    (media_walk @ (first_runtime :: remaining_runtimes) @ [ assigned_runtime ])
+   on capability alone and never looks at the account, so a head exhausted by a
+   402/429 would stay in front of a live capable candidate. A reroute target is
+   the walk's head for the same reason. *)
+let attempt_runtimes_for_turn ~media_walk ~lane =
+  dedupe_runtimes_preserve_order (media_walk @ lane)
 
 let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~goal_blocks ~first_candidate ~candidates =
@@ -1169,25 +1174,18 @@ let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~initial_messages
     goal_blocks
 
-(* The WARN names the runtime being left and the runtime being taken. It used to
-   print [assignment_id] on the left, which for a keeper whose assignment is a
-   bare runtime id reads as a reroute from a runtime to itself — the "<id> -> <id>"
-   lines that made a working reroute look like a no-op. The assignment is still
-   reported, as the assignment. *)
-let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
-    ~first_candidate_id ~first_candidate = function
-  | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-    first_candidate_id, first_candidate
+(* The WARN names the lane head the image turn does not start from and the lane
+   candidate it starts from, then the assignment. *)
+let log_modality_reroute ~keeper_name ~assignment_id ~first_candidate_id = function
+  | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ()
   | Runtime_agent.Reroute { target; reason } ->
-    let to_runtime_id = target.Runtime.id in
     Log.Keeper.warn
       "%s: RFC-0265 modality reroute %s -> %s (assignment %s: %s)"
       keeper_name
       first_candidate_id
-      to_runtime_id
+      target.Runtime.id
       assignment_id
-      reason;
-    to_runtime_id, target
+      reason
 
 (* The dispatch view of one candidate's input. RFC-0265 media degrade projects
    the goal, the pre-turn history and the resumed checkpoint against the input
@@ -1484,6 +1482,7 @@ let run_named
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
+    ?on_response_observed_model_input
     ?carried_front_seed
     ?runtime_manifest_context
     ?runtime_manifest_append
@@ -1523,14 +1522,30 @@ let run_named
 	  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
 	     attempt candidates sequentially with manifest evidence per attempt. *)
 	  let runtime_id = String.trim runtime_id in
-	  (* A front halved after a refusal is a position in this history, so it
+	  (* A front moved after a refusal is a position in this history, so it
 	     holds for every Agent Core candidate of this turn. Kept here, at the
 	     turn, because the lane walks candidates one by one: held inside a
 	     candidate's own run it was lost at the walk's next step, and the
 	     next candidate composed the whole history again (2026-09-18:
 	     pr-updater shrank 16 MB to 3.7 MB on one candidate and sent 16 MB
 	     to the next). *)
-	  let halved_carried_front = ref None in
+	  let refused_carried_front = ref None in
+	  (* The same front the Agent Core branch reads, for the official-client
+	     branches: they cut their start seed from this very history
+	     ([Keeper_carried_front.Hands_over_its_own_list]), so a range the last
+	     completed turn measured names the same atoms there. A front a refusal
+	     moved is the turn's, not one candidate's, so it stands for these
+	     candidates too. Those lanes hold no ledger of their own — it is
+	     written from the usage of a request this process composed — so this
+	     is their whole answer. *)
+	  let official_client_carried_front_seed () : Keeper_carried_front.seed_read =
+	    match !refused_carried_front with
+	    | Some seed -> { Keeper_carried_front.seed = Some seed; unreadable = None }
+	    | None ->
+	      (match carried_front_seed with
+	       | Some read -> read ()
+	       | None -> Keeper_carried_front.no_seed_read)
+	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
   let routing_run_id = Random_id.hex ~bytes:16 in
@@ -1656,11 +1671,11 @@ let run_named
     | Some _ -> Ok []
     | None -> resolve_runtime_candidates remaining_candidate_ids
   in
-  (* This decision orders the walk: a [Reroute] moves a capable candidate to
-     the head and drops the assigned one. On a deferred lane the suffix order
+  (* This decision is reported, not applied: the image walk already leads with
+     the capable candidate a [Reroute] names. On a deferred lane the suffix order
      was frozen before pre-dispatch shaping, so [modality_reroute_candidates]
      is [[]] and the decision can only be [No_reroute_needed] or
-     [No_capable_runtime], neither of which moves the head. The media degrade
+     [No_capable_runtime], and the image walk is empty. The media degrade
      itself is not decided here for any lane: every attempt projects the input
      against the runtime it dispatches to ([project_input_for_attempt] inside
      [run_attempt] below), because the walk crosses runtimes with different
@@ -1685,11 +1700,8 @@ let run_named
       ~first_candidate
       ~candidates:reroute_candidates
   in
-  let first_runtime =
-    snd
-      (first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
-         ~first_candidate_id ~first_candidate reroute_decision)
-  in
+  log_modality_reroute ~keeper_name ~assignment_id:runtime_id ~first_candidate_id
+    reroute_decision;
   let attempt_runtimes =
     attempt_runtimes_for_turn
       ~media_walk:
@@ -1698,9 +1710,7 @@ let run_named
            ~checkpoint_messages
            ~initial_messages
            current_goal_blocks)
-      ~assigned_runtime:first_candidate
-      ~first_runtime
-      ~remaining_runtimes
+      ~lane:(first_candidate :: remaining_runtimes)
   in
   let attempt_candidates =
     match deferred_runtime_lane with
@@ -1903,6 +1913,87 @@ let run_named
              })
         on_runtime_attempt;
       let error_runtime_id = attempt_runtime_id in
+      let official_model_input_observation hooks =
+        let attempted = ref None in
+        let transmitted_observation = ref None in
+        let on_observation =
+          match
+            on_model_input_window_observation,
+            on_response_observed_model_input
+          with
+          | None, None -> None
+          | _ ->
+            Some
+              (fun observation ->
+                 attempted := Some observation;
+                 Option.iter
+                   (fun observe ->
+                      observe
+                        ~measurement:Turn_record.Durable_shape
+                        observation)
+                   on_model_input_window_observation)
+        in
+        let on_transmitted_model_input = function
+          | Keeper_official_client_host.Whole_input_transmitted _ ->
+            transmitted_observation := !attempted
+          | Keeper_official_client_host.Held_by_client_session ->
+            transmitted_observation := None
+        in
+        let hooks =
+          match on_response_observed_model_input with
+          | None -> hooks
+          | Some observe ->
+            let response_observation_hook =
+              { Agent_core.Hooks.empty with
+                after_turn =
+                  Some
+                    (function
+                      | Agent_core.Hooks.AfterTurn _ ->
+                        let observed = !transmitted_observation in
+                        transmitted_observation := None;
+                        Option.iter
+                          (fun
+                            (window :
+                              Runtime_model_input_tail_window.window_observation) ->
+                             observe
+                               { Turn_record.runtime_profile =
+                                   attempt_runtime_id
+                               ; window =
+                                   { Turn_record.transmitted_atoms =
+                                       window.transmitted_atoms
+                                   ; total_atoms = window.total_atoms
+                                   ; measurement = Turn_record.Durable_shape
+                                   ; front_atom_digest = window.front_atom_digest
+                                   }
+                               })
+                          observed;
+                        Agent_core.Hooks.Continue
+                      | Agent_core.Hooks.BeforeTurn _
+                      | Agent_core.Hooks.BeforeTurnParams _
+                      | Agent_core.Hooks.PreToolUse _
+                      | Agent_core.Hooks.PostToolUse _
+                      | Agent_core.Hooks.PostToolUseFailure _
+                      | Agent_core.Hooks.OnStop _
+                      | Agent_core.Hooks.OnError _
+                      | Agent_core.Hooks.OnToolError _ ->
+                        Agent_core.Hooks.Continue)
+              }
+            in
+            Some
+              (match hooks with
+               | None -> response_observation_hook
+               | Some hooks ->
+                 Agent_core.Hooks.compose
+                   ~outer:response_observation_hook
+                   ~inner:hooks)
+        in
+        ( (fun () ->
+            attempted := None;
+            transmitted_observation := None)
+        , on_observation
+        , on_transmitted_model_input
+        , hooks )
+      in
       let inference_policy =
         attempt_inference_policy
           ~runtime_id:attempt_runtime_id
@@ -1919,8 +2010,16 @@ let run_named
          Keeper_provider_attempt_effect.No_effect_observed,
          Keeper_attempt_dispatch.Rejected_before_dispatch)
       | Runtime_execution.Codex_app_server config ->
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , hooks ) =
+          official_model_input_observation hooks
+        in
         let run_codex ~initial_messages () =
+          reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
+            record_transmitted_model_input transmitted;
             Option.iter
               (fun observe ->
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
@@ -1944,10 +2043,7 @@ let run_named
                is the list it handed over. Same reading the Agent Core path
                publishes; without it the turn record has no window. *)
             ?on_model_input_window_observation:
-              (Option.map
-                 (fun observe observation ->
-                    observe ~measurement:Turn_record.Durable_shape observation)
-                 on_model_input_window_observation)
+              on_model_input_window_observation
             ~hooks
             ~context_injector
             ~context
@@ -2053,8 +2149,16 @@ let run_named
         , codex_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Antigravity_cli config ->
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , hooks ) =
+          official_model_input_observation hooks
+        in
         let run_antigravity ~initial_messages () =
+          reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
+            record_transmitted_model_input transmitted;
             Option.iter
               (fun observe ->
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
@@ -2065,13 +2169,11 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~carried_front_seed:official_client_carried_front_seed
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
-              (Option.map
-                 (fun observe observation ->
-                    observe ~measurement:Turn_record.Durable_shape observation)
-                 on_model_input_window_observation)
+              on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2164,9 +2266,17 @@ let run_named
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Claude_code config ->
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , hooks ) =
+          official_model_input_observation hooks
+        in
         let run_claude ~initial_messages () =
+          reset_model_input_observation ();
           let tools = if runtime.model.tools_support then tools else [] in
           let on_transmitted_model_input transmitted =
+            record_transmitted_model_input transmitted;
             Option.iter
               (fun observe ->
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
@@ -2177,6 +2287,7 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~carried_front_seed:official_client_carried_front_seed
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2192,10 +2303,7 @@ let run_named
                when its own serializer produced the bytes and falls back to
                this same shape when it could not. *)
             ?on_model_input_window_observation:
-              (Option.map
-                 (fun observe observation ->
-                    observe ~measurement:Turn_record.Durable_shape observation)
-                 on_model_input_window_observation)
+              on_model_input_window_observation
             ~hooks
             ~context_injector
             ~context
@@ -2344,14 +2452,11 @@ let run_named
                  history. *)
               carried_front_seed =
                 (fun () ->
-                   match !halved_carried_front with
-                   | Some seed ->
-                     { Keeper_carried_front.seed = Some seed; unreadable = None }
-                   | None ->
-                     (match carried_front_seed with
-                      | Some read -> read ()
-                      | None -> Keeper_carried_front.no_seed_read))
-            ; hold_carried_front = (fun seed -> halved_carried_front := Some seed)
+                   match carried_front_seed with
+                   | Some read -> read ()
+                   | None -> Keeper_carried_front.no_seed_read)
+            ; carried_front_after_refusal = (fun () -> !refused_carried_front)
+            ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
             ; base_path
             ; keeper_name
             ; name
@@ -2457,6 +2562,7 @@ let run_named
             ; on_runtime_observation
             ; on_request_wire_observation
             ; on_model_input_window_observation
+            ; on_response_observed_model_input
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append
@@ -2501,8 +2607,7 @@ module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
-  let first_runtime_after_modality_reroute =
-    first_runtime_after_modality_reroute
+  let log_modality_reroute = log_modality_reroute
 
   let modality_reroute_candidates = modality_reroute_candidates
   let attempt_runtimes_for_turn = attempt_runtimes_for_turn

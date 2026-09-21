@@ -48,6 +48,10 @@ val default_record : goal_id:string -> record
 val record_to_yojson : record -> Yojson.Safe.t
 (** Historical record without a current-Goal comparison. *)
 
+val completion_state_of_yojson : Yojson.Safe.t -> (completion_state, string) result
+(** Decode the current completion contract, including verdict provenance.
+    A stale-criterion projection is not a current completion and is refused. *)
+
 type criterion_relation = Current | Stale_criterion
 
 val relation_for_goal : goal:Goal_store.goal -> record -> criterion_relation

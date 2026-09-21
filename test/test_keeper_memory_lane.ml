@@ -9,6 +9,10 @@ module Keeper_lane = Masc.Keeper_lane
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Memory_current = Masc.Keeper_memory_os_current
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
+module Queue_refresh = Masc.Keeper_librarian_queue_refresh
+module Queue_signal = Masc.Keeper_librarian_queue_signal
+
+let initial_eio_context = Eio_context.snapshot_state ()
 
 exception Test_boom
 exception Cancel_lane_test
@@ -41,7 +45,12 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error detail -> Alcotest.failf "keeper meta fixture failed: %s" detail
 ;;
 
-let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn =
+let run_post_turn
+  ~checkpoint_owner
+  ~config
+  ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+  ~turn
+  =
   Post_turn_memory.run
     ~config
     ~meta
@@ -49,9 +58,111 @@ let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn 
     ~agent_core_turn_count:1
     ~tool_observations:[]
     ~librarian_messages:[]
+    ~checkpoint_owner
     ~post_turn_t0:(Time_compat.now ())
     ~inference_telemetry:None
     ()
+;;
+
+let test_checkpoint_owner_selects_one_librarian_producer () =
+  Lane.For_testing.reset ();
+  let root = temp_dir "test-post-turn-owner-" in
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  let previous_env = Sys.getenv_opt env_key in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_env with
+       | Some value -> Unix.putenv env_key value
+       | None -> Unix.putenv env_key "");
+      Queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+      Config_dir_resolver.reset ();
+      Lane.For_testing.reset ();
+      remove_tree root)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc_test_deps.init_eio_clock env;
+       let config = Masc.Workspace.default_config root in
+       ignore (Masc.Workspace.init config ~agent_name:None);
+       Config_dir_resolver.reset ();
+       Unix.putenv env_key "true";
+       let direct_runs = ref 0 in
+       let wakes = ref [] in
+       Queue_signal.install (fun ~base_path ~keeper_name ->
+         wakes := (base_path, keeper_name) :: !wakes);
+       let core_name = "agent-core-owner" in
+       let core_meta = make_meta core_name in
+       let core_trace_id =
+         Keeper_id.Trace_id.to_string core_meta.runtime.trace_id
+       in
+       Queue_refresh.remember_turn
+         ~base_path:config.base_path
+         ~keeper_name:core_name
+         ~trace_id:core_trace_id
+         (fun ~meta:_ _ -> incr direct_runs; Queue_refresh.Entered);
+       run_post_turn
+         ~checkpoint_owner:Runtime_execution.Masc_agent_core
+         ~config
+         ~meta:core_meta
+         ~turn:1;
+       Alcotest.(check bool)
+         "Agent Core handoff attempts pending direct evidence"
+         true
+         (Queue_refresh.For_testing.attempt_remembered
+            ~base_path:config.base_path
+            ~keeper_name:core_name
+            ~trace_id:core_trace_id
+            ~meta:core_meta
+            ~sources_changed:false
+            ~trigger:Librarian_runtime.Queue_changed);
+       Alcotest.(check int) "Agent Core runs the pending direct producer once" 1 !direct_runs;
+       Alcotest.(check bool)
+         "Agent Core retires direct evidence after the handoff attempt"
+         false
+         (Queue_refresh.For_testing.attempt_remembered
+            ~base_path:config.base_path
+            ~keeper_name:core_name
+            ~trace_id:core_trace_id
+            ~meta:core_meta
+            ~sources_changed:true
+            ~trigger:Librarian_runtime.Queue_changed);
+       Alcotest.(check (list (pair string string)))
+         "Agent Core emits one durable wake"
+         [ config.base_path, core_name ]
+         (List.rev !wakes);
+       let official_name = "official-client-owner" in
+       let official_meta = make_meta official_name in
+       (match
+          Lane.drain_and_join_librarian
+            ~base_path:config.base_path
+            ~keeper_name:official_name
+        with
+        | Ok Lane.No_librarian_work -> ()
+        | Ok Lane.Librarian_drained ->
+          Alcotest.fail "empty official-client lane reported completed work"
+        | Error error ->
+         Alcotest.fail (Lane.librarian_drain_error_to_string error));
+       run_post_turn
+         ~checkpoint_owner:Runtime_execution.Official_client
+         ~config
+         ~meta:official_meta
+         ~turn:1;
+       Unix.putenv env_key "false";
+       Alcotest.(check bool)
+         "official client retains direct evidence"
+         true
+         (Queue_refresh.For_testing.attempt_remembered
+            ~base_path:config.base_path
+            ~keeper_name:official_name
+            ~trace_id:
+              (Keeper_id.Trace_id.to_string official_meta.runtime.trace_id)
+            ~meta:official_meta
+            ~sources_changed:false
+            ~trigger:Librarian_runtime.Queue_changed);
+       Alcotest.(check (list (pair string string)))
+         "official client does not emit a durable wake"
+         [ config.base_path, core_name ]
+         (List.rev !wakes))
 ;;
 
 (* No executor switch set -> submit runs inline so no work is lost. *)
@@ -608,7 +719,11 @@ let test_finished_switch_drops_without_leak () =
      Alcotest.fail "expected Dropped, got Rejected_draining");
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 ->
-    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+    let drain () =
+      Eio_main.run (fun _env ->
+        Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1")
+    in
+    (match drain () with
      | Error (Lane.Librarian_interrupted (Keeper_lane.Failed _)) -> ()
      | Error error ->
        Alcotest.failf
@@ -624,7 +739,7 @@ let test_finished_switch_drops_without_leak () =
        Alcotest.fail
          ("finished-switch receipt prevented lifecycle reopen: "
           ^ Lane.lifecycle_open_error_to_string error));
-    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+    (match drain () with
      | Ok Lane.No_librarian_work -> ()
      | Ok Lane.Librarian_drained ->
        Alcotest.fail "reopened empty lifecycle retained stale completed work"
@@ -713,7 +828,11 @@ let test_post_turn_librarian_live_config_boundaries () =
       let expect_no_admission ~value ~keeper_name ~turn =
         Unix.putenv env_key value;
         let meta = make_meta keeper_name in
-        run_post_turn ~config ~meta ~turn;
+        run_post_turn
+          ~checkpoint_owner:Runtime_execution.Official_client
+          ~config
+          ~meta
+          ~turn;
         match
           Lane.For_testing.pending
             ~base_path:config.base_path
@@ -761,7 +880,11 @@ let test_post_turn_librarian_live_config_boundaries () =
          | Lane.Rejected_draining ->
            Alcotest.fail "Librarian blocker was not submitted");
         Eio.Promise.await started;
-        run_post_turn ~config ~meta ~turn;
+        run_post_turn
+          ~checkpoint_owner:Runtime_execution.Official_client
+          ~config
+          ~meta
+          ~turn;
         Alcotest.(check (option int))
           "one running plus one queued Librarian unit"
           (Some 2)
@@ -848,6 +971,128 @@ let test_drain_reports_timeout_when_owner_never_exits () =
     Alcotest.fail "hung owner was reported as drained"
 ;;
 
+let with_remembered_post_turn keeper_name f =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  let module Refresh = Masc.Keeper_librarian_queue_refresh in
+  let root = temp_dir "test-librarian-pending-input-" in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let previous_context = Eio_context.snapshot_state () in
+  Lane.For_testing.reset ();
+  Eio_context.restore_state initial_eio_context;
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state previous_context;
+      (match previous_fs with
+       | None -> Fs_compat.clear_fs ()
+       | Some fs -> Fs_compat.set_fs fs);
+      Config_dir_resolver.reset ();
+      Lane.For_testing.reset ();
+      remove_tree root)
+    (fun () ->
+      Masc_test_deps.with_process_env "MASC_CONFIG_DIR" None @@ fun () ->
+      Masc_test_deps.with_process_env
+        Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Masc_test_deps.init_eio_clock env;
+      (* A real runtime entry records Runtime_context_unavailable and returns
+         normally. No provider call or fake Memory reader is needed. *)
+      Alcotest.(check bool) "fixture has no provider network context" true
+        (Option.is_none (Eio_context.get_net_opt ()));
+      let config = Masc.Workspace.default_config root in
+      ignore (Masc.Workspace.init config ~agent_name:None);
+      Config_dir_resolver.reset ();
+      let meta = make_meta keeper_name in
+      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      (match Memory_current.replace ~keepers_dir ~keeper_id:keeper_name
+          ~expected_revision:None ~now:200.
+          ~source:{ kind = Memory_current.Explicit_write; trace_id }
+          ~facts:[] () with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      let snapshot_path =
+        Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+      in
+      let valid_snapshot = Fs_compat.load_file snapshot_path in
+      run_post_turn ~checkpoint_owner:Runtime_execution.Official_client ~config ~meta ~turn:1;
+      let attempt () =
+        Refresh.For_testing.attempt_remembered
+             ~base_path:config.base_path ~keeper_name ~trace_id ~meta
+             ~sources_changed:false ~trigger:Librarian_runtime.Queue_changed
+      in
+      let runtime_entries () =
+        Memory_current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:10
+        |> List.filter (function
+          | Ok (Memory_current.Journal_failed
+                  { kind = Memory_current.Runtime_context_unavailable; _ }) -> true
+          | Ok _ -> false
+          | Error detail -> Alcotest.fail detail)
+        |> List.length
+      in
+      Alcotest.(check int) "no runtime entry during submission" 0 (runtime_entries ());
+      f ~config ~meta ~keepers_dir ~snapshot_path ~valid_snapshot ~attempt ~runtime_entries)
+;;
+
+let test_snapshot_read_failure_keeps_remembered_turn_pending () =
+  let keeper_name = "snapshot-read-retry" in
+  with_remembered_post_turn keeper_name
+    (fun ~config:_ ~meta:_ ~keepers_dir ~snapshot_path ~valid_snapshot ~attempt ~runtime_entries ->
+      Fs_compat.save_file snapshot_path "{ invalid snapshot\n";
+      Alcotest.(check bool) "actual snapshot decoder rejects the fixture" true
+        (Result.is_error
+           (Memory_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name));
+      Alcotest.(check bool) "remembered input remains available" true (attempt ());
+      Alcotest.(check int) "read failure did not enter runtime" 0 (runtime_entries ());
+      Fs_compat.save_file snapshot_path valid_snapshot;
+      Alcotest.(check bool) "remembered input remains available" true (attempt ());
+      Alcotest.(check int) "unchanged external wake enters after repair" 1 (runtime_entries ());
+      Alcotest.(check bool) "remembered input remains available" true (attempt ());
+      Alcotest.(check int) "runtime normal return suppresses unchanged wake" 1 (runtime_entries ()))
+;;
+
+let test_live_config_refusal_keeps_remembered_turn_pending value () =
+  with_remembered_post_turn ("config-retry-" ^ value)
+    (fun ~config:_ ~meta:_ ~keepers_dir:_ ~snapshot_path:_ ~valid_snapshot:_ ~attempt ~runtime_entries ->
+      Unix.putenv Env_config.KeeperMemoryOs.librarian_env_key value;
+      Alcotest.(check bool) "remembered input remains available" true (attempt ());
+      Alcotest.(check int) "live setting refused runtime entry" 0 (runtime_entries ());
+      Unix.putenv Env_config.KeeperMemoryOs.librarian_env_key "true";
+      Alcotest.(check bool) "remembered input remains available" true (attempt ());
+      Alcotest.(check int) "unchanged external wake enters after enabling" 1 (runtime_entries ());
+      Alcotest.(check bool) "remembered input remains available" true (attempt ());
+      Alcotest.(check int) "entered callback is not duplicated" 1 (runtime_entries ()))
+;;
+
+let test_handoff_read_failure_keeps_official_input_pending () =
+  let keeper_name = "handoff-snapshot-read-retry" in
+  with_remembered_post_turn keeper_name
+    (fun ~config ~meta ~keepers_dir ~snapshot_path ~valid_snapshot ~attempt ~runtime_entries ->
+      Fs_compat.save_file snapshot_path "{ invalid snapshot\n";
+      Alcotest.(check bool) "actual snapshot decoder rejects the handoff fixture" true
+        (Result.is_error
+           (Memory_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name));
+      let wakes = ref [] in
+      Fun.protect
+        ~finally:(fun () -> Queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ()))
+        (fun () ->
+          Queue_signal.install (fun ~base_path ~keeper_name ->
+            wakes := (base_path, keeper_name) :: !wakes);
+          run_post_turn ~checkpoint_owner:Runtime_execution.Masc_agent_core
+            ~config ~meta ~turn:2;
+          Alcotest.(check (list (pair string string))) "handoff requests the existing queue wake"
+            [config.base_path, keeper_name] (List.rev !wakes));
+      Alcotest.(check bool) "first wake handles pending official input" true (attempt ());
+      Alcotest.(check int) "decoder refusal does not enter runtime" 0 (runtime_entries ());
+      Fs_compat.save_file snapshot_path valid_snapshot;
+      Alcotest.(check bool) "unchanged wake retains official input after repair" true (attempt ());
+      Alcotest.(check int) "repaired handoff enters runtime once" 1 (runtime_entries ());
+      Alcotest.(check bool) "entered handoff retires official input" false (attempt ());
+      Alcotest.(check int) "retired input is not replayed" 1 (runtime_entries ()))
+;;
+
 (* A queue signal may replace the pending post-turn closure even when source
    coverage is unchanged. The replacement must still attempt the remembered
    conversation, while repeated unchanged signals need no further attempt. *)
@@ -870,7 +1115,7 @@ let test_queue_coalescing_preserves_completed_turn () =
       Eio.Promise.await release));
     Eio.Promise.await started;
     Refresh.remember_turn ~base_path ~keeper_name ~trace_id
-      (fun ~meta:_ trigger -> seen := trigger :: !seen);
+      (fun ~meta:_ trigger -> seen := trigger :: !seen; Refresh.Entered);
     ignore (Lane.submit ~base_path ~keeper_name
       (attempt Librarian_runtime.Conversation_completed));
     let outcome = Lane.submit ~base_path ~keeper_name
@@ -898,7 +1143,8 @@ let test_remembered_turn_replacement_and_cancellation () =
   in
   remember (fun ~meta:_ _ ->
     seen := "old" :: !seen;
-    remember (fun ~meta:_ _ -> seen := "new" :: !seen));
+    remember (fun ~meta:_ _ -> seen := "new" :: !seen; Refresh.Entered);
+    Refresh.Entered);
   ignore (attempt trace_id);
   ignore (attempt trace_id);
   Alcotest.(check (list string)) "new evidence stays pending during old attempt"
@@ -908,7 +1154,8 @@ let test_remembered_turn_replacement_and_cancellation () =
     if !cancel_once then (
       cancel_once := false;
       raise (Eio.Cancel.Cancelled Test_boom));
-    seen := "resumed" :: !seen);
+    seen := "resumed" :: !seen;
+    Refresh.Entered);
   (try ignore (attempt trace_id); Alcotest.fail "expected cancellation"
    with Eio.Cancel.Cancelled _ -> ());
   Alcotest.(check bool) "old trace cannot run latest evidence" false
@@ -932,7 +1179,8 @@ let test_remembered_turn_uses_current_policy () =
   Refresh.remember_turn ~base_path ~keeper_name ~trace_id
     (fun ~meta _ ->
       seen := (meta.Masc.Keeper_meta_contract.instructions,
-               meta.current_task_id, completed_evidence) :: !seen);
+               meta.current_task_id, completed_evidence) :: !seen;
+      Refresh.Entered);
   let attempt meta =
     Refresh.For_testing.attempt_remembered ~base_path ~keeper_name ~trace_id
       ~meta ~sources_changed:false ~trigger:Librarian_runtime.Queue_changed
@@ -967,6 +1215,10 @@ let () =
         ; Alcotest.test_case
             "remembered turn replacement and cancellation"
             `Quick test_remembered_turn_replacement_and_cancellation
+        ; Alcotest.test_case
+            "checkpoint owner selects one Librarian producer"
+            `Quick
+            test_checkpoint_owner_selects_one_librarian_producer
         ; Alcotest.test_case
             "inline when uninitialized"
             `Quick
@@ -1021,6 +1273,14 @@ let () =
             "accepting reopen clears exited owner receipt"
             `Quick
             test_accepting_reopen_clears_exited_owner_receipt
+        ; Alcotest.test_case "snapshot read refusal preserves pending input" `Quick
+            test_snapshot_read_failure_keeps_remembered_turn_pending
+        ; Alcotest.test_case "disabled config preserves pending input" `Quick
+            (test_live_config_refusal_keeps_remembered_turn_pending "false")
+        ; Alcotest.test_case "invalid config preserves pending input" `Quick
+            (test_live_config_refusal_keeps_remembered_turn_pending "invalid")
+        ; Alcotest.test_case "handoff decoder refusal preserves official input" `Quick
+            test_handoff_read_failure_keeps_official_input_pending
         ; Alcotest.test_case
             "post-turn Librarian live config boundaries"
             `Quick

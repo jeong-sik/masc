@@ -1,8 +1,10 @@
-(** Keeper_agent_run — Run a single keeper turn via Agent_core.Agent.run().
+(** Orchestration of one Keeper turn.
 
-    This module is intentionally a compatibility facade: public types and
-    entrypoints stay here while prompt metrics, result/error helpers, and
-    tool-surface policy live in focused implementation modules. *)
+    Prepares Keeper context, tools and hooks, then dispatches through
+    [Keeper_turn_driver.run_named]. The selected [Runtime_execution.t]
+    determines whether AGENT_CORE or an official client runs the model/tool loop.
+    Re-exports [Keeper_agent_result] and [Keeper_agent_prompt_metrics] for
+    existing callers. *)
 
 include Keeper_agent_prompt_metrics
 include Keeper_agent_tool_surface
@@ -764,10 +766,7 @@ let capture_skill_snapshot ~base_path =
     @param runtime_id Runtime profile name for model selection
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
-           [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param is_retry When [true], replays the current user message into the
-           working context without persisting it again, so transient retry
-           attempts do not duplicate the user entry in session history *)
+           [Keeper_config.keeper_unified_temperature] is the fallback. *)
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -797,10 +796,6 @@ let run_turn
       ?on_tool_result_ready
       ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?(degraded_retry_applied = false)
-      ?degraded_retry_runtime
-      ?fallback_reason
-      ?(runtime_rotation_attempts = [])
       ?direct_resume
       ?official_task_reference
       ?on_gate_evidence_admitted
@@ -810,7 +805,6 @@ let run_turn
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
       ?on_deferred_runtime_consumed
-      ?(is_retry = false)
       ?shared_context
       ?repetition_execution
       ?event_bus
@@ -896,9 +890,11 @@ let run_turn
   Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ())
   @@ fun () ->
   let runtime_id_string = runtime_id in
+  let direct_resume_checkpoint = Option.bind direct_resume direct_checkpoint in
+  let ( let* ) = Result.bind in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
-  let ctx =
+  let* ctx =
     Keeper_run_context.prepare_run_context
       ~config
       ~meta
@@ -907,15 +903,27 @@ let run_turn
       ~runtime_id
       ?temperature
       ?shared_context
+      ?checkpoint:direct_resume_checkpoint
       ()
+    |> Result.map_error (fun error ->
+      Agent_core.Error.Io
+        (FileOpFailed
+          { op = "load checkpoint"
+          ; path =
+              Keeper_checkpoint_store.agent_core_checkpoint_path
+                ~session_dir:(Filename.concat base_dir
+                  (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ; detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error
+          }))
   in
-  let ctx = match Option.bind direct_resume direct_checkpoint with
+  let ctx = match direct_resume_checkpoint with
     | None -> ctx
     | Some checkpoint ->
       { ctx with Keeper_run_context.ctx_work =
           Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
       ; resume_agent_core_checkpoint = Some checkpoint
-      ; loaded_checkpoint_present = true
+      ; saved_history = Keeper_run_context.Saved_history_loaded
       ; start_turn_count = checkpoint.turn_count }
   in
   let meta = ctx.meta in
@@ -962,7 +970,9 @@ let run_turn
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Checkpoint
         (`Assoc
-          [ "loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present ]))
+          [ "loaded_checkpoint_present"
+          , `Bool (Keeper_run_context.loaded_checkpoint_present ctx)
+          ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
   (* [ctx.ctx_work] is the history this turn starts from; the [ctx_work] bound
      below already carries this turn's input. *)
@@ -970,11 +980,22 @@ let run_turn
     Keeper_turn_boundaries.history_at_start_of_messages
       (Keeper_context_runtime.messages_of_context ctx.ctx_work)
   in
-  Turn_helpers.record_empty_history_at_turn_start
-    ~config
-    ~keeper_name:meta.name
-    ~trace_id
-    history_at_start;
+  (* RFC librarian-lifecycle 4.6: a restart line must not be ahead of the
+     restart. A turn that knows the saved history holds no atom says so now; a
+     turn whose checkpoint version was superseded says so after the first stage
+     save the store accepts ([checkpoint_sink] below). *)
+  let restart_notice_after_first_save =
+    match Turn_helpers.restart_notice history_at_start ctx.saved_history with
+    | Turn_helpers.No_restart_notice -> Atomic.make false
+    | Turn_helpers.Notice_at_turn_start ->
+      Turn_helpers.record_history_restart
+        ~config
+        ~keeper_name:meta.name
+        ~trace_id
+        Turn_helpers.At_turn_start;
+      Atomic.make false
+    | Turn_helpers.Notice_after_first_save -> Atomic.make true
+  in
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
@@ -991,7 +1012,6 @@ let run_turn
       ~meta
       ~history_user_source
       ~user_turn_record:prompt_user_turn_record
-      ~is_retry
       ~start_turn_count
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
@@ -1052,7 +1072,6 @@ let run_turn
       ~keeper_turn_id:manifest_keeper_turn_id
       ~turn_kind
       ~runtime_id
-      ~is_retry
       ~config_root
       ~runtime_config_path
       ~skill_snapshot
@@ -1165,7 +1184,9 @@ let run_turn
       ~site:"context_injected"
       ~keeper_turn_id:manifest_keeper_turn_id
       ?checkpoint_path:
-        (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
+        (if Keeper_run_context.loaded_checkpoint_present ctx
+         then Some checkpoint_path
+         else None)
       ~decision:
         (Keeper_runtime_manifest.with_payload_role
            ~payload_role:Model_input
@@ -1262,6 +1283,7 @@ let run_turn
        refused at the wire has a real cut and no wire observation. Sharing one
        cell would let the missing half erase the half that was measured. *)
     let model_input_window_ref = ref None in
+    let response_observed_model_input_ref = ref None in
     let current_request_provider_content_ref :
       ( Agent_core.Types.message list
       , Keeper_agent_prompt_metrics.provenance_failure )
@@ -1317,16 +1339,14 @@ let run_turn
        provider-bound history inside the runtime and hands the result to a
        client that assembles the wire itself.
 
-       Only a lane that started the conversation reports a list: on those
-       turns the whole window is rendered into the request, so its bytes are
-       the ones the model read. A resumed lane reports no list at all, because
-       the client re-sends only the new turn and the accumulated history never
-       leaves this process -- attributing the local window there would have
-       counted bytes that were not sent, and on Antigravity would additionally
-       have dropped the carrier that was. The gap is recorded as
-       [Client_session_holds_input] rather than as a zero or an absent
-       attribution, so a reader can tell it from a turn that never
-       dispatched. *)
+       The receipt distinguishes retransmitted MASC input from history held
+       by the client; it does not distinguish Start from Resume. On resume,
+       MASC can retransmit the canonical snapshot, as documented by
+       Keeper_official_client_host.transmitted_model_input. Client-owned
+       native history outside that snapshot is not measured here.
+       Held_by_client_session becomes an explicit attribution gap rather than
+       zero bytes or an absent receipt, so it remains distinct from a turn
+       that never dispatched. *)
     let record_transmitted_model_input ~runtime_id ~tools ~transmitted =
       let () = match direct_resume with
         | Some (Gate_continuation admission) ->
@@ -1516,6 +1536,13 @@ let run_turn
                 with
                 | Ok (Keeper_checkpoint_store.Saved _) ->
                   last_persisted_checkpoint_ref := Some checkpoint;
+                  if Atomic.compare_and_set restart_notice_after_first_save true false
+                  then
+                    Turn_helpers.record_history_restart
+                      ~config
+                      ~keeper_name:meta.name
+                      ~trace_id
+                      Turn_helpers.After_first_save;
                   Keeper_turn_driver_try_provider.observe_checkpoint_saved
                     checkpoint_progress
                     snapshot.stage;
@@ -1595,7 +1622,7 @@ let run_turn
                               finally answered, and the metrics row credits
                               one lane's bytes to another.
 
-                              All four cells, not just the two the record is
+                              All four attempt-local cells, not just the two the record is
                               built from: the Agent Core wire handler reads
                               the provider-content and projected-message cells
                               to assemble its attribution, so leaving them set
@@ -1603,7 +1630,10 @@ let run_turn
                               the inputs it is assembled from. That the Agent
                               Core lane happens to overwrite both on every
                               request is a property of that lane, not of this
-                              invariant. *)
+                              invariant. The window and response-observed cells
+                              are turn-local: selecting a later candidate must
+                              not erase the last projection, nor the last
+                              request that actually received a response. *)
                            request_attribution_ref := None;
                            request_wire_evidence_ref := None;
                            current_request_provider_content_ref := None;
@@ -1643,6 +1673,10 @@ let run_turn
                         (fun ~measurement observation ->
                            model_input_window_ref :=
                              Some (measurement, observation))
+                      ~on_response_observed_model_input:
+                        (fun observation ->
+                           response_observed_model_input_ref :=
+                             Some observation)
                       ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
@@ -1780,9 +1814,10 @@ let run_turn
                    : Keeper_agent_prompt_metrics.ctx_composition_metrics
                    =
                    let actual_input_tokens =
-                     if usage.input_tokens > 0
-                     then Some usage.input_tokens
-                     else None
+                     match result.runtime_observation with
+                     | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
+                       when usage.input_tokens > 0 -> Some usage.input_tokens
+                     | Some _ | None -> None
                    in
                    (* Absent evidence and unresolved provenance are recorded
                       as what they are. Writing a zero here is what let a
@@ -1904,6 +1939,7 @@ let run_turn
                              ~max_context:selected_max_context
                              ~checkpoint_owner
                              ~history_at_start
+                             ~restart_notice_pending:restart_notice_after_first_save
                              ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage
@@ -1932,29 +1968,21 @@ let run_turn
                                    ())
                              ())))
                in
-       let deferred_retry =
+       (* The lane this turn leaves behind, and the lane an earlier turn left
+          for this one. They used to be merged into one runtime slot with the
+          new deferral winning, so a receipt could read "retry applied"
+          against a runtime this turn had only queued. Both travel now, and
+          [Keeper_agent_run_receipt.degraded_retry_taken_up] says whether the
+          turn got far enough to run the lane it was handed. *)
+       let degraded_retry_deferred =
          Option.map
-           (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-              let reason =
-                match
-                  Keeper_error_classify.recoverable_runtime_failure_reason
-                    hint.failure
-                with
-                | Some reason -> reason
-                | None -> Keeper_error_classify.Deferred_runtime_lane
-              in
-              hint.next_runtime_id, reason)
+           Keeper_error_classify.degraded_retry_of_deferred_lane
            !deferred_runtime_lane_ref
        in
-       let receipt_degraded_retry_runtime =
-         match deferred_retry with
-         | Some (runtime_id, _) -> Some runtime_id
-         | None -> degraded_retry_runtime
-       in
-       let receipt_fallback_reason =
-         match deferred_retry with
-         | Some (_, reason) -> Some reason
-         | None -> fallback_reason
+       let degraded_retry_hint =
+         Option.map
+           Keeper_error_classify.degraded_retry_of_deferred_lane
+           deferred_runtime_lane
        in
        let settled_runtime_id =
          match turn_result with
@@ -1976,10 +2004,8 @@ let run_turn
            ~receipt_started_at
            ~runtime_manifest_context
            ~acc
-           ~degraded_retry_applied
-           ~degraded_retry_runtime:receipt_degraded_retry_runtime
-           ~fallback_reason:receipt_fallback_reason
-           ~runtime_rotation_attempts
+           ~degraded_retry_hint
+           ~degraded_retry_deferred
            ~turn_result
            ~receipt_agent_core_turn_count_ref
            ~receipt_stop_reason_ref
@@ -2246,6 +2272,8 @@ let run_turn
                       observation.Runtime_model_input_tail_window.front_atom_digest
                   })
                !model_input_window_ref)
+          ~response_observed_model_input:
+            !response_observed_model_input_ref
           ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature

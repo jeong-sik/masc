@@ -282,6 +282,16 @@ let registry_provider_kind = function
   | None -> None
 ;;
 
+(* The catalog answers for a provider it has a row for; a deployment's [kind]
+   answers only for an endpoint it does not. Preferring the registry keeps the
+   catalog the single authority, so a restated kind is dead weight rather than
+   a rival — and the loader refuses it outright. *)
+let effective_provider_kind ?registry_entry (provider : Runtime_schema.provider) =
+  match registry_provider_kind registry_entry with
+  | Some _ as kind -> kind
+  | None -> provider.Runtime_schema.wire_kind
+;;
+
 let messages_api_compatible_provider_kind = function
   | Llm_provider.Provider_config.Anthropic | Llm_provider.Provider_config.Kimi -> true
   | Llm_provider.Provider_config.OpenAI_compat
@@ -290,8 +300,55 @@ let messages_api_compatible_provider_kind = function
   | Llm_provider.Provider_config.Glm -> false
 ;;
 
+(* A declared [kind] that nobody reads is worse than one that is missing: the
+   operator believes they set the dialect and the deployment quietly uses
+   another. So every position where the value cannot be read refuses it instead
+   of ignoring it — the catalog already answering, the protocol already fixing
+   the dialect, or the provider not being an HTTP one at all. *)
+let refuse_unread_declaration ~key ~value ~reason (provider : Runtime_schema.provider) =
+  match value with
+  | None -> Ok ()
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "provider %S declares %s %S, but %s"
+         provider.id
+         key
+         value
+         reason)
+;;
+
+let refuse_unread_wire_kind ~reason (provider : Runtime_schema.provider) =
+  refuse_unread_declaration
+    provider
+    ~key:"kind"
+    ~value:
+      (Option.map
+         Llm_provider.Provider_config.string_of_provider_kind
+         provider.Runtime_schema.wire_kind)
+    ~reason
+;;
+
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
+  let ( let* ) = Result.bind in
+  let* () =
+    match provider.api_format, registry_provider_kind registry_entry with
+    | (Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime), _ ->
+      refuse_unread_wire_kind
+        provider
+        ~reason:"an official client speaks no HTTP dialect"
+    | (Gemini_api | Vertex_gemini_api | Ollama_api), _ ->
+      refuse_unread_wire_kind
+        provider
+        ~reason:
+          (Printf.sprintf "protocol %s already fixes the dialect" provider.protocol)
+    | (Chat_completions_api | Messages_api), Some _ ->
+      refuse_unread_wire_kind
+        provider
+        ~reason:"the AGENT_CORE catalog has a row for it and owns that fact"
+    | (Chat_completions_api | Messages_api), None -> Ok ()
+  in
   match provider.api_format with
   | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime ->
     Error
@@ -307,13 +364,13 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
        registry metadata is absent. Messages API deliberately fails closed
        below because there is no safe Anthropic-style default. *)
     Ok
-      (match registry_provider_kind registry_entry with
+      (match effective_provider_kind ?registry_entry provider with
        | Some Llm_provider.Provider_config.Ollama ->
          Llm_provider.Provider_config.OpenAI_compat
        | Some kind -> kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api ->
-    (match registry_provider_kind registry_entry with
+    (match effective_provider_kind ?registry_entry provider with
      | Some kind when messages_api_compatible_provider_kind kind -> Ok kind
      | Some kind ->
        Error
@@ -326,8 +383,10 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
      | None ->
        Error
          (Printf.sprintf
-            "provider %S uses protocol %s, but no AGENT_CORE provider registry entry exists; \
-             messages-http requires registry kind SSOT"
+            "provider %S uses protocol %s, but neither an AGENT_CORE provider \
+             registry entry nor a declared kind exists; messages-http has no \
+             safe default dialect, so an endpoint the catalog does not know \
+             must declare kind = \"anthropic\" or kind = \"kimi\""
             provider.id
             provider.protocol))
 ;;
@@ -408,12 +467,6 @@ let http_protocol_metadata provider =
       (provider_kind_for_http_provider ?registry_entry provider)
 ;;
 
-let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spec) =
-  match spec.capabilities with
-  | Some capabilities -> Some capabilities.supports_tool_choice
-  | None -> None
-;;
-
 let agent_core_thinking_control_format = function
   | Runtime_schema.No_thinking_control ->
     Llm_provider.Capabilities.No_thinking_control
@@ -478,7 +531,12 @@ let model_capabilities_override_of_model_spec
   | None ->
     Option.map
       (fun (caps : Runtime_schema.model_capabilities) ->
-         let base = Llm_provider.Capabilities.default_capabilities in
+         (* The wire's own preset, not the bare defaults: an uncatalogued model
+            still runs on a known dialect, and that dialect decides the fields
+            no runtime block states (tool content shape, output budget field,
+            reasoning replay). Fields the block does state are assigned below
+            and override it. *)
+         let base = Llm_provider.Capabilities.capabilities_of_kind wire in
          { base with
            max_context_tokens = spec.max_context
          ; max_output_tokens = caps.max_output_tokens
@@ -557,15 +615,44 @@ let effective_max_context_of_model_spec
 ;;
 
 (* --- provider × model spec → Provider_config.t --- *)
+let validate_parallel_tool_policy (provider : Runtime_schema.provider)
+    ~(model_id : string) ~disable_parallel_tool_use =
+  match provider.api_format, disable_parallel_tool_use with
+  | (Runtime_schema.Codex_app_server_runtime | Antigravity_cli_runtime
+    | Claude_code_runtime | Ollama_api | Gemini_api | Vertex_gemini_api), true ->
+    Error
+      (Printf.sprintf
+         "binding %s.%s declares disable-parallel-tool-use = true, but \
+          protocol %s cannot carry that request policy"
+         provider.id model_id provider.protocol)
+  | (Messages_api | Chat_completions_api), true ->
+    let declared =
+      Option.bind (Llm_provider.Model_catalog.global ()) (fun catalog ->
+        Llm_provider.Model_catalog.provider_entry_for_label catalog provider.id)
+    in
+    (match declared with
+     | Some entry when entry.supports_parallel_tool_suppression -> Ok ()
+     | Some _ | None ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares disable-parallel-tool-use = true, but provider %S has no catalog-declared parallel tool suppression contract"
+            provider.id model_id provider.id))
+  | (Messages_api | Chat_completions_api), false
+  | (Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
+    | Ollama_api | Gemini_api | Vertex_gemini_api), false -> Ok ()
+;;
+
 let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
+    ~disable_parallel_tool_use
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (Llm_provider.Provider_config.t, string) result =
   let ( let* ) = Result.bind in
+  let* () = validate_parallel_tool_policy provider ~model_id:spec.id
+      ~disable_parallel_tool_use in
   let registry_entry = find_registry_entry provider.id in
-  let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -636,8 +723,8 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~credential_source
             ~headers
             ~request_path
+            ~disable_parallel_tool_use
             ?max_context
-            ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature
             ?top_p:spec.top_p
@@ -690,10 +777,10 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~provider_id:provider.id
             ~model_id:spec.api_name
             ~base_url:""
+            ~disable_parallel_tool_use
             ~api_key
             ~headers:(Option.value ~default:[] provider.headers)
             ?max_context
-            ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature
             ?top_p:spec.top_p
@@ -749,6 +836,7 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?repeat_last_n:binding.repeat_last_n
          ?return_progress:binding.return_progress
          ?max_concurrent_requests:binding.max_concurrent
+         ~disable_parallel_tool_use:binding.disable_parallel_tool_use
          ?max_tokens:binding.max_tokens
          provider
          spec)
@@ -898,6 +986,9 @@ let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
+       let ( let* ) = Result.bind in
+       let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
+           ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
        (match provider.api_format with
         | Runtime_schema.Codex_app_server_runtime ->
           codex_app_server_execution provider spec

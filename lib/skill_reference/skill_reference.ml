@@ -9,6 +9,14 @@ type package_id_error =
   | Package_id_contains_separator
   | Package_id_contains_nul
 
+let package_id_error_to_string = function
+  | Empty_package_id -> "must not be empty"
+  | Current_directory_package_id -> "must not be ."
+  | Parent_directory_package_id -> "must not be .."
+  | Package_id_contains_separator -> "must be one directory name"
+  | Package_id_contains_nul -> "must not contain NUL"
+;;
+
 type content_revision = string
 
 type revision_error =

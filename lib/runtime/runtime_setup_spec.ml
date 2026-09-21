@@ -3,7 +3,7 @@ type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
   | Http of {endpoint:string; credential:credential option;
-      kind:http_kind; request_path:string; api_key_env:string}
+      kind:http_kind}
   | Client of {command:string; oauth:string option; timeout:float option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   transport:transport; canonical_spec:string}
@@ -38,15 +38,55 @@ let valid_endpoint value =
     && Uri.userinfo uri = None && Uri.query uri = [] && Uri.fragment uri = None
     && (match Uri.port uri with None -> true | Some port -> port >= 1 && port <= 65535)
   with Invalid_argument _ -> false
-let valid_path value =
-  let uri = Uri.of_string value in
-  safe_text value && String.starts_with ~prefix:"/" value
-  && Uri.scheme uri = None && Uri.host uri = None && Uri.query uri = [] && Uri.fragment uri = None
 (* Match pathlib's lexical POSIX File spelling without resolving symlinks or
    reading a credential. Parent traversal remains explicit, as in the input. *)
 let reference_path path =
   let prefix = if String.starts_with ~prefix:"//" path && not (String.starts_with ~prefix:"///" path) then "//" else "/" in
   prefix ^ String.concat "/" (List.filter (fun part -> part <> "" && part <> ".") (String.split_on_char '/' path))
+(* The operator's endpoint is one AGENT_CORE has no provider row for, so the
+   deployment has to name the dialect itself; [protocol] only names the request
+   shape. Same spellings as the catalog's own [kind]. *)
+let wire_kind_name = function
+  | Openai_compat -> "openai_compat"
+  | Anthropic -> "anthropic"
+  | Kimi -> "kimi"
+  | Glm -> "glm"
+  | Ollama_kind -> "ollama"
+
+(* Identity comes from the parsed connection, not from the text that produced
+   it. Hashing the raw field bag made a field left out and the same field
+   written with its default two different connections, and the inventory fills
+   [provider_kind] on every round trip -- so adding an endpoint and
+   reconfiguring it answered with two ids for one endpoint, and the second
+   arrived as a duplicate row beside a stale one.
+
+   Destructured exhaustively with warning 9 forced on, because the failure in
+   the other direction is worse: a field added to [t] and forgotten here would
+   give two different connections one id, and an overwritten row is invisible
+   where a duplicate row is not. *)
+let[@warning "+9"] canonical_spec_of
+      ({ choice; model; context; tools; streaming; transport; canonical_spec = _ } : t)
+  =
+  let credential_json = function
+    | None -> `Null
+    | Some (Env_reference name) -> `List [`String "env"; `String name]
+    | Some (File_reference path) -> `List [`String "file"; `String path] in
+  (* Destructured, not field-accessed: warning 9 fires on a record pattern and
+     says nothing about [h.endpoint], so a fourth field on either constructor
+     would drop out of the identity the same way a seventh on [t] would. *)
+  let transport_json = match transport with
+    | Http {endpoint; kind; credential} ->
+      `Assoc ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
+              "credential", credential_json credential]
+    | Client {command; oauth; timeout} ->
+      `Assoc ["command",`String command;
+              "oauth",(match oauth with None -> `Null | Some path -> `String path);
+              "timeout",(match timeout with None -> `Null | Some value -> `Float value)] in
+  Yojson.Safe.to_string (`Assoc [
+    "choice",`String (choice_name choice); "model",`String model;
+    "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
+    "transport", transport_json])
+
 let of_json ?home_dir = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) ->
     let* name = required fields "choice" in
@@ -56,7 +96,7 @@ let of_json ?home_dir = function
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
       | _ -> invalid "choice" in
     let allowed = ["choice";"model";"max_context";"tools";"streaming"]
-      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
+      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* model = required fields "model" in
@@ -78,13 +118,7 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | _ -> invalid "provider_kind" in
-      let* request_path = optional fields "request_path" in
-      let request_path = match request_path with
-        | Some path -> path
-        | None -> (match choice with Ollama -> "/api/chat" | Messages -> "/v1/messages" | _ -> "/chat/completions") in
-      let* () = if valid_path request_path then Ok () else invalid "request_path" in
-      let api_key_env = match env with Some name -> name | None -> "" in
-      Ok (Http {endpoint;credential;kind;request_path;api_key_env}))
+      Ok (Http {endpoint;credential;kind}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
         else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | _ -> "agy") in
@@ -99,19 +133,24 @@ let of_json ?home_dir = function
           | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout})) in
-    let canonical_spec = Yojson.Safe.to_string (`Assoc (List.sort (fun (a,_) (b,_) -> String.compare a b) fields)) in
-    Ok {choice;model;context;tools;streaming;transport;canonical_spec}
+    let parsed = {choice;model;context;tools;streaming;transport;canonical_spec=""} in
+    Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
+(* Mirrors the loader's rule: a protocol that already determines the dialect
+   refuses a restated one rather than ignoring it, so the wizard writes [kind]
+   only where it will be read. Listed per choice so a new transport has to
+   decide rather than inherit a catch-all. *)
+let protocol_fixes_dialect = function
+  | Ollama -> true
+  | Llama_cpp | Vllm | Openai_compatible | Messages -> false
+  | Claude_code | Codex | Antigravity -> true
+
 let quoted value = Yojson.Safe.to_string (`String value)
 let table ?(array=false) path fields =
   "\n" ^ (if array then "[[" else "[") ^ String.concat "." (List.map quoted path)
   ^ (if array then "]]\n" else "]\n")
   ^ String.concat "" (List.map (fun (key,value) -> quoted key ^ " = " ^ Yojson.Safe.to_string value ^ "\n") fields)
-let unverified_capabilities = ["supports_tool_choice";"supports_required_tool_choice";"supports_named_tool_choice";
-  "supports_parallel_tool_calls";"supports_reasoning";"supports_response_format_json";"supports_structured_output";
-  "supports_multimodal_inputs";"supports_image_input";"supports_audio_input";"supports_video_input";
-  "supports_document_input";"supports_prompt_caching";"supports_top_k";"supports_min_p";"supports_seed"]
-type rendered = {runtime_id:string;runtime_toml:string;model_overlay_toml:string}
+type rendered = {runtime_id:string;runtime_toml:string}
 let render spec =
   let name = choice_name spec.choice in
   let provider = "setup_" ^ name ^ "_" ^ Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) in
@@ -119,7 +158,9 @@ let render spec =
   let runtime_id = provider ^ "." ^ model_key in
   let fields = ["display-name",`String (name ^ " / " ^ spec.model);"protocol",`String (protocol spec.choice)] in
   let transport_fields,credential = match spec.transport with
-    | Http h -> ["endpoint",`String h.endpoint],h.credential
+    | Http h ->
+      (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
+      @ ["endpoint",`String h.endpoint],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
       @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout]),
       Option.map (fun path -> File_reference path) c.oauth in
@@ -132,19 +173,19 @@ let render spec =
     | None -> "") in
   let runtime = runtime ^ table ["models";model_key] ["api-name",`String spec.model;"max-context",`Int spec.context;
     "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming]
+    (* The wizard's provider id carries a hash of the operator's answers, so no
+       catalog row can ever name it and the binding's model is one AGENT_CORE
+       has no entry for. Declaring the table is how a deployment says "these
+       are this model's capabilities, the dialect's preset where I stated
+       nothing": [Provider_config.capabilities_for_config_model] answers from
+       the declaration and never reaches the catalog, which is what keeps the
+       startup gate from rejecting the binding as catalog-missing. Nobody
+       verified this model's reasoning stream, so it is declared off rather
+       than left to the wire default. *)
+    ^ table ["models";model_key;"capabilities"]
+        ["reasoning-streaming-format",`String "none"]
     ^ table [provider;model_key] (["wizard-default",`Bool true] @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
-  let overlay = match spec.transport with Client _ -> "" | Http h ->
-    let kind,base = match h.kind with Openai_compat -> "openai_compat","openai_chat" | Anthropic -> "anthropic","anthropic"
-      | Kimi -> "kimi","kimi" | Glm -> "glm","glm" | Ollama_kind -> "ollama","ollama" in
-    table ~array:true ["models"] (["id_prefix",`String spec.model;"provider_name",`String provider;"base",`String base;
-      "max_context_tokens",`Int spec.context;"supports_tools",`Bool spec.tools;"supports_native_streaming",`Bool spec.streaming]
-      @ List.map (fun key -> key,`Bool false) unverified_capabilities
-      @ ["thinking_control_format",`String "none";"reasoning_streaming_format",`String "none"])
-    ^ table ~array:true ["providers"] ["id",`String provider;"kind",`String kind;"base_url",`String h.endpoint;
-      "request_path",`String h.request_path;"api_key_env",`String h.api_key_env;"capabilities_base",`String base]
-    ^ table ~array:true ["targets"] ["id",`String runtime_id;"provider_ref",`String provider;"model_id",`String spec.model] in
-  {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay}
-let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml;
-  "model_overlay_toml",`String value.model_overlay_toml]
+  {runtime_id;runtime_toml=runtime}
+let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]
 
 let model_id spec = spec.model

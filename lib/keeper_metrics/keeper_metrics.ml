@@ -162,7 +162,6 @@ type t =
   | RestartOutcomes
   | Agent_coreRunTimeout
   | RuntimeSelected
-  | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
   | ReceiptUnmappedDisposition
@@ -201,7 +200,7 @@ type t =
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
-  | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's at its start or its end, or a clear's) was not built or not written *)
+  | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's end line, or a restart line from a turn or a clear) was not built or not written *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -372,7 +371,6 @@ let to_string = function
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
   | Agent_coreRunTimeout -> "masc_keeper_agent_core_run_timeout_total"
   | RuntimeSelected -> "masc_keeper_runtime_selected_total"
-  | RuntimeRotation -> "masc_keeper_runtime_rotation_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
@@ -428,30 +426,6 @@ let collection = function
   | PersistenceLaneWaits | PersistenceLanePending | PersistenceLaneInFlight ->
     External_observable
   | _ -> Metric_store
-;;
-
-let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
-  Otel_metric_store_core.inc_counter
-    (to_string RuntimeSelected)
-    ~labels:
-      [ "keeper", keeper_name
-      ; "runtime_id", runtime_id
-      ; "source", "fallback"
-      ; "fallback_reason", fallback_reason
-      ]
-    ()
-;;
-
-let emit_runtime_rotation ~keeper_name ~from_runtime ~to_runtime ~reason =
-  Otel_metric_store_core.inc_counter
-    (to_string RuntimeRotation)
-    ~labels:
-      [ "keeper", keeper_name
-      ; "from_runtime", from_runtime
-      ; "to_runtime", to_runtime
-      ; "reason", reason
-      ]
-    ()
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

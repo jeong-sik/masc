@@ -132,6 +132,7 @@ type forecast_carried_origin =
   | Carried_from_turn_record of { turn : int }
       (** No ledger since the server started: the range that turn's record measured. *)
   | Carried_halved_after_refusal of { retry : int }
+  | Carried_evicted_after_refusal of { retry : int }
   | Carried_whole_history  (** No front to start from: everything. *)
 
 type forecast_carried =

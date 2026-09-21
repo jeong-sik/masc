@@ -789,19 +789,25 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
 let sandbox_resource_config_json (meta : keeper_meta) =
   match meta.sandbox_profile with
   | Micro_vm ->
-    let memory =
-      match Env_config_sandbox.Runtime.microvm_memory () with
-      | "" -> Env_config_sandbox.Hardening.memory ()
-      | configured -> configured
-    in
-    let cpus =
-      match Env_config_sandbox.Runtime.microvm_cpus () with
-      | "" -> `Null
-      | configured -> `String configured
+    (* The same resolution the boot argv takes, so the size shown is the size
+       a guest starting now gets. A size that cannot be resolved refuses the
+       boot, and says why here rather than showing nothing. *)
+    let memory, cpus, guest_size_error =
+      match
+        Env_config_sandbox.Runtime.microvm_guest_size
+          ~memory:meta.microvm_memory
+          ~cpus:meta.microvm_cpus
+      with
+      | Ok (size : Keeper_microvm_guest_size.t) ->
+        ( `String (Keeper_microvm_guest_size.memory_argv size.memory)
+        , `String (string_of_int (Keeper_microvm_guest_size.cpus_count size.cpus))
+        , `Null )
+      | Error detail -> `Null, `Null, `String detail
     in
     `Assoc
-      [ "memory", `String memory
+      [ "memory", memory
       ; "cpus", cpus
+      ; "guest_size_error", guest_size_error
       ; "work_volume_size", `String (Env_config_sandbox.Runtime.microvm_work_volume_size ())
       ; "pids_limit", `Null
       ; "tmpfs_size", `Null
@@ -810,6 +816,7 @@ let sandbox_resource_config_json (meta : keeper_meta) =
     `Assoc
       [ "memory", `String (Env_config_sandbox.Hardening.memory ())
       ; "cpus", `Null
+      ; "guest_size_error", `Null
       ; "work_volume_size", `Null
       ; "pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ())
       ; "tmpfs_size", `String (Env_config_sandbox.Hardening.tmpfs_size ())

@@ -46,18 +46,15 @@ type try_provider_ctx =
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
+        (** The durable seed, read only when neither the pair's ledger nor a
+            refusal in this turn supplies the front. *)
+  ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
+        (** The latest refusal's front, shared by every Agent Core candidate
+            of this turn. A valid later front takes precedence over the
+            candidate's ledger, including when that ledger predates it. *)
   ; hold_carried_front : Keeper_carried_front.seed -> unit
-        (** Keeps a front halved after a refusal for the rest of the turn,
-            so the lane's next candidate reads it through
-            {!carried_front_seed} rather than composing the whole history
-            again. A halved position names an atom of the history, which
-            every Agent Core candidate of the turn composes from. *)
-        (** Where the carried range starts when no ledger holds this
-            (keeper, runtime) pair yet: the range the newest completed Agent
-            Core turn record on the trace measured, whichever runtime ran it,
-            with the records that could not be decoded counted. Read once per
-            attempt, on that path only; unreadable records are logged beside
-            the attempt's first carried-range line. *)
+        (** Keeps a front moved by either halving or block eviction after a
+            refusal. It names an atom of the shared checkpoint history. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -150,6 +147,11 @@ type try_provider_ctx =
             summary of it. Never invoked when the projection refuses: the turn
             carries a typed budget error instead, and reporting a cut that was
             never dispatched would fabricate evidence. *)
+  ; on_response_observed_model_input :
+      (Turn_record.response_observed_model_input -> unit) option
+        (** Called only when [AfterTurn] joins a typed provider response to the
+            exact Agent Core request range that produced it. Later unanswered
+            attempts do not replace this fact. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
@@ -312,6 +314,7 @@ val carried_range_eviction_sequence :
   last_request:(unit -> Keeper_model_input_ledger.request option) ->
   marks:Runtime_schema.context_marks option ->
   evict:(Keeper_carried_range.step -> bool) ->
+  hold_front:(Keeper_carried_front.seed -> unit) ->
   halve:(first_atom:int -> atom_count:int -> retry:int -> bool) ->
   last_resort:(retry:int -> bool) ->
   on_retry:(retry:int -> eviction_retry -> unit) ->
@@ -321,8 +324,9 @@ val carried_range_eviction_sequence :
 (** The Agent Core lane's retry policy over an injected [attempt] (RFC
     keeper-context-window-in-tokens §10.5). A provider context overflow or a
     size refusal on the byte axis is answered from the pair's ledger with
-    {!Keeper_carried_range.after_overflow}; [evict] applies the step before
-    the next attempt and answers whether the front moved. When the ledger has no block structure to walk, no
+    {!Keeper_carried_range.after_overflow}; [evict] applies a step beyond the
+    refused request's front and [hold_front] shares it with later candidates.
+    When the ledger has no block structure ahead of the actual request, no
     usage counted yet or a single block, [last_request]'s range halves
     toward the newest atom through [halve], which answers [false] when it
     cannot name the halved front by its opening message and so ends the
@@ -494,30 +498,44 @@ module For_testing : sig
     request_view
 
   val carried_front :
+    ledger:Keeper_model_input_ledger.t option ref ->
     keeper_name:string ->
     runtime_id:string ->
     session_id:string ->
     digest_at:(int -> string option) ->
+    after_refusal:Keeper_carried_front.seed option ->
     cold:(unit -> Keeper_carried_front.seed option) ->
     Keeper_carried_front.seed option * Keeper_model_input_ledger.t option
   (** The front a request composes from, [digest_at] being the lookup over
-      the history it composes from: the pair's ledger front while that
-      history holds the ledger ({!Keeper_model_input_ledger.holds}), else
-      [cold ()]. A ledger that does not hold is removed from the table and
-      returned second. *)
+      the history it composes from: the candidate's working ledger front
+      while that history holds the ledger ({!Keeper_model_input_ledger.holds}), advanced
+      by a valid later [after_refusal] front. With neither, [cold ()]. A ledger
+      that does not hold is returned second; the current table entry is
+      independently checked before discarding or adopting it. *)
+
+  val move_ledger_front :
+    Keeper_model_input_ledger.t option ref ->
+    first_atom:int -> front_digest:string -> bool
+  (** Move only the candidate's working value. *)
+
+  val evict_at_turn_boundary :
+    keeper_name:string -> runtime_id:string ->
+    context_marks:Runtime_schema.context_marks option ->
+    Keeper_model_input_ledger.t option ref -> unit
+  (** Apply this runtime's declared marks to its candidate's working value. *)
 
   val halve_front :
     digest_at:(int -> string option) option ->
-    move_ledger:(first_atom:int -> front_digest:string -> Keeper_model_input_ledger.Table.move) ->
+    move_ledger:(first_atom:int -> front_digest:string -> bool) ->
     hold:(Keeper_carried_front.seed -> unit) ->
     first_atom:int ->
     retry:int ->
     bool
   (** One halving after a refusal: whether the retry carries a strictly
-      later front. [false] when [digest_at] (the refused request's history)
-      has no atom at [first_atom], or when the pair's ledger did not move;
-      [true] when it moved, or when there is no ledger, after [hold] took the
-      halved seed the next composition reads. *)
+      later front, chosen by {!Keeper_carried_front.halve} on the refused
+      request. [false] when [digest_at] has no atom there. Otherwise [hold]
+      keeps the seed even if the ledger predates that position and cannot
+      move to it; the next composition uses the held front. *)
 
   val last_resort_demotes :
     measure_message_bytes:(Agent_core.Types.message -> int) ->

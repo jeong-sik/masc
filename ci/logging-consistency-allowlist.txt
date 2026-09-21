@@ -39,6 +39,11 @@ bin/main_eio.ml
 bin/masc_trace.ml
 bin/masc_tui_loader.ml
 bin/masc_cost.ml
+# masc_librarian_replay prints its measurements as JSON on stdout and puts
+# the usage text, an argument error and an unreadable keepers directory on
+# stderr. It runs outside the server, so there is no Log surface to route to
+# and routing there would hide the message from the operator reading the run.
+bin/masc_librarian_replay.ml
 # masc_cli_onboarding spawns the Python setup journey and reports its own
 # startup failures to the operator's terminal before any runtime exists;
 # user-facing CLI output, not server logging.

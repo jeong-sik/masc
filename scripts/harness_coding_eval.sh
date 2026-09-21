@@ -177,14 +177,6 @@ declare_requested_runtimes() {
     fi
     printf '\n[%s."%s"]\nmax-concurrent = 1\n' \
       "${provider}" "${alias}" >> "${runtime_toml}"
-    # The runtime also needs an agent-core catalog row, or the server boots it
-    # disabled ("degraded catalog mode") and quietly routes the keeper to the
-    # default lane — the eval would then measure a different model.
-    local overlay_toml="${CONFIG_DIR}/agent-core-models-overlay.toml"
-    if ! grep -qF "id_prefix = \"${model}\"" "${overlay_toml}"; then
-      printf '\n[[models]]\nid_prefix = "%s"\nprovider_name = "%s"\nbase = "%s"\nmax_context_tokens = 32768\nsupports_tools = true\nsupports_reasoning = false\nsupports_native_streaming = true\n' \
-        "${model}" "${provider}" "${provider}" >> "${overlay_toml}"
-    fi
     echo "[coding-eval] declared runtime ${provider}.${alias} (api-name ${model}) in the isolated config copy" >&2
   done
 }

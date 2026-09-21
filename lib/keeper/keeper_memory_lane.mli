@@ -26,10 +26,9 @@
     Keeper admission does not open it, a Keeper exit does not fence or cancel
     it, and a Keeper shutdown does not join it: a unit reads Keeper state from
     disk and its Memory commit is the only thing that moves the read position,
-    so nothing about it belongs to one Keeper lifecycle. A submission is never
-    refused; while a unit runs, the newest submission waits as the latest
-    snapshot. Only {!cancel_and_await_librarian}, from a Keeper purge, stops a
-    unit early. *)
+    so nothing about it belongs to one Keeper lifecycle. While a unit runs,
+    the newest submission waits as the latest snapshot. Only a Keeper purge
+    stops a unit early and discards wakes until its file deletion finishes. *)
 
 type outcome =
   | Submitted
@@ -43,7 +42,8 @@ type outcome =
           caller so no work is lost (tests, or startup before {!init}). A
           raising unit is contained and emits a metric instead of escaping. *)
   | Dropped
-      (** The executor switch could not own the unit. Saturation returns
+      (** A purge currently owns the keeper's files, or the executor switch
+          could not own the unit. Purge drops are logged and counted. Saturation returns
           {!Coalesced}, not [Dropped]. The drop is counted, never silent. *)
 
 val init : sw:Eio.Switch.t -> unit
@@ -63,6 +63,7 @@ val submit
     metrics. *)
 
 type purge_cancel_error =
+  | Purge_already_in_progress
   | Purge_cancel_wrong_domain
       (** [Keeper_lane.request_cancel] accepts a request only from the domain
           that owns the lane. Call from the owner domain
@@ -71,13 +72,24 @@ type purge_cancel_error =
 
 val purge_cancel_error_to_string : purge_cancel_error -> string
 
+val with_librarian_purge
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> ('a, purge_cancel_error) result
+(** Exclude new submissions, cancel and await existing work, then run the
+    deletion callback under the same exclusion. A concurrent purge is refused.
+    Exceptions and cancellation release only this caller's exclusion. Call
+    from the lane's owner domain after {!init}, as server startup does before
+    starting Keepers. The pre-init inline fallback has no owner to await. *)
+
 val cancel_and_await_librarian
   :  base_path:string
   -> keeper_name:string
   -> (unit, purge_cancel_error) result
-(** For a Keeper purge only. Request cancellation of the Librarian unit still
-    running for [keeper_name], if any, and wait until its lane has exited, so
-    that a unit cannot write the progress file after the purge has deleted it.
+(** Cancellation primitive used by {!with_librarian_purge}. Does not exclude
+    new submissions by itself. Request cancellation of the Librarian unit still
+    running for [keeper_name], if any, and wait until its lane has exited.
     A round moves the read position only after its Memory commit, so cutting
     it short loses nothing (RFC librarian-lifecycle section 4.3). There is no
     time limit: cancellation is requested first, and the wait ends when the

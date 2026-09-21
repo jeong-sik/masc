@@ -466,6 +466,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
               ((), map)
           )
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn ->
           (match exn with
            | Compute_timeout _ -> ()

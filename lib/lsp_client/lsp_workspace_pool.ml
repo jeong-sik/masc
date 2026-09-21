@@ -118,6 +118,7 @@ let discard_unless_installed proc installed =
   if not !installed
   then (
     try Lsp_process_manager.shutdown proc with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
       Log.Server.debug
         "LSP pool teardown for %s raised: %s"
@@ -233,6 +234,7 @@ let close t =
   List.iter
     (fun proc ->
       try Lsp_process_manager.shutdown proc with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Server.debug
           "LSP pool close for %s raised: %s"

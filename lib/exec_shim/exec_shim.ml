@@ -780,7 +780,7 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
             ("masc-exec-shim: " ^ Printexc.to_string exn ^ "\n");
           flush stderr
         with
-       | _ -> ());
+       | _ -> ()); (* cancel-guard-ok: this runs in the forked child just before exit 127, and output_string and flush on stderr perform no Eio operation. *)
        exit 127)
   | pid ->
     let prepared = ref false in
@@ -1240,6 +1240,7 @@ let run () =
                    ~is_executable:is_executable_file (List.hd argv)
                in
                try spawn ~before_exec ?observe_sock ~program ~argv ~env ~cwd () with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
                | exn ->
                  (match observe_sock with
                   | Some (child_end, parent_end) ->

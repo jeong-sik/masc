@@ -279,6 +279,7 @@ let write_backlog_result ?after_commit config backlog =
         (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
         None
       with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         let message = Printexc.to_string exn in
         Log.TaskState.error
@@ -296,6 +297,7 @@ let write_backlog_result ?after_commit config backlog =
            f ();
            None
          with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
            let message = Printexc.to_string exn in
            Log.TaskState.error

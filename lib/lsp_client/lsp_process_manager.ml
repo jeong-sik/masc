@@ -452,7 +452,7 @@ let spawn
         Eio.Flow.close stderr_w;
         Eio.Switch.on_release sw (fun () ->
           try Eio.Process.signal proc Sys.sigterm with
-          | exn ->
+          | exn -> (* cancel-guard-ok: Eio invokes Switch.on_release handlers under Cancel.protect (eio core/switch.ml:113 and :189), so the ambient cancellation cannot fire inside this one. *)
             Log.Server.debug
               "LSP process signal failed for %s: %s"
               lang_id

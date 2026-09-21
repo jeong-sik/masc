@@ -1155,8 +1155,8 @@ let durable_range_id : Current.durable_range_id =
 let official_range_id : Current.official_range_id =
   { receipt_scope = durable_range_id.receipt_scope
   ; after_boundary_line = 2
-  ; turns = [ 3, Masc.Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:1
-            ; 5, Masc.Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:2 ]
+  ; turns = [ 3, Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:1
+            ; 5, Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:2 ]
   }
 ;;
 

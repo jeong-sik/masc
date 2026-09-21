@@ -147,7 +147,7 @@ flowchart TD
 | `dropped` | 같은 스냅숏에서 빠진다. 저널에 한 줄 | 회차 도중에 Keeper 가 같은 fact 를 다시 관측했어도 뺀다 |
 | `absorbs` | 스냅숏에서 빠지고 `<keeper>.memory-absorbed.jsonl` 에 원문이 남는다 | 이 append 가 실패하면 아무것도 커밋하지 않는다(RFC-0456 §4.2) |
 | `supersedes` | `memory-os-events` 에 Revised 한 줄 | 못 써도 회차는 성공이다 |
-| `working_contexts` | `working-context.json`, 이어서 `working-context-recall.json` 색인 | 버전 CAS. 실패하면 WARN 을 남기고 facts 저장은 계속한다 |
+| `working_contexts` | `working-context.json`, 이어서 `working-context-recall.json` 색인 | generation+revision CAS. 주입 시에도 색인과 정본 버전을 다시 대조하며, 불일치/읽기 실패는 fail-closed 한다. publication 실패는 WARN 을 남기되 stale publisher가 더 새 색인을 삭제하지 않는다 |
 | 회차가 말하지 않은 fact | 그대로 남는다 | |
 | 버려지는 것 | 맨 뒤 72개 밖의 대화, 도구 결과 본문, thinking, §2.3 에 걸린 턴 | 버렸다는 기록이 없다 |
 

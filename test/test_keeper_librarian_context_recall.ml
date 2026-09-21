@@ -60,10 +60,10 @@ let test_growth_does_not_expand_prompt () = with_store @@ fun ~base_path ~keeper
     (match result.Keeper_tool_execution.disposition with
      | Tool_result.Completed () -> true
      | Tool_result.Deferred () | Tool_result.Failed _ -> false);
-  (* No queue stores or full snapshot are needed for recall once published. *)
+  (* A derived index without its authoritative owner must never be injected. *)
   Sys.remove (Filename.concat keepers_dir "keeper.working-context.json");
-  check (option string) "index recall survives unavailable source snapshot"
-    (Some large) (Recall.render ~keepers_dir ~keeper_name:"keeper")
+  check (option string) "index recall fails closed without its owner snapshot"
+    None (Recall.render ~keepers_dir ~keeper_name:"keeper")
 
 let test_stale_publish_and_corruption () = with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "first" in
@@ -99,7 +99,21 @@ let test_recovered_generation_replaces_old_index () = with_store @@ fun ~base_pa
   check (option string) "recovered reference remains available" current
     (Recall.render ~keepers_dir ~keeper_name:"keeper")
 
+let test_committed_snapshot_invalidates_stale_projection () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "first context" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  check bool "first projection is available" true
+    (Option.is_some (Recall.render ~keepers_dir ~keeper_name:"keeper"));
+  let second = commit ~keepers_dir ~previous:(Some first) "second context" in
+  check (option string) "older projection is not consumed after owner commit" None
+    (Recall.render ~keepers_dir ~keeper_name:"keeper");
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
+  check bool "matching replacement projection is available" true
+    (Option.is_some (Recall.render ~keepers_dir ~keeper_name:"keeper"))
+
 let () = run "working context recall"
   ["progress", [test_case "recovered generation replaces older high revision" `Quick test_recovered_generation_replaces_old_index;
     test_case "growing context remains paged and off request path" `Quick test_growth_does_not_expand_prompt;
-    test_case "stale publication and corrupt index recovery" `Quick test_stale_publish_and_corruption]]
+    test_case "stale publication and corrupt index recovery" `Quick test_stale_publish_and_corruption;
+    test_case "owner commit invalidates stale projection" `Quick test_committed_snapshot_invalidates_stale_projection]]

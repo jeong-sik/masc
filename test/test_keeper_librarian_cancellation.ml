@@ -81,12 +81,13 @@ let test_cancel ~base_path ~registry stage () =
    | Ok _ -> ()
    | Error error -> Alcotest.fail
        (Runtime_exact_output_registry.publication_error_to_string error));
-  let bind = Masc_test_deps.with_process_env in
-  bind "TYPESAFEAI_API_KEY" (Some "synthetic-cancel-key") @@ fun () ->
-  bind "MASC_TYPESAFEAI_ENABLED" (Some "true") @@ fun () ->
-  bind "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") @@ fun () ->
-  bind "MASC_TYPESAFEAI_ENDPOINT" (Some jev.base_url) @@ fun () ->
-  bind "MASC_TYPESAFEAI_MODEL" (Some "requested-cancel-model") @@ fun () ->
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-cancel-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with
+      lane_endpoint = jev.base_url
+    ; lane_model = "requested-cancel-model"
+    ; absorb_gate = true
+    } @@ fun () ->
   let cancel_context, set_cancel_context = Eio.Promise.create () in
   let memory_committed = ref false in
   let runtime_cancelled = ref false in

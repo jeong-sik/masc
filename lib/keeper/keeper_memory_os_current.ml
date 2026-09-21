@@ -281,39 +281,25 @@ let official_range_id_of_json = function
   | _ -> wire_here Expected_object
 ;;
 
-(* schema-compat: receipt identities now explicitly name their source kind.
-   This is a hard-cut codec; no reader accepts the previous atom-only shape. *)
-let consumed_range_to_json = function
-  | Atom_range range ->
-    `Assoc [ "kind", `String "atom"; "range", durable_range_id_to_json range ]
-  | Official_range range ->
-    `Assoc [ "kind", `String "official"; "range", official_range_id_to_json range ]
-;;
-
-let consumed_range_of_json = function
-  | `Assoc fields ->
-    let* () = exact_field_names_result [ "kind"; "range" ] fields in
-    let* kind = wire_string_field "kind" fields in
-    let* range = wire_json_field "range" fields in
-    (match kind with
-     | "atom" -> Result.map (fun range -> Atom_range range) (durable_range_id_of_json range)
-     | "official" -> Result.map (fun range -> Official_range range) (official_range_id_of_json range)
-     | token -> wire_fail [ Wire_field "kind" ] (Unknown_token token))
-  | _ -> wire_here Expected_object
+(* schema-compat: atom receipts retain their exact [range_id] wire shape.
+   Official receipts name a distinct, mutually exclusive identity field. *)
+let consumed_range_field = function
+  | Atom_range range -> "range_id", durable_range_id_to_json range
+  | Official_range range -> "official_range_id", official_range_id_to_json range
 ;;
 
 let durable_range_receipt_to_json = function
   | Prepared { range_id; snapshot_revision; snapshot_sha256 } ->
     `Assoc
       [ "state", `String "prepared"
-      ; "range_id", consumed_range_to_json range_id
+      ; consumed_range_field range_id
       ; "snapshot_revision", `Int snapshot_revision
       ; "snapshot_sha256", `String snapshot_sha256
       ]
   | Committed { range_id; snapshot_revision; snapshot_sha256 } ->
     `Assoc
       [ "state", `String "committed"
-      ; "range_id", consumed_range_to_json range_id
+      ; consumed_range_field range_id
       ; "snapshot_revision", `Int snapshot_revision
       ; "snapshot_sha256", `String snapshot_sha256
       ]
@@ -321,18 +307,22 @@ let durable_range_receipt_to_json = function
 
 let durable_range_receipt_of_json = function
   | `Assoc fields ->
-    let* () =
-      exact_field_names_result
-        [ "state"; "range_id"; "snapshot_revision"; "snapshot_sha256" ]
-        fields
+    let* range_id =
+      let decode key parse wrap =
+        let* () = exact_field_names_result
+          [ "state"; key; "snapshot_revision"; "snapshot_sha256" ] fields in
+        let* json = wire_json_field key fields in
+        Result.map wrap (wire_at (Wire_field key) (parse json))
+      in
+      match List.mem_assoc "range_id" fields, List.mem_assoc "official_range_id" fields with
+      | true, false -> decode "range_id" durable_range_id_of_json (fun range -> Atom_range range)
+      | false, true -> decode "official_range_id" official_range_id_of_json (fun range -> Official_range range)
+      | true, true -> wire_here (Field_set_mismatch
+          { missing = []; unexpected = [ "official_range_id" ] })
+      | false, false -> wire_here (Field_set_mismatch
+          { missing = [ "range_id or official_range_id" ]; unexpected = [] })
     in
     let* state = wire_string_field "state" fields in
-    let* range_id_json = wire_json_field "range_id" fields in
-    let* range_id =
-      wire_at
-        (Wire_field "range_id")
-        (consumed_range_of_json range_id_json)
-    in
     let* snapshot_revision = wire_int_field "snapshot_revision" fields in
     let* () =
       if snapshot_revision >= 1

@@ -51,7 +51,7 @@ class Call:
     ts: int | float
     keeper: str
     tool: str
-    success: bool
+    success: bool | None
     outcome: CallOutcome
     trace_id: str | None
     keeper_turn_id: int | None
@@ -176,14 +176,16 @@ def _execution_schedule(
     )
 
 
-def _call_outcome(row: dict[str, Any], success: bool, gaps: set[str]) -> CallOutcome:
+def _call_outcome(
+    row: dict[str, Any], success: bool | None, gaps: set[str]
+) -> CallOutcome:
     if "disposition" not in row:
         gaps.add("missing_disposition")
         return CallOutcome.LEGACY_UNKNOWN
     disposition = row["disposition"]
     if not isinstance(disposition, str) or disposition not in VALID_DISPOSITIONS:
         raise RowError("disposition must be completed, deferred, or failed")
-    if (disposition, success) not in {
+    if success is not None and (disposition, success) not in {
         ("completed", True),
         ("deferred", True),
         ("failed", False),
@@ -295,8 +297,8 @@ def _call_from_row(row: dict[str, Any], source: Source) -> Call | None:
     if not math.isfinite(ts):
         raise RowError("ts must be finite")
     success = row.get("success")
-    if not isinstance(success, bool):
-        raise RowError("success must be a boolean")
+    if success is not None and not isinstance(success, bool):
+        raise RowError("success must be a boolean when present")
     if "input" not in row:
         raise RowError("input is required")
     if "output" not in row:

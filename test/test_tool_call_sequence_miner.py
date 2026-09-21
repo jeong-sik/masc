@@ -314,6 +314,28 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             )
             self.assertEqual(report["summary"]["pair_occurrences"], 0)
 
+    def test_disposition_is_authoritative_when_success_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            completed = fixture_call("completed", 1.0)
+            failed = fixture_call("failed", 2.0, success=False)
+            del completed["success"]
+            del failed["success"]
+            write_rows(root / "calls.jsonl", [completed, failed])
+
+            report = MINER.analyze(
+                root,
+                evidence_sequences=frozenset({("completed", "failed")}),
+                evidence_limit=1,
+            )
+            pair = report["pairs"][0]
+
+            self.assertEqual(pair["completed_occurrence_count"], 0)
+            self.assertEqual(pair["failed_occurrence_count"], 1)
+            calls = pair["occurrences"][0]["calls"]
+            self.assertIsNone(calls[0]["success"])
+            self.assertIsNone(calls[1]["success"])
+
     def test_multi_call_concurrent_batch_is_not_a_directed_sequence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

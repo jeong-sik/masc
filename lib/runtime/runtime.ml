@@ -1572,7 +1572,7 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->

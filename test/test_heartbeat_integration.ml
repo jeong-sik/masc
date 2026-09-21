@@ -296,18 +296,21 @@ let install_test_env env =
      the clock installed the turn got one step further and died on
      "Invalid config 'eio_context': Eio net not available (running outside
      server context)". That is promoted to a fatal environment error, which
-     crashes the Keeper. *)
+     crashes the Keeper, which drains its Librarian lane -- and the two
+     fixtures that then submit to that lane get Rejected_draining. *)
   Eio_context.set_net (Eio.Stdenv.net env);
   Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env)
 
-(* [Memory_lane.submit] has three ways to not accept a unit and its .mli gives
-   each a different meaning. Both fixture sites collapsed them into one
+(* [Memory_lane.submit] has four ways to not accept a unit and its .mli gives
+   each a different meaning -- Rejected_draining even names the call a later
+   lifecycle has to make first. Both fixture sites collapsed all four into one
    sentence, so a failure said only that it was not Submitted. *)
 let memory_lane_outcome_name : Memory_lane.outcome -> string = function
   | Memory_lane.Submitted -> "Submitted"
   | Memory_lane.Coalesced -> "Coalesced"
   | Memory_lane.Ran_inline -> "Ran_inline"
   | Memory_lane.Dropped -> "Dropped"
+  | Memory_lane.Rejected_draining -> "Rejected_draining"
 
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
@@ -1236,7 +1239,8 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
           | Memory_lane.Submitted -> ()
           | ( Memory_lane.Coalesced
             | Memory_lane.Ran_inline
-            | Memory_lane.Dropped ) as other ->
+            | Memory_lane.Dropped
+            | Memory_lane.Rejected_draining ) as other ->
             failf
               "failed Librarian receipt fixture was not submitted: %s"
               (memory_lane_outcome_name other));
@@ -2591,7 +2595,8 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
        | Memory_lane.Submitted -> ()
        | ( Memory_lane.Coalesced
          | Memory_lane.Ran_inline
-         | Memory_lane.Dropped ) as other ->
+         | Memory_lane.Dropped
+         | Memory_lane.Rejected_draining ) as other ->
          failf
            "cancelled-update Librarian fixture was not submitted: %s"
            (memory_lane_outcome_name other));
@@ -3599,20 +3604,58 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Memory_lane.Submitted -> ()
        | Memory_lane.Coalesced
        | Memory_lane.Ran_inline
-       | Memory_lane.Dropped ->
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
          fail "shutdown Librarian was not submitted");
       Eio.Promise.await librarian_started;
-      (* I7: the shutdown neither waits for nor cancels the Librarian unit. *)
+      let shutdown_done, resolve_shutdown_done = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve
+          resolve_shutdown_done
+          (Shutdown_prepare_join.run
+             ~config
+             ~entry
+             ~request:
+               { actor = "operator"
+               ; cleanup_intent = retain_operator_cleanup
+               }));
+      let rec await_durable_joining_lanes () =
+        match Eio.Promise.peek shutdown_done with
+        | Some (Ok _) -> fail "shutdown completed before Librarian release"
+        | Some (Error error) -> fail (Shutdown_prepare_join.error_to_string error)
+        | None ->
+          (match
+             owner_shutdown_operation_id_exn
+               ~base_path:config.base_path
+               ~keeper_name:name
+           with
+           | None ->
+             Eio.Fiber.yield ();
+             await_durable_joining_lanes ()
+           | Some operation_id ->
+             (match Shutdown_store.load ~config ~keeper_name:name operation_id with
+              | Ok { phase = Shutdown_types.Joining_lanes; _ } -> operation_id
+              | Ok { phase = Shutdown_types.Prepared; _ } ->
+                Eio.Fiber.yield ();
+                await_durable_joining_lanes ()
+              | Ok operation ->
+                fail
+                  (Printf.sprintf
+                     "Librarian wait entered unexpected durable revision=%d"
+                     operation.revision)
+              | Error (Shutdown_store.Not_found _) ->
+                Eio.Fiber.yield ();
+                await_durable_joining_lanes ()
+              | Error error -> fail (Shutdown_store.error_to_string error)))
+      in
+      let _joining_operation_id = await_durable_joining_lanes () in
+      check bool
+        "shutdown remains pending while accepted Librarian work runs"
+        true
+        (Option.is_none (Eio.Promise.peek shutdown_done));
+      Eio.Promise.resolve resolve_librarian_release ();
       let operation =
-        match
-          Shutdown_prepare_join.run
-            ~config
-            ~entry
-            ~request:
-              { actor = "operator"
-              ; cleanup_intent = retain_operator_cleanup
-              }
-        with
+        match Eio.Promise.await shutdown_done with
         | Ok operation -> operation
         | Error error -> fail (Shutdown_prepare_join.error_to_string error)
       in
@@ -3633,23 +3676,20 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
         true
         (Option.is_some operation.join_evidence);
       check bool
-        "shutdown did not cancel the Librarian unit"
+        "shutdown preserved the detached Librarian through completion"
         false
         !librarian_cancelled;
       check bool
-        "shutdown did not wait for the Librarian unit"
-        false
+        "shutdown drained the detached Librarian before returning"
+        true
         !librarian_completed;
       check
         (option int)
-        "the Librarian unit is still running after the shutdown"
-        (Some 1)
+        "shutdown joined the detached Librarian"
+        (Some 0)
         (Memory_lane.For_testing.pending
            ~base_path:config.base_path
            ~keeper_name:name);
-      Eio.Promise.resolve resolve_librarian_release ();
-      Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name:name;
-      check bool "the unit finished on its own afterwards" true !librarian_completed;
       (match
          owner_shutdown_operation_id_exn
            ~base_path:config.base_path
@@ -3756,40 +3796,24 @@ let test_keeper_shutdown_blocks_join_replay_after_record_failure () =
        | Error detail -> fail detail);
       install_owner_inventory_exn ~sw config;
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
-      (* The join is held open by the Keeper lane itself: once cancelled it
-         waits on [lane_release] under Cancel.protect before it exits, which
-         gives the test time to hide the shutdown record. The shutdown does
-         not wait for the Librarian (I7), so the Librarian cannot hold it. *)
-      let lane_started, resolve_lane_started = Eio.Promise.create () in
-      let lane_release, resolve_lane_release = Eio.Promise.create () in
-      let never_p, _never_r = Eio.Promise.create () in
+      Memory_lane.init ~sw;
+      let librarian_started, resolve_librarian_started = Eio.Promise.create () in
+      let librarian_release, resolve_librarian_release = Eio.Promise.create () in
       (match
-         Lane.fork
-           ~sw
-           entry.lane
-           ~run:(fun _lane_sw ->
-             Eio.Promise.resolve resolve_lane_started ();
-             try Eio.Promise.await never_p with
-             | Eio.Cancel.Cancelled _ as exn ->
-               Eio.Cancel.protect (fun () -> Eio.Promise.await lane_release);
-               raise exn)
-           ~cleanup:(fun _outcome ->
-             (match R.dispatch_event_exact entry KSM.Stop_requested with
-              | Ok _ -> ()
-              | Error error -> fail (KSM.transition_error_to_string error));
-             (match R.dispatch_event_exact entry KSM.Drain_complete with
-              | Ok _ -> ()
-              | Error error -> fail (KSM.transition_error_to_string error));
-             (match
-                R.resolve_done entry ~source:"record_retry_test_lane_cleanup" `Stopped
-              with
-              | R.Done_resolved _ -> ()
-              | R.Done_already_resolved _ -> fail "test lane terminal resolved twice");
-             Ok ())
+         Memory_lane.submit
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () ->
+              Eio.Promise.resolve resolve_librarian_started ();
+              Eio.Promise.await librarian_release)
        with
-       | Ok () -> ()
-       | Error error -> fail (Lane.start_error_to_string error));
-      Eio.Promise.await lane_started;
+       | Memory_lane.Submitted -> ()
+       | Memory_lane.Coalesced
+       | Memory_lane.Ran_inline
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "record retry Librarian fixture was not submitted");
+      Eio.Promise.await librarian_started;
       let operation =
         match
           Shutdown_prepare_join.prepare
@@ -3824,7 +3848,7 @@ let test_keeper_shutdown_blocks_join_replay_after_record_failure () =
       in
       let held_path = operation_path ^ ".held" in
       Unix.rename operation_path held_path;
-      Eio.Promise.resolve resolve_lane_release ();
+      Eio.Promise.resolve resolve_librarian_release ();
       (match Eio.Promise.await first_join with
        | Error (Shutdown_prepare_join.Join_record_update_failed _) -> ()
        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
@@ -4886,10 +4910,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
       | Ok _ -> fail "task receipt recovery did not reach Finalized"
       | Error error -> fail (Shutdown_finalize.error_to_string error))
 
-(* I7: a Librarian unit running for a Keeper does not block that Keeper's
-   launch. The launch goes through and its durable catch-up queues behind the
-   running unit on the same lane. *)
-let test_running_librarian_does_not_block_start_keepalive () =
+let test_librarian_rejection_unregisters_with_lifecycle_authority () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   R.For_testing.clear ();
@@ -4920,8 +4941,9 @@ let test_running_librarian_does_not_block_start_keepalive () =
        | Memory_lane.Submitted -> ()
        | Memory_lane.Coalesced
        | Memory_lane.Ran_inline
-       | Memory_lane.Dropped ->
-         fail "running Librarian fixture was not submitted");
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "Librarian lifecycle rejection fixture was not submitted");
       Eio.Promise.await librarian_started;
       let token =
         match
@@ -4947,36 +4969,23 @@ let test_running_librarian_does_not_block_start_keepalive () =
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
       (match Masc.Keeper_keepalive.start_keepalive ~lifecycle_token:token ctx meta with
-       | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+       | Masc.Keeper_keepalive.Keepalive_memory_lane_not_ready
+           Memory_lane.Librarian_drain_still_active -> ()
        | outcome ->
          failf
-           "a running Librarian unit changed the launch outcome: %s"
+           "Librarian rejection returned unexpected launch outcome: %s"
            (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
       check bool
-        "the Keeper is registered while its Librarian unit runs"
-        true
+        "lifecycle-authorized rejection removed fresh registry entry"
+        false
         (R.is_registered ~base_path:config.base_path keeper_name);
-      check
-        (option int)
-        "the launch's catch-up queued behind the running unit"
-        (Some 2)
-        (Memory_lane.For_testing.pending ~base_path:config.base_path ~keeper_name);
       (match Keeper_lifecycle_reservation.release token with
        | Keeper_lifecycle_reservation.Released -> ()
        | outcome ->
          fail
-           ("failed to release lifecycle fixture: "
+           ("failed to release lifecycle rejection fixture: "
             ^ Keeper_lifecycle_reservation.release_outcome_to_string outcome));
-      (match
-         Masc.Keeper_keepalive.stop_keepalive_and_await
-           ~base_path:config.base_path
-           keeper_name
-       with
-       | Masc.Keeper_keepalive.Keeper_not_registered ->
-         fail "the launched Keeper was not registered"
-       | Masc.Keeper_keepalive.Keeper_joined _ -> ());
-      Eio.Promise.resolve resolve_librarian_release ();
-      Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name)
+      Eio.Promise.resolve resolve_librarian_release ())
 
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
@@ -5537,8 +5546,8 @@ let () =
         test_configuration_removal_replays_a_completed_deletion;
       test_case "a vanished lifecycle reservation is not a completed removal" `Quick
         test_configuration_removal_reports_a_vanished_reservation;
-      test_case "a running Librarian does not block start_keepalive" `Quick
-        test_running_librarian_does_not_block_start_keepalive;
+      test_case "Librarian rejection unregisters with lifecycle authority" `Quick
+        test_librarian_rejection_unregisters_with_lifecycle_authority;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown owner failure persists blocked join" `Quick

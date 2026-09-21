@@ -97,6 +97,9 @@ type fence_disposition =
 type terminal_class =
   | Deterministic_request  (** request-body/schema rejections; retry is futile *)
   | Context_overflow  (** typed context-window overflow *)
+  | Session_claim_refused
+      (** an official client refused its durable session claim before provider
+          dispatch; the held recovery requires explicit operator resolution *)
   | Contract_violation
       (** completion/progress contract rejections without a recovery hint,
           max-tokens ceiling violations, internal contract rejections *)
@@ -204,8 +207,9 @@ val response_observed : route -> bool
     and the two effect fences with [Fenced_effect_attempted] (a tool handler
     was entered, so the model had answered).
 
-    [false]: every other [Retry_after_observed] class, every other rotation
-    and terminal class, and the two effect fences with
+    [false]: every other [Retry_after_observed] class, every other rotation,
+    [Session_claim_refused], every other unlisted terminal class, and the two
+    effect fences with
     [Fenced_observation_unavailable], which the lanes set before any answer.
     [Internal_opaque] is [false] although it also holds an accept rejection
     without a no-progress hint: the route cannot tell that apart from an

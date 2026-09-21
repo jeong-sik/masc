@@ -49,39 +49,20 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_progress_unreadable of string
-      (** The Librarian progress file exists but cannot be read or decoded.
-          Not "unread": a purge cannot tell those apart, so it stops. *)
-  | Purge_librarian_lane_not_stopped of string
-      (** A Librarian unit for this Keeper could not be cancelled before the
-          rewrite ({!Keeper_memory_lane.cancel_and_await_librarian}). *)
-  | Purge_librarian_unread of Keeper_librarian_purge_gate.refusal
-      (** The Librarian has not read to the end of the history the purge
-          would renumber (RFC librarian-lifecycle section 10). *)
+  | Purge_librarian_coordinates_present
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
-  | Purge_progress_rebase_failed of
-      { detail : string
-      ; backup_path : string
-      }
-      (** The rewritten checkpoint is installed, but the Librarian read
-          position was not moved to its end. The next round reports the
-          position as a mismatch instead of reading; the backup holds the
-          history the position describes. *)
 
 val purge_error_to_string : purge_error -> string
 
 (** Deterministically preview or apply the fixed checkpoint purge policy.
     Preview is read-only and reports whether apply is currently allowed.
     Apply requires the Keeper to be fully absent from the runtime registry and
-    serializes that check with same-Keeper boot registration. Apply first
-    cancels and waits for any Librarian unit still running for the Keeper,
-    and is refused while the Librarian has atoms of the history left to read
-    ({!Keeper_librarian_purge_gate}); when it has read to the end, the read
-    position is moved to the end of the rewritten history after the install.
-    The canonical checkpoint is installed only if its exact source reference
-    is unchanged. *)
+    serializes that check with same-Keeper boot registration. A rewrite that
+    changes the History endpoint is refused while turn-boundary or Librarian
+    progress coordinates exist. The canonical checkpoint is installed only
+    if its exact source reference is unchanged. *)
 val purge_current :
   Workspace.config ->
   keeper_name:string ->

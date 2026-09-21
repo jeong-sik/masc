@@ -184,6 +184,12 @@ describe('operatorDispositionReasonLabel', () => {
       'Provider 효과 결과 확인 필요',
     )
   })
+
+  it('labels official-client recovery without exposing the raw token', () => {
+    expect(operatorDispositionReasonLabel('official_client_recovery_required')).toBe(
+      '공식 클라이언트 세션 복구 필요',
+    )
+  })
 })
 
 describe('isTurnTerminalFailureCode', () => {

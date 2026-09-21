@@ -51,6 +51,7 @@ type failure_reason =
       (** Latched from a typed Agent Core configuration error. The current
           process cannot repair this failure without an operator changing
           configuration or environment. *)
+  | Official_client_recovery_required of Keeper_internal_error.official_client_recovery
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_failure

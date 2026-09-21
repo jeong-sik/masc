@@ -222,16 +222,10 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_progress_unreadable of string
-  | Purge_librarian_lane_not_stopped of string
-  | Purge_librarian_unread of Keeper_librarian_purge_gate.refusal
+  | Purge_librarian_coordinates_present
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
-  | Purge_progress_rebase_failed of
-      { detail : string
-      ; backup_path : string
-      }
 
 let purge_error_to_string = function
   | Purge_invalid_keeper_name keeper ->
@@ -246,24 +240,15 @@ let purge_error_to_string = function
     "checkpoint unavailable: " ^ detail
   | Purge_checkpoint_invalid detail ->
     "checkpoint purge refused: " ^ detail
-  | Purge_progress_unreadable detail ->
-    "Librarian progress unreadable: " ^ detail
-  | Purge_librarian_lane_not_stopped detail ->
-    "Librarian lane could not be stopped before purge: " ^ detail
-  | Purge_librarian_unread refusal ->
-    "checkpoint purge refused: " ^ Keeper_librarian_purge_gate.refusal_to_string refusal
+  | Purge_librarian_coordinates_present ->
+    "checkpoint purge refused: rewrite would invalidate existing \
+     turn-boundary/Librarian-progress coordinates"
   | Purge_backup_failed detail ->
     "checkpoint backup failed: " ^ detail
   | Purge_source_changed ->
     "checkpoint changed after preview; preview the current checkpoint again"
   | Purge_install_failed detail ->
     "checkpoint purge install failed: " ^ detail
-  | Purge_progress_rebase_failed { detail; backup_path } ->
-    Printf.sprintf
-      "purged checkpoint installed, but the Librarian read position was not moved: %s \
-       (the history it describes is kept at %s)"
-      detail
-      backup_path
 ;;
 
 let checkpoint_load_error_to_string = function
@@ -421,65 +406,6 @@ let checkpoint_purge_error_to_string = function
     ^ Keeper_transcript_unit.show_structural_error structural
 ;;
 
-let install_purged_checkpoint
-      ~config
-      ~session_dir
-      ~trace_id
-      ~source_ref
-      ~source_bytes
-      ~purged
-      ~keeper_name
-      ~runtime_keepers_dir
-      ~rebased
-      ~report
-  =
-  match ensure_exact_backup ~config ~trace_id ~source_ref source_bytes with
-  | Error detail -> Error (Purge_backup_failed detail)
-  | Ok backup_path ->
-    (match
-       Keeper_checkpoint_store.save_agent_core_if_source
-         ~session_dir
-         ~expected_source_ref:source_ref
-         purged
-     with
-     | Keeper_checkpoint_store.Not_installed { cause = Source_changed _; _ } ->
-       Error Purge_source_changed
-     | Not_installed { cause; _ } ->
-       Error (Purge_install_failed (checkpoint_cas_error_to_string cause))
-     | Installed installed ->
-       let result =
-         { keeper = keeper_name
-         ; trace_id
-         ; apply_allowed = true
-         ; applied = true
-         ; backup_path = Some backup_path
-         ; report
-         ; warnings =
-             List.map checkpoint_installation_auxiliary_to_string installed.auxiliary
-         }
-       in
-       (* The checkpoint is installed first. If the position write below does
-          not land, the old position names an end the rewritten history no
-          longer has, and the next round reports a mismatch instead of reading
-          past anything (RFC librarian-lifecycle section 10). *)
-       (match rebased with
-        | None -> Ok result
-        | Some progress ->
-          (match
-             Keeper_librarian_progress.write
-               ~keepers_dir:runtime_keepers_dir
-               ~keeper_id:keeper_name
-               progress
-           with
-           | Ok () -> Ok result
-           | Error error ->
-             Error
-               (Purge_progress_rebase_failed
-                  { detail = Keeper_librarian_progress.write_error_to_string error
-                  ; backup_path
-                  }))))
-;;
-
 let purge_current_unlocked config ~keeper_name ~apply =
   match Keeper_meta_store.read_meta_resolved config keeper_name with
   | Error detail -> Error (Purge_checkpoint_unavailable detail)
@@ -508,41 +434,17 @@ let purge_current_unlocked config ~keeper_name ~apply =
            Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot
          in
          let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
-         (* A Librarian unit for this Keeper may be running (the lane is the
-            server's), and it would commit a position counted against the
-            history the purge is about to renumber. Apply stops it first; a
-            preview leaves it alone. *)
-         let lane_stopped =
-           if apply
-           then
-             Eio_context.run_on_owner_domain (fun () ->
-               Keeper_memory_lane.cancel_and_await_librarian
-                 ~base_path:config.Workspace.base_path
-                 ~keeper_name)
-           else Ok ()
+         let librarian_coordinates_present =
+           List.exists
+             Sys.file_exists
+             [ Keeper_turn_boundaries.path_for_keepers_dir
+                 ~keepers_dir:runtime_keepers_dir
+                 ~keeper_id:keeper_name
+             ; Keeper_librarian_progress.path_for_keepers_dir
+                 ~keepers_dir:runtime_keepers_dir
+                 ~keeper_id:keeper_name
+             ]
          in
-         (match lane_stopped with
-          | Error error ->
-            Error
-              (Purge_librarian_lane_not_stopped
-                 (Keeper_memory_lane.purge_cancel_error_to_string error))
-          | Ok () ->
-         let boundary_lines_present =
-           Sys.file_exists
-             (Keeper_turn_boundaries.path_for_keepers_dir
-                ~keepers_dir:runtime_keepers_dir
-                ~keeper_id:keeper_name)
-         in
-         (match
-            Keeper_librarian_progress.read
-              ~keepers_dir:runtime_keepers_dir
-              ~keeper_id:keeper_name
-          with
-          | Error error ->
-            Error
-              (Purge_progress_unreadable
-                 (Keeper_librarian_progress.read_error_to_string error))
-          | Ok progress ->
          let purge_result =
            Domain_pool_ref.submit_cpu_or_inline (fun () ->
              match Agent_core.Checkpoint.of_string source_bytes with
@@ -563,20 +465,18 @@ let purge_current_unlocked config ~keeper_name ~apply =
                 | Ok (purged, purge_report) ->
                   let purged_bytes = Agent_core.Checkpoint.to_string purged in
                   (match
-                     Keeper_librarian_purge_gate.decide
-                       ~trace_id
-                       ~boundary_lines_present
-                       ~progress
+                     Keeper_checkpoint_purge.rewrite_invalidates_librarian_coordinates
+                       ~coordinates_present:librarian_coordinates_present
                        ~before:checkpoint.messages
                        ~after:purged.messages
                    with
                    | Error detail -> Error (Purge_checkpoint_invalid detail)
-                   | Ok decision ->
-                     Ok (purged, purged_bytes, purge_report, decision))))
+                   | Ok invalidates ->
+                     Ok (purged, purged_bytes, purge_report, invalidates))))
          in
          (match purge_result with
           | Error _ as error -> error
-          | Ok (purged, purged_bytes, raw_report, decision) ->
+          | Ok (purged, purged_bytes, raw_report, invalidates_coordinates) ->
             let report =
               { messages_before = raw_report.messages_before
               ; messages_after = raw_report.messages_after
@@ -588,17 +488,12 @@ let purge_current_unlocked config ~keeper_name ~apply =
               ; tool_results_cleared = raw_report.tool_results_cleared
               }
             in
-            let refusal, rebased =
-              match decision with
-              | Keeper_librarian_purge_gate.Allowed rebased -> None, rebased
-              | Keeper_librarian_purge_gate.Refused refusal -> Some refusal, None
-            in
             let apply_allowed =
               not
                 (Keeper_registry.is_registered
                    ~base_path:config.Workspace.base_path
                    keeper_name)
-              && Option.is_none refusal
+              && not invalidates_coordinates
             in
             if not apply
             then
@@ -610,18 +505,16 @@ let purge_current_unlocked config ~keeper_name ~apply =
                 ; backup_path = None
                 ; report
                 ; warnings =
-                    (match refusal with
-                     | Some refusal ->
-                       [ "apply refused: "
-                         ^ Keeper_librarian_purge_gate.refusal_to_string refusal
+                    (if invalidates_coordinates
+                     then
+                       [ "apply requires removing or transactionally rebasing existing \
+                          Librarian coordinates"
                        ]
-                     | None -> [])
+                     else [])
                 }
-            else (
-              match refusal with
-              | Some refusal -> Error (Purge_librarian_unread refusal)
-              | None ->
-            if String.equal source_bytes purged_bytes
+            else if invalidates_coordinates
+            then Error Purge_librarian_coordinates_present
+            else if String.equal source_bytes purged_bytes
             then
               Ok
                 { keeper = keeper_name
@@ -633,17 +526,41 @@ let purge_current_unlocked config ~keeper_name ~apply =
                 ; warnings = []
                 }
             else
-              install_purged_checkpoint
-                ~config
-                ~session_dir
-                ~trace_id
-                ~source_ref
-                ~source_bytes
-                ~purged
-                ~keeper_name
-                ~runtime_keepers_dir
-                ~rebased
-                ~report)))))
+              (match
+                 ensure_exact_backup
+                   ~config
+                   ~trace_id
+                   ~source_ref
+                   source_bytes
+               with
+               | Error detail -> Error (Purge_backup_failed detail)
+               | Ok backup_path ->
+                 (match
+                    Keeper_checkpoint_store.save_agent_core_if_source
+                      ~session_dir
+                      ~expected_source_ref:source_ref
+                      purged
+                  with
+                  | Keeper_checkpoint_store.Not_installed
+                      { cause = Source_changed _; _ } ->
+                    Error Purge_source_changed
+                  | Not_installed { cause; _ } ->
+                    Error
+                      (Purge_install_failed
+                         (checkpoint_cas_error_to_string cause))
+                  | Installed installed ->
+                    Ok
+                      { keeper = keeper_name
+                      ; trace_id
+                      ; apply_allowed = true
+                      ; applied = true
+                      ; backup_path = Some backup_path
+                      ; report
+                      ; warnings =
+                          List.map
+                            checkpoint_installation_auxiliary_to_string
+                            installed.auxiliary
+                      }))))
 ;;
 
 let purge_current config ~keeper_name ~apply =

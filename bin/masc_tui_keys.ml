@@ -432,6 +432,9 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a failover candidate to this lane's walk order"
+      ; b Act "s" "slots"
+          ~help:"edit the lane's declared slots in walk order: x drops, J/K \
+                 reorders, Esc closes"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)

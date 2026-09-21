@@ -259,6 +259,12 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       fleet?.recovering_keeper_fiber_count != null
         ? `recovering_keeper_fiber_count=${fleet.recovering_keeper_fiber_count}`
         : null,
+      fleet?.official_client_recovery_required_keeper_count != null
+        ? `official_client_recovery_required_keeper_count=${fleet.official_client_recovery_required_keeper_count}`
+        : null,
+      fleet?.official_client_recovery_required_keeper_names?.length
+        ? `세션 복구 필요: ${fleet.official_client_recovery_required_keeper_names.join(', ')}`
+        : null,
       fleet?.paused_autoboot_enabled_keeper_count != null
         ? `paused_autoboot_enabled_keeper_count=${fleet.paused_autoboot_enabled_keeper_count}`
         : null,

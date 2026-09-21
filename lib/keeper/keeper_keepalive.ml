@@ -859,6 +859,7 @@ type start_keepalive_outcome =
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
+  | Keepalive_memory_lane_not_ready of Keeper_memory_lane.lifecycle_open_error
   | Keepalive_launch_callback_failed of string
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
@@ -900,6 +901,8 @@ let start_keepalive_outcome_to_string = function
     Printf.sprintf
       "Fiber_started rejected: %s"
       (Keeper_state_machine.transition_error_to_string error)
+  | Keepalive_memory_lane_not_ready error ->
+    Keeper_memory_lane.lifecycle_open_error_to_string error
   | Keepalive_launch_callback_failed detail -> detail
   | Keepalive_lane_ownership_lost -> "lane ownership lost before fiber fork"
   | Keepalive_fork_rejected error -> Keeper_lane.start_error_to_string error
@@ -1173,14 +1176,27 @@ let rec start_keepalive
            (Keeper_registry.Registration_turn_failure_streak_unavailable
               { keeper_name; detail })
        | Error
+           (Keeper_keepalive_launch_transaction.Lifecycle_open_failed
+              { error; rollback_error }) ->
+         let detail = Keeper_memory_lane.lifecycle_open_error_to_string error in
+         Log.Keeper.error
+           "start_keepalive: Librarian lifecycle not ready keeper=%s error=%s%s"
+           m.name
+           detail
+           (match rollback_error with
+            | None -> ""
+            | Some rollback -> "; rollback failed: " ^ rollback);
+         Keepalive_memory_lane_not_ready error
+       | Error
            (Keeper_keepalive_launch_transaction.Launch_failed
-              { exception_detail; rollback_error }) ->
+              { exception_detail; librarian_abort_error; rollback_error }) ->
          let cleanup_detail label = function
            | None -> ""
            | Some detail -> "; " ^ label ^ " failed: " ^ detail
          in
          let detail =
            "keepalive launch callback failed: " ^ exception_detail
+           ^ cleanup_detail "Librarian abort" librarian_abort_error
            ^ cleanup_detail "registry rollback" rollback_error
          in
          Log.Keeper.error ~keeper_name:m.name "%s" detail;
@@ -1377,8 +1393,24 @@ let rec start_keepalive
            invokes it only after the child-owning switch and all children
            finish. *)
         let cleanup_tracking outcome =
+          let graceful_librarian_boundary =
+            match outcome with
+            | Keeper_lane.Completed
+            | Keeper_lane.Shutdown_before_start
+            | Keeper_lane.Shutdown_requested -> true
+            | Keeper_lane.Cancelled_by_parent _ ->
+              Atomic.get stop || Shutdown.is_shutting_down_global ()
+            | Keeper_lane.Shutdown_cancel_failed _
+            | Keeper_lane.Failed _ -> false
+          in
           let lifecycle_result =
             Keeper_keepalive_launch_transaction.finish_lifecycle
+              ~boundary:
+                (if graceful_librarian_boundary
+                 then Keeper_keepalive_launch_transaction.Graceful
+                 else Keeper_keepalive_launch_transaction.Unexpected)
+              ~base_path:ctx.config.Workspace.base_path
+              ~keeper_name:live_meta.name
               ~terminalize:(fun () ->
                 terminalize_lane outcome;
                 Ok ())

@@ -92,9 +92,9 @@ let endpoint ?turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_
   | Micro_vm -> guest_endpoint ~turn_sandbox_factory ~meta ~cwd
 ;;
 
-(* The remote root is a config fact for OpenSSH and a constant for a guest,
-   so a path can be translated before, or without, reaching the endpoint. *)
-let remote_root ~(config : Workspace.config) ~(meta : keeper_meta) =
+(* The endpoint root is a config fact for OpenSSH and a constant for a guest,
+   so the resolved workspace can be named before, or without, reaching it. *)
+let endpoint_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> Error (docker_has_no_remote_lane meta)
   | Remote_ssh ->
@@ -106,8 +106,8 @@ let remote_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   | Micro_vm -> Ok Keeper_sandbox_microvm.work_volume_guest_root
 ;;
 
-let remote_keeper_root ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let* root = remote_root ~config ~meta in
+let workspace_root ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let* root = endpoint_root ~config ~meta in
   Ok (Filename.concat root (Playground_paths.sanitize_keeper_name meta.name))
 ;;
 

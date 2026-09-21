@@ -1,16 +1,32 @@
-(** One durable Agent-Core Librarian pass.
+(** One durable Librarian pass over a keeper's finished turns.
 
-    Boundary lines and progress are read before the canonical checkpoint. The
-    selected range and its slice therefore use the same immutable checkpoint
-    value. A consumed range advances progress only when [commit] reports that
-    the Memory OS snapshot committed. Establishing an initial baseline writes
-    progress without a Memory commit. *)
+    Boundary lines, the two read positions and then the canonical checkpoint
+    are read, in that order, so the selected range and its slice use the same
+    immutable checkpoint value. Agent-Core turns are read as atoms of that
+    checkpoint; official-client turns, whose end lines carry no atoms, are
+    read as the fragments their [turn_ref] names in the history files of
+    their trace ({!Keeper_turn_fragments}, RFC librarian-lifecycle §10-3). A
+    pass hands the Librarian both kinds in the order their end lines were
+    appended. Each kind has its own position: the atom position
+    ({!Keeper_librarian_progress}) and the official one
+    ({!Keeper_librarian_official_progress}), and a consumed pass advances
+    them only when [commit] reports that the Memory OS snapshot committed.
+    Establishing an initial baseline writes the atom position without a
+    Memory commit. *)
 
 type outcome =
   | Nothing_to_read
   | Baseline_advanced of Keeper_librarian_progress.t
   | Memory_not_committed
   | Progress_advanced of Keeper_librarian_progress.t
+      (** A pass of atoms only. *)
+  | Official_advanced of
+      { atom : Keeper_librarian_progress.t option
+      ; official : Keeper_librarian_official_progress.t
+      }
+      (** A pass that read official-client lines, with the atoms it read
+          alongside if any. Lines whose fragments are all gone or all untagged
+          are passed without a model call. *)
 
 type error =
   | Keeper_meta_absent
@@ -29,6 +45,31 @@ type error =
       }
   | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of Keeper_librarian_progress.write_error
+  | Official_progress_unreadable of Keeper_librarian_official_progress.read_error
+  | Official_progress_write_failed of Keeper_librarian_official_progress.write_error
+  | Official_progress_boundary_missing of Keeper_librarian_official_progress.t
+      (** The official position names a line that is not an official turn's
+          end line. *)
+  | Committed_official_range_mismatch
+      (** A saved Memory receipt names different official turns from the
+          current boundary log. Neither cursor nor Memory may advance. *)
+  | Official_range_stopped of
+      { line : int
+      ; error : Keeper_turn_boundaries.read_error
+      }
+      (** A refused line beyond the official position (RFC §4.4 row 2c). *)
+  | Fragment_store_unreadable of
+      { trace_id : string
+      ; file : Keeper_turn_fragments.file
+      ; detail : string
+      }
+  | Fragment_line_unreadable of
+      { trace_id : string
+      ; file : Keeper_turn_fragments.file
+      ; line : int
+      ; error : Keeper_turn_fragments.read_error
+      }
+      (** A refused history line after the first that names a turn. *)
 
 val error_to_string : error -> string
 
@@ -37,16 +78,23 @@ val consume_one
   -> keeper_name:string
   -> commit:
        (expected_revision:int option
-        -> range_id:Keeper_memory_os_current.durable_range_id
+        -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
         -> Keeper_librarian.input
         -> bool)
   -> (outcome, error) result
-(** The first attempt reads all unread cut points. A failed commit, typed
-    error, or cancellation keeps a process-local marker; the next attempt for
-    that cluster-scoped Keeper reads only through the oldest unread cut point.
-    A small successful cut keeps that mode until the backlog is empty;
-    a successful all-unread pass or a baseline also clears the marker.
-    Durable progress remains the authority across process restarts.
+(** The first attempt reads all unread cut points and official lines. A
+    failed commit, typed error, or cancellation keeps a process-local marker;
+    the next attempt for that cluster-scoped Keeper reads only the oldest
+    unread turn, of whichever kind ends first in the log. A small successful
+    cut keeps that mode until the backlog is empty; a successful all-unread
+    pass or a baseline also clears the marker. Durable progress remains the
+    authority across process restarts.
+
+    [range_id] is the receipt identity of the atoms in the pass, [None] when
+    the pass read official lines only: the receipt recovers a Memory commit
+    whose atom position write did not land, and official lines are re-read
+    in that case rather than skipped.
 
     [Baseline_advanced] means an absent position was durably initialized at
     the smallest matching cut point. [Progress_advanced] means a non-empty
@@ -70,7 +118,14 @@ val consume_one
     checks the original all-unread selection, before process-local retry
     narrowing, and advances to the committed endpoint without calling [commit]
     again. Later Memory writers preserve every runtime cluster's receipt until
-    a newer durable range in that same cluster replaces it. *)
+    a newer durable range in that same cluster replaces it.
+
+    Official-client turns have their own receipt in that same Memory WAL,
+    naming the exact ordered boundary rows and turn references. It is recovered
+    before checkpoint selection or retry narrowing. A mixed Memory commit
+    records both kinds together; a failed write of either progress file never
+    requires synthesizing that committed input again. A receipt whose official
+    identities no longer match the log stops the pass. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)
@@ -79,7 +134,8 @@ val commit_with_runtime
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
-  -> range_id:Keeper_memory_os_current.durable_range_id
+  -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
   -> Keeper_librarian.input
   -> bool
 
@@ -90,11 +146,17 @@ module For_testing : sig
           -> keeper_id:string
           -> Keeper_librarian_progress.t
           -> (unit, Keeper_librarian_progress.write_error) result)
+    -> write_official_progress_store:
+         (keepers_dir:string
+          -> keeper_id:string
+          -> Keeper_librarian_official_progress.t
+          -> (unit, Keeper_librarian_official_progress.write_error) result)
     -> config:Workspace.config
     -> keeper_name:string
     -> commit:
          (expected_revision:int option
-          -> range_id:Keeper_memory_os_current.durable_range_id
+          -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
           -> Keeper_librarian.input
           -> bool)
     -> (outcome, error) result

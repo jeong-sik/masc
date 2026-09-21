@@ -354,6 +354,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            | Keepalive_lifecycle_denied _
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _
+           | Keepalive_memory_lane_not_ready _
            | Keepalive_launch_callback_failed _
            | Keepalive_lane_ownership_lost
            | Keepalive_fork_rejected _ ) as rejected ->

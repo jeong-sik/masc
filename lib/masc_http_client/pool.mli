@@ -235,6 +235,8 @@ val stats : t -> stats
     config defaults) without requiring piaf integration. Do not call
     from production code. *)
 module For_testing : sig
+  val request_body : string -> Piaf.Body.t
+  (** The same finite request body used by buffered and streaming calls. *)
   (** The request window [request] arms, on its own: a result the work
       finished as the window passed stands; the timeout is the result only
       when the work has not finished. *)

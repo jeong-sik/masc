@@ -533,3 +533,10 @@ status: reference
   입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
   게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
   Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
+
+### 대화 작업 상태 (working_state)
+
+Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
+같은 파일에 저장된 정확한 대화 범위와 한 쌍이며, 큐 원본을 정리한
+`working_contexts`나 장기 Memory facts와 다릅니다. 모델의 출력만으로 범위가
+소비된 것은 아닙니다. pair 저장과 소비 시 이력 검증이 필요합니다.

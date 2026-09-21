@@ -650,3 +650,25 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
    **입력 구성 바이트는 도구 본문의 소실량이 아니다.** `Turn_record.input_components`는 Keeper 턴에서 관측한 마지막 요청의 구성 비용이다(`lib/types/turn_record.mli`). `keeper_agent_run.ml`이 넘긴 `input_messages` 전체에서 `Keeper_agent_prompt_metrics.build_ctx_segments`가 도구 호출·결과 바이트를 합하므로, 같은 이력을 다음 요청에 다시 실으면 다시 세어진다. 호출 id·도구 이름·인자도 포함하며, 새 결과량·중복을 제거한 본문량·삭제량을 구분해서 측정하는 값이 아니다.
 
    Claude Code와 Codex는 재개할 때도 MASC의 canonical snapshot을 설정으로 다시 보내고 그 메시지를 `Whole_input_transmitted`로 보고한다. 이 측정에는 클라이언트가 따로 보유한 native 대화·도구 이력이 포함되지 않는다. 따라서 이 합계로 D6의 발생률이나 실행 방식별 소실량을 비교할 수 없다. source로 확인되는 D6의 경계는 `keeper_librarian.ml`의 `text_of_content`가 도구 호출·결과 본문을 생략하고, checkpoint가 없는 턴의 `librarian_messages`가 assistant 메시지만 받는다는 것이다. 실제 본문이 어디에 보관되고 무엇이 빠지는지는 이 프롬프트 입력 계약과 별도로 확인해야 한다(§6).
+
+### 저장된 대화 상태의 생산
+
+`Keeper_librarian_continuity`는 Memory 읽기 위치와 별도로, 현재 Keeper trace의
+완료된 대화 범위를 읽습니다. 경계 로그를 먼저 읽고 정확한 checkpoint를 잠금
+안에서 읽습니다. 저장된 상태가 그 이력과 일치하면 이전 상태와 새 완료 구간만
+모델에 주고, 일치하지 않으면 restart로 증명된 완료 prefix 전체를 줍니다.
+아직 진행 중인 끝부분은 이 입력과 새 frontier에 포함하지 않습니다.
+
+기존 Librarian 호출의 `working_state` 출력은 대화의 작업 상태입니다. 큐 원본의
+`working_contexts`와 장기 Memory 판정은 별도 입력과 출력입니다. 상태와 정확한
+대화 범위는 runtime Keeper 디렉터리의 `librarian-continuity.json`에 한 번에
+저장하며, 이전 pair가 바뀌었으면 오래된 작성자의 결과를 덮어쓰지 않습니다.
+출력이 null이거나 저장에 실패하면 frontier도 전진하지 않습니다. Memory commit
+성공 여부와 읽기 위치는 기존 의미를 유지합니다. 과거 trace의 Memory를 처리하는
+중에도 새 대화 상태의 생산 대상은 현재 Keeper metadata의 trace입니다.
+
+Memory가 이미 읽은 구간이라도 이어갈 상태가 없으면 기존 queue 변경 호출의
+Context-only 경로에서 생산할 수 있습니다. 별도 daemon이나 타이머를 만들지
+않으며, remembered-turn 처리가 있다는 이유로 이 생산을 생략하지 않습니다.
+이 생산 단계 자체는 provider 전송을 자르지 않습니다. 실제 전송 제외는 후속
+소비자가 저장된 pair를 원본 이력에 대조한 뒤 적용해야 합니다.

@@ -267,8 +267,11 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
-let resolve_librarian_prompt input =
+let resolve_librarian_prompt ?continuity input =
   let variables = Keeper_librarian.prompt_variables input in
+  let variables = match continuity with None -> variables | Some prepared ->
+    ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
+    :: List.remove_assoc "continuity" variables in
   ( variables
   , Result.map
       (fun (resolution, rendered) -> { resolution; rendered })
@@ -799,6 +802,7 @@ let run_best_effort
       ?(trigger = Conversation_completed)
       ?(input_projection = Recent_window)
       ?(write_scope = Context_and_memory)
+      ?continuity
       ?(on_memory_committed = fun () -> ())
       ?durable_range_id
       ?official_range_id
@@ -829,7 +833,7 @@ let run_best_effort
         in
         let prompt_input = input_for_projection input_projection inp in
         let prompt_variables, prompt_material =
-          resolve_librarian_prompt prompt_input
+          resolve_librarian_prompt ?continuity prompt_input
         in
         Exact_lane_run_registry.register_running
           registry
@@ -847,7 +851,11 @@ let run_best_effort
                   ]));
         let observed_context_review = ref None in
         let context_write = ref Not_attempted in
+        let continuity_write = ref (`Assoc ["status", `String "not_attempted"]) in
         let complete ?selected_slot outcome output =
+          let output = match continuity, output with
+            | Some _, `Assoc fields -> `Assoc (("continuity_write", !continuity_write) :: fields)
+            | _ -> output in
           let output = match !observed_context_review, output with
             | None, _ -> output
             | Some review, `Assoc fields ->
@@ -956,6 +964,21 @@ let run_best_effort
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
+             (match continuity, selection.working_state with
+              | None, _ -> ()
+              | Some _, None -> continuity_write := `Assoc ["status", `String "not_provided"]
+              | Some prepared, Some working_state ->
+                continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
+                (match Domain_pool_ref.submit_io_or_inline (fun () ->
+                   Keeper_librarian_continuity.commit
+                     ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
+                     ~prepared ~working_state) with
+                 | Ok snapshot -> continuity_write := `Assoc
+                     ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
+                      "prefix_sha256", `String snapshot.prefix_sha256]
+                 | Error detail ->
+                   continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
+                   Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail));
              match write_scope with
              | Context_only -> Ok (`Context_organized (exact_output, selected_slot))
              | Context_and_memory ->

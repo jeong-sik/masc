@@ -1,5 +1,5 @@
-(** Offline continuity-harness artifact. No operational path, progress cursor,
-    prompt, or live request is changed by this module. *)
+(** Working state paired with exact conversation coverage. This value codec
+    and projection do not choose a storage path or change a progress cursor. *)
 type t = private
   { trace_id : string
   ; history_start_boundary_line : int

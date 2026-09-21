@@ -6615,3 +6615,5 @@
  (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
 
 (include stanzas/test_tui_librarian_context_review.inc)
+
+(include stanzas/test_keeper_librarian_continuity.inc)

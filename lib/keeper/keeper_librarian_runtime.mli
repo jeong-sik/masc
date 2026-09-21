@@ -71,6 +71,7 @@ val run_best_effort
   :  ?trigger:trigger
   -> ?input_projection:input_projection
   -> ?write_scope:write_scope
+  -> ?continuity:Keeper_librarian_continuity.prepared
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)

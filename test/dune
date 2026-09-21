@@ -5196,6 +5196,7 @@
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
+(include stanzas/test_keeper_window_position.inc)
 (include stanzas/test_keeper_librarian_store_scope.inc)
 (include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_keeper_librarian_durable_consumer.inc)

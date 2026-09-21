@@ -181,6 +181,7 @@ let record_vision_candidate_start
               ; "candidate_count", `Int candidate_count
               ])
     ~output_text:""
+    ~record_kind:Keeper_tool_call_log.Lifecycle_event
     ~wire_outcome:Tool_result.Unknown
     ~duration_ms:0.0
     ?tool_use_id

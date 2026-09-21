@@ -224,10 +224,12 @@ let rec advance_committed_revision ~keeper_name =
 type record_kind =
   | Tool_call
   | Composition_run
+  | Lifecycle_event
 
 let record_kind_to_string = function
   | Tool_call -> "tool_call"
   | Composition_run -> "composition_run"
+  | Lifecycle_event -> "lifecycle_event"
 ;;
 
 type append_entry =

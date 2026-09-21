@@ -196,6 +196,7 @@ val committed_revision : keeper_name:string -> int
 type record_kind =
   | Tool_call
   | Composition_run
+  | Lifecycle_event
 
 val log_call :
   keeper_name:string ->
@@ -248,9 +249,11 @@ val log_call :
 (** [log_call ...] persists a single tool call record with full I/O.
     [record_kind] defaults to [Tool_call]; [Composition_run] is the explicit
     terminal aggregate for a composition and must not be interpreted as a
-    second physical invocation. [skill_reference], when present, is the exact
-    published Skill revision that produced the run; clients must not infer it
-    from the mutable composition tool name.
+    second physical invocation. [Lifecycle_event] is an opening or progress
+    marker, not an invocation outcome, and quality aggregators exclude it.
+    [skill_reference], when present, is the exact published Skill revision
+    that produced the run; clients must not infer it from the mutable
+    composition tool name.
     [execution_id] is the RFC-0233 canonical join key minted once at the
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the

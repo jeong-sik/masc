@@ -68,32 +68,40 @@ type tool_record_outcome =
   | Settled of bool
   | Deferred
   | Unsettled
+  | Lifecycle_event
   | Malformed_outcome
 
-(* Read the closed typed disposition first. An absent disposition is valid for
-   runtime-MCP rows, whose wire outcome is the available boundary. [unknown]
-   and an absent wire outcome mean not yet settled; an unrecognized token or
-   wrong JSON type is producer/consumer schema drift and stays malformed. *)
+(* Lifecycle markers are not invocation outcomes and never enter the quality
+   denominator. For invocation rows, read the closed typed disposition first.
+   An absent disposition is valid for runtime-MCP rows, whose wire outcome is
+   the available boundary. [unknown] and an absent wire outcome mean not yet
+   settled; an unrecognized token or wrong JSON type is producer/consumer
+   schema drift and stays malformed. *)
 let tool_outcome_of_record record =
   match record with
   | `Assoc fields ->
-    (match List.assoc_opt "disposition" fields with
-     | Some (`String "completed") -> Settled true
-     | Some (`String "failed") -> Settled false
-     | Some (`String "deferred") -> Deferred
-     | Some _ -> Malformed_outcome
-     | None ->
-       (match List.assoc_opt "wire_outcome" fields with
-        | Some (`String "ok") -> Settled true
-        | Some (`String "error") -> Settled false
-        | Some (`String "unknown") | None -> Unsettled
-        | Some _ -> Malformed_outcome))
+    (match List.assoc_opt "record_kind" fields with
+     | Some (`String "lifecycle_event") -> Lifecycle_event
+     | Some (`String ("tool_call" | "composition_run")) | None ->
+       (match List.assoc_opt "disposition" fields with
+        | Some (`String "completed") -> Settled true
+        | Some (`String "failed") -> Settled false
+        | Some (`String "deferred") -> Deferred
+        | Some _ -> Malformed_outcome
+        | None ->
+          (match List.assoc_opt "wire_outcome" fields with
+           | Some (`String "ok") -> Settled true
+           | Some (`String "error") -> Settled false
+           | Some (`String "unknown") | None -> Unsettled
+           | Some _ -> Malformed_outcome))
+     | Some _ -> Malformed_outcome)
   | _ -> Malformed_outcome
 
-(* Every producer writes [result_bytes] (the [log_call] callers in
-   keeper_hooks_agent_core, keeper_tool_composition_surface and
-   mcp_server_eio_call_tool all pass it).  A row without it is malformed:
-   it is dropped from every aggregate and counted in [malformed]. *)
+(* Every invocation-result producer writes [result_bytes] (the [log_call]
+   callers in keeper_hooks_agent_core, keeper_tool_composition_surface and
+   mcp_server_eio_call_tool all pass it). A result row without it is malformed:
+   it is dropped from every aggregate and counted in [malformed]. Lifecycle
+   markers are classified and excluded before this requirement is applied. *)
 let result_bytes_of_record record =
   match record with
   | `Assoc fields ->
@@ -194,15 +202,14 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
   let deferred, unsettled, malformed, records =
     List.fold_left
       (fun (deferred, unsettled, malformed, acc) record ->
-        match result_bytes_of_record record with
-        | None -> deferred, unsettled, malformed + 1, acc
-        | Some result_bytes ->
-          (match tool_outcome_of_record record with
-           | Settled success ->
-             deferred, unsettled, malformed, (record, result_bytes, success) :: acc
-           | Deferred -> deferred + 1, unsettled, malformed, acc
-           | Unsettled -> deferred, unsettled + 1, malformed, acc
-           | Malformed_outcome -> deferred, unsettled, malformed + 1, acc))
+        match tool_outcome_of_record record, result_bytes_of_record record with
+        | Lifecycle_event, _ -> deferred, unsettled, malformed, acc
+        | _, None -> deferred, unsettled, malformed + 1, acc
+        | Settled success, Some result_bytes ->
+          deferred, unsettled, malformed, (record, result_bytes, success) :: acc
+        | Deferred, Some _ -> deferred + 1, unsettled, malformed, acc
+        | Unsettled, Some _ -> deferred, unsettled + 1, malformed, acc
+        | Malformed_outcome, Some _ -> deferred, unsettled, malformed + 1, acc)
       (0, 0, 0, []) records
   in
   let records = List.rev records in

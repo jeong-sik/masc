@@ -1634,6 +1634,14 @@ let test_dashboard_aggregate_separates_unsettled_from_malformed () =
     Dated_jsonl.append store (row [ "wire_outcome", `String "unknown" ]);
     Dated_jsonl.append store (row []);
     Dated_jsonl.append store (row [ "disposition", `String "future_state" ]);
+    Dated_jsonl.append store
+      (`Assoc
+         [ "ts", `Float (Unix.gettimeofday ())
+         ; "record_kind", `String "lifecycle_event"
+         ; "keeper", `String "k"
+         ; "tool", `String "vision_candidate"
+         ; "wire_outcome", `String "unknown"
+         ]);
     let summary = aggregate ~n:10 () in
     Alcotest.(check int) "known unknown wire outcomes stay readable" 2
       (Safe_ops.json_int ~default:(-1) "unsettled" summary);

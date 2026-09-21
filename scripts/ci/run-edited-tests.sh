@@ -76,14 +76,15 @@ suite_timeout() {
 # The shortfall gate's pieces, kept as functions so --self-test drives the
 # ones the pull-request path runs rather than a second copy.
 count_edited_lib_sources() {
-  printf '%s\n' "$1" | grep -cE '^lib/.*\.mli?$' || true
+  printf '%s\n' "$1" | grep -E '^lib/.*\.mli?$' \
+    | sed -E 's/\.mli?$//' | sort -u | grep -c . || true
 }
 
 count_suites() {
   printf '%s\n' "$1" | grep -cv '^[[:space:]]*$' || true
 }
 
-# Fewer suites than library sources edited. The call site says where the
+# Fewer suites than library modules edited. The call site says where the
 # threshold comes from.
 selection_is_short() {
   local selected="$1" lib_edited="$2"
@@ -1326,11 +1327,17 @@ FAKE
       failures=$((failures + 1))
     fi
   }
-  # #37473 as it stood: six library sources, one suite selected, green.
-  gate_check "under-selected pull request is blocked" block 1 6
+  counted_modules=$(count_edited_lib_sources \
+    $'lib/paired.ml\nlib/paired.mli\nlib/implementation_only.ml\nREADME.md')
+  if [ "${counted_modules}" -ne 2 ]; then
+    echo "FAIL library source count: expected 2 modules, got ${counted_modules}"
+    failures=$((failures + 1))
+  fi
+  # #37473 as it stood: four library modules, one suite selected, green.
+  gate_check "under-selected pull request is blocked" block 1 4
   # The same pull request once its body answers. The named suites are added to
   # the run, so this is an answer rather than a waiver.
-  gate_check "named suites clear the gate" named 1 6 \
+  gate_check "named suites clear the gate" named 1 4 \
     "Test-suites: test_fs_compat test_fs_compat_publication_reconciliation"
   # 2b18c1fa31: one library source, nothing selected at all.
   gate_check "nothing selected is blocked" block 0 1
@@ -1341,7 +1348,7 @@ FAKE
   gate_check "wide selection is quiet" allow 119 19
   gate_check "single source, four suites" allow 4 1
   # A pull request that edits no library source is not this gate's business.
-  gate_check "no library sources edited" allow 0 0
+  gate_check "no library modules edited" allow 0 0
 
   if [ "${failures}" -eq 0 ]; then
     echo "run-edited-tests self-test: all cases pass"
@@ -1363,16 +1370,16 @@ fi
 changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
   --paginate --jq '.[] | select(.status != "removed") | .filename')
 
-# A pull request that edits library sources and comes out with fewer suites
-# than files edited has probably not been seen, rather than not been affected.
+# A pull request that edits library modules and comes out with fewer suites
+# than modules edited has probably not been seen, rather than not been affected.
 # [select_sources] cannot tell those apart and answered both by exiting 0 in
-# silence: #37473 edited six library sources, selected one suite, went green,
+# silence: #37473 edited four library modules, selected one suite, went green,
 # and was covered only because a dispatch was fired by hand.
 #
-# The threshold is suites < library sources edited. Measured over the last 300
-# first-parent commits on main: fifteen changed library sources and no test
+# The threshold is suites < library modules edited. Measured over the last 300
+# first-parent commits on main: fifteen changed library modules and no test
 # file, and this separates exactly the two that were under-selected -- 0
-# suites for 1 source, 1 for 6 -- from the thirteen that were not. The next
+# suites for 1 module, 1 for 4 -- from the thirteen that were not. The next
 # value up is 2 suites for 2 sources, so the line is not drawn around the
 # first example.
 #
@@ -1396,7 +1403,7 @@ if selection_is_short "${selected}" "${lib_edited}"; then
   pr_body=${pr_body-$(gh api "repos/${repo}/pulls/${pr_number}" --jq '.body // ""')}
   named=$(named_suites "${pr_body}")
   if [ -z "${named}" ]; then
-    echo "selection is short: ${selected} suite(s) for ${lib_edited} edited library source(s)." >&2
+    echo "selection is short: ${selected} suite(s) for ${lib_edited} edited library module(s)." >&2
     echo "  The rules that map a source to a suite answer by name, and a module" >&2
     echo "  reached only through an alias never appears under its own. Here that" >&2
     echo "  reads the same as a change nothing covers, so this asks rather than" >&2

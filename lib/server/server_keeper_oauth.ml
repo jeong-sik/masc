@@ -114,7 +114,17 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
     in
     let* () =
       Store.save ~dir:(identity_dir ~base_path) ~provider
-        { Store.client_id = trimmed; client_secret; scopes }
+        { Store.client_id = trimmed
+        ; client_secret
+          (* An app the operator made and typed in here. There is no
+             registration answer to read a deadline from, and the operator is
+             the one who renews it, so this records what RFC 7591 spells "0":
+             nothing on this side expires it. Leaving it unrecorded would let
+             {!Store.secret_expired} read the operator's own app as lapsed and
+             register over it. *)
+        ; secret_expires_at = Some 0.
+        ; scopes
+        }
     in
     Ok
       (`Assoc

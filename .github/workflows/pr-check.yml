@@ -280,6 +280,11 @@ jobs:
           dune build @check @test/stanzas/runtest ${node_targets} \
             @packages/agent_core/test/exact-output-single-surface
 
+      # Reads Dune's effective environment, so keep this beside the build
+      # instead of in the deliberately toolchain-free lint job.
+      - name: Root dune warning mask
+        run: bash scripts/ci/check-ocaml-compile-authority.sh
+
       # #32511 dropped the nine-job lane and took this ratchet with it: the
       # script still has a GITHUB_ACTIONS branch, and between 2026-09-02 and
       # this commit no workflow called it. It runs here because it needs the

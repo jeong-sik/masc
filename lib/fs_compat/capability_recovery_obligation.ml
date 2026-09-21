@@ -212,15 +212,6 @@ type transition_error =
   ; cleanup_failures : failure list
   }
 
-type callback_and_release_failure =
-  { store_effect : transition_effect
-  ; callback : Eio.Exn.with_bt
-  ; release : failure
-  }
-
-exception Resource_scope_callback_and_release_failed of
-  callback_and_release_failure
-
 type registry =
   { lanes : Eio.Fs.dir_ty Eio.Path.t }
 
@@ -1376,15 +1367,13 @@ let raise_resource_scope_exception
          ; cleanup_failures = [ cleanup_failure ]
          })
       backtrace
-  | _, None -> Printexc.raise_with_backtrace exception_ backtrace
-  | _, Some cleanup_failure ->
-    Printexc.raise_with_backtrace
-      (Resource_scope_callback_and_release_failed
-         { store_effect
-         ; callback = exception_, backtrace
-         ; release = cleanup_failure
-         })
-      backtrace
+  (* A release failure alongside a foreign exception has no typed home here --
+     the arms above carry it into [Transition_failed] and [Store_failure],
+     which readers destructure, and this case has no such error to carry it
+     in. It used to be wrapped in its own exception; nothing caught that, so
+     the release cause reached only a top-level print. The callback exception
+     continues with its own backtrace. *)
+  | _, _ -> Printexc.raise_with_backtrace exception_ backtrace
 ;;
 
 let protect_result ~store_effect f =

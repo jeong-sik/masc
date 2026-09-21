@@ -929,14 +929,16 @@ val create_runtime_lane :
   (config_commit_receipt, string) result
 (** Declare a new [\[runtime.lanes."<lane_id>"\]] with [runtime_ids] as its
     candidates, through the same validated write as
-    {!set_runtime_lane_candidates}. Both refusals read the file under the
-    write lock:
-    - the file already declares that lane: a create that landed on it would
-      replace its candidates without the operator having seen them;
-    - [lane_id] is a declared runtime id: the lane would shadow that runtime
-      for every keeper that names it, and for every unassigned keeper when it
-      is the default. A runtime's own lane is edited with
-      {!set_runtime_lane_candidates}. *)
+    {!set_runtime_lane_candidates}. One refusal, read under the write lock:
+    the file already declares that lane, and a create that landed on it would
+    replace its candidates without the operator having seen them.
+
+    A [lane_id] that is also a runtime id is allowed and shadows that runtime:
+    every keeper naming it, and every unassigned keeper when it is
+    [\[runtime\].default], walks the lane's candidates. {!set_first_run_runtime}
+    writes exactly that pair, so refusing it here left the install path's own
+    output beyond an operator's reach. The Runtime surface marks which lanes a
+    table declares. *)
 
 val remove_runtime_lane :
   ?runtime_config_path:string ->

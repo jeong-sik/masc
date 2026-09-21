@@ -18,10 +18,16 @@ let log_observation_failure operation exn =
     (Printexc.to_string exn)
 ;;
 
+(* Both call sites break if this propagates. The "acquire" one runs after
+   [update_active 1] and before [Eio_guard.protect] installs the matching
+   decrement, so a raise there strands the counter for the life of the
+   process -- and [update_active] fails hard on underflow, which makes the
+   skew permanent. The "release" one runs inside that guard's finally, where
+   a raise replaces the exception being unwound. *)
 let observe_metric operation f =
   match f () with
   | () -> ()
-  | exception exn -> log_observation_failure operation exn
+  | exception exn -> log_observation_failure operation exn (* cancel-guard-ok: acquire runs before the matching decrement is installed and release runs inside the finally; raising from either strands the counter or replaces the unwinding exception *)
 ;;
 
 let update_active delta =

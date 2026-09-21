@@ -1144,9 +1144,9 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
      [Eio.Fiber.fork ~sw] onto the root switch would let such a raise call
      [Switch.fail sw] and cancel sibling server background fibers; routing
      through [Fiber.List.map] instead degrades the whole batch to the caller's
-     failure envelope ([maybe_fork_dashboard_runtime_probe_refresh]'s
-     [| exception exn -> record_failure]) -- the same outcome the sequential
-     [List.map] already produces, so the parallel path is no worse than
+     failure envelope ([maybe_fork_dashboard_runtime_probe_refresh]'s bare
+     exception arm, which calls [record_failure]) -- the same outcome the
+     sequential [List.map] already produces, so the parallel path is no worse than
      sequential under a rogue exn. [Eio.Cancel.Cancelled] (server shutdown)
      still propagates. Bounded at [dashboard_runtime_probe_max_fibers].
 

@@ -74,8 +74,8 @@ let lane_state () =
       rrs_default_runtime_id = Some "a";
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
-        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]};
-         {rrl_id = "solo"; rrl_runtime_ids = ["c"]}] } in
+        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+         {rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
   (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
    | Ok snapshot -> state.runtime_surface <- Some snapshot
    | Error detail -> Alcotest.fail detail);
@@ -303,7 +303,7 @@ let test_search_follows_the_runtime_mode () =
       rrs_default_runtime_id = Some "assigned";
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
       rrs_lanes =
-        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]}] } in
+        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
   let snapshot = match Masc.Tui_decode.join_runtime_surface
       ~probe:None ~probe_error:None ~resolved with
     | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
@@ -542,6 +542,56 @@ let test_slot_editor_keys_parse () =
           | None -> "none")
        [ "x"; "J"; "K"; "a" ])
 
+(* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
+   candidate in first position -- the same shape a declared lane holding one
+   candidate has. The row fact is the only thing that separates them. *)
+let fact_text = function
+  | Lane_undeclared -> "runtime, not a declared lane"
+  | Lane_single_candidate -> "single candidate"
+  | Lane_head -> "head"
+  | Lane_fallback position -> Printf.sprintf "fallback #%d" position
+
+let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_runtime_id = Some "a";
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes =
+        [{rrl_id = "solo"; rrl_runtime_ids = ["a"]; rrl_declared = true};
+         {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false};
+         {rrl_id = "pair"; rrl_runtime_ids = ["c"; "a"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "the surface did not join"
+   | Some snapshot ->
+     Alcotest.(check (list string)) "one fact per row"
+       ["single candidate"; "runtime, not a declared lane"; "head"; "fallback #1"]
+       (List.map (fun row -> fact_text (runtime_lane_fact_of_row row))
+          snapshot.Masc.Tui_decode.rss_candidates));
+  state.runtime_cursor <- 1;
+  expect_plan "D refuses the runtime row before arming" state remove
+    "refuse: b is a runtime, not a declared lane; there is no table to remove"
+
+(* An undeclared lane carries the id of the runtime it rests on, so offering
+   it as a lane put the same assignment in the picker twice -- once labelled a
+   lane that walks, once the runtime it actually is. *)
+let test_the_picker_offers_only_declared_lanes () =
+  let state = state () in
+  state.runtime_lanes <-
+    [{rrl_id = "coding"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+     {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false}];
+  state.runtime_catalog <- [runtime "a"; runtime "b"];
+  Alcotest.(check (list string)) "what the picker offers"
+    ["lane coding"; "model a"; "model b"]
+    (List.map
+       (function
+         | Pick_lane lane -> "lane " ^ lane.Masc.Tui_decode.rrl_id
+         | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
+        (runtime_picker_items state))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
@@ -573,4 +623,8 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "the slot editor keeps the last slot" `Quick
         test_the_slot_editor_keeps_the_last_slot;
       Alcotest.test_case "slot editor keys parse" `Quick
-        test_slot_editor_keys_parse]]
+        test_slot_editor_keys_parse;
+      Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
+        test_an_undeclared_lane_is_not_read_as_a_single_candidate;
+      Alcotest.test_case "the picker offers only declared lanes" `Quick
+        test_the_picker_offers_only_declared_lanes]]

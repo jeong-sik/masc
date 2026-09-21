@@ -324,6 +324,7 @@ export type RuntimeDraft = {
   max_context_override: string
   sandbox_profile: SandboxProfile | null
   mention_targets_text: string
+  board_interests_text: string
   network_mode: SandboxNetworkMode
   // '' = no endpoint. Only meaningful under remote_ssh; serialised as null.
   remote_endpoint: string
@@ -451,6 +452,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: toSandboxProfile(c.sandbox_profile),
     mention_targets_text: c.workspace.mention_targets.join('\n'),
+    board_interests_text: c.workspace.board_interests.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     remote_endpoint: c.remote_endpoint ?? '',
     voice_always_allow: Boolean(c.voice_always_allow),
@@ -484,6 +486,9 @@ export function rebaseRuntimeDraftOnFreshConfig(
   }
   if (draft.mention_targets_text !== base.mention_targets_text) {
     rebased.mention_targets_text = draft.mention_targets_text
+  }
+  if (draft.board_interests_text !== base.board_interests_text) {
+    rebased.board_interests_text = draft.board_interests_text
   }
   if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
   if (draft.remote_endpoint !== base.remote_endpoint) {
@@ -815,6 +820,20 @@ export function keeperConfigControlInventory(
             'sources.default_source_kind',
           ],
         ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-access-board-interests',
+          'Board interests',
+          `${configApiSource} workspace.board_interests + ${manifestSource}`,
+          'PATCH /api/v1/keepers/:name/config board_interests',
+          'board_interests',
+          [
+            'workspace.board_interests',
+            'sources.default_manifest_path',
+            'sources.default_source_kind',
+          ],
+        ),
         {
           id: 'kcf-access-effective-scope',
           tab,
@@ -955,12 +974,14 @@ export function buildRuntimePayloadResult(
 
   const payload: KeeperConfigUpdatePayload = {}
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
+  const newBoardInterests = listTextToStrings(draft.board_interests_text).sort()
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.activation_mode !== activationConfigValue(orig)) payload.activation_mode = draft.activation_mode
   if (maxContextOverride.ok && maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
   }
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
+  if (!sameStringArray(newBoardInterests, orig.workspace.board_interests)) payload.board_interests = newBoardInterests
   if (profile !== null && profile !== toSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   // null is an explicit detach. Leaving the field out instead carries the
@@ -1108,6 +1129,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
       'max_context_override' in payload
       || rd.max_context_override !== String(c.max_context_override ?? 0),
     mention_targets: 'mention_targets' in payload,
+    board_interests: 'board_interests' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     remote_endpoint: 'remote_endpoint' in payload,
@@ -2146,6 +2168,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const currentMentionTargets = rd
     ? listTextToStrings(rd.mention_targets_text)
     : c.workspace.mention_targets
+  const currentBoardInterests = rd
+    ? listTextToStrings(rd.board_interests_text).sort()
+    : c.workspace.board_interests
 
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
   // identity ◈ — avatar + owned attrs + derived facts + source provenance
@@ -2463,6 +2488,27 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${ModelList} models=${currentMentionTargets} />
       </div>
     ` : null}
+    ${rd && runtimeCanEdit ? html`
+      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.board_interests ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-[var(--color-fg-secondary)]">board_interests</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">${currentBoardInterests.length > 0 ? `${currentBoardInterests.length}개` : 'targetless discovery off'}</span>
+        </div>
+        <textarea aria-label="board_interests" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+          rows=${3}
+          value=${rd.board_interests_text}
+          placeholder="MASC runtime"
+          onInput=${(e: Event) => updateRuntimeDraft('board_interests_text', (e.target as HTMLTextAreaElement).value)}
+        ></textarea>
+      </div>
+    ` : currentBoardInterests.length > 0 ? html`
+      <div class="mt-1.5">
+        <${SectionHeader} size="xs" class="mb-1">Board 관심사</${SectionHeader}>
+        <${ModelList} models=${currentBoardInterests} />
+      </div>
+    ` : html`
+      <${ConfigRow} label="Board 관심사" value="Targetless discovery off" />
+    `}
     <div class="mt-1.5">
       <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
       <${ModelList} models=${c.workspace.bound_workspace_ids} />

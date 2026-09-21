@@ -67,6 +67,18 @@ type input_projection =
   | Recent_window
   | Already_selected_range
 
+type capacity_refusal =
+  | Input_limit_unknown
+  | Cli_input_limit of Keeper_lane_cli_oneshot.input_capacity
+
+val fit_continuity :
+  capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
+  input:Keeper_librarian.input -> Keeper_librarian_continuity.prepared ->
+  (Keeper_librarian_continuity.prepared option, string) result
+(** Fit the complete rendered CLI prompt to a reported character limit while its
+    runtime remains declared in the lane. Returns [None] if no safe source fits.
+    Does not dispatch a provider or change Memory receipts. *)
+
 val run_best_effort
   :  ?trigger:trigger
   -> ?input_projection:input_projection
@@ -75,7 +87,7 @@ val run_best_effort
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
-  -> ?on_capacity_refused:(unit -> unit)
+  -> ?on_capacity_refused:(capacity_refusal -> unit)
   -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id

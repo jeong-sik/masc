@@ -73,19 +73,17 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # the machine (a name that is no keeper is reported at boot).
 # When enabled, MASC POSTs the TYPESAFEAI_API_KEY as an Authorization bearer
 # credential to the configured TypeSafe AI endpoint. The JSON body's top-level
-# fields are model, state, and questions. state.items[0] contains candidate_id;
-# signal fields kind, post_id, author, title, content, hearth, updated_at,
+# fields are model, state, and questions. state.items[0] contains candidate_id
+# and only the current signal: kind, post_id, author, title, content, hearth,
+# updated_at,
 # reaction (target_type, target_id, user_id, emoji, reacted) and optional vote
-# (target_kind, target_id, target_author, voter, direction); post fields id,
-# author, title, body, post_kind, visibility, created_at, updated_at, expires_at,
-# votes_up, votes_down, reply_count, pinned, and optional hearth, thread_id,
-# origin, classification_reason, arbitrary meta; and every comment's id,
-# post_id, parent_id, author, content, created_at, expires_at, votes_up,
-# votes_down.
-# state.keeper_context sends lane_keeper_name, keeper_record_id,
-# keeper_runtime_uid, the Keeper's full instructions, current_task_id, and
-# mention_keeper_ids. questions.relevance sends type=choice, the Keeper-naming
-# instructions, and relevant/not_relevant criteria descriptions.
+# (target_kind, target_id, target_author, voter, direction). The persisted post
+# and comment snapshot is not sent. state.keeper_role sends only the Keeper's
+# name and instructions; record/runtime/task identity and mention lists are not
+# sent. questions.relevance sends type=choice, the Keeper-naming instructions,
+# and relevant/not_relevant criteria descriptions. The current signal must
+# itself address or specifically require the Keeper's role; general topic or
+# capability overlap is not relevant.
 # When on, board attention asks Jev first. A relevant answer is kept; a
 # not-relevant answer or a failed call is judged again by the
 # board_attention_exact slots below. So only a relevant answer saves an

@@ -14,6 +14,7 @@ type parsed_args = {
   runtime_id_opt : string option;
   activation_mode_opt : Keeper_activation_mode.t option;
   mention_targets_opt : string list option;
+  board_interests_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
   sandbox_profile_opt : string option;
@@ -218,6 +219,7 @@ let creation_stem =
   "name": "new-keeper",
   "sandbox_profile": "docker",
   "network_mode": "",
+  "board_interests": [],
   "instructions": "Replace this with what this keeper is for."
 }
 |json}
@@ -228,6 +230,7 @@ let known_turn_up_args =
   ; "runtime_id"
   ; "activation_mode"
   ; "mention_targets"
+  ; "board_interests"
   ; "max_context_override"
   ; "sandbox_profile"
   ; "sandbox_image"
@@ -299,18 +302,21 @@ let parse
     | Error result -> Error result
     | Ok () ->
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
+    let board_interests_opt_res = parse_present_string_list_opt args "board_interests" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     let tools_patch_res = parse_tools_patch args in
     let skills_patch_res = parse_skills_patch args in
     match
-      mention_targets_opt_res,
+      mention_targets_opt_res, board_interests_opt_res,
       runtime_id_opt_res, tools_patch_res, skills_patch_res
     with
-    | Error e, _, _, _
-    | _, Error e, _, _
-    | _, _, Error e, _
-    | _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
+    | Error e, _, _, _, _
+    | _, Error e, _, _, _
+    | _, _, Error e, _, _
+    | _, _, _, Error e, _
+    | _, _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
     | Ok mention_targets_opt,
+      Ok board_interests_opt,
       Ok runtime_id_opt,
       Ok (native_tool_posture_present, native_tool_posture_opt),
       Ok (skill_names_present, skill_names_opt) ->
@@ -516,6 +522,7 @@ let parse
       runtime_id_opt;
       activation_mode_opt;
       mention_targets_opt;
+      board_interests_opt;
       max_context_override_opt;
       max_context_override_present;
       sandbox_profile_opt;
@@ -543,6 +550,12 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
     | None -> if fallback_targets <> [] then fallback_targets else [ name ]
   in
   raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
+
+let resolve_board_interests ~board_interests_opt ~fallback_interests =
+  match board_interests_opt with
+  | Some interests -> Keeper_types_profile_toml.normalize_board_interests interests
+  | None -> Keeper_types_profile_toml.normalize_board_interests fallback_interests
+;;
 
 (* An explicit request wins over the TOML default. Neither source stating one
    returns [None] rather than [Local]: omission is not a choice of isolation

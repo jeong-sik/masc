@@ -54,6 +54,7 @@ type profile_update =
   ; microvm_cpus : Keeper_microvm_guest_size.cpus option
   ; network_mode : Keeper_types_profile.network_mode
   ; mention_targets : string list
+  ; board_interests : string list
   ; max_context_override : int option
   ; activation_mode : Keeper_activation_mode.t
   ; telemetry_feedback_enabled : bool option

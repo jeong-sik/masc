@@ -1610,6 +1610,7 @@ interface KeeperConfigRuntime {
 
 interface KeeperConfigWorkspace {
   mention_targets: string[]
+  board_interests: string[]
   bound_workspace_ids: string[]
 }
 

@@ -7,8 +7,10 @@ val read : config:Workspace.config -> keeper_name:string ->
 val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->
   (prepared option, string) result
 (** Read boundaries before the locked checkpoint. Supply previous valid state
-    plus the new suffix, or an explicitly captured checkpoint prefix. Pending
-    in-flight atoms are excluded. [None] means no new complete coverage. *)
+    plus the suffix through the next real completed turn. Capacity is a ceiling,
+    not a reason to include later turns. An explicit [end_atom] selects a prefix;
+    an unpublished exact Memory receipt takes precedence over either choice.
+    Pending in-flight atoms are excluded. [None] means no new complete coverage. *)
 val prompt_json : prepared -> Yojson.Safe.t
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
   working_state:string -> (Librarian_continuity_snapshot.t, string) result
@@ -21,6 +23,12 @@ val messages : prepared -> Agent_core.Types.message list
     disposition and working-state inference. *)
 val turn_ref : prepared -> Ids.Turn_ref.t
 val end_atom : prepared -> int
+val fit : fits:(prepared -> (bool, string) result) -> prepared ->
+  (prepared option, string) result
+(** Keep the selected work unit unchanged when it fits. Only an oversized unit
+    is split at whole-atom midpoints, stopping at the first fitting part without
+    growing it back toward the limit. Source bytes and prior state stay intact;
+    an exact Memory recovery range cannot be split. *)
 val narrow : prepared -> prepared option
 (** Retry a refused source at the midpoint between whole atoms. Call only after
     a typed capacity refusal; [None] means one indivisible atom remains, or the exact range already has

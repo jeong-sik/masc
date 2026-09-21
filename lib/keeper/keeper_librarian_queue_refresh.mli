@@ -77,7 +77,8 @@ val run_completed_turn : base_path:string -> keeper_name:string -> unit
     or commit success. A pre-entry refusal leaves the input pending. *)
 
 module For_testing : sig
-  val run_continuity : base_path:string -> keeper_name:string -> unit
+  val run_continuity : ?cli_runner:Keeper_lane_cli_oneshot.runner ->
+    base_path:string -> keeper_name:string -> unit -> unit
   val run_durable_with_commit
     :  config:Workspace.config
     -> keeper_name:string

@@ -58,7 +58,7 @@ let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_over
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~trigger:Runtime.Durable_range
     ~input_projection:Runtime.Already_selected_range ~cli_runner
-    ~on_capacity_refused:(fun () -> incr refused)
+    ~on_capacity_refused:(fun _ -> incr refused)
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   Alcotest.(check int) "only final capacity failure requests narrowing" expected !refused;
@@ -74,6 +74,113 @@ let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_over
   | [run] -> Alcotest.(check string) "terminal failure remains observable" "failed"
       (Runs.status_label run.status)
   | _ -> Alcotest.fail "expected one recorded Librarian run"
+
+let test_prefit_real_continuity ~base_path () =
+  let module P = Keeper_librarian_continuity in
+  let module B = Keeper_turn_boundaries in
+  let module C = Keeper_checkpoint_store in
+  let module Current = Keeper_memory_os_current in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let some = function Some value -> value | None -> Alcotest.fail "missing continuity source" in
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let keeper_id = "prefit-real-continuity" and trace_id = "prefit-source" in
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let source = List.init 4 (fun index -> Agent_core.Types.user_msg
+    (string_of_int index ^ String.make 2000 'a')) in
+  let checkpoint : Agent_core.Checkpoint.t =
+    {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+     agent_name=keeper_id; model="fixture"; system_prompt=None; messages=source;
+     usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
+     tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
+     top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
+     preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
+     context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None} in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  (match C.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+   | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
+   | Error detail -> Alcotest.fail detail);
+  B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+    {B.recorded_at=1000.; event=B.Turn_ended {
+      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+      history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
+    |> Result.map_error B.append_error_to_string |> get;
+  let resolver = Fixture.resolver_snapshot ~source:"prefit-cli-only" [] in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime] resolver);
+  let prepare () = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
+  let input prepared : Keeper_librarian.input =
+    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
+    {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
+     keeper_instructions="Preserve evidence.";
+     current=Option.map (fun (s : Current.t) -> {Keeper_librarian.facts=s.facts}) current;
+     working_context=Keeper_librarian_context.empty; messages=P.messages prepared;
+     tool_observations=[];counterpart_observations=[]} in
+  (* Independently measure the exact prompt contract to derive the fixture's
+     server limit, including template, current facts, continuity and schema. *)
+  let rendered prepared input =
+    let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json prepared))
+      :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input) in
+    let _, prompt = Prompt_registry.resolve_and_render_prompt_template
+      Prompt_names.librarian variables |> get in
+    let requirement = Agent_core.Exact_output.make_output_requirement
+      ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+    Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt in
+  let chars text = Runtime_codex_app_server.prompt_char_count text |> get in
+  let full = prepare () in
+  let half = P.narrow full |> some in
+  let max_chars = chars (rendered half (input half)) in
+  let capacity : Keeper_lane_cli_oneshot.input_capacity =
+    {runtime_id=Fixture.cli_primary_runtime;
+     capacity={actual_chars=chars (rendered full (input full));max_chars}} in
+  let calls = ref [] in
+  let execute prepared state =
+    let input = input prepared in
+    let expected = rendered prepared input in
+    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+      calls := prompt :: !calls;
+      Alcotest.(check string) "prefit and dispatch use identical full text" expected prompt;
+      Alcotest.(check bool) "no oversized CLI probe after learning the bound" true
+        (chars prompt <= max_chars);
+      Ok (Yojson.Safe.to_string (`Assoc [
+        "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
+        "working_state", `String state])) in
+    let committed = ref false in
+    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
+    Runtime.run_best_effort ~trigger:Runtime.Durable_range
+      ~input_projection:Runtime.Already_selected_range ~continuity:prepared
+      ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
+      ~cli_runner:runner ~on_continuity_committed:(fun _ -> committed:=true)
+      ~base_path ~keepers_dir ~keeper_id
+      ~expected_revision:(Option.map (fun (s : Current.t) -> s.revision) current) input;
+    Alcotest.(check bool) "actual Memory and continuity publication completed" true !committed in
+  let fit prepared = Runtime.fit_continuity ~capacity ~base_path ~keeper_id
+      ~input:(input prepared) prepared |> get |> some in
+  let first = fit full in
+  Alcotest.(check int) "measured bound selects first two whole atoms" 2 (P.end_atom first);
+  execute first ("Saved state " ^ String.make 200 's');
+  let fact = Keeper_memory_os_types.observed ~claim:("New fact " ^ String.make 200 'f')
+    ~category:Keeper_memory_os_types.Fact ~now:1001.
+    ~origin:{kind=Keeper_memory_os_types.Authored;trace_id} in
+  ignore (Current.apply_disposition ~keepers_dir ~keeper_id ~now:1001.
+    ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[fact] () |> get);
+  let next = prepare () in
+  Alcotest.(check bool) "new state and Memory overhead make former atom count exceed limit"
+    true (chars (rendered next (input next)) > max_chars);
+  let second = fit next in
+  Alcotest.(check int) "second pass accounts for growing overhead" 3 (P.end_atom second);
+  execute second "State through the third atom.";
+  Alcotest.(check int) "only two fitted requests were dispatched" 2 (List.length !calls);
+  let after = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
+    | Ok value -> C.exact_snapshot_messages value
+    | Error _ -> Alcotest.fail "source checkpoint disappeared" in
+  Alcotest.(check bool) "source checkpoint is unchanged" true
+    (List.equal Agent_core.Types.Message_value.equal source after)
 
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
@@ -102,7 +209,9 @@ let () =
     test_callback ~cli_errors ~base_path ~registry ~keeper_id:name
       ~first_overflow:false ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
-    ["actual HTTP outcomes", [
+    ["continuity prefit", [Alcotest.test_case "two productive passes respect learned bound" `Quick
+       (test_prefit_real_continuity ~base_path)];
+     "actual HTTP outcomes", [
       case "capacity-final" false `OK 1;
       case "quota-final" false `Too_many_requests 0;
       case "capacity-then-quota" true `Too_many_requests 0;

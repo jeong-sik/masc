@@ -318,6 +318,7 @@ let profile_update_command (meta : keeper_meta) =
     ; microvm_cpus = meta.microvm_cpus
     ; network_mode = meta.network_mode
     ; mention_targets = meta.mention_targets
+    ; board_interests = meta.board_interests
     ; max_context_override = meta.max_context_override
     ; activation_mode = meta.activation_mode
     ; telemetry_feedback_enabled = meta.telemetry_feedback_enabled
@@ -452,6 +453,11 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
          else p.profile_defaults.mention_targets)
       ~name:p.name
   in
+  let board_interests =
+    resolve_board_interests
+      ~board_interests_opt:p.board_interests_opt
+      ~fallback_interests:p.profile_defaults.board_interests
+  in
   let source_meta = old in
   let updated = { source_meta with
     instructions =
@@ -481,6 +487,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     latched_reason = source_meta.latched_reason;
     runtime = source_meta.runtime;
     mention_targets;
+    board_interests;
     telemetry_feedback_enabled =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
         old.telemetry_feedback_enabled;

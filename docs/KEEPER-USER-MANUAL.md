@@ -36,6 +36,7 @@ load by `lib/keeper/keeper_types_profile.ml`, not started with an empty prompt.
 activation_mode = "autonomous"
 sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
+board_interests = []
 
 instructions = """
 You are the review Keeper. Read the actual diff and the file, not a summary of
@@ -74,6 +75,19 @@ mention_targets = ["rondo, 론도"]     # one name nobody will ever type
 Each entry is case-folded and kept whole. A comma inside the string does not
 split it, and nothing rejects the result, so a mistyped list silently routes
 no mentions at all. This one is worth re-reading in your own config.
+
+### `board_interests` is targetless discovery, not an address
+
+```toml
+board_interests = ["OCaml runtime", "Keeper lifecycle"]
+board_interests = [] # do not admit targetless Board candidates
+```
+
+Use `mention_targets` for exact names people type. Use `board_interests` only
+for topics whose unaddressed posts or not-yet-joined thread comments should be
+sent to semantic attention judgment. The fields never fall back to one another.
+An empty interest list does not disable exact mentions, broadcast, or replies
+to a thread the Keeper already joined.
 
 ## The work surface (playground)
 

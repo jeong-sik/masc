@@ -45,6 +45,10 @@ let default_runner ~base_dir : runner =
     |> Result.map (fun (response : Fusion_official_client.response) -> response.text)
 ;;
 
+let prompt_with_schema ~requirement ~prompt =
+  prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
+;;
+
 let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
   if not (Fusion_official_client.is_official_client ~runtime_id)
   then Error (Not_an_official_client { runtime_id })
@@ -63,7 +67,7 @@ let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
        channels answer different halves -- one says what to write, the other
        refuses what does not match. *)
     let prompt =
-      prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
+      prompt_with_schema ~requirement ~prompt
     in
     match
       runner
@@ -107,8 +111,14 @@ let walk ?runner ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~valid
   loop [] cli_slots
 ;;
 
-let input_capacity_refused = function
-  | Execution_failed { cause = Fusion_official_client.Codex_failure error; _ } ->
-    Option.is_some (Runtime_codex_app_server.input_capacity_refusal error)
-  | _ -> false
+type input_capacity =
+  { runtime_id : string
+  ; capacity : Runtime_codex_app_server.input_capacity
+  }
+
+let input_capacity = function
+  | Execution_failed { runtime_id; cause = Fusion_official_client.Codex_failure error } ->
+    Runtime_codex_app_server.input_capacity_refusal error
+    |> Option.map (fun capacity -> {runtime_id; capacity})
+  | _ -> None
 ;;

@@ -749,12 +749,13 @@ let compose_carried_model_input
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
   let front, outlived_seed =
-    match front with
-    | Some seed ->
+    match continuity, front with
+    | Some _, _ -> None, None
+    | None, Some seed ->
       (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
        | Ok seed -> Some seed, None
        | Error dropped -> None, Some (seed, dropped))
-    | None -> None, None
+    | None, None -> None, None
   in
   let demote_before =
     if Option.is_some continuity then 0
@@ -1025,7 +1026,9 @@ let bounded_model_input_projection
         Runtime_model_input_tail_window.atom_opening_digest messages)
     in
     let front, dropped_ledger =
-      carried_front
+      match ctx.continuity with
+      | Some _ -> None, None
+      | None -> carried_front
         ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id
@@ -1258,10 +1261,8 @@ let bounded_model_input_projection
         composed from, whose atom count [history_atom_count] is.
         - (Some, Some): the range carried atoms [first_atom] to the newest.
         - (None, None): the history has no atom; nothing was carried.
-        - (None, Some _): [first_atom] is outside the history, which it is
-          when this request carried no atom of a non-empty one. The
-          composition always carries the newest atom, so it does not occur
-          on this path.
+        - (None, Some _): the saved working state covers every history atom,
+          so the request carries only pinned context and no raw atom.
         - (Some _, None): cannot occur. A front index below the atom count
           puts the newest index at or above it, and both are read from the
           same lookup.

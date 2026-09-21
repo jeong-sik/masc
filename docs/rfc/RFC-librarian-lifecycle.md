@@ -538,8 +538,12 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
     restart·prefix 변경·손상된 파일은 거절한다. 마지막 atom까지 보존했으면
     과거 atom은 남기지 않으며 pinned context는 유지한다.
     이는 Agent Core checkpoint를 사용하는 offline 저장·조립 검증이다.
-    후보 설명의 의미 보존, 공식 클라이언트의 fragment 경계, 운영 창 연결은
-    별도 검증이 필요하다. semantic score나 운영 read position을 생성하지 않는다.
+    후보 설명의 의미 보존과 공식 클라이언트 fragment 경계는 별도 검증이 필요하다.
+    하네스가 semantic score나 운영 read position을 생성하지는 않는다.
+    Agent Core 운영 입력은 별도의 `librarian-continuity.json` 쌍을 dispatch마다
+    검증해 고정하고, 덮은 prefix 대신 하던 일을 전달한다. 미처리 suffix는
+    원문 그대로 유지한다. 저장본 없는 경로와 공식 client는 적용 대상이 아니다.
+    연결의 구현과 배포 후 연속 턴 검증은 구분한다(`docs/librarian-continuity-snapshot.md`).
 - **(마) 일을 셋으로 나눈다.** 턴 읽기(facts 전부를 싣지 않는다), 기억 접기(facts 만 본다), 받은 일 정리(지금의 `working_contexts`). 일마다 프롬프트 키, 스키마, 디코더를 따로 둔다. 회차 시간과 실패율(§2.6 의 p90 583초, 실패 15%)을 줄이는 것이 목적이다. 나눌지와 나누는 모양은 하네스가 잰 값으로 정한다. 그때 같이 풀어야 하는 것이 셋 있다. 접기 회차의 커밋이 자기를 다시 깨우지 않아야 한다(`apply_disposition` 은 바뀐 것이 없어도 revision 을 올리고 알림을 낸다). `supersedes` 와 "대체할 말 없이 틀렸다고 밝혀진 사실"을 뺄 자리가 남아야 한다(턴 읽기는 facts 를 못 보고 접기는 대화를 못 본다). 일의 종류를 registry 행에 남기려면 그 행의 엄격한 디코드와 lane 단위 보존을 같이 봐야 한다.
 
 ## 8. 이행

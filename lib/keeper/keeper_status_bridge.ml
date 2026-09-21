@@ -65,7 +65,7 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
   |> nonempty_string_list_override
        "workspace.board_interests"
        defaults.board_interests
-       meta.board_interests
+       (default_nonempty_string_list defaults.board_interests meta.board_interests)
   |> (fun acc ->
   let runtime_id = runtime_id_of_meta meta in
   if effective_runtime_id <> runtime_id

@@ -219,6 +219,7 @@ let creation_stem =
   "name": "new-keeper",
   "sandbox_profile": "docker",
   "network_mode": "",
+  "board_interests": [],
   "instructions": "Replace this with what this keeper is for."
 }
 |json}

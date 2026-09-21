@@ -230,7 +230,11 @@ let run_continuity ~base_path ~keeper_name =
       if !saved then next ()
       else if !capacity_refused then
         match P.narrow prepared with
-        | Some smaller -> attempt meta smaller
+        | Some smaller ->
+          Log.Keeper.info ~keeper_name
+            "continuity input capacity refused; narrowing end_atom=%d -> %d"
+            (P.end_atom prepared) (P.end_atom smaller);
+          attempt meta smaller
         | None -> report "source cannot be narrowed safely after runtime capacity refusal"
   in
   next ()

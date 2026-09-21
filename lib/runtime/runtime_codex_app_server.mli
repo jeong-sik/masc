@@ -203,6 +203,7 @@ type error =
       { method_ : string
       ; code : int option
       ; message : string
+      ; data : Yojson.Safe.t option
       }
   | Subscription_required of string
   | Unsupported_server_request of string
@@ -233,6 +234,12 @@ type error =
             trigger lane rotation. [false] means nothing was started upstream
             and retrying elsewhere is safe. *)
       }
+
+type input_capacity = { actual_chars : int; max_chars : int }
+val input_capacity_refusal : error -> input_capacity option
+(** Decode only a structurally witnessed turn/start input limit refusal.
+    Missing, ambiguous or malformed error data and other invalid-params errors
+    remain ordinary RPC errors. Counts come from the server, never a local cap. *)
 
 val error_to_string : error -> string
 

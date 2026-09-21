@@ -233,6 +233,9 @@ if [[ "$declared_prefixes" != "$used_prefixes" ]]; then
   fail "SPEC-INDEX invariant-prefix table drifted from docs/spec usage"
 fi
 
+# Every local path these docs name must still exist. The glossary is here
+# because its `→` coordinates are the term-to-code SSOT: when a file is
+# renamed, the entry keeps pointing at the old path and reads as current.
 docs_to_scan=(
   README.md
   README.ko.md
@@ -241,6 +244,7 @@ docs_to_scan=(
   docs/MCP-TEMPLATE.md
   docs/TUI-GUIDE.md
   docs/spec/SPEC-INDEX.md
+  docs/spec/00-glossary.md
   docs/spec/01-system-overview.md
   docs/spec/09-server-transport.md
   docs/spec/10-dashboard.md
@@ -257,8 +261,12 @@ for file in "${docs_to_scan[@]}"; do
     [[ -e "$ref" ]] || missing_refs+=("$file -> $ref")
   done < <(
     {
-      rg -o '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file" | sed 's/^('// | sed 's/)$//'
-      rg -o '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
+      # rg exits 1 on no match. Under `set -e` that aborts the block before the
+      # second scan runs, so a doc whose links are not `(docs/...)` -- the
+      # glossary points at `../../lib/...` -- would have its code paths skipped
+      # and read as checked. `|| true` keeps both scans running for every doc.
+      rg -o '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file" | sed 's/^('// | sed 's/)$//' || true
+      rg -o '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file" || true
     } | sort -u
   )
 done

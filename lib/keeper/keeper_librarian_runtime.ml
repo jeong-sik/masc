@@ -531,7 +531,21 @@ type cli_fallback_failure =
   | Fitted_prompt_unavailable
   | Slot_failures of Keeper_lane_cli_oneshot.failure list
 
+(* A continuity pass must produce both Memory disposition and its saved
+   working state before either may be published. Ordinary Memory extraction
+   has no continuity obligation and still accepts an absent working state. *)
+let validate_selection ?continuity selected_input output =
+  let open Result.Syntax in
+  let* selection = Keeper_librarian.selection_of_json_result selected_input output in
+  match continuity, selection.Keeper_librarian.working_state with
+  | Some _, None ->
+    Error (Keeper_librarian.Working_state_invalid
+      "continuity requires a nonblank working_state")
+  | None, _ | Some _, Some _ -> Ok selection
+;;
+
 let try_cli_slots
+      ~continuity
       ~keeper_id
       ~base_path
       ~cli_runner
@@ -554,7 +568,7 @@ let try_cli_slots
             ~requirement:librarian_output_requirement
             ~prompt
             ~validate:(fun output ->
-              Keeper_librarian.selection_of_json_result selected_input output
+              validate_selection ?continuity selected_input output
               |> Result.map (fun selection -> selection, output)
               |> Result.map_error Keeper_librarian.parse_error_to_string)
             ~on_failure:(fun failure ->
@@ -580,6 +594,7 @@ let with_cli_failure prior_error = function
 ;;
 
 let execute_exact_output_classified
+      ~continuity
       ?cli_runner
       ~clock
       ~net
@@ -596,7 +611,7 @@ let execute_exact_output_classified
     (* Registry publication rejects a lane with neither transport, and lane
        resolution rejects a lane with no admitted transport. Keep this final
        classification defensive in case either upstream contract changes. *)
-    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+    (match try_cli_slots ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
      | Error No_cli_slots -> Error No_transport_declared
@@ -609,7 +624,7 @@ let execute_exact_output_classified
   | Error error ->
     (* No API slot can project this request. The independently admitted CLI
        slots still own a chance to answer, just as after API exhaustion. *)
-    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+    (match try_cli_slots ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) ->
        Log.Keeper.warn ~keeper_name:keeper_id
@@ -627,7 +642,7 @@ let execute_exact_output_classified
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in
     match
-      Keeper_librarian.selection_of_json_result
+      validate_selection ?continuity
         selected_input
         output.output
     with
@@ -660,6 +675,7 @@ let execute_exact_output_classified
      | Exact_output.Advanceable_candidates_exhausted ->
        (match
           try_cli_slots
+            ~continuity
             ~keeper_id
             ~base_path
             ~cli_runner
@@ -686,6 +702,7 @@ let execute_exact_output_classified
     in
     (match
        try_cli_slots
+         ~continuity
          ~keeper_id
          ~base_path
          ~cli_runner
@@ -972,6 +989,7 @@ let run_best_effort
              in
              let* (selection, exact_output), selected_slot =
                execute_exact_output_classified
+                 ~continuity
                  ?cli_runner
                  ~clock
                  ~net

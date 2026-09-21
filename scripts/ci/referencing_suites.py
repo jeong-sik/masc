@@ -50,7 +50,9 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-SUITE = re.compile(r"^(test|packages/[^/]+/test)/([a-z0-9_]+/)?test_[a-z0-9_]+\.(ml|py)$")
+SUITE = re.compile(
+    r"^(test|packages/[^/]+/test)/([a-z0-9_]+/)?test_[a-z0-9_]+\.(ml|py)$"
+)
 MODULE_SOURCE = re.compile(r"^(bin|lib|packages/[^/]+/lib)/.*\.mli?$")
 IDENT = r"[A-Z][A-Za-z0-9_']*"
 REFERENCES = (
@@ -59,7 +61,9 @@ REFERENCES = (
     re.compile(rf"\bmodule\s+{IDENT}\s*=\s*(?:{IDENT}\.)*({IDENT})"),
     re.compile(rf"\(\s*module\s+(?:{IDENT}\.)*({IDENT})"),
 )
-CHAR_LITERAL = re.compile(r"'(?:\\(?:[\\'\"ntbr ]|[0-9]{3}|x[0-9a-fA-F]{2}|o[0-3][0-7]{2})|[^\\'\n])'")
+CHAR_LITERAL = re.compile(
+    r"'(?:\\(?:[\\'\"ntbr ]|[0-9]{3}|x[0-9a-fA-F]{2}|o[0-3][0-7]{2})|[^\\'\n])'"
+)
 SPECIAL = re.compile(r"\(\*|\*\)|\"|\{[a-z_]*\||'")
 # A file name inside a longer name is not that file: install.sh is not
 # masc-install.sh.
@@ -147,7 +151,9 @@ def module_name(path: str) -> str:
 
 
 def tracked_files(root: Path) -> list[str]:
-    listed = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True)
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
+    )
     return [p for p in listed.stdout.decode().split("\0") if p]
 
 
@@ -163,7 +169,9 @@ def module_suites(root: Path, tracked: list[str], changed: list[str]) -> set[str
     return {
         suite
         for suite in tracked
-        if SUITE.match(suite) and suite.endswith(".ml") and refers_to(read(root, suite), modules)
+        if SUITE.match(suite)
+        and suite.endswith(".ml")
+        and refers_to(read(root, suite), modules)
     }
 
 
@@ -177,14 +185,24 @@ def file_suites(root: Path, tracked: list[str], changed: list[str]) -> set[str]:
         name = PurePosixPath(path).name
         others = counts[name] - (1 if path in tracked_set else 0)
         if others == 0:
-            patterns.append((name, re.compile(rf"(?<![{NAME_CHAR}]){re.escape(name)}(?![{NAME_CHAR}])")))
+            patterns.append(
+                (
+                    name,
+                    re.compile(
+                        rf"(?<![{NAME_CHAR}]){re.escape(name)}(?![{NAME_CHAR}])"
+                    ),
+                )
+            )
     if not patterns:
         return set()
     return {
         suite
         for suite in tracked
         if SUITE.match(suite)
-        and any(name in read(root, suite) and bounded.search(read(root, suite)) for name, bounded in patterns)
+        and any(
+            name in read(root, suite) and bounded.search(read(root, suite))
+            for name, bounded in patterns
+        )
     }
 
 
@@ -212,7 +230,10 @@ def exactpath_suites(root: Path, tracked: list[str], changed: list[str]) -> set[
         suite
         for suite in tracked
         if SUITE.match(suite)
-        and any(path in read(root, suite) and bounded.search(read(root, suite)) for path, bounded in patterns)
+        and any(
+            path in read(root, suite) and bounded.search(read(root, suite))
+            for path, bounded in patterns
+        )
     }
 
 
@@ -225,7 +246,10 @@ def main(argv: list[str]) -> int:
     try:
         tracked = tracked_files(root)
     except (OSError, subprocess.CalledProcessError) as error:
-        print(f"referencing_suites.py: cannot list tracked files: {error}", file=sys.stderr)
+        print(
+            f"referencing_suites.py: cannot list tracked files: {error}",
+            file=sys.stderr,
+        )
         return 1
     # One pass for both rules: the gate asks for both on every pull request,
     # and each reads every suite.

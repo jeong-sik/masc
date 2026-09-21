@@ -57,6 +57,26 @@ type run_result =
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   }
 
+(** What a turn settled: its result, and the two degraded-retry lanes that
+    describe it.
+
+    The lanes sit beside the result rather than inside it so an errored turn
+    carries them too. That is not symmetry for its own sake — after #37375 gave
+    the receipt two typed lanes, the failure path was where the old reading
+    ("a lane is pending, so a retry ran") still lived, because a verdict on a
+    success value never reaches a turn that failed.
+
+    Both are decided once, in [Keeper_agent_run_receipt.finalize], beside the
+    runtime observation that says whether a provider answered. A caller reports
+    them; it does not compute them. *)
+type turn_settlement =
+  { result : (run_result, Agent_core.Error.t) result
+  ; degraded_retry_applied : Keeper_error_classify.degraded_retry option
+        (** The lane an earlier turn deferred to, when this turn ran it. *)
+  ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
+        (** The lane this turn leaves for a later one. *)
+  }
+
 val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
 (** Serialize a tool call detail to JSON. Reached via the
     [include Keeper_agent_result] chain in [Keeper_agent_run], where

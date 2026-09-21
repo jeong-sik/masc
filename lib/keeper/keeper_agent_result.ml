@@ -106,6 +106,21 @@ type run_result =
   ; tool_surface : tool_surface_metrics
   }
 
+(* What a turn settled. The two degraded-retry lanes sit beside the result
+   rather than inside it, so an errored turn carries them too: the failure path
+   is where the "a lane is pending means a retry ran" misread survived after
+   #37375 fixed the receipt, and a verdict that only rides a success value
+   cannot reach it.
+
+   Both are decided once, in [Keeper_agent_run_receipt.finalize], beside the
+   runtime observation that says whether a provider answered. Neither is a
+   caller's to assert. *)
+type turn_settlement =
+  { result : (run_result, Agent_core.Error.t) result
+  ; degraded_retry_applied : Keeper_error_classify.degraded_retry option
+  ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
+  }
+
 let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
 let tool_call_count (result : run_result) = List.length result.tool_calls
 

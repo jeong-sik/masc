@@ -531,27 +531,11 @@ let run_keeper_cycle
   in
   let turn_start = Mtime_clock.now () in
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
-    let degraded_retry_info =
-      Option.map
-        (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-           let fallback_reason =
-             match
-               Keeper_error_classify.recoverable_runtime_failure_reason
-                 hint.failure
-             with
-             | Some reason -> reason
-             | None -> Keeper_error_classify.Deferred_runtime_lane
-           in
-           { Keeper_error_classify.next_runtime = hint.next_runtime_id
-           ; fallback_reason
-           })
-        deferred_runtime_lane
-    in
     { cycle_completed = false
     ; manifest_seq = 0
     ; current_turn_blocker_info = None
     ; last_execution = None
-    ; degraded_retry_info
+    ; degraded_retry_settled = None
     ; deferred_runtime_lane = None
     ; failure_reason = None
     ; runtime_attempt_errors = []
@@ -1148,31 +1132,16 @@ let run_keeper_cycle
                         (turn_event_bus_manifest_decision turn_event_bus))
                    Keeper_runtime_manifest.Event_bus_correlated
                in
-               let degraded_retry_info = turn_state.degraded_retry_info in
-               (* These three feed the decision record below, and nothing else:
-                  the execution receipt now reports the two lanes on its own,
-                  in [Keeper_agent_run_receipt].
-
-                  [degraded_retry_info] is seeded at [initial_turn_state] from the
-                  [deferred_runtime_lane] argument -- a hint a *previous* turn left
-                  behind -- and no path in this turn writes it. Its presence says a
-                  deferred lane is pending, not that a retry ran, which is why the
-                  comparison in [Keeper_unified_turn_types] stands between it and
-                  the label. *)
-               let degraded_retry_applied =
-                 degraded_retry_applied_for_turn
-                   ~degraded_retry_info
-                   ~last_execution:turn_state.last_execution
-               in
-               let degraded_retry_runtime =
-                 Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.next_runtime)
-                   degraded_retry_info
-               in
-               let fallback_reason =
-                 Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
-                   degraded_retry_info
+               (* What the turn's receipt recorded, not a second answer to the
+                  same question. Absent when the turn never reached
+                  [Keeper_agent_run_receipt.finalize] -- a phase-gate or
+                  pre-dispatch end -- and then no lane was run or left behind
+                  either. *)
+               let degraded_retry_applied, degraded_retry_deferred =
+                 match turn_state.degraded_retry_settled with
+                 | Some (settled : Keeper_agent_run.turn_settlement) ->
+                   settled.degraded_retry_applied, settled.degraded_retry_deferred
+                 | None -> None, None
                in
                (match run_result with
                 | Error err when EC.is_input_required_error err ->
@@ -1397,9 +1366,7 @@ let run_keeper_cycle
                     ~latency_ms
                     ~outcome:"error"
                     ~degraded_retry_applied
-                    ?degraded_retry_runtime
-                    ?fallback_reason:
-                      (Option.map EC.degraded_retry_reason_to_string fallback_reason)
+                    ~degraded_retry_deferred
                     ~error:e_str
                     ~terminal_reason
                     (* The runtime walk's own name for the last candidate it
@@ -1500,8 +1467,7 @@ let run_keeper_cycle
                       ~observation
                       ~latency_ms
                       ~degraded_retry_applied
-                      ~degraded_retry_runtime
-                      ~fallback_reason
+                      ~degraded_retry_deferred
                       ~keeper_turn_id
                       execution_outcome
                   in

@@ -778,7 +778,7 @@ let run_keeper_invocation_turn_admitted_inner
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
-	            let run_result, latency_ms =
+	            let settlement, latency_ms =
 	              Inference_utils.timed (fun () ->
                       let consume = match direct_resume with
                         | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()
@@ -789,7 +789,11 @@ let run_keeper_invocation_turn_admitted_inner
                             ~base_path:ctx.config.base_path ~keeper_name:meta.name
                             ~operation_id admission in
                       match consume with
-                      | Error detail -> Error (Agent_core.Error.Internal detail)
+                      | Error detail ->
+                        ({ result = Error (Agent_core.Error.Internal detail)
+                         ; degraded_retry_applied = None
+                         ; degraded_retry_deferred = None }
+                         : Keeper_agent_run.turn_settlement)
                       | Ok () ->
                   run_direct_turn_with_fsm
                     ~keeper_name:meta.name
@@ -846,6 +850,7 @@ let run_keeper_invocation_turn_admitted_inner
                                 ?continuation_channel
                                 ()))
 		            in
+                let run_result = settlement.Keeper_agent_run.result in
                 let run_result = match gate_resume with
                   | None -> run_result
                   | Some admission ->
@@ -935,12 +940,6 @@ let run_keeper_invocation_turn_admitted_inner
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
-              let degraded_retry_applied =
-                not (String.equal result.runtime_id initial_execution.runtime_id)
-              in
-              let degraded_retry_runtime =
-                if degraded_retry_applied then Some result.runtime_id else None
-              in
               let execution_outcome =
                 Keeper_execution_outcome.create
                   ~lane:Keeper_execution_outcome.Direct
@@ -954,9 +953,14 @@ let run_keeper_invocation_turn_admitted_inner
                     ~turn_ctx_cell
                     ~observation:world_observation
                     ~latency_ms
-                    ~degraded_retry_applied
-                    ~degraded_retry_runtime
-                    ~fallback_reason:None
+                    (* The turn's own verdict, as the receipt recorded it. This
+                       used to be [result.runtime_id <> initial_execution.runtime_id]
+                       -- the lane walk moving, which [runtime_fallback_applied]
+                       already reports -- and it read true on 16 of 33 measured
+                       turns that ran one candidate and failed over to none
+                       (#37376). *)
+                    ~degraded_retry_applied:settlement.Keeper_agent_run.degraded_retry_applied
+                    ~degraded_retry_deferred:settlement.Keeper_agent_run.degraded_retry_deferred
                     ~keeper_turn_id
                     execution_outcome
                 with

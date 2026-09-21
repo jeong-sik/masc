@@ -47,12 +47,20 @@ let context_overflow_blocker_label ~limit_tokens =
      | Some n -> string_of_int n
      | None -> "?")
 
-let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
+(* A rejected dispatch never reaches [Keeper_agent_run_receipt.finalize], so it
+   writes no receipt and settles neither lane. *)
+let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch
+  : Keeper_agent_run.turn_settlement
+  =
   match before_dispatch_authority () with
   | Error reason ->
-    Error
-      (Agent_core.Error.Internal
-         ("keeper provider dispatch authority rejected: " ^ reason))
+    { result =
+        Error
+          (Agent_core.Error.Internal
+             ("keeper provider dispatch authority rejected: " ^ reason))
+    ; degraded_retry_applied = None
+    ; degraded_retry_deferred = None
+    }
   | Ok () -> dispatch ()
 ;;
 
@@ -191,7 +199,7 @@ let run (ctx : ctx)
     let turn_state =
       { turn_state with last_execution = Some execution }
     in
-    let result =
+    let settlement =
       Otel_genai.with_keeper_turn_span
         ~keeper_name:run_meta.name
         ~agent_name:run_meta.name
@@ -298,7 +306,12 @@ let run (ctx : ctx)
                 ();
               raise exn))
     in
-    result, turn_state
+    (* The receipt's own verdict rides up on [turn_state] so the decision
+       record below reports it rather than deciding again. *)
+    let turn_state =
+      { turn_state with degraded_retry_settled = Some settlement }
+    in
+    settlement.Keeper_agent_run.result, turn_state
   in
   let run_once (turn_state : turn_state) =
     let mark_terminal_error err =

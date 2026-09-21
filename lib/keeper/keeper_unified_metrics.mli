@@ -153,9 +153,8 @@ val append_decision_record :
   latency_ms:int ->
   outcome:string ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
-  ?degraded_retry_applied:bool ->
-  ?degraded_retry_runtime:string ->
-  ?fallback_reason:string ->
+  degraded_retry_applied:Keeper_error_classify.degraded_retry option ->
+  degraded_retry_deferred:Keeper_error_classify.degraded_retry option ->
   ?turn_mode:turn_mode ->
   ?result:Keeper_agent_run.run_result option ->
   ?usage_resolution:Keeper_usage_resolution.t option ->

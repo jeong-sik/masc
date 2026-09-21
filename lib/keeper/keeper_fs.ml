@@ -328,7 +328,7 @@ let save_pieces_durable_atomic_core
         match !temp_path with
         | Some temp when not !renamed && Sys.file_exists temp ->
           (try Sys.remove temp with
-           | exn ->
+           | exn -> (* cancel-guard-ok: Sys.remove performs no Eio operation, so Cancelled cannot originate in this body. *)
              Log.Keeper.error
                "filesystem_runtime: strict atomic temp cleanup failed path=%s error=%s"
                temp
@@ -448,6 +448,15 @@ let observe_durable_write_success ~on_durable_commit = function
      | () ->
        Eio_guard.check_if_ready ();
        Ok Committed
+     | exception (Eio.Cancel.Cancelled _ as exn) ->
+       (* #37372: the observer's cancellation leaves unchanged. Propagating
+          costs no half-written state -- the blocking transaction and both
+          lease confirmations are already complete when this runs, which is
+          why the success branch above can raise a pending cancellation too.
+          [raise] here, not [raise_with_backtrace]: OCaml compiles raise of a
+          handler's own binding as a re-raise, so the original frames survive
+          either way, and this is the shape Cancel_safe.protect uses. *)
+       raise exn
      | exception exn ->
        let backtrace = Printexc.get_raw_backtrace () in
        Ok (Committed_but_observer_failed (exn, backtrace)))

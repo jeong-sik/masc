@@ -395,7 +395,7 @@ let bootstrap_initial_config_root ~base_path ~created =
           | None -> 0
         in
         (* Last resort for a root that exists but cannot start: no repo to copy
-           from, so the startup-required pair comes out of the binary. *)
+           from, so the required runtime configuration comes out of the binary. *)
         let backfilled_from_embedded =
           backfill_startup_required_from_embedded ~config_root
         in

@@ -783,10 +783,34 @@ let ensure_host_header ~uri headers =
       Some (("host", Printf.sprintf "%s:%d" host port) :: headers)
     | (Some _ | None), _ -> if headers = [] then None else Some headers)
 
+(* Enforce an explicit caller limit before retaining a body chunk. A refused
+   body remains unread; the request owner closes that connection on Error. *)
+let read_response_body ?max_body_bytes ~status body =
+  match max_body_bytes with
+  | None -> Piaf.Body.to_string body
+  | Some limit ->
+    let too_large () =
+      Error (`Msg (Printf.sprintf "HTTP %d: body exceeds %d bytes" status limit))
+    in
+    match Piaf.Body.length body with
+    | `Fixed length when Int64.compare length (Int64.of_int limit) > 0 ->
+      too_large ()
+    | `Fixed _ | `Chunked | `Unknown | `Close_delimited | `Error _ ->
+      let buffer = Buffer.create 0 in
+      let exception Body_limit_exceeded in
+      try
+        match Piaf.Body.iter_string body ~f:(fun chunk ->
+          if String.length chunk > limit - Buffer.length buffer then
+            raise Body_limit_exceeded;
+          Buffer.add_string buffer chunk) with
+        | Ok () -> Ok (Buffer.contents buffer)
+        | Error _ as error -> error
+      with Body_limit_exceeded -> too_large ()
+
 (* Wrap a single request: acquire-or-create client, send, release.
    Errors return [Error string]; the connection is dropped (close)
    on error, parked on success. *)
-let do_request t ?headers ?body ~method_ uri : (response, string) result =
+let do_request t ?headers ?body ?max_body_bytes ~method_ uri : (response, string) result =
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
@@ -845,7 +869,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
           in
           let body_result =
             with_client_scope client ~on_error:(fun exn -> `Exn exn)
-              (fun () -> Piaf.Body.to_string (Piaf.Response.body resp)) in
+              (fun () -> read_response_body ?max_body_bytes ~status (Piaf.Response.body resp)) in
           (match body_result with
            | Error err ->
              release_once ~close_only:true;
@@ -868,10 +892,13 @@ let with_optional_timeout
   | _ -> f ()
 
 let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
-    ?timeout_seconds ~method_ ~url ?headers ?body () =
-  with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
-  let uri = Uri.of_string url in
-  do_request t ?headers ?body ~method_ uri
+    ?timeout_seconds ?max_body_bytes ~method_ ~url ?headers ?body () =
+  match max_body_bytes with
+  | Some limit when limit < 0 -> Error "max_body_bytes must be non-negative"
+  | Some _ | None ->
+    with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
+    let uri = Uri.of_string url in
+    do_request t ?headers ?body ?max_body_bytes ~method_ uri
 
 (* ── RFC-0129: idle-timeout request with streaming progress ────── *)
 

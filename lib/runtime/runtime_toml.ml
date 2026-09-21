@@ -708,26 +708,19 @@ let parse_provider (id : string) (tbl : Otoml.t)
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match
-          ( capabilities_result
-          , enabled_result
-          , healthcheck_result
-          , connect_timeout_result
-          , is_non_interactive_result
-          , wire_kind_result )
-        with
-        | Error errs, _, _, _, _, _
-        | _, Error errs, _, _, _, _
-        | _, _, Error errs, _, _, _
-        | _, _, _, Error errs, _, _
-        | _, _, _, _, Error errs, _
-        | _, _, _, _, _, Error errs -> Error errs
-        | ( Ok capabilities
-          , Ok enabled_opt
-          , Ok healthcheck_path
-          , Ok connect_timeout_s
-          , Ok is_non_interactive
-          , Ok wire_kind ) ->
+       let exact_body_timeout_key = Runtime_schema.exact_body_timeout_s_key in
+       let exact_body_timeout_result =
+         strict_float_find path tbl exact_body_timeout_key
+         |> positive_finite_float_opt_field ~path ~key:exact_body_timeout_key
+       in
+       (let ( let* ) = Result.bind in
+        let* capabilities = capabilities_result in
+        let* enabled_opt = enabled_result in
+        let* healthcheck_path = healthcheck_result in
+        let* connect_timeout_s = connect_timeout_result in
+        let* exact_body_timeout_s = exact_body_timeout_result in
+        let* is_non_interactive = is_non_interactive_result in
+        let* wire_kind = wire_kind_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -743,6 +736,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; healthcheck_path
             ; headers
             ; connect_timeout_s
+            ; exact_body_timeout_s
             ; antigravity_cli
             }))
 ;;
@@ -856,7 +850,10 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
-  let b key = typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:false in
+  (* Exact TOML presence: [None] is "the operator wrote nothing here", which
+     each consumer resolves against the layer it owns. A [false] default here
+     made an unwritten key indistinguishable from a written [false] (#37435). *)
+  let b key = typed_find "a boolean" path tbl key Otoml.get_boolean in
   let reasoning_streaming_format_result =
     match typed_find "a string" path tbl "reasoning-streaming-format" Otoml.get_string with
     | Error errors -> Error errors
@@ -872,9 +869,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                  "unknown reasoning-streaming-format %S — expected %s"
                  raw
                  Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
-  in
-  let b_default_true key =
-    typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:true
   in
   let positive_int_opt_field key =
     match typed_find "an integer" path tbl key Otoml.get_integer with
@@ -924,7 +918,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let* supports_top_k = b "supports-top-k" in
   let* supports_min_p = b "supports-min-p" in
   let* supports_seed = b "supports-seed" in
-  let* emits_usage_tokens = b_default_true "emits-usage-tokens" in
+  let* emits_usage_tokens = b "emits-usage-tokens" in
   Ok
     { Runtime_schema.max_output_tokens
     ; supports_tool_choice
@@ -1130,25 +1124,35 @@ let sampling_capability_errors
   match capabilities with
   | None -> []
   | Some capabilities ->
+    (* A declaration-layer question: did the operator authorize this sampling
+       field for this model? Not declared is not authorized, exactly as before
+       #37435 — the wire's preset does not answer it, because the operator is
+       the one asserting the model accepts the field. *)
+    let sampling_error ~key ~declared =
+      match declared with
+      | Some true -> []
+      | Some false ->
+        error
+          (path ^ "." ^ key)
+          (Printf.sprintf "%s is set but %s.capabilities.supports-%s is false" key path key)
+      | None ->
+        error
+          (path ^ "." ^ key)
+          (Printf.sprintf
+             "%s is set but %s.capabilities.supports-%s is not declared"
+             key
+             path
+             key)
+    in
     let top_k_errors =
       match top_k with
-      | Some _ when not capabilities.supports_top_k ->
-        error
-          (path ^ ".top-k")
-          (Printf.sprintf
-             "top-k is set but %s.capabilities.supports-top-k is false"
-             path)
-      | Some _ | None -> []
+      | Some _ -> sampling_error ~key:"top-k" ~declared:capabilities.supports_top_k
+      | None -> []
     in
     let min_p_errors =
       match min_p with
-      | Some _ when not capabilities.supports_min_p ->
-        error
-          (path ^ ".min-p")
-          (Printf.sprintf
-             "min-p is set but %s.capabilities.supports-min-p is false"
-             path)
-      | Some _ | None -> []
+      | Some _ -> sampling_error ~key:"min-p" ~declared:capabilities.supports_min_p
+      | None -> []
     in
     top_k_errors @ min_p_errors
 ;;

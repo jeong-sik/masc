@@ -9,13 +9,14 @@ import base64
 import errno
 import fcntl
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import re
 import select
 import signal
+import socket
 import struct
 import zlib
 import subprocess
@@ -172,6 +173,36 @@ class GatedHttpResponse:
             self.completed.set()
 
 
+# Same test-only allowance as the harness's ordinary response waits.
+FIXTURE_HANDLER_CLEANUP_TIMEOUT_S = 3.0
+
+
+class FixtureHTTPServer(ThreadingHTTPServer):
+    def __init__(self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler]) -> None:
+        self.handlers: list[threading.Thread] = []
+        super().__init__(address, handler)
+
+    def process_request(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]
+    ) -> None:
+        thread = threading.Thread(
+            target=self.process_request_thread,
+            args=(request, client_address),
+            daemon=True,
+        )
+        self.handlers.append(thread)
+        thread.start()
+
+    def server_close(self) -> None:
+        HTTPServer.server_close(self)
+        deadline = time.monotonic() + FIXTURE_HANDLER_CLEANUP_TIMEOUT_S
+        for handler in self.handlers:
+            handler.join(max(0.0, deadline - time.monotonic()))
+        pending = [handler.name for handler in self.handlers if handler.is_alive()]
+        if pending:
+            raise AssertionError("HTTP fixture handlers did not stop: " + ", ".join(pending))
+
+
 @contextmanager
 def test_http_endpoint(
     fixtures: HttpFixtures | None,
@@ -272,7 +303,7 @@ def test_http_endpoint(
         def log_message(self, format: str, *args: object) -> None:
             del format, args
 
-    with ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler) as server:
+    with FixtureHTTPServer(("127.0.0.1", 0), FixtureHandler) as server:
         thread: threading.Thread | None = None
 
         def start_endpoint() -> None:
@@ -6644,6 +6675,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
         {
             "keeper": "alpha",
             "dashboard_surface": "/api/v1/keepers/:name/memory-facts",
+            "events_read_error": None,
             "ordinary": {
                 "present": True,
                 "revision": 7,
@@ -6660,7 +6692,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                             "retrieved_count": 3,
                             "retrieved_distinct_days": 2,
                             "last_retrieved_at": 1787347500.0,
-                            "cited_count": 0,
+                            "retracted_count": 0,
                             "revised_from": [],
                         },
                     },
@@ -6675,7 +6707,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                             "retrieved_count": 0,
                             "retrieved_distinct_days": 0,
                             "last_retrieved_at": None,
-                            "cited_count": 0,
+                            "retracted_count": 0,
                             "revised_from": [],
                         },
                     },
@@ -7452,6 +7484,8 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
                         "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        "response_observed_model_input": None,
+                        "usage_scope": "per_request",
                         "raw_trace_run_ref": None,
                         "selected_model": "claude-opus-5",
                         "context_window": 200000,
@@ -10092,7 +10126,7 @@ def standalone_lane_fixture(
         ),
     }
     purpose, required = lane_contracts[lane_id]
-    return {
+    row = {
         "lane_id": lane_id,
         "label": label,
         "purpose": purpose,
@@ -10121,13 +10155,16 @@ def standalone_lane_fixture(
         "p50_elapsed_s": 8.0,
         "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
     }
+    if lane_id == "board_attention_exact":
+        row["jev"] = {"state": "off"}
+    return row
 
 
 def standalone_lanes_response() -> HttpResponse:
     return (
         200,
         {
-            "schema": "masc.standalone_llm_lanes.v1",
+            "schema": "masc.standalone_llm_lanes.v2",
             "generated_at": "2026-08-27T20:36:29Z",
             "observed_at_unix": 1787557669.715736,
             "exact_run_projection_count": 60,
@@ -10462,6 +10499,7 @@ def keeper_lanes_ia_interaction(
         for detail in (
             "Judges one durable Board candidate for Keeper attention.",
             "Config: [runtime.exact_output_lanes.board_attention_exact]",
+            "JEV OFF",
             "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
             "Then CLI (after catalog exhaustion): (none)",
             "Output meaning: the accepted candidate judgment JSON.",

@@ -1677,8 +1677,8 @@ let test_decode_json_response_body_keeps_a_long_json_sentence_whole () =
         ("HTTP 503: " ^ sentence) err
 
 let test_http_error_fallback_and_controls () =
-  Alcotest.(check string) "transport reports its actual URL before the reason"
-    "(http://127.0.0.1:8935/api/overview GET failed: connect backoff)"
+  Alcotest.(check string) "transport reports its reason before the actual URL"
+    "GET failed: connect backoff (http://127.0.0.1:8935/api/overview)"
     (Tui_decode.http_transport_error ~verb:"GET"
       ~url:"http://127.0.0.1:8935/api/overview" ~detail:"connect backoff");
   let decode body =
@@ -3752,21 +3752,23 @@ let test_decode_memory_health_rejects_stale_schema () =
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
     (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
 
-let memory_fact_snapshot_json ~ordinary ~source_bound =
+let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc
     [ "keeper", `String "alpha"
     ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-facts"
     ; "ordinary", ordinary
     ; "source_bound", source_bound
+    ; ( "events_read_error"
+      , match events_read_error with None -> `Null | Some detail -> `String detail )
     ]
 
-let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(cited = 0)
+let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(retracted = 0)
     ?(revised_from = []) () =
   `Assoc
     [ "retrieved_count", `Int retrieved
     ; "retrieved_distinct_days", `Int days
     ; "last_retrieved_at", last
-    ; "cited_count", `Int cited
+    ; "retracted_count", `Int retracted
     ; "revised_from", `List (List.map (fun id -> `String id) revised_from)
     ]
 
@@ -3799,7 +3801,7 @@ let test_decode_memory_fact_reads_the_use_record () =
               ; "updated_at", `Float 1_775_000_100.0
               ; "facts", `List [ fact ]
               ])
-         ~source_bound:(`Assoc [ "present", `Bool false ]))
+         ~source_bound:(`Assoc [ "present", `Bool false ]) ())
   in
   let only_fact = function
     | Error error -> Alcotest.failf "snapshot rejected: %s" error
@@ -3818,14 +3820,14 @@ let test_decode_memory_fact_reads_the_use_record () =
       (snapshot_with
          ~events:
            (memory_fact_events_json ~retrieved:4 ~days:2
-              ~last:(`Float 1_775_000_040.0) ~cited:1 ~revised_from:[ "mem-0" ] ())
+              ~last:(`Float 1_775_000_040.0) ~retracted:1 ~revised_from:[ "mem-0" ] ())
          ())
   in
   Alcotest.(check int) "retrieved" 4 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count;
   Alcotest.(check int) "days" 2 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_distinct_days;
   Alcotest.(check (option (float 0.0))) "last" (Some 1_775_000_040.0)
     fact.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
-  Alcotest.(check int) "cited" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_cited_count;
+  Alcotest.(check int) "retracted" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_retracted_count;
   Alcotest.(check (list string)) "revised from" [ "mem-0" ]
     fact.Tui_decode.mf_events.Tui_decode.mfe_revised_from;
   let unused = only_fact (snapshot_with ~events:(memory_fact_events_json ()) ()) in
@@ -3890,7 +3892,7 @@ let test_decode_memory_facts_keeps_both_stores () =
   in
   match
     Tui_decode.decode_memory_fact_snapshot
-      (memory_fact_snapshot_json ~ordinary ~source_bound)
+      (memory_fact_snapshot_json ~ordinary ~source_bound ())
   with
   | Error err -> Alcotest.fail err
   | Ok snapshot -> (
@@ -3937,7 +3939,7 @@ let test_decode_memory_facts_keeps_store_states_apart () =
   let json =
     memory_fact_snapshot_json
       ~ordinary:(`Assoc [ "read_error", `String "corrupt row 12" ])
-      ~source_bound:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   match Tui_decode.decode_memory_fact_snapshot json with
   | Error err -> Alcotest.fail err
@@ -3952,7 +3954,22 @@ let test_decode_memory_facts_keeps_store_states_apart () =
        | Tui_decode.Memory_store_absent -> ()
        | Tui_decode.Memory_store_read_error _
        | Tui_decode.Memory_store_present _ ->
-           Alcotest.fail "an absent store must stay absent")
+          Alcotest.fail "an absent store must stay absent")
+
+let test_decode_memory_facts_keeps_event_read_error () =
+  let json =
+    memory_fact_snapshot_json
+      ~events_read_error:"memory event sidecar read failed: permission denied"
+      ~ordinary:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
+  in
+  match Tui_decode.decode_memory_fact_snapshot json with
+  | Error error -> Alcotest.fail error
+  | Ok snapshot ->
+    Alcotest.(check (option string))
+      "sidecar failure is not empty history"
+      (Some "memory event sidecar read failed: permission denied")
+      snapshot.Tui_decode.mfs_events_read_error
 
 let test_decode_memory_facts_rejects_a_shapeless_store () =
   (* Neither read_error nor present: the store object answers nothing, and
@@ -3960,7 +3977,7 @@ let test_decode_memory_facts_rejects_a_shapeless_store () =
   let json =
     memory_fact_snapshot_json
       ~ordinary:(`Assoc [ "revision", `Int 3 ])
-      ~source_bound:(`Assoc [ "present", `Bool false ])
+      ~source_bound:(`Assoc [ "present", `Bool false ]) ()
   in
   Alcotest.(check bool) "a shapeless store is a decode error, not empty" true
     (Result.is_error (Tui_decode.decode_memory_fact_snapshot json))
@@ -4163,6 +4180,11 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
     lane_id label =
+  let jev =
+    if String.equal lane_id "board_attention_exact"
+    then [ "jev", `Assoc [ "state", `String "off" ] ]
+    else []
+  in
   `Assoc
     ([ "lane_id", `String lane_id
      ; "label", `String label
@@ -4187,7 +4209,13 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
-    ])
+    ]
+     @ jev)
+
+let replace_assoc_field name value = function
+  | `Assoc fields ->
+    `Assoc ((name, value) :: List.remove_assoc name fields)
+  | _ -> Alcotest.fail "expected an object fixture"
 
 (* The server collapses "nobody configured this lane" and "the registry could
    not be read" into one status word, and keeps them apart only in
@@ -4199,7 +4227,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
      Only the board lane's state varies. *)
   let snapshot configuration_state =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -4262,7 +4290,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
 let test_decode_standalone_lane_keeps_the_run_start () =
   let json =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -4327,7 +4355,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -4340,8 +4368,8 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
-      (* Against the fixture, not a literal: this read "all four lanes" 4 and
-         a fifth known lane broke it without anything about decoding changing. *)
+      (* Against the fixture, not a literal: adding a known lane must not
+         leave a stale expected count behind. *)
       Alcotest.(check int) "every lane in the fixture survives" (List.length lanes)
         (List.length snapshot.sls_lanes);
       let first = List.hd snapshot.sls_lanes in
@@ -4363,12 +4391,111 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         | Some lane -> lane
         | None -> Alcotest.fail "the verifier lane did not survive the decode"
       in
-      Alcotest.(check (option string)) "older v1 row remains readable" None
+      Alcotest.(check (option string)) "absent purpose remains explicit" None
         verifier.sl_purpose;
       Alcotest.(check string)
         "none retained"
         "none retained"
         (Tui_decode.standalone_lane_status_to_string verifier.sl_status)
+
+let test_decode_standalone_lane_jev_is_typed_and_required () =
+  let snapshot board =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
+      ; "generated_at", `String "2026-09-20T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 0
+      ; "exact_run_source_total", `Int 0
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            [ board
+            ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
+            ; standalone_lane_json "librarian_exact" "Librarian"
+            ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
+            ; standalone_lane_json "verifier_exact" "Verifier"
+            ] )
+      ]
+  in
+  let decode_board board =
+    match Tui_decode.decode_standalone_lanes_snapshot (snapshot board) with
+    | Error detail -> Error detail
+    | Ok snapshot ->
+      (match
+         List.find_opt
+           (fun (lane : Tui_decode.standalone_lane) ->
+              String.equal lane.sl_lane_id "board_attention_exact")
+           snapshot.sls_lanes
+       with
+       | Some lane -> Ok lane.sl_jev
+       | None -> Error "board lane missing")
+  in
+  let board = standalone_lane_json "board_attention_exact" "Board Attention" in
+  (match decode_board board with
+   | Ok (Some Tui_decode.Jev_off) -> ()
+   | Ok _ -> Alcotest.fail "off JEV state decoded to the wrong variant"
+   | Error detail -> Alcotest.fail detail);
+  let enabled =
+    replace_assoc_field "jev"
+      (`Assoc [ "state", `String "configured"; "model", `String "jev-next" ])
+      board
+  in
+  (match decode_board enabled with
+   | Ok (Some (Tui_decode.Jev_configured { model })) ->
+     Alcotest.(check string) "enabled model" "jev-next" model
+   | Ok _ -> Alcotest.fail "enabled JEV state decoded to the wrong variant"
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun model ->
+       let blank =
+         replace_assoc_field "jev"
+           (`Assoc [ "state", `String "configured"; "model", `String model ])
+           board
+       in
+       match decode_board blank with
+       | Ok _ -> Alcotest.fail "a blank JEV model decoded"
+       | Error detail ->
+         Alcotest.(check bool) "blank model fails closed" true
+           (String_util.contains_substring detail
+              "JEV model must be a non-empty string"))
+    [ ""; " \t " ];
+  List.iter
+    (fun (state, expected) ->
+       let unavailable =
+         replace_assoc_field "jev" (`Assoc [ "state", `String state ]) board
+       in
+       match decode_board unavailable with
+       | Ok (Some actual) ->
+         Alcotest.(check bool) "unavailable reason survives decoding" true
+           (actual = expected)
+       | Ok None -> Alcotest.fail "unavailable JEV state disappeared"
+       | Error detail -> Alcotest.fail detail)
+    [ "cli_only", Tui_decode.Jev_cli_only
+    ; "lane_unavailable", Tui_decode.Jev_lane_unavailable ];
+  List.iter
+    (fun state ->
+       let unknown =
+         replace_assoc_field "jev"
+           (`Assoc [ "state", `String state; "model", `String "jev-next" ]) board
+       in
+       match decode_board unknown with
+       | Ok _ -> Alcotest.fail "an unknown JEV state decoded"
+       | Error detail ->
+         Alcotest.(check bool) "unknown state fails closed" true
+           (String_util.contains_substring detail
+              ("standalone lane JEV state: unknown value " ^ state)))
+    [ "warming"; "on" ];
+  let without_jev =
+    match board with
+    | `Assoc fields -> `Assoc (List.remove_assoc "jev" fields)
+    | _ -> Alcotest.fail "expected an object fixture"
+  in
+  match decode_board without_jev with
+  | Ok _ -> Alcotest.fail "the Board lane decoded without its JEV projection"
+  | Error detail ->
+    Alcotest.(check bool) "missing projection fails closed" true
+      (String_util.contains_substring detail "missing required field 'jev'")
 
 (* The screen draws these words in a column sized for the longest one. *)
 let test_every_lane_status_word_fits_its_column () =
@@ -4484,7 +4611,7 @@ let test_decode_standalone_lanes_rejects_duplicate_ids () =
   let duplicate = standalone_lane_json "board_attention_exact" "Board" in
   let json =
     `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
@@ -5965,9 +6092,14 @@ let test_decode_runtime_resolved () =
       (match assignments with
        | [ a ] ->
            Alcotest.(check string) "keeper" "orbiter" a.Tui_decode.ra_keeper;
-           Alcotest.(check string) "source" "explicit" a.ra_source;
-           Alcotest.(check (option string)) "resolved id"
-             (Some "ollama_cloud.deepseek") a.ra_target_id
+           (match a.ra_source with
+            | Explicit_runtime -> ()
+            | Default_runtime -> Alcotest.fail "explicit source decoded as default");
+           (match a.ra_resolution with
+            | Runtime_assignment_lane lane_id ->
+              Alcotest.(check string) "resolved lane" "ollama_cloud.deepseek" lane_id
+            | Runtime_assignment_missing | Runtime_assignment_unavailable _ ->
+              Alcotest.fail "lane assignment lost its typed resolution")
        | other ->
            Alcotest.failf "expected one assignment, got %d" (List.length other))
 
@@ -6003,8 +6135,14 @@ let test_decode_unavailable_runtime_assignment () =
   (match Tui_decode.decode_runtime_resolved (unavailable reason) with
    | Ok (runtimes, [assignment]) ->
        Alcotest.(check int) "healthy runtime catalog remains visible" 2 (List.length runtimes);
-       Alcotest.(check (option string)) "configured unavailable identity survives" (Some "fixture.missing") assignment.ra_target_id;
-       Alcotest.(check (option string)) "unavailability is explicit" (Some "Capability catalog entry unavailable") assignment.ra_unavailable_reason
+       (match assignment.ra_resolution with
+        | Runtime_assignment_unavailable
+            { runtime_id; reason = Missing_catalog_model { provider_label; model_id } } ->
+          Alcotest.(check string) "configured unavailable identity survives" "fixture.missing" runtime_id;
+          Alcotest.(check string) "provider label survives" "fixture" provider_label;
+          Alcotest.(check string) "model id survives" "missing" model_id
+        | Runtime_assignment_lane _ | Runtime_assignment_missing ->
+          Alcotest.fail "unavailable assignment lost its typed resolution")
    | Ok _ -> Alcotest.fail "unavailable assignment lost"
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "missing reason cannot claim unavailable certainty" true
@@ -6950,7 +7088,17 @@ let test_decode_librarian_page_keeps_the_server_cursor () =
         (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
 let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
-    ?(completion = true) run_id =
+    ?(completion = true) ?failure run_id =
+  let completion_fields =
+    if completion then
+      [ "elapsed_s", `Float 1.25; "selected_slot", `String "qwen-primary" ]
+    else []
+  in
+  let failure_fields =
+    match failure with
+    | None -> []
+    | Some (code, detail) -> [ "code", `String code; "detail", `String detail ]
+  in
   `Assoc
     ([ "run_id", `String run_id
      ; "lane", `String lane
@@ -6958,10 +7106,8 @@ let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
      ; "started_at", `Float 100.
      ; "status", `String status
      ]
-     @
-     if completion then
-       [ "elapsed_s", `Float 1.25; "selected_slot", `String "qwen-primary" ]
-     else [])
+     @ completion_fields
+     @ failure_fields)
 
 let test_decode_lane_run_page_filters_to_one_lane () =
   let listing =
@@ -7009,6 +7155,30 @@ let test_decode_lane_run_page_running_run_has_no_completion_fields () =
            Alcotest.(check (option (pair (float 0.0) string))) "no next page"
              None page.Tui_decode.lrpg_next
        | _ -> Alcotest.fail "expected exactly one run")
+
+let test_decode_exact_lane_failure_keeps_reason () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ lane_run_summary_json
+                ~status:"failed"
+                ~failure:("missing_deadline", "target has no finite request window")
+                "lib-failed"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok { Tui_decode.lrpg_runs = [ run ]; _ } ->
+    (match run.Tui_decode.lrs_failure with
+     | Some failure ->
+       Alcotest.(check string) "failure code" "missing_deadline" failure.lrf_code;
+       Alcotest.(check string) "failure detail"
+         "target has no finite request window" failure.lrf_detail
+     | None -> Alcotest.fail "failed exact run dropped its failure")
+  | Ok _ -> Alcotest.fail "expected exactly one failed run"
 
 let test_decode_lane_run_status_is_typed () =
   let listing =
@@ -7115,7 +7285,23 @@ let lane_run_detail_json ?(output = true) run_id =
            @ (if output then
                 [ "elapsed_s", `Float 0.5
                 ; "selected_slot", `Null
-                ; "output", `Assoc [ "summary", `String "done" ]
+                ; ( "output"
+                  , `Assoc
+                      [ ( "verdict"
+                        , `Assoc
+                            [ "decision", `String "relevant"
+                            ; "rationale", `String "the Board post needs attention"
+                            ] )
+                      ; "slot_id", `String "jev-latest"
+                      ; ( "source"
+                        , `Assoc
+                            [ "kind", `String "vendor_system_one"
+                            ; "endpoint", `String "https://jev.invalid/v1/judge"
+                            ; "model", `String "jev-latest"
+                            ; "request_body_sha256", `String (String.make 64 'a')
+                            ] )
+                      ; "judged_at", `Float 42.
+                      ] )
                 ]
               else []))
       )
@@ -7142,8 +7328,17 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
       (match detail.Tui_decode.lrd_output with
        | Some (`Assoc fields) ->
            Alcotest.(check bool) "output payload" true
-             (List.assoc_opt "summary" fields = Some (`String "done"))
+             (List.assoc_opt "slot_id" fields = Some (`String "jev-latest"))
        | _ -> Alcotest.fail "a completed run carries its output");
+      (match detail.Tui_decode.lrd_answer_source with
+       | Some
+           (Tui_decode.Lane_run_answer_vendor_system_one
+              { model = "jev-latest"; endpoint }) ->
+         Alcotest.(check string)
+           "Vendor System One endpoint"
+           "https://jev.invalid/v1/judge"
+           endpoint
+       | _ -> Alcotest.fail "the Vendor System One answer source was not decoded");
       Alcotest.(check bool) "exact output has no tool loop" true
         (detail.Tui_decode.lrd_tool_evidence
          = Tui_decode.Lane_run_no_tools_by_contract);
@@ -7151,6 +7346,86 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
         (Tui_decode.lane_run_decision ~run_kind:detail.lrd_run_kind
            ~status:detail.lrd_status
          = Tui_decode.Lane_run_not_a_decision)
+
+let test_decode_board_answer_source_rejects_invented_selected_slot () =
+  let json =
+    match lane_run_detail_json "cmp-mismatch" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc
+        [ ( "run"
+          , `Assoc
+              (("selected_slot", `String "invented-slot")
+               :: List.remove_assoc "selected_slot" fields) )
+        ]
+    | _ -> Alcotest.fail "invalid Board detail fixture"
+  in
+  Alcotest.(check bool)
+    "Vendor System One cannot own a selected slot"
+    true
+    (Result.is_error (Tui_decode.decode_lane_run_detail json))
+
+let board_persistence_detail_json status persistence_state =
+  match lane_run_detail_json ("cmp-" ^ status) with
+  | `Assoc [ "run", `Assoc fields ] ->
+    let replaced = [ "status" ] in
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            ([ "status", `String status
+             ; "intended_status", `String "succeeded"
+             ; "persistence_error", `String "completion append did not settle"
+             ; "persistence_state", `String persistence_state
+             ]
+             @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) )
+      ]
+  | _ -> Alcotest.fail "invalid Board persistence fixture"
+;;
+
+let test_decode_board_answer_source_survives_persistence_failure () =
+  [ "completion_persistence_failed", "not_persisted"
+  ; "completion_durability_unknown", "durability_unknown"
+  ]
+  |> List.iter (fun (status, persistence_state) ->
+    match
+      Tui_decode.decode_lane_run_detail
+        (board_persistence_detail_json status persistence_state)
+    with
+    | Error detail -> Alcotest.failf "%s did not decode: %s" status detail
+    | Ok detail ->
+      (match detail.Tui_decode.lrd_answer_source with
+       | Some
+           (Tui_decode.Lane_run_answer_vendor_system_one
+              { model = "jev-latest"; _ }) ->
+         ()
+       | _ ->
+         Alcotest.failf "%s lost its Vendor System One answer source" status))
+;;
+
+let test_decode_terminal_lane_run_requires_selected_slot_field () =
+  let json =
+    match lane_run_detail_json "cmp-missing-selected-slot" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc [ "run", `Assoc (List.remove_assoc "selected_slot" fields) ]
+    | _ -> Alcotest.fail "invalid Board detail fixture"
+  in
+  Alcotest.(check bool)
+    "terminal selected_slot omission is not intentional Vendor attribution"
+    true
+    (Result.is_error (Tui_decode.decode_lane_run_detail json))
+;;
+
+let test_decode_running_lane_run_rejects_selected_slot_field () =
+  let json =
+    match lane_run_detail_json ~output:false "cmp-running-selected-slot" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc [ "run", `Assoc (("selected_slot", `Null) :: fields) ]
+    | _ -> Alcotest.fail "invalid running detail fixture"
+  in
+  Alcotest.(check bool)
+    "running selected_slot must be absent"
+    true
+    (Result.is_error (Tui_decode.decode_lane_run_detail json))
+;;
 
 let test_decode_lane_run_detail_running_has_no_output () =
   match
@@ -7305,8 +7580,13 @@ let test_lane_detail_distinguishes_null_missing_and_unavailable () =
     match lane_run_detail_json "recorded-null" with
     | `Assoc [ "run", `Assoc fields ] ->
       `Assoc [ "run", `Assoc
-        (("payload_availability", availability) :: output
-          @ (fields |> List.remove_assoc "payload_availability" |> List.remove_assoc "output")) ]
+        (("lane", `String "payload_fixture")
+         :: ("payload_availability", availability)
+         :: output
+         @ (fields
+            |> List.remove_assoc "lane"
+            |> List.remove_assoc "payload_availability"
+            |> List.remove_assoc "output")) ]
     | _ -> assert false
   in
   let available = lane_payload_availability ~running:false ~output:true in
@@ -8921,7 +9201,57 @@ let test_decode_file_change_reads_an_insert () =
         | Tui_decode.Fc_inserted { line; text } ->
           Alcotest.(check int) "line" 3 line;
           Alcotest.(check string) "the comment line" "# masc(alpha): why" text
-        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _ -> Alcotest.fail "expected an insert")
+        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _
+        | Tui_decode.Fc_materialized _ -> Alcotest.fail "expected an insert")
+     | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
+;;
+
+let test_decode_file_change_reads_a_materialize () =
+  (* [keeper_artifact_transfer materialize] writes a blob's bytes into a file.
+     The projection sends the blob's coordinates, not its text, so the reader
+     must accept the kind instead of rejecting the whole snapshot. *)
+  let sha256 = String.make 64 'a' in
+  let change =
+    `Assoc
+      [ ("at", `Float 1.)
+      ; ("keeper", `String "alpha")
+      ; ("turn", `Null)
+      ; ("task_id", `Null)
+      ; ("execution_id", `String "exec-1")
+      ; ("line_evidence", `Null)
+      ; ( "location"
+        , `Assoc
+            [ ("kind", `String "absolute"); ("path", `String "/tmp/poster.png") ] )
+      ; ( "change"
+        , `Assoc
+            [ ("kind", `String "materialize")
+            ; ("sha256", `String sha256)
+            ; ("bytes", `Int 4096)
+            ] )
+      ; ("succeeded", `Bool true)
+      ]
+  in
+  let snapshot =
+    `Assoc
+      [ ("keeper", `String "alpha")
+      ; ("window_hours", `Float 1.)
+      ; ("calls_in_window", `Int 1)
+      ; ("changes", `List [ change ])
+      ; ("over_budget", `Int 0)
+      ; ("malformed", `Int 0)
+      ]
+  in
+  match Tui_decode.decode_file_change_snapshot snapshot with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    (match snapshot.Tui_decode.fcs_changes with
+     | [ change ] ->
+       (match change.Tui_decode.fc_kind with
+        | Tui_decode.Fc_materialized { sha256 = got; bytes } ->
+          Alcotest.(check string) "the blob's sha256" sha256 got;
+          Alcotest.(check int) "the blob's byte count" 4096 bytes
+        | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _
+        | Tui_decode.Fc_inserted _ -> Alcotest.fail "expected a materialize")
      | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
 ;;
 
@@ -9149,6 +9479,8 @@ let () =
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick
           test_decode_memory_facts_keeps_store_states_apart;
+        Alcotest.test_case "memory facts keep event read errors" `Quick
+          test_decode_memory_facts_keeps_event_read_error;
         Alcotest.test_case "memory facts reject a shapeless store" `Quick
           test_decode_memory_facts_rejects_a_shapeless_store;
         Alcotest.test_case "project changes keep project scope" `Quick
@@ -9171,6 +9503,8 @@ let () =
           test_decode_standalone_lanes_keeps_running_and_no_retained_observation;
         Alcotest.test_case "keeps the newest run's start" `Quick
           test_decode_standalone_lane_keeps_the_run_start;
+        Alcotest.test_case "JEV state is typed and required" `Quick
+          test_decode_standalone_lane_jev_is_typed_and_required;
         Alcotest.test_case "rejects duplicate lane ids" `Quick
           test_decode_standalone_lanes_rejects_duplicate_ids;
         Alcotest.test_case "every lane status word fits its column" `Quick
@@ -9189,12 +9523,22 @@ let () =
           test_decode_lane_run_page_filters_to_one_lane;
         Alcotest.test_case "running run has no completion fields" `Quick
           test_decode_lane_run_page_running_run_has_no_completion_fields;
+        Alcotest.test_case "exact failure keeps code and detail" `Quick
+          test_decode_exact_lane_failure_keeps_reason;
         Alcotest.test_case "status decodes to a variant, unknown preserved" `Quick
           test_decode_lane_run_status_is_typed;
         Alcotest.test_case "verifier summary keeps subject and verdict" `Quick
           test_decode_verifier_lane_summary_keeps_subject_and_verdict;
         Alcotest.test_case "detail carries prompt and output" `Quick
           test_decode_lane_run_detail_carries_prompt_and_output;
+        Alcotest.test_case "Board answer source rejects an invented selected slot" `Quick
+          test_decode_board_answer_source_rejects_invented_selected_slot;
+        Alcotest.test_case "Board answer source survives persistence failure" `Quick
+          test_decode_board_answer_source_survives_persistence_failure;
+        Alcotest.test_case "terminal lane run requires selected_slot field" `Quick
+          test_decode_terminal_lane_run_requires_selected_slot_field;
+        Alcotest.test_case "running lane run rejects selected_slot field" `Quick
+          test_decode_running_lane_run_rejects_selected_slot_field;
         Alcotest.test_case "running detail has no output" `Quick
           test_decode_lane_run_detail_running_has_no_output;
         Alcotest.test_case "HITL advisory is not Gate resolution" `Quick
@@ -9657,5 +10001,8 @@ let () =
           test_required_display_keeps_rfc3339_string_verbatim
       ] );
     ( "file change"
-    , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert ] );
+    , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
+      ; Alcotest.test_case "reads a materialize" `Quick
+          test_decode_file_change_reads_a_materialize
+      ] );
   ]

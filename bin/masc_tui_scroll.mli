@@ -28,6 +28,9 @@ val step_uncounted : delta:int -> int -> int
     overlay opened over the Keepers surface was unlisted, and one up-key
     from the top stored -1. *)
 
+val page_step : height:int -> int
+(** A page of visible rows with the existing one-row overlap. *)
+
 val page_down : count:int -> height:int -> int -> int
 val page_up : count:int -> height:int -> int -> int
 (** A whole window, less one row kept from the window being left. Reading a

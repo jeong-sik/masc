@@ -378,6 +378,23 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
         Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.mf_claim)
         |> List.map (fun line -> "    " ^ line)
       in
+      let history =
+        Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
+          fact.mf_events.mfe_retrieved_count
+          (Message_layout.count_noun fact.mf_events.mfe_retrieved_distinct_days "day")
+          (match fact.mf_events.mfe_last_retrieved_at with
+           | None -> "never"
+           | Some at -> memory_fact_age_label at)
+          fact.mf_events.mfe_retracted_count
+          (List.length fact.mf_events.mfe_revised_from)
+      in
+      let history_prefix = detail_field "History:" "" in
+      let prefix_width = Message_layout.display_width history_prefix in
+      let history_lines =
+        Message_layout.wrap_words ~max_cells:(max 1 (cols - prefix_width)) history
+        |> List.mapi (fun index line ->
+             (if index = 0 then history_prefix else String.make prefix_width ' ') ^ line)
+      in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
       @ [ detail_field "Category:" fact.mf_category
@@ -386,18 +403,9 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
                fact.mf_origin (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
-        ; detail_field "Use:"
-            (Printf.sprintf "Retrieved %d · %s · last %s · Cited %d · Revised from %d"
-               fact.mf_events.mfe_retrieved_count
-               (Message_layout.count_noun
-                  fact.mf_events.mfe_retrieved_distinct_days "day")
-               (match fact.mf_events.mfe_last_retrieved_at with
-                | None -> "never"
-                | Some at -> memory_fact_age_label at)
-               fact.mf_events.mfe_cited_count
-               (List.length fact.mf_events.mfe_revised_from))
-        ; detail_field "Memory ID:" fact.mf_memory_id
         ]
+      @ history_lines
+      @ [ detail_field "Memory ID:" fact.mf_memory_id ]
   | Memory_row_source_fact fact ->
       let claim_lines =
         Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.msf_claim)
@@ -566,6 +574,7 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
         + (match snapshot.mfs_source with
            | Memory_store_read_error _ -> 1
            | Memory_store_absent | Memory_store_present _ -> 0)
+        + (match snapshot.mfs_events_read_error with None -> 0 | Some _ -> 1)
   in
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
@@ -701,7 +710,12 @@ let render_memory_facts_body ~cols ~budget (state : state)
         | Memory_store_read_error detail ->
             push_styled ~style:(Theme.bad ())
               ("  source-bound store: " ^ Terminal_text.single_line detail)
-        | Memory_store_absent | Memory_store_present _ -> ()));
+        | Memory_store_absent | Memory_store_present _ -> ());
+       (match snapshot.mfs_events_read_error with
+        | None -> ()
+        | Some detail ->
+          push_styled ~style:(Theme.bad ())
+            ("  events sidecar: " ^ Terminal_text.single_line detail)));
   let col_header =
     if is_fleet then
       Printf.sprintf "  %-10s %-12s %6s %s" "KEEPER" "CATEGORY" "AGE" "CLAIM / BOUND PATH"

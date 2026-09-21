@@ -457,6 +457,7 @@ let memory_state_with_facts () =
                   }
                 ]
             }
+      ; mfs_events_read_error = None
       };
   state
 
@@ -1766,6 +1767,7 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_required = false
   ; sl_status = Tui_decode.Standalone_idle
   ; sl_configuration_state = Tui_decode.Lane_ready
+  ; sl_jev = None
   ; sl_admitted_slots = []
   ; sl_cli_slots = []
   ; sl_dropped_slots = []

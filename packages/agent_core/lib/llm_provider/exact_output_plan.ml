@@ -131,10 +131,10 @@ let%test "timeout validation preserves the invalid value" =
 ;;
 
 (* Each [validate_timeout] accepts [None] on its own because either budget
-   alone bounds the request: on the non-streaming path the connect deadline
-   is the effective ceiling for headers and body together, and the body
-   deadline is a total ceiling. Both absent is the one combination that
-   leaves the wire with no deadline at all. *)
+   bounds its declared phase: on the non-streaming path the connect deadline
+   ends when the response headers arrive, while the body deadline is a total
+   request ceiling. Both absent is the one combination that leaves the wire
+   with no deadline at all. *)
 let validate_deadline_coverage
       ~connect_timeout_s
       ~body_timeout_s
@@ -226,6 +226,8 @@ let uses_anthropic_schema_prefill (config : Provider_config.t) messages =
 
 let request_uses_exact_cross_feature (request : Llm_transport.completion_request) =
   let config = request.config in
+  (* A binding's explicit effort is a validated request control, like
+     [enable_thinking]; it does not add tools or reasoning history. *)
   request.tools <> []
   || config.tool_stream
   || config.disable_parallel_tool_use
@@ -233,7 +235,6 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
       | None | Some Types.None_ -> false
       | Some _ -> true)
   || Option.is_some config.preserve_thinking
-  || Option.is_some config.reasoning_effort
   || Option.is_some config.clear_thinking
   || uses_anthropic_schema_prefill config request.messages
   || List.exists

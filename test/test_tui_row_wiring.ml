@@ -164,25 +164,27 @@ let test_the_overview_row_counts_every_approval_list () =
     "no confirm-queue count of its own in the Overview summary" 0
     (reads ~binding_name:"render_overview"
        ~fields:[ "aps_visible_count"; "aps_total_count" ]);
-  (* Both spellings: the file reaches this function qualified in some places
-     and bare in others, and which one a call site uses is not the fact under
-     test. Asking for only one of them is how this guard passed review while
-     counting zero. *)
-  Alcotest.(check int) "the row walks the list the badge walks" 1
+  (* The row and the ring must use the same population. The helper owns
+     the approval rows plus open questions, so the overview must call it
+     rather than rebuilding only one source. *)
+  Alcotest.(check int) "the row walks the shared pending helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"render_overview" ~callee:"approval_items"
+       ~binding_name:"render_overview"
+       ~callee:"approvals_surface_pending"
      + Ast_grep.count_calls_in_value_binding ~module_path:render
          ~binding_name:"render_overview"
-         ~callee:"Masc_tui_types.approval_items");
+         ~callee:"Masc_tui_types.approvals_surface_pending");
   (* Every list the walk can come up short or long on has to be able to mark
      the count unreliable. The gate poll was the one left out: a failed fetch
      fills gate_error and leaves the previous rows standing, so the row drew a
      bare number over a list the server no longer holds. *)
-  Alcotest.(check int) "every approval source can mark the count unreliable" 4
+  Alcotest.(check int) "every approval source can mark the count unreliable" 6
     (reads ~binding_name:"render_overview"
        ~fields:
          [ "approvals_error"
          ; "keeper_tool_approvals_error"
+         ; "asks_snapshot"
+         ; "asks_error"
          ; "gate_error"
          ; "gate_queue_unavailable"
          ])
@@ -413,6 +415,18 @@ let test_the_two_p50s_on_the_lanes_screen_agree () =
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
        ~binding_name:"standalone_lane_detail_lines"
        ~needle:" \xc2\xb7 p50 latency %.2fs")
+
+let test_board_lane_detail_draws_typed_jev_readiness () =
+  Alcotest.(check int) "the detail reads the decoded JEV field" 1
+    (reads ~binding_name:"standalone_lane_detail_lines" ~fields:[ "sl_jev" ]);
+  Alcotest.(check int) "the off state is explicit" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:render ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"JEV OFF");
+  Alcotest.(check int) "the configured state includes the model" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:render ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"JEV CONFIGURED \xc2\xb7 %s")
 
 (* The Code tree draws one arrow on a row that opens rather than reads, and
    it drew it from two places a branch apart: the selected row reached for
@@ -825,6 +839,8 @@ let () =
             test_a_detail_heading_is_spelled_the_way_a_heading_is
         ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
             test_the_two_p50s_on_the_lanes_screen_agree
+        ; Alcotest.test_case "Board lane detail draws typed JEV readiness" `Quick
+            test_board_lane_detail_draws_typed_jev_readiness
         ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick
             test_the_code_tree_draws_one_folder_arrow
         ; Alcotest.test_case "the chat failure rows say the subject once" `Quick

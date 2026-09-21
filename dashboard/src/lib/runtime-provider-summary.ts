@@ -209,6 +209,7 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     spec.provider?.is_non_interactive ? 'non-interactive' : null,
     typeof spec.provider?.custom_header_count === 'number' ? `headers:${spec.provider.custom_header_count}` : null,
     typeof spec.provider?.connect_timeout_s === 'number' ? `connect:${spec.provider.connect_timeout_s}s` : null,
+    typeof spec.provider?.exact_body_timeout_s === 'number' ? `Exact timeout:${spec.provider.exact_body_timeout_s}s` : null,
     behaviorParts.length > 0 ? `behavior:${behaviorParts.join(',')}` : null,
     typeof spec.model?.max_context === 'number' ? `ctx:${spec.model.max_context}` : null,
     typeof spec.model?.temperature === 'number' ? `temp:${spec.model.temperature}` : null,

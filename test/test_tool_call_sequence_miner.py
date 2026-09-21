@@ -74,6 +74,30 @@ def write_rows(path: Path, rows: Sequence[dict[str, Any] | str]) -> None:
 
 
 class ToolCallSequenceMinerTest(unittest.TestCase):
+    def test_schedule_is_named_and_outcome_rollup_is_fail_closed(self) -> None:
+        gaps: set[str] = set()
+        schedule = MINER._execution_schedule(fixture_call("scheduled", 1.0), gaps)
+
+        self.assertEqual(schedule.turn, 1)
+        self.assertEqual(schedule.planned_index, 0)
+        self.assertEqual(schedule.batch_index, 0)
+        self.assertEqual(schedule.batch_size, 1)
+        self.assertEqual(schedule.execution_mode, "serial")
+        self.assertFalse(schedule.directed_order_unproven)
+        self.assertEqual(gaps, set())
+        self.assertIs(
+            MINER._rollup_outcomes(
+                {MINER.CallOutcome.COMPLETED, MINER.CallOutcome.DEFERRED}
+            ),
+            MINER.CallOutcome.DEFERRED,
+        )
+        self.assertIs(
+            MINER._rollup_outcomes(
+                {MINER.CallOutcome.COMPLETED, MINER.CallOutcome.CONFLICT}
+            ),
+            MINER.CallOutcome.CONFLICT,
+        )
+
     def test_filters_groups_and_orders_by_timestamp_then_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

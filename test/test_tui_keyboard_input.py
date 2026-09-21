@@ -11878,14 +11878,17 @@ def runtime_resolved_response() -> HttpResponse:
                 {
                     "id": "primary",
                     "runtime_ids": ["runtime-a", "runtime-b"],
+                    "declared": True,
                 },
                 {
                     "id": "degraded",
                     "runtime_ids": ["runtime-c"],
+                    "declared": True,
                 },
                 {
                     "id": "unobserved",
                     "runtime_ids": ["runtime-d"],
+                    "declared": True,
                 },
             ],
             "assignments": [

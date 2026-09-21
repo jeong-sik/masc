@@ -4582,6 +4582,15 @@ type local_intervention =
   | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
   | Retained_after_stop
 
+(* The slot editor over the Lanes reading: which standalone lane it was opened
+   on, and where its cursor sits among that lane's declared slots. The slots
+   themselves are read from the lane list each time, so a write followed by a
+   re-read moves the editor with it. *)
+type standalone_slot_editor =
+  { sse_lane : string
+  ; sse_cursor : int
+  }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5261,6 +5270,10 @@ type state = {
      the change it has to show, so one more follows it. *)
   mutable standalone_lanes_reread_pending: bool;
   mutable standalone_lanes_generation: int;
+  (* The slot editor open over the Lanes reading, or [None]. It names the lane
+     rather than holding its slots: the list is re-read after every write, and
+     a copy taken when the editor opened would go stale in place. *)
+  mutable standalone_slot_editor: standalone_slot_editor option;
   (* The clients roster, off the ring under Runtime. Lanes is a top-level
      workspace. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
@@ -6958,6 +6971,7 @@ let create_state
   standalone_lanes_inflight = false;
   standalone_lanes_reread_pending = false;
   standalone_lanes_generation = 0;
+  standalone_slot_editor = None;
   clients_surface = None;
   clients_surface_error = None;
   clients_surface_inflight = false;
@@ -8439,6 +8453,12 @@ let plan_runtime_lane_edit (state : state) = function
                   (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
+        | Remove_lane, _ when not row.Tui_decode.rcr_lane_declared ->
+          Refuse_lane_edit
+            (Lane_write_refused
+               (Printf.sprintf
+                  "%s is a runtime, not a declared lane; there is no table to remove"
+                  lane))
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->
@@ -8448,12 +8468,158 @@ let plan_runtime_lane_edit (state : state) = function
              write Write_lane_removal ~cursor_after:(Some (max 0 (first_row - 1)))
            | Some _ | None -> Arm_lane_removal lane)))
 
+(* A row of the slot editor: a slot the lane declares, and whether publication
+   admitted it. A declared slot the catalog rejected keeps its place in the
+   file, so it is drawn and edited where it sits rather than left out -- the
+   admitted list alone cannot say where that is. *)
+type standalone_slot_row =
+  { ssr_slot : string
+  ; ssr_admitted : bool
+  }
+
+let standalone_slot_editor_rows (state : state) =
+  match state.standalone_slot_editor, state.standalone_lanes with
+  | None, _ | _, None -> []
+  | Some editor, Some snapshot ->
+    snapshot.Tui_decode.sls_lanes
+    |> List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
+         String.equal lane.Tui_decode.sl_lane_id editor.sse_lane)
+    |> Option.map (fun (lane : Tui_decode.standalone_lane) ->
+         List.map
+           (fun slot ->
+              { ssr_slot = slot
+              ; ssr_admitted =
+                  List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
+              })
+           lane.Tui_decode.sl_declared_slots)
+    |> Option.value ~default:[]
+;;
+
+let standalone_slot_editor_row (state : state) =
+  match state.standalone_slot_editor with
+  | None -> None
+  | Some editor -> List.nth_opt (standalone_slot_editor_rows state) editor.sse_cursor
+;;
+
+type standalone_slot_edit =
+  | Drop_slot
+  | Move_slot of runtime_lane_move
+
+let standalone_slot_edit_of_key = function
+  | "x" -> Some Drop_slot
+  | "J" -> Some (Move_slot Move_down)
+  | "K" -> Some (Move_slot Move_up)
+  | _ -> None
+;;
+
+(* What the editor sends: one slot and what to do with it, never a rebuilt
+   order. The writer reads the declaration under its lock, which is the only
+   place the file's own order is known -- this list is an admission reading
+   with the rejected slots put back, and a lane edited by another writer in
+   between would be overwritten by an order built from it. *)
+type standalone_slot_request =
+  | Drop_declared_slot
+  | Move_declared_slot of runtime_lane_move
+
+type standalone_slot_edit_plan =
+  | Send_slot_write of
+      { lane : string
+      ; slot : string
+      ; request : standalone_slot_request
+      ; cursor_after : int option
+      }
+  | Refuse_slot_edit of runtime_lane_notice
+
+let plan_standalone_slot_edit (state : state) edit =
+  match state.standalone_slot_editor with
+  | None -> Refuse_slot_edit (Lane_write_refused "the slot editor is not open")
+  | Some editor ->
+    let rows = standalone_slot_editor_rows state in
+    let count = List.length rows in
+    (match List.nth_opt rows editor.sse_cursor with
+     | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
+     | Some row ->
+       let lane = editor.sse_lane in
+       let slot = row.ssr_slot in
+       if runtime_lane_write_busy state
+       then Refuse_slot_edit Lane_write_pending
+       else (
+         match edit with
+         | Drop_slot ->
+           if count <= 1
+           then
+             (* The writer refuses it too. Saying so here keeps the round trip
+                for edits that can land. *)
+             Refuse_slot_edit
+               (Lane_write_refused
+                  (Printf.sprintf
+                     "%s is the last slot of %s; an exact-output lane needs at least one"
+                     slot
+                     lane))
+           else
+             Send_slot_write
+               { lane
+               ; slot
+               ; request = Drop_declared_slot
+               ; cursor_after =
+                   (if editor.sse_cursor = count - 1
+                    then Some (editor.sse_cursor - 1)
+                    else None)
+               }
+         | Move_slot move ->
+           let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
+           let target = editor.sse_cursor + by in
+           if target < 0 || target >= count
+           then
+             Refuse_slot_edit
+               (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge lane))
+           else
+             Send_slot_write
+               { lane
+               ; slot
+               ; request = Move_declared_slot move
+               ; cursor_after = Some target
+               }))
+;;
+
+(* What a Runtime row says about the position it holds in its lane. The
+   renderer spells and colours these; the reading itself is here because it is
+   the one fact that table exists to carry, and [Lane_undeclared] is not
+   derivable from the position alone. *)
+type runtime_lane_fact =
+  | Lane_undeclared
+      (* No [runtime.lanes.<id>] table declares this lane: it is the single
+         candidate an assignment naming a runtime rests on. It reads exactly
+         like [Lane_single_candidate] on the wire -- one candidate, first
+         position. A declared lane of one candidate walks no failover either;
+         what separates this one is that [D] has no table to remove. *)
+  | Lane_single_candidate
+  | Lane_head
+  | Lane_fallback of int
+
+let runtime_lane_fact_of_row (row : Tui_decode.runtime_candidate_row) =
+  if not row.Tui_decode.rcr_lane_declared then Lane_undeclared
+  else if row.Tui_decode.rcr_candidate_count = 1 then Lane_single_candidate
+  else if row.Tui_decode.rcr_position = 1 then Lane_head
+  else Lane_fallback (row.Tui_decode.rcr_position - 1)
+;;
+
 type runtime_pick_item =
   | Pick_lane of Tui_decode.runtime_resolved_lane
   | Pick_model of Tui_decode.runtime_option
 
 let runtime_picker_items (state : state) : runtime_pick_item list =
-  let lanes = List.map (fun lane -> Pick_lane lane) state.runtime_lanes in
+  (* Only declared lanes are offered as lanes. A lane no
+     [runtime.lanes.<id>] table declares carries the id of the runtime it
+     rests on and that runtime as its only candidate, so picking it writes the
+     same assignment as the [MODEL] row of the same id further down this
+     list -- the picker showed both and called one of them a lane. *)
+  let lanes =
+    state.runtime_lanes
+    |> List.filter (fun (lane : Tui_decode.runtime_resolved_lane) ->
+         lane.Tui_decode.rrl_declared)
+    |> List.map (fun lane -> Pick_lane lane)
+  in
   let models =
     state.runtime_catalog
     |> List.map (fun model -> Pick_model model)

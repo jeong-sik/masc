@@ -468,7 +468,7 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     refs.config = makeConfig({ selected_runtime_id: 'a.one' })
     refs.resolved.mockResolvedValue(makeRuntimeResolved({
       lanes: [
-        { id: 'lane-x', runtime_ids: ['a.one', 'b.two'] },
+        { id: 'lane-x', declared: true, runtime_ids: ['a.one', 'b.two'] },
       ],
       assignments: [
         { keeper: 'lane-keeper', assignment_source: 'explicit', resolved: { kind: 'lane', id: 'lane-x' } },

@@ -3293,28 +3293,24 @@ let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
     Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
-(* A lane shadows the runtime of the same id ([resolve_assignment] reads lanes
-   first), so a lane created under a runtime id would silently hand its
-   candidates to every keeper that names that runtime -- and to every keeper
-   without an assignment when it is the default. A runtime's own lane is
-   edited through [set_runtime_lane_candidates], which says what it does. *)
-let declares_runtime (config : Runtime_schema.config) id =
-  List.exists
-    (fun (binding : Runtime_schema.binding) -> String.equal (id_of_binding binding) id)
-    config.bindings
-;;
-
+(* A lane shadows the runtime of the same id: [resolve_assignment] reads lanes
+   first, so every keeper assigned to that runtime -- and, when it is
+   [\[runtime\].default], every keeper without an assignment -- walks the lane's
+   candidates instead of the bare runtime. That is what the shape is for, and
+   it is the shape the install path writes: [set_first_run_runtime] sets
+   [\[runtime\].default] to a runtime id and declares a lane of that same id
+   holding it and its fallbacks. This entry point used to refuse it, so the
+   one configuration setup produces was the one an operator could not
+   reproduce, while [set_runtime_lane_candidates] -- the [e]/[x]/[J]/[K]
+   writer -- created it without a word. The three agree now. The Runtime
+   surface marks which lanes a table declares so the shadowing is read
+   rather than guessed. *)
 let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
   let* lane_id = validated_lane_id lane_id in
   let* runtime_ids = validated_lane_candidates runtime_ids in
   edit_runtime_lanes ?runtime_config_path (fun ~content config ->
     if lane_is_declared config lane_id
     then Error (Printf.sprintf "lane %S already exists" lane_id)
-    else if declares_runtime config lane_id
-    then
-      Error
-        (Printf.sprintf
-           "%S is a runtime id; a new lane needs a name of its own" lane_id)
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
@@ -3473,4 +3469,100 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
              ~path:(exact_lane_table_path lane)
              ~key:"slots"
              ~values:(slots @ [ slot ])))
+;;
+
+(* Which way [move_exact_output_lane_slot] walks a slot through the declared
+   order. A lane's walk is that order, so one step is the whole edit; naming
+   the direction keeps the caller from sending an order rebuilt from what it
+   can see, which is the mistake {!append_exact_output_lane_slot} exists to
+   avoid. *)
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+
+(* Both edits below read the declaration under the write lock for the reason
+   the append does: the standalone-lane projection shows the slots the
+   registry admitted, so an order rebuilt from that view drops every declared
+   slot the catalog rejected. The caller names one slot, and the file's own
+   order decides the rest. *)
+let with_declared_exact_slots ~lane ~slot decide =
+  let slot = String.trim slot in
+  let lane_id = exact_lane_id lane in
+  if String.equal slot ""
+  then Error "slot must not be empty"
+  else if contains_newline slot
+  then Error "slot must not contain newlines"
+  else
+    Ok
+      (fun ~content config ->
+         let* () = exact_lane_editable ~content config lane in
+         let slots =
+           match exact_lane_decl config lane with
+           | Some decl -> decl.slot_ids
+           | None -> []
+         in
+         match List.find_index (String.equal slot) slots with
+         | None ->
+           Error
+             (Printf.sprintf
+                "%s is not a slot of %s; the lane declares %s"
+                slot
+                lane_id
+                (match slots with [] -> "none" | _ -> String.concat ", " slots))
+         | Some position ->
+           let* values = decide ~lane_id ~slot ~slots ~position in
+           Ok
+             (Toml_line_editor.edit_table_multiline_array
+                content
+                ~path:(exact_lane_table_path lane)
+                ~key:"slots"
+                ~values))
+;;
+
+let drop_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
+  let* edit =
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
+      match List.filteri (fun index _ -> index <> position) slots with
+      | [] ->
+        (* The same floor {!set_exact_output_lane_slots} holds: a mandatory
+           lane with no slot fails the boot fail-closed, and emptying a lane is
+           not the edit dropping its last slot means. Remove the lane's table
+           instead. *)
+        Error
+          (Printf.sprintf
+             "%s is the last slot of %s; an exact-output lane needs at least one"
+             slot
+             lane_id)
+      | remaining -> Ok remaining)
+  in
+  edit_runtime_lanes ?runtime_config_path edit
+;;
+
+let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
+  let* edit =
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
+      let count = List.length slots in
+      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 in
+      if target < 0 || target >= count
+      then
+        Error
+          (Printf.sprintf
+             "%s is already %s in %s"
+             slot
+             (match move with Move_slot_up -> "first" | Move_slot_down -> "last")
+             lane_id)
+      else
+        let at_position = List.nth slots position
+        and at_target = List.nth slots target in
+        Ok
+          (List.mapi
+             (fun index declared ->
+                if index = position
+                then at_target
+                else if index = target
+                then at_position
+                else declared)
+             slots))
+  in
+  edit_runtime_lanes ?runtime_config_path edit
 ;;

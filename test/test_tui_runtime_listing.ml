@@ -74,8 +74,8 @@ let lane_state () =
       rrs_default_runtime_id = Some "a";
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
-        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]};
-         {rrl_id = "solo"; rrl_runtime_ids = ["c"]}] } in
+        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+         {rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
   (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
    | Ok snapshot -> state.runtime_surface <- Some snapshot
    | Error detail -> Alcotest.fail detail);
@@ -303,7 +303,7 @@ let test_search_follows_the_runtime_mode () =
       rrs_default_runtime_id = Some "assigned";
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
       rrs_lanes =
-        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]}] } in
+        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
   let snapshot = match Masc.Tui_decode.join_runtime_surface
       ~probe:None ~probe_error:None ~resolved with
     | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
@@ -438,6 +438,160 @@ let test_narrow_target_column_still_tells_the_variants_apart () =
   Alcotest.(check bool) "the step survives the cut" true
     (Masc_tui_message_layout.display_width high = target)
 
+(* The slot editor's rows are the lane's declared order with each slot marked
+   by whether publication admitted it. A rejected slot keeps its place: the
+   admitted list alone cannot say where that is, and the editor moves and
+   drops by position. *)
+let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_lane =
+  { Masc.Tui_decode.sl_lane_id = lane_id
+  ; sl_label = lane_id
+  ; sl_purpose = None
+  ; sl_required = false
+  ; sl_status = Masc.Tui_decode.Standalone_idle
+  ; sl_configuration_state = Masc.Tui_decode.Lane_ready
+  ; sl_jev = None
+  ; sl_admitted_slots = admitted
+  ; sl_cli_slots = []
+  ; sl_dropped_slots =
+      List.filter (fun slot -> not (List.mem slot admitted)) declared
+  ; sl_declared_slots = declared
+  ; sl_admission_error = None
+  ; sl_retained_run_count = 0
+  ; sl_running_count = 0
+  ; sl_succeeded_count = 0
+  ; sl_failed_count = 0
+  ; sl_cancelled_count = 0
+  ; sl_last_started_at = None
+  ; sl_last_terminal_at = None
+  ; sl_last_outcome = None
+  ; sl_p50_elapsed_s = None
+  ; sl_selected_slots = []
+  }
+
+let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
+      ?(admitted = [ "a"; "b" ]) () =
+  let state = state () in
+  state.standalone_lanes <-
+    Some
+      { Masc.Tui_decode.sls_observed_at_unix = 0.
+      ; sls_exact_run_projection_count = 0
+      ; sls_exact_run_source_total = 0
+      ; sls_exact_run_projection_truncated = false
+      ; sls_lanes = [ standalone_lane ~lane_id:"librarian_exact" ~declared ~admitted ]
+      };
+  state.standalone_slot_editor <- Some { sse_lane = "librarian_exact"; sse_cursor = cursor };
+  state
+
+let slot_plan_text = function
+  | Send_slot_write { lane; slot; request; cursor_after } ->
+    Printf.sprintf "%s %s %s, cursor %s" lane
+      (match request with
+       | Drop_declared_slot -> "drop"
+       | Move_declared_slot Move_up -> "up"
+       | Move_declared_slot Move_down -> "down")
+      slot
+      (match cursor_after with Some row -> string_of_int row | None -> "stays")
+  | Refuse_slot_edit notice -> notice_text (Some notice)
+
+let test_the_slot_editor_edits_the_declared_order () =
+  let state = slot_editor_state () in
+  Alcotest.(check (list string)) "a rejected slot keeps its place"
+    [ "a (admitted)"; "rejected (declared)"; "b (admitted)" ]
+    (List.map
+       (fun row ->
+          Printf.sprintf "%s (%s)" row.ssr_slot
+            (if row.ssr_admitted then "admitted" else "declared"))
+       (standalone_slot_editor_rows state));
+  Alcotest.(check string) "the head cannot move up"
+    "refuse: a is already first in librarian_exact"
+    (slot_plan_text (plan_standalone_slot_edit state (Move_slot Move_up)));
+  Alcotest.(check string) "the head moves down"
+    "librarian_exact down a, cursor 1"
+    (slot_plan_text (plan_standalone_slot_edit state (Move_slot Move_down)));
+  let state = slot_editor_state ~cursor:1 () in
+  Alcotest.(check string) "a rejected slot is dropped like any other"
+    "librarian_exact drop rejected, cursor stays"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot));
+  let state = slot_editor_state ~cursor:2 () in
+  Alcotest.(check string) "dropping the last row moves the cursor up"
+    "librarian_exact drop b, cursor 1"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot))
+
+let test_the_slot_editor_keeps_the_last_slot () =
+  let state = slot_editor_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
+  Alcotest.(check string) "the lane needs one slot"
+    "refuse: only is the last slot of librarian_exact; an exact-output lane needs at least one"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot));
+  (* A write already out is the other refusal both editors share: the writer
+     reads the declaration, but a second write sent before the first is read
+     back would be planned against rows the first replaced. *)
+  state.runtime_lane_write <- Lane_write_posting;
+  Alcotest.(check string) "a write already out holds the next edit"
+    "pending"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot))
+
+let test_slot_editor_keys_parse () =
+  Alcotest.(check (list string)) "the editor's own keys"
+    [ "drop"; "down"; "up"; "none" ]
+    (List.map
+       (fun key ->
+          match standalone_slot_edit_of_key key with
+          | Some Drop_slot -> "drop"
+          | Some (Move_slot Move_down) -> "down"
+          | Some (Move_slot Move_up) -> "up"
+          | None -> "none")
+       [ "x"; "J"; "K"; "a" ])
+
+(* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
+   candidate in first position -- the same shape a declared lane holding one
+   candidate has. The row fact is the only thing that separates them. *)
+let fact_text = function
+  | Lane_undeclared -> "runtime, not a declared lane"
+  | Lane_single_candidate -> "single candidate"
+  | Lane_head -> "head"
+  | Lane_fallback position -> Printf.sprintf "fallback #%d" position
+
+let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_runtime_id = Some "a";
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes =
+        [{rrl_id = "solo"; rrl_runtime_ids = ["a"]; rrl_declared = true};
+         {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false};
+         {rrl_id = "pair"; rrl_runtime_ids = ["c"; "a"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "the surface did not join"
+   | Some snapshot ->
+     Alcotest.(check (list string)) "one fact per row"
+       ["single candidate"; "runtime, not a declared lane"; "head"; "fallback #1"]
+       (List.map (fun row -> fact_text (runtime_lane_fact_of_row row))
+          snapshot.Masc.Tui_decode.rss_candidates));
+  state.runtime_cursor <- 1;
+  expect_plan "D refuses the runtime row before arming" state remove
+    "refuse: b is a runtime, not a declared lane; there is no table to remove"
+
+(* An undeclared lane carries the id of the runtime it rests on, so offering
+   it as a lane put the same assignment in the picker twice -- once labelled a
+   lane that walks, once the runtime it actually is. *)
+let test_the_picker_offers_only_declared_lanes () =
+  let state = state () in
+  state.runtime_lanes <-
+    [{rrl_id = "coding"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+     {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false}];
+  state.runtime_catalog <- [runtime "a"; runtime "b"];
+  Alcotest.(check (list string)) "what the picker offers"
+    ["lane coding"; "model a"; "model b"]
+    (List.map
+       (function
+         | Pick_lane lane -> "lane " ^ lane.Masc.Tui_decode.rrl_id
+         | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
+        (runtime_picker_items state))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
@@ -463,4 +617,14 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "narrow rows keep the quota warning" `Quick
         test_narrow_rows_keep_the_fact_that_is_said_nowhere_else;
       Alcotest.test_case "narrow target column tells the variants apart" `Quick
-        test_narrow_target_column_still_tells_the_variants_apart]]
+        test_narrow_target_column_still_tells_the_variants_apart;
+      Alcotest.test_case "the slot editor edits the declared order" `Quick
+        test_the_slot_editor_edits_the_declared_order;
+      Alcotest.test_case "the slot editor keeps the last slot" `Quick
+        test_the_slot_editor_keeps_the_last_slot;
+      Alcotest.test_case "slot editor keys parse" `Quick
+        test_slot_editor_keys_parse;
+      Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
+        test_an_undeclared_lane_is_not_read_as_a_single_candidate;
+      Alcotest.test_case "the picker offers only declared lanes" `Quick
+        test_the_picker_offers_only_declared_lanes]]

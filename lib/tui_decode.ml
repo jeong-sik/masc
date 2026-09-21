@@ -169,6 +169,7 @@ type standalone_lane = {
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
+  sl_declared_slots : string list;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -2402,6 +2403,7 @@ type runtime_option = {
 type runtime_resolved_lane = {
   rrl_id : string;
   rrl_runtime_ids : string list;
+  rrl_declared : bool;
 }
 
 type runtime_resolved_snapshot = {
@@ -2414,6 +2416,7 @@ type runtime_resolved_snapshot = {
 
 type runtime_candidate_row = {
   rcr_lane_id : string;
+  rcr_lane_declared : bool;
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
@@ -4338,6 +4341,7 @@ let decode_runtime_default_member json =
 
 let decode_runtime_resolved_lane json =
   let* rrl_id = required_string_field json "id" in
+  let* rrl_declared = required_bool_field json "declared" in
   let* runtime_ids = required_list_field json "runtime_ids" in
   let* rrl_runtime_ids =
     decode_list "runtime_ids"
@@ -4367,7 +4371,7 @@ let decode_runtime_resolved_lane json =
     in
     loop rrl_runtime_ids
   in
-  Ok { rrl_id; rrl_runtime_ids }
+  Ok { rrl_id; rrl_runtime_ids; rrl_declared }
 
 let decode_runtime_resolved_snapshot json =
   let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
@@ -4489,6 +4493,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
            | Some runtime ->
                loop (position + 1)
                  ({ rcr_lane_id = lane.rrl_id
+                  ; rcr_lane_declared = lane.rrl_declared
                   ; rcr_position = position
                   ; rcr_candidate_count = candidate_count
                   ; rcr_runtime = runtime
@@ -5955,6 +5960,15 @@ let decode_standalone_lane json =
         | _ -> Error "dropped_slots: expected a string")
       dropped_slots
   in
+  let* declared_slots = required_list_field json "declared_slots" in
+  let* sl_declared_slots =
+    decode_list
+      "declared_slots"
+      (function
+        | `String slot_id -> Ok slot_id
+        | _ -> Error "declared_slots: expected a string")
+      declared_slots
+  in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -5982,6 +5996,7 @@ let decode_standalone_lane json =
     ; sl_admitted_slots
     ; sl_cli_slots
     ; sl_dropped_slots
+    ; sl_declared_slots
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count

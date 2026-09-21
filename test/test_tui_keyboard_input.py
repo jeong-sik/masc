@@ -10138,12 +10138,13 @@ def standalone_lane_fixture(
         "observation_only": True,
         "configured": True,
         "configuration_state": "ready",
+        "declared_slots": ["glm-coding.glm-5-turbo"],
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes three slot lists, not one: what the lane
-        # admitted, what it reaches over a CLI, and what its admission
-        # dropped. Omitting the last two fails the row decode, and the whole
-        # snapshot with it, so the observation matrix simply never draws --
-        # the surface has no per-row gap to show.
+        # The projection writes four slot lists, not one: what the lane
+        # declares, what admission kept, what it reaches over a CLI, and what
+        # admission dropped. Omitting any list fails the row decode, and the
+        # whole snapshot with it, so the observation matrix simply never
+        # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
         "dropped_slots": [],
         "admission_error": None,
@@ -11837,7 +11838,7 @@ def runtime_probe_response(*, fresh: bool) -> HttpResponse:
                 "providers": providers,
                 "errors": [] if fresh else ["runtime-c: network_error"],
                 "observations": ["provider metadata endpoints only"],
-                "limitations": ["no completion request"],
+                "limitations": ["no completion request", "CLI execution skipped"],
             },
         },
     )
@@ -11882,14 +11883,17 @@ def runtime_resolved_response() -> HttpResponse:
                 {
                     "id": "primary",
                     "runtime_ids": ["runtime-a", "runtime-b"],
+                    "declared": True,
                 },
                 {
                     "id": "degraded",
                     "runtime_ids": ["runtime-c"],
+                    "declared": True,
                 },
                 {
                     "id": "unobserved",
                     "runtime_ids": ["runtime-d"],
+                    "declared": True,
                 },
             ],
             "assignments": [
@@ -12093,6 +12097,8 @@ def runtime_surface_interaction(
                 # status in agreement, so the row said the status twice.
                 b"HTTP status: 200",
                 b"Latency: 18ms",
+                b"Probe limitation: no completion request",
+                b"Probe limitation: CLI execution skipped",
             ):
                 if needle not in lane_detail_plain:
                     raise AssertionError(

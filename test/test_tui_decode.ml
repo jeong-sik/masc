@@ -4214,6 +4214,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "admitted_slots", `List [ `String "qwen-primary" ]
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
+    ; "declared_slots", `List [ `String "qwen-primary" ]
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained
@@ -6066,6 +6067,7 @@ let runtime_resolved_json =
               ; ( "runtime_ids"
                 , `List
                     [ `String "ollama_cloud.deepseek"; `String "exact.embed" ] )
+              ; ("declared", `Bool true)
               ]
           ] )
     ; ( "assignments"
@@ -6131,9 +6133,53 @@ let test_decode_runtime_resolved_full () =
            Alcotest.(check string) "lane id" "ollama_cloud.deepseek" lane.Tui_decode.rrl_id;
            Alcotest.(check (list string)) "lane candidates"
              [ "ollama_cloud.deepseek"; "exact.embed" ]
-             lane.rrl_runtime_ids
+             lane.rrl_runtime_ids;
+           Alcotest.(check bool) "a table declares this lane" true lane.rrl_declared
        | _ -> Alcotest.fail "expected exactly one lane");
       Alcotest.(check int) "assignments decode" 1 (List.length assignments)
+
+(* [declared] tells a lane a table declares from the single candidate an
+   assignment naming a runtime rests on. The two are the same shape otherwise,
+   so a surface built without the field would read the second as a lane that
+   walks. Required, not defaulted: an older server answering without it is a
+   surface this build cannot read correctly. *)
+let test_decode_runtime_resolved_lane_needs_its_origin () =
+  let lane_without_origin =
+    `Assoc
+      [ "id", `String "solo"
+      ; "runtime_ids", `List [ `String "ollama_cloud.deepseek" ] ]
+  in
+  let json =
+    match runtime_resolved_json with
+    | `Assoc fields ->
+        `Assoc (("lanes", `List [ lane_without_origin ])
+                :: List.remove_assoc "lanes" fields)
+    | _ -> Alcotest.fail "runtime fixture is not an object"
+  in
+  (match Tui_decode.decode_runtime_resolved_full json with
+   | Ok _ -> Alcotest.fail "a lane without declared decoded"
+   | Error detail ->
+       Alcotest.(check bool) "the refusal names the field" true
+         (String_util.contains_substring detail "declared"));
+  let undeclared =
+    `Assoc
+      [ "id", `String "ollama_cloud.deepseek"
+      ; "runtime_ids", `List [ `String "ollama_cloud.deepseek" ]
+      ; "declared", `Bool false ]
+  in
+  let json =
+    match runtime_resolved_json with
+    | `Assoc fields ->
+        `Assoc (("lanes", `List [ undeclared ]) :: List.remove_assoc "lanes" fields)
+    | _ -> Alcotest.fail "runtime fixture is not an object"
+  in
+  match Tui_decode.decode_runtime_resolved_full json with
+  | Error detail -> Alcotest.fail detail
+  | Ok (_, lanes, _) ->
+      (match lanes with
+       | [ lane ] ->
+           Alcotest.(check bool) "no table declares it" false lane.Tui_decode.rrl_declared
+       | other -> Alcotest.failf "expected one lane, got %d" (List.length other))
 
 let test_decode_unavailable_runtime_assignment () =
   let with_resolution resolved =
@@ -6198,7 +6244,12 @@ let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
 
 let runtime_probe_surface_json ?(first_status = "reachable")
     ?(probe_status = "degraded") ?(first_reachable = `Bool true)
-    ?(source = "runtime.toml") () =
+    ?(source = "runtime.toml")
+    ?(limitations =
+      `List
+        [ `String "no completion request"
+        ; `String "CLI execution skipped"
+        ]) () =
   let providers =
     [ runtime_probe_provider ~status:first_status ~reachable:first_reachable
         "runtime-a"
@@ -6236,7 +6287,7 @@ let runtime_probe_surface_json ?(first_status = "reachable")
           ; "providers", `List providers
           ; "errors", `List [ `String "runtime-c: network_error" ]
           ; "observations", `List [ `String "metadata endpoints only" ]
-          ; "limitations", `List [ `String "no completion request" ]
+          ; "limitations", limitations
           ] )
     ]
 
@@ -6253,10 +6304,11 @@ let resolved_runtime id provider model =
     ; "is_default", `Bool false
     ]
 
-let runtime_lane id runtime_ids =
+let runtime_lane ?(declared = true) id runtime_ids =
   `Assoc
     [ "id", `String id
     ; "runtime_ids", `List (List.map (fun runtime_id -> `String runtime_id) runtime_ids)
+    ; "declared", `Bool declared
     ]
 
 let runtime_resolved_surface_json () =
@@ -6401,6 +6453,34 @@ let test_runtime_probe_rejects_status_reachability_disagreement () =
   with
   | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
   | Error _ -> ()
+
+let test_runtime_probe_preserves_limitations () =
+  match Tui_decode.decode_runtime_probe_snapshot (runtime_probe_surface_json ()) with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+      Alcotest.(check (list string)) "producer limitations"
+        [ "no completion request"; "CLI execution skipped" ]
+        snapshot.rps_limitations
+
+let test_runtime_probe_accepts_empty_limitations () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json ~limitations:(`List []) ())
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+      Alcotest.(check (list string)) "no limitations" [] snapshot.rps_limitations
+
+let test_runtime_probe_rejects_malformed_limitations () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json
+         ~limitations:(`List [ `String "typed"; `Int 1 ]) ())
+  with
+  | Ok _ -> Alcotest.fail "a non-string runtime probe limitation decoded"
+  | Error detail ->
+      Alcotest.(check string) "malformed limitation points to the exact element"
+        "field 'limitations[1]' must be a string (received int)" detail
 
 (* The server names the file this snapshot was read from and the decoder
    refuses any other name, so the two have to agree on one string. They now
@@ -9377,6 +9457,12 @@ let () =
           test_runtime_probe_status_round_trips
       ; Alcotest.test_case "rejects status/reachability disagreement" `Quick
           test_runtime_probe_rejects_status_reachability_disagreement
+      ; Alcotest.test_case "preserves producer limitations" `Quick
+          test_runtime_probe_preserves_limitations
+      ; Alcotest.test_case "accepts an empty limitation list" `Quick
+          test_runtime_probe_accepts_empty_limitations
+      ; Alcotest.test_case "rejects a malformed limitation list" `Quick
+          test_runtime_probe_rejects_malformed_limitations
       ; Alcotest.test_case "rejects a source that is not the runtime config"
           `Quick test_runtime_probe_rejects_a_source_that_is_not_the_runtime_config
       ; Alcotest.test_case "catalog probe is independent of dispatch" `Quick
@@ -9394,7 +9480,9 @@ let () =
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;
         Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
-          test_decode_unavailable_runtime_assignment
+          test_decode_unavailable_runtime_assignment;
+        Alcotest.test_case "a lane says whether a table declares it" `Quick
+          test_decode_runtime_resolved_lane_needs_its_origin
       ] );
     ( "decode_keeper_tool_approvals",
       [ Alcotest.test_case "carries the whole ask" `Quick

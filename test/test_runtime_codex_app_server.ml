@@ -2520,7 +2520,7 @@ candidates = ["projection.http", "codex.codex"]
                                 ; keeper_name = meta.name
                                 }
                               in
-                              Keeper_agent_run.run_turn
+                              (Keeper_agent_run.run_turn
                                 ~config
                                 ~meta
                                 ~publication_recovery
@@ -2546,7 +2546,7 @@ candidates = ["projection.http", "codex.codex"]
                                      ~detail:"test fixture has no Skill publication")
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
-                                ()))))))
+                                ()).Keeper_agent_run.result))))))
 ;;
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model

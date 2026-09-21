@@ -1162,15 +1162,32 @@ let test_a_lane_the_default_walks_is_not_removed () =
       Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"runpod_mtp.qwen" ()))
 ;;
 
-(* A new lane under a runtime id would take over that runtime for every keeper
-   that names it. That runtime's own lane is what [set] writes. *)
-let test_a_new_lane_under_a_runtime_id_is_refused () =
+(* A lane named after a runtime takes that runtime over for every keeper that
+   names it, which is the shape [set_first_run_runtime] writes at install and
+   the one [set_runtime_lane_candidates] has always produced. [create] used to
+   be the only writer refusing it. *)
+let test_a_new_lane_under_a_runtime_id_is_declared () =
   with_runtime_file (fun path ->
-    lane_write_refused "create" ~path ~names:[ "is a runtime id" ] (fun () ->
-      Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
-        ~runtime_ids:[ "openai.gpt" ] ());
-    Alcotest.(check bool) "no lane was declared" true
-      (Option.is_none (Runtime.get_lane_by_id "openai.small")))
+    lane_write_ok "create under a runtime id"
+      (Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
+         ~runtime_ids:[ "openai.small"; "openai.gpt" ] ());
+    match Runtime.get_lane_by_id "openai.small" with
+    | None -> Alcotest.fail "the lane was not declared"
+    | Some lane -> (
+      Alcotest.(check (list string))
+        "the lane shadows the runtime with its own candidates"
+        [ "openai.small"; "openai.gpt" ]
+        (Runtime_lane.ordered_candidates lane);
+      (* The point of allowing it: a keeper that names the runtime now walks
+         the lane, which is what [resolve_assignment] reads first. *)
+      (match Runtime.resolve_assignment "openai.small" with
+       | `Lane resolved ->
+         Alcotest.(check (list string))
+           "the assignment resolves through the lane"
+           [ "openai.small"; "openai.gpt" ]
+           (Runtime_lane.ordered_candidates resolved)
+       | `Missing | `Unavailable _ ->
+         Alcotest.fail "the runtime id no longer resolves")))
 ;;
 
 (* A lane written inline has no header for the line editor to remove. With no
@@ -1347,6 +1364,52 @@ let test_an_exact_slot_append_keeps_the_declared_order () =
     |> lane_write_ok "append to an undeclared lane";
     Alcotest.(check (list string)) "an undeclared lane starts with the slot"
       [ "openai.gpt" ] (exact_lane_slots path "hitl_auto_judge"))
+;;
+
+(* [drop] and [move] read the same declaration under the same lock, for the
+   same reason: the caller sees the admitted slots and an order rebuilt from
+   them would delete the rest. Each names one slot and the file's order
+   decides where it goes. *)
+let test_an_exact_slot_drop_and_move_read_the_declaration () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention
+      ~slots:[ "catalog.only"; "openai.gpt"; "runpod_mtp.qwen" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen"
+      ~move:Runtime.Move_slot_up ()
+    |> lane_write_ok "move a slot up";
+    Alcotest.(check (list string)) "the slot swapped with the one above it"
+      [ "catalog.only"; "runpod_mtp.qwen"; "openai.gpt" ]
+      (exact_lane_slots path "board_attention_exact");
+    Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"catalog.only" ()
+    |> lane_write_ok "drop the head";
+    Alcotest.(check (list string)) "the rest keep their order"
+      [ "runpod_mtp.qwen"; "openai.gpt" ]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "move past the head" ~path
+      ~names:[ "runpod_mtp.qwen is already first in board_attention_exact" ]
+      (fun () ->
+         Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen"
+           ~move:Runtime.Move_slot_up ());
+    lane_write_refused "drop a slot the lane does not declare" ~path
+      ~names:[ "is not a slot of board_attention_exact"; "runpod_mtp.qwen, openai.gpt" ]
+      (fun () ->
+         Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"catalog.only" ());
+    Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()
+    |> lane_write_ok "drop down to one";
+    (* A lane that resolves to nothing fails the boot fail-closed, so the last
+       slot stays; removing the lane is the other edit. *)
+    lane_write_refused "drop the last slot" ~path
+      ~names:[ "is the last slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ()))
 ;;
 
 (* A CLI slot is declared on the lane too. The registry refuses the same id as
@@ -3210,7 +3273,7 @@ let () =
         ; Alcotest.test_case
             "a new lane under a runtime id is refused"
             `Quick
-            test_a_new_lane_under_a_runtime_id_is_refused
+            test_a_new_lane_under_a_runtime_id_is_declared
         ; Alcotest.test_case
             "an inline lane is not reported removed"
             `Quick
@@ -3223,6 +3286,10 @@ let () =
             "an exact slot append keeps the declared order"
             `Quick
             test_an_exact_slot_append_keeps_the_declared_order
+        ; Alcotest.test_case
+            "an exact slot drop and move read the declaration"
+            `Quick
+            test_an_exact_slot_drop_and_move_read_the_declaration
         ; Alcotest.test_case
             "an exact append or set refuses a declared CLI slot"
             `Quick

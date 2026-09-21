@@ -69,7 +69,7 @@ SCENARIOS = [
         "name": "pre_checkpoint_failover",
         "authority_transition": "retryable first attempt -> next candidate -> winner checkpoint owner",
         "user_outcome": "one final response",
-        "evidence": ["attempt_sequence", "fallback_reason", "winner_owner"],
+        "evidence": ["attempt_sequence", "degraded_retry_applied.reason", "winner_owner"],
         "targets": ["@test/runtest-test_keeper_turn_driver_failover"],
     },
     {

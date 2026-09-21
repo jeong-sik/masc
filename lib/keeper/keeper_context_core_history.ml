@@ -36,10 +36,10 @@ let classify_history_entry ~(source : string) : history_line_action =
   else Keep_main
 
 let main_history_path ~(session_dir : string) : string =
-  Filename.concat session_dir "history.jsonl"
+  Filename.concat session_dir Keeper_types_support.history_file_name
 
 let internal_history_path ~(session_dir : string) : string =
-  Filename.concat session_dir "history.internal.jsonl"
+  Filename.concat session_dir Keeper_types_support.internal_history_file_name
 
 let history_path_for_source ~(session_dir : string) ~(source : string option) :
     string =
@@ -71,18 +71,13 @@ let not_recorded ~keeper_name ~turn_ref ~path ~site detail =
     ~labels:[ "keeper", keeper_name; "site", site ]
     ()
 
+(* The session directory appears when something is stored in it; the append
+   primitive creates the parent, as it does for the turn-boundary log. Past
+   the cancellation arm every exception is reported and swallowed: the turn
+   that called has its checkpoint and owes the reader nothing here. *)
 let append_line ~keeper_name ~turn_ref ~path line =
-  (* The session directory appears when something is stored in it, so the
-     first append is what opens it. The three durable-save primitives the
-     checkpoint store uses create their own parent — [save_atomic] directly,
-     [save_bytes_durable_atomic_observed] and [save_encoded_durable_atomic_from]
-     through [save_pieces_durable_atomic_core] — and this is the only writer
-     under a session directory that appends instead. *)
   let failed = not_recorded ~keeper_name ~turn_ref ~path ~site:"append" in
-  match
-    let (_created : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
-    Fs_compat.append_private_jsonl_durable_locked_result path line
-  with
+  match Fs_compat.append_private_jsonl_durable_locked_result path line with
   | Fs_compat.Private_file_succeeded () -> ()
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
       Log.Keeper.warn
@@ -102,6 +97,7 @@ let append_line ~keeper_name ~turn_ref ~path line =
   | exception Sys_error message -> failed message
   | exception Unix.Unix_error (code, fn, arg) ->
       failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+  | exception exn -> failed (Printexc.to_string exn)
 
 let line_of_fields fields = Yojson.Safe.to_string (`Assoc fields) ^ "\n"
 

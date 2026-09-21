@@ -221,7 +221,7 @@ let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
 
 type runtime_case =
   | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run
-  | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+  | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure
 
 let runtime_case_name = function
@@ -233,6 +233,8 @@ let runtime_case_name = function
   | Invalid_json_run -> "invalid-json"
   | Invalid_response_run -> "invalid-response"
   | Nonfinite_response_run -> "nonfinite-response"
+  | Duplicate_response_run -> "duplicate-response"
+  | Nonutf8_response_run -> "nonutf8-response"
   | Invalid_answer_run -> "invalid-answer"
   | Memory_write_failure -> "memory-write-failure"
 ;;
@@ -241,6 +243,8 @@ let invalid_response_body = function
   | Invalid_json_run -> Some "not JSON: \"fixture\"\nsecond line"
   | Invalid_response_run -> Some {|{"model":"malformed-fixture","answers":[]}|}
   | Nonfinite_response_run -> Some {|{"model":"nonfinite-fixture","answers":{"s0_0":{"type":"noul","noul":NaN},"s1_0":{"type":"noul","noul":0.0}}}|}
+  | Duplicate_response_run -> Some {|{"model":"duplicate-fixture","answers":{"s0_0":{"type":"noul","noul":1.0},"s0_0":{"type":"noul","noul":0.0}}}|}
+  | Nonutf8_response_run -> Some ("{\"model\":\"binary-" ^ String.make 1 (Char.chr 255) ^ "\",\"answers\":{}}")
   | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run
   | Http_failure | Invalid_answer_run | Memory_write_failure -> None
 ;;
@@ -249,7 +253,7 @@ let runtime_skip_reason = function
   | Gate_disabled_run -> Some "absorb_gate_disabled"
   | Lane_disabled_run -> Some "lane_disabled"
   | Missing_key_run -> Some "missing_api_key"
-  | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+  | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure -> None
 ;;
 
@@ -319,7 +323,7 @@ let run_runtime_evidence ?fixture_dir () =
       | Judged_run -> claims @
           [ `Assoc [ "claim", `String (String.make 70000 'x' ^ "EXACT_OUTPUT_TAIL")
                    ; "category", `String "fact" ] ]
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure -> claims
     in
     let answer = `Assoc
@@ -363,11 +367,11 @@ let run_runtime_evidence ?fixture_dir () =
             Alcotest.fail "the directory must fail the Memory file read"
           with Sys_error _ as exn ->
             observed_storage_error := Some (Printexc.to_string exn))
-       | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Invalid_answer_run -> ());
+       | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
       match scenario with
       | Http_failure -> Cohttp_eio.Server.respond_string
           ~status:`Service_unavailable ~body:"fixture unavailable" ()
-      | Invalid_json_run | Invalid_response_run | Nonfinite_response_run ->
+      | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run ->
         Cohttp_eio.Server.respond_string ~status:`OK
           ~body:(Option.get (invalid_response_body scenario)) ()
       | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Invalid_answer_run | Memory_write_failure ->
@@ -417,6 +421,8 @@ let run_runtime_evidence ?fixture_dir () =
       (Runs.status_label run.status);
     let original = Runs.run_to_yojson run in
     let encoded = Yojson.Safe.to_string ~std:true original in
+    Alcotest.(check bool) "the complete durable report is valid UTF-8" true
+      (String_util.is_valid_utf8 encoded);
     List.iter (fun secret ->
       Alcotest.(check bool) "configured URL credentials are absent from durable output" false
         (String_util.contains_substring encoded secret))
@@ -433,7 +439,7 @@ let run_runtime_evidence ?fixture_dir () =
        Alcotest.(check string) "the actual storage exception reaches run detail"
          expected
          (member "detail" original |> string)
-     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Invalid_answer_run -> ());
+     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
     let replayed = Runs.get (Runs.replay registry_path) ~run_id:run.run_id |> Option.get in
     check_json "the full execution evidence survives disk replay"
       original (Runs.run_to_yojson replayed);
@@ -445,7 +451,7 @@ let run_runtime_evidence ?fixture_dir () =
     let expected_status = match scenario with
       | Judged_run | Memory_write_failure -> "judged"
       | Gate_disabled_run | Lane_disabled_run | Missing_key_run -> "skipped"
-      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Invalid_answer_run -> "open" in
+      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> "open" in
     Alcotest.(check string) "gate status" expected_status (member "status" gate |> string);
     (match scenario with
      | Gate_disabled_run | Lane_disabled_run | Missing_key_run ->
@@ -454,7 +460,7 @@ let run_runtime_evidence ?fixture_dir () =
        check_json "a skipped gate has no applied boundary" `Null
          (member "conveyed_boundary" gate);
        check_json "no invented evaluations" `Null (member "evaluations" gate)
-     | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+     | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure ->
        Alcotest.(check (float 0.)) "the gate records the applied probability boundary"
          Gate.conveyed_boundary
@@ -473,7 +479,7 @@ let run_runtime_evidence ?fixture_dir () =
          (member "model" sent |> string);
        (match scenario with
         | Http_failure ->
-          let reason = "typesafeai: HTTP 503: fixture unavailable" in
+          let reason = Printf.sprintf "typesafeai: HTTP 503 returned by %s: fixture unavailable" displayed_jev_uri in
           Alcotest.(check string) "original HTTP failure" reason (member "reason" gate |> string);
           Alcotest.(check string) "evaluation failure" "failed" (member "status" evaluation |> string);
           Alcotest.(check string) "same evaluation failure" reason (member "reason" evaluation |> string);
@@ -482,7 +488,7 @@ let run_runtime_evidence ?fixture_dir () =
           Alcotest.(check string) "actual HTTP failure body" "fixture unavailable" (member "body" failure |> string);
           List.iter (fun key -> check_json ("failure does not invent " ^ key)
             `Null (member key evaluation)) [ "model"; "answers"; "request_body_sha256" ]
-        | Invalid_json_run | Invalid_response_run | Nonfinite_response_run ->
+        | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run ->
           Alcotest.(check string) "a rejected HTTP response is a failed evaluation" "failed"
             (member "status" evaluation |> string);
           let failure = member "failure" evaluation in
@@ -490,8 +496,22 @@ let run_runtime_evidence ?fixture_dir () =
             (member "kind" failure |> string);
           Alcotest.(check int) "actual successful HTTP status survives decoding failure" 200
             (member "status" failure |> Yojson.Safe.Util.to_int);
+          let original_body = Option.get (invalid_response_body scenario) in
+          let body = member "body" failure in
+          let restored = match body with
+            | `String body -> body
+            | body ->
+              Alcotest.(check string) "binary evidence is explicitly encoded" "base64"
+                (member "encoding" body |> string);
+              Alcotest.(check int) "binary evidence records its original length"
+                (String.length original_body)
+                (member "total_bytes" body |> Yojson.Safe.Util.to_int);
+              Base64.decode_exn (member "content" body |> string)
+          in
           Alcotest.(check string) "the exact returned body survives durable replay"
-            (Option.get (invalid_response_body scenario)) (member "body" failure |> string);
+            original_body restored;
+          Alcotest.(check string) "failure destination is retained for all consumers"
+            displayed_jev_uri (member "destination_uri" failure |> string);
           Alcotest.(check bool) "typed failure diagnostic is retained" true
             (String.length (member "detail" failure |> string) > 0);
           List.iter (fun key -> check_json ("decode failure does not invent " ^ key)
@@ -519,13 +539,13 @@ let run_runtime_evidence ?fixture_dir () =
      | Memory_write_failure ->
        Unix.rmdir current_path;
        Unix.rename saved_path current_path
-     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Invalid_answer_run -> ());
+     | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
     let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
       | Some snapshot -> snapshot
       | None -> Alcotest.fail "current snapshot is missing" in
     let expected_facts = match scenario with
       | Judged_run -> b :: untouched :: selection.new_claims
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Invalid_answer_run -> untouched :: selection.new_claims
+      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> untouched :: selection.new_claims
       | Memory_write_failure -> seeded.facts in
     Alcotest.(check (list string)) "correct originals remain current"
       (List.sort String.compare (List.map id expected_facts))
@@ -536,7 +556,7 @@ let run_runtime_evidence ?fixture_dir () =
       | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
     let archived = match scenario with
       | Judged_run -> [ a.claim ]
-      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Invalid_answer_run -> [ a.claim; b.claim ]
+      | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> [ a.claim; b.claim ]
       | Memory_write_failure -> [] in
     Alcotest.(check (list string)) "only applied originals are archived"
       (List.sort String.compare archived)
@@ -554,6 +574,7 @@ let run_runtime_evidence ?fixture_dir () =
         (`Assoc [ "scenario", `String case_name; "detail", detail; "page", page ])) fixture_dir)
     [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run
     ; Http_failure; Invalid_json_run; Invalid_response_run; Nonfinite_response_run
+    ; Duplicate_response_run; Nonutf8_response_run
     ; Invalid_answer_run; Memory_write_failure ]
 ;;
 

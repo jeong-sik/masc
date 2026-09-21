@@ -191,6 +191,8 @@ let test_purge_plan_removes_the_progress_file () =
   let has artifact = List.exists (fun entry -> entry = artifact) plan in
   check bool "plan removes the progress file" true
     (has Shutdown.Keeper_librarian_progress_artifact);
+  check bool "plan removes the committed-range receipt" true
+    (has Shutdown.Keeper_librarian_range_receipt_artifact);
   check bool "and the log it is a position in" true
     (has Shutdown.Keeper_turn_boundaries_artifact)
 ;;

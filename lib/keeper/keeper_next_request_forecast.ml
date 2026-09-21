@@ -322,11 +322,10 @@ let record_runtime (record : Turn_record.t) =
   | None -> record.Turn_record.runtime_profile
 ;;
 
-(* A keeper that calls tools on most turns leaves mostly post-tool records
-   (lane-smith: one first-round record in thirteen on 2026-09-16), so the
-   read reaches back as far as the carried front's seed does, for the same
-   reason: most records are another lane's. *)
-let recent_records_read = Keeper_carried_front.records_read
+(* Recent compositions are diagnostic samples (lane-smith: one first-round
+   record in thirteen on 2026-09-16). This limit does not bound the search
+   for the carried front's last response observation. *)
+let recent_records_read = 200
 
 (* Every record with an exact composition is read; [select_parts] decides
    which lane and which completion each figure may come from. [finish_reason]
@@ -392,13 +391,15 @@ let candidate
   =
   let runtime = Runtime.get_runtime_by_id runtime_id in
   let lane = lane_for ~runtime_id runtime in
+  let marks = Runtime.context_marks_of_runtime_id runtime_id in
   let parts = select_parts ~runtime_id ~records_read readings in
   let carried =
     match lane with
     | Error _ -> None
     | Ok () ->
-      (* The same front the turn driver composes from: the pair's ledger
-         while this history holds its positions, else the seed the newest
+      (* Apply the driver's boundary policy to a local value; the Table
+         remains the observation the next real turn will read. If this
+         history no longer holds its positions, use the seed the newest
          response-observed record on the trace gives every candidate alike.
          The forecast only reads: a ledger that does not hold is passed over
          here and dropped by the turn driver's next composition. *)
@@ -407,8 +408,13 @@ let candidate
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
         | Some ledger when Keeper_model_input_ledger.holds ~digest_at ledger ->
-          Keeper_carried_front.of_ledger ledger, ledger.Keeper_model_input_ledger.total_tokens
-        | Some _ | None -> seed, None
+          let projected =
+            match marks with
+            | None -> ledger
+            | Some marks -> fst (Keeper_carried_range.apply_turn_boundary ~marks ledger)
+          in
+          Keeper_carried_front.of_ledger projected, ledger.Keeper_model_input_ledger.total_tokens
+        | Some _ | None -> Lazy.force seed, None
       in
       Some
         (carry
@@ -424,7 +430,7 @@ let candidate
   in
   { runtime_id
   ; lane
-  ; marks = Runtime.context_marks_of_runtime_id runtime_id
+  ; marks
   ; parts
   ; history_atoms
   ; carried
@@ -458,12 +464,11 @@ let forecast ~config ~keeper_name =
        let now = Unix.gettimeofday () in
        let records, records_read = records_of_store ~config ~keeper_name in
        let readings = readings_of_records records in
-       let seed =
-         Keeper_carried_front.of_records
-           ~composer:(fun runtime_id ->
-             Keeper_carried_front.composer_of_runtime (Runtime.get_runtime_by_id runtime_id))
-           ~trace_id
-           records
+       (* Stdlib lazy: private to this synchronous candidate walk, never
+          shared across fibers. A valid warm ledger needs no store scan;
+          cold candidates share the one read when they need it. *)
+       let seed = lazy (
+         (Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed)
        in
        let walk, candidates =
          match Keeper_turn_driver.assignment_walk_order ~now assignment_id with

@@ -129,9 +129,10 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
 ;;
 
 (* The distinct execution causes reach the advance line through
-   [execution_cause_detail]. The execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
-   private agent-core type with no constructor — so what is pinned is that every
-   cause the renderer can receive still renders apart from every other. A
+   [execution_cause_detail]. The execution-failed branch of
+   [advance_failure_kind] cannot be built here — [flow_attempt_snapshot] is a
+   private agent-core type with no constructor — so this test pins that every
+   cause the branch can receive still renders apart from every other. A
    single shared label is what made them indistinguishable in the log,
    and this fails if any two collapse onto the same string. *)
 let test_every_execution_cause_renders_distinctly () =
@@ -178,6 +179,88 @@ let test_every_execution_cause_renders_distinctly () =
        (Detail.execution_cause_detail Incomplete_output))
 ;;
 
+let require_ok label = function
+  | Ok value -> value
+  | Error _ -> Alcotest.fail label
+;;
+
+let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
+  let declared target_ref : Exact_output.declared_target =
+    { target_ref
+    ; provider_ref = "openai-responses"
+    ; model_id = "gpt-5.6-luna"
+    ; enable_thinking = None
+    ; reasoning_effort = None
+    ; connect_timeout_s = Some 1.0
+    ; body_timeout_s = None
+    ; api_key_env = Some "MISSING_FLOW_KEY"
+    }
+  in
+  let snapshot =
+    Exact_output.load_resolver_snapshot
+      ~io:{ getenv = (fun _ -> Ok None) }
+      ~catalog:
+        (Exact_output.Embedded_with_targets
+           [ declared "missing-first"; declared "missing-last" ])
+      ()
+    |> require_ok "load rejection catalog"
+  in
+  let candidate id =
+    let target =
+      Exact_output.admit_target_ref snapshot id |> require_ok ("admit " ^ id)
+    in
+    Exact_output.make_flow_candidate ~id ~admitted_target:target
+    |> require_ok ("make candidate " ^ id)
+  in
+  let requirement =
+    Exact_output.make_output_requirement
+      ~schema:(`Assoc [ "type", `String "object" ])
+      ~minimum_guarantee:Exact_output.Json_syntax
+  in
+  let flow =
+    Exact_output.snapshot_flow
+      ~first:(candidate "missing-first")
+      ~rest:[ candidate "missing-last" ]
+      ~messages:[ Agent_core.Types.user_msg "Return one JSON object." ]
+      requirement
+    |> require_ok "snapshot rejection flow"
+    |> Exact_output.start_flow
+    |> require_ok "start rejection flow"
+  in
+  Eio_main.run @@ fun env ->
+  match
+    Exact_output.execute_flow_once
+      ~net:(Eio.Stdenv.net env)
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Alcotest.fail "missing credential reached dispatch")
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun success -> Exact_output.Accept success)
+      flow
+  with
+  | Error
+      (Exact_output.Flow_execution_terminal
+        { cause = Exact_output.Flow_candidates_exhausted { rejection; evidence }
+        ; prior_rejections = _
+        }) ->
+    Alcotest.(check string)
+      "intermediate rejection keeps its typed preparation cause"
+      "advance=missing-first->missing-last kind=candidate_rejected \
+       cause=missing_target_credential(target_ref=\"missing-first\" \
+       environment_variable=\"MISSING_FLOW_KEY\")"
+      (Detail.flow_evidence_detail evidence);
+    Alcotest.(check string)
+      "terminal rejection keeps its typed preparation cause"
+      "slot=missing-last runtime slot unavailable \
+       cause=missing_target_credential(target_ref=\"missing-last\" \
+       environment_variable=\"MISSING_FLOW_KEY\"); \
+       flow=[advance=missing-first->missing-last kind=candidate_rejected \
+       cause=missing_target_credential(target_ref=\"missing-first\" \
+       environment_variable=\"MISSING_FLOW_KEY\")]"
+      (Detail.candidates_exhausted_detail ~rejection ~evidence)
+  | Ok _ | Error _ -> Alcotest.fail "missing credentials did not exhaust the exact flow"
+;;
+
 let () =
   Alcotest.run
     "keeper_exact_flow_detail"
@@ -200,5 +283,7 @@ let () =
             test_raw_response_excerpt_cuts_on_utf8_boundary
         ; Alcotest.test_case "every execution cause renders distinctly" `Quick
             test_every_execution_cause_renders_distinctly
+        ; Alcotest.test_case "rejection cause reaches terminal and intermediate detail" `Quick
+            test_rejection_cause_reaches_terminal_and_intermediate_detail
         ] )
     ]

@@ -17,6 +17,7 @@
       is caught here. *)
 
 module R = Masc.Keeper_execution_receipt
+module EC = Masc.Keeper_error_classify
 module C = Masc.Keeper_contract_classifier
 module Tr = Keeper_terminal_reason
 module UTS = Masc.Keeper_unified_turn_success.For_testing
@@ -216,7 +217,8 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_operator_action_required, R.Reason_preflight_config_error
   else if
     provider_runtime_failure
-    && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
+    && (Option.is_some receipt.degraded_retry_applied
+        || Option.is_some receipt.degraded_retry_deferred)
   then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
   else if
     provider_runtime_failure
@@ -235,7 +237,9 @@ let frozen_operator_disposition (receipt : R.t)
     || String.equal terminal_reason "internal_bridge_exception"
     || String.equal terminal_reason "internal_contract_rejected"
   then R.Disp_fail_open_next_runtime, R.Reason_internal_error
-  else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+  else if
+    Option.is_some receipt.degraded_retry_applied
+    || Option.is_some receipt.degraded_retry_deferred
   then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
   else if
     receipt.runtime_fallback_applied
@@ -289,9 +293,8 @@ let base_receipt : R.t =
   ; runtime_fallback_applied = false
   ; runtime_outcome = R.Runtime_completed
   ; agent_core_internal_runtime_allowed = true
-  ; degraded_retry_applied = false
-  ; degraded_retry_runtime = None
-  ; fallback_reason = None
+  ; degraded_retry_applied = None
+  ; degraded_retry_deferred = None
   ; stop_reason = None
   ; error_kind = None
   ; error_message = None
@@ -526,7 +529,33 @@ let error_kinds =
   ; Some (R.error_kind_of_string "io")
   ]
 
-let degraded_bools = [ false; true ]
+(* The receipt carries the two degraded-retry lanes separately: the one an
+   earlier turn took up, and the one it leaves behind. Either puts the turn on
+   a degraded-retry disposition, and a turn can hold both -- it took a lane up,
+   failed there, and deferred another -- so the axis walks all four. *)
+let applied_lane =
+  { EC.next_runtime = "runtime-2"; fallback_reason = EC.Rate_limit }
+;;
+
+let deferred_lane =
+  { EC.next_runtime = "runtime-3"; fallback_reason = EC.Deferred_runtime_lane }
+;;
+
+let degraded_lane_label = function
+  | `Neither -> "neither"
+  | `Applied -> "applied"
+  | `Deferred -> "deferred"
+  | `Both -> "both"
+;;
+
+let degraded_lanes_of_case = function
+  | `Neither -> None, None
+  | `Applied -> Some applied_lane, None
+  | `Deferred -> None, Some deferred_lane
+  | `Both -> Some applied_lane, Some deferred_lane
+;;
+
+let degraded_cases = [ `Neither; `Applied; `Deferred; `Both ]
 let fallback_bools = [ false; true ]
 
 let runtime_outcomes =
@@ -605,11 +634,15 @@ let () =
                              (fun tcr ->
                                 List.iter
                                   (fun outcome ->
+                                     let degraded_retry_applied, degraded_retry_deferred =
+                                       degraded_lanes_of_case degraded
+                                     in
                                      let receipt =
                                        { base_receipt with
                                          terminal_reason_code = code
                                        ; error_kind
-                                       ; degraded_retry_applied = degraded
+                                       ; degraded_retry_applied
+                                       ; degraded_retry_deferred
                                        ; runtime_fallback_applied = fallback
                                        ; runtime_outcome
                                        ; completion_contract_result = tcr
@@ -630,7 +663,7 @@ let () =
                                        then
                                          check
                                            (Printf.sprintf
-                                              "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s deg=%b fb=%b want=%s got=%s"
+                                              "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s deg=%s fb=%b want=%s got=%s"
                                               code
                                               (match error_kind with
                                                | None -> "none"
@@ -639,7 +672,7 @@ let () =
                                               (R.runtime_outcome_to_string
                                                  runtime_outcome)
                                               (R.completion_contract_result_to_string tcr)
-                                              degraded
+                                              (degraded_lane_label degraded)
                                               fallback
                                               (disp_pair_to_string want)
                                               (disp_pair_to_string got))
@@ -648,7 +681,7 @@ let () =
                              completion_contract_results)
                         runtime_outcomes)
                    fallback_bools)
-              degraded_bools)
+              degraded_cases)
          error_kinds)
     codes;
   Printf.printf
@@ -950,6 +983,7 @@ let () =
         ~default:
           (match usage_scope with
            | Runtime_usage_scope.Per_request -> Masc.Keeper_usage_resolution.Per_request
+           | Runtime_usage_scope.Turn_total -> Masc.Keeper_usage_resolution.Turn_total
            | Runtime_usage_scope.Conversation_cumulative
            | Runtime_usage_scope.Usage_scope_unavailable ->
              Masc.Keeper_usage_resolution.Unavailable)
@@ -1660,6 +1694,94 @@ let () =
   check
     "a turn that never failed over reports one candidate, not zero"
     (Json_util.get_int single_runtime "lane_attempt_count" = Some 1)
+;;
+
+(* The shape the old bool and single runtime string could not carry: a turn
+   that took up one lane and deferred another. The two used to share the
+   runtime and reason slots, with the new deferral winning, so this receipt
+   read "retry applied" beside the runtime nothing had run on yet (#37108).
+   Each lane now travels with the reason it was deferred for. *)
+let () =
+  let both =
+    { base_receipt with
+      degraded_retry_applied = Some applied_lane
+    ; degraded_retry_deferred = Some deferred_lane
+    }
+  in
+  let runtime = Yojson.Safe.Util.member "runtime" (R.to_json both) in
+  let lane key field =
+    Json_util.get_string (Yojson.Safe.Util.member key runtime) field
+  in
+  check
+    "the lane the turn took up names its own runtime"
+    (lane "degraded_retry_applied" "runtime" = Some "runtime-2");
+  check
+    "and its own reason, not the other lane's"
+    (lane "degraded_retry_applied" "reason" = Some "rate_limit");
+  check
+    "the lane the turn leaves behind names the other runtime"
+    (lane "degraded_retry_deferred" "runtime" = Some "runtime-3");
+  check
+    "with the reason that deferred it"
+    (lane "degraded_retry_deferred" "reason" = Some "deferred_runtime_lane");
+  let neither = R.to_json base_receipt |> Yojson.Safe.Util.member "runtime" in
+  check
+    "a turn with no degraded retry says so with null, not an empty lane"
+    (Yojson.Safe.Util.member "degraded_retry_applied" neither = `Null
+     && Yojson.Safe.Util.member "degraded_retry_deferred" neither = `Null)
+;;
+
+(* The compact projection the dashboard composite reads. The receipt store has
+   no version partition and [latest_json] hands back the newest row whatever
+   its shape, so a keeper that has not taken a turn since the deploy is read
+   here in its older shape: one bool under [degraded_retry_applied], and no
+   [degraded_retry_deferred] at all. [json_member] answers `Null for a key that
+   is not there, so reading the two fields on their own would mark the first
+   unreadable and report the second as "this turn deferred no lane" -- a claim
+   the old row cannot support. One shape verdict covers both fields. *)
+let () =
+  let compact runtime =
+    Server_dashboard_compact_receipt_json.compact_receipt_runtime_json
+      (`Assoc [ "runtime", runtime ])
+  in
+  let field json key name = Json_util.get_string (Yojson.Safe.Util.member key json) name in
+  let unreadable json key =
+    Yojson.Safe.Util.member "unreadable" (Yojson.Safe.Util.member key json)
+  in
+  let older_shape =
+    compact
+      (`Assoc
+         [ "name", `String "runtime-1"
+         ; "degraded_retry_applied", `Bool true
+         ; "degraded_retry_runtime", `String "runtime-2"
+         ; "fallback_reason", `String "rate_limit"
+         ])
+  in
+  check
+    "a row older than the split says its applied lane is unreadable"
+    (unreadable older_shape "degraded_retry_applied" = `Bool true);
+  check
+    "and says the same of the field that did not exist yet"
+    (unreadable older_shape "degraded_retry_deferred" = `Bool true);
+  check
+    "so the missing sibling never reads as an absent lane"
+    (Yojson.Safe.Util.member "degraded_retry_deferred" older_shape <> `Null);
+  let split_shape =
+    compact
+      (`Assoc
+         [ "name", `String "runtime-1"
+         ; ( "degraded_retry_applied"
+           , `Assoc [ "runtime", `String "runtime-2"; "reason", `String "rate_limit" ] )
+         ; "degraded_retry_deferred", `Null
+         ])
+  in
+  check
+    "a row of this generation reads the lane it took up"
+    (field split_shape "degraded_retry_applied" "runtime" = Some "runtime-2"
+     && field split_shape "degraded_retry_applied" "reason" = Some "rate_limit");
+  check
+    "and an absent lane on such a row stays absent"
+    (Yojson.Safe.Util.member "degraded_retry_deferred" split_shape = `Null)
 ;;
 
 (* #29929 gave [Terminal_effect_failed] its own operator disposition, but the

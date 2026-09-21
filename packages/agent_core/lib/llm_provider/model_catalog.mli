@@ -110,29 +110,6 @@ val of_toml_string : source:string -> string -> (t, string) result
 
 val load_file : string -> (t, string) result
 
-(** A catalog row excluded by the lenient loaders. [entry_label] is the row's
-    declared [id_prefix]/[id] when readable, otherwise a positional label such
-    as ["<model entry #2>"]. [skip_reason] is the parse/validation error that
-    excluded the row. *)
-type skipped_entry =
-  { entry_label : string
-  ; skip_reason : string
-  }
-
-(** Lenient variant of {!of_toml_string}: rows that fail to parse are excluded
-    and reported instead of failing the whole load. Deployment overlays are
-    hand-written and outlive the binary that wrote them, so one stale field
-    must not block every other row. Whole-file failures — unreadable input,
-    broken TOML, or duplicate identities among surviving rows — remain [Error]:
-    skipping must never turn a contradiction into a silent winner. *)
-val of_toml_string_lenient
-  :  source:string
-  -> string
-  -> (t * skipped_entry list, string) result
-
-(** Lenient variant of {!load_file}; see {!of_toml_string_lenient}. *)
-val load_file_lenient : string -> (t * skipped_entry list, string) result
-
 (** Load the build-time embedded default [models.toml].
 
     The embedded value is generated directly from the AGENT_CORE-owned root
@@ -174,18 +151,6 @@ val lookup_for_provider
   -> provider_name:string
   -> model_id:string
   -> model_entry option
-
-(** Row-level overlay merge (Agent Core contract). Rows in [overlay] replace rows in
-    [base] with the same identity — [(provider_name, id_prefix)] for model
-    rows (a bare row and a provider-scoped row with the same [id_prefix] are
-    distinct), and [id] for provider entries, compared with lookup normalization —
-    and rows unique to either side are kept. Same-identity overlay rows replace
-    the complete base row. Overlay rows precede base rows in
-    the result, so order-sensitive provider-entry consumers
-    ({!provider_label_for_base_url}, {!provider_label_for_endpoint}) prefer a
-    deployment entry whose endpoint identity is also covered by an embedded
-    entry. *)
-val merge : base:t -> overlay:t -> t
 
 (** Return the catalog-declared provider identity for a concrete endpoint.
 

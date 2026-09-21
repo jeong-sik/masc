@@ -18,6 +18,13 @@ let default_config =
   }
 ;;
 
+let rewrite_invalidates_librarian_coordinates ~coordinates_present ~before ~after =
+  let ( let* ) = Result.bind in
+  let* before = Keeper_turn_boundaries.position_of_messages before in
+  let* after = Keeper_turn_boundaries.position_of_messages after in
+  Ok (coordinates_present && before <> after)
+;;
+
 let cleared_tool_result_content =
   "[old tool result content cleared by keeper checkpoint purge]"
 ;;

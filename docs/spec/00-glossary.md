@@ -12,11 +12,15 @@ status: reference
 : Multi-Agent Shared Context의 약어. 다중 에이전트의 Board, Task, Goal, Schedule,
   Keeper와 도구 실행을 조율하는 OCaml/Eio 서버.
 
-**agent core**
-: `packages/agent_core`에 있는 모델 호출 계층. MASC coordinator 라이브러리를
-  참조하지 않아 MASC 없이도 쓸 수 있다. Agent 구성, tool turn, typed response와
-  실패의 타입은 모든 레인이 여기 것을 쓴다. Provider 요청을 실제로 보내는 것은
-  agent core 레인뿐이고, 공식 클라이언트 레인은 자기 프로세스가 보낸다.
+**Agent Core**
+: `packages/agent_core`의 재사용 모델 실행 계층. MASC coordinator를 참조하지
+  않아 MASC 없이도 쓸 수 있다. `Agent_core.Agent`를 거치는 실행의 Agent 구성,
+  tool turn, provider 요청, typed 응답·사용량·실패를 소유한다. 공통 타입은
+  레인과 무관하게 공유한다. 공식 클라이언트 레인도 `Agent_core.Error`·
+  `Agent_core.Llm_provider`·`Agent_core.Retry`를 쓰고, provider 요청은 자기
+  프로세스에서 보낸다. MASC는 Keeper 실행과 제품 조율을 소유한다.
+  코드 식별자는 `agent_core`와 `Agent_core`다.
+  → [Agent Core 경계](13-agent-core.md)
 
 **Official Client Lane**
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
@@ -48,22 +52,26 @@ status: reference
 **Agent**
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
 
-**Agent Core**
-: `packages/agent_core`로 제공되는 재사용 모델 실행 계층. Agent 구성, tool turn,
-  provider 요청, typed response와 실패를 소유하며, MASC는 제품 오케스트레이션을
-  소유한다. 코드 식별자는 `agent_core`와 `Agent_core`다.
-
 **Keeper**
-: 독립된 agent core checkpoint와 MASC lifecycle을 가진 장기 실행 Agent. 현재 typed
-  event와 tool schema를 관찰하고 자율 turn을 실행한다.
+: MASC가 lifecycle을 관리하는 장기 실행 Agent. 현재 typed event와 tool schema를
+  관찰하고 자율 turn을 실행한다. 이어 실행할 상태는 runtime에 따라 AGENT_CORE 또는
+  공식 클라이언트가 관리한다([`Runtime_execution.checkpoint_owner`](../../lib/runtime/runtime_execution.mli)).
 
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Keeper Turn**
-: 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
-  레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
+: MASC가 하나의 Keeper 작업을 시도하는 단위. 선택한 runtime에 따라 AGENT_CORE
+  Agent run 또는 공식 클라이언트의 모델·도구 실행을 사용한다
+  ([`Runtime_execution.t`](../../lib/runtime/runtime_execution.mli)). MASC는 해당 레인의 결과를
+  조율·기록한다.
+
+**Keeper Chat Operation**
+: Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
+  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
+  제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
+  접수 응답은 실행 완료를 뜻하지 않는다.
 
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
@@ -76,6 +84,13 @@ status: reference
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Usage Scope**
+: Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
+  요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
+  `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
+  합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
+  않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
@@ -113,11 +128,6 @@ status: reference
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
   최신 대기 하나를 가진다. 코드 이름은 `Keeper_memory_lane`이다.
   → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
-
-**Skill**
-: `SKILL.md`로 선언한 재사용 지시 또는 Tool 합성. 출처·패키지·이름·문서 revision으로
-  식별한다. → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
-  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
 **Composition**
 : Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
@@ -229,10 +239,13 @@ status: reference
 
 **Skill**
 : 선언된 source의 `<package>/SKILL.md`로 발행하는 재사용 지식 또는 도구 합성.
+  출처·패키지·이름·문서 revision으로 식별한다.
   Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
   `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
   뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
+  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
@@ -285,6 +298,10 @@ status: reference
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
   (`<trace 디렉터리>/<trace id>.json`)다. 실행 중에는
   `Keeper_types.working_context`가 이 checkpoint 하나를 감싼다.
+  공식 클라이언트의 대화 이력은 이 파일에 옮겨 저장하지 않는다. MASC는
+  클라이언트 세션 식별자와 turn 진행 상태를 별도의
+  [공식 클라이언트 세션 저장소](../../lib/keeper/keeper_official_client_session_store.mli)에
+  기록한다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
 
 **받은 일 정리**
@@ -322,6 +339,12 @@ status: reference
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
 
+  저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
+  지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.
+  원장이 없으면 보관 중인 기록에서 같은 trace의 마지막 응답 관측까지 거슬러 찾는다.
+  응답 없는 기록이 쌓여도 이 관측을 가리지 않는다. 재시도가 같은 turn 번호를 쓰면
+  나중에 저장한 응답 관측을 선택한다. 다음 요청 예측도 같은 reader를 쓴다.
+
 **Model Input Ledger (모델 입력 원장)**
 : Keeper·runtime·trace별로 응답에서 확인한 Atom 범위와 제공된 usage를 기록한 프로세스 내 원장.
   상한 판정과 거절 뒤 이동은 후보 안의 작업값에 적용하고, 응답 관측으로 원장을 갱신한다.
@@ -336,14 +359,16 @@ status: reference
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
   (`fresh`/`continued`)도 같이 적는다. Checkpoint 파일이 있었는지가 아니라 Atom이
   있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
-  줄이 파일에 쌓인 순서가 아니라 Atom 수로 줄을 세운다.
+  같은 재시작 구간 안의 줄을 Atom 수로 줄 세운다.
   같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터
   0에서 다시 시작한다"를 말하는 줄이고, History를 다시 시작하게 만든 쪽이 쓴다.
   `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. Atom이 없는 History에서
   시작하는 turn은, 저장된 History에 Atom이 없는 것을 알면 시작할 때 쓰고,
   Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
   보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
-  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
+  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다. 가장 최근의 이 두 종류
+  중 하나부터 현재 History의 끝 경계를 고른다. 그 앞의 줄은 같은 메시지가 반복되어
+  digest가 맞더라도 쓰지 않으며, `fresh` turn의 자기 끝 경계는 포함한다.
   이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
   cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
 
@@ -357,6 +382,7 @@ status: reference
   전체가 안 읽은 것으로 보인다.
   이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
   cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
+  Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
@@ -411,3 +437,7 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
+  History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.
+  Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
+  읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
+  매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.

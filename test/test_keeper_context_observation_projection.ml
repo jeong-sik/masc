@@ -268,6 +268,26 @@ let test_cumulative_usage_is_diagnostic_not_occupancy () =
     | Error detail -> fail detail)
 ;;
 
+let test_client_turn_total_is_diagnostic_not_occupancy () =
+  with_temp_workspace (fun config ->
+    append_record config
+      (sample_record ~usage_scope:Runtime_usage_scope.Turn_total ());
+    let fields =
+      Projection.context_fields ~config ~keeper_name:"beta"
+        ~current_trace_id:sample_trace
+    in
+    check_not_observed fields ~reason:"turn_total_usage";
+    check bool "an aggregate below the window still has no occupancy ratio" true
+      (field fields "context_ratio" = `Null);
+    match decodes fields with
+    | Ok
+        (Masc.Tui_decode.Context_unavailable
+          (Context_turn_total_usage
+            { raw_input_tokens = Some 18_000; context_window = Some 131_072 })) -> ()
+    | Ok _ -> fail "client-turn total lost its typed raw diagnostics"
+    | Error detail -> fail detail)
+;;
+
 let test_per_request_overflow_is_unavailable_not_clamped () =
   with_temp_workspace (fun config ->
     append_record
@@ -343,6 +363,8 @@ let () =
             test_missing_window_keeps_tokens_without_ratio
         ; test_case "cumulative usage is diagnostic, not occupancy" `Quick
             test_cumulative_usage_is_diagnostic_not_occupancy
+        ; test_case "client-turn total is diagnostic, not occupancy" `Quick
+            test_client_turn_total_is_diagnostic_not_occupancy
         ; test_case "per-request overflow is unavailable, not clamped" `Quick
             test_per_request_overflow_is_unavailable_not_clamped
         ; test_case "every projected shape decodes" `Quick

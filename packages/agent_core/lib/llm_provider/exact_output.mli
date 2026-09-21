@@ -526,6 +526,8 @@ val plan_provenance_catalog_generation : plan_provenance -> catalog_generation
 val plan_provenance_catalog_evidence : plan_provenance -> catalog_evidence
 val plan_provenance_target_identity : plan_provenance -> target_identity
 val plan_fingerprint : ready_plan -> string
+val connect_timeout_s : ready_plan -> float option
+val body_timeout_s : ready_plan -> float option
 val schema_fingerprint_to_string : schema_fingerprint -> string
 
 type start_attempt_error = Call_id_generation_failed of string
@@ -678,6 +680,11 @@ val candidate_rejection_measurement_outcome
 val candidate_rejection_disposition
   :  candidate_rejection_receipt
   -> candidate_rejection_disposition
+
+val candidate_rejection_reason : candidate_rejection_receipt -> string
+(** Stable one-line reason from the receipt's original typed selection or
+    admission error. This retains the cause hidden by the coarser disposition
+    without exposing credentials or provider response bodies. *)
 
 type flow_evidence = private
   { flow_id : flow_id

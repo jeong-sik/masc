@@ -49,11 +49,11 @@ type resolver_catalog_input =
           own, so these are the whole target set. *)
   | Full_replacement of catalog_document
   | Full_replacement_file of string
-(** Which catalog bytes [load_resolver_snapshot] starts from. The overlay
-    variants layer declared rows on top of the embedded default; a full
-    replacement supplies the whole catalog. The overlay's model identities
-    must stay unique against the base — a colliding overlay row is rejected
-    during snapshot loading rather than silently shadowing. *)
+(** Which catalog bytes [load_resolver_snapshot] starts from. Embedded inputs
+    use the packaged provider/model catalog and may add the complete set of
+    runtime target bindings; a full replacement supplies the whole catalog,
+    including its targets. Provider, model, and target identities must each be
+    unique within the selected catalog. *)
 
 type target_ref_error =
   | Empty_target_ref

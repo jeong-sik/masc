@@ -439,6 +439,33 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_core.Checkpoint.turn_count
 
+let test_librarian_coordinates_block_endpoint_rewrite () =
+  let before = (checkpoint_fixture ()).Agent_core.Checkpoint.messages in
+  let after = [ text_message Types.User "retained" ] in
+  let invalidates coordinates_present rewritten =
+    match
+      Purge.rewrite_invalidates_librarian_coordinates
+        ~coordinates_present
+        ~before
+        ~after:rewritten
+    with
+    | Ok invalidates -> invalidates
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool)
+    "tracked endpoint rewrite is refused"
+    true
+    (invalidates true after);
+  Alcotest.(check bool)
+    "untracked rewrite remains available"
+    false
+    (invalidates false after);
+  Alcotest.(check bool)
+    "tracked stable endpoint remains available"
+    false
+    (invalidates true before)
+;;
+
 
 let rec workspace_contents dir =
   Sys.readdir dir
@@ -452,7 +479,7 @@ let rec workspace_contents dir =
 
 let test_cli_workspace ?(linked_worktree = false) cluster_name () =
   Eio_main.run @@ fun env ->
-  let owner_root = Filename.temp_dir "checkpoint-purge-cli-" "" in
+  let owner_root = Filename.temp_dir "checkpoint-purge-cli-" "" |> Unix.realpath in
   let base_path =
     if not linked_worktree then owner_root
     else
@@ -487,22 +514,34 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
       let original = In_channel.with_open_bin checkpoint_path In_channel.input_all in
       let before = workspace_contents owner_root in
       let runtime_entries = Sys.readdir runtime_root |> Array.to_list in
-      let run_cli args =
+      let run_cli ?(from_cwd = false) args =
         let runtime_base_path =
-          Masc.Workspace.runtime_base_path (Masc.Workspace.Ambient base_path)
+          Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit base_path)
+        in
+        let executable =
+          Sys.getenv "MASC_TEST_CHECKPOINT_PURGE_EXE"
+          |> Config_dir_resolver.absolute_path
         in
         let child_env =
-          [ "MASC_BASE_PATH=" ^ runtime_base_path ]
+          [ "HOME=" ^ owner_root; "XDG_CONFIG_HOME=" ^ owner_root ]
+          @ (if from_cwd then [] else [ "MASC_BASE_PATH=" ^ runtime_base_path ])
           @ (match cluster_name with
              | None -> []
              | Some name -> [ "MASC_CLUSTER_NAME=" ^ name ])
         in
-        Eio.Process.parse_out ~env:(Array.of_list child_env)
-          (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
-          ([ Sys.getenv "MASC_TEST_CHECKPOINT_PURGE_EXE"
-           ; "--trace"; checkpoint.session_id; "--keep-recent"; "0"
-           ] @ args)
-        |> print_string
+        let output =
+          Eio.Process.parse_out
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+            ~env:(Array.of_list child_env)
+            (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
+            ([ executable
+             ; "--trace"; checkpoint.session_id; "--keep-recent"; "0"
+             ] @ args)
+        in
+        Alcotest.(check bool) "CLI reports the producer checkpoint" true
+          (List.mem ("checkpoint: " ^ checkpoint_path)
+             (String.split_on_char '\n' output));
+        print_string output
       in
       run_cli [ "--base"; base_path ];
       Alcotest.(check (list (pair string (option string))))
@@ -511,6 +550,10 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
       run_cli [];
       Alcotest.(check (list (pair string (option string))))
         "MASC_BASE_PATH dry-run uses the same workspace without writes"
+        before (workspace_contents owner_root);
+      run_cli ~from_cwd:true [];
+      Alcotest.(check (list (pair string (option string))))
+        "no base or recorded default uses current workspace without writes"
         before (workspace_contents owner_root);
       run_cli [ "--base"; base_path; "--apply" ];
       let backup_dirs =
@@ -608,6 +651,10 @@ let () =
             "checkpoint fields pass through"
             `Quick
             test_checkpoint_fields_pass_through
+        ; Alcotest.test_case
+            "Librarian coordinates block endpoint rewrite"
+            `Quick
+            test_librarian_coordinates_block_endpoint_rewrite
         ] )
     ; ( "cli"
       , [ Alcotest.test_case "default cluster: workspace dry-run and apply" `Quick

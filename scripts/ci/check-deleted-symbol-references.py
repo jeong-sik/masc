@@ -10,6 +10,7 @@ import sys
 NAME = r"[A-Za-z_][A-Za-z0-9_']*"
 DECLARATION = re.compile(rf"^\s*\+\s*(?:let|and|val)\s+({NAME})\b")
 REFERENCE = re.compile(rf"\b({NAME})\b")
+ALLOW = re.compile(r"symbol-guard: allow (" + NAME + r")")
 
 
 def git(*args: str) -> str:
@@ -31,31 +32,52 @@ def deleted_names(base: str, branch_point: str) -> dict[str, str]:
     return deleted
 
 
-def added_references(head: str, branch_point: str) -> dict[str, str]:
+def added_references(head: str, branch_point: str) -> tuple[dict[str, str], set[str]]:
     diff = git("diff", "--unified=0", f"{branch_point}..{head}", "--", "*.ml", "*.mli")
     added: dict[str, str] = {}
+    allowed: set[str] = set()
     current_file = "<unknown>"
     for line in diff.splitlines():
         if line.startswith("+++ b/"):
             current_file = line[6:]
         if not line.startswith("+") or line.startswith("+++"):
             continue
+        allowed.update(match.group(1) for match in ALLOW.finditer(line))
         for match in REFERENCE.finditer(line[1:]):
             added.setdefault(match.group(1), current_file)
-    return added
+    return added, allowed
 
 
-def run(base: str) -> int:
-    branch_point = git("merge-base", base, "HEAD").strip()
+def deletion_commit(name: str, file_name: str, base: str, branch_point: str) -> str:
+    commits = git(
+        "log", "--format=%H", "-S", f"let {name}", f"{branch_point}..{base}",
+        "--", file_name,
+    ).splitlines()
+    return commits[-1] if commits else base
+
+
+def run(base: str, head: str = "HEAD") -> int:
+    branch_point = git("merge-base", base, head).strip()
     deleted = deleted_names(base, branch_point)
-    added = added_references("HEAD", branch_point)
-    collisions = sorted(set(deleted) & set(added))
+    added, allowed = added_references(head, branch_point)
+    collisions = sorted((set(deleted) & set(added)) - allowed)
+    print(f"base: {base}")
+    print(f"head: {head}")
+    print(f"branch point: {branch_point}")
     print(f"deleted top-level names: {len(deleted)}")
     print(f"added identifiers compared: {len(added)}")
     if collisions:
         print("deleted names referenced by added lines:")
         for name in collisions:
-            print(f"- {name}: deleted in {deleted[name]}, referenced in {added[name]}")
+            commit = deletion_commit(name, deleted[name], base, branch_point)
+            print(
+                f"- {name}: deleted by {commit} in {deleted[name]}, "
+                f"referenced in {added[name]}"
+            )
+        print(
+            "To suppress an intentional match, add "
+            "symbol-guard: allow NAME to the added line and explain why."
+        )
         return 1
     print("no deleted-name references found")
     return 0
@@ -73,6 +95,6 @@ def self_test() -> int:
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
         raise SystemExit(self_test())
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: check-deleted-symbol-references.py BASE_SHA")
-    raise SystemExit(run(sys.argv[1]))
+    if len(sys.argv) not in (2, 3):
+        raise SystemExit("usage: check-deleted-symbol-references.py BASE_SHA [HEAD_SHA]")
+    raise SystemExit(run(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else "HEAD"))

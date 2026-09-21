@@ -547,7 +547,8 @@ let ask_jev ~clock prepared =
     Jev_off
   | Error
       ( Typesafeai_config.Lane_disabled | Typesafeai_config.Missing_api_key
-      | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Board_attention_disabled ) ->
+      | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Board_attention_disabled
+      | Typesafeai_config.Context_review_disabled ) ->
     Jev_off
   | Ok api_key ->
     (

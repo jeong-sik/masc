@@ -337,6 +337,13 @@ status: reference
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
   checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다.
+  `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
+  평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
+  참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
+  `insufficient_evidence`는 검증 통과가 아니며 기존 저장 검사를 유지한다.
+  실행 상세의 `context_review`는 판정, `context_write`는 정리 저장 결과다.
+  `outcome_unconfirmed`는 저장 도중 중단되어 저장 여부를 확인하지 못한 상태다.
+  원본 요청 처리·Memory 변경·Checkpoint 저장 결과와 구분한다.
   → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 
 **History**

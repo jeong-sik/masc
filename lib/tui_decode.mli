@@ -1238,6 +1238,12 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev =
+  | Jev_off
+  | Jev_configured of { model : string }
+  | Jev_cli_only
+  | Jev_lane_unavailable
+
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
@@ -1247,6 +1253,7 @@ type standalone_lane = {
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : standalone_lane_configuration;
+  sl_jev : standalone_lane_jev option;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -1813,15 +1820,33 @@ val decode_keeper_turns :
     registered keeper. Unknown schema, status, or lane is an error, not a
     silently defaulted row. *)
 
-(** Where one keeper points today. [ra_source] is the server's word:
-    ["default"] rides the fleet default, ["explicit"] was assigned. *)
-type runtime_assignment = {
-  ra_keeper : string;
-  ra_source : string;
-  ra_target_id : string option;
-  ra_unavailable_reason : string option;
-      (** Resolved lane id, or [None] when the assignment is missing. *)
-}
+type runtime_assignment_source =
+  | Default_runtime
+  | Explicit_runtime
+(** Whether the keeper rides the fleet default or has an explicit assignment. *)
+
+type runtime_unavailable_reason =
+  | Missing_catalog_model of
+      { provider_label : string
+      ; model_id : string
+      }
+(** The server's closed [reason.kind] sum for an unavailable assignment. *)
+
+type runtime_assignment_resolution =
+  | Runtime_assignment_lane of string
+  | Runtime_assignment_missing
+  | Runtime_assignment_unavailable of
+      { runtime_id : string
+      ; reason : runtime_unavailable_reason
+      }
+(** The server's closed [resolved.kind] sum. Consumers match this value directly;
+    membership in a separately projected lane catalogue does not reclassify it. *)
+
+type runtime_assignment =
+  { ra_keeper : string
+  ; ra_source : runtime_assignment_source
+  ; ra_resolution : runtime_assignment_resolution
+  }
 
 val decode_runtime_resolved_full :
   Yojson.Safe.t ->
@@ -2590,6 +2615,15 @@ type file_change_kind =
       line : int;
       text : string;
     }
+  | Fc_materialized of {
+      sha256 : string;
+      bytes : int;
+    }
+      (** A blob's bytes written into a file by [keeper_artifact_transfer]'s
+          [materialize] action. The call's input names the blob by its
+          [sha256] and byte count, so the reader has the blob's identity and
+          size and no body text. The same handler's [export] action reads a
+          file into the blob store and is not a file change. *)
 
 type file_change = {
   fc_at : float;

@@ -130,9 +130,14 @@ type t =
   ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
   ; agent_core_internal_runtime_allowed : bool
-  ; degraded_retry_applied : bool
-  ; degraded_retry_runtime : string option
-  ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
+  (* Two facts, never one. [degraded_retry_applied] is the lane an earlier
+     turn deferred to and that this turn dispatched on; [degraded_retry_deferred]
+     is the lane this turn leaves for a later one. Both can hold at once: a
+     turn can take up a deferred lane, fail there, and defer again. They used
+     to share one bool and one runtime string, which let a receipt print
+     "retry applied" beside a runtime nothing had run on yet (#37108). *)
+  ; degraded_retry_applied : Keeper_error_classify.degraded_retry option
+  ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
   ; stop_reason : Runtime_agent.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option
@@ -189,5 +194,20 @@ let list_json values = `List (List.map (fun value -> `String value) values)
 
 let string_opt_json = function
   | Some value -> `String value
+  | None -> `Null
+;;
+
+(* One object per lane so a reader cannot pick up a runtime without the reason
+   it was deferred for, and cannot read the reason of one lane beside the
+   runtime of another. *)
+let degraded_retry_json = function
+  | Some (retry : Keeper_error_classify.degraded_retry) ->
+    `Assoc
+      [ "runtime", `String retry.next_runtime
+      ; ( "reason"
+        , `String
+            (Keeper_error_classify.degraded_retry_reason_to_string
+               retry.fallback_reason) )
+      ]
   | None -> `Null
 ;;

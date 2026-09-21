@@ -259,17 +259,10 @@ open Alcotest
    required. No headroom. *)
 (* 2026-09-20: the read-only keeper_skill_validate caller adds artifact document
    validation. The production renderer measures 119,546 bytes / 136 tools. *)
-(* 2026-09-21: the DOS lane gains its mouse. The production renderer measures
-   121,200 bytes / 137 tools. masc_dos_click declares x/y/buttons/steps so a
-   keeper can drive mouse-polled games: Sangokushi III boots on a click and
-   never reads INT 16h (it polls the BDA ring), so press and type alone
-   cannot start it. 1,554 bytes over the previous ceiling. *)
-(* 2026-09-21: the same 137-tool tree measures 121,200 in CI run 35524977894's
-   environment and 121,226 on the local macos renderer -- 26 bytes of drift
-   between renderers on identical source, unexplained. The ceiling takes the
-   larger reading plus the drift again, so neither environment fails on the
-   other's measurement. *)
-let ceiling_bytes = 121_300
+(* 2026-09-21: the merged inventory, including DOS mouse control and main's
+   keeper_memory_search description, measures 121,200 bytes across 137 tools.
+   Pin the measured surface without speculative renderer headroom. *)
+let ceiling_bytes = 121_200
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

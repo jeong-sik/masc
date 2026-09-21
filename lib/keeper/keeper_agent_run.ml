@@ -1,8 +1,10 @@
-(** Keeper_agent_run — Run a single keeper turn via Agent_core.Agent.run().
+(** Orchestration of one Keeper turn.
 
-    This module is intentionally a compatibility facade: public types and
-    entrypoints stay here while prompt metrics, result/error helpers, and
-    tool-surface policy live in focused implementation modules. *)
+    Prepares Keeper context, tools and hooks, then dispatches through
+    [Keeper_turn_driver.run_named]. The selected [Runtime_execution.t]
+    determines whether AGENT_CORE or an official client runs the model/tool loop.
+    Re-exports [Keeper_agent_result] and [Keeper_agent_prompt_metrics] for
+    existing callers. *)
 
 include Keeper_agent_prompt_metrics
 include Keeper_agent_tool_surface
@@ -794,9 +796,6 @@ let run_turn
       ?on_tool_result_ready
       ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?(degraded_retry_applied = false)
-      ?degraded_retry_runtime
-      ?fallback_reason
       ?direct_resume
       ?official_task_reference
       ?on_gate_evidence_admitted
@@ -1969,29 +1968,21 @@ let run_turn
                                    ())
                              ())))
                in
-       let deferred_retry =
+       (* The lane this turn leaves behind, and the lane an earlier turn left
+          for this one. They used to be merged into one runtime slot with the
+          new deferral winning, so a receipt could read "retry applied"
+          against a runtime this turn had only queued. Both travel now, and
+          [Keeper_agent_run_receipt.degraded_retry_taken_up] says whether the
+          turn got far enough to run the lane it was handed. *)
+       let degraded_retry_deferred =
          Option.map
-           (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-              let reason =
-                match
-                  Keeper_error_classify.recoverable_runtime_failure_reason
-                    hint.failure
-                with
-                | Some reason -> reason
-                | None -> Keeper_error_classify.Deferred_runtime_lane
-              in
-              hint.next_runtime_id, reason)
+           Keeper_error_classify.degraded_retry_of_deferred_lane
            !deferred_runtime_lane_ref
        in
-       let receipt_degraded_retry_runtime =
-         match deferred_retry with
-         | Some (runtime_id, _) -> Some runtime_id
-         | None -> degraded_retry_runtime
-       in
-       let receipt_fallback_reason =
-         match deferred_retry with
-         | Some (_, reason) -> Some reason
-         | None -> fallback_reason
+       let degraded_retry_hint =
+         Option.map
+           Keeper_error_classify.degraded_retry_of_deferred_lane
+           deferred_runtime_lane
        in
        let settled_runtime_id =
          match turn_result with
@@ -2013,9 +2004,8 @@ let run_turn
            ~receipt_started_at
            ~runtime_manifest_context
            ~acc
-           ~degraded_retry_applied
-           ~degraded_retry_runtime:receipt_degraded_retry_runtime
-           ~fallback_reason:receipt_fallback_reason
+           ~degraded_retry_hint
+           ~degraded_retry_deferred
            ~turn_result
            ~receipt_agent_core_turn_count_ref
            ~receipt_stop_reason_ref

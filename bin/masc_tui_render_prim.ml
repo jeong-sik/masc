@@ -45,6 +45,32 @@ module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 
+let runtime_assignment_label (assignment : runtime_assignment) =
+  let source =
+    match assignment.ra_source with
+    | Default_runtime -> "default"
+    | Explicit_runtime -> "explicit"
+  in
+  match assignment.ra_resolution with
+  | Runtime_assignment_lane lane_id ->
+    Printf.sprintf "%s (lane, %s)" (Terminal_text.single_line lane_id) source
+  | Runtime_assignment_missing -> Printf.sprintf "- (missing, %s)" source
+  | Runtime_assignment_unavailable
+      { runtime_id; reason = Missing_catalog_model { provider_label; model_id } } ->
+    Printf.sprintf
+      "%s (not in catalog: %s / %s, %s)"
+      (Terminal_text.single_line runtime_id)
+      (Terminal_text.single_line provider_label)
+      (Terminal_text.single_line model_id)
+      source
+;;
+
+let runtime_assignment_targets assignment target =
+  match assignment.ra_resolution with
+  | Runtime_assignment_lane lane_id -> String.equal lane_id target
+  | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false
+;;
+
 let acting_pane_reserved_cols = ref 0
 
 
@@ -379,13 +405,15 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
      Expired here rather than cleared by the setter: the setter is a key
      handler that has already returned, and nothing runs on a timer to come
      back for it. *)
-  let hints =
+  (* The footer keeps action text separate from hints and search status so
+     a long outcome cannot drop a confirmation or identity warning. *)
+  let action_text =
     match state.last_action with
     | Some (text, set_at)
       when Unix.gettimeofday () -. set_at
            <= Masc_tui_types.last_action_window_s ->
-      text ^ "  " ^ hints
-    | Some _ | None -> hints
+      Some text
+    | Some _ | None -> None
   in
   let identity =
     match state.server_identity with
@@ -497,7 +525,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line ?literal_prefix
+  Masc_tui_footer.line ?literal_prefix ?action_text
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
@@ -878,7 +906,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
                 (match change.fc_kind with
                  | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
                    Pane.File_edited
-                 | Masc.Tui_decode.Fc_written _ -> Pane.File_written)
+                 | Masc.Tui_decode.Fc_written _
+                 | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
             ; file_succeeded = change.fc_succeeded
             ; file_at = change.fc_at
             ; file_where = file_change_evidence_label change.fc_line_evidence

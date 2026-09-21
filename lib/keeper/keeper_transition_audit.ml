@@ -168,6 +168,7 @@ let append_now ~site json =
   | None -> ()
   | Some store ->
     (try Dated_jsonl.append store json with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> observe_append_failure ~site exn)
 ;;
 
@@ -266,6 +267,7 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
          ~finally:(fun () -> close_out_noerr oc)
          (fun () -> output_string oc (line ^ "\n"))
      with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> observe_append_failure ~site:"sink_append" exn)
 ;;
 
@@ -377,6 +379,7 @@ let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
          ~finally:(fun () -> close_out_noerr oc)
          (fun () -> output_string oc (line ^ "\n"))
      with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> observe_append_failure ~site:"sink_completed_append" exn)
 ;;
 
@@ -397,6 +400,7 @@ let record_turn_fsm_transition ~keeper_name (rec_ : turn_fsm_transition_record) 
          ~finally:(fun () -> close_out_noerr oc)
          (fun () -> output_string oc (line ^ "\n"))
      with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> observe_append_failure ~site:"sink_turn_fsm_append" exn)
 ;;
 

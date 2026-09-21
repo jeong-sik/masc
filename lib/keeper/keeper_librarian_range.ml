@@ -99,28 +99,30 @@ let current_history_lines own =
 ;;
 
 let may_have_unread ~trace_id ~lines ~progress =
-  match progress with
-  | None -> complete_line_count lines > 0
+  let own = current_history_lines (lines_of_trace ~trace_id lines) in
+  (* Unknown complete rows may contain an atom boundary or restart. Leave
+     their rejection to the selector; official-only rows are not atom work. *)
+  unreadable_lines lines <> []
+  || match progress with
+  | None ->
+    List.exists
+      (fun (_, (written : B.record)) ->
+         is_restart written
+         || match written.event with
+            | B.Turn_ended { position = B.Atom_history _; _ } -> true
+            | B.Turn_ended _ | B.History_restarted _ -> false)
+      own
   | Some ({ P.position; boundary_lines_seen } : P.t) ->
-    let trace_changed = not (String.equal trace_id position.trace_id) in
-    let line_count_changed = complete_line_count lines <> boundary_lines_seen in
-    trace_changed
-    || line_count_changed
+    not (String.equal trace_id position.trace_id)
+    || complete_line_count lines < boundary_lines_seen
     || List.exists
          (fun (line, (written : B.record)) ->
-            let restarted_after_progress =
-              line > boundary_lines_seen && is_restart written
-            in
-            let extends_position =
-              match written.event with
-              | B.Turn_ended { position = B.Atom_history { end_atom; _ }; _ } ->
-                end_atom > position.end_atom
-              | B.Turn_ended
-                  { position = B.Empty_atom_history | B.No_atom_history | B.Stale_noop; _ }
-              | B.History_restarted _ -> false
-            in
-            restarted_after_progress || extends_position)
-         (current_history_lines (lines_of_trace ~trace_id lines))
+            (line > boundary_lines_seen && is_restart written)
+            || match written.event with
+               | B.Turn_ended { position = B.Atom_history { end_atom; _ }; _ } ->
+                 line > boundary_lines_seen || end_atom > position.end_atom
+               | B.Turn_ended _ | B.History_restarted _ -> false)
+         own
 ;;
 
 let matches_checkpoint ~digest_at ~atom_count ~end_atom ~digest =

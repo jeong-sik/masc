@@ -3991,6 +3991,93 @@ streaming = false
         check (float 0.000001) "actual provider sees the candidate temperature" 0.25
           Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
 
+(* task-1649: a lane whose every candidate is missing from the catalog is
+   dropped whole at load (distinct from the single-runtime-assignment gap
+   the test above covers). A keeper assigned to that lane name used to fall
+   through [Runtime.resolve_assignment]'s [`Missing] into
+   [build_runtime_execution] treating the dropped lane's own name as a
+   runtime id, and only failed two layers later with a generic "no
+   configured runtime context window" that named the wrong cause. This pins
+   that the failure is now named at the real layer, with the real lane id
+   and its missing candidates. *)
+let test_dropped_lane_assignment_names_the_lane_not_context_window () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     provider_name = \"fixture\"\n\
+     base = \"openai_chat\"\n\
+     max_context_tokens = 8192\n\
+     max_output_tokens = 1024\n\
+     supports_tools = true\n\
+     supports_native_streaming = false\n" in
+  let runtime_toml = {|[runtime]
+default = "fixture.good"
+[runtime.assignments]
+affected = "orphaned-lane"
+[runtime.lanes.orphaned-lane]
+candidates = [ "fixture.missing-one", "fixture.missing-two" ]
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.good]
+api-name = "good"
+max-context = 8192
+streaming = false
+[models.missing-one]
+api-name = "missing-one"
+max-context = 8192
+streaming = false
+[models.missing-two]
+api-name = "missing-two"
+max-context = 8192
+streaming = false
+[fixture.good]
+[fixture.missing-one]
+[fixture.missing-two]
+|} in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () -> with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml runtime_toml @@ fun path ->
+      (match Runtime.init_default_degraded_report ~config_path:path with
+       | Error error -> fail (Runtime.strict_init_error_to_string error)
+       | Ok Runtime.Initialized -> fail "a lane with every candidate missing must be observable"
+       | Ok (Runtime.Initialized_degraded degradation) ->
+         (match List.find_opt
+                  (fun (dropped : Runtime.dropped_runtime_lane) ->
+                     String.equal dropped.lane_id "orphaned-lane")
+                  degradation.dropped_lanes
+          with
+          | None -> fail "orphaned-lane must appear in dropped_lanes"
+          | Some dropped ->
+            check (list string) "every declared candidate was missing"
+              [ "fixture.missing-one"; "fixture.missing-two" ]
+              dropped.runtime_ids));
+      (match Runtime.resolve_assignment "orphaned-lane" with
+       | `Missing -> ()
+       | `Lane _ | `Unavailable _ -> fail "a fully-dropped lane must resolve to `Missing");
+      (match Runtime.dropped_lane_reason "orphaned-lane" with
+       | None -> fail "dropped_lane_reason must explain the `Missing lane"
+       | Some dropped ->
+         check string "dropped_lane_reason names the lane" "orphaned-lane" dropped.lane_id);
+      let meta = match Masc_test_deps.meta_of_json_fixture
+          (`Assoc [ "name", `String "affected"; "trace_id", `String "trace-affected" ]) with
+        | Ok meta -> meta | Error detail -> fail detail in
+      match Keeper_unified_turn_pre_dispatch.build_runtime_execution
+              ~meta ~runtime_id:"orphaned-lane" with
+      | Ok _ -> fail "a dropped lane must not resolve to a runtime execution"
+      | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+        check string "the error names the lane layer, not context-window resolution"
+          "runtime.lanes" field;
+        check bool "the detail names the dropped lane" true
+          (String_util.contains_substring detail "orphaned-lane");
+        check bool "the detail names its missing candidates" true
+          (String_util.contains_substring detail "fixture.missing-one"
+           && String_util.contains_substring detail "fixture.missing-two")
+      | Error error -> fail (Agent_core.Error.to_string error))
+
 let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
     "[[models]]\n\
@@ -5430,6 +5517,8 @@ let () =
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
           test_case "assignment-only catalog gap isolates requests and recovers" `Quick
             test_degraded_assignment_isolation_preserves_routing_and_recovers;
+          test_case "a dropped lane names the lane, not context-window resolution" `Quick
+            test_dropped_lane_assignment_names_the_lane_not_context_window;
           test_case
             "server degraded init still rejects unavailable lane and media routes"
             `Quick test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes;

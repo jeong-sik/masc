@@ -97,10 +97,13 @@ Open `must-do` issues, grouped. Numbers are issues.
 - `1.0.0` does not open until the TUI, the MCP workspace, and release truth
   hold without caveats.
 - `v2.*` tags are audit history only.
-- No `0.y.0` tag while that train's entry-condition issues remain open. Each
-  train names its entry condition on its GitHub milestone (v0.36.0: its open
-  `impact/breaks-continuity` issues). Other `must-do` issues do not block a
-  tag; they stay ordered by `impact/*` in the backlog. (Before 2026-09-21 this
+- No `0.y.0` tag while that train's entry-condition issues remain open. The
+  milestone is the list, not the label: an issue blocks the tag when it sits on
+  that train's GitHub milestone (v0.36.0: its open `impact/breaks-continuity`
+  issues). The label states the risk; putting the issue on that milestone is
+  the separate act that makes it block — on 2026-09-21, 11 of the 191 open
+  `impact/breaks-continuity` issues were on it. Other `must-do` issues do not
+  block a tag; they stay ordered by `impact/*` in the backlog. (Before 2026-09-21 this
   rule read "no tag while `must-do` issues remain open"; with 97 open on that
   day no tag could satisfy it, so it was never applied.)
 - `0.y.z` tags are date-fixed and scope-variable: the cut date holds and

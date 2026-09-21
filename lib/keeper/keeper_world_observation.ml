@@ -556,26 +556,32 @@ let board_reaction_event_of_dispatch
   }
 ;;
 
-let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
-  match signal.kind with
-  | Board_dispatch.Board_post_created -> Board_post_created
-  | Board_dispatch.Board_comment_added -> Board_comment_added
-  | Board_dispatch.Board_reaction_changed reaction ->
+let pending_board_event_kind_of_observation
+      (observation : Board_signal.board_observation)
+  =
+  match observation.kind with
+  | Board_signal.Observed_post_created -> Board_post_created
+  | Board_signal.Observed_comment_added -> Board_comment_added
+  | Board_signal.Observed_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
-  | Board_dispatch.Board_vote_cast vote -> Board_vote_cast vote
+  | Board_signal.Observed_vote_cast vote -> Board_vote_cast vote
 ;;
 
-let pending_board_event_of_board_signal
+let pending_board_event_of_board_observation
       ~(meta : keeper_meta)
       ~arrived_at:(_ : float)
-      (signal : Board_dispatch.board_signal)
+      (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
   =
   let self_ids = self_ids meta in
-  let matched = board_signal_match ~meta ~signal in
-  match Board_dispatch.get_post ~post_id:signal.post_id with
+  let matched = Board_signal.match_observation ~meta ~observation in
+  match Board_dispatch.get_post ~post_id:observation.post_id with
   | Error error ->
-    Error { Board_signal.operation = Board_signal.Get_post; post_id = signal.post_id; error }
+    Error
+      { Board_signal.operation = Board_signal.Get_post
+      ; post_id = observation.post_id
+      ; error
+      }
   | Ok post_snapshot ->
     let title, preview, hearth, post_kind, updated_at =
       let post : Board.post = post_snapshot in
@@ -585,21 +591,24 @@ let pending_board_event_of_board_signal
       , post.post_kind
       , post.updated_at )
     in
-    let event_kind = pending_board_event_kind_of_signal signal in
+    let event_kind = pending_board_event_kind_of_observation observation in
     let comment_derived =
-      match signal.kind with
-      | Board_dispatch.Board_post_created -> Ok (None, None, None)
-      | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+      match observation.kind with
+      | Board_signal.Observed_post_created -> Ok (None, None, None)
+      | Board_signal.Observed_comment_added ->
+        (match check_self_comment_status ~self_ids ~post_id:observation.post_id with
          | Board_signal.Unavailable unavailable -> Error unavailable
          | Board_signal.Available (`New_external (replies, author, preview)) ->
            Ok (Some replies, Some author, Some preview)
          | Board_signal.Available (`No_new_external | `Never) ->
-           Ok (None, Some signal.author, Some (short_preview ~max_len:60 signal.content)))
+           Ok
+             ( None
+             , Some observation.author
+             , Some (short_preview ~max_len:60 observation.content) ))
       (* A reaction or vote row states who did what to which target; the
          replies after the keeper's own comment belong to comment rows, so
          none are derived here. *)
-      | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ ->
+      | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
         Ok (None, None, None)
     in
     (match comment_derived with
@@ -607,8 +616,8 @@ let pending_board_event_of_board_signal
      | Ok (replies_after_own_comment, latest_external_author, latest_external_preview) ->
        Ok
          { event_kind
-         ; post_id = signal.post_id
-         ; author = signal.author
+         ; post_id = observation.post_id
+         ; author = observation.author
          ; title
          ; preview
          ; hearth
@@ -1103,17 +1112,19 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Board_signal bs ->
     Result.map
       (fun ev -> Some ev)
-      (pending_board_event_of_board_signal
+      (pending_board_event_of_board_observation
          ~meta
          ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
+         (Board_signal.board_observation_of_board_stimulus
+            ~post_id:stimulus.post_id
+            bs))
   | Keeper_event_queue.Board_attention attention ->
     Result.map
       (fun ev -> Some ev)
-      (pending_board_event_of_board_signal
+      (pending_board_event_of_board_observation
          ~meta
          ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_signal_of_board_stimulus
+         (Board_signal.board_observation_of_board_stimulus
             ~post_id:stimulus.post_id
             attention.signal))
   | Keeper_event_queue.Fusion_completed fc ->
@@ -1237,8 +1248,6 @@ let collect_board_events_with_cursor_policy
               let signal : Board_dispatch.board_signal =
                 { kind = Board_dispatch.Board_post_created
                 ; post_id = Board.Post_id.to_string p.id
-                ; comment_id = None
-                ; parent_id = None
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
                 ; content = p.body
@@ -1302,8 +1311,6 @@ let collect_board_events_with_cursor_policy
            let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
              ; post_id
-             ; comment_id = None
-             ; parent_id = None
              ; author = Board.Agent_id.to_string p.author
              ; title = p.title
              ; content = p.body
@@ -1412,8 +1419,6 @@ let collect_board_events_with_cursor_policy
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
                ; post_id
-               ; comment_id = None
-               ; parent_id = None
                ; author = Board.Agent_id.to_string p.author
                ; title = p.title
                ; content = p.body

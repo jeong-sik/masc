@@ -563,7 +563,7 @@ let wakeup_relevant_keeper_for_board_signal
   let signal_kind_label =
     match signal.kind with
     | Board_dispatch.Board_post_created -> "post_created"
-    | Board_dispatch.Board_comment_added -> "comment_added"
+    | Board_dispatch.Board_comment_added _ -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
     | Board_dispatch.Board_vote_cast _ -> "vote_cast"
   in
@@ -761,7 +761,7 @@ let wakeup_relevant_keeper_for_board_signal
                 an attention candidate. Every other kind still violates the
                 boundary — keep that fail-visible. *)
              match signal.kind with
-             | Board_dispatch.Board_comment_added ->
+             | Board_dispatch.Board_comment_added _ ->
                record_board_attention_candidate
                  ~config
                  ~signal_kind_label

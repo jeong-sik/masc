@@ -391,8 +391,6 @@ let test_board_goal_keyword_overlap_is_not_wake_reason () =
   let signal : Board_dispatch.board_signal =
     { kind = Board_dispatch.Board_post_created
     ; post_id = "post-keyword-overlap"
-    ; comment_id = None
-    ; parent_id = None
     ; author = "external-author"
     ; title = "test"
     ; content = "this test overlaps the keeper goal but does not address it"
@@ -412,8 +410,6 @@ let check_exact_board_mention ~content ~expected =
   let signal : Board_dispatch.board_signal =
     { kind = Board_dispatch.Board_post_created
     ; post_id = "post-exact-mention"
-    ; comment_id = None
-    ; parent_id = None
     ; author = "external-author"
     ; title = "test"
     ; content
@@ -434,13 +430,6 @@ let audience_signal ?(kind = Board_dispatch.Board_post_created) ~author content 
   =
   { kind
   ; post_id = "post-audience"
-  ; comment_id =
-      (match kind with
-       | Board_dispatch.Board_comment_added -> Some "c-audience"
-       | Board_dispatch.Board_post_created
-       | Board_dispatch.Board_reaction_changed _
-       | Board_dispatch.Board_vote_cast _ -> None)
-  ; parent_id = None
   ; author
   ; title = "audience"
   ; content
@@ -539,7 +528,13 @@ let test_closed_board_audience_routes_only_its_authority () =
      | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
   let comment =
     audience_signal
-      ~kind:Board_dispatch.Board_comment_added
+      ~kind:
+        (Board_dispatch.Board_comment_added
+           { comment_id =
+               (Board.Comment_id.of_string "c-00000000000000000000000000000001"
+                |> Result.get_ok)
+           ; parent_id = None
+           })
       ~author:"external-author"
       "thread update"
   in
@@ -691,8 +686,6 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-multi-lane"
-         ; comment_id = None
-         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@alpha @beta inspect independently"
@@ -774,8 +767,6 @@ let test_paused_exact_mention_is_durable_without_wake () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-paused-lane"
-         ; comment_id = None
-         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@pausedlane retain this"
@@ -815,8 +806,6 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-restarting-lane"
-         ; comment_id = None
-         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@restartlane retain this while relaunching"
@@ -855,8 +844,6 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-lane-isolation"
-         ; comment_id = None
-         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@zzzbroken @aaahealthy inspect independently"
@@ -903,10 +890,10 @@ let create_thread_fixture config ~keeper_name =
   let comment = add_comment ~author:"external-author" ~content:"follow up" in
   let signal : Board_dispatch.addressed_board_signal =
     { signal =
-        { kind = Board_dispatch.Board_comment_added
+        { kind =
+            Board_dispatch.Board_comment_added
+              { comment_id = comment.id; parent_id = comment.parent_id }
         ; post_id
-        ; comment_id = Some (Board.Comment_id.to_string comment.id)
-        ; parent_id = Option.map Board.Comment_id.to_string comment.parent_id
         ; author = "external-author"
         ; title = "thread"
         ; content = "follow up"
@@ -978,10 +965,10 @@ let create_self_post_fixture config ~keeper_name =
   in
   let signal : Board_dispatch.addressed_board_signal =
     { signal =
-        { kind = Board_dispatch.Board_comment_added
+        { kind =
+            Board_dispatch.Board_comment_added
+              { comment_id = comment.id; parent_id = comment.parent_id }
         ; post_id
-        ; comment_id = Some (Board.Comment_id.to_string comment.id)
-        ; parent_id = Option.map Board.Comment_id.to_string comment.parent_id
         ; author = "external-author"
         ; title = "question from the keeper"
         ; content = "it is empty because the loader skips it"

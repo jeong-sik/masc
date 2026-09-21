@@ -77,8 +77,6 @@ let delivered label = function
 let signal post_id : Masc.Board_dispatch.board_signal =
   { kind = Masc.Board_dispatch.Board_post_created
   ; post_id
-  ; comment_id = None
-  ; parent_id = None
   ; author = "external-author"
   ; title = "Board update"
   ; content = "Persisted Board evidence"

@@ -33,9 +33,15 @@ val valid_sort_order_strings : string list
 
 (** {1 Hook events} *)
 
+type board_comment_identity =
+  { comment_id : Board.Comment_id.t
+  ; parent_id : Board.Comment_id.t option
+  }
+(** Exact identity accepted by the Board store for one new comment. *)
+
 type board_signal_kind =
   | Board_post_created
-  | Board_comment_added
+  | Board_comment_added of board_comment_identity
   | Board_reaction_changed of board_reaction_change
   | Board_vote_cast of board_vote_change
       (** A vote landed on a post or comment. Emitted by {!vote} and
@@ -66,8 +72,6 @@ and board_vote_change = {
 type board_signal = {
   kind : board_signal_kind;
   post_id : string;
-  comment_id : string option;
-  parent_id : string option;
   author : string;
   title : string;
   content : string;

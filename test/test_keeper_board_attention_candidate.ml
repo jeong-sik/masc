@@ -34,6 +34,12 @@ let ok label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
+let comment_id raw =
+  match Masc.Board.Comment_id.of_string raw with
+  | Ok id -> id
+  | Error error -> Alcotest.fail (Masc.Board.show_board_error error)
+;;
+
 (* Every case in this file delivers against a candidate it just persisted, so
    [Candidate_absent] here is a bug in the fixture, not the outcome under
    test — see test_keeper_board_attention_worker.ml for the terminal-settlement
@@ -50,8 +56,6 @@ let signal ?(content = "Persisted Board evidence") ?(updated_at = 42.0) post_id 
   =
   { kind = Masc.Board_dispatch.Board_post_created
   ; post_id
-  ; comment_id = None
-  ; parent_id = None
   ; author = "external-author"
   ; title = "Board update"
   ; content
@@ -436,8 +440,11 @@ let test_old_relevant_comment_cannot_override_current_unrelated_signal () =
     { (signal
          ~content:"Lunch is available in the kitchen."
          "post-current-unrelated-comment") with
-      kind = Masc.Board_dispatch.Board_comment_added
-    ; comment_id = Some "c-00000000000000000000000000000002"
+      kind =
+        Masc.Board_dispatch.Board_comment_added
+          { comment_id = comment_id "c-00000000000000000000000000000002"
+          ; parent_id = None
+          }
     }
   in
   let original = candidate current_signal in
@@ -497,10 +504,11 @@ let test_old_relevant_comment_cannot_override_current_unrelated_signal () =
 ;;
 
 let test_distinct_comment_ids_with_the_same_body_are_distinct_candidates () =
-  let make comment_id =
+  let make raw_comment_id =
     { (signal ~content:"same body" "post-comment-identity") with
-      kind = Masc.Board_dispatch.Board_comment_added
-    ; comment_id = Some comment_id
+      kind =
+        Masc.Board_dispatch.Board_comment_added
+          { comment_id = comment_id raw_comment_id; parent_id = None }
     }
   in
   let first = make "c-00000000000000000000000000000001" in
@@ -513,44 +521,41 @@ let test_distinct_comment_ids_with_the_same_body_are_distinct_candidates () =
        (A.candidate_id_of_signal ~keeper_name:"alpha" second))
 ;;
 
-let test_record_rejects_malformed_without_poisoning_ledger () =
-  with_temp_base "board-attention-candidate-record-validation" @@ fun base_path ->
+let test_codec_rejects_malformed_comment_identity () =
   let valid = candidate (signal "post-record-validation") in
-  let expect_rejected label candidate =
-    (match A.record ~base_path candidate with
-     | A.Record_error _ -> ()
-     | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded"));
-    Alcotest.(check int)
-      (label ^ " left the ledger empty")
-      0
-      (ok
-         "load ledger after rejected record"
-         (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
-       |> List.length)
+  let invalid_signal replacements =
+    let replace fields =
+      List.map
+        (fun (key, value) ->
+           key, Option.value ~default:value (List.assoc_opt key replacements))
+        fields
+    in
+    match A.candidate_to_json valid with
+    | `Assoc candidate_fields ->
+      `Assoc
+        (List.map
+           (function
+             | "signal", `Assoc signal_fields -> "signal", `Assoc (replace signal_fields)
+             | field -> field)
+           candidate_fields)
+    | _ -> Alcotest.fail "candidate codec did not produce an object"
   in
-  expect_rejected
-    "non-comment signal carrying comment identity"
-    { valid with signal = { valid.signal with comment_id = Some "c-unowned" } };
-  let comment_without_id =
-    { valid.signal with kind = Masc.Board_dispatch.Board_comment_added }
+  let expect_rejected label json =
+    match A.candidate_of_json json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " was decoded")
   in
   expect_rejected
     "comment signal without producer identity"
-    { valid with signal = comment_without_id };
-  let malformed_comment_id =
-    { valid.signal with
-      kind = Masc.Board_dispatch.Board_comment_added
-    ; comment_id = Some "comment-two"
-    }
-  in
+    (invalid_signal [ "kind", `String "comment_added" ]);
   expect_rejected
     "comment signal with a non-Board id"
-    { valid with signal = malformed_comment_id };
-  let persisted = record ~base_path valid in
-  Alcotest.(check bool)
-    "valid current signal is the only durable row"
-    true
-    (load_one ~base_path = persisted)
+    (invalid_signal
+       [ "kind", `String "comment_added"; "comment_id", `String "comment-two" ]);
+  expect_rejected
+    "non-comment signal carrying comment identity"
+    (invalid_signal
+       [ "comment_id", `String "c-00000000000000000000000000000003" ])
 ;;
 
 let test_pending_row_has_no_board_thread_history () =
@@ -1233,9 +1238,9 @@ let () =
             `Quick
             test_pending_row_has_no_board_thread_history
         ; Alcotest.test_case
-            "record rejects malformed input without poisoning ledger"
+            "codec rejects malformed comment identity"
             `Quick
-            test_record_rejects_malformed_without_poisoning_ledger
+            test_codec_rejects_malformed_comment_identity
         ; Alcotest.test_case
             "judgment write invariant rejects blank provenance"
             `Quick

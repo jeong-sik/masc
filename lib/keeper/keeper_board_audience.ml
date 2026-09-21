@@ -47,7 +47,7 @@ let classify ~visibility signal =
         ~visibility
         ~title:signal.title
         ~content:signal.content
-    | Board_dispatch.Board_comment_added ->
+    | Board_dispatch.Board_comment_added _ ->
       Board.audience_for_comment ~content:signal.content
     | Board_dispatch.Board_reaction_changed _ ->
       Ok Board.audience_for_reaction
@@ -89,10 +89,13 @@ let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signa
             post_created signals only). Escalate to [Judge_discoverable] so
             the lane records an attention candidate; every other kind keeps
             the [Ignore] fold. *)
-         if signal.Board_dispatch.kind = Board_dispatch.Board_comment_added
-            && meta.board_interests <> []
-         then Board_signal.Available Judge_discoverable
-         else Board_signal.Available Ignore)
+         (match signal.Board_dispatch.kind with
+          | Board_dispatch.Board_comment_added _ when meta.board_interests <> [] ->
+            Board_signal.Available Judge_discoverable
+          | Board_dispatch.Board_post_created
+          | Board_dispatch.Board_comment_added _
+          | Board_dispatch.Board_reaction_changed _
+          | Board_dispatch.Board_vote_cast _ -> Board_signal.Available Ignore))
     | Discoverable ->
       if meta.board_interests = []
       then Board_signal.Available Ignore

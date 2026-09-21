@@ -5,6 +5,24 @@ type match_result =
   ; matched_targets : string list
   }
 
+type board_observation_kind =
+  | Observed_post_created
+  | Observed_comment_added
+  | Observed_reaction_changed of Board_dispatch.board_reaction_change
+  | Observed_vote_cast of Board_dispatch.board_vote_change
+
+type board_observation =
+  { kind : board_observation_kind
+  ; post_id : string
+  ; author : string
+  ; title : string
+  ; content : string
+  ; hearth : string option
+  ; updated_at : float option
+  }
+(** Lossy durable-queue projection. Unlike [Board_dispatch.board_signal], a
+    comment observation does not claim to carry the accepted comment id. *)
+
 type board_read_operation =
   | Get_post
   | Get_comments
@@ -62,17 +80,17 @@ val disposition_of_unavailable : board_unavailable -> disposition
    [unavailable_to_string] below, which is this module's only use of it. *)
 val unavailable_to_string : board_unavailable -> string
 
-val board_signal_of_board_stimulus
+val board_observation_of_board_stimulus
   :  post_id:string
   -> Keeper_event_queue.board_stimulus
-  -> Board_dispatch.board_signal
-(** Total conversion from the typed event-queue board payload to the
-    [Board_dispatch.board_signal] the matchers consume (RFC-0020). *)
+  -> board_observation
+(** Read the queue payload as the lossy observation it is. *)
 
 val board_stimulus_of_board_signal
   :  Board_dispatch.board_signal
   -> Keeper_event_queue.board_stimulus
-(** Total inverse conversion used by durable Board-signal producers. *)
+(** Project a live signal into the existing durable queue shape. Comment
+    identity remains owned by the Board record and attention candidate. *)
 
 (* [post_id_string] is how [cursor_token_of_post] below keys a post; that is
    its only caller. *)
@@ -92,6 +110,11 @@ val mention_ids_of_signal : Board_dispatch.board_signal -> Keeper_identity.Keepe
 val match_signal
   :  meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
+  -> match_result
+
+val match_observation
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> observation:board_observation
   -> match_result
 
 val check_self_comment_status

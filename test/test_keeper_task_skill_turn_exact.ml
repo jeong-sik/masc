@@ -866,7 +866,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       (Exact_output_fixture.Replies
         [ response "not_applicable"; response "applicable"; response "insufficient_context"
         ; response "not-an-offered-choice"
-        ; response ~extra_answers:[ "surplus", `Bool true ] "applicable"
+        ; response ~extra_answers:[ "surplus", `Assoc [ "type", `String "noul"; "noul", `Float 1.0 ] ] "applicable"
         ; "not-json"; response "applicable" ]) in
   let policy = { Runtime_schema.default_typesafeai with
       skill_applicability = true; lane_endpoint = server.base_url } in

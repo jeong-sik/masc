@@ -2,8 +2,13 @@ module R = Keeper_librarian_range
 module B = Keeper_turn_boundaries
 module Window = Runtime_model_input_tail_window
 
+type origin = Witnessed_history | Captured_checkpoint_prefix
+
 type t =
-  { trace_id : string
+  { origin : origin
+  ; covering_end_atom : int
+  ; covering_last_atom_digest : string
+  ; trace_id : string
   ; history_start_boundary_line : int
   ; end_boundary_line : int
   ; end_turn_ref : Ids.Turn_ref.t
@@ -52,11 +57,14 @@ let validate (snapshot : t) =
   if String.trim snapshot.trace_id = "" then Error (Invalid_snapshot "blank trace_id")
   else if snapshot.history_start_boundary_line < 1 || snapshot.end_atom < 1
   then Error (Invalid_snapshot "history positions must be positive")
+  else if snapshot.covering_end_atom < snapshot.end_atom
+       || (snapshot.origin = Witnessed_history && snapshot.covering_end_atom <> snapshot.end_atom)
+  then Error (Invalid_snapshot "cut lies outside its completed boundary")
   else if snapshot.end_boundary_line < snapshot.history_start_boundary_line
   then Error (Invalid_snapshot "ending boundary precedes history start")
   else if not (String.equal snapshot.trace_id (Ids.Turn_ref.trace_id snapshot.end_turn_ref))
   then Error (Invalid_snapshot "ending turn belongs to another trace")
-  else if not (valid_sha256 snapshot.last_atom_digest && valid_sha256 snapshot.prefix_sha256)
+  else if not (valid_sha256 snapshot.covering_last_atom_digest && valid_sha256 snapshot.last_atom_digest && valid_sha256 snapshot.prefix_sha256)
   then Error (Invalid_snapshot "digests must be canonical SHA256")
   else if String.trim snapshot.working_state = ""
   then Error (Invalid_snapshot "blank working_state")
@@ -65,7 +73,10 @@ let validate (snapshot : t) =
 
 let to_json (snapshot : t) =
   `Assoc
-    [ "trace_id", `String snapshot.trace_id
+    [ "origin", `String (match snapshot.origin with Witnessed_history -> "witnessed_history" | Captured_checkpoint_prefix -> "captured_checkpoint_prefix")
+    ; "covering_end_atom", `Int snapshot.covering_end_atom
+    ; "covering_last_atom_digest", `String snapshot.covering_last_atom_digest
+    ; "trace_id", `String snapshot.trace_id
     ; "history_start_boundary_line", `Int snapshot.history_start_boundary_line
     ; "end_boundary_line", `Int snapshot.end_boundary_line
     ; "end_turn_ref", Ids.Turn_ref.to_yojson snapshot.end_turn_ref
@@ -78,11 +89,19 @@ let to_json (snapshot : t) =
 
 let of_json = function
   | `Assoc fields ->
-    let keys = ["trace_id"; "history_start_boundary_line"; "end_boundary_line"; "end_turn_ref"; "end_atom";
+    let keys = ["origin"; "covering_end_atom"; "covering_last_atom_digest"; "trace_id"; "history_start_boundary_line"; "end_boundary_line"; "end_turn_ref"; "end_atom";
       "last_atom_digest"; "prefix_sha256"; "working_state"] in
     if List.sort String.compare (List.map fst fields) <> List.sort String.compare keys
     then Error (Invalid_snapshot "unexpected, duplicate or missing fields")
     else (
+      let* origin = match List.assoc "origin" fields with
+        | `String "witnessed_history" -> Ok Witnessed_history
+        | `String "captured_checkpoint_prefix" -> Ok Captured_checkpoint_prefix
+        | _ -> Error (Invalid_snapshot "unknown source origin") in
+      let* covering_end_atom, covering_last_atom_digest =
+        match List.assoc "covering_end_atom" fields, List.assoc "covering_last_atom_digest" fields with
+        | `Int ending, `String digest -> Ok (ending, digest)
+        | _ -> Error (Invalid_snapshot "invalid covering boundary") in
       let* end_turn_ref = Ids.Turn_ref.of_yojson (List.assoc "end_turn_ref" fields)
         |> Result.map_error (fun detail -> Invalid_snapshot detail) in
       match List.assoc "end_boundary_line" fields, List.assoc "trace_id" fields, List.assoc "history_start_boundary_line" fields,
@@ -90,7 +109,7 @@ let of_json = function
             List.assoc "prefix_sha256" fields, List.assoc "working_state" fields with
       | `Int end_boundary_line, `String trace_id, `Int history_start_boundary_line, `Int end_atom,
         `String last_atom_digest, `String prefix_sha256, `String working_state ->
-        validate { trace_id; history_start_boundary_line; end_boundary_line; end_turn_ref; end_atom;
+        validate { origin; covering_end_atom; covering_last_atom_digest; trace_id; history_start_boundary_line; end_boundary_line; end_turn_ref; end_atom;
                    last_atom_digest; prefix_sha256; working_state }
       | _ -> Error (Invalid_snapshot "field type mismatch"))
   | _ -> Error (Invalid_snapshot "expected object")
@@ -104,14 +123,44 @@ let source_range ~trace_id ~lines ~messages =
   | R.Read _ | R.Baseline _ | R.Nothing_to_read -> Error Uncovered_history
 ;;
 
+
+(* A baseline identifies a real completed checkpoint endpoint; it does not
+   certify that Memory ever read it. This source explicitly reads its prefix. *)
+let checkpoint_prefix_range ~trace_id ~lines ~messages =
+  match R.select ~trace_id ~lines ~progress:None ~messages R.All_unread with
+  | R.Baseline baseline ->
+    let progress = { Keeper_librarian_progress.position = baseline.position;
+      boundary_lines_seen = baseline.boundary_lines_seen } in
+    (match R.select ~trace_id ~lines ~progress:(Some progress) ~messages R.All_unread with
+     | R.Read {range; _} -> Ok {range with R.start_atom = 0}
+     | R.Nothing_to_read ->
+       let first = List.find_map (function
+         | line, Ok {B.event = B.Turn_ended {turn_ref; _}; _}
+           when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id -> Some line
+         | _ -> None) lines in
+       (match first with
+        | None -> Error Uncovered_history
+        | Some history_start_boundary_line -> Ok
+          {R.history_start_boundary_line; start_atom = 0;
+           end_atom = baseline.position.end_atom;
+           last_atom_digest = baseline.position.last_atom_digest})
+     | R.Stop error -> Error (Range_stopped error)
+     | _ -> Error Uncovered_history)
+  | _ -> source_range ~trace_id ~lines ~messages
+;;
+
 let prefix_sha256 messages range =
   R.slice messages range
   |> List.map Agent_core.Checkpoint.message_to_json
   |> fun messages -> Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List messages)) |> to_hex)
 ;;
 
-let capture ~trace_id ~lines ~messages ~working_state =
-  let* range = source_range ~trace_id ~lines ~messages in
+let capture_range ~origin ?end_atom ~trace_id ~lines ~messages ~working_state range =
+  let end_atom = Option.value end_atom ~default:range.R.end_atom in
+  let* last_atom_digest =
+    if end_atom < 1 || end_atom > range.end_atom then Error Uncovered_history
+    else match Window.atom_opening_digest messages (end_atom - 1) with
+      | None -> Error Uncovered_history | Some digest -> Ok digest in
   let* end_boundary_line, end_turn_ref =
     match List.find_map (function
       | line, Ok { B.event = B.Turn_ended
@@ -125,32 +174,48 @@ let capture ~trace_id ~lines ~messages ~working_state =
     | None -> Error Uncovered_history
   in
   validate
-    { trace_id
+    { origin
+    ; covering_end_atom = range.end_atom
+    ; covering_last_atom_digest = range.last_atom_digest
+    ; trace_id
     ; history_start_boundary_line = range.history_start_boundary_line
     ; end_boundary_line
     ; end_turn_ref
-    ; end_atom = range.end_atom
-    ; last_atom_digest = range.last_atom_digest
-    ; prefix_sha256 = prefix_sha256 messages range
+    ; end_atom
+    ; last_atom_digest
+    ; prefix_sha256 = prefix_sha256 messages {range with R.end_atom; last_atom_digest}
     ; working_state
     }
+;;
+
+let capture ~trace_id ~lines ~messages ~working_state =
+  let* range = source_range ~trace_id ~lines ~messages in
+  capture_range ~origin:Witnessed_history ~trace_id ~lines ~messages ~working_state range
+;;
+
+let capture_checkpoint_prefix ?end_atom ~trace_id ~lines ~messages ~working_state () =
+  let* range = checkpoint_prefix_range ~trace_id ~lines ~messages in
+  capture_range ~origin:Captured_checkpoint_prefix ?end_atom ~trace_id ~lines ~messages ~working_state range
 ;;
 
 let restore ~trace_id ~lines ~messages (snapshot : t) =
   if not (String.equal trace_id snapshot.trace_id) then Error Trace_mismatch
   else
-    let* range = source_range ~trace_id ~lines ~messages in
+    let source = match snapshot.origin with Witnessed_history -> source_range | Captured_checkpoint_prefix -> checkpoint_prefix_range in
+    let* range = source ~trace_id ~lines ~messages in
     let boundary_present = List.exists (function
       | line, Ok { B.event = B.Turn_ended
           { turn_ref; position = B.Atom_history { end_atom; last_atom_digest }; _ }; _ } ->
         line = snapshot.end_boundary_line
         && Ids.Turn_ref.equal turn_ref snapshot.end_turn_ref
-        && end_atom = snapshot.end_atom
-        && String.equal last_atom_digest snapshot.last_atom_digest
+        && end_atom = snapshot.covering_end_atom
+        && String.equal last_atom_digest snapshot.covering_last_atom_digest
       | _ -> false) lines
     in
     if range.history_start_boundary_line <> snapshot.history_start_boundary_line
-       || range.end_atom < snapshot.end_atom || not boundary_present
+       || range.end_atom < snapshot.covering_end_atom || not boundary_present
+       || Window.atom_opening_digest messages (snapshot.covering_end_atom - 1)
+          <> Some snapshot.covering_last_atom_digest
        || Window.atom_opening_digest messages (snapshot.end_atom - 1)
           <> Some snapshot.last_atom_digest
     then Error History_changed

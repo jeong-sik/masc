@@ -122,6 +122,7 @@ type outward_effect =
 
 type exact_execution_error =
   { outward_effect : outward_effect
+  ; capacity_refused : bool
   ; detail : string
   }
 
@@ -197,7 +198,7 @@ let rec extraction_error_to_string = function
   | Execution_clock_unavailable ->
     "memory os librarian execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
-  | Exact_execution_failed { outward_effect; detail } ->
+  | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
       "librarian exact execution failed outward_effect=%s cause=%s"
       (match outward_effect with
@@ -442,6 +443,27 @@ let prepare_attempt ~selected_slots messages =
       Exact_setup_failed (Exact_flow_start_failed error))
 ;;
 
+let capacity_refused_by_flow = function
+  | Exact_output.Flow_candidates_exhausted { rejection; _ } ->
+    (match Exact_output.candidate_rejection_disposition rejection with
+     | Input_capacity (Context_window_exceeded _
+         | Token_capacity_rejected (Capacity_input_rejected _)) -> true
+     | _ -> false)
+  | Exact_output.Flow_exact_execution_failed { cause; _ } ->
+    (match cause.Exact_output.cause with
+     | Provider_response_refused
+         { refusal = Request_body_refused | Context_overflow | Input_capacity; _ } -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let extraction_capacity_refused = function
+  | Exact_execution_failed error -> error.capacity_refused
+  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Cli_slots_exhausted _ | Cli_prompt_unavailable _ | No_transport_declared
+  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> false
+;;
+
 let exact_execution_error error =
   let outward_effect =
     match Exact_output.flow_execution_error_generation_dispatch error with
@@ -449,7 +471,7 @@ let exact_execution_error error =
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
   let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
-  { outward_effect; detail }
+  { outward_effect; detail; capacity_refused = capacity_refused_by_flow error }
 ;;
 
 (* The librarian's whole prompt is one User message; the cli one-shot needs
@@ -813,6 +835,8 @@ let run_best_effort
       ?(write_scope = Context_and_memory)
       ?continuity
       ?(on_memory_committed = fun () -> ())
+      ?(on_capacity_refused = fun () -> ())
+      ?(on_continuity_committed = fun _ -> ())
       ?durable_range_id
       ?official_range_id
       ?cli_runner
@@ -985,9 +1009,11 @@ let run_best_effort
                      ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
                      ~prepared ~working_state)
                   ~observe:(function
-                 | Ok snapshot -> continuity_write := `Assoc
+                 | Ok snapshot ->
+                   continuity_write := `Assoc
                      ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
-                      "prefix_sha256", `String snapshot.prefix_sha256]
+                      "prefix_sha256", `String snapshot.prefix_sha256];
+                   on_continuity_committed snapshot
                  | Error detail ->
                    continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
                    Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail)
@@ -1092,6 +1118,7 @@ let run_best_effort
                 normally. Propagate it here even when no later I/O yields. *)
              Eio.Fiber.check ()
            | Error error ->
+             if extraction_capacity_refused error then on_capacity_refused ();
              let detail = extraction_error_to_string error in
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)

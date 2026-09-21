@@ -174,8 +174,71 @@ let run_durable ~base_path ~keeper_name =
       ~base_path ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name)
 ;;
 
+(* Continuity has its own exact source position. A Memory baseline does not
+   claim the earlier checkpoint was summarized. Work stays in this Keeper's
+   existing serial Librarian lane. *)
+let run_continuity ~base_path ~keeper_name =
+  let module P = Keeper_librarian_continuity in
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let report detail = Log.Keeper.warn ~keeper_name "continuity pass stopped: %s" detail in
+  let rec next () =
+    match Env_config.KeeperMemoryOs.librarian_config_state () with
+    | Disabled | Invalid -> ()
+    | Enabled ->
+      match Keeper_meta_store.read_effective_meta_presence config keeper_name with
+      | Error detail | Ok (Keeper_meta_store.Meta_not_current detail) -> report detail
+      | Ok Keeper_meta_store.Meta_absent -> ()
+      | Ok (Keeper_meta_store.Meta_present meta) ->
+        match Domain_pool_ref.submit_io_or_inline (fun () ->
+          P.prepare ~config ~keeper_name
+            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ()) with
+        | Error detail -> report detail
+        | Ok None -> ()
+        | Ok (Some prepared) -> attempt meta prepared
+  and attempt meta prepared =
+    let inputs = Domain_pool_ref.submit_io_or_inline (fun () ->
+      let ( let* ) = Result.bind in
+      let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+      let* memory_committed = P.memory_committed ~config ~keeper_name prepared in
+      let* range_id = P.memory_range_id ~config ~keeper_name prepared in
+      Ok (current, memory_committed, range_id,
+        Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name)) in
+    match inputs with
+    | Error detail -> report detail
+    | Ok (current, memory_committed, range_id, working_context) ->
+      let input : Keeper_librarian.input =
+        { turn_ref = P.turn_ref prepared; goal_context = Keeper_librarian.No_task;
+          keeper_instructions = meta.Keeper_meta_contract.instructions;
+          current = Option.map (fun (value : Keeper_memory_os_current.t) ->
+            {Keeper_librarian.facts = value.facts}) current;
+          working_context; messages = P.messages prepared;
+          tool_observations = []; counterpart_observations = [] } in
+      let saved = ref false and capacity_refused = ref false in
+      Keeper_librarian_runtime.run_best_effort
+        ~trigger:Keeper_librarian_runtime.Durable_range
+        ~input_projection:Keeper_librarian_runtime.Already_selected_range
+        ~write_scope:(if memory_committed then Keeper_librarian_runtime.Context_only else Context_and_memory)
+        ~continuity:prepared
+        ?durable_range_id:(if memory_committed then None else
+          Some range_id)
+        ~on_capacity_refused:(fun () -> capacity_refused := true)
+        ~on_continuity_committed:(fun _ -> saved := true)
+        ~base_path ~keepers_dir ~keeper_id:keeper_name
+        ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
+        input;
+      if !saved then next ()
+      else if !capacity_refused then
+        match P.narrow prepared with
+        | Some smaller -> attempt meta smaller
+        | None -> report "source cannot be narrowed safely after runtime capacity refusal"
+  in
+  next ()
+;;
+
 let run ~trigger ~base_path ~keeper_name =
   run_durable ~base_path ~keeper_name;
+  run_continuity ~base_path ~keeper_name;
   match Env_config.KeeperMemoryOs.librarian_config_state (),
         Keeper_owner_projection.lookup ~base_path ~keeper_name with
   | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
@@ -193,13 +256,7 @@ let run ~trigger ~base_path ~keeper_name =
     let handled = attempt_remembered ~base_path ~keeper_name
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~meta ~sources_changed ~trigger in
-    let continuity = Domain_pool_ref.submit_io_or_inline (fun () ->
-      Keeper_librarian_continuity.prepare_committed ~config:(Workspace.default_config base_path)
-        ~keeper_name ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)) in
-    let continuity = match continuity with
-      | Ok value -> value
-      | Error detail -> Log.Keeper.warn ~keeper_name "continuity source unavailable: %s" detail; None in
-    if (sources_changed && not handled) || Option.is_some continuity then (
+    if sources_changed && not handled then (
       match Domain_pool_ref.submit_io_or_inline (fun () ->
         Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
       | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
@@ -221,7 +278,6 @@ let run ~trigger ~base_path ~keeper_name =
           ; messages = []; tool_observations = []; counterpart_observations = [] } in
         Keeper_librarian_runtime.run_best_effort ~trigger:Queue_changed
           ~write_scope:Keeper_librarian_runtime.Context_only
-          ?continuity
           ~base_path ~keepers_dir ~keeper_id:keeper_name
           ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
   | (Disabled | Invalid), _
@@ -248,7 +304,8 @@ let install () =
 let submit_durable ~base_path ~keeper_name =
   let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
-      run_durable ~base_path ~keeper_name)
+      run_durable ~base_path ~keeper_name;
+      run_continuity ~base_path ~keeper_name)
   in
   ()
 ;;
@@ -264,6 +321,7 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 ;;
 
 module For_testing = struct
+  let run_continuity = run_continuity
   let attempt_remembered = attempt_remembered
   let run_durable_with_commit = run_durable_with_commit
 end

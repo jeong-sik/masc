@@ -11,6 +11,10 @@ type prepared =
   ; messages : Agent_core.Types.message list
   ; previous : S.t option
   ; previous_state : string option
+  ; recovery_receipt : Keeper_memory_os_current.durable_range_id option
+  ; range : R.range
+  ; start_atom : int
+  ; end_atom : int
   ; unread : Agent_core.Types.message list
   }
 let path ~config ~keeper_name =
@@ -22,7 +26,7 @@ let read ~config ~keeper_name =
   | Fs_compat.Exact_missing -> Ok None
   | Fs_compat.Exact_kind _ -> S.load ~path:file |> Result.map Option.some |> Result.map_error S.error_to_string
   | Fs_compat.Exact_unknown -> Error "continuity snapshot path cannot be inspected"
-let prepare ~config ~keeper_name ~trace_id =
+let prepare ?end_atom ~config ~keeper_name ~trace_id () =
   let* lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
   let* previous = read ~config ~keeper_name in
   let progress = Option.map (fun (snapshot : S.t) ->
@@ -41,65 +45,103 @@ let prepare ~config ~keeper_name ~trace_id =
       | C.Ref_lock_failed detail -> detail)
   | Ok checkpoint ->
     let messages = C.exact_snapshot_messages checkpoint in
-    match R.select ~trace_id ~lines ~progress:None ~messages R.All_unread with
-    | R.Read {range;_} when range.start_atom=0 ->
-      let labelled,_ = W.annotate messages in
-      let messages = List.filter_map (fun (message,label) -> match label with
-        | W.Pinned -> Some message
-        | W.Atom atom -> if atom < range.end_atom then Some message else None) labelled in
-      let previous_state, unread = match previous with
+    match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
+    | Error S.Uncovered_history -> Ok None
+    | Error error -> Error (S.error_to_string error)
+    | Ok range ->
+      let previous_state, start_atom = match previous with
         | Some snapshot -> (match S.restore ~trace_id ~lines ~messages snapshot with
-            | Ok restored -> Some restored.working_state, restored.messages
-            | Error _ -> None, messages)
-        | None -> None, messages in
-      let has_atoms = List.exists (fun (_,label) -> match label with W.Atom _ -> true | W.Pinned -> false)
-        (fst (W.annotate unread)) in
-      if not has_atoms && Option.is_some previous_state then Ok None
-      else Ok (Some {trace_id;lines;messages;previous;previous_state;unread})
-    | R.Stop _ -> Error "continuity source boundary cannot be read safely"
-    | R.Read _ | R.Baseline _ | R.Nothing_to_read | R.Position_in_other_trace _ -> Ok None
-let memory_covers ~config ~keeper_name prepared =
-  (* This is an endpoint check, not a retained proof of every earlier range.
-     The WAL keeps only the latest atom receipt per scope. Production receipts
-     come from the serial durable consumer, which advances each selected
-     prefix only after Memory commits (or recovers that commit from its WAL).
-     [prepare] additionally requires a witnessed history start at atom zero;
-     an unwitnessed baseline cannot bootstrap continuity. These producer
-     invariants supply earlier coverage when this receipt starts after zero. *)
-  let* receipt = Keeper_memory_os_current.committed_durable_range
+            | Ok restored -> Some restored.working_state, snapshot.end_atom
+            | Error _ -> None, 0)
+        | None -> None, 0 in
+      let* receipt = Keeper_memory_os_current.committed_durable_range
+        ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+        ~keeper_id:keeper_name ~receipt_scope:(path ~config ~keeper_name) in
+      let recovery_receipt = match receipt with
+        | Some receipt when String.equal receipt.trace_id trace_id
+            && receipt.history_start_boundary_line = range.history_start_boundary_line
+            && receipt.start_atom = start_atom && receipt.end_atom > start_atom
+            && receipt.end_atom <= range.end_atom
+            && W.atom_opening_digest messages (receipt.end_atom - 1) = Some receipt.last_atom_digest
+            && List.exists (fun (cut : R.atom_cut) -> cut.cut_line = receipt.end_boundary_line
+                 && cut.cut_end_atom >= receipt.end_atom)
+                 (R.cut_lines ~trace_id ~lines ~messages range) -> Some receipt
+        | _ -> None in
+      let end_atom = match recovery_receipt with
+        | Some receipt -> receipt.end_atom
+        | None -> Option.value end_atom ~default:range.end_atom in
+      if end_atom > range.end_atom || end_atom < 1 then
+        Error "continuity cut is outside the completed checkpoint prefix"
+      else if end_atom <= start_atom then Ok None
+      else let unread = R.slice messages {range with R.start_atom; end_atom} in
+        Ok (Some {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;start_atom;end_atom;unread})
+let messages prepared = prepared.unread
+let turn_ref prepared =
+  (* [prepare] obtained this range from a verified completed boundary. *)
+  (List.find (fun (cut : R.atom_cut) -> cut.cut_end_atom = prepared.range.end_atom)
+    (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
+      ~messages:prepared.messages prepared.range)).cut_turn_ref
+let end_atom prepared = prepared.end_atom
+let narrow prepared =
+  let count = prepared.end_atom - prepared.start_atom in
+  if count <= 1 || Option.is_some prepared.recovery_receipt then None
+  else
+    let end_atom = prepared.start_atom + count / 2 in
+    let unread = R.slice prepared.messages {prepared.range with R.start_atom = prepared.start_atom; end_atom} in
+    Some {prepared with end_atom; unread; recovery_receipt = None}
+let memory_range_id ~config ~keeper_name prepared =
+  match prepared.recovery_receipt with Some receipt -> Ok receipt | None ->
+  let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
+    ~messages:prepared.messages prepared.range in
+  match List.find_opt (fun (cut : R.atom_cut) -> cut.cut_end_atom = prepared.range.end_atom) cuts,
+        W.atom_opening_digest prepared.messages (prepared.end_atom - 1) with
+  | Some cut, Some last_atom_digest -> Ok
+    { Keeper_memory_os_current.receipt_scope = path ~config ~keeper_name;
+      trace_id = prepared.trace_id;
+      history_start_boundary_line = prepared.range.history_start_boundary_line;
+      start_atom = prepared.start_atom; end_atom = prepared.end_atom; last_atom_digest;
+      end_boundary_line = cut.cut_line;
+      boundary_lines_seen = List.fold_left (fun count (_, read) ->
+        match read with Error B.Incomplete_line -> count | _ -> count + 1) 0 prepared.lines }
+  | _ -> Error "continuity source has no covering completed boundary"
+let memory_committed ~config ~keeper_name prepared =
+  let* expected = memory_range_id ~config ~keeper_name prepared in
+  let* actual = Keeper_memory_os_current.committed_durable_range
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+    ~keeper_id:keeper_name ~receipt_scope:expected.receipt_scope in
+  if actual = Some expected then Ok true else
+  let* ordinary = Keeper_memory_os_current.committed_durable_range
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
     ~keeper_id:keeper_name ~receipt_scope:(Workspace.keepers_runtime_dir config) in
-  match receipt, R.select ~trace_id:prepared.trace_id ~lines:prepared.lines ~progress:None
-    ~messages:prepared.messages R.All_unread with
-  | Some receipt, R.Read {range;_} ->
-    let ending = List.find_map (function
-      | line, Ok {B.event=B.Turn_ended {turn_ref;
-          position=B.Atom_history {end_atom;last_atom_digest};_};_}
-        when line >= range.history_start_boundary_line
-          && String.equal (Ids.Turn_ref.trace_id turn_ref) prepared.trace_id
-          && end_atom=range.end_atom && String.equal last_atom_digest range.last_atom_digest -> Some line
-      | _ -> None) prepared.lines in
-    Ok (String.equal receipt.trace_id prepared.trace_id
-      && receipt.history_start_boundary_line=range.history_start_boundary_line
-      && receipt.end_atom=range.end_atom
-      && String.equal receipt.last_atom_digest range.last_atom_digest
-      && ending=Some receipt.end_boundary_line)
-  | _ -> Ok false
-let prepare_committed ~config ~keeper_name ~trace_id =
-  let* prepared = prepare ~config ~keeper_name ~trace_id in
-  match prepared with
-  | None -> Ok None
-  | Some prepared ->
-    let* covered = memory_covers ~config ~keeper_name prepared in
-    Ok (if covered then Some prepared else None)
+  (* Only the serial consumer's genuinely read interval is known: a baseline
+     is not evidence for the prefix preceding it. This receipt never changes
+     the independent continuity recovery range. *)
+  let floor = match R.select ~trace_id:prepared.trace_id ~lines:prepared.lines
+      ~progress:None ~messages:prepared.messages R.All_unread with
+    | R.Read {range;_} when range.start_atom = 0 -> Some 0
+    | R.Baseline {position;_} -> Some position.end_atom
+    | _ -> None in
+  Ok (match ordinary, floor with
+    | Some receipt, Some floor ->
+      String.equal receipt.trace_id prepared.trace_id
+      && receipt.history_start_boundary_line = prepared.range.history_start_boundary_line
+      && receipt.start_atom >= floor && prepared.start_atom >= floor
+      && prepared.end_atom <= receipt.end_atom
+      && W.atom_opening_digest prepared.messages (receipt.end_atom - 1) = Some receipt.last_atom_digest
+      && List.exists (fun (cut : R.atom_cut) ->
+           cut.cut_line = receipt.end_boundary_line && cut.cut_end_atom = receipt.end_atom)
+           (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
+              ~messages:prepared.messages prepared.range)
+    | _ -> false)
 let prompt_json prepared =
   `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
     "completed_conversation", `List (List.map Agent_core.Checkpoint.message_to_json prepared.unread)]
 let commit ~config ~keeper_name ~prepared ~working_state =
-  let* snapshot = S.capture ~trace_id:prepared.trace_id ~lines:prepared.lines
-    ~messages:prepared.messages ~working_state |> Result.map_error S.error_to_string in
-  let* covered = memory_covers ~config ~keeper_name prepared in
-  let* () = if covered then Ok () else Error "Memory has not committed this exact continuity frontier" in
+  let* covered = memory_committed ~config ~keeper_name prepared in
+  let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in
+  let* snapshot = S.capture_checkpoint_prefix ~end_atom:prepared.end_atom
+    ~trace_id:prepared.trace_id ~lines:prepared.lines ~messages:prepared.messages
+    ~working_state () |> Result.map_error S.error_to_string in
   let file = path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname file);
   File_lock_eio.with_lock file (fun () ->

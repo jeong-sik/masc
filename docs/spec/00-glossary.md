@@ -461,6 +461,15 @@ status: reference
   같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
   Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
 
+**Continuity Snapshot (하던 일 저장본)**
+: 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
+  한 파일. 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
+  Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
+  저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
+  현재는 `masc-librarian-continuity capture/restore`의 저장·복원 검증에 사용한다.
+  운영 요청의 History 절단이나 모델 생성 설명의 정확성을 승인하지 않는다.
+  → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
+
 **Working Context**
 : Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
   operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.

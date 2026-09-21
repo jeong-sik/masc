@@ -1,3 +1,6 @@
+(include stanzas/test_librarian_continuity_snapshot_cli.inc)
+(include stanzas/test_librarian_continuity_snapshot.inc)
+
 (rule
  (alias runtest-test_dashboard_observation_quota)
  (deps test_dashboard_observation_quota.py ../bin/main_eio.exe

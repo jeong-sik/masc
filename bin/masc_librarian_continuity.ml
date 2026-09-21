@@ -16,7 +16,8 @@ type options =
 
 let usage =
   "masc-librarian-continuity --input DATASET.json --output REPORT.json \
-   --config runtime.toml --runtime EXACT_ID [--publish-base-path DIR]"
+   --config runtime.toml --runtime EXACT_ID [--publish-base-path DIR]\n\n\
+   Storage experiments: masc-librarian-continuity capture --help | restore --help"
 
 let parse_options () =
   let input = ref None and output = ref None and config = ref None in
@@ -312,8 +313,115 @@ let run options =
             ~generate ~clock:(Eio.Stdenv.clock env) report in
         publish options report bytes)))
 
+(* Storage/assembly experiment for RFC section 7(d). These explicit commands
+   write only the requested artifact; they never advance a live read cursor. *)
+type snapshot_mode = Capture | Restore
+
+let snapshot_command mode =
+  let module S = Masc.Librarian_continuity_snapshot in
+  let module C = Masc.Keeper_checkpoint_store in
+  let session_dir = ref None and trace_id = ref None in
+  let keepers_dir = ref None and keeper = ref None in
+  let state = ref None and snapshot = ref None and output = ref None in
+  let set target value = target := Some value in
+  let command = match mode with Capture -> "capture" | Restore -> "restore" in
+  let common =
+    [ "--session-dir", Arg.String (set session_dir), "Checkpoint session directory"
+    ; "--trace", Arg.String (set trace_id), "Exact checkpoint trace ID"
+    ; "--keepers-dir", Arg.String (set keepers_dir), "Runtime Keeper directory containing boundaries"
+    ; "--keeper", Arg.String (set keeper), "Keeper owning the boundary log"
+    ; "--output", Arg.String (set output), "New local artifact path (contains context text)"
+    ] in
+  let specific = match mode with
+    | Capture -> [ "--working-state", Arg.String (set state), "Candidate ongoing-work text file" ]
+    | Restore -> [ "--snapshot", Arg.String (set snapshot), "Previously captured continuity artifact" ]
+  in
+  let* () =
+    try
+      Arg.parse_argv ~current:(ref 1) Sys.argv (common @ specific)
+        (fun argument -> raise (Arg.Bad ("Unexpected argument: " ^ argument)))
+        ("masc-librarian-continuity " ^ command ^ " --session-dir DIR --trace ID --keepers-dir DIR --keeper NAME --output FILE");
+      Ok ()
+    with
+    | Arg.Bad detail -> Error detail
+    | Arg.Help detail -> print_string detail; exit 0
+  in
+  let required name value = match !value with
+    | Some value when String.trim value <> "" -> Ok value
+    | None | Some _ -> Error ("Missing or empty " ^ name)
+  in
+  let* session_dir = required "--session-dir" session_dir in
+  let* trace_id = required "--trace" trace_id in
+  let* keepers_dir = required "--keepers-dir" keepers_dir in
+  let* keeper_id = required "--keeper" keeper in
+  let* output_path = required "--output" output in
+  let output_path = Config_dir_resolver.absolute_path output_path in
+  let* () = match Fs_compat.exact_path_kind ~follow:false output_path with
+    | Fs_compat.Exact_missing -> Ok ()
+    | Fs_compat.Exact_kind _ -> Error ("Output already exists: " ^ output_path)
+    | Fs_compat.Exact_unknown -> Error ("Cannot inspect output path: " ^ output_path)
+  in
+  let* lines = Masc.Keeper_turn_boundaries.read ~keepers_dir ~keeper_id in
+  let* checkpoint = C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
+    |> Result.map_error (function
+      | C.Ref_not_found -> "Checkpoint not found"
+      | C.Ref_read_failed error -> C.checkpoint_load_error_to_string error
+      | C.Ref_identity_invalid _ -> "Checkpoint identity is invalid"
+      | C.Ref_session_mismatch _ -> "Checkpoint trace does not match --trace"
+      | C.Ref_lock_failed detail -> "Checkpoint lock failed: " ^ detail)
+  in
+  let messages = C.exact_snapshot_messages checkpoint in
+  let* artifact = match mode with
+    | Capture ->
+      let* state_path = required "--working-state" state in
+      let* working_state =
+        try Ok (In_channel.with_open_bin state_path In_channel.input_all)
+        with Sys_error detail -> Error detail
+      in
+      let* value = S.capture ~trace_id ~lines ~messages ~working_state
+        |> Result.map_error S.error_to_string in
+      Ok (S.to_json value)
+    | Restore ->
+      let* snapshot_path = required "--snapshot" snapshot in
+      let* value = S.load ~path:snapshot_path |> Result.map_error S.error_to_string in
+      let* restored = S.restore ~trace_id ~lines ~messages value
+        |> Result.map_error S.error_to_string in
+      Ok (`Assoc
+        [ "schema", `String "masc.continuity-restoration.v1"
+        ; "trace_id", `String trace_id
+        ; "snapshot", S.to_json value
+        ; "working_state", `String restored.working_state
+        ; "messages", `List (List.map Agent_core.Checkpoint.message_to_json restored.messages)
+        ])
+  in
+  let bytes = Yojson.Safe.pretty_to_string artifact ^ "\n" in
+  let* () = Masc.Keeper_fs.save_bytes_durable_atomic output_path bytes
+    |> Result.map_error Masc.Keeper_fs.durable_write_error_to_string in
+  print_endline (Yojson.Safe.to_string (`Assoc
+    [ "operation", `String command
+    ; "output_path", `String output_path
+    ; "sha256", `String Digestif.SHA256.(to_hex (digest_string bytes))
+    ; "semantic_continuity_evaluated", `Bool false
+    ]));
+  Ok 0
+
+let run_snapshot mode =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Eio_context.set_env env;
+      Eio_context.set_switch sw;
+      Eio_context.set_clock (Eio.Stdenv.clock env);
+      Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      snapshot_command mode))
+
 let () =
-  let result = let* options = parse_options () in run options in
+  let result =
+    match Array.to_list Sys.argv with
+    | _ :: "capture" :: _ -> run_snapshot Capture
+    | _ :: "restore" :: _ -> run_snapshot Restore
+    | _ -> let* options = parse_options () in run options
+  in
   match result with
   | Ok code -> exit code
   | Error detail -> Log.Runtime.error "librarian-continuity: %s" detail; exit 2

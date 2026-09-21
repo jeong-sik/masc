@@ -1646,7 +1646,7 @@ let runtimes_and_media_failover () =
 
 (* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
    runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
-   {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
+   {!get_default_route}. The returned id is opaque (masc never parses it;
    only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
    the immutable loaded-state assignment snapshot. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =

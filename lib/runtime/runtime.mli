@@ -451,7 +451,7 @@ val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned
     in [\[runtime.assignments\]] (runtime.toml SSOT) — a declared lane name or a
     runtime id — or [None] when no explicit assignment exists (caller falls back
-    to {!get_default_runtime_id}). It is a routing label, not necessarily a
+    to {!get_default_route}). It is a routing label, not necessarily a
     materialized binding: pass it to {!resolve_assignment} to walk the lane, or
     to {!entry_runtime_id_of_route} for the binding the turn opens first. The id is opaque (only the AGENT_CORE adapter parses
     it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
@@ -782,7 +782,9 @@ val get_default_route : unit -> string
     {!get_default_runtime_id}. *)
 
 val get_default_runtime_id : unit -> string
-(** @raise Failure if {!init_default} has not run. No silent fallback
+(** The runtime binding where the current default route enters: the route
+    itself may be a lane name, which {!get_default_route} returns instead.
+    @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a
     recoverable condition. Callers must invoke this at runtime, never as a
     module-level [let] binding (would crash config-less test binaries). *)

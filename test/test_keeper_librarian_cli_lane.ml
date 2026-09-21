@@ -82,7 +82,7 @@ let execute ~net ~clock ~base_path ~runner =
   match Runtime.messages_for_librarian selected_input with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->
-    Runtime.For_testing.execute_exact_output_classified
+    Runtime.For_testing.execute_exact_output_classified ~continuity:None
       ~cli_runner:runner
       ~clock
       ~net
@@ -409,7 +409,7 @@ let test_cli_prompt_drift_is_not_reported_as_no_cli_declaration () =
     Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run"))
   in
   match
-    Runtime.For_testing.execute_exact_output_classified
+    Runtime.For_testing.execute_exact_output_classified ~continuity:None
       ~cli_runner:runner
       ~clock
       ~net

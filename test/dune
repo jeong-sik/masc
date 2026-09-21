@@ -1449,6 +1449,7 @@
  (libraries
   masc_test_deps
   masc
+  masc.fusion_core
   masc.runtime
   masc.masc_eio_context
   agent_core

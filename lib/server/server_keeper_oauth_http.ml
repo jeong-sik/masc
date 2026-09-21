@@ -97,12 +97,15 @@ let handle_providers request reqd =
   Server_auth.with_public_read
     (fun state req reqd ->
       Http.Response.json_value ~compress:true ~request:req
+        (* NDT-OK: the HTTP request boundary samples Unix wall time once;
+           [declarations_json] receives it explicitly to compare persisted
+           Unix expiry timestamps without hiding a clock read in projection. *)
         (`Assoc
           [ ( "providers"
             , Server_keeper_oauth.declarations_json
                 ~base_path:
                   (Mcp_server.workspace_config state).Workspace.base_path
-                ~now:(Unix.gettimeofday ()) )
+                ~now:(Time_compat.now ()) )
           ])
         reqd)
     request reqd

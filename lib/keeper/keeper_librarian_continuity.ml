@@ -59,6 +59,13 @@ let prepare ~config ~keeper_name ~trace_id =
     | R.Stop _ -> Error "continuity source boundary cannot be read safely"
     | R.Read _ | R.Baseline _ | R.Nothing_to_read | R.Position_in_other_trace _ -> Ok None
 let memory_covers ~config ~keeper_name prepared =
+  (* This is an endpoint check, not a retained proof of every earlier range.
+     The WAL keeps only the latest atom receipt per scope. Production receipts
+     come from the serial durable consumer, which advances each selected
+     prefix only after Memory commits (or recovers that commit from its WAL).
+     [prepare] additionally requires a witnessed history start at atom zero;
+     an unwitnessed baseline cannot bootstrap continuity. These producer
+     invariants supply earlier coverage when this receipt starts after zero. *)
   let* receipt = Keeper_memory_os_current.committed_durable_range
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
     ~keeper_id:keeper_name ~receipt_scope:(Workspace.keepers_runtime_dir config) in

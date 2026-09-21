@@ -680,6 +680,13 @@ Context-only 경로에서 생산할 수 있습니다. 별도 daemon이나 타이
 대화 상태 pair의 publication은 Memory disposition 저장 성공 뒤에 합니다.
 같은 trace·history 시작·끝 경계 줄·atom·digest에 대한 Memory WAL 증거가
 있어야 하며, 좁혀 재시도한 Memory 범위보다 앞선 준비 입력은 게시하지 않습니다.
-Context-only bootstrap도 같은 증거를 확인합니다. executor에 넘긴 실제 파일
+WAL은 scope별 마지막 atom 범위만 보존하므로 이 검사는 끝점 일치를 확인하며,
+전체 prefix의 commit 이력을 독립적으로 증명하지는 않습니다. 운영의 atom receipt는
+직렬 durable consumer가 생산합니다. 이 consumer가 Memory commit 또는 그 WAL
+복구 뒤에만 선택 구간의 위치를 전진시키는 불변식과, 준비 입력이 atom 0부터의
+목격된 history 시작을 요구하는 조건을 함께 사용합니다. 목격된 시작이 없는
+baseline은 continuity를 만들지 못합니다. 마지막 receipt의 시작이 0보다 큰
+경우 앞선 범위의 coverage는 이 생산 경로의 불변식에 의존합니다.
+Context-only bootstrap도 같은 끝점 증거와 생산 조건을 사용합니다. executor에 넘긴 실제 파일
 저장과 결과 기록이 끝날 때까지 호출자의 취소를 보호하고, 그 뒤 취소를 다시
 전파합니다. 따라서 종료·purge가 아직 실행 중인 저장 작업을 추월하지 않습니다.

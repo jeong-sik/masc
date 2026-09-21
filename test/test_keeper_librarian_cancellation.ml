@@ -94,8 +94,12 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-cancel-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
     { Runtime_schema.default_typesafeai with
-      lane_endpoint = jev.base_url
-    ; lane_model = "requested-cancel-model"
+      destinations =
+        ( { Runtime_schema.endpoint = jev.base_url
+          ; model = "requested-cancel-model"
+          ; api_key_env = "TYPESAFEAI_API_KEY"
+          }
+        , [] )
     ; absorb_gate = true
     } @@ fun () ->
   let cancel_context, set_cancel_context = Eio.Promise.create () in

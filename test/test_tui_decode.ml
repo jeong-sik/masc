@@ -4564,28 +4564,35 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
    | Error detail -> Alcotest.fail detail);
   let enabled =
     replace_assoc_field "jev"
-      (`Assoc [ "state", `String "configured"; "model", `String "jev-next" ])
+      (`Assoc
+         [ "state", `String "configured"
+         ; "models", `List [ `String "jev-next"; `String "~typesafe/jev-latest" ]
+         ])
       board
   in
   (match decode_board enabled with
-   | Ok (Some (Tui_decode.Jev_configured { model })) ->
-     Alcotest.(check string) "enabled model" "jev-next" model
+   | Ok (Some (Tui_decode.Jev_configured { models })) ->
+     Alcotest.(check (list string)) "armed models, in walk order"
+       [ "jev-next"; "~typesafe/jev-latest" ] models
    | Ok _ -> Alcotest.fail "enabled JEV state decoded to the wrong variant"
    | Error detail -> Alcotest.fail detail);
   List.iter
-    (fun model ->
+    (fun models ->
        let blank =
          replace_assoc_field "jev"
-           (`Assoc [ "state", `String "configured"; "model", `String model ])
+           (`Assoc
+              [ "state", `String "configured"
+              ; "models", `List (List.map (fun model -> `String model) models)
+              ])
            board
        in
        match decode_board blank with
-       | Ok _ -> Alcotest.fail "a blank JEV model decoded"
+       | Ok _ -> Alcotest.fail "a blank or empty JEV model list decoded"
        | Error detail ->
-         Alcotest.(check bool) "blank model fails closed" true
+         Alcotest.(check bool) "blank or empty models fail closed" true
            (String_util.contains_substring detail
-              "JEV model must be a non-empty string"))
-    [ ""; " \t " ];
+              "JEV models must be a non-empty list of non-empty strings"))
+    [ []; [ "" ]; [ "jev-next"; " \t " ] ];
   List.iter
     (fun (state, expected) ->
        let unavailable =

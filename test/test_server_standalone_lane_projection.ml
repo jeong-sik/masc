@@ -168,15 +168,18 @@ let test_board_lane_projects_credential_free_jev_readiness () =
     (jev Typesafeai.Off
      |> Yojson.Safe.Util.member "state"
      |> Yojson.Safe.Util.to_string);
-  let enabled = jev (Typesafeai.Configured { model = "jev-next" }) in
+  let enabled = jev (Typesafeai.Configured { models = [ "jev-next"; "~typesafe/jev-latest" ] }) in
   check string "configured state" "configured"
     (enabled |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.to_string);
-  check string "enabled model" "jev-next"
-    (enabled |> Yojson.Safe.Util.member "model" |> Yojson.Safe.Util.to_string);
+  check (list string) "armed models, in walk order" [ "jev-next"; "~typesafe/jev-latest" ]
+    (enabled
+     |> Yojson.Safe.Util.member "models"
+     |> Yojson.Safe.Util.to_list
+     |> List.map Yojson.Safe.Util.to_string);
   List.iter
     (fun (configuration, expected) ->
        let actual =
-         snapshot ~configuration (Typesafeai.Configured { model = "jev-next" })
+         snapshot ~configuration (Typesafeai.Configured { models = [ "jev-next" ] })
          |> fun json -> lane_by_id json "board_attention_exact"
          |> Yojson.Safe.Util.member "jev"
          |> Yojson.Safe.Util.member "state"

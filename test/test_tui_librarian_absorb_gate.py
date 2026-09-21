@@ -147,7 +147,10 @@ def run_case(executable: str, fixture_path: Path) -> None:
             )
         if gate["status"] != "skipped":
             needles.append(
-                cast(str, gate["evaluations"][0]["request"]["endpoint"]).encode()
+                cast(
+                    str,
+                    gate["evaluations"][0]["request"]["destinations"][0]["destination_uri"],
+                ).encode()
             )
         seen = first_screen
         # Only the short report is searched. The unrelated exact_output can

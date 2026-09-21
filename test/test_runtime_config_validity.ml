@@ -5142,7 +5142,11 @@ let test_lsp_servers_reads_a_command_per_language () =
 (* [typesafeai] is the lane's table; the key is not in it. Absent is the
    default; present is read strictly, so a misspelt key is a load error. *)
 let typesafeai_table =
-  "[typesafeai]\nenabled = false\nendpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
+  "[typesafeai]\nenabled = false\n\
+   destinations = [\n\
+   \  { endpoint = \"http://127.0.0.1:9/judge\", model = \"jev-1.13\", api_key_env = \"TYPESAFEAI_API_KEY\" },\n\
+   \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
+   ]\n\
    board_attention = false\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
@@ -5153,6 +5157,8 @@ let test_typesafeai_absent_is_the_default () =
   | Ok config ->
     let t = config.Runtime_schema.typesafeai in
     check bool "the lane is on with a key" true t.Runtime_schema.lane_enabled;
+    check bool "the vendor's own server alone" true
+      (t.Runtime_schema.destinations = (Runtime_schema.typesafe_destination, []));
     check bool "the Board gate is on" true t.Runtime_schema.board_attention;
     check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
     check bool "Context review is off" false t.Runtime_schema.context_review;
@@ -5166,8 +5172,16 @@ let test_typesafeai_reads_the_whole_table () =
   | Ok config ->
     let t = config.Runtime_schema.typesafeai in
     check bool "enabled" false t.Runtime_schema.lane_enabled;
-    check string "endpoint" "http://127.0.0.1:9/judge" t.Runtime_schema.lane_endpoint;
-    check string "model" "jev-1.13" t.Runtime_schema.lane_model;
+    let first, rest = t.Runtime_schema.destinations in
+    check string "first endpoint" "http://127.0.0.1:9/judge" first.Runtime_schema.endpoint;
+    check string "first model" "jev-1.13" first.Runtime_schema.model;
+    check string "first key variable" "TYPESAFEAI_API_KEY" first.Runtime_schema.api_key_env;
+    (match rest with
+     | [ second ] ->
+       check string "second endpoint" "http://127.0.0.1:9/reserve" second.Runtime_schema.endpoint;
+       check string "second model" "~typesafe/jev-latest" second.Runtime_schema.model;
+       check string "second key variable" "OPENROUTER_API_KEY" second.Runtime_schema.api_key_env
+     | _ -> failf "two destinations, in order; got %d after the first" (List.length rest));
     check bool "board_attention" false t.Runtime_schema.board_attention;
     check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
     check bool "Context review enabled" true t.Runtime_schema.context_review;
@@ -5200,7 +5214,27 @@ let test_typesafeai_refuses_a_stray_key () =
 ;;
 
 let test_typesafeai_refuses_a_value_that_names_nothing () =
-  typesafeai_rejects ~what:"a blank endpoint" "[typesafeai]\nendpoint = \"  \"\n" "endpoint must be non-empty";
+  typesafeai_rejects ~what:"the endpoint key the table no longer reads"
+    "[typesafeai]\nendpoint = \"http://127.0.0.1:9/judge\"\n" "unknown [typesafeai] key \"endpoint\"";
+  typesafeai_rejects ~what:"a blank destination endpoint"
+    "[typesafeai]\ndestinations = [{ endpoint = \"  \", model = \"m\", api_key_env = \"K\" }]\n"
+    "endpoint must be non-empty";
+  typesafeai_rejects ~what:"a destination without its key variable"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\" }]\n"
+    "api_key_env is required";
+  typesafeai_rejects ~what:"a key variable with whitespace"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"A B\" }]\n"
+    "must name an environment variable without whitespace";
+  typesafeai_rejects ~what:"a stray destination key"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"K\", key = \"secret\" }]\n"
+    "unknown [typesafeai.destinations[0]] key \"key\"";
+  typesafeai_rejects ~what:"an empty destination list"
+    "[typesafeai]\ndestinations = []\n" "destinations must name at least one server";
+  typesafeai_rejects ~what:"the same server and model twice"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"K\" }, { endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"L\" }]\n"
+    "is listed twice";
+  typesafeai_rejects ~what:"destinations that is not an array"
+    "[typesafeai]\ndestinations = \"http://127.0.0.1:9/judge\"\n" "destinations must be an array of tables";
   typesafeai_rejects ~what:"a keeper name with whitespace"
     "[typesafeai]\nexcluded_keepers = [\"a b\"]\n" "must be non-empty without whitespace";
   typesafeai_rejects ~what:"a non-string keeper list"

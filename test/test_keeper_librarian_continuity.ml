@@ -197,8 +197,58 @@ let test_ordinary_baseline_coverage () = with_source @@ fun _env config save _ap
     (P.memory_range_id ~config ~keeper_name suffix |> get).start_atom;
   check bool "normal serial receipt certifies already consumed suffix" true
     (P.memory_committed ~config ~keeper_name suffix |> get)
+let test_fit_largest_request_prefix () = with_source @@ fun _env config save _append boundary ->
+  let messages = List.init 8 (fun index -> message (String.make (index + 1) 'x')) in
+  save messages; boundary ~fresh:true 1 messages;
+  let prepared = prepare config |> some in
+  let original = P.prompt_json prepared |> Yojson.Safe.to_string in
+  let visited = ref [] in
+  let whole = P.fit ~fits:(fun candidate ->
+    visited := P.end_atom candidate :: !visited; Ok true) prepared |> get |> some in
+  check bool "fitting original returned unchanged" true (whole == prepared);
+  check (list int) "whole request tested before search" [8] !visited;
+  let first = P.narrow prepared |> some in
+  ignore (commit config first "Prior work preserved.");
+  let suffix = prepare config |> some in
+  let exact_size candidate = P.prompt_json candidate |> Yojson.Safe.to_string |> String.length in
+  let expected = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
+  let limit = exact_size expected in
+  let fitted = P.fit ~fits:(fun candidate -> Ok (exact_size candidate <= limit)) suffix
+    |> get |> some in
+  check int "largest fitting whole-atom endpoint" 7 (P.end_atom fitted);
+  check string "exact suffix and prior state preserved" (P.prompt_json expected |> Yojson.Safe.to_string)
+    (P.prompt_json fitted |> Yojson.Safe.to_string);
+  check string "frozen original unaffected" original (P.prompt_json prepared |> Yojson.Safe.to_string);
+  let minimum_seen = ref false in
+  check bool "no indivisible atom fits" true
+    (P.fit ~fits:(fun candidate ->
+       if P.end_atom candidate = 5 then minimum_seen := true; Ok false) suffix
+     |> get |> Option.is_none);
+  check bool "minimum remaining atom was tested" true !minimum_seen;
+  check bool "predicate error propagated from search" true
+    (P.fit ~fits:(fun candidate ->
+       if P.end_atom candidate = 8 then Ok false else Error "measurement failed") suffix
+     = Error "measurement failed")
+
+let test_fit_keeps_exact_recovery_range () = with_source @@ fun _env config save _append boundary ->
+  let messages = [message "A"; message "B"; message "C"; message "D"] in
+  save messages; boundary ~fresh:true 1 messages;
+  let partial = prepare config |> some |> P.narrow |> some in
+  record_prepared_memory config partial;
+  let recovery = prepare config |> some in
+  let visited = ref [] in
+  let result = P.fit ~fits:(fun candidate ->
+    visited := P.end_atom candidate :: !visited; Ok false) recovery |> get in
+  check bool "unfit committed interval cannot be split" true (Option.is_none result);
+  check (list int) "only exact recovery interval tested" [2] !visited;
+  let fitted = P.fit ~fits:(fun _ -> Ok true) recovery |> get |> some in
+  check bool "fitting recovery interval returned unchanged" true
+    (fitted == recovery)
+
 let () = run "production continuity pair"
   ["cycle",[test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
+    test_case "largest request-fitting prefix" `Quick test_fit_largest_request_prefix;
+    test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;
     test_case "normal baseline excludes unknown prefix" `Quick test_ordinary_baseline_coverage;test_case "baseline partial bootstrap and recovery" `Quick test_baseline_partial_bootstrap;test_case "executor cancellation joins commit" `Quick test_worker_cancellation_waits_for_commit;
     test_case "Memory frontier proves publication coverage" `Quick test_memory_coverage_required;
     test_case "saved state, suffix, CAS, restart" `Quick test_append_cas_and_restart;

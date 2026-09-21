@@ -21,6 +21,13 @@ val messages : prepared -> Agent_core.Types.message list
     disposition and working-state inference. *)
 val turn_ref : prepared -> Ids.Turn_ref.t
 val end_atom : prepared -> int
+val fit : fits:(prepared -> (bool, string) result) -> prepared ->
+  (prepared option, string) result
+(** Select the largest nonempty whole-atom prefix accepted by [fits], checking
+    the original range first. The predicate must be monotone in the endpoint
+    for this frozen input and account for the complete rendered request.
+    Source bytes, prior state, and the Memory recovery range remain unchanged.
+    An exact recovery range is either accepted whole or returns [None]. *)
 val narrow : prepared -> prepared option
 (** Retry a refused source at the midpoint between whole atoms. Call only after
     a typed capacity refusal; [None] means one indivisible atom remains, or the exact range already has

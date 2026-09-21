@@ -199,6 +199,7 @@ let protect_goal_link_settlement f =
 
 let notify_task_mutation () =
   try (Atomic.get Workspace_hooks.on_task_mutation_fn) () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Misc.warn
       "goal-task link settlement observer failed: %s"

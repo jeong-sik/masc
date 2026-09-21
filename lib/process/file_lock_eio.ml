@@ -487,7 +487,7 @@ let with_durable_lock_observed_with ~release_fd ~lock_path f =
         let body =
           match f () with
           | value -> `Returned value
-          | exception exn -> `Raised (exn, Printexc.get_raw_backtrace ())
+          | exception exn -> `Raised (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: PROVISIONAL, delete with #37372. The exception is stashed as `Raised and thrown again with its backtrace on both arms that consume it (:501 and :516); the release failure is logged there and never replaces it. *)
         in
         let release = release_fd fd in
         match body, release with

@@ -62,6 +62,7 @@ let resolve_upstream ~net ~host ~port =
   match Eio.Net.getaddrinfo_stream net name ~service:(string_of_int port) with
   | [] -> Error (Printf.sprintf "no address for %s" name)
   | addresses -> Ok addresses
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Printexc.to_string exn)
 ;;
 

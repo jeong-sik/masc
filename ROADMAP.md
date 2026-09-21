@@ -98,7 +98,7 @@ Open `must-do` issues, grouped. Numbers are issues.
   hold without caveats.
 - `v2.*` tags are audit history only.
 - No `0.y.0` tag while that train's entry-condition issues remain open. Each
-  train names its entry condition on its GitHub milestone (v0.36.0: eight
+  train names its entry condition on its GitHub milestone (v0.36.0: its open
   `impact/breaks-continuity` issues). Other `must-do` issues do not block a
   tag; they stay ordered by `impact/*` in the backlog. (Before 2026-09-21 this
   rule read "no tag while `must-do` issues remain open"; with 97 open on that

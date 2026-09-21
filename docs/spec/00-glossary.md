@@ -159,9 +159,13 @@ status: reference
 **Execution Disposition**
 : 한 번의 도구 호출이 실제로 어떤 결말을 냈는지에 대한 MASC의 권위 있는 분류
   (`Tool_result.disposition` = `Completed`·`Deferred`·`Failed`). Tool Call Outcome과
-  별개이며, wire outcome이 이를 대체하지 않는다. `Deferred`를 성공 boolean으로 접지
-  않는다 — 레지스트리·직렬화기는 전체 disposition을 소비한다. turn 수준의
-  Operator Disposition과 이름이 겹치지만 다른 단위를 분류한다.
+  별개이며, wire outcome이 이를 대체하지 않는다. 판정을 내리는 자리는 세 갈래를
+  그대로 받는다 — 레지스트리와 직렬화기가 그렇다. 반대로 "실패였나" 한 가지만
+  묻는 자리는 boolean 투영을 쓴다(`mcp_server_eio_call_tool.ml`의 `success`는
+  `Deferred`를 `true`로 접는다; 지연은 실패가 아니다). 그 투영은 `Deferred`를
+  표현하지 못하므로(`tool_result.mli`) 원장의 `success` 하나만 보고 결말을
+  되돌릴 수는 없다. turn 수준의 Operator Disposition과 이름이 겹치지만 다른
+  단위를 분류한다.
   → [Tool_result](../../lib/tool_types/tool_result.mli)
 
 **Provider**

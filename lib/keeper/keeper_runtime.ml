@@ -269,6 +269,7 @@ let keeper_meta_overlay_drift_categories
     ~(target : keeper_meta) =
   List.filter_map Fun.id
     [
+      drift_if "input_policy" (current.input_policy <> target.input_policy);
       drift_if "activation_mode"
         (current.activation_mode <> target.activation_mode);
       drift_if "mention_targets"
@@ -326,6 +327,7 @@ let ensure_keeper_meta_with_cause config name =
     let target_instructions = apply_default defaults.instructions meta.instructions in
 
     (* --- Policy --- *)
+    let target_input_policy = apply_default defaults.input_policy Keeper_input_policy.default in
     let target_activation_mode =
       apply_default defaults.activation_mode meta.activation_mode in
     let target_mention_targets =
@@ -385,6 +387,7 @@ let ensure_keeper_meta_with_cause config name =
       { meta with
         instructions = target_instructions;
         activation_mode = target_activation_mode;
+        input_policy = target_input_policy;
         mention_targets = target_mention_targets;
         board_interests = target_board_interests;
         sandbox_profile = target_sandbox_profile;
@@ -440,6 +443,7 @@ let ensure_keeper_meta_with_cause config name =
              ; board_interests = persisted_updated.board_interests
              ; max_context_override = persisted_updated.max_context_override
              ; activation_mode = persisted_updated.activation_mode
+             ; input_policy = persisted_updated.input_policy
              ; telemetry_feedback_enabled = persisted_updated.telemetry_feedback_enabled
              ; telemetry_feedback_window_hours =
                  persisted_updated.telemetry_feedback_window_hours

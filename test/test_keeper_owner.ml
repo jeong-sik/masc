@@ -323,6 +323,7 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; mention_targets = [ "profile-target" ]
     ; board_interests = [ "MASC runtime" ]
     ; activation_mode = Masc.Keeper_activation_mode.Autonomous
+    ; input_policy = Masc.Keeper_input_policy.Wide
     ; max_context_override = Some 32_000
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 24
@@ -334,6 +335,7 @@ let test_profile_update_preserves_owner_runtime_state () =
   in
   let state = reducer_ok (Reducer.apply_meta state (Update_profile update)) in
   let committed = Option.get (Reducer.projection state).meta in
+  check bool "input policy reaches owner" true (committed.input_policy = Masc.Keeper_input_policy.Wide);
   check string "profile instructions updated" update.instructions committed.instructions;
   check bool "profile backend reaches owner projection" true
     (committed.microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata);

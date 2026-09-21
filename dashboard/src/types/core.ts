@@ -1683,12 +1683,15 @@ interface KeeperHookIntrospection {
   slots: Record<string, KeeperHookSlot>
 }
 
+export type KeeperInputPolicy = 'small' | 'wide'
+
 export interface KeeperConfig {
   name: string
   config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
   config_transaction_warnings?: KeeperManifestWarning[]
   activation_mode: KeeperActivationMode
+  input_policy: KeeperInputPolicy
   max_context_override: number | null
   // The server's string, unnormalized. It is not a `SandboxProfile`: when the
   // response omits the field `normalizeKeeperConfig` writes the placeholder

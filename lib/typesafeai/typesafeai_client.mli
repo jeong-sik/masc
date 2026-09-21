@@ -8,13 +8,30 @@
     [~typesafe/jev-latest]), whose response adds [id], [provider] and
     [usage.cost], which the decoder ignores. Sources, read 2026-09-21:
     docs.typesafe.ai/api and openrouter.ai/docs/guides/community/typesafe-sdk.
-    Uses {!Masc_http_client.post_sync} for outbound keep-alive pooling. *)
+    Uses {!Masc_http_client.post_sync} for outbound keep-alive pooling.
+
+    A destination's key goes to that destination's endpoint and nowhere else.
+    Whoever can name a destination can therefore send a secret to a URL of
+    their choosing; that is the same trust runtime.toml already carries for
+    [\[providers.<id>\]] endpoints and their credentials. *)
 
 type destination =
   { endpoint : string  (** the URL the request is posted to *)
   ; model : string  (** the model id as this server names it *)
   ; api_key : string  (** the bearer key this server takes *)
   }
+
+type destination_id =
+  { destination_uri : string
+  ; model : string
+  }
+(** A destination without its key, for records and projections.
+    [destination_uri] is the observation URL: userinfo, query and fragment
+    removed; the outbound URL is unchanged. [model] is the id the destination
+    was asked for, which is part of the request body it received. *)
+
+val identify : destination -> destination_id
+val destination_id_to_yojson : destination_id -> Yojson.Safe.t
 
 type refusal =
   | Transport_failure of string
@@ -29,10 +46,9 @@ type refusal =
     API key and credential-bearing endpoint before observation, preserving
     every other received byte. JSON observations use a string for UTF-8
     bodies and the [encoding]/[content]/[total_bytes] base64 representation
-    otherwise. Diagnostics are valid UTF-8. [destination_uri] is the
-    observation URL: userinfo, query and fragment removed; the outbound URL
-    is unchanged. Response content is private evidence, not guaranteed free
-    of secrets that the remote server chose to echo. *)
+    otherwise. Diagnostics are valid UTF-8. Response content is private
+    evidence, not guaranteed free of secrets that the remote server chose to
+    echo. *)
 
 type attempt =
   { destination_uri : string
@@ -45,35 +61,26 @@ type failure =
   { first_attempt : attempt
   ; later_attempts : attempt list
   }
-(** Every destination the walk asked refused, in the order asked. The walk
-    always asks the first destination, so there is always a first attempt. *)
+(** Every destination refused, in the order asked. The walk always asks the
+    first destination, so there is always a first attempt, and it asks every
+    destination before it fails, so the attempts are the whole list. *)
 
 type evaluated =
   { response : Typesafeai_types.eval_response
-  ; destination_uri : string
+  ; destination : destination_id
   ; request_body_sha256 : string
   ; passed_over : attempt list
   }
 (** A decoded response, the destination that gave it, the sha256 of the exact
     request bytes that destination received, and the destinations asked
-    before it with their refusals: [[]] when the first destination answered. *)
-
-type disposition =
-  | Ask_next_destination
-  | Stop_walk
-
-val disposition_of_refusal : refusal -> disposition
-(** Whether a refusal ends the walk. A destination that says the request body
-    itself is wrong ends it, because the next destination would receive the
-    same bytes: HTTP 400 (OpenRouter: malformed input), 413 (OpenRouter:
-    payload too large) and 422 (TypeSafe: validation failed). Every other
-    refusal is about the destination that gave it, so the next one is asked:
-    its key (401, 403), its account (402), its route (404), its capacity
-    (429, 5xx), a body it returned that does not decode, or no response. *)
+    before it with their refusals: [[]] when the first destination answered.
+    [destination.model] is the id requested; [response.model] is the id the
+    server says answered. *)
 
 val endpoint_for_observation : string -> string
 val refusal_to_string : refusal -> string
 val refusal_to_yojson : refusal -> Yojson.Safe.t
+val attempt_to_yojson : attempt -> Yojson.Safe.t
 
 val attempts : failure -> attempt list
 (** In the order asked. *)
@@ -91,10 +98,15 @@ val evaluate :
   questions:(string * Typesafeai_types.question) list ->
   unit ->
   (evaluated, failure) result
-(** Asks the destinations in order: the first always, each later one only
-    when {!disposition_of_refusal} says so for the refusal before it. Each
-    destination receives the request body with its own model id, so the
-    [request_body_sha256] of the answer names what that destination read.
+(** Asks the destinations in order until one answers. Every refusal moves the
+    walk to the next destination, whatever it says: the destinations share the
+    state and the questions but not the body, since each is asked for its own
+    model id, and their limits differ, so one server calling a request wrong
+    or too large says nothing about the next. A request that really is wrong
+    costs one refused call per destination and ends with all of them in the
+    {!failure}. Cancellation is not a refusal: it propagates and nothing more
+    is asked.
+
     [timeout_sec] bounds each destination's request/response exchange
     separately and defaults to
     {!Masc_http_client.default_request_timeout_sec}, the deadline the other

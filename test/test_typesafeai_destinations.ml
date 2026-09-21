@@ -114,7 +114,11 @@ let test_second_destination_answers_after_a_capacity_refusal () =
     Alcotest.(check string)
       "the answer names the server that gave it"
       openrouter.uri
-      evaluated.destination_uri;
+      evaluated.destination.destination_uri;
+    Alcotest.(check string)
+      "and the model id that server was asked for"
+      "~typesafe/jev-latest"
+      evaluated.destination.model;
     Alcotest.(check string)
       "the answer carries that server's model id"
       "typesafe/jev-1.13"
@@ -139,24 +143,57 @@ let test_second_destination_answers_after_a_capacity_refusal () =
      | _ -> Alcotest.fail "exactly one passed-over attempt with an HTTP refusal")
 ;;
 
-let test_a_request_refusal_stops_the_walk () =
+(* A server that calls the request wrong says nothing about the next one: each
+   destination is asked for its own model id and keeps its own limits. *)
+let test_a_request_refusal_still_asks_the_next_destination () =
   with_env
   @@ fun ~sw ~net ~clock ->
-  let first_server = serve ~sw ~net ~respond:(refuses `Unprocessable_entity) in
-  let second_server = serve ~sw ~net ~respond:(answers ~model:"never-asked") in
-  let first = { Client.endpoint = first_server.uri; model = "jev-latest"; api_key = "k1" } in
-  let second = { Client.endpoint = second_server.uri; model = "m2"; api_key = "k2" } in
-  match evaluate ~clock (first, [ second ]) with
-  | Ok _ -> Alcotest.fail "a 422 must not be answered by the next destination"
+  let unavailable = serve ~sw ~net ~respond:(refuses `Service_unavailable) in
+  let refusing = serve ~sw ~net ~respond:(refuses `Unprocessable_entity) in
+  let answering = serve ~sw ~net ~respond:(answers ~model:"m3") in
+  let first = { Client.endpoint = unavailable.uri; model = "m1"; api_key = "k1" } in
+  let second = { Client.endpoint = refusing.uri; model = "m2"; api_key = "k2" } in
+  let third = { Client.endpoint = answering.uri; model = "m3"; api_key = "k3" } in
+  match evaluate ~clock (first, [ second; third ]) with
+  | Error failure -> Alcotest.fail (Client.failure_to_string failure)
+  | Ok evaluated ->
+    Alcotest.(check string)
+      "the third destination answered"
+      answering.uri
+      evaluated.destination.destination_uri;
+    Alcotest.(check (list int))
+      "each server was asked once"
+      [ 1; 1; 1 ]
+      (List.map
+         (fun server -> List.length !(server.received))
+         [ unavailable; refusing; answering ]);
+    let statuses =
+      List.map
+        (fun (attempt : Client.attempt) ->
+           match attempt.refusal with
+           | Client.Http_response_failure { status; _ } -> status
+           | Client.Transport_failure detail -> Alcotest.fail detail)
+        evaluated.passed_over
+    in
+    Alcotest.(check (list int)) "both refusals are kept, in the order asked" [ 503; 422 ] statuses;
+    Alcotest.(check (list string))
+      "with the model each was asked for"
+      [ "m1"; "m2" ]
+      (List.map (fun (attempt : Client.attempt) -> attempt.model) evaluated.passed_over)
+;;
+
+let test_one_destination_renders_as_its_refusal () =
+  with_env
+  @@ fun ~sw ~net ~clock ->
+  let server = serve ~sw ~net ~respond:(refuses `Unprocessable_entity) in
+  let only = { Client.endpoint = server.uri; model = "jev-latest"; api_key = "k1" } in
+  match evaluate ~clock (only, []) with
+  | Ok _ -> Alcotest.fail "the only destination refused"
   | Error failure ->
     Alcotest.(check int) "one attempt" 1 (List.length (Client.attempts failure));
-    Alcotest.(check int)
-      "the second server was never asked"
-      0
-      (List.length !(second_server.received));
     Alcotest.(check string)
       "one attempt renders as its refusal"
-      (Printf.sprintf "typesafeai: HTTP 422 returned by %s: fixture refusal" first_server.uri)
+      (Printf.sprintf "typesafeai: HTTP 422 returned by %s: fixture refusal" server.uri)
       (Client.failure_to_string failure)
 ;;
 
@@ -170,7 +207,10 @@ let test_no_response_moves_to_the_next_destination () =
   match evaluate ~clock (closed, [ second ]) with
   | Error failure -> Alcotest.fail (Client.failure_to_string failure)
   | Ok evaluated ->
-    Alcotest.(check string) "answered by the second" server.uri evaluated.destination_uri;
+    Alcotest.(check string)
+      "answered by the second"
+      server.uri
+      evaluated.destination.destination_uri;
     (match evaluated.passed_over with
      | [ { refusal = Client.Transport_failure _; destination_uri; _ } ] ->
        Alcotest.(check string) "the closed port is recorded" closed_uri destination_uri
@@ -208,28 +248,6 @@ let test_every_destination_refusing_is_recorded_in_order () =
       Yojson.Safe.Util.(member "attempts" json |> to_list |> List.length)
 ;;
 
-let test_disposition_follows_the_documented_statuses () =
-  let http status =
-    Client.Http_response_failure
-      { status; destination_uri = "http://fixture/systemone"; body = ""; detail = "" }
-  in
-  let check status expected =
-    Alcotest.(check bool)
-      (Printf.sprintf "status %d" status)
-      true
-      (Client.disposition_of_refusal (http status) = expected)
-  in
-  List.iter (fun status -> check status Client.Stop_walk) [ 400; 413; 422 ];
-  List.iter
-    (fun status -> check status Client.Ask_next_destination)
-    [ 200; 401; 402; 403; 404; 429; 500; 502; 503; 524; 529 ];
-  Alcotest.(check bool)
-    "no response asks the next destination"
-    true
-    (Client.disposition_of_refusal (Client.Transport_failure "connect timeout")
-     = Client.Ask_next_destination)
-;;
-
 let () =
   Alcotest.run
     "typesafeai destinations"
@@ -239,9 +257,13 @@ let () =
             `Quick
             test_second_destination_answers_after_a_capacity_refusal
         ; Alcotest.test_case
-            "a request refusal stops the walk"
+            "a request refusal still asks the next destination"
             `Quick
-            test_a_request_refusal_stops_the_walk
+            test_a_request_refusal_still_asks_the_next_destination
+        ; Alcotest.test_case
+            "one destination renders as its refusal"
+            `Quick
+            test_one_destination_renders_as_its_refusal
         ; Alcotest.test_case
             "no response moves to the next destination"
             `Quick
@@ -250,10 +272,6 @@ let () =
             "every destination refusing is recorded in order"
             `Quick
             test_every_destination_refusing_is_recorded_in_order
-        ; Alcotest.test_case
-            "disposition follows the documented statuses"
-            `Quick
-            test_disposition_follows_the_documented_statuses
         ] )
     ]
 ;;

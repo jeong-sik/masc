@@ -4451,7 +4451,27 @@ let test_a_chat_operation_resumes_after_attributed_empty_completion () =
     [ Llm_provider.Types.EndTurn
     ; Llm_provider.Types.MaxTokens
     ; Llm_provider.Types.StopSequence
-    ; Llm_provider.Types.Refusal
+    ]
+;;
+
+let test_deterministic_empty_stops_do_not_resume_after_saved_tool_results () =
+  List.iter
+    (fun stop_reason ->
+       let error = attributed_empty_completion stop_reason in
+       let result, hints, rows =
+         same_path_walk ~continuation:resume_chat_operation [ "only" ]
+           (fun ~save _candidate ->
+              save Agent_core.Agent.After_tool_results_appended Wrote;
+              error)
+       in
+       Alcotest.(check (list string))
+         (Llm_provider.Types.stop_reason_to_metric_label stop_reason)
+         [] (List.map describe_hint hints);
+       Alcotest.(check (list string)) "no resume decision is recorded" [] rows;
+       Alcotest.(check (result string string)) "the terminal error is preserved"
+         (Error (Agent_core.Error.to_string error))
+         (Result.map_error Agent_core.Error.to_string result))
+    [ Llm_provider.Types.Refusal
     ; Llm_provider.Types.ContentFilter
     ; Llm_provider.Types.RepetitionTruncation
     ]
@@ -5134,6 +5154,10 @@ let () =
             "a chat operation resumes after an attributed empty completion"
             `Quick
             test_a_chat_operation_resumes_after_attributed_empty_completion;
+          Alcotest.test_case
+            "deterministic empty stops do not resume after saved tool results"
+            `Quick
+            test_deterministic_empty_stops_do_not_resume_after_saved_tool_results;
           Alcotest.test_case
             "no same-path hint unless every condition holds"
             `Quick

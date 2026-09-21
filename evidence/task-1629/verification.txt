@@ -1,11 +1,16 @@
 task: task-1629
-head: 872d1cf
+head: f618fe3
 pr: https://github.com/jeong-sik/masc/pull/37468
 
 verification:
 - python3 scripts/ci/check-deleted-symbol-references.py --self-test: exit 0
+- ruff check scripts/ci/check-deleted-symbol-references.py: exit 0
+- ruff format --check scripts/ci/check-deleted-symbol-references.py: exit 0
+- pyright --outputjson scripts/ci/check-deleted-symbol-references.py: 0 errors
 - python3 scripts/ci/check-deleted-symbol-references.py origin/main: exit 0
   output: deleted top-level names: 0; added identifiers compared: 0; no deleted-name references found
+- python3 scripts/ci/check-deleted-symbol-references.py 0ba0686b65 98ead90ca14c31c3d125a66f01bbf76663666e9c: expected exit 1
+  output: deleted top-level names: 74; collisions: failure, lane_run_render_max_bytes, read
 - python3 -m py_compile scripts/ci/check-deleted-symbol-references.py: exit 0
 - git diff --check: exit 0
 

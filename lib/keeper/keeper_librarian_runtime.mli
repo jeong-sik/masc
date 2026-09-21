@@ -72,11 +72,11 @@ val run_best_effort
   -> ?input_projection:input_projection
   -> ?write_scope:write_scope
   -> ?continuity:Keeper_librarian_continuity.prepared
-  -> ?on_capacity_refused:(unit -> unit)
-  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
+  -> ?on_capacity_refused:(unit -> unit)
+  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner

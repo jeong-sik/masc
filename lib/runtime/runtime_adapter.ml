@@ -537,14 +537,25 @@ let model_capabilities_override_of_model_spec
             reasoning replay). Fields the block does state are assigned below
             and override it. *)
          let base = Llm_provider.Capabilities.capabilities_of_kind wire in
+         (* [None] means the block stated nothing, so the dialect decides —
+            which is what the comment above has always promised and what a
+            [false]-defaulted bool could not deliver (#37435). *)
+         let stated field ~default = Option.value field ~default in
+         (* Media input stays fail-closed: MASC's model spec is the SSOT for
+            it ([Runtime_agent.apply_runtime_model_input_capabilities]), so an
+            unwritten media flag is [false], never the wire's preset. Absence
+            is the answer here, not a stand-in for a value that went missing:
+            the operator did not grant the modality. *)
+         (* DET-OK: the default is the contract. *)
+         let media field = Option.value field ~default:false in
          { base with
            max_context_tokens = spec.max_context
          ; max_output_tokens = caps.max_output_tokens
          ; supports_tools = spec.tools_support
-         ; supports_tool_choice = caps.supports_tool_choice
-         ; supports_required_tool_choice = caps.supports_required_tool_choice
-         ; supports_named_tool_choice = caps.supports_named_tool_choice
-         ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
+         ; supports_tool_choice = stated caps.supports_tool_choice ~default:base.supports_tool_choice
+         ; supports_required_tool_choice = stated caps.supports_required_tool_choice ~default:base.supports_required_tool_choice
+         ; supports_named_tool_choice = stated caps.supports_named_tool_choice ~default:base.supports_named_tool_choice
+         ; supports_parallel_tool_calls = stated caps.supports_parallel_tool_calls ~default:base.supports_parallel_tool_calls
          (* DET-OK: absent policy retains the existing provider default capability
             for this uncataloged model; it does not synthesize enable_thinking. *)
          ; supports_reasoning = Option.value spec.thinking_support ~default:base.supports_reasoning
@@ -554,19 +565,19 @@ let model_capabilities_override_of_model_spec
              Option.value
                caps.reasoning_streaming_format
                ~default:base.reasoning_streaming_format
-         ; supports_response_format_json = caps.supports_response_format_json
-         ; supports_structured_output = caps.supports_structured_output
-         ; supports_multimodal_inputs = caps.supports_multimodal_inputs
-         ; supports_image_input = caps.supports_image_input
-         ; supports_audio_input = caps.supports_audio_input
-         ; supports_video_input = caps.supports_video_input
+         ; supports_response_format_json = stated caps.supports_response_format_json ~default:base.supports_response_format_json
+         ; supports_structured_output = stated caps.supports_structured_output ~default:base.supports_structured_output
+         ; supports_multimodal_inputs = media caps.supports_multimodal_inputs
+         ; supports_image_input = media caps.supports_image_input
+         ; supports_audio_input = media caps.supports_audio_input
+         ; supports_video_input = media caps.supports_video_input
          ; supports_native_streaming = spec.streaming
-         ; supports_system_prompt = caps.supports_system_prompt
-         ; supports_prompt_caching = caps.supports_prompt_caching
-         ; supports_top_k = caps.supports_top_k
-         ; supports_min_p = caps.supports_min_p
-         ; supports_seed = caps.supports_seed
-         ; emits_usage_tokens = caps.emits_usage_tokens
+         ; supports_system_prompt = stated caps.supports_system_prompt ~default:base.supports_system_prompt
+         ; supports_prompt_caching = stated caps.supports_prompt_caching ~default:base.supports_prompt_caching
+         ; supports_top_k = stated caps.supports_top_k ~default:base.supports_top_k
+         ; supports_min_p = stated caps.supports_min_p ~default:base.supports_min_p
+         ; supports_seed = stated caps.supports_seed ~default:base.supports_seed
+         ; emits_usage_tokens = stated caps.emits_usage_tokens ~default:base.emits_usage_tokens
          })
       spec.capabilities
 ;;

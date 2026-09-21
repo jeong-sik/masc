@@ -1,15 +1,23 @@
 name: PR check
 
-# One quick compile per pull request push. The manual CI stays as it is:
-# dispatched at a work-unit boundary, one run for the whole repo. What that
-# lane cannot give a PR is a fast answer, because its concurrency group is
-# repo-global and parallel sessions' dispatches cancel each other's runs.
+# One quick compile per pull request push, plus the suites that push selects.
+# The manual CI stays as it is: dispatched at a work-unit boundary, one run
+# for the whole repo. What that lane cannot give a PR is a fast answer,
+# because its concurrency group is repo-global and parallel sessions'
+# dispatches cancel each other's runs.
 #
-# Scope matches the manual job's: `dune build @check` type-checks the whole
-# tree, test/ included, and links nothing -- linking is this repo's slow
-# step, and every breakage class this session produced (unbound values,
-# signature mismatches, an mli-only type, a label that would not resolve)
-# is a compile error @check reports.
+# `dune build @check` type-checks the whole tree, test/ included, and links
+# nothing -- linking is this repo's slow step, and every breakage class this
+# session produced (unbound values, signature mismatches, an mli-only type, a
+# label that would not resolve) is a compile error @check reports.
+#
+# Since 2026-09-06 (#33507) the @check job does not stop there. Its last step
+# links and runs the suites this pull request selects, bounded at 1080
+# seconds; the comment above that step carries the reasoning and the numbers.
+# Two things follow. The scope no longer matches the manual job's, which is
+# why ci.yml's header describes a narrower lane than this one. And this gate
+# can go red on an assertion, not only on a compile error -- the step log
+# says which, and names any suite the budget did not reach.
 #
 # Concurrency is per PR, so a new push cancels only that PR's older run and
 # parallel PRs leave each other alone.

@@ -335,7 +335,7 @@ let remove_durable_range_receipts ~keepers_dir ~keeper_id =
   match Sys.remove path with
   | () -> Ok ()
   | exception Sys_error _ when not (Sys.file_exists path) -> Ok ()
-  | exception exn ->
+  | exception exn -> (* cancel-guard-ok: Sys.remove performs no Eio operation, so Cancelled cannot originate in this body. *)
     Error
       (Printf.sprintf
          "durable Librarian range receipt removal failed path=%s: %s"

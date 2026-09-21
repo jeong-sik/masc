@@ -697,9 +697,17 @@ streaming = true
 [models.minimax-m3.capabilities]
 max-output-tokens = 131072
 thinking-control-format = "none"
-# SSOT = agent-core models.toml per official MiniMax Chat documentation; Chat
-# tool_choice, response_format, and structured output are not documented.
-supports-response-format-json = false
+# SSOT = agent-core models.toml. This binding reaches MiniMax over Ollama
+# Cloud's OpenAI-compatible wire ([providers.ollama_cloud] points at
+# https://ollama.com/v1), not MiniMax's own Chat API, and that wire documents
+# response_format as supported and tool_choice as not
+# (docs.ollama.com/api/openai-compatibility, checked 2026-09-21). A capability
+# this binding has therefore comes from the wire as much as from the model, and
+# models.toml carries a row per wire: a bare minimax-m3 row for MiniMax's own
+# API and an ollama_cloud row for this one. That row declares structured output
+# off as well — /v1 accepts json_schema but does not guarantee schema-shaped
+# output, and strict schemas belong on the native /api/chat lane — which is
+# what the line below states.
 supports-structured-output = false
 supports-image-input = true
 supports-multimodal-inputs = true

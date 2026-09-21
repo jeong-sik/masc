@@ -264,9 +264,11 @@ val run_turn
   -> ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit)
   -> ?approval_gate:Keeper_tool_approval_gate.t
   -> ?trajectory_acc:Trajectory.accumulator
-  -> ?degraded_retry_applied:bool
-  -> ?degraded_retry_runtime:string
-  -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
+     (* The receipt's degraded-retry report takes no caller argument. A caller
+        knows only that a lane was deferred to this turn, and that is what
+        [deferred_runtime_lane] below carries. Whether the turn took the lane
+        up is read here, from the runtime the walk started on. Callers used to
+        assert it, and the unified path asserted "a lane is pending" (#37108). *)
   -> ?direct_resume:direct_continuation
   -> ?official_task_reference:Keeper_official_task_reference.t
   -> ?on_gate_evidence_admitted:(Agent_core.Checkpoint.t -> (unit, string) result)

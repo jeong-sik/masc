@@ -416,6 +416,12 @@ let abort_replacement reservation =
 ;;
 let rejected_slots registry = registry.rejected_slots
 
+let declared_lane registry ~lane_id =
+  List.find_opt
+    (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id lane_id)
+    registry.declared_lanes
+;;
+
 let diagnose_rejected_slot registry (slot : rejected_slot) ~configured_runtime =
   let rejected_bindings =
     Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot

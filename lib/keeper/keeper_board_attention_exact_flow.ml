@@ -593,8 +593,8 @@ let jev_answer_label = function
 ;;
 
 (* [rejudged] appears only after a not-relevant answer. It is the decision the
-   LLM lane then returned, or [null] when this flow returned no judgment; the
-   worker may still ask a CLI slot after that, which this entry does not see. *)
+   complete LLM lane then returned after its HTTP and declared CLI slots, or
+   [null] when the lane returned no judgment. *)
 let jev_first_to_yojson jev_first result =
   let answer = "answer", `String (jev_answer_label jev_first) in
   let with_provenance provenance fields =

@@ -246,18 +246,12 @@ let run (ctx : ctx)
                     multi-turn ordering without a separate turn identity. *)
                  ~user_turn_record:Keeper_run_prompt.Record_user_turn
                  ~history_assistant_source:"internal_assistant"
-                 ~degraded_retry_applied:
-                   (Option.is_some turn_state.degraded_retry_info)
-                 ?degraded_retry_runtime:
-                   (Option.map
-                      (fun (retry : EC.degraded_retry) ->
-                         retry.next_runtime)
-                      turn_state.degraded_retry_info)
-                 ?fallback_reason:
-                   (Option.map
-                      (fun (retry : EC.degraded_retry) ->
-                         retry.fallback_reason)
-                      turn_state.degraded_retry_info)
+                 (* [deferred_runtime_lane] is the whole degraded-retry input.
+                    This call also passed the lane's runtime and reason
+                    separately, under a flag that said a retry had been
+                    applied whenever a lane was merely pending — which is what
+                    the receipt then printed (#37108). The receipt now reads
+                    the lane from here and decides for itself. *)
                  ?deferred_runtime_lane
                  ~runtime_retry_deferral:
                    { Keeper_turn_driver.continuation = lane_retry_continuation

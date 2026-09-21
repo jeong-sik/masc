@@ -19,7 +19,12 @@ name: CI
 # mismatches, one shadowed duplicate caught as warning 32 — and @check
 # reports all of them. Nothing that day needed an executable to exist.
 #
-# Lint, dashboard, ratchets, and the ci-gate no longer run anywhere.
+# Lint, dashboard, ratchets, and the ci-gate stopped running here that day,
+# and three of the four came back in pr-check.yml rather than staying gone:
+# the lint suite on 2026-09-05 (#33226), then the dashboard typecheck and the
+# OCaml boundary ratchet. Only the ci-gate runs nowhere. This lane is the
+# compile alone; pr-check.yml is where a pull request meets the rest, and
+# since 2026-09-06 (#33507) it also runs the suites the change selects.
 
 on:
   push:

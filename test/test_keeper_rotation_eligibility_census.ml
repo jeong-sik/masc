@@ -394,7 +394,8 @@ let route_says_this_walk_rotates = function
           | Keeper_runtime_failure_route.Model_unavailable
           | Keeper_runtime_failure_route.Refusal_body_not_received
           | Keeper_runtime_failure_route.Generation_repeated
-          | Keeper_runtime_failure_route.Attempt_rejected )
+          | Keeper_runtime_failure_route.Attempt_rejected
+          | Keeper_runtime_failure_route.Provider_reported_failure )
       } -> true
   | Keeper_runtime_failure_route.Rotate_now
       { rotate =
@@ -431,6 +432,7 @@ let test_walk_rotates_where_the_route_says_it_does () =
     ; "provider:authorization_error"
     ; "api:not_found"
     ; "provider:not_found"
+    ; "provider:reported_error"
     ];
   List.iter
     (fun (label, error, _count) ->

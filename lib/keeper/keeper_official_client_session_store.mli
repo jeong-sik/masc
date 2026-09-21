@@ -162,6 +162,28 @@ val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
 
+val clear_then :
+  base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result
+(** [clear_then ... after_clear] durably removes the current binding, then runs
+    [after_clear] before releasing the same claim lock. New claims therefore
+    cannot observe an absent binding until the caller's paired durable mutation
+    has finished. [after_clear] must not take this claim lock again, and every
+    other lock it takes is ordered under this one. Missing state still runs
+    [after_clear] without creating the optional session-store directory or its
+    sibling lock. A completed callback result survives a lock-release failure;
+    that release failure is logged separately. A binding that cannot decode is
+    not resumable, so clear warns and removes it under the lock instead of
+    wedging the Keeper permanently. *)
+
+module For_testing : sig
+  val clear_then_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error ->
+    base_path:string ->
+    keeper_name:string ->
+    (unit -> 'a) ->
+    ('a, string) result
+end
+
 val plan_claim :
   expected:t option ->
   client_kind:client_kind ->

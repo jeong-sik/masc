@@ -68,8 +68,8 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
        in
        observe [ "status", `String "started" ];
        let outcome =
-         match Client.evaluate ?clock ~endpoint ~model:requested_model ~api_key ~state
-             ~questions () with
+         let destination = { Client.endpoint; model = requested_model; api_key } in
+         match Client.evaluate ?clock ~destinations:(destination, []) ~state ~questions () with
          | Error failure -> Failed failure
          | Ok evaluated ->
            let decoded =

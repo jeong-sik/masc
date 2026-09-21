@@ -584,8 +584,11 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
+       let destination = { Typesafeai_client.endpoint; model; api_key } in
        let evaluate ~state ~questions =
-         let result = Typesafeai_client.evaluate ?clock ~endpoint ~model ~api_key ~state ~questions () in
+         let result =
+           Typesafeai_client.evaluate ?clock ~destinations:(destination, []) ~state ~questions ()
+         in
          let endpoint = Typesafeai_client.endpoint_for_observation endpoint in
          evaluations := { endpoint; model; state; questions; result } :: !evaluations;
          publish (Incomplete (List.rev !evaluations));

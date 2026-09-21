@@ -60,10 +60,16 @@ let judge_candidate ?clock ~api_key ~candidate () =
     Keeper_board_attention_candidate.singleton_judgment_request
       candidate
   in
+  let destination =
+    { Typesafeai_client.endpoint = Typesafeai_config.endpoint ()
+    ; model = Typesafeai_config.model ()
+    ; api_key
+    }
+  in
   let* evaluated =
     Typesafeai_client.evaluate
       ?clock
-      ~api_key
+      ~destinations:(destination, [])
       ~state
       ~questions:[ relevance_question_id, relevance_question ~choices candidate ]
       ()

@@ -97,7 +97,8 @@ let run ?(observe = fun _ -> ()) ?clock ~keeper_id ~input ~proposed () =
     observe (Checking request);
     let now () = match clock with Some clock -> Eio.Time.now clock | None -> Time_compat.now () in
     let started = now () in
-    let result = match Typesafeai_client.evaluate ?clock ~endpoint ~model ~api_key
+    let destination = { Typesafeai_client.endpoint; model; api_key } in
+    let result = match Typesafeai_client.evaluate ?clock ~destinations:(destination, [])
         ~state:request.state ~questions:[question_id, request.question] () with
       | Error failure -> Failed failure
       | Ok receipt ->

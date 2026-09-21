@@ -349,7 +349,12 @@ blocking_pr_lints() {
   # runtime as an Assert_failure. The lint existed but no workflow ran it, so
   # the count drifted to 32 and back to 0 without anyone seeing either move.
   # Blocking at 0 keeps the next one from landing unnoticed.
-  run_lint "Cancel guard on wildcard catches" bash scripts/lint-cancel-guard.sh
+  # The guard runs its own fixtures first: nine cases, each either a shape
+  # the shell version answered wrongly or a swallow that has to stay
+  # reported. A guard nobody has seen catch anything is an untested test
+  # (#37458).
+  run_lint "Cancel guard fixtures" python3 scripts/ci/check-cancel-guard.py --self-test
+  run_lint "Cancel guard on wildcard catches" python3 scripts/ci/check-cancel-guard.py
   # A match whose every arm is a bare wildcard computes its scrutinee and
   # throws it away, while reading as if it told two cases apart. Four were in
   # the tree on 2026-09-06 and two of them sat on a real classifier, so the

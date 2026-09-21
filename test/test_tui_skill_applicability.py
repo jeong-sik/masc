@@ -51,9 +51,7 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
         h.drain_until_quiet(process, fd, output)
         screen = h.screen_text(bytes(output))
         expected = (
-            b"JEV applicability advice"
-            if row["success"]
-            else b"skill_activation_error"
+            b"JEV applicability advice" if row["success"] else b"skill_activation_error"
         )
         if expected not in screen:
             raise AssertionError(

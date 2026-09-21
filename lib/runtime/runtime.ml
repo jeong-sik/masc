@@ -1463,7 +1463,9 @@ let set_loaded
   let runtimes = List.map preserve_candidate runtimes in
   let rt = preserve_candidate rt in
   let declared_media_failover =
-    Option.value declared_media_failover ~default:media_failover
+    match declared_media_failover with
+    | Some declared -> declared
+    | None -> media_failover
   in
   Atomic.set loaded_state_ref
     { default_runtime = Some rt

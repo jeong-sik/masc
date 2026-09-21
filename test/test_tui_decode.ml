@@ -1007,6 +1007,8 @@ let fleet_safety_json ?(missing = true) () =
            ; "failing_keeper_fiber_count", `Int 1
            ; "recovering_keeper_fiber_count", `Int 0
            ; "turn_configuration_error_keeper_count", `Int 1
+           ; "official_client_recovery_required_keeper_count", `Int 0
+           ; "official_client_recovery_required_keeper_names", `List []
            ; "paused_keeper_count", `Int 0
            ; "target_reaction_capacity_count", `Int 10
            ; "reaction_capacity_shortfall_count", `Int 1
@@ -1050,6 +1052,8 @@ let test_decode_fleet_safety_carries_both_name_lists () =
         fleet.fs_turn_configuration_error_count;
       Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
         fleet.fs_turn_configuration_error_names;
+      Alcotest.(check int) "no session recovery required" 0
+        fleet.fs_official_client_recovery_required_count;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
         [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
@@ -1065,6 +1069,19 @@ let test_decode_fleet_safety_carries_both_name_lists () =
            fleet.fs_bootable_names)
 
 (* A fleet where every bootable keeper runs leaves the difference empty. *)
+let test_decode_fleet_safety_requires_session_recovery_fields () =
+  let section = Yojson.Safe.Util.member "keeper_fleet_safety" (fleet_safety_json ()) in
+  match section with
+  | `Assoc fields ->
+    List.iter
+      (fun field ->
+        let json = `Assoc [ "keeper_fleet_safety", `Assoc (List.remove_assoc field fields) ] in
+        Alcotest.(check bool) ("missing observation is not zero: " ^ field) true
+          (Result.is_error (Tui_decode.decode_fleet_safety json)))
+      [ "official_client_recovery_required_keeper_count"
+      ; "official_client_recovery_required_keeper_names" ]
+  | _ -> Alcotest.fail "fleet fixture must be an object"
+
 let test_decode_fleet_safety_with_nothing_missing () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
   | Error err -> Alcotest.fail err
@@ -4245,6 +4262,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "admitted_slots", `List [ `String "qwen-primary" ]
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
+    ; "declared_slots", `List [ `String "qwen-primary" ]
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained
@@ -9826,6 +9844,8 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "session recovery fields are required" `Quick
+          test_decode_fleet_safety_requires_session_recovery_fields;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick
           test_decode_fleet_safety_with_nothing_missing;
         Alcotest.test_case "a body without the section is refused" `Quick

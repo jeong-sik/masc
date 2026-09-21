@@ -613,6 +613,25 @@ let test_librarian_rebase_refuses_a_position_beyond_the_history () =
   | Ok _ -> Alcotest.fail "a position past the history was moved"
 ;;
 
+let test_librarian_rebase_refuses_another_history_at_the_same_end () =
+  let before, after = rewritten_fixture () in
+  let count = atom_count before in
+  let at_end = progress_at before ~end_atom:count in
+  let held = "another-history-digest" in
+  let progress =
+    { at_end with
+      position = { at_end.position with last_atom_digest = held }
+    }
+  in
+  let _, history = atom_position before in
+  match rebase ~progress:(Some progress) ~before ~after () with
+  | Error (Purge.Position_in_other_history digests) ->
+    Alcotest.(check string) "names the held digest" held digests.held;
+    Alcotest.(check string) "names the checkpoint digest" history digests.history
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a position from another same-length history was moved"
+;;
+
 let test_librarian_rebase_refuses_a_rewrite_with_no_atoms () =
   let before, _after = rewritten_fixture () in
   let progress = progress_at before ~end_atom:(atom_count before) in
@@ -882,6 +901,10 @@ let () =
             "librarian_rebase_refuses_a_position_beyond_the_history"
             `Quick
             test_librarian_rebase_refuses_a_position_beyond_the_history
+        ; Alcotest.test_case
+            "librarian_rebase_refuses_another_history_at_the_same_end"
+            `Quick
+            test_librarian_rebase_refuses_another_history_at_the_same_end
         ; Alcotest.test_case
             "librarian_rebase_refuses_a_rewrite_with_no_atoms"
             `Quick

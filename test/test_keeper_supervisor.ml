@@ -395,6 +395,17 @@ let seed_durable_librarian_baseline
   | Ok () -> ()
   | Error error -> fail (Librarian_boundaries.append_error_to_string error)
 
+let check_durable_librarian_baseline config ~keeper_name =
+  match
+    Librarian_progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+  with
+  | Ok (Some progress) ->
+    check int "durable baseline end" 1 progress.position.end_atom
+  | Ok None -> fail "durable Librarian callback did not write progress"
+  | Error error -> fail (Librarian_progress.read_error_to_string error)
+
 let with_librarian_enabled f =
   Masc_test_deps.with_process_env
     Env_config.KeeperMemoryOs.librarian_env_key
@@ -1613,7 +1624,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       | Some entry ->
           check int "restart count restored to attempt" 1 entry.restart_count)
 
-let test_restart_reopens_crash_aborted_librarian_lifecycle () =
+let test_restart_leaves_librarian_lane_open () =
   with_restart_launch_noop @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1638,10 +1649,8 @@ let test_restart_reopens_crash_aborted_librarian_lifecycle () =
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
-      (match Memory_lane.abort_librarian ~base_path:config.base_path ~keeper_name:name with
-       | Ok Memory_lane.Librarian_abort_idle -> ()
-       | Ok _ -> fail "empty crash-abort fixture unexpectedly owned Librarian work"
-       | Error error -> fail (Memory_lane.librarian_abort_error_to_string error));
+      check (option int) "crash fixture owns no Librarian work" None
+        (Memory_lane.For_testing.pending ~base_path:config.base_path ~keeper_name:name);
       let ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = supervisor_agent_name
@@ -1663,9 +1672,7 @@ let test_restart_reopens_crash_aborted_librarian_lifecycle () =
       match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name (fun () -> ()) with
       | Memory_lane.Ran_inline -> ()
       | Memory_lane.Submitted | Memory_lane.Coalesced -> ()
-      | Memory_lane.Dropped -> fail "restarted Librarian submission was dropped"
-      | Memory_lane.Rejected_draining ->
-        fail "supervisor restart left the Librarian lifecycle fenced")
+      | Memory_lane.Dropped -> fail "restarted Librarian submission was dropped")
 ;;
 
 let test_restart_path_emits_meta_unavailable_outcome_metric () =
@@ -1818,7 +1825,10 @@ let test_supervised_stop_joins_board_attention_worker () =
         true
         (Reg.lane_has_exited reg))
 
-let test_supervised_stop_drains_librarian_before_terminal () =
+(* I7: a Keeper stop neither waits for nor cancels the Librarian unit that is
+   running for it. The unit belongs to the server's lane and finishes on its
+   own. *)
+let test_supervised_stop_does_not_wait_for_librarian () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   ensure_test_runtime ();
@@ -1839,13 +1849,6 @@ let test_supervised_stop_drains_librarian_before_terminal () =
        | Ok () -> ()
        | Error err -> fail err);
       Memory_lane.init ~sw;
-      (match
-         Memory_lane.begin_librarian_lifecycle
-           ~base_path:config.base_path
-           ~keeper_name:name
-       with
-       | Ok () -> ()
-       | Error error -> fail (Memory_lane.lifecycle_open_error_to_string error));
       let reg = Reg.register_offline ~base_path:config.base_path name meta in
       let ctx : _ Keeper_types_profile.context =
         { config
@@ -1875,6 +1878,7 @@ let test_supervised_stop_drains_librarian_before_terminal () =
            | Error error -> fail (Keeper_state_machine.transition_error_to_string error));
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
       let librarian_release, resolve_librarian_release = Eio.Promise.create () in
+      let librarian_finished, resolve_librarian_finished = Eio.Promise.create () in
       let librarian_cancelled = ref false in
       let librarian_completed = ref false in
       (match
@@ -1885,7 +1889,8 @@ let test_supervised_stop_drains_librarian_before_terminal () =
               Eio.Promise.resolve resolve_librarian_started ();
               try
                 Eio.Promise.await librarian_release;
-                librarian_completed := true
+                librarian_completed := true;
+                Eio.Promise.resolve resolve_librarian_finished ()
               with
               | Eio.Cancel.Cancelled _ as exn ->
                 librarian_cancelled := true;
@@ -1894,53 +1899,42 @@ let test_supervised_stop_drains_librarian_before_terminal () =
        | Memory_lane.Submitted
        | Memory_lane.Coalesced -> ()
        | Memory_lane.Ran_inline
-       | Memory_lane.Dropped
-       | Memory_lane.Rejected_draining ->
+       | Memory_lane.Dropped ->
          fail "supervised Librarian fixture was not submitted");
       Eio.Promise.await librarian_started;
-      let stop_done, resolve_stop_done = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
-        Eio.Promise.resolve
-          resolve_stop_done
-          (Masc.Keeper_keepalive.stop_keepalive_and_await
-             ~base_path:config.base_path
-             name));
-      Eio.Time.sleep ctx.clock 0.05;
-      check bool
-        "supervised stop waits for accepted Librarian work"
-        true
-        (Option.is_none (Eio.Promise.peek stop_done));
-      check bool
-        "terminal promise stays pending until Librarian drain"
-        true
-        (Option.is_none (Eio.Promise.peek reg.done_p));
-      Eio.Promise.resolve resolve_librarian_release ();
-      let joined = Eio.Promise.await stop_done in
+      let joined =
+        Masc.Keeper_keepalive.stop_keepalive_and_await
+          ~base_path:config.base_path
+          name
+      in
       (match joined with
        | Masc.Keeper_keepalive.Keeper_not_registered ->
-         fail "supervised Keeper disappeared before Librarian join"
+         fail "supervised Keeper disappeared before the stop"
        | Masc.Keeper_keepalive.Keeper_joined
            { lane_exit = { cleanup_error = None; _ }; terminal = `Stopped } -> ()
        | Masc.Keeper_keepalive.Keeper_joined
            { lane_exit = { cleanup_error = Some error; _ }; _ } ->
-         fail ("supervised Librarian cleanup failed: " ^ error)
+         fail ("supervised lane cleanup failed: " ^ error)
        | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
-         fail ("supervised Librarian stop resolved as crashed: " ^ reason));
+         fail ("supervised stop resolved as crashed: " ^ reason));
       check bool
-        "supervised stop preserves Librarian work"
+        "the stop did not cancel the running Librarian unit"
         false
         !librarian_cancelled;
       check bool
-        "supervised stop drains Librarian before terminal"
-        true
+        "the stop did not wait for the running Librarian unit"
+        false
         !librarian_completed;
       check
         (option int)
-        "supervised Librarian has no pending work after stop"
-        (Some 0)
+        "the Librarian unit is still running after the stop"
+        (Some 1)
         (Memory_lane.For_testing.pending
            ~base_path:config.base_path
-           ~keeper_name:name))
+           ~keeper_name:name);
+      Eio.Promise.resolve resolve_librarian_release ();
+      Eio.Promise.await librarian_finished;
+      check bool "the unit finished on its own afterwards" true !librarian_completed)
 
 (* Codex #24135 finding 5: a rejected [Keeper_lane.fork] (parent switch already
    cancelling, or [claim_start] refused) must propagate [Error] from
@@ -2285,9 +2279,10 @@ let test_non_storm_crashed_restarts_normally () =
        | Some _ -> ()
        | None -> fail "registry entry missing after ordinary restart"))
 
-(* Failure observations remain durable across lane unregister/restart without
-   changing the Keeper's operator-controlled lifecycle state. *)
-let test_active_librarian_abort_defers_then_retries_restart () =
+(* I7: a Librarian unit running for a crashed Keeper does not defer its
+   restart. The restart installs a new lane at once and its durable catch-up
+   queues behind the running unit on the same lane. *)
+let test_running_librarian_does_not_defer_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   ensure_test_runtime ();
@@ -2321,30 +2316,19 @@ let test_active_librarian_abort_defers_then_retries_restart () =
          | None -> fail "crashed restart fixture disappeared"
        in
        let started, set_started = Eio.Promise.create () in
-       let cancellation_seen, set_cancellation_seen = Eio.Promise.create () in
-       let release_cleanup, set_release_cleanup = Eio.Promise.create () in
-       let never, _set_never = Eio.Promise.create () in
+       let release, set_release = Eio.Promise.create () in
+       let finished, set_finished = Eio.Promise.create () in
        (match
           Memory_lane.submit ~base_path:config.base_path ~keeper_name:name (fun () ->
             Eio.Promise.resolve set_started ();
-            try Eio.Promise.await never with
-            | Eio.Cancel.Cancelled _ as exn ->
-              Eio.Promise.resolve set_cancellation_seen ();
-              Eio.Cancel.protect (fun () -> Eio.Promise.await release_cleanup);
-              raise exn)
+            Eio.Promise.await release;
+            Eio.Promise.resolve set_finished ())
         with
         | Memory_lane.Submitted -> ()
         | Memory_lane.Coalesced
         | Memory_lane.Ran_inline
-        | Memory_lane.Dropped
-        | Memory_lane.Rejected_draining -> fail "active Librarian fixture was not submitted");
+        | Memory_lane.Dropped -> fail "active Librarian fixture was not submitted");
        Eio.Promise.await started;
-       (match Memory_lane.abort_librarian ~base_path:config.base_path ~keeper_name:name with
-        | Ok Memory_lane.Librarian_abort_requested
-        | Ok Memory_lane.Librarian_abort_already_in_progress -> ()
-        | Ok _ -> fail "active Librarian abort did not commit cancellation"
-        | Error error -> fail (Memory_lane.librarian_abort_error_to_string error));
-       Eio.Promise.await cancellation_seen;
        let run_restart (previous : Reg.registry_entry) =
          Launch_transaction.run
            ~base_path:config.base_path
@@ -2359,85 +2343,19 @@ let test_active_librarian_abort_defers_then_retries_restart () =
            ~rollback:(Launch_transaction.Restore_previous previous)
            (fun _intake_token _token replacement -> replacement)
        in
-       (match run_restart crashed with
-        | Error (Launch_transaction.Lifecycle_open_failed _) -> ()
-        | Error _ -> fail "restart deferred for an unexpected transaction reason"
-        | Ok _ -> fail "restart crossed an active cancelled Librarian owner");
-       (match Reg.get ~base_path:config.base_path name with
-        | Some current ->
-          check bool "deferred restart restores the crashed lane" true
-            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
-        | None -> fail "deferred restart lost its durable crashed authority");
-       Eio.Promise.resolve set_release_cleanup ();
-       (match
-          Memory_lane.drain_and_join_librarian
-            ~base_path:config.base_path
-            ~keeper_name:name
-        with
-        | Error (Memory_lane.Librarian_interrupted _) -> ()
-        | Error error -> fail (Memory_lane.librarian_drain_error_to_string error)
-        | Ok _ -> fail "cancelled Librarian was reported as gracefully drained");
        let replacement =
          match run_restart crashed with
          | Ok replacement -> replacement
-         | Error _ -> fail "next restart sweep did not reopen the exited Librarian owner"
+         | Error _ -> fail "a running Librarian unit deferred the restart"
        in
-       check bool "retry installs a distinct restart lane" false
+       check bool "the restart installs a distinct lane while the unit runs" false
          (Lane.Id.equal (Lane.id replacement.lane) (Lane.id crashed.lane));
-       ignore
-         (Memory_lane.drain_and_join_librarian
-            ~base_path:config.base_path
-            ~keeper_name:name
-           : (Memory_lane.librarian_drain_outcome,
-              Memory_lane.librarian_drain_error)
-               result))
-
-let test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle () =
-  Eio_main.run @@ fun _env ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Memory_lane.For_testing.reset ();
-      cleanup_dir base_dir)
-    (fun () ->
-       Memory_lane.For_testing.reset ();
-       let keeper_name = "unexpected-librarian-reopen" in
-       (match
-          Memory_lane.begin_librarian_lifecycle
-            ~base_path:base_dir
-            ~keeper_name
-        with
-        | Ok () -> ()
-        | Error error -> fail (Memory_lane.lifecycle_open_error_to_string error));
-       let replacement_opened = ref false in
-       (match
-          Launch_transaction.finish_lifecycle
-            ~boundary:Launch_transaction.Unexpected
-            ~base_path:base_dir
-            ~keeper_name
-            ~terminalize:(fun () ->
-              match
-                Memory_lane.begin_librarian_lifecycle
-                  ~base_path:base_dir
-                  ~keeper_name
-              with
-              | Ok () ->
-                replacement_opened := true;
-                Ok ()
-              | Error error ->
-                Error (Memory_lane.lifecycle_open_error_to_string error))
-        with
-        | Ok () -> ()
-        | Error detail -> fail detail);
-       check bool "terminal publication admitted replacement" true !replacement_opened;
-       match Memory_lane.submit ~base_path:base_dir ~keeper_name ignore with
-       | Memory_lane.Ran_inline -> ()
-       | Memory_lane.Submitted
-       | Memory_lane.Coalesced
-       | Memory_lane.Dropped
-       | Memory_lane.Rejected_draining ->
-         fail "stale unexpected cleanup closed the replacement lifecycle")
-;;
+       check (option int)
+         "the restart's catch-up queues behind the running unit"
+         (Some 2)
+         (Memory_lane.For_testing.pending ~base_path:config.base_path ~keeper_name:name);
+       Eio.Promise.resolve set_release ();
+       Eio.Promise.await finished)
 
 let crashed_restart_fixture ~base_path name meta =
   let initial = Reg.For_testing.register ~base_path name meta in
@@ -2463,7 +2381,7 @@ let register_restart ~base_path ~name ~meta token intake_token =
     meta
 ;;
 
-let test_launch_transaction_leaves_durable_catchup_to_the_server_loop () =
+let test_durable_catchup_is_submitted_before_launch () =
   with_librarian_enabled @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2497,8 +2415,8 @@ let test_launch_transaction_leaves_durable_catchup_to_the_server_loop () =
              Ok offline)
            ~rollback:Launch_transaction.Retain_registered
            (fun _intake_token _token entry ->
-              check int "launch does not submit durable catch-up"
-                submitted_before
+              check int "durable catch-up submitted before launch"
+                (submitted_before + 1)
                 (memory_lane_submitted_total ());
               order := "launch" :: !order;
               entry)
@@ -2510,9 +2428,8 @@ let test_launch_transaction_leaves_durable_catchup_to_the_server_loop () =
         | Error _ -> fail "ordered catch-up launch transaction failed");
        check (list string) "registration precedes launch" [ "register"; "launch" ]
          (List.rev !order);
-       check int "launch leaves the queue submission count unchanged"
-         submitted_before
-         (memory_lane_submitted_total ()))
+       Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name:name;
+       check_durable_librarian_baseline config ~keeper_name:name)
 ;;
 
 let test_launch_callback_failure_rolls_back_restart_transaction () =
@@ -2549,31 +2466,22 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
               failwith "injected launch callback failure")
         with
         | Error
-            (Launch_transaction.Launch_failed
-               { librarian_abort_error = None; rollback_error = None; _ }) -> ()
+            (Launch_transaction.Launch_failed { rollback_error = None; _ }) -> ()
         | Error _ -> fail "launch exception produced the wrong transaction outcome"
         | Ok _ -> fail "launch exception unexpectedly committed");
-       check int "failed launch did not submit durable catch-up"
-         submitted_before
+       check int "failed launch admitted durable catch-up"
+         (submitted_before + 1)
          (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
           check bool "launch exception restores exact crashed authority" true
             (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
         | None -> fail "launch exception removed the durable restart authority");
+       (* I7: a failed launch closes nothing on the Librarian lane. *)
        (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
-        | Memory_lane.Rejected_draining -> ()
-        | _ -> fail "failed launch left Librarian admission open");
-       (match
-          Memory_lane.drain_and_join_librarian
-            ~base_path:config.base_path
-            ~keeper_name:name
-        with
-        | Ok Memory_lane.Librarian_drained
-        | Error (Memory_lane.Librarian_interrupted _) -> ()
-        | Ok Memory_lane.No_librarian_work ->
-          fail "submitted catch-up had no Librarian owner to join"
-        | Error error -> fail (Memory_lane.librarian_drain_error_to_string error));
+        | Memory_lane.Submitted | Memory_lane.Coalesced | Memory_lane.Ran_inline -> ()
+        | Memory_lane.Dropped -> fail "failed launch left the Librarian lane unusable");
+       Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name:name;
        match
          Launch_transaction.run
            ~base_path:config.base_path
@@ -2642,8 +2550,8 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        Eio.Cancel.cancel context (Failure "cancel injected launch callback");
        check bool "launch cancellation propagates after rollback" true
          (Eio.Promise.await cancelled);
-       check int "cancelled launch did not submit durable catch-up"
-         submitted_before
+       check int "cancelled launch admitted durable catch-up"
+         (submitted_before + 1)
          (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
@@ -2660,9 +2568,10 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
           fail
             ("launch cancellation leaked lifecycle reservation: "
              ^ Lifecycle_reservation.snapshot_to_string owner));
+       (* I7: a cancelled launch closes nothing on the Librarian lane. *)
        match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
-       | Memory_lane.Rejected_draining -> ()
-       | _ -> fail "cancelled launch left Librarian admission open")
+       | Memory_lane.Submitted | Memory_lane.Coalesced | Memory_lane.Ran_inline -> ()
+       | Memory_lane.Dropped -> fail "cancelled launch left the Librarian lane unusable")
 ;;
 
 let test_register_cancellation_rolls_back_restart_transaction () =
@@ -2735,9 +2644,11 @@ let test_register_cancellation_rolls_back_restart_transaction () =
           check bool "registration cancellation removed replacement authority" false
             (Lane.Id.equal (Lane.id current.lane) (Lane.id replacement.lane))
         | None -> fail "registration cancellation removed durable restart authority");
+       (* I7: a cancelled registration closes nothing on the Librarian lane. *)
        match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
-       | Memory_lane.Rejected_draining -> ()
-       | _ -> fail "registration cancellation left Librarian admission open")
+       | Memory_lane.Submitted | Memory_lane.Coalesced | Memory_lane.Ran_inline -> ()
+       | Memory_lane.Dropped ->
+         fail "registration cancellation left the Librarian lane unusable")
 ;;
 
 let test_started_launch_exception_retains_registered_lane () =
@@ -2820,13 +2731,14 @@ let test_offline_launch_exception_retains_retryable_lane () =
             failwith "injected pre-start callback failure")
         with
         | Error
-            (Launch_transaction.Launch_failed
-               { librarian_abort_error = None; rollback_error = None; _ }) -> ()
+            (Launch_transaction.Launch_failed { rollback_error = None; _ }) -> ()
         | Error _ -> fail "offline callback failure produced the wrong transaction outcome"
         | Ok _ -> fail "offline callback failure unexpectedly committed");
+       (* I7: a pre-start callback failure closes nothing on the Librarian lane. *)
        (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
-        | Memory_lane.Rejected_draining -> ()
-        | _ -> fail "pre-start Offline failure left Librarian admission open");
+        | Memory_lane.Submitted | Memory_lane.Coalesced | Memory_lane.Ran_inline -> ()
+        | Memory_lane.Dropped ->
+          fail "pre-start Offline failure left the Librarian lane unusable");
        let forked = ref false in
        (match
           run (fun _intake_token _token entry ->
@@ -3011,16 +2923,14 @@ let () =
     "restart_metrics", [
       test_case "restart path emits attempt and started outcome metrics" `Quick
         test_restart_path_emits_attempt_and_started_outcome_metrics;
-      test_case "restart reopens crash-aborted Librarian lifecycle" `Quick
-        test_restart_reopens_crash_aborted_librarian_lifecycle;
+      test_case "restart leaves the Librarian lane open" `Quick
+        test_restart_leaves_librarian_lane_open;
       test_case "restart path emits missing-meta outcome metrics" `Quick
         test_restart_path_emits_meta_unavailable_outcome_metric;
-      test_case "active Librarian abort defers then retries restart" `Quick
-        test_active_librarian_abort_defers_then_retries_restart;
-      test_case "unexpected cleanup preserves reopened Librarian lifecycle" `Quick
-        test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle;
-      test_case "launch leaves durable catch-up to the server loop" `Quick
-        test_launch_transaction_leaves_durable_catchup_to_the_server_loop;
+      test_case "a running Librarian does not defer restart" `Quick
+        test_running_librarian_does_not_defer_restart;
+      test_case "durable catch-up is submitted before launch" `Quick
+        test_durable_catchup_is_submitted_before_launch;
       test_case "launch callback failure rolls back restart transaction" `Quick
         test_launch_callback_failure_rolls_back_restart_transaction;
       test_case "launch callback cancellation rolls back restart transaction" `Quick
@@ -3039,8 +2949,8 @@ let () =
         test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
       test_case "supervised stop joins Board worker" `Quick
         test_supervised_stop_joins_board_attention_worker;
-      test_case "supervised stop drains Librarian before terminal" `Quick
-        test_supervised_stop_drains_librarian_before_terminal;
+      test_case "supervised stop does not wait for Librarian" `Quick
+        test_supervised_stop_does_not_wait_for_librarian;
       test_case "owner launch respects spontaneous bootstrap policy" `Quick
         test_on_demand_and_manual_launch_do_not_inject_bootstrap;
       test_case "lane fork reject does not announce Running" `Quick

@@ -297,6 +297,37 @@ let store_resolution_error = function
       message
 ;;
 
+let clear_matching_registry_recovery ~base_path ~keeper_name ~runtime_id ~recovery_id =
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> ()
+  | Some expected ->
+    let result =
+      Keeper_registry.update_entry_exact expected (fun current ->
+        match current.Keeper_registry.last_failure_reason with
+        | Some
+            (Keeper_registry.Official_client_recovery_required
+               { runtime_id = current_runtime_id
+               ; recovery_id = current_recovery_id
+               ; _
+               })
+          when String.equal current_runtime_id runtime_id
+               && String.equal current_recovery_id recovery_id ->
+          { current with last_failure_reason = None }
+        | Some _ | None -> current)
+    in
+    (match result with
+     | Keeper_registry.Exact_updated -> ()
+     | Exact_update_missing | Exact_update_replaced ->
+       Log.Keeper.debug
+         ~keeper_name
+         "official-client recovery resolution retained a newer or removed registry lane"
+     | Exact_update_invalid error ->
+       Log.Keeper.warn
+         ~keeper_name
+         "official-client recovery resolution could not update registry: %s"
+         (Keeper_registry.registry_entry_validation_error_to_string error))
+;;
+
 let resolve_body ~config ~actor ~body =
   let* request = parse_body body in
   let* actor = non_empty "actor" actor in
@@ -321,6 +352,11 @@ let resolve_body ~config ~actor ~body =
       ~resolved_at:(Time_compat.now ())
   with
   | Ok (resolved, application) ->
+    clear_matching_registry_recovery
+      ~base_path
+      ~keeper_name:request.keeper_name
+      ~runtime_id:resolved.runtime_id
+      ~recovery_id:request.recovery_id;
     let audit =
       audit_resolution
         config

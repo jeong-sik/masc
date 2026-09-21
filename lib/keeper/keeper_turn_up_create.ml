@@ -43,11 +43,7 @@ let write_initial_meta ~intake_token config meta =
       ~base_path:config.Workspace.base_path
       meta
   with
-  | Ok (Some _) ->
-    (* The keeper exists once its metadata does; its Librarian loop starts
-       here, pending, and reads the first turn's end line when it comes. *)
-    Keeper_librarian_loop.ensure ~config ~keeper_name:meta.Keeper_meta_contract.name;
-    Ok ()
+  | Ok (Some _) -> Ok ()
   | Ok None -> Error "Keeper owner removed metadata during create"
   | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 
@@ -358,7 +354,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            | Keepalive_lifecycle_denied _
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _
-           | Keepalive_memory_lane_not_ready _
            | Keepalive_launch_callback_failed _
            | Keepalive_lane_ownership_lost
            | Keepalive_fork_rejected _ ) as rejected ->

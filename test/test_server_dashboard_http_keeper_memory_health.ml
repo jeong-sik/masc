@@ -338,7 +338,7 @@ let test_corrupt_source_snapshot_is_visible () =
     (int_field "source_snapshot_read_error_keepers" (alert_summary json))
 ;;
 
-(* RFC librarian-lifecycle §4.9. No loop runs in this test process, so the
+(* RFC librarian-lifecycle §4.9. No server-owned catch-up runs in this test process, so the
    keeper has no measurement: the row says "not measured" rather than zero,
    and the counts are absent rather than a number nothing took. The journal
    and the snapshot's own source still say when the Librarian last succeeded
@@ -360,7 +360,7 @@ let test_reports_the_librarian_position_without_a_loop () =
     "official turns are not counted"
     true
     (is_null (member "unread_official_turns" librarian));
-  Alcotest.(check (option float))
+  Alcotest.(check (option (float 1e-9)))
     "the snapshot the Librarian wrote is its last success"
     (Some test_now)
     (float_option_field "last_success_at" librarian);

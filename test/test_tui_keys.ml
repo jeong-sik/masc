@@ -225,7 +225,7 @@ let test_lanes_footer_opens_standalone_runs () =
        One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
        and "A:add-ons" as separate items reading as separate destinations,
        and the dispatch had always been one arm. *)
-    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:slots  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -1771,6 +1771,7 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_admitted_slots = []
   ; sl_cli_slots = []
   ; sl_dropped_slots = []
+  ; sl_declared_slots = []
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0

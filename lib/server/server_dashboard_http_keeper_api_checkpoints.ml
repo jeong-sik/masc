@@ -224,6 +224,7 @@ type purge_error =
   | Purge_checkpoint_invalid of string
   | Purge_librarian_position_unreadable of string
   | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
+  | Purge_librarian_cancel_failed of string
   | Purge_librarian_position_not_written of string
   | Purge_backup_failed of string
   | Purge_source_changed
@@ -246,6 +247,8 @@ let purge_error_to_string = function
     "checkpoint purge refused: Librarian position unreadable: " ^ detail
   | Purge_librarian_rebase_refused refusal ->
     "checkpoint purge refused: " ^ Keeper_checkpoint_purge.refusal_to_string refusal
+  | Purge_librarian_cancel_failed detail ->
+    "checkpoint purge refused: Librarian lane could not be stopped: " ^ detail
   | Purge_librarian_position_not_written detail ->
     "checkpoint installed but the Librarian position was not moved with it; the \
      Librarian stops on the mismatch until the keeper's Librarian files are purged: "
@@ -597,18 +600,27 @@ let purge_current config ~keeper_name ~apply =
       ~base_path:config.Workspace.base_path
       ~keeper_name
       (fun () ->
-         (* The keeper's Librarian loop is retired first so that no round
-            reads the position or the checkpoint while either is replaced,
-            and woken after so that the keeper has a loop again (RFC
-            librarian-lifecycle §4.6). The release only drops the tombstone
-            and raises nothing, so [finally] masks no exception. *)
-         let release = Keeper_librarian_loop.retire ~config ~keeper_name in
-         let result =
-           Fun.protect ~finally:release (fun () ->
-             purge_current_unlocked config ~keeper_name ~apply:true)
-         in
-         Keeper_librarian_loop.wake ~base_path:config.Workspace.base_path ~keeper_name;
-         result)
+         if
+           Keeper_registry.is_registered
+             ~base_path:config.Workspace.base_path
+             keeper_name
+         then Error (Purge_keeper_active keeper_name)
+         else
+           (* The Librarian lane is server-owned and may outlive this Keeper.
+              Stop any current or pending unit before either persisted value is
+              replaced; the absent Keeper cannot submit another post-turn unit
+              while this lifecycle lock excludes same-Keeper boot registration. *)
+           match
+             Eio_context.run_on_owner_domain (fun () ->
+               Keeper_memory_lane.cancel_and_await_librarian
+                 ~base_path:config.Workspace.base_path
+                 ~keeper_name)
+           with
+           | Error error ->
+             Error
+               (Purge_librarian_cancel_failed
+                  (Keeper_memory_lane.purge_cancel_error_to_string error))
+           | Ok () -> purge_current_unlocked config ~keeper_name ~apply:true)
   else purge_current_unlocked config ~keeper_name ~apply:false
 ;;
 

@@ -49,6 +49,7 @@ type t =
   | Authorization_refused of string
   | Provider_runtime_failure of string
   | Transcript_corruption of string
+  | Official_client_recovery_required of string
   | Provider_attempt_effect_fenced of string
   | Tool_correction_lost of string
   | Accept_rejected of string
@@ -97,6 +98,8 @@ let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_provider_attempt_effect_fenced ->
     Provider_attempt_effect_fenced wire
   | Keeper_internal_error.Wire_tool_correction_lost -> Tool_correction_lost wire
+  | Keeper_internal_error.Wire_official_client_recovery_required ->
+    Official_client_recovery_required wire
   (* RFC-0454 P2. Both wires are new spellings of failures that already
      reached this classifier, and each keeps the bucket it had: a host stop
      used to arrive as the bare ["internal_error"] wire, and a closed runtime
@@ -165,6 +168,7 @@ let to_wire = function
   | Authorization_refused wire -> wire
   | Provider_runtime_failure wire -> wire
   | Transcript_corruption wire -> wire
+  | Official_client_recovery_required wire -> wire
   | Provider_attempt_effect_fenced wire -> wire
   | Tool_correction_lost wire -> wire
   | Accept_rejected wire -> wire
@@ -198,6 +202,7 @@ let is_transient_provider_runtime_failure = function
   | Config_invalid _
   | Authorization_refused _
   | Transcript_corruption _
+  | Official_client_recovery_required _
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
   | Accept_rejected _

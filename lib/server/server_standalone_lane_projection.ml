@@ -3,6 +3,11 @@ type lane_configuration =
       { admitted_slots : string list
       ; cli_slots : string list
       ; dropped_slots : string list
+      ; declared_slots : string list
+          (** [slots] in the order the file writes them, admitted or not. The
+              three lists above are an admission reading and cannot be put back
+              in file order once a sibling was rejected, so an editor that
+              moves or drops one slot needs this to say where the slot sits. *)
       ; admission_error : string option
       }
   | Unconfigured of string
@@ -632,15 +637,15 @@ let lane_json
   let configuration = resolve_lane spec.lane_id in
   let configured, config_state, admitted_slots, admission_error =
     match configuration with
-    | Configured { admitted_slots; cli_slots; dropped_slots; admission_error } ->
+    | Configured { admitted_slots; cli_slots; dropped_slots; declared_slots; admission_error } ->
       Some true,
       (if admitted_slots = [] && cli_slots = [] then "degraded" else "ready"),
-      (admitted_slots, cli_slots, dropped_slots),
+      (admitted_slots, cli_slots, dropped_slots, declared_slots),
       admission_error
-    | Unconfigured error -> Some false, "unconfigured", ([], [], []), Some error
-    | Registry_unavailable error -> None, "unavailable", ([], [], []), Some error
+    | Unconfigured error -> Some false, "unconfigured", ([], [], [], []), Some error
+    | Registry_unavailable error -> None, "unavailable", ([], [], [], []), Some error
   in
-  let admitted_slots, cli_slots, dropped_slots = admitted_slots in
+  let admitted_slots, cli_slots, dropped_slots, declared_slots = admitted_slots in
   let status =
     match configuration with
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
@@ -680,6 +685,8 @@ let lane_json
     ; "admitted_slots", `List (List.map (fun slot -> `String slot) admitted_slots)
     ; "cli_slots", `List (List.map (fun slot -> `String slot) cli_slots)
     ; "dropped_slots", `List (List.map (fun slot -> `String slot) dropped_slots)
+    ; ( "declared_slots"
+      , `List (List.map (fun slot -> `String slot) declared_slots) )
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)
@@ -738,6 +745,15 @@ let snapshot_json_with
 ;;
 
 let live_lane_configuration registry lane_id =
+  (* The file's own order for [slots], which no admission reading reproduces:
+     [admitted_slots] and [dropped_slots] are two lists by then, and a slot's
+     position among its siblings is gone. The slot editor moves and drops by
+     position, so it reads this. *)
+  let declared_slots =
+    match Runtime_exact_output_registry.declared_lane registry ~lane_id with
+    | Some declared -> declared.Runtime_schema.slot_ids
+    | None -> []
+  in
   (* Publication keeps declared-but-inadmissible slots as typed observations;
      surfacing them per lane is what lets an operator distinguish "configured
      single" from "configured double, one silently dropped" without going
@@ -797,6 +813,7 @@ let live_lane_configuration registry lane_id =
       { admitted_slots = admitted_catalog_slots
       ; cli_slots = admitted_cli_slots
       ; dropped_slots
+      ; declared_slots
       ; admission_error =
           (match admitted_catalog_slots, admitted_cli_slots with
            | [], [] ->
@@ -826,6 +843,7 @@ let live_lane_configuration registry lane_id =
       { admitted_slots = []
       ; cli_slots = []
       ; dropped_slots
+      ; declared_slots
       ; admission_error =
           Some
             (Runtime_exact_output_registry.lane_resolution_error_to_string

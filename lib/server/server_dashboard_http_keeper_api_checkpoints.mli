@@ -54,6 +54,9 @@ type purge_error =
           as "no position": that would let a rewrite pass over what it
           holds. *)
   | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
+  | Purge_librarian_cancel_failed of string
+      (** The server-owned lane could not be cancelled before either file was
+          replaced. *)
   | Purge_librarian_position_not_written of string
       (** The checkpoint was installed and the position write after it
           failed. *)
@@ -68,9 +71,9 @@ val purge_error_to_string : purge_error -> string
     Apply requires the Keeper to be fully absent from the runtime registry and
     serializes that check with same-Keeper boot registration. A rewrite is
     refused while the Librarian has atoms left to read
-    ({!Keeper_checkpoint_purge.librarian_rebase}); otherwise apply retires
-    the keeper's Librarian loop, installs the checkpoint, writes the rebased
-    position after it and wakes the loop. The canonical checkpoint is
+    ({!Keeper_checkpoint_purge.librarian_rebase}); otherwise apply cancels and
+    awaits the server-owned Librarian lane, installs the checkpoint, and
+    writes the rebased position after it. The canonical checkpoint is
     installed only if its exact source reference is unchanged. *)
 val purge_current :
   Workspace.config ->

@@ -89,10 +89,19 @@ type refusal =
           on it; the way out is the keeper's Librarian purge. *)
   | Position_in_other_trace of string
       (** The position belongs to another trace than the checkpoint's. *)
+  | Position_in_other_history of
+      { held : string
+      ; history : string
+      }
+      (** The position has the checkpoint's atom count but its final digest
+          belongs to another history. *)
   | Rewrite_leaves_no_atoms
       (** The rewritten history has no atom to hold a position in. *)
   | Position_unreadable of string
       (** A position could not be computed from the messages. *)
+  | Position_invariant_violation of string
+      (** [position_of_messages] returned a turn-end-only result. This is an
+          internal contract violation rather than unreadable input. *)
 
 val refusal_to_string : refusal -> string
 

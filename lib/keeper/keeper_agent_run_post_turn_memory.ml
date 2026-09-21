@@ -103,12 +103,16 @@ let run
   =
   (* Both kinds of turn leave their record on disk before this runs -- the
      checkpoint and its end line for an Agent-Core turn, the history fragments
-     and an end line for an official-client turn -- and the keeper's Librarian
-     loop reads both from there. The turn hands over nothing else. The
+     and an end line for an official-client turn -- and the durable consumer
+     reads both from there. The turn hands over nothing else: a remembered
+     closure would be a second copy of what the log already says. The
      librarian toggle is owned at this admission boundary: disabled or invalid
      configuration wakes nothing. *)
   (match checkpoint_owner with
    | Runtime_execution.Masc_agent_core | Runtime_execution.Official_client ->
+     Keeper_librarian_queue_refresh.forget_turn
+       ~base_path:config.Workspace.base_path
+       ~keeper_name:meta.name;
      (match Env_config.KeeperMemoryOs.librarian_config_state () with
       | Disabled | Invalid -> ()
       | Enabled ->

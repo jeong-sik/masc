@@ -624,10 +624,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      switch. After [set_switch] so the lane and provider calls it forks share
      the same long-lived switch (cancelled together at shutdown). *)
   Keeper_memory_lane.init ~sw;
-  (* The Librarian loops live on the same switch (RFC librarian-lifecycle
-     §4.3): [init] makes every queue commit and turn end a wake, and [boot]
-     below starts one loop per keeper once the runtime is available. *)
-  Keeper_librarian_loop.init ~sw;
+  Keeper_librarian_queue_refresh.install ();
   (* RFC-0107 Phase D.2c — record full Eio.Stdenv for piaf-backed
      Pool in Masc_http_client.  Optional: tests / pre-bootstrap
      callers may omit [env], in which case Pool falls back to a
@@ -1610,12 +1607,7 @@ let start_post_ready_owner_lanes
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw state;
     Server_workspace_memory_curator.start ~sw
-      ~base_path:(Mcp_server.workspace_config state).base_path;
-    (* One Librarian loop per keeper on disk, stopped keepers included, each
-       pending its first pass. Before keeper autoboot, which
-       [start_background_maintenance] hosts, and after the exact-output
-       registry is published, which a pass checks. *)
-    Keeper_librarian_loop.boot ~config:(Mcp_server.workspace_config state)
+      ~base_path:(Mcp_server.workspace_config state).base_path
   in
   if Runtime_startup_state.requires_setup () then
     Eio.Fiber.fork ~sw (fun () ->

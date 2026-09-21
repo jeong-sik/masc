@@ -72,6 +72,15 @@ type durable_range_id =
   ; boundary_lines_seen : int
   }
 
+(** Exact official-client boundaries consumed by one Memory commit. [turns]
+    is nonempty, strictly ordered after [after_boundary_line]; its final row
+    identifies the consumed end. *)
+type official_range_id =
+  { receipt_scope : string
+  ; after_boundary_line : int
+  ; turns : (int * Ids.Turn_ref.t) list
+  }
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -140,11 +149,6 @@ val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> strin
     range identity to the exact shared Memory snapshot revision and bytes
     produced from it. *)
 
-val durable_range_receipt_count : keepers_dir:string -> keeper_id:string -> (int, string) result
-(** How many receipts the sidecar holds, read with the production decoder and
-    nothing written back: [Ok 0] for no file, [Error] for a file the decoder
-    refuses. For the deployment preflight. *)
-
 (** Record a librarian pass that produced no snapshot. The commit path already
     journals its own line, so this is the failure counterpart and never runs
     after a successful commit. Append failure degrades to a warning: the pass
@@ -201,11 +205,20 @@ val committed_durable_range
     Other cluster receipts share the sidecar but are not replaced by this
     scope's commit. *)
 
+val committed_official_range
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> receipt_scope:string
+  -> (official_range_id option, string) result
+(** Same snapshot proof as [committed_durable_range], independently retained
+    for official-client input in the shared receipt sidecar. *)
+
 val apply_disposition
   :  ?on_committed:(t -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
+  -> ?official_range_id:official_range_id
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> keepers_dir:string
   -> keeper_id:string
@@ -236,8 +249,10 @@ val apply_disposition
     once under the store locks and must only update caller-owned in-memory
     state: no I/O, yielding or exceptions. It is not a scheduling callback.
 
-    [durable_range_id] joins this disposition to the completed-turn range that
-    produced it. The store writes a prepared transaction receipt
+    [durable_range_id] and [official_range_id] join this disposition to the
+    atom and official-client ranges that produced it. When both are present,
+    both identities share the same snapshot revision and SHA-256. Each source
+    kind retains its latest receipt per runtime scope. The store writes a prepared transaction receipt
     before replacing the snapshot and marks it committed afterwards. Recovery
     compares a prepared receipt with the exact snapshot SHA-256, so neither
     side of a process interruption is guessed.

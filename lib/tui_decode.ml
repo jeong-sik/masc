@@ -169,6 +169,7 @@ type standalone_lane = {
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
+  sl_declared_slots : string list;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -544,6 +545,7 @@ type fleet_safety = {
   fs_failing_count : int;
   fs_recovering_count : int;
   fs_turn_configuration_error_count : int;
+  fs_official_client_recovery_required_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
@@ -551,6 +553,7 @@ type fleet_safety = {
   fs_running_names : string list;
   fs_executable_names : string list;
   fs_turn_configuration_error_names : string list;
+  fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -5092,6 +5095,14 @@ let decode_memory_health_snapshot json =
   let sum field =
     List.fold_left (fun total keeper -> total + field keeper) 0 mhs_keepers
   in
+  let librarian_unread_total keeper =
+    match
+      keeper.mkh_librarian.mlh_unread_atom_turns,
+      keeper.mkh_librarian.mlh_unread_official_turns
+    with
+    | Some atoms, Some official -> atoms + official
+    | Some _, None | None, Some _ | None, None -> 0
+  in
   let expected_totals =
     [ mhs_total_facts, sum (fun keeper -> keeper.mkh_facts)
     ; mhs_total_observed_facts, sum (fun keeper -> keeper.mkh_observed_facts)
@@ -5104,9 +5115,7 @@ let decode_memory_health_snapshot json =
     ; mhs_total_source_invalidations, sum (fun keeper -> keeper.mkh_source_invalidations)
     ; mhs_total_source_snapshot_bytes, sum (fun keeper -> keeper.mkh_source_snapshot_bytes)
     ; ( mhs_total_librarian_unread_turns
-      , sum (fun keeper ->
-          Option.value keeper.mkh_librarian.mlh_unread_atom_turns ~default:0
-          + Option.value keeper.mkh_librarian.mlh_unread_official_turns ~default:0) )
+      , sum librarian_unread_total )
     ; mhs_total_librarian_failures, sum (fun keeper -> keeper.mkh_librarian_failures)
     ; mhs_total_vision_ingest_errors, sum (fun keeper -> keeper.mkh_vision_ingest_errors)
     ; mhs_total_read_errors, sum (fun keeper -> if Option.is_some keeper.mkh_read_error then 1 else 0)
@@ -6038,6 +6047,15 @@ let decode_standalone_lane json =
         | _ -> Error "dropped_slots: expected a string")
       dropped_slots
   in
+  let* declared_slots = required_list_field json "declared_slots" in
+  let* sl_declared_slots =
+    decode_list
+      "declared_slots"
+      (function
+        | `String slot_id -> Ok slot_id
+        | _ -> Error "declared_slots: expected a string")
+      declared_slots
+  in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -6065,6 +6083,7 @@ let decode_standalone_lane json =
     ; sl_admitted_slots
     ; sl_cli_slots
     ; sl_dropped_slots
+    ; sl_declared_slots
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count
@@ -8819,6 +8838,12 @@ let decode_fleet_safety json =
   let* fs_turn_configuration_error_count =
     int_field_or section "turn_configuration_error_keeper_count" ~default:0
   in
+  let* fs_official_client_recovery_required_count =
+    required_int_field section "official_client_recovery_required_keeper_count"
+  in
+  let* fs_official_client_recovery_required_names =
+    require_string_list section "official_client_recovery_required_keeper_names"
+  in
   let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
   let* fs_target_reaction_capacity =
     int_field_or section "target_reaction_capacity_count" ~default:0
@@ -8850,6 +8875,8 @@ let decode_fleet_safety json =
     ; fs_failing_count
     ; fs_recovering_count
     ; fs_turn_configuration_error_count
+    ; fs_official_client_recovery_required_count
+    ; fs_official_client_recovery_required_names
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall

@@ -14,9 +14,9 @@
     live keeper holds the conversation in memory and its next save overwrites
     the purge. [--apply] also takes the workspace writer lease that the
     server holds while it runs, so it is refused while a server owns the
-    workspace: that server's Librarian loop would read the position and the
+    workspace: that server's Librarian lane would read the position and the
     checkpoint while they are replaced. On the server, the dashboard purge
-    action retires that loop instead.
+    action cancels and awaits that lane instead.
 
     The Librarian's atom position moves with the checkpoint (RFC
     librarian-lifecycle §10-2, {!Masc.Keeper_checkpoint_purge.librarian_rebase}):
@@ -248,7 +248,7 @@ let () =
              error
                (Printf.sprintf
                   "--apply refused: a server owns this workspace (pid %s); use the dashboard \
-                   purge action, which retires the keeper's Librarian loop for the rewrite"
+                   purge action, which stops the keeper's Librarian lane for the rewrite"
                   (match Server_startup_takeover.base_path_owner_pid owner with
                    | Some pid -> string_of_int pid
                    | None -> "unknown"))

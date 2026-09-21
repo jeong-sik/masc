@@ -502,6 +502,23 @@ let purge_keeper_root_logs config keeper_name =
 
 let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   let open Keeper_shutdown_types in
+  (* The Librarian lane is the server's and outlives the Keeper, so a unit for
+     this Keeper may still be running whichever operation asks for the purge
+     (dashboard purge completion, configuration removal). It is cancelled and
+     waited for before any file goes, or it could write the progress file back
+     after the purge deleted it (RFC librarian-lifecycle section 8).
+     [request_cancel] only accepts a request from the lane's owner domain. *)
+  match
+    Eio_context.run_on_owner_domain (fun () ->
+      Keeper_memory_lane.cancel_and_await_librarian
+        ~base_path:config.Workspace.base_path
+        ~keeper_name)
+  with
+  | Error error ->
+    Error
+      ("Librarian lane could not be stopped before purge: "
+       ^ Keeper_memory_lane.purge_cancel_error_to_string error)
+  | Ok () ->
     let artifacts =
       Keeper_shutdown_types.dashboard_purge_artifact_plan
         ~keeper_name:keeper_name
@@ -625,33 +642,17 @@ let handle_dashboard_keeper_purge_completion config operation =
        let operation_id =
          Keeper_shutdown_types.Operation_id.to_string operation.operation_id
        in
-       (* The keeper's Librarian loop is retired first and released last:
-          a pass running while the files below are removed would write a
-          read position back for a keeper that no longer exists, and a wake
-          during the removal would start a loop that reads the same files
-          (RFC librarian-lifecycle §4.6). *)
-       let result =
-         Keeper_librarian_loop.retire
-           ~config
-           ~keeper_name:operation.keeper_name
-           (fun () ->
-              match
-                Server_schedule_consumers.cancel_keeper_schedules
-                  config
-                  ~keeper_name:operation.keeper_name
-              with
-              | Error error ->
-                Error (Schedule_store.store_error_to_string error)
-              | Ok () ->
-                purge_keeper_artifacts
-                  config
-                  ~keeper_name:operation.keeper_name
-                  ~remove_configuration:true
-                  context)
-       in
-       (match result with
-        | Error _ as error -> error
+       (match
+          Server_schedule_consumers.cancel_keeper_schedules
+            config
+            ~keeper_name:operation.keeper_name
+        with
+        | Error error ->
+          Error (Schedule_store.store_error_to_string error)
         | Ok () ->
+          (match purge_keeper_artifacts config ~keeper_name:operation.keeper_name ~remove_configuration:true context with
+           | Error _ as error -> error
+           | Ok () ->
           Keeper_supervisor_publish_lifecycle.publish_lifecycle
             ~event:
               (Keeper_lifecycle_events.Custom_event
@@ -666,7 +667,7 @@ let handle_dashboard_keeper_purge_completion config operation =
             "dashboard Keeper purge completion delivered: keeper=%s operation=%s"
             operation.keeper_name
             operation_id;
-          Ok ())
+          Ok ()))
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
      | Supervisor_cleanup ->

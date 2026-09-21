@@ -209,6 +209,8 @@ export interface DashboardFleetPressureHealth {
   running_keeper_fiber_count?: number | null
   failing_keeper_fiber_count?: number | null
   recovering_keeper_fiber_count?: number | null
+  official_client_recovery_required_keeper_count?: number | null
+  official_client_recovery_required_keeper_names?: string[] | null
   executable_keeper_fiber_count?: number | null
   no_executable_keeper_fibers?: boolean | null
   reaction_capacity_below_target?: boolean | null

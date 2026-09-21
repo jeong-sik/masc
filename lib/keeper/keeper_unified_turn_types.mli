@@ -26,7 +26,10 @@ type turn_state =
   ; manifest_seq : int
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
-  ; degraded_retry_info : Keeper_error_classify.degraded_retry option
+  ; degraded_retry_settled : Keeper_agent_result.turn_settlement option
+    (** The verdict this turn's receipt recorded, carried up so the decision
+        record reports what the receipt reported instead of deciding again
+        (#37376). Absent on a turn that never reached [finalize]. *)
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; runtime_attempt_errors : runtime_attempt_error list
@@ -132,24 +135,6 @@ val keeper_cycle_failed_terminal_origin_to_string :
     ["[<runtime_id>@<dispatch>=<error preview>, ...]"], in walk order, where
     [<dispatch>] is [Keeper_attempt_dispatch.to_string]. *)
 val runtime_attempt_errors_to_string : runtime_attempt_error list -> string
-
-val degraded_retry_applied_for_turn :
-  degraded_retry_info:Keeper_error_classify.degraded_retry option ->
-  last_execution:Keeper_turn_runtime_budget.runtime_execution option ->
-  bool
-(** Whether the deferred lane a previous turn hinted at is the lane this turn
-    actually ran on. Reader: the unified path's decision record only. The
-    execution receipt answers the same question for itself in
-    [Keeper_agent_run_receipt.degraded_retry_taken_up].
-
-    [turn_state.degraded_retry_info] is seeded at [initial_turn_state] from the
-    [deferred_runtime_lane] argument and nothing writes it afterwards, so its
-    presence means a deferred lane is pending — not that a retry ran.
-
-    Returns [false] when no execution was recorded: nothing ran, so nothing was
-    applied. That is the condition doing the work here, because
-    [Keeper_unified_turn.main_path] routes a turn carrying a hint to
-    [hint.next_runtime_id]: when both sides are present they agree. *)
 
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t

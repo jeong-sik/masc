@@ -3380,7 +3380,7 @@ let test_decode_repository_requires_resolved_local_path () =
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
 let empty_memory_context_cycle =
-  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null]
+  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null; "synthesis", `Null]
 
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
@@ -3443,7 +3443,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v6")
+      [ ("schema", `String "keeper.memory_os.current_health.v7")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
         , `List
@@ -3511,8 +3511,25 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
   let prepared = `Assoc ["prepared_at", `Float 1700000000.; "runtime_id", `String "fixture-runtime";
     "input", input; "request_bytes", `Int 2048] in
-  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared] in
+  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared; "synthesis", `Null] in
   let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
+  let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
+    "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
+      "end_atom", `Int 5; "completed_end_atom", `Int 20]] in
+  let with_synthesis = replace_field "synthesis" synthesis cycle in
+  (match Tui_decode.decode_memory_health_snapshot (context_payload with_synthesis) with
+   | Ok snapshot ->
+     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_synthesis with
+      | Some {state=Masc.Keeper_continuity_observation.Not_committed;
+          range=Some {start_atom=3;end_atom=5;completed_end_atom=20};_} -> ()
+      | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun invalid -> Alcotest.(check bool) "invalid synthesis cannot look caught up" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+      (context_payload (replace_field "synthesis" invalid cycle)))))
+    [replace_field "state" (`String "drained") synthesis;
+     replace_field "trace_id" `Null synthesis;
+     replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
   (match Tui_decode.decode_memory_health_snapshot (context_payload cycle) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
@@ -3727,7 +3744,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v6")
+    [ ("schema", `String "keeper.memory_os.current_health.v7")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
       , `List

@@ -22,6 +22,8 @@ val messages : prepared -> Agent_core.Types.message list
 (** Exact new source atoms, including tool results, supplied to both Memory
     disposition and working-state inference. *)
 val turn_ref : prepared -> Ids.Turn_ref.t
+val start_atom : prepared -> int
+val completed_end_atom : prepared -> int
 val end_atom : prepared -> int
 val fit : fits:(prepared -> (bool, string) result) -> prepared ->
   (prepared option, string) result

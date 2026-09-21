@@ -391,7 +391,39 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   check int "known final-slot bound prevents repeated oversized probes" 1 !oversized;
   check int "one refusal and two fitted chunks reach final slot" 3 !final_calls;
   check bool "no-fit source still reaches recovered alternative" true
-    (match !alternative_bytes with Some size -> size > max_chars | None -> false)
+    (match !alternative_bytes with Some size -> size > max_chars | None -> false);
+  let module O = Masc.Keeper_continuity_observation in
+  let observation () = O.latest_synthesis ~config ~keeper_name |> some in
+  check bool "no further source is not labelled drained" true
+    ((observation ()).state = O.No_source);
+  let extended = source @ [message "A newly completed source."] in
+  save extended; boundary ~fresh:false 2 extended;
+  let rejected ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    check bool "actual runtime dispatch is visibly running" true
+      ((observation ()).state = O.Running);
+    Error (Masc.Fusion_official_client.Setup_failure (Provider_error "fixture refusal")) in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:rejected ~base_path ~keeper_name ();
+  check bool "failed generation replaces running state" true
+    ((observation ()).state = O.Not_committed);
+  check int "refused range keeps committed frontier" 4
+    (P.read ~config ~keeper_name |> get |> some).end_atom;
+  (try Eio.Cancel.run (fun cancellation ->
+     let cancelled ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+       check bool "cancelling runtime was running" true ((observation ()).state = O.Running);
+       Eio.Cancel.cancel cancellation Exit;
+       Eio.Fiber.check ();
+       Ok answer in
+     Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+       ~cli_runner:cancelled ~base_path ~keeper_name ())
+   with Eio.Cancel.Cancelled _ -> ());
+  check bool "cancellation replaces running state" true ((observation ()).state = O.Cancelled);
+  O.record ~config ~keeper_name
+    {prepared_at=1000.;runtime_id="fixture";input=O.Uncompressed;request_bytes=1};
+  O.forget ~config ~keeper_name;
+  check bool "forget clears both observations" true
+    (Option.is_none (O.latest_synthesis ~config ~keeper_name)
+     && Option.is_none (O.latest ~config ~keeper_name))
 
 let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;

@@ -145,7 +145,20 @@ let memory_context_lines (k : memory_keeper_health) =
         Printf.sprintf "%s · %d request bytes · %s"
           (memory_updated_text (Some value.mcp_prepared_at))
           value.mcp_request_bytes (Terminal_text.single_line value.mcp_runtime_id), input in
-    ["  Context saved · " ^ saved;
+    let synthesis = match cycle.mcc_synthesis with
+      | None -> "not observed since server start"
+      | Some value ->
+        let module O = Masc.Keeper_continuity_observation in
+        let state = match value.state with
+          | O.No_source -> "no new completed source (coverage not inferred)"
+          | state -> O.synthesis_state_to_string state in
+        let range = match value.range with
+          | None -> " · atom range unavailable"
+          | Some range -> Printf.sprintf " · last selected atoms [%d,%d) / observed completed %d"
+              range.start_atom range.end_atom range.completed_end_atom in
+        state ^ range ^ " · " ^ memory_updated_text (Some value.observed_at) in
+    ["  Context synthesis · " ^ synthesis;
+     "  Context saved · " ^ saved;
      "  Request prepared (not provider success) · " ^ prepared;
      "  Context used · " ^ input]
   in

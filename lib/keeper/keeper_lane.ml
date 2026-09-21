@@ -157,7 +157,7 @@ let cleanup_result cleanup outcome =
       | Ok () -> None
       | Error detail -> Some detail
     with
-    | exn -> Some (Printexc.to_string exn))
+    | exn -> Some (Printexc.to_string exn)) (* cancel-guard-ok: the whole body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it *)
 ;;
 
 let rec claim_finalization t =
@@ -303,7 +303,7 @@ let fork ~sw t ~run ~cleanup =
            then Error (Fork_failed cause)
            else Ok ()
      with
-     | exn ->
+     | exn -> (* cancel-guard-ok: settles the lane exit exactly once and returns Error (Fork_failed); keeper_supervisor_launch.ml:137 names the cancelling-parent case as this Error, and raising instead would leave an awaiting party with no settlement *)
        let outcome = Failed exn in
        (match resolve_exit_once t outcome cleanup with
         | true -> ()

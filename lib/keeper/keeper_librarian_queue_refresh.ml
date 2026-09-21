@@ -209,6 +209,7 @@ let run ~trigger ~base_path ~keeper_name =
           ; working_context
           ; messages = []; tool_observations = []; counterpart_observations = [] } in
         Keeper_librarian_runtime.run_best_effort ~trigger:Queue_changed
+          ~write_scope:Keeper_librarian_runtime.Context_only
           ~base_path ~keepers_dir ~keeper_id:keeper_name
           ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
   | (Disabled | Invalid), _

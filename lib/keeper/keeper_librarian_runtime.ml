@@ -783,6 +783,8 @@ let context_write_json = function
 
 type trigger = Conversation_completed | Queue_changed | Durable_range
 
+type write_scope = Context_only | Context_and_memory
+
 type input_projection =
   | Recent_window
   | Already_selected_range
@@ -796,6 +798,7 @@ let input_for_projection projection input =
 let run_best_effort
       ?(trigger = Conversation_completed)
       ?(input_projection = Recent_window)
+      ?(write_scope = Context_and_memory)
       ?(on_memory_committed = fun () -> ())
       ?durable_range_id
       ?official_range_id
@@ -953,6 +956,9 @@ let run_best_effort
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
+             match write_scope with
+             | Context_only -> Ok (`Context_organized (exact_output, selected_slot))
+             | Context_and_memory ->
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
                 snapshot this pass read before its provider turn; writing it
@@ -1020,10 +1026,15 @@ let run_best_effort
                  ~keeper_name:keeper_id
                  "%s"
                  (Keeper_memory_os_events.append_error_to_string error));
-             snapshot, exact_output, selected_slot, absorb_gate
+             `Memory_committed (snapshot, exact_output, selected_slot, absorb_gate)
            in
            match result with
-           | Ok (snapshot, exact_output, selected_slot, absorb_gate) ->
+           | Ok (`Context_organized (exact_output, selected_slot)) ->
+             complete ~selected_slot Exact_lane_run_registry.Succeeded
+               (`Assoc [ "memory_write", `String "skipped_context_only"
+                       ; "exact_output", exact_output ]);
+             Eio.Fiber.check ()
+           | Ok (`Memory_committed (snapshot, exact_output, selected_slot, absorb_gate)) ->
              complete
                ~selected_slot
                Exact_lane_run_registry.Succeeded
@@ -1035,7 +1046,10 @@ let run_best_effort
                snapshot.revision
                (List.length snapshot.facts)
                (List.length snapshot.change.added)
-               (List.length snapshot.change.removed)
+               (List.length snapshot.change.removed);
+             (* A completion observer may request cancellation and return
+                normally. Propagate it here even when no later I/O yields. *)
+             Eio.Fiber.check ()
            | Error error ->
              let detail = extraction_error_to_string error in
              complete
@@ -1076,7 +1090,8 @@ let run_best_effort
                     "memory os librarian failed lane=%s: %s"
                     exact_lane_id
                     detail)
-               ~cadence_deferred:true
+               ~cadence_deferred:true;
+             Eio.Fiber.check ()
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
             journal — the record of what the librarian did on this keeper —

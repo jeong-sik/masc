@@ -1067,10 +1067,11 @@ let official_client_session_store =
   }
 ;;
 
-(* The two stores the Librarian lifecycle writes per keeper (RFC
-   librarian-lifecycle section 4.6) and the two memory OS sidecars beside them
-   (RFC-0456) decode field-exact, and nothing read them before a deploy
-   (#37019). Each entry reads with the module's own decoder. A JSONL line a
+(* The three position stores the Librarian lifecycle writes per keeper (RFC
+   librarian-lifecycle sections 4.6 and 10.3), the turn fragments it consumes,
+   and the two memory OS sidecars beside them (RFC-0456) decode field-exact,
+   and nothing read them before a deploy (#37019). Each entry reads with the
+   module's own decoder. A JSONL line a
    store reports as [Incomplete_line] is an append a crash cut short, which the
    next durable append trims away; it is not a row the new binary refuses, so
    it is neither counted as a row nor held against the deploy. *)
@@ -1141,6 +1142,76 @@ let librarian_progress_store =
                   (keeper_id
                    ^ ": "
                    ^ Masc.Keeper_librarian_progress.read_error_to_string error))))
+  }
+;;
+
+let librarian_official_progress_store =
+  { store = "keeper official-client Librarian progress"
+  ; on_refusal =
+      "the official-client read position is an error, never \"not read yet\", so the \
+       keeper's official turns are not read until the file is readable"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           match
+             Masc.Keeper_librarian_official_progress.read ~keepers_dir ~keeper_id
+           with
+           | Ok None -> report
+           | Ok (Some _) -> count_row report (Ok ())
+           | Error error ->
+             count_row
+               report
+               (Error
+                  (keeper_id
+                   ^ ": "
+                   ^ Masc.Keeper_librarian_official_progress.read_error_to_string
+                       error))))
+  }
+;;
+
+let turn_fragment_store =
+  { store = "keeper official-client turn fragments"
+  ; on_refusal =
+      "a Librarian round stops before a refused named-turn fragment instead of \
+       reading past words or tool observations it cannot assign to that turn"
+  ; scan =
+      (fun ~base_path ->
+         let root = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+         Ok
+           (files_under root ~keep:(fun _name -> true)
+            |> List.fold_left
+                 (fun report session_dir ->
+                    let trace_id = Filename.basename session_dir in
+                    List.fold_left
+                      (fun report file ->
+                         match Masc.Keeper_turn_fragments.read ~session_dir file with
+                         | Error detail ->
+                           count_row report (Error (trace_id ^ ": " ^ detail))
+                         | Ok lines ->
+                           List.fold_left
+                             (fun report (line, decoded) ->
+                                match decoded with
+                                | Ok _ -> count_row report (Ok ())
+                                | Error Masc.Keeper_turn_fragments.Incomplete_line ->
+                                  report
+                                | Error error ->
+                                  count_row
+                                    report
+                                    (Error
+                                       (Printf.sprintf
+                                          "%s line %d: %s"
+                                          trace_id
+                                          line
+                                          (Masc.Keeper_turn_fragments.read_error_to_string
+                                             error))))
+                             report
+                             lines)
+                      report
+                      [ Masc.Keeper_turn_fragments.Main
+                      ; Masc.Keeper_turn_fragments.Internal
+                      ])
+                 empty_report))
   }
 ;;
 
@@ -1224,6 +1295,8 @@ let durable_stores =
   ; turn_record_store
   ; turn_boundary_store
   ; librarian_progress_store
+  ; librarian_official_progress_store
+  ; turn_fragment_store
   ; memory_absorbed_store
   ; memory_os_events_store
   ]

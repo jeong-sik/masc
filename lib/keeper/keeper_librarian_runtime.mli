@@ -122,7 +122,7 @@ module For_testing : sig
   val classified_error_kind : classified_error -> Keeper_memory_os_current.librarian_failure_kind
 
   val execute_exact_output_classified
-    :  ?continuity:Keeper_librarian_continuity.prepared
+    :  continuity:Keeper_librarian_continuity.prepared option
     -> ?cli_runner:Keeper_lane_cli_oneshot.runner
     -> clock:_ Eio.Time.clock
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

@@ -335,6 +335,7 @@ let launch_supervised_fiber_body
                    ();
                Ok ()
              in
+             (* See terminalize_normal: it logs and publishes every failure. *)
              ignore
                (finish_lifecycle
                   Keeper_keepalive_launch_transaction.Graceful
@@ -408,6 +409,7 @@ let launch_supervised_fiber_body
                  ();
              Ok ()
              in
+             (* See terminalize_crash: it logs and publishes every failure. *)
              ignore
                (finish_lifecycle
                   Keeper_keepalive_launch_transaction.Unexpected

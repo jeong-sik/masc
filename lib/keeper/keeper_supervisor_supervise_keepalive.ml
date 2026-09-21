@@ -228,6 +228,7 @@ let supervise_keepalive
         (match rollback_error with
          | None -> ""
          | Some detail -> "; rollback failed: " ^ detail);
+      (* See lifecycle-open refusal above: abort is best-effort after the warning. *)
       ignore
         (Keeper_memory_lane.abort_librarian
            ~base_path

@@ -306,10 +306,11 @@ val run_turn
   -> unit
   -> turn_settlement
      (* The turn's result, and the two degraded-retry lanes decided beside the
-        runtime observation. Returning them rather than firing a hook is what
-        makes a lane that fails to carry them a compile error: an optional
-        effect defaulting to silence is the shape that let the decision record
-        and the receipt disagree (#37376). *)
+        runtime observation. Returning them makes the facts available but does
+        not force a caller to use every field. The compile-time boundary is at
+        the consumers: [append_decision_record] and the success handler require
+        both lanes, so a path that writes their records cannot silently omit
+        them (#37376). *)
 
 val capture_skill_snapshot : base_path:string -> Skill_catalog_snapshot.t
 (** Capture one immutable Skill revision outside provider retry/failover loops.

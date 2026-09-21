@@ -1119,8 +1119,10 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
                  Fun.protect
                    ~finally:(fun () -> close_in_noerr input)
                    (fun () ->
-                      (* The callback stops the reverse scan; only its selected
-                         value is relevant, not the unit stop marker. *)
+                      (* See [find_latest_decoded_from_channel]: the callback
+                         stops the reverse scan; only its selected value is
+                         relevant, not the unit stop marker. *)
+                      (* See the callback contract above. *)
                       ignore
                         (find_latest_decoded_from_channel
                            input

@@ -582,6 +582,8 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   const runningKeeperFiberCount = asNumber(raw.running_keeper_fiber_count)
   const failingKeeperFiberCount = asNumber(raw.failing_keeper_fiber_count)
   const recoveringKeeperFiberCount = asNumber(raw.recovering_keeper_fiber_count)
+  const sessionRecoveryRequiredCount = asNumber(raw.official_client_recovery_required_keeper_count)
+  const sessionRecoveryRequiredNames = asStringArray(raw.official_client_recovery_required_keeper_names)
   const executableKeeperFiberCount = asNumber(raw.executable_keeper_fiber_count)
   const noExecutableKeeperFibers = asBoolean(raw.no_executable_keeper_fibers)
   const reactionCapacityBelowTarget = asBoolean(raw.reaction_capacity_below_target)
@@ -609,6 +611,8 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
       running_keeper_fiber_count: runningKeeperFiberCount ?? null,
       failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
       recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
+      official_client_recovery_required_keeper_count: sessionRecoveryRequiredCount ?? null,
+      official_client_recovery_required_keeper_names: sessionRecoveryRequiredNames,
       executable_keeper_fiber_count: executableKeeperFiberCount ?? null,
       no_executable_keeper_fibers: noExecutableKeeperFibers ?? null,
       reaction_capacity_below_target: reactionCapacityBelowTarget ?? null,
@@ -631,6 +635,8 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     running_keeper_fiber_count: runningKeeperFiberCount ?? null,
     failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
     recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
+    official_client_recovery_required_keeper_count: sessionRecoveryRequiredCount ?? null,
+    official_client_recovery_required_keeper_names: sessionRecoveryRequiredNames,
     executable_keeper_fiber_count: executableKeeperFiberCount ?? null,
     no_executable_keeper_fibers: noExecutableKeeperFibers ?? null,
     reaction_capacity_below_target: reactionCapacityBelowTarget ?? null,

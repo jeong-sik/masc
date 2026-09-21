@@ -49,7 +49,11 @@ def run(executable: str) -> None:
                 raise AssertionError(
                     f"the lane detail lost what the lane answers: {needle!r}")
         # The words are not gone from the product, only from the pane.
-        h.send_and_wait(process, fd, output, b"?", IN_THE_SHEET[0])
+        h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+        # The slot-editor help added above [e] makes the last wrapped line of
+        # [e] the first line below a thirty-row viewport. Exercise the sheet's
+        # advertised scroll instead of assuming every key fits at offset zero.
+        h.send_and_wait(process, fd, output, b"j", IN_THE_SHEET[0])
         h.read_available(fd, output)
         sheet = screen_text(output)
         for needle in IN_THE_SHEET:

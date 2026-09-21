@@ -1271,6 +1271,11 @@ type standalone_lane = {
       (** Slot ids the lane declared that publication could not admit — the
           per-lane answer to "configured single, or configured double with
           one silently dropped". *)
+  sl_declared_slots : string list;
+      (** [slots] in the order [runtime.exact_output_lanes.<id>] writes them,
+          admitted or not. The two lists above are an admission reading and
+          lose file order once a sibling was rejected; the slot editor moves
+          and drops by position, so it reads this one. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -1882,6 +1887,7 @@ type fleet_safety = {
   fs_failing_count : int;
   fs_recovering_count : int;
   fs_turn_configuration_error_count : int;
+  fs_official_client_recovery_required_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
@@ -1889,6 +1895,7 @@ type fleet_safety = {
   fs_running_names : string list;
   fs_executable_names : string list;
   fs_turn_configuration_error_names : string list;
+  fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }

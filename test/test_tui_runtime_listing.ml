@@ -438,6 +438,110 @@ let test_narrow_target_column_still_tells_the_variants_apart () =
   Alcotest.(check bool) "the step survives the cut" true
     (Masc_tui_message_layout.display_width high = target)
 
+(* The slot editor's rows are the lane's declared order with each slot marked
+   by whether publication admitted it. A rejected slot keeps its place: the
+   admitted list alone cannot say where that is, and the editor moves and
+   drops by position. *)
+let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_lane =
+  { Masc.Tui_decode.sl_lane_id = lane_id
+  ; sl_label = lane_id
+  ; sl_purpose = None
+  ; sl_required = false
+  ; sl_status = Masc.Tui_decode.Standalone_idle
+  ; sl_configuration_state = Masc.Tui_decode.Lane_ready
+  ; sl_jev = None
+  ; sl_admitted_slots = admitted
+  ; sl_cli_slots = []
+  ; sl_dropped_slots =
+      List.filter (fun slot -> not (List.mem slot admitted)) declared
+  ; sl_declared_slots = declared
+  ; sl_admission_error = None
+  ; sl_retained_run_count = 0
+  ; sl_running_count = 0
+  ; sl_succeeded_count = 0
+  ; sl_failed_count = 0
+  ; sl_cancelled_count = 0
+  ; sl_last_started_at = None
+  ; sl_last_terminal_at = None
+  ; sl_last_outcome = None
+  ; sl_p50_elapsed_s = None
+  ; sl_selected_slots = []
+  }
+
+let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
+      ?(admitted = [ "a"; "b" ]) () =
+  let state = state () in
+  state.standalone_lanes <-
+    Some
+      { Masc.Tui_decode.sls_observed_at_unix = 0.
+      ; sls_exact_run_projection_count = 0
+      ; sls_exact_run_source_total = 0
+      ; sls_exact_run_projection_truncated = false
+      ; sls_lanes = [ standalone_lane ~lane_id:"librarian_exact" ~declared ~admitted ]
+      };
+  state.standalone_slot_editor <- Some { sse_lane = "librarian_exact"; sse_cursor = cursor };
+  state
+
+let slot_plan_text = function
+  | Send_slot_write { lane; slot; request; cursor_after } ->
+    Printf.sprintf "%s %s %s, cursor %s" lane
+      (match request with
+       | Drop_declared_slot -> "drop"
+       | Move_declared_slot Move_up -> "up"
+       | Move_declared_slot Move_down -> "down")
+      slot
+      (match cursor_after with Some row -> string_of_int row | None -> "stays")
+  | Refuse_slot_edit notice -> notice_text (Some notice)
+
+let test_the_slot_editor_edits_the_declared_order () =
+  let state = slot_editor_state () in
+  Alcotest.(check (list string)) "a rejected slot keeps its place"
+    [ "a (admitted)"; "rejected (declared)"; "b (admitted)" ]
+    (List.map
+       (fun row ->
+          Printf.sprintf "%s (%s)" row.ssr_slot
+            (if row.ssr_admitted then "admitted" else "declared"))
+       (standalone_slot_editor_rows state));
+  Alcotest.(check string) "the head cannot move up"
+    "refuse: a is already first in librarian_exact"
+    (slot_plan_text (plan_standalone_slot_edit state (Move_slot Move_up)));
+  Alcotest.(check string) "the head moves down"
+    "librarian_exact down a, cursor 1"
+    (slot_plan_text (plan_standalone_slot_edit state (Move_slot Move_down)));
+  let state = slot_editor_state ~cursor:1 () in
+  Alcotest.(check string) "a rejected slot is dropped like any other"
+    "librarian_exact drop rejected, cursor stays"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot));
+  let state = slot_editor_state ~cursor:2 () in
+  Alcotest.(check string) "dropping the last row moves the cursor up"
+    "librarian_exact drop b, cursor 1"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot))
+
+let test_the_slot_editor_keeps_the_last_slot () =
+  let state = slot_editor_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
+  Alcotest.(check string) "the lane needs one slot"
+    "refuse: only is the last slot of librarian_exact; an exact-output lane needs at least one"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot));
+  (* A write already out is the other refusal both editors share: the writer
+     reads the declaration, but a second write sent before the first is read
+     back would be planned against rows the first replaced. *)
+  state.runtime_lane_write <- Lane_write_posting;
+  Alcotest.(check string) "a write already out holds the next edit"
+    "pending"
+    (slot_plan_text (plan_standalone_slot_edit state Drop_slot))
+
+let test_slot_editor_keys_parse () =
+  Alcotest.(check (list string)) "the editor's own keys"
+    [ "drop"; "down"; "up"; "none" ]
+    (List.map
+       (fun key ->
+          match standalone_slot_edit_of_key key with
+          | Some Drop_slot -> "drop"
+          | Some (Move_slot Move_down) -> "down"
+          | Some (Move_slot Move_up) -> "up"
+          | None -> "none")
+       [ "x"; "J"; "K"; "a" ])
+
 (* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
    candidate in first position -- the same shape a declared lane holding one
    candidate has. The row fact is the only thing that separates them. *)
@@ -486,7 +590,7 @@ let test_the_picker_offers_only_declared_lanes () =
        (function
          | Pick_lane lane -> "lane " ^ lane.Masc.Tui_decode.rrl_id
          | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
-       (runtime_picker_items state))
+        (runtime_picker_items state))
 
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
@@ -514,6 +618,12 @@ let () = Alcotest.run "runtime list geometry"
         test_narrow_rows_keep_the_fact_that_is_said_nowhere_else;
       Alcotest.test_case "narrow target column tells the variants apart" `Quick
         test_narrow_target_column_still_tells_the_variants_apart;
+      Alcotest.test_case "the slot editor edits the declared order" `Quick
+        test_the_slot_editor_edits_the_declared_order;
+      Alcotest.test_case "the slot editor keeps the last slot" `Quick
+        test_the_slot_editor_keeps_the_last_slot;
+      Alcotest.test_case "slot editor keys parse" `Quick
+        test_slot_editor_keys_parse;
       Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
         test_an_undeclared_lane_is_not_read_as_a_single_candidate;
       Alcotest.test_case "the picker offers only declared lanes" `Quick

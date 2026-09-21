@@ -2547,17 +2547,25 @@ let test_the_arrow_walk_does_not_repeat_the_queue () =
 ;;
 
 (* The Keeper Calls table says a call ran and what it was called with. What
-   it answered is the question a failed call leaves open, and the digest is
-   computed where it can be tested; this pins that the table asks for it. *)
+   it answered is the question a failed call leaves open. This used to pin
+   the timeline digest as the thing the table asks for; #37514 stopped
+   passing the recorded output through it -- a digest drops structured
+   receipt fields and can hide an assessment behind a later failure -- and
+   draws the output as stored. What the pin is for is that the table reads
+   the answer at all, so that is what it counts now, not which function
+   shapes it. *)
 let test_the_calls_table_says_what_came_back () =
   let n =
-    calls ~module_path:"bin/masc_tui_render.ml"
-      ~callee:"Masc.Keeper_chat_tool_trail.tool_result_digest"
+    Ast_grep.count_field_accesses_outside_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_calls"
+      ~callees:[]
+      ~fields:[ "kc_output" ]
   in
   if n < 1 then
     failf
       "bin/masc_tui_render.ml must draw what a call answered; \
-       tool_result_digest is called %d time(s)"
+       render_keeper_calls reads kc_output %d time(s)"
       n
 ;;
 

@@ -169,6 +169,7 @@ type standalone_lane = {
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
+  sl_declared_slots : string list;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -544,6 +545,7 @@ type fleet_safety = {
   fs_failing_count : int;
   fs_recovering_count : int;
   fs_turn_configuration_error_count : int;
+  fs_official_client_recovery_required_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
@@ -551,6 +553,7 @@ type fleet_safety = {
   fs_running_names : string list;
   fs_executable_names : string list;
   fs_turn_configuration_error_names : string list;
+  fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -5957,6 +5960,15 @@ let decode_standalone_lane json =
         | _ -> Error "dropped_slots: expected a string")
       dropped_slots
   in
+  let* declared_slots = required_list_field json "declared_slots" in
+  let* sl_declared_slots =
+    decode_list
+      "declared_slots"
+      (function
+        | `String slot_id -> Ok slot_id
+        | _ -> Error "declared_slots: expected a string")
+      declared_slots
+  in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -5984,6 +5996,7 @@ let decode_standalone_lane json =
     ; sl_admitted_slots
     ; sl_cli_slots
     ; sl_dropped_slots
+    ; sl_declared_slots
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count
@@ -8738,6 +8751,12 @@ let decode_fleet_safety json =
   let* fs_turn_configuration_error_count =
     int_field_or section "turn_configuration_error_keeper_count" ~default:0
   in
+  let* fs_official_client_recovery_required_count =
+    required_int_field section "official_client_recovery_required_keeper_count"
+  in
+  let* fs_official_client_recovery_required_names =
+    require_string_list section "official_client_recovery_required_keeper_names"
+  in
   let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
   let* fs_target_reaction_capacity =
     int_field_or section "target_reaction_capacity_count" ~default:0
@@ -8769,6 +8788,8 @@ let decode_fleet_safety json =
     ; fs_failing_count
     ; fs_recovering_count
     ; fs_turn_configuration_error_count
+    ; fs_official_client_recovery_required_count
+    ; fs_official_client_recovery_required_names
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall

@@ -48,7 +48,7 @@ type failure_reason =
       ; reason : Keeper_meta_contract.runtime_exhaustion_reason option
           (** Typed runtime-exhaustion reason, [Some] only on the
               runtime-exhausted construction path
-              ([keeper_unified_turn_types.runtime_exhausted_failure_reason_of_raw_error]).
+              ([keeper_unified_turn_types.registry_failure_reason_of_raw_error]).
               Lets the supervisor decide retryability via
               [Keeper_meta_contract.runtime_exhaustion_reason_retryable]
               instead of reparsing [code]. [None] for non-exhaustion
@@ -63,6 +63,7 @@ type failure_reason =
       configuration or process-environment change. Kept separate from
       provider runtime failures so health can require operator action without
       parsing rendered error text. *)
+  | Official_client_recovery_required of Keeper_internal_error.official_client_recovery
   | Fiber_unresolved of fiber_drop_cause
   (** Fiber exited without resolving [done_r].
           Issue #18901: cause payload distinguishes graceful shutdown
@@ -77,6 +78,8 @@ type failure_reason =
   | Operator_interrupt
 
 let failure_reason_to_string = function
+  | Official_client_recovery_required recovery ->
+    Keeper_internal_error.official_client_recovery_summary recovery
   | Heartbeat_consecutive_failures n ->
     Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n -> Printf.sprintf "turn_consecutive_failures(%d)" n

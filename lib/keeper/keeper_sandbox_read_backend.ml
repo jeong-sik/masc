@@ -42,9 +42,11 @@ let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~h
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Endpoint_owned ->
     let ( let* ) = Result.bind in
-    let* remote_root = Keeper_sandbox_remote_lane.remote_root ~config ~meta in
+    let* remote_workspace_root =
+      Keeper_sandbox_remote_lane.workspace_root ~config ~meta
+    in
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
-      ~remote_root ~keeper:meta.name host_path
+      ~remote_workspace_root ~keeper:meta.name host_path
   | Shared_mount ->
     let host_root = host_playground_root ~config ~meta in
     let host_norm =
@@ -186,7 +188,8 @@ let run_endpoint_command_with_status
   let* endpoint = acquire_endpoint ~cwd:host_root in
   let* cwd =
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
-      ~remote_root:(Keeper_sandbox_remote.remote_root endpoint) ~keeper:meta.name
+      ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
+      ~keeper:meta.name
       host_root
   in
   let stdout_mode = match max_bytes with None -> Keeper_sandbox_remote.Binary_bytes | Some _ -> Keeper_sandbox_remote.Text_paths in

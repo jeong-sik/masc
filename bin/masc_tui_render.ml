@@ -4330,13 +4330,16 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
        | _ -> Some (color, label, String.concat ", " names))
     [ (not_running, "not running", (Theme.bad ()))
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
-    ; (* The one failing subset an operator must act on: turn configuration
+    ; (* Failing subsets that need operator action: turn configuration
          errors survive every retry, so the names are listed where the
          failing counter only counts them. Unscoped on purpose -- the
          configuration_blocked_* wire fields are autoboot-scoped and skip a
          blocked keeper booted on request. *)
       ( fleet.fs_turn_configuration_error_names
       , "config-blocked"
+      , (Theme.bad ()) )
+    ; ( fleet.fs_official_client_recovery_required_names
+      , "session recovery required"
       , (Theme.bad ()) )
     ]
 
@@ -4494,20 +4497,19 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* Failing is not a mystery bucket. Every failing keeper is either
-          retrying on its own -- a clean turn returns it to Running -- or
-          blocked on turn configuration, which no retry fixes. Both parts
-          come from the same phase snapshot, which sorts each failing keeper
-          into exactly one of the two, so they sum to the failing count and
-          print beside the whole instead of as a separate "recovering"
-          counter whose relationship to failing was invisible. *)
+       (* The phase snapshot partitions failing keepers into recovering,
+          configuration errors and explicit official-client session recovery.
+          Every failing Keeper belongs to exactly one class, so these three
+          counts sum to the displayed failing count. The latter two require
+          action beyond repeating the same turn. *)
        let failing_entry =
          if fleet.fs_failing_count = 0 then []
          else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d)"
+           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
                fleet.fs_failing_count
                fleet.fs_recovering_count
                fleet.fs_turn_configuration_error_count
+               fleet.fs_official_client_recovery_required_count
            ]
        in
        let counts =
@@ -5126,6 +5128,13 @@ let render_lanes_overview (state : state) =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
+         (* The slot editor's heading, its rows and its key line, counted here
+            so the lane detail below gives up the space rather than the
+            editor being drawn past the frame. *)
+         + (match state.standalone_slot_editor with
+            | None -> 0
+            | Some _ ->
+              2 + max 1 (List.length (Masc_tui_types.standalone_slot_editor_rows state)))
        in
        let available =
          max 0
@@ -5169,6 +5178,38 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
+  (* The slot editor the "s" key opens. Its rows are the lane's declared
+     order, which is what the lane walks; a slot publication rejected keeps
+     its place there and is marked rather than left out, because dropping it
+     from the drawing would put the numbers beside the other slots out of step
+     with the file. *)
+  (match state.standalone_slot_editor with
+   | None -> ()
+   | Some editor ->
+       box_line_styled buf cols ~style:(Theme.info ())
+         (Printf.sprintf "  slots of %s — the order this lane walks"
+            (Terminal_text.single_line editor.Masc_tui_types.sse_lane));
+       let slot_rows = Masc_tui_types.standalone_slot_editor_rows state in
+       if slot_rows = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (this lane declares no slot; a slots array is what it walks)"
+       else
+         List.iteri
+           (fun index (row : Masc_tui_types.standalone_slot_row) ->
+              let line =
+                Printf.sprintf "  %s %d  %s%s"
+                  (if index = editor.Masc_tui_types.sse_cursor then ">" else " ")
+                  (index + 1)
+                  (Terminal_text.single_line row.Masc_tui_types.ssr_slot)
+                  (if row.Masc_tui_types.ssr_admitted then ""
+                   else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
+              in
+              if index = editor.Masc_tui_types.sse_cursor then
+                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+              else box_line buf cols line)
+           slot_rows;
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  j/k move · x drop · J/K reorder · Esc close");
   (* The failover-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)

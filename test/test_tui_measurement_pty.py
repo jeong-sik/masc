@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
 import copy
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import threading
 from typing import Any
 
@@ -20,6 +22,12 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
     "lib/librarian_continuity_report.ml",
+    "lib/tui_decode.ml",
+    "lib/tui_decode.mli",
+    "lib/masc_http_client/pool.ml",
+    "lib/masc_http_client/pool.mli",
+    "lib/masc_http_client/masc_http_client.ml",
+    "lib/masc_http_client/masc_http_client.mli",
 )
 
 
@@ -177,6 +185,11 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             "overlay-origin", [sample("overlay-context", "Scored")]
         ),
         "theme-preview": report("theme-preview", [sample("retained", "Scored")]),
+        "oversized-length": report("must-not-render", [sample("oversized", "Scored")]),
+        "oversized-unfinished": report(
+            "must-not-render", [sample("oversized", "Scored")]
+        ),
+        "oversized-lane": report("unused", []),
     }
     if scenario == "large":
         large = sample("large", "Scored", provided=True)
@@ -211,6 +224,51 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         else None
     )
     fixtures["/api/v1/artifacts/" + sha] = response if delayed is None else delayed
+    body_started = threading.Event()
+    release_body = threading.Event()
+    if scenario in ("oversized-length", "oversized-unfinished", "oversized-lane"):
+        oversized_bytes = 4 * 1024 * 1024 + 1
+
+        def unfinished_body() -> Iterator[bytes]:
+            body_started.set()
+            if scenario == "oversized-unfinished":
+                yield b"x" * oversized_bytes
+            release_body.wait()
+
+        # The existing streaming fixture sends headers before asking for body
+        # chunks. Fixed-length refusal must need no body; a close-delimited
+        # response must be refused without waiting for its end.
+        fixtures["/api/v1/artifacts/" + sha] = h.StreamingHttpResponse(
+            unfinished_body,
+            headers=(("Content-Length", str(oversized_bytes)),)
+            if scenario in ("oversized-length", "oversized-lane")
+            else (),
+        )
+        if scenario == "oversized-lane":
+            fixtures[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
+            fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
+            fixtures[h.lane_runs_path("librarian_exact")] = (
+                200,
+                {
+                    "runs": [
+                        {
+                            "run_id": "oversized",
+                            "run_kind": "exact_output",
+                            "lane": "librarian_exact",
+                            "actor": "fixture",
+                            "started_at": 1787557000.0,
+                            "status": "succeeded",
+                            "elapsed_s": 1.0,
+                            "selected_slot": "fixture",
+                        }
+                    ],
+                    "has_more": False,
+                    "total": 1,
+                },
+            )
+            fixtures["/api/v1/dashboard/exact-lane-runs/oversized"] = fixtures[
+                "/api/v1/artifacts/" + sha
+            ]
     if scenario == "malformed":
         fixtures["/api/v1/artifacts/" + sha] = h.RawHttpResponse(
             200, b"{", content_type="application/json"
@@ -252,9 +310,40 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             },
         )
 
-    def interact(process, master, _slave, output, _base):
+    def interact_body(process, master, _slave, output, _base):
         h.send_and_wait(process, master, output, b"2", b"MASC Keepers")
         h.select_keeper_row(process, master, output, b"alpha")
+
+        def check_receive_limit() -> None:
+            reason = b"HTTP 200: body exceeds 4194304 bytes"
+            h.wait_for_output(process, master, output, reason, start=0, timeout=3.0)
+            screen = h.screen_text(bytes(output))
+            assert body_started.is_set() and not release_body.is_set()
+            # The ordinary 100-column frame must show the reason and limit;
+            # the long artifact URL may follow beyond the visible line.
+            assert reason in screen, screen
+            if evidence is not None:
+                evidence.mkdir(parents=True, exist_ok=True)
+                (evidence / (scenario + ".pty")).write_bytes(output)
+                (evidence / (scenario + ".txt")).write_bytes(screen)
+
+        if scenario == "oversized-lane":
+            h.palette_go(process, master, output, b"go lanes", b"Librarian")
+            h.send_and_wait(
+                process,
+                master,
+                output,
+                b"/Librarian",
+                re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian"),
+            )
+            h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
+            h.send_and_wait(process, master, output, b"\r", b"1 loaded / 1 retained")
+            h.send_and_wait(
+                process, master, output, b"\r", b"Lane run detail: GET failed:"
+            )
+            check_receive_limit()
+            os.write(master, b"q")
+            return
 
         def submit_command(text: str, needle: bytes) -> None:
             h.send_and_wait(process, master, output, b"i", b"Ctrl-Y to speak")
@@ -323,8 +412,15 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             "overlay-palette": b"SCORED 1",
             "theme-preview": b"SCORED 1",
             "probabilities-preview": b"SCORED 96",
+            "oversized-length": b"Measurement: GET failed:",
+            "oversized-unfinished": b"Measurement: GET failed:",
         }[scenario]
         h.wait_for_output(process, master, output, expected, start=0, timeout=5.0)
+        if scenario in ("oversized-length", "oversized-unfinished"):
+            check_receive_limit()
+            h.send_and_wait(process, master, output, b"\x1b", b"MASC Lanes")
+            os.write(master, b"q")
+            return
         if delayed is not None:
             assert delayed.requested.wait(2.0), "old artifact was not requested"
             submit_command("/measurement " + new_sha, b"new-result")
@@ -468,17 +564,21 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         )
         os.write(master, b"q")
 
-    try:
-        h.run_terminal_scenario(
-            executable,
-            description="Noul measurement: " + scenario,
-            interact=interact,
-            http_fixtures=fixtures,
-            http_requests=requests,
-        )
-    finally:
-        if delayed is not None:
-            delayed.release.set()
+    def interact(process, master, slave, output, base):
+        try:
+            interact_body(process, master, slave, output, base)
+        finally:
+            release_body.set()
+            if delayed is not None:
+                delayed.release.set()
+
+    h.run_terminal_scenario(
+        executable,
+        description="Noul measurement: " + scenario,
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
 
 
 if __name__ == "__main__":
@@ -501,6 +601,9 @@ if __name__ == "__main__":
         "overlay-palette",
         "theme-preview",
         "probabilities-preview",
+        "oversized-length",
+        "oversized-unfinished",
+        "oversized-lane",
     ):
         run(os.path.abspath(args.executable), name, args.evidence_dir)
-    print("TUI Noul measurement: 14 scenarios PASS")
+    print("TUI measurement and lane artifacts: 17 scenarios PASS")

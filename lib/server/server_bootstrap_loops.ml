@@ -914,8 +914,10 @@ let prepare_keeper_persistence ?requested_base_path ~accept_store_quarantine ~co
               ~config
       with
       | outcome -> outcome
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
+      (* This handler already propagates, at the end of its body. It runs
+         first so the lifecycle leaves [preparing]; a cancellation that
+         skipped it would strand the state machine there. *)
+      | exception exn -> (* cancel-guard-ok: records the failed lifecycle and then re-throws with the original backtrace, past the guard's lookahead *)
         let backtrace = Printexc.get_raw_backtrace () in
         let failure =
           persistence_failure

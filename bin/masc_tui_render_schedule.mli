@@ -14,8 +14,6 @@ val create : min_interval_ns:int64 -> unit -> t
 val request : t -> request -> unit
 val take : t -> now_ns:int64 -> decision
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
-val nonnegative_width : int -> int
-val keeper_context_bar_width : inner_width:int -> int
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int
 
@@ -80,35 +78,6 @@ val allocate_overview :
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
-
-type board_read_allocation = {
-  body_rows : int;
-  comment_rows : int;
-}
-
-val board_read_box_rows : int
-(** The rows the read pane's box spends before any body or comment row: its
-    top and bottom, the title, two dividers, the heading and the author. *)
-
-val allocate_board_read :
-  terminal_rows:int ->
-  body_line_count:int ->
-  comment_count:int ->
-  board_read_allocation
-
-type board_read_scroll = {
-  normalized_scroll : int;
-  body_offset : int;
-  comment_offset : int;
-}
-
-val project_board_read_scroll :
-  body_line_count:int ->
-  body_rows:int ->
-  comment_count:int ->
-  comment_rows:int ->
-  int ->
-  board_read_scroll
 
 (** {1 Keeper roster columns} *)
 

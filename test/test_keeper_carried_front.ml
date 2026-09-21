@@ -537,10 +537,12 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
 let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
   with_turn_record_store @@ fun config store ->
   let records =
-    [ record ~turn:10 ~finish:None (Some (30, 100))
+    [ (* The previous trace is older than this generation. A newer foreign
+         trace would be the boundary and make reading [trace-1] invalid. *)
+      record ~turn:9 ~trace:"another-trace" (Some (1, 100))
+    ; record ~turn:10 ~finish:None (Some (30, 100))
     ; record ~turn:10 (Some (15, 100))
     ; record ~turn:10 ~finish:None ~response_observed:false (Some (5, 100))
-    ; record ~turn:11 ~trace:"another-trace" (Some (1, 100))
     ]
   in
   List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;

@@ -1998,7 +1998,8 @@ let test_a_mixed_keeper_is_read_in_line_order () =
 
 (* Lines whose fragments predate turn-named history are passed without a
    model call; the position still moves so they are not asked for again. *)
-let test_official_commit_recovers_without_resynthesis ~mixed ~cancel_after_save () =
+let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ~mixed ~cancel_after_save () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
   let trace_id = "trace-official-commit-recovery" in
@@ -2044,6 +2045,13 @@ let test_official_commit_recovers_without_resynthesis ~mixed ~cancel_after_save 
   let no_commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ =
     fail "saved input was sent for synthesis again"
   in
+  if through_queue then (
+    Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit:no_commit;
+    (match read_official config with
+     | Some official -> check int "queue restores official cursor" (if mixed then 3 else 2) official.boundary_line
+     | None -> fail "queue left official cursor behind");
+    if mixed then check_progress_end config 2)
+  else (
   (match consume config no_commit with
    | Consumer.Official_advanced { official; _ } ->
      check int "official range restored in full" (if mixed then 3 else 2) official.boundary_line
@@ -2051,7 +2059,7 @@ let test_official_commit_recovers_without_resynthesis ~mixed ~cancel_after_save 
   if mixed && cancel_after_save then (
     match consume config no_commit with
     | Consumer.Progress_advanced progress -> check int "atom cursor restored separately" 2 progress.position.end_atom
-    | _ -> fail "mixed atom receipt was lost");
+    | _ -> fail "mixed atom receipt was lost"));
   (match consume config no_commit with
    | Consumer.Nothing_to_read -> ()
    | _ -> fail "receipt recovery left input to read again");
@@ -2294,6 +2302,10 @@ let () =
             (test_official_commit_recovers_without_resynthesis ~mixed:false ~cancel_after_save:true)
         ; test_case "mixed receipt restores both cursors after cancellation" `Quick
             (test_official_commit_recovers_without_resynthesis ~mixed:true ~cancel_after_save:true)
+        ; test_case "Memory lane drain recovers mixed cancellation without synthesis" `Quick
+            (test_official_commit_recovers_without_resynthesis ~through_queue:true ~mixed:true ~cancel_after_save:true)
+        ; test_case "Memory lane drain recovers partial cursor writes without synthesis" `Quick
+            (test_official_commit_recovers_without_resynthesis ~through_queue:true ~mixed:true ~cancel_after_save:false)
         ; test_case "official receipt cannot skip replaced history" `Quick
             test_official_receipt_rejects_replaced_history
         ; test_case "untagged fragments are passed without a commit" `Quick

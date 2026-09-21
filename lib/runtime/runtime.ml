@@ -3501,16 +3501,16 @@ let with_declared_exact_slots ~lane ~slot decide =
            | Some decl -> decl.slot_ids
            | None -> []
          in
-         if not (List.exists (String.equal slot) slots)
-         then
+         match List.find_index (String.equal slot) slots with
+         | None ->
            Error
              (Printf.sprintf
                 "%s is not a slot of %s; the lane declares %s"
                 slot
                 lane_id
                 (match slots with [] -> "none" | _ -> String.concat ", " slots))
-         else
-           let* values = decide ~lane_id ~slot ~slots in
+         | Some position ->
+           let* values = decide ~lane_id ~slot ~slots ~position in
            Ok
              (Toml_line_editor.edit_table_multiline_array
                 content
@@ -3521,8 +3521,8 @@ let with_declared_exact_slots ~lane ~slot decide =
 
 let drop_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
   let* edit =
-    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ->
-      match List.filter (fun declared -> not (String.equal declared slot)) slots with
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
+      match List.filteri (fun index _ -> index <> position) slots with
       | [] ->
         (* The same floor {!set_exact_output_lane_slots} holds: a mandatory
            lane with no slot fails the boot fail-closed, and emptying a lane is
@@ -3540,13 +3540,8 @@ let drop_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
 
 let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
   let* edit =
-    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ->
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
       let count = List.length slots in
-      let position =
-        match List.find_index (String.equal slot) slots with
-        | Some index -> index
-        | None -> -1
-      in
       let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 in
       if target < 0 || target >= count
       then

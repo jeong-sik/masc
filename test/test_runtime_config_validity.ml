@@ -1687,14 +1687,15 @@ List.iter
             resolved.supports_structured_output;
           check bool "MiniMax M3 forced tool_choice disabled" false
             resolved.supports_tool_choice;
-          (* config/runtime.toml declares supports-response-format-json = false
-             for this binding and the catalog row overrides it with true, so
-             the runtime uses JSON mode. The seed's fail-closed line does
-             nothing; this pins the behaviour until the seed and the row agree
+          (* JSON mode comes from the ollama_cloud catalog row for this
+             binding's wire, and config/runtime.toml says nothing about it —
+             which is what a config should say when the catalog decides. The
+             second check fails the moment an inert line is written back into
+             that block, which is the mistake this whole thread came from
              (#37435). *)
-          check bool "MiniMax M3 response_format json is on despite the seed line"
+          check bool "MiniMax M3 response_format json follows its catalog row"
             true resolved.supports_response_format_json;
-          check (option bool) "and the seed still declares it off" (Some false)
+          check (option bool) "and the seed declares nothing for it" None
             (Option.bind runtime.model.capabilities (fun (caps :
                Runtime_schema.model_capabilities) ->
                Some caps.supports_response_format_json)

@@ -6592,3 +6592,5 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_jev_readiness)))
+
+(include stanzas/test_pool_h2_request_body.inc)

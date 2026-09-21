@@ -1578,12 +1578,12 @@ let terminate_spawned_process ~clock proc stdin_w =
   let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
-     | exn ->
+     | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
        Log.Runtime_agent.debug
          "Codex app-server stdin close failed: %s"
          (Printexc.to_string exn));
     (try Eio.Process.signal proc Sys.sigterm with
-     | exn ->
+     | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
        Log.Runtime_agent.debug
          "Codex app-server termination signal failed: %s"
          (Printexc.to_string exn));
@@ -1598,7 +1598,7 @@ let terminate_spawned_process ~clock proc stdin_w =
            Eio.Process.signal proc Sys.sigkill;
            Eio.Process.await proc |> ignore
          with
-         | exn ->
+         | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
            Log.Runtime_agent.warn
              "Codex app-server forced reap failed: %s"
              (Printexc.to_string exn))
@@ -1774,6 +1774,7 @@ let native_cwd cwd =
     then Error (Invalid_config "cwd must be an absolute native path")
     else Ok cwd
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Error
       (Invalid_config

@@ -1126,6 +1126,7 @@ let await_full_health_refresh_worker ~sw ~compute =
         Eio.Fiber.fork ~sw (fun () ->
             let outcome =
               try Ok (compute ()) with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error exn
             in
             finish_full_health_refresh_worker worker outcome;

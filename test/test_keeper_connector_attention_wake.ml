@@ -319,7 +319,7 @@ let test_external_attention_projects_to_prompt_event () =
        item.A.content_preview observation.content
    | WO.Board_post_created
    | WO.Board_post_updated
-   | WO.Board_comment_added
+   | WO.Board_comment_added _
    | WO.Board_reaction_changed _
    | WO.Board_vote_cast _
    | WO.Fusion_completed

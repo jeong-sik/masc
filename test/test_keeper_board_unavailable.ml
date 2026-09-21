@@ -697,7 +697,7 @@ let test_board_replay_routes_exact_replies () =
     | [event] ->
       check (option string) "actual nested reply body" (Some "direct answer")
         event.Keeper_world_observation.latest_external_preview;
-      check bool "comment event" true (event.event_kind = Board_comment_added)
+      check bool "comment event" true (match event.event_kind with Board_comment_added _ -> true | _ -> false)
     | events -> failf "expected one direct reply, got %d" (List.length events))
     [poster; parent_author];
   check int "unrelated participant still excluded" 0 (List.length (collect bystander));

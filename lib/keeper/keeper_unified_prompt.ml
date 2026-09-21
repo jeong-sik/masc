@@ -479,7 +479,7 @@ let format_surface_presence (p : Gate_surface.surface_presence) : string =
 let board_event_kind_label = function
   | Keeper_world_observation.Board_post_created -> "post_created"
   | Keeper_world_observation.Board_post_updated -> "post_updated"
-  | Keeper_world_observation.Board_comment_added -> "comment_added"
+  | Keeper_world_observation.Board_comment_added _ -> "comment_added"
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
   | Keeper_world_observation.Board_vote_cast _ -> "vote_cast"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
@@ -689,7 +689,7 @@ let board_event_note_fields = function
        | Some user_name -> [ "external_user_name", user_name ])
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
-  | Keeper_world_observation.Board_comment_added
+  | Keeper_world_observation.Board_comment_added _
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
@@ -874,7 +874,7 @@ let group_scheduled_wake_events events =
       update [] groups
     | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
-    | Keeper_world_observation.Board_comment_added
+    | Keeper_world_observation.Board_comment_added _
     | Keeper_world_observation.Board_reaction_changed _
     | Keeper_world_observation.Board_vote_cast _
     | Keeper_world_observation.Fusion_completed
@@ -1026,7 +1026,7 @@ let format_completion_authority_rejection_observations
               ^ "\n")
          | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
-         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_comment_added _
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
@@ -1075,7 +1075,7 @@ let format_task_outcome_observations
               ^ "\n")
          | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
-         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_comment_added _
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
@@ -1129,7 +1129,7 @@ let format_task_cancellation_observations
            Some (format_prompt_row fields ^ "\n")
          | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
-         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_comment_added _
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed

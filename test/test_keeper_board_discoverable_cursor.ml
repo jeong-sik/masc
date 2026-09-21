@@ -226,6 +226,13 @@ let test_initialized_cursor_receives_each_discoverable_edit () =
   check int "second edit has its own candidate" 2 (attention_count config meta.name);
   ignore (edit "Second unaddressed revision");
   check int "identical edit creates no duplicate candidate" 2 (attention_count config meta.name);
+  ignore (Keeper_world_observation.collect_board_events_without_advancing_cursor
+    ~base_path:config.base_path ~meta);
+  check int "preview does not mint an edit candidate" 2 (attention_count config meta.name);
+  ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+  check int "replayed edit converges to its live candidate" 2 (attention_count config meta.name);
+  ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+  check int "next tick does not rejudge the edit" 2 (attention_count config meta.name);
   check int "discoverable edits still require judgment before direct delivery" 0
     (queue_length config meta.name)
 ;;

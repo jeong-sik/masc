@@ -753,7 +753,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
       carried.Keeper_event_queue.schedule_id
   | WO.Board_post_created
    | WO.Board_post_updated
-  | WO.Board_comment_added
+  | WO.Board_comment_added _
   | WO.Board_reaction_changed _
   | WO.Board_vote_cast _
   | WO.Fusion_completed
@@ -1230,6 +1230,7 @@ let test_a_comment_on_your_own_post_says_who_and_what () =
   let commented_on_by_someone_else =
     { sample_board_event with
       event_kind = WO.Board_comment_added
+        { comment_id = "c-00000000000000000000000000000001"; parent_id = None }
     ; replies_after_own_comment = None
     ; latest_external_author = Some "bob"
     ; latest_external_preview = Some "I hit this too, here is the trace"
@@ -1270,6 +1271,7 @@ let test_a_reply_after_your_own_comment_still_counts () =
   let replied_after_me =
     { sample_board_event with
       event_kind = WO.Board_comment_added
+        { comment_id = "c-00000000000000000000000000000001"; parent_id = None }
     ; replies_after_own_comment =
         Some
           { Masc.Keeper_world_observation_board_signal.comment_offset =

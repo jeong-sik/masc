@@ -220,6 +220,49 @@ data: [DONE]
   require (Exact_output_fixture.post_count server = 1) "intake unexpectedly dispatched";
   require ((evidence config stimulus_id).matched_record_count = settled.matched_record_count)
     "empty next intake added another reaction or ACK";
+  (* A later batch contains four distinct sources on the same post. Replay
+     contributes one identical comment, which must not hide the other three. *)
+  let comment_body = "@" ^ keeper_name ^ " identical follow-up" in
+  let add_comment () = Board_dispatch.add_comment ~post_id ~author:"synthetic-user"
+      ~content:comment_body () |> get Board.show_board_error in
+  let first_comment = add_comment () in
+  let second_comment = add_comment () in
+  let edit body = Board_dispatch.update_post ~post_id ~editor:"synthetic-user"
+      ~content:body ~title:"edited thread" ~body () |> get Board.show_board_error in
+  let first_edit = edit ("@" ^ keeper_name ^ " first edit") in
+  let second_edit = edit ("@" ^ keeper_name ^ " second edit") in
+  require (first_edit.content_updated_at <> second_edit.content_updated_at)
+    "two actual persisted edits must carry distinct content update times";
+  let pending = Keeper_event_queue.to_list (queue config keeper_name) in
+  require (List.length pending = 4) "distinct comments/edits were lost before intake";
+  let replay = Keeper_world_observation.pending_board_event_of_stimulus
+      ~meta:second.meta (List.hd pending) |> get
+        Keeper_world_observation_board_signal.unavailable_to_string in
+  let replay = match replay with Some event -> event | None -> failwith "comment replay missing" in
+  let intake = Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+      (Some (string_of_int (List.length pending))) (fun () ->
+        Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+          ~ctx ~meta_after_triage:second.meta ~pending_board_events:[replay]) in
+  require (Keeper_heartbeat_source_batch.count intake.source_batch = 4)
+    "actual intake did not admit all four sources";
+  require (List.length intake.pending_board_events = 4)
+    "intake merged distinct post events or duplicated exact replay";
+  let comments, edits = List.fold_left
+    (fun (comments, edits) (event : Keeper_world_observation.pending_board_event) ->
+      match event.event_kind with
+      | Keeper_world_observation.Board_comment_added {comment_id; _} -> comment_id :: comments, edits
+      | Keeper_world_observation.Board_post_updated -> comments, event.updated_at :: edits
+      | _ -> failwith "unexpected event kind in follow-up intake")
+    ([], []) intake.pending_board_events in
+  require (List.sort String.compare comments = List.sort String.compare
+      [Board.Comment_id.to_string first_comment.id; Board.Comment_id.to_string second_comment.id])
+    "same-body comment identities were not both shown";
+  require (List.sort Float.compare edits = List.sort Float.compare
+      [first_edit.content_updated_at; second_edit.content_updated_at])
+    "distinct edit identities were not both shown";
+  require (queue_count config keeper_name = 4)
+    "preparing observations prematurely acknowledged queued sources";
+  require (Exact_output_fixture.post_count server = 1) "intake unexpectedly ran a model";
   let summary = `Assoc
     ["post_id", `String post_id; "keeper", `String keeper_name
     ; "model_response", `String "synthetic loopback protocol"

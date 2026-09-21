@@ -21,7 +21,7 @@ type board_reaction_event =
 type pending_board_event_kind =
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added of { comment_id : string; parent_id : string option }
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
@@ -58,12 +58,21 @@ type pending_board_event =
   ; latest_external_preview : string option
   }
 
+let same_board_event_identity (left : pending_board_event) (right : pending_board_event) =
+  String.equal left.post_id right.post_id
+  && match left.event_kind, right.event_kind with
+     | Board_comment_added left_comment, Board_comment_added right_comment ->
+       String.equal left_comment.comment_id right_comment.comment_id
+     | Board_post_updated, Board_post_updated -> Float.equal left.updated_at right.updated_at
+     | _ -> left.event_kind = right.event_kind
+;;
+
 let is_board_activity_event (event : pending_board_event) =
   match event.event_kind with
   | Schedule_due _ -> false
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -92,7 +101,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Schedule_due _ -> true
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -110,7 +119,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Completion_authority_rejected _ -> true
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -130,7 +139,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Task_outcome _ -> true
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -154,7 +163,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Ask_answered_row
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -365,8 +374,8 @@ let board_cursor_token_of_post = Board_signal.cursor_token_of_post
 let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
 
 (** The keeper's own latest board posts, newest first. Cursor-independent:
-    the board-event collector above filters out self-authored posts and only
-    looks past the cursor, so without this a keeper never observes its own
+    the board-event collector routes new source events and ignores the Keeper's
+    own authored signals, so without this a keeper never observes its own
     published posts in-prompt (production: one keeper posted 23 near-duplicate
     posts in a single hour). Raw observation only — bounded by
     [Keeper_config.keeper_board_own_recent_max]; no dedup gate. *)
@@ -566,7 +575,8 @@ let pending_board_event_kind_of_observation
   match observation.kind with
   | Board_signal.Observed_post_created -> Board_post_created
   | Board_signal.Observed_post_updated _ -> Board_post_updated
-  | Board_signal.Observed_comment_added _ -> Board_comment_added
+  | Board_signal.Observed_comment_added { comment_id; parent_id } ->
+    Board_comment_added { comment_id; parent_id }
   | Board_signal.Observed_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
   | Board_signal.Observed_vote_cast vote -> Board_vote_cast vote
@@ -1309,6 +1319,7 @@ let collect_board_events_with_cursor_policy
                let kind =
                  match signal.kind with
                  | Board_dispatch.Board_post_created -> "post_created"
+                 | Board_dispatch.Board_post_updated _ -> "post_updated"
                  | Board_dispatch.Board_comment_added _ -> "comment_added"
                  | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
                  | Board_dispatch.Board_vote_cast _ -> "vote_cast"
@@ -1334,7 +1345,11 @@ let collect_board_events_with_cursor_policy
       | Error error -> Error { Board_signal.operation = Board_signal.Get_comments; post_id; error }
       | Ok comments ->
         let post_signal : Board_dispatch.board_signal =
-          { kind = Board_dispatch.Board_post_created; post_id
+          { kind =
+              (if Float.equal p.content_updated_at p.created_at
+               then Board_dispatch.Board_post_created
+               else Board_dispatch.Board_post_updated { content_updated_at = p.content_updated_at })
+          ; post_id
           ; author = Board.Agent_id.to_string p.author; title = p.title; content = p.body
           ; hearth = p.hearth; updated_at = Some p.content_updated_at }
         in

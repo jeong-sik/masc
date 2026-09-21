@@ -1425,7 +1425,15 @@ let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
       ~names:[ "already has that name" ]
       (fun () ->
          Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
-           ~new_lane_id:"coding" ()))
+           ~new_lane_id:"coding" ());
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"openai.gpt" ~runtime_ids:[ "openai.small" ] ()
+    |> lane_write_ok "declare a lane with the default runtime's name";
+    lane_write_refused "rename a lane named by the default" ~path
+      ~names:[ "[runtime].default names this lane; move the default first, then rename" ]
+      (fun () ->
+         Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"openai.gpt"
+           ~new_lane_id:"default-renamed" ()))
 ;;
 
 (* [drop] and [move] read the same declaration under the same lock, for the

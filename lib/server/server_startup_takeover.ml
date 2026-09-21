@@ -874,7 +874,7 @@ let inspect_runtime_directory ~base_path runtime_directory =
     | Ok Fs_compat.Owned_directory_missing -> Ok `Missing
     | Error rejection -> Error (Runtime_directory_rejected rejection)
   with
-  | exn ->
+  | exn -> (* cancel-guard-ok: Fs_compat.inspect_owned_directory_chain walks the chain with Unix.lstat and performs no Eio operation *)
     Error
       (Lease_io_failed
          { operation = "inspect_runtime_directory"
@@ -988,7 +988,7 @@ let establish_runtime_directory prepared =
          Ok ()
        with
        | Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
-       | exn ->
+       | exn -> (* cancel-guard-ok: Unix.mkdir performs no Eio operation *)
          Error
            (Runtime_directory_creation_failed
               { path = prepared.runtime_directory; reason = Printexc.to_string exn })
@@ -1019,7 +1019,7 @@ let observe_lease_path path =
     else Ok (Lease_path_other stat.st_kind)
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Lease_path_missing
-  | exn ->
+  | exn -> (* cancel-guard-ok: Unix.lstat performs no Eio operation *)
     Error
       (Lease_io_failed
          { operation = "lstat_lease_file"
@@ -1122,7 +1122,7 @@ let verify_open_lease_file prepared fd expected_file_stat =
                     | Error rejection -> reject rejection
                     | Ok () -> Ok fd)))))
   with
-  | exn ->
+  | exn -> (* cancel-guard-ok: the body is Unix.fstat and Unix.lstat through verify_directory_identity, which perform no Eio operation *)
     reject
       (Lease_io_failed
          { operation = "verify_lease_identity"
@@ -1194,7 +1194,7 @@ let open_lease_file prepared =
            | Ok Lease_path_missing ->
              Error (Lease_identity_changed { path = prepared.path })
            | Error _ as error -> error)
-          | exn ->
+          | exn -> (* cancel-guard-ok: Unix.openfile performs no Eio operation *)
             Error
               (Lease_io_failed
                  { operation = "create_lease_file"
@@ -1327,7 +1327,7 @@ let acquire_base_path_lock_with
                    ; lock_path = prepared.path
                    }
                | Error rejection -> Base_path_rejected rejection)
-            | exn ->
+            | exn -> (* cancel-guard-ok: Unix.lseek, Unix.ftruncate and Unix.fsync perform no Eio operation *)
               let commit_rejection =
                 Lease_io_failed
                   { operation = "commit_base_path_lease"

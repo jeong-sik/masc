@@ -133,6 +133,21 @@ status: reference
   감사 상세의 `reported_agent`와 실패 envelope에 보존한다. 허용된 tokenless
   요청의 보고자는 기존 로컬 attribution 정책을 따른다.
 
+**Tool Call Outcome**
+: MCP/AGENT_CORE wire 응답에 대한 가벼운 관측(`Tool_result.tool_call_outcome` =
+  `Ok`·`Error`·`Unknown`). 외부 투영이라 `Deferred`를 표현하지 못하며, MASC 내부 실행
+  결과의 권위가 아니다. 투영 관측이 없으면 필드를 생략하지 않고 `Unknown`으로 기록한다.
+  실행이 완료·지연됐어도 결과 전달이 나중에 실패하면 `wire_outcome=error`가 될 수 있다.
+  → [Tool_result](../../lib/tool_types/tool_result.mli)
+
+**Execution Disposition**
+: 한 번의 도구 호출이 실제로 어떤 결말을 냈는지에 대한 MASC의 권위 있는 분류
+  (`Tool_result.disposition` = `Completed`·`Deferred`·`Failed`). Tool Call Outcome과
+  별개이며, wire outcome이 이를 대체하지 않는다. `Deferred`를 성공 boolean으로 접지
+  않는다 — 레지스트리·직렬화기는 전체 disposition을 소비한다. turn 수준의
+  Operator Disposition과 이름이 겹치지만 다른 단위를 분류한다.
+  → [Tool_result](../../lib/tool_types/tool_result.mli)
+
 **Provider**
 : 모델에 접속하는 protocol·transport·credential을 소유하는 설정 항목.
   → [Runtime_schema.provider](../../lib/runtime/runtime_schema.mli)

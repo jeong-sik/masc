@@ -72,7 +72,7 @@ Librarian 답을 적용하고 로그에 이유를 남긴다. 지금과 같은 �
 | 문장 자르기 | 결정론 | 코드. 같은 원문은 항상 같은 문장 목록 |
 | "전하는가" 판정 | 비결정론(보정된 확률) | Jev. 코드는 값을 받기만 한다 |
 | 0.5 경계, "한 문장이라도" 규칙, `absorbed` 거르기 | 결정론 | 코드 |
-| 실패 시 열림 | 선언 | `Typesafeai_config` — 키는 env `TYPESAFEAI_API_KEY`(유일한 비밀), 나머지는 runtime.toml 의 `[typesafeai]` 테이블(`enabled`, `endpoint`, `model`) |
+| 실패 시 열림 | 선언 | `Typesafeai_config` — 키는 env `TYPESAFEAI_API_KEY`(유일한 비밀), 나머지는 runtime.toml 의 `[typesafeai]` 테이블(`enabled`, `destinations` — 서버마다 `endpoint`·`model`·키를 읽을 환경변수 이름 `api_key_env`) |
 | 관문별 켜기/끄기·keeper 제외 | 선언 | `[typesafeai] absorb_gate`(이 관문, **기본 꺼짐** — Librarian 기억을 벤더로 보내는 새 반출이라 운영자가 켠다), `[typesafeai] board_attention`(Board 관문, 기본 켜짐 = 기존 동작), `[typesafeai] excluded_keepers`(이름이 오른 keeper 는 **모든 JEV 검토에서** 벤더에 묻지 않는다 — 같은 엔드포인트로 가므로 목록은 하나. 회사 Slack keeper 처럼 제3자 처리가 안 되는 keeper). 키는 레인을 켜고, 관문은 TOML 로 켜고 끈다. 미지 키는 로드 오류, 선언되지 않은 제외 이름은 부팅 로그 경고 |
 | 외부 연결 | `Typesafeai_client.evaluate`(`Masc_http_client` 풀, 공용 시간 상한) | 이미 main 에 있음(#36970) |
 
@@ -102,7 +102,7 @@ RFC 에서는 그 답으로 원문을 남긴다. 그 목록을 Librarian 에게 
   천장 0.02~0.03. 문장을 지시문에 두는 지금 모양은 바닥 0.94·천장 0.10. Jev 문서의 약점("간접 참조", "관련 없는 큰 state")이 그대로다.
   그래서 문장은 지시문에 둔다. 주입 위험은 §8 에 적는다.
 - OpenRouter: 09-18 부터 베타. `POST https://openrouter.ai/api/alpha/decisions`, 모델 `typesafe/jev-1.13`, 본문 모양 같음, 32k, 오류 봉투 `{"error":{...}}`.
-  `[typesafeai] endpoint`·`model` 과 OpenRouter 키로 예비 경로가 된다. 오류 해석은 확인 필요.
+  `[typesafeai] destinations` 의 두 번째 항목이 된다(`https://openrouter.ai/api/v1/systemone`, 모델 `~typesafe/jev-latest`, `api_key_env = "OPENROUTER_API_KEY"`). 응답은 TypeSafe 와 같고 `id`·`provider`·`usage.cost` 가 더 붙는다. 첫 목적지가 답을 못 하거나 자기 사정(401·402·403·404·429·5xx·해독 안 되는 본문)으로 거절하면 다음 목적지에 묻고, 요청 본문이 틀렸다는 답(400·413·422)이면 멈춘다(`Typesafeai_client.disposition_of_refusal`).
 
 ## 5. 비용과 지연
 

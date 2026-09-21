@@ -601,7 +601,7 @@ let write_board_lane_config config (meta : Keeper_meta_contract.keeper_meta) =
   Fs_compat.mkdir_p keepers_dir;
   Out_channel.with_open_text (Filename.concat keepers_dir (meta.name ^ ".toml"))
     (fun oc -> Printf.fprintf oc
-      "[keeper]\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
+      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
       (String.concat ", " (List.map (Printf.sprintf "%S") meta.board_interests)))
 ;;
 

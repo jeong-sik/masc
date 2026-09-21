@@ -2,7 +2,7 @@ open Alcotest
 
 module Workspace = Masc.Workspace
 module Consumer = Masc.Keeper_librarian_durable_consumer
-module Queue_refresh = Masc.Keeper_librarian_queue_refresh
+module Loop = Masc.Keeper_librarian_loop
 module Boundaries = Masc.Keeper_turn_boundaries
 module Progress = Masc.Keeper_librarian_progress
 module Store = Masc.Keeper_checkpoint_store
@@ -202,56 +202,6 @@ let establish_progress config ~trace_id first =
   | Consumer.Nothing_to_read
   | Consumer.Official_advanced _
   | Consumer.Memory_not_committed -> fail "initial range did not advance"
-;;
-
-let test_agent_core_handoff_retains_pending_official_evidence () =
-  with_workspace @@ fun config ->
-  let trace_id = "trace-official-to-agent-core" in
-  let attempts = ref 0 in
-  Queue_refresh.remember_turn
-    ~base_path:config.Workspace.base_path
-    ~keeper_name
-    ~trace_id
-    (fun ~meta:_ _trigger ->
-      incr attempts;
-      if !attempts = 1 then raise Exit;
-      Queue_refresh.Entered);
-  Queue_refresh.forget_turn
-    ~base_path:config.Workspace.base_path
-    ~keeper_name;
-  (match
-     Queue_refresh.For_testing.attempt_remembered
-       ~base_path:config.Workspace.base_path
-       ~keeper_name
-       ~trace_id
-       ~meta:(meta trace_id)
-       ~sources_changed:false
-       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
-   with
-   | _ -> fail "cancelled official evidence attempt did not escape"
-   | exception Exit -> ());
-  check int "cancelled attempt retains its evidence" 1 !attempts;
-  let handled =
-    Queue_refresh.For_testing.attempt_remembered
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-      ~trace_id
-      ~meta:(meta trace_id)
-      ~sources_changed:false
-      ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
-  in
-  check bool "pending official evidence survives Agent-Core handoff" true handled;
-  check int "pending official evidence succeeds on retry" 2 !attempts;
-  check bool
-    "handoff evidence retires immediately after its attempt"
-    false
-    (Queue_refresh.For_testing.attempt_remembered
-       ~base_path:config.Workspace.base_path
-       ~keeper_name
-       ~trace_id
-       ~meta:(meta trace_id)
-       ~sources_changed:false
-       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed)
 ;;
 
 let test_n_tick_reads_every_intermediate_turn () =
@@ -676,6 +626,12 @@ let markers_without_working_sources (input : Masc.Keeper_librarian.input) =
   text_markers input
 ;;
 
+(* The loop's pass, with the Memory commit injected: what a wake does. *)
+let drain config ~commit =
+  let (_ : Loop.pass_end) = Loop.For_testing.drain ~config ~keeper_name ~commit in
+  ()
+;;
+
 let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
     (Some "true")
@@ -683,7 +639,7 @@ let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
   with_workspace @@ fun config ->
   prepare_three_unread_turns config ~trace_id:"trace-wake-retry";
   let failed_calls = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       failed_calls := markers_without_working_sources input :: !failed_calls;
       false);
@@ -695,11 +651,11 @@ let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
     committed_calls := markers_without_working_sources input :: !committed_calls;
     true
   in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  drain config ~commit;
   check (list (list string)) "one later wake drains all successful small cuts"
     [ [ "turn-2" ]; [ "turn-3" ]; [ "turn-4" ] ] (List.rev !committed_calls);
   check_progress_end config 4;
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  drain config ~commit;
   check int "an empty backlog is not committed again" 3 (List.length !committed_calls)
 ;;
 
@@ -721,7 +677,7 @@ let test_one_wake_continues_after_an_initial_baseline () =
   check bool "this Keeper has no read position yet" true
     (Option.is_none (read_progress config));
   let calls = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       calls := markers_without_working_sources input :: !calls;
       true);
@@ -735,13 +691,13 @@ let test_disabling_between_cuts_stops_until_a_new_enabled_wake () =
   Masc_test_deps.with_process_env env_key (Some "true") @@ fun () ->
   with_workspace @@ fun config ->
   prepare_three_unread_turns config ~trace_id:"trace-wake-disable";
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       ignore (markers_without_working_sources input : string list);
       false);
   check_progress_end config 1;
   let before_disable = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       before_disable := markers_without_working_sources input :: !before_disable;
       Unix.putenv env_key "false";
@@ -751,7 +707,7 @@ let test_disabling_between_cuts_stops_until_a_new_enabled_wake () =
   check_progress_end config 2;
   Unix.putenv env_key "true";
   let after_enable = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       after_enable := markers_without_working_sources input :: !after_enable;
       true);
@@ -1998,7 +1954,8 @@ let test_a_mixed_keeper_is_read_in_line_order () =
 
 (* Lines whose fragments predate turn-named history are passed without a
    model call; the position still moves so they are not asked for again. *)
-let test_official_commit_recovers_without_resynthesis ~mixed ~cancel_after_save () =
+let test_official_commit_recovers_without_resynthesis ?(through_loop = false) ~mixed ~cancel_after_save () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
   let trace_id = "trace-official-commit-recovery" in
@@ -2044,6 +2001,15 @@ let test_official_commit_recovers_without_resynthesis ~mixed ~cancel_after_save 
   let no_commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ =
     fail "saved input was sent for synthesis again"
   in
+  if through_loop then (
+    (match Loop.For_testing.drain ~config ~keeper_name ~commit:no_commit with
+     | Loop.Drained -> ()
+     | _ -> fail "server loop did not finish receipt recovery");
+    (match read_official config with
+     | Some official -> check int "loop restores official cursor" (if mixed then 3 else 2) official.boundary_line
+     | None -> fail "loop left official cursor behind");
+    if mixed then check_progress_end config 2)
+  else (
   (match consume config no_commit with
    | Consumer.Official_advanced { official; _ } ->
      check int "official range restored in full" (if mixed then 3 else 2) official.boundary_line
@@ -2051,7 +2017,7 @@ let test_official_commit_recovers_without_resynthesis ~mixed ~cancel_after_save 
   if mixed && cancel_after_save then (
     match consume config no_commit with
     | Consumer.Progress_advanced progress -> check int "atom cursor restored separately" 2 progress.position.end_atom
-    | _ -> fail "mixed atom receipt was lost");
+    | _ -> fail "mixed atom receipt was lost"));
   (match consume config no_commit with
    | Consumer.Nothing_to_read -> ()
    | _ -> fail "receipt recovery left input to read again");
@@ -2216,8 +2182,6 @@ let () =
     [ ( "range lifecycle"
       , [ test_case "N ticks retain intermediate turns" `Quick
             test_n_tick_reads_every_intermediate_turn
-        ; test_case "Agent-Core handoff retains pending official evidence" `Quick
-            test_agent_core_handoff_retains_pending_official_evidence
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
         ; test_case "committed range repairs failed progress after restart" `Quick
@@ -2294,6 +2258,10 @@ let () =
             (test_official_commit_recovers_without_resynthesis ~mixed:false ~cancel_after_save:true)
         ; test_case "mixed receipt restores both cursors after cancellation" `Quick
             (test_official_commit_recovers_without_resynthesis ~mixed:true ~cancel_after_save:true)
+        ; test_case "server loop recovers mixed cancellation without synthesis" `Quick
+            (test_official_commit_recovers_without_resynthesis ~through_loop:true ~mixed:true ~cancel_after_save:true)
+        ; test_case "server loop recovers a partial cursor write without synthesis" `Quick
+            (test_official_commit_recovers_without_resynthesis ~through_loop:true ~mixed:true ~cancel_after_save:false)
         ; test_case "official receipt cannot skip replaced history" `Quick
             test_official_receipt_rejects_replaced_history
         ; test_case "untagged fragments are passed without a commit" `Quick

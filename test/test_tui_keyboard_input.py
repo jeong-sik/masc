@@ -11833,7 +11833,7 @@ def runtime_probe_response(*, fresh: bool) -> HttpResponse:
                 "providers": providers,
                 "errors": [] if fresh else ["runtime-c: network_error"],
                 "observations": ["provider metadata endpoints only"],
-                "limitations": ["no completion request"],
+                "limitations": ["no completion request", "CLI execution skipped"],
             },
         },
     )
@@ -12089,6 +12089,8 @@ def runtime_surface_interaction(
                 # status in agreement, so the row said the status twice.
                 b"HTTP status: 200",
                 b"Latency: 18ms",
+                b"Probe limitation: no completion request",
+                b"Probe limitation: CLI execution skipped",
             ):
                 if needle not in lane_detail_plain:
                     raise AssertionError(

@@ -11028,6 +11028,14 @@ let runtime_detail_lines state target ~width =
                | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
+      let probe_limitations =
+        match state.runtime_surface with
+        | Some { rss_probe = Some snapshot; _ } ->
+            List.concat_map
+              (runtime_detail_field ~width ~style:Ansi.reset "Probe limitation")
+              snapshot.rps_limitations
+        | Some { rss_probe = None; _ } | None -> []
+      in
       let keeper_lines =
         let target_keepers =
           match target with
@@ -11055,7 +11063,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ quota @ keeper_lines @ probe_lines
+      fields @ candidate @ quota @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in

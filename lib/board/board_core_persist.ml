@@ -595,8 +595,8 @@ let create_post_with_audience
       | Error _ as error -> error
       | Ok audience ->
       (* Write-ahead (PR #28934 class, #28952): validate under
-         [with_lock] with no mutation, durably append outside any lock,
-         then commit under [with_lock]. The previous shape mutated
+         [with_lock] with no mutation, then hold the persistence lock across the durable
+         append and the in-memory commit under [with_lock]. The previous shape mutated
          first and appended second, so a racing [flush_dirty] could
          snapshot-write a post whose durable append was about to fail
          and be rolled back — reviving it from the snapshot on restart.
@@ -631,11 +631,9 @@ let create_post_with_audience
       match staged with
       | Error _ as e -> e
       | Ok post ->
-        (match with_persist_lock store (fun () -> append_post post) with
-         | Error _ as e -> e
-         | Ok () ->
-           let committed =
-             with_lock store (fun () ->
+        (match with_persist_lock store (fun () ->
+           let* () = append_post post in
+           Ok (with_lock store (fun () ->
                (* Commit re-checks the policy: staging validated it, but
                   it can flip while the append is in flight, and commit
                   is the authoritative gate — a durable row without a
@@ -649,8 +647,9 @@ let create_post_with_audience
                  index_post_origin store post;
                  Stdlib.incr store.post_count;
                  invalidate_post_caches store;
-                 Ok ())
-           in
+                 Ok ()))) with
+         | Error _ as e -> e
+         | Ok committed ->
            (match committed with
             | Ok () -> Ok { post; audience }
             | Error e ->

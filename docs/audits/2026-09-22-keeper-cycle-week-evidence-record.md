@@ -59,7 +59,7 @@ repair remains pending`가 같은 task/verification에 반복된 사례도 있�
 | msx 입력 거절 후 다음 후보를 시도하지 않고 종료 | #37631 | 실제 400 형태를 이용한 후보 순회·효과 경계 회귀, CI 통과 | 재배포 후 실제 provider 전환 |
 | Small에서 실패 호출의 긴 인자/오류를 fresh Context에 다시 삽입 | #37632 | 실제 원문 조회 복원 및 Keeper hook→Codex 요청 연결 테스트, CI 통과 | 배포 후 전송 bytes·내용 연속성 |
 | 분석기가 현재 로그의 lifecycle_event에서 전체 중단 | #37634 | 같은 18,107행에서 exit2→exit0; 21개 Python 테스트·Pyright·Ruff·PR CI 통과 | main 반영 |
-| TUI GitHub 카드가 본문보다 넓어 테두리와 배너가 줄바꿈 | #37635 | 실제 body 폭 사용; cache/frame 일관성 회귀 추가; 독립 리뷰 | native CI와 새 TUI의 실제 표시 |
+| TUI GitHub 카드가 본문보다 넓어 테두리와 배너가 줄바꿈 | #37635 | 실제 body 폭 사용; cache/frame 일관성 회귀 실행 및 CI 통과 | 새 TUI의 실제 표시 |
 | Memory에서 재사용 Skill을 생성·검증·발행하는 전체 연결 | #37633 | parser·관리자 editor·catalog는 존재; 자동 생산 경로는 미구현 확인 | 후보 증거→실행 검증→승인/발행→후속 사용 |
 
 이 표 작성 시 #37628~#37632는 CI 통과 후 자동 병합을 등록했지만 GitHub 필수

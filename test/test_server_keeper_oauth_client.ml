@@ -103,7 +103,7 @@ let test_an_undeclared_provider_is_refused () =
   | Ok _ -> Alcotest.fail "a client was written for a provider nobody declared"
 
 let test_the_listing_says_whether_an_app_is_on_file () =
-  let base_path = base_path () in
+  let listing_base = base_path () in
   let client_state id json =
     match json with
     | `List rows ->
@@ -120,18 +120,24 @@ let test_the_listing_says_whether_an_app_is_on_file () =
   check (Alcotest.option Alcotest.string) "nothing on file to begin with"
     (Some "none")
     (Option.bind
-       (client_state "slack" (Oauth.declarations_json ~base_path ~now:0.0))
+       (client_state
+          "slack"
+          (Oauth.declarations_json ~base_path:listing_base ~now:0.0))
        Yojson.Safe.Util.to_string_option);
-  let _ = set base_path ~client_secret:None in
+  let _ = set listing_base ~client_secret:None in
   check (Alcotest.option Alcotest.string) "and it says so once there is"
     (Some "on_file")
     (Option.bind
-       (client_state "slack" (Oauth.declarations_json ~base_path ~now:0.0))
+       (client_state
+          "slack"
+          (Oauth.declarations_json ~base_path:listing_base ~now:0.0))
        Yojson.Safe.Util.to_string_option);
   check (Alcotest.option Alcotest.string) "without claiming it for another provider"
     (Some "none")
     (Option.bind
-       (client_state "figma" (Oauth.declarations_json ~base_path ~now:0.0))
+       (client_state
+          "figma"
+          (Oauth.declarations_json ~base_path:listing_base ~now:0.0))
        Yojson.Safe.Util.to_string_option);
   let unreadable_base = base_path () in
   let provider = provider_or_fail "slack" in

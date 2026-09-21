@@ -79,15 +79,15 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
 
     def test_split_heading_requires_both_titles_on_one_row(self):
         capture.require_split_heading(
-            "INPUT · PROMPT PAYLOAD  1-4/4 │ OUTPUT · MODEL RESPONSE  1-2/2",
-            "INPUT · PROMPT PAYLOAD",
-            "OUTPUT · MODEL RESPONSE",
+            "INPUT · RUN INPUT  1-4/4 │ OUTPUT · RUN RESULT  1-2/2",
+            "INPUT · RUN INPUT",
+            "OUTPUT · RUN RESULT",
         )
         with self.assertRaises(capture.WaitFailed):
             capture.require_split_heading(
-                "INPUT · PROMPT PAYLOAD\nOUTPUT · MODEL RESPONSE",
-                "INPUT · PROMPT PAYLOAD",
-                "OUTPUT · MODEL RESPONSE",
+                "INPUT · RUN INPUT\nOUTPUT · RUN RESULT",
+                "INPUT · RUN INPUT",
+                "OUTPUT · RUN RESULT",
             )
 
     def test_executable_digest_is_recordable(self):

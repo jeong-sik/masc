@@ -66,12 +66,14 @@ let replace
 let apply_disposition
       ~keepers_dir
       ?dropped_statements
+      ?durable_range_id
       ?(absorbed = [])
       ?(new_claims = [])
       ()
   =
   Current.apply_disposition
     ?dropped_statements
+    ?durable_range_id
     ~absorbed
     ~keepers_dir
     ~keeper_id:"keeper"
@@ -102,6 +104,144 @@ let require_upsert_ok = function
 let require_some = function
   | Some value -> value
   | None -> fail "expected current snapshot"
+;;
+
+let memory_snapshot_readers =
+  [ "ordinary", (fun keepers_dir ->
+      Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+      |> Result.map (Option.map (fun (snapshot : Current.t) -> snapshot.revision)))
+  ; "source-bound", (fun keepers_dir ->
+      Masc.Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+      |> Result.map (Option.map (fun (snapshot : Masc.Keeper_memory_source_current.t) ->
+        snapshot.revision)))
+  ]
+;;
+
+let check_snapshot_revisions ~keepers_dir expected =
+  List.iter (fun (store, read) ->
+    match read keepers_dir with
+    | Ok revision -> check (option int) store expected revision
+    | Error detail -> failf "%s: %s" store detail) memory_snapshot_readers
+;;
+
+let check_snapshot_read_errors ~keepers_dir =
+  List.iter (fun (store, read) ->
+    check bool (store ^ " preserves the read failure") true
+      (Result.is_error (read keepers_dir))) memory_snapshot_readers
+;;
+
+let with_readable_memory_stores f =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  let module Source = Masc.Keeper_memory_source_current in
+  let source : Source.t =
+    { revision = 1; updated_at = 200.; trace_id = "trace"; facts = []; invalidations = [] }
+  in
+  Out_channel.with_open_bin (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper")
+    (fun channel -> output_string channel (Yojson.Safe.to_string (Source.to_json source)));
+  check_snapshot_revisions ~keepers_dir (Some 1);
+  f keepers_dir
+;;
+
+let test_snapshot_reads_preserve_missing_directories () =
+  with_temp_keepers @@ fun parent ->
+  check_snapshot_revisions ~keepers_dir:(Filename.concat parent "fresh/keepers") None
+;;
+
+let test_snapshot_reads_preserve_missing_files () =
+  with_temp_keepers @@ fun keepers_dir ->
+  check_snapshot_revisions ~keepers_dir None
+;;
+
+let test_snapshot_reads_follow_the_writer_directory_alias () =
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let alias = Filename.concat keepers_dir "directory-alias" in
+  Unix.symlink keepers_dir alias;
+  Fun.protect ~finally:(fun () -> Sys.remove alias) (fun () ->
+    check_snapshot_revisions ~keepers_dir:alias (Some 1))
+;;
+
+let test_snapshot_reads_preserve_file_aliases () =
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let paths =
+    [ Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ; Masc.Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ]
+  in
+  List.iter (fun path ->
+    let target = path ^ ".target" in
+    Unix.rename path target;
+    Unix.symlink target path) paths;
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let test_snapshot_reads_reject_non_directory_parents () =
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let file = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  check_snapshot_read_errors ~keepers_dir:file;
+  check_snapshot_read_errors ~keepers_dir:(Filename.concat file "child");
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let with_denied_mode path mode f =
+  let previous = (Unix.stat path).Unix.st_perm in
+  Unix.chmod path mode;
+  Fun.protect ~finally:(fun () -> Unix.chmod path previous) f
+;;
+
+let test_snapshot_reads_preserve_parent_permission_failure () =
+  (* Root bypasses this OS permission check; do not count it as exercised. *)
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  with_denied_mode keepers_dir 0o600 (fun () ->
+    (match Unix.stat path with
+     | exception Unix.Unix_error (Unix.EACCES, _, _) -> ()
+     | _ -> fail "fixture must deny parent-directory search");
+    check_snapshot_read_errors ~keepers_dir);
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let test_snapshot_reads_preserve_leaf_permission_failure () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let ordinary = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let source =
+    Masc.Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  with_denied_mode ordinary 0o000 (fun () ->
+    with_denied_mode source 0o000 (fun () ->
+      check_snapshot_read_errors ~keepers_dir));
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let with_memory_read_fs fs test () =
+  let previous = Fs_compat.get_fs_opt () in
+  let install = function
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  install fs;
+  Fun.protect ~finally:(fun () -> install previous) (fun () ->
+    check bool "requested filesystem branch is active"
+      (Option.is_some fs) (Fs_compat.has_fs ());
+    test ())
+;;
+
+let in_memory_read_eio test () =
+  Eio_main.run (fun env ->
+    with_memory_read_fs (Some (Eio.Stdenv.fs env)) test ())
+;;
+
+let snapshot_read_cases =
+  [ "fresh directories are absent", test_snapshot_reads_preserve_missing_directories
+  ; "missing files are absent", test_snapshot_reads_preserve_missing_files
+  ; "directory aliases remain readable", test_snapshot_reads_follow_the_writer_directory_alias
+  ; "file aliases remain readable", test_snapshot_reads_preserve_file_aliases
+  ; "non-directory parents are errors", test_snapshot_reads_reject_non_directory_parents
+  ; "parent permission failure is an error", test_snapshot_reads_preserve_parent_permission_failure
+  ; "leaf permission failure remains an error", test_snapshot_reads_preserve_leaf_permission_failure
+  ]
 ;;
 
 let fact_ids facts =
@@ -996,6 +1136,155 @@ let test_purge_plan_removes_memory_sidecars () =
     (contains Shutdown.Keeper_memory_journal_artifact);
   check bool "plan removes the absorbed memory rows" true
     (contains Shutdown.Keeper_memory_absorbed_artifact)
+;;
+
+let durable_range_id : Current.durable_range_id =
+  { receipt_scope = "runtime-cluster-a"
+  ; trace_id = "trace"
+  ; history_start_boundary_line = 1
+  ; start_atom = 1
+  ; end_atom = 2
+  ; last_atom_digest = String.make 64 'a'
+  ; end_boundary_line = 2
+  ; boundary_lines_seen = 2
+  }
+;;
+
+let require_no_committed_range ~keepers_dir label =
+  match
+    Current.committed_durable_range
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> fail label
+  | Error detail -> fail detail
+;;
+
+let require_committed_range ~keepers_dir label =
+  match
+    Current.committed_durable_range
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope
+  with
+  | Ok (Some range_id) -> range_id
+  | Ok None -> fail label
+  | Error detail -> fail detail
+;;
+
+let test_committed_range_receipt_rejects_absent_snapshot () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  Sys.remove (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper");
+  require_no_committed_range
+    ~keepers_dir
+    "receipt authorized a range without a Memory snapshot";
+  check bool "invalid receipt is removed" false
+    (Sys.file_exists (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"))
+;;
+
+let test_committed_range_receipt_rejects_snapshot_rollback () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[ fact ~claim:"before" () ] () |> require_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let prior = Fs_compat.load_file snapshot_path in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  Fs_compat.save_file snapshot_path prior;
+  require_no_committed_range
+    ~keepers_dir
+    "receipt authorized a range after snapshot revision rollback"
+;;
+
+let test_committed_range_receipt_rejects_same_revision_different_snapshot () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let changed =
+    match Yojson.Safe.from_string (Fs_compat.load_file snapshot_path) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "updated_at" then name, `Float 201.0 else name, value)
+           fields)
+    | _ -> fail "Memory snapshot was not an object"
+  in
+  Fs_compat.save_file snapshot_path (Yojson.Safe.to_string changed);
+  require_no_committed_range
+    ~keepers_dir
+    "receipt authorized different snapshot bytes at the same revision"
+;;
+
+let test_committed_range_receipt_survives_retract_and_replace () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"target" () in
+  ignore
+    (apply_disposition
+       ~keepers_dir
+       ~durable_range_id
+       ~new_claims:[ target ]
+       ()
+     |> require_ok);
+  (match
+     Current.retract_fact
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:201.0
+       ~source:(source Current.Explicit_retract)
+       ~memory_id:(Types.memory_id target)
+       ~reason:"test retraction"
+       ()
+   with
+   | Ok snapshot -> check int "retract revision" 2 snapshot.revision
+   | Error _ -> fail "retract failed");
+  ignore
+    (require_committed_range
+       ~keepers_dir
+       "explicit retract erased the committed range receipt");
+  ignore
+    (replace ~keepers_dir ~expected_revision:(Some 2) ~facts:[] () |> require_ok);
+  ignore
+    (require_committed_range
+       ~keepers_dir
+       "replace erased the committed range receipt")
+;;
+
+let test_committed_range_receipts_are_scoped_per_runtime_cluster () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let cluster_a = durable_range_id in
+  let cluster_b =
+    { durable_range_id with
+      receipt_scope = "runtime-cluster-b"
+    ; trace_id = "trace-b"
+    ; end_atom = 3
+    ; last_atom_digest = String.make 64 'b'
+    ; end_boundary_line = 3
+    ; boundary_lines_seen = 3
+    }
+  in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_a () |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_b () |> require_ok);
+  let read scope =
+    match
+      Current.committed_durable_range
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~receipt_scope:scope
+    with
+    | Ok (Some range_id) -> range_id
+    | Ok None -> failf "cluster receipt %s was replaced" scope
+    | Error detail -> fail detail
+  in
+  check string
+    "cluster A receipt survives cluster B commit"
+    cluster_a.trace_id
+    (read cluster_a.receipt_scope).trace_id;
+  check string
+    "cluster B has its own receipt"
+    cluster_b.trace_id
+    (read cluster_b.receipt_scope).trace_id
 ;;
 
 let test_stale_replace_rejects_concurrent_explicit_write () =
@@ -1964,6 +2253,12 @@ let () =
       , [ test_case "a commit parses and prints on the pool" `Quick
             test_a_commit_parses_and_prints_on_the_pool
         ] )
+    ; ( "snapshot read failures"
+      , List.map (fun (name, test) -> test_case name `Quick (with_memory_read_fs None test))
+          snapshot_read_cases )
+    ; ( "snapshot read failures Eio"
+      , List.map (fun (name, test) -> test_case name `Quick (in_memory_read_eio test))
+          snapshot_read_cases )
     ; ( "commit notification"
       , [ test_case "all writers notify outside locks" `Quick test_commit_notifications_follow_all_writers_outside_locks
         ; test_case "snapshot authority independent of journal" `Quick test_commit_notifications_do_not_depend_on_journal
@@ -2092,6 +2387,26 @@ let () =
             "purge plan removes memory sidecars"
             `Quick
             test_purge_plan_removes_memory_sidecars
+        ; test_case
+            "range receipt rejects absent snapshot"
+            `Quick
+            test_committed_range_receipt_rejects_absent_snapshot
+        ; test_case
+            "range receipt rejects snapshot rollback"
+            `Quick
+            test_committed_range_receipt_rejects_snapshot_rollback
+        ; test_case
+            "range receipt rejects same revision different snapshot"
+            `Quick
+            test_committed_range_receipt_rejects_same_revision_different_snapshot
+        ; test_case
+            "range receipt survives retract and replace"
+            `Quick
+            test_committed_range_receipt_survives_retract_and_replace
+        ; test_case
+            "range receipts are scoped per runtime cluster"
+            `Quick
+            test_committed_range_receipts_are_scoped_per_runtime_cluster
         ; test_case
             "journal recreated after purge sequence"
             `Quick

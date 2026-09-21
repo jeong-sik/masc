@@ -72,6 +72,11 @@ let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 let keepers_runtime_dir config =
   Filename.concat (masc_root_dir config) Common.keepers_runtime_dirname
 
+let keepers_runtime_dir_for_base_path base_path =
+  Filename.concat
+    (backend_config_for base_path).base_path
+    Common.keepers_runtime_dirname
+
 (** Shared in-memory pubsub for FileSystem and Memory backends.
     All supported backends now share the same in-memory pubsub. *)
 let shared_pubsub = Backend_types.Pubsub_mem.create ()

@@ -103,6 +103,12 @@ val decode : directory_name:string -> string -> load_outcome
     valid. Any diagnostic makes the document [Unloadable]. Client-specific
     data belongs under the specification's [metadata] field. *)
 
+val decode_authored : string -> load_outcome
+(** Validate a new document before its package directory is chosen. Uses the
+    same document rules as {!decode}, excluding only name-directory equality.
+    The validated [name] can then name the new package; publication must still
+    use {!decode} with its actual directory. *)
+
 val diagnostics : load_outcome -> diagnostic list
 val diagnostic_to_string : diagnostic -> string
 val diagnostic_to_yojson : diagnostic -> Yojson.Safe.t

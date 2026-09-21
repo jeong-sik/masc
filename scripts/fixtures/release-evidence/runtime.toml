@@ -39,6 +39,13 @@ display-name = "Release Evidence Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
+# Synthetic authorization for the loopback model fixture. This smoke never
+# reaches Ollama Cloud, so inheriting that catalog row's environment credential
+# would make the hermetic first-turn proof depend on OLLAMA_CLOUD_API_KEY.
+[providers.ollama_cloud.credentials]
+type = "inline"
+value = "release-evidence-loopback"
+
 [models.deepseek-v4-flash]
 api-name = "deepseek-v4-flash"
 max-context = 32768

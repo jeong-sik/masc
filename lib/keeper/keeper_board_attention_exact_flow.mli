@@ -61,13 +61,42 @@ type 'callback_error execution_error =
       ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
-  | Exact_execution_failed of attempt_provenance list
+  | Providers_exhausted of
+      { attempts : attempt_provenance list
+      ; detail : string
+          (** Why the HTTP walk gave up: the provider error's label and
+              payload. The CLI tail, when the lane walks one, reports through
+              {!Cli_slots_exhausted} rather than being folded in here. *)
+      }
+  | Cli_slots_exhausted of
+      { prior_error : 'callback_error execution_error option
+          (** The HTTP failure the tail was walked after, or [None] on a
+              CLI-only lane, which has no HTTP walk. *)
+      ; failures : Keeper_lane_cli_oneshot.failure list
+          (** One per slot the tail walked, in the order it walked them.
+              Kept as the walker's own type: it separates an admission
+              refusal from an execution failure from a rejected answer, and
+              a reader counting those cannot recover them from a sentence. *)
+      }
+  | Flow_bookkeeping_failed of
+      { attempts : attempt_provenance list
+      ; detail : string
+          (** An attempt or measurement could not establish its durable
+              bookkeeping boundary. No second transport is tried. *)
+      }
   | Provenance_mismatch of string
   | Domain_output_invalid of string
 
 type prepared
 
 val lane_id : string
+
+val terminal_of_flow_error
+  :  'callback_error Agent_core.Exact_output.flow_execution_error
+  -> 'callback_error execution_error
+(** Classify every AGENT_CORE flow terminal before deciding whether a second
+    transport may run. The closed input and output variants make a new flow
+    terminal a compile-time classification request. *)
 
 (** Snapshot only an effective resumable pending candidate. Quarantined and
     requeue-requested candidates are not executable; a durably requeued pending
@@ -80,39 +109,6 @@ val prepare :
   (prepared, setup_error) result
 (** Freeze one complete ordered AGENT_CORE flow. Missing network context fails before
     AGENT_CORE allocates an attempt. *)
-
-type cli_tail_error =
-  | No_cli_slots
-  | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
-
-val cli_tail_error_to_string : cli_tail_error -> string
-
-val has_http_flow : prepared -> bool
-(** Whether preparation allocated an HTTP attempt. CLI-only lanes allocate none. *)
-
-val cli_slots : prepared -> string list
-(** The lane's declared official-client tail, in declaration order. Empty when
-    the lane declares none. *)
-
-val run_cli_tail :
-  ?runner:Keeper_lane_cli_oneshot.runner ->
-  base_path:string ->
-  prepared ->
-  ( string * Keeper_board_attention_candidate.judgment
-  , cli_tail_error )
-  result
-(** Walk [cli_slots] as one-shots and return the first slot whose answer judges
-    this candidate, as [(slot_id, judgment)].
-
-    For an HTTP flow, call this only after {!execute} reported [Exact_execution_failed], which is
-    the provider-exhaustion arm. The persistence and provenance arms keep their
-    terminal: they say the durable record is in doubt, and a second transport
-    does not settle that (RFC cli-runtimes-as-lane-slots, the same split the
-    librarian and HITL lanes apply).
-
-    CLI-only flows call this directly. The judgment carries [Cli_lane_slot];
-    completion is owned by the durable candidate claim, without fabricating
-    an HTTP attempt receipt. *)
 
 val execute :
   ?cli_runner:Keeper_lane_cli_oneshot.runner ->
@@ -127,9 +123,13 @@ val execute :
   ( Keeper_board_attention_candidate.judgment
   , 'callback_error execution_error )
   result
-(** Execute the prepared affine flow exactly once. Domain identity and
-    provenance failures are terminal results and never request AGENT_CORE
-    advancement. Cancellation is not caught. The caller's durable callback
+(** Execute the prepared affine flow exactly once. After semantic exhaustion
+    or a typed advanceable final HTTP failure, walk the same frozen lane's
+    declared official clients as one-shots ([cli_runner], default the real
+    client). Persistence, replay, cancellation, and non-advanceable execution
+    failures remain terminal; a CLI-only lane walks its slots directly. The
+    run record is closed after the complete lane and names the slot that
+    answered. Cancellation is not caught. The caller's durable callback
     progress is the sole terminalization authority and must be quarantined
     under cancellation protection; no AGENT_CORE receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.

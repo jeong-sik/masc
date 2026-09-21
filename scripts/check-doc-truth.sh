@@ -191,6 +191,14 @@ require_not_contains docs/DASHBOARD-INTEGRATION.md '- `intervene`: mutating oper
 require_contains docs/spec/01-system-overview.md 'MASC의 현재 canonical front door는 3가지다.'
 require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator Read Visibility'
 
+# Glossary evidence and heartbeat names are semantic boundaries, not broad
+# synonyms: narrative notes are accepted evidence, while the Workspace write
+# is distinct from Keeper/transport liveness signals.
+require_contains docs/spec/00-glossary.md '**Workspace Heartbeat**'
+require_contains docs/spec/00-glossary.md '`keeper_heartbeat` SSE나 MCP·transport activity'
+require_contains docs/spec/00-glossary.md '`note:<text>`는 허용된 서술형 근거'
+require_not_contains docs/spec/00-glossary.md '설명 문장만으로 근거를 대신하지 않는다.'
+
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 0'
@@ -207,6 +215,23 @@ require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure i
 # a removed surface as current is the exact drift this file exists to catch.
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
 require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
+
+# Keep the spec-index invariant-prefix table synchronized with the prefixes
+# actually declared by the spec files. SPEC-INDEX is excluded from the census
+# so its table cannot validate itself; the testing file's INV-T1..INV-T5 short
+# form is intentionally outside the INV-SUBSYSTEM-NNN census and is documented
+# beside the table.
+declared_prefixes="$(sed -nE 's/^\| `(INV-[A-Z]+)` \|.*$/\1/p' docs/spec/SPEC-INDEX.md | sort -u)"
+used_prefixes="$(rg -o --no-filename 'INV-[A-Z]+-[0-9]+' docs/spec -g '*.md' -g '!SPEC-INDEX.md' | sed -E 's/-[0-9]+$//' | sort -u)"
+# The census counts every ID that appears anywhere in a spec file, including
+# prose, code blocks and quotes, not only the ones a spec declares. Today the
+# two sets coincide; if this guard goes red unexpectedly, look first at a
+# sentence that merely mentions an ID.
+if [[ "$declared_prefixes" != "$used_prefixes" ]]; then
+  echo "SPEC-INDEX prefix table vs docs/spec usage (< table only, > docs only):" >&2
+  diff <(printf '%s\n' "$declared_prefixes") <(printf '%s\n' "$used_prefixes") >&2 || true
+  fail "SPEC-INDEX invariant-prefix table drifted from docs/spec usage"
+fi
 
 docs_to_scan=(
   README.md
@@ -272,4 +297,3 @@ check_translation_shape README.md README.ko.md
 check_translation_shape docs/INSTALL.md docs/INSTALL.ko.md
 
 printf 'Doc truth OK: front-door docs and key specs are aligned with current repo truth\n'
-

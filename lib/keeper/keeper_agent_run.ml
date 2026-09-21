@@ -1,8 +1,10 @@
-(** Keeper_agent_run — Run a single keeper turn via Agent_core.Agent.run().
+(** Orchestration of one Keeper turn.
 
-    This module is intentionally a compatibility facade: public types and
-    entrypoints stay here while prompt metrics, result/error helpers, and
-    tool-surface policy live in focused implementation modules. *)
+    Prepares Keeper context, tools and hooks, then dispatches through
+    [Keeper_turn_driver.run_named]. The selected [Runtime_execution.t]
+    determines whether AGENT_CORE or an official client runs the model/tool loop.
+    Re-exports [Keeper_agent_result] and [Keeper_agent_prompt_metrics] for
+    existing callers. *)
 
 include Keeper_agent_prompt_metrics
 include Keeper_agent_tool_surface
@@ -794,9 +796,6 @@ let run_turn
       ?on_tool_result_ready
       ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?(degraded_retry_applied = false)
-      ?degraded_retry_runtime
-      ?fallback_reason
       ?direct_resume
       ?official_task_reference
       ?on_gate_evidence_admitted
@@ -1284,6 +1283,7 @@ let run_turn
        refused at the wire has a real cut and no wire observation. Sharing one
        cell would let the missing half erase the half that was measured. *)
     let model_input_window_ref = ref None in
+    let response_observed_model_input_ref = ref None in
     let current_request_provider_content_ref :
       ( Agent_core.Types.message list
       , Keeper_agent_prompt_metrics.provenance_failure )
@@ -1339,16 +1339,14 @@ let run_turn
        provider-bound history inside the runtime and hands the result to a
        client that assembles the wire itself.
 
-       Only a lane that started the conversation reports a list: on those
-       turns the whole window is rendered into the request, so its bytes are
-       the ones the model read. A resumed lane reports no list at all, because
-       the client re-sends only the new turn and the accumulated history never
-       leaves this process -- attributing the local window there would have
-       counted bytes that were not sent, and on Antigravity would additionally
-       have dropped the carrier that was. The gap is recorded as
-       [Client_session_holds_input] rather than as a zero or an absent
-       attribution, so a reader can tell it from a turn that never
-       dispatched. *)
+       The receipt distinguishes retransmitted MASC input from history held
+       by the client; it does not distinguish Start from Resume. On resume,
+       MASC can retransmit the canonical snapshot, as documented by
+       Keeper_official_client_host.transmitted_model_input. Client-owned
+       native history outside that snapshot is not measured here.
+       Held_by_client_session becomes an explicit attribution gap rather than
+       zero bytes or an absent receipt, so it remains distinct from a turn
+       that never dispatched. *)
     let record_transmitted_model_input ~runtime_id ~tools ~transmitted =
       let () = match direct_resume with
         | Some (Gate_continuation admission) ->
@@ -1624,7 +1622,7 @@ let run_turn
                               finally answered, and the metrics row credits
                               one lane's bytes to another.
 
-                              All four cells, not just the two the record is
+                              All four attempt-local cells, not just the two the record is
                               built from: the Agent Core wire handler reads
                               the provider-content and projected-message cells
                               to assemble its attribution, so leaving them set
@@ -1632,7 +1630,10 @@ let run_turn
                               the inputs it is assembled from. That the Agent
                               Core lane happens to overwrite both on every
                               request is a property of that lane, not of this
-                              invariant. *)
+                              invariant. The window and response-observed cells
+                              are turn-local: selecting a later candidate must
+                              not erase the last projection, nor the last
+                              request that actually received a response. *)
                            request_attribution_ref := None;
                            request_wire_evidence_ref := None;
                            current_request_provider_content_ref := None;
@@ -1672,6 +1673,10 @@ let run_turn
                         (fun ~measurement observation ->
                            model_input_window_ref :=
                              Some (measurement, observation))
+                      ~on_response_observed_model_input:
+                        (fun observation ->
+                           response_observed_model_input_ref :=
+                             Some observation)
                       ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
@@ -1809,9 +1814,10 @@ let run_turn
                    : Keeper_agent_prompt_metrics.ctx_composition_metrics
                    =
                    let actual_input_tokens =
-                     if usage.input_tokens > 0
-                     then Some usage.input_tokens
-                     else None
+                     match result.runtime_observation with
+                     | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
+                       when usage.input_tokens > 0 -> Some usage.input_tokens
+                     | Some _ | None -> None
                    in
                    (* Absent evidence and unresolved provenance are recorded
                       as what they are. Writing a zero here is what let a
@@ -1962,29 +1968,21 @@ let run_turn
                                    ())
                              ())))
                in
-       let deferred_retry =
+       (* The lane this turn leaves behind, and the lane an earlier turn left
+          for this one. They used to be merged into one runtime slot with the
+          new deferral winning, so a receipt could read "retry applied"
+          against a runtime this turn had only queued. Both travel now, and
+          [Keeper_agent_run_receipt.degraded_retry_taken_up] says whether the
+          turn got far enough to run the lane it was handed. *)
+       let degraded_retry_deferred =
          Option.map
-           (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-              let reason =
-                match
-                  Keeper_error_classify.recoverable_runtime_failure_reason
-                    hint.failure
-                with
-                | Some reason -> reason
-                | None -> Keeper_error_classify.Deferred_runtime_lane
-              in
-              hint.next_runtime_id, reason)
+           Keeper_error_classify.degraded_retry_of_deferred_lane
            !deferred_runtime_lane_ref
        in
-       let receipt_degraded_retry_runtime =
-         match deferred_retry with
-         | Some (runtime_id, _) -> Some runtime_id
-         | None -> degraded_retry_runtime
-       in
-       let receipt_fallback_reason =
-         match deferred_retry with
-         | Some (_, reason) -> Some reason
-         | None -> fallback_reason
+       let degraded_retry_hint =
+         Option.map
+           Keeper_error_classify.degraded_retry_of_deferred_lane
+           deferred_runtime_lane
        in
        let settled_runtime_id =
          match turn_result with
@@ -2006,9 +2004,8 @@ let run_turn
            ~receipt_started_at
            ~runtime_manifest_context
            ~acc
-           ~degraded_retry_applied
-           ~degraded_retry_runtime:receipt_degraded_retry_runtime
-           ~fallback_reason:receipt_fallback_reason
+           ~degraded_retry_hint
+           ~degraded_retry_deferred
            ~turn_result
            ~receipt_agent_core_turn_count_ref
            ~receipt_stop_reason_ref
@@ -2275,6 +2272,8 @@ let run_turn
                       observation.Runtime_model_input_tail_window.front_atom_digest
                   })
                !model_input_window_ref)
+          ~response_observed_model_input:
+            !response_observed_model_input_ref
           ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature

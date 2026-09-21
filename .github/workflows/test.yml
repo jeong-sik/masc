@@ -1,21 +1,40 @@
 name: Test
 
-# The PR gate (pr-check.yml) and the manual CI lane (ci.yml) both stop at
-# `dune build @check`: they type-check test/ but link and run nothing. That
-# is an explicit owner decision (2026-09-02, see the ci.yml header) — linking
-# the ~296 test executables is this repo's slow step, so the gate stays fast.
+# The manual CI lane (ci.yml) stops at `dune build @check`: it type-checks
+# test/ but links and runs nothing. That is an explicit owner decision
+# (2026-09-02, see the ci.yml header) — linking the ~296 test executables is
+# this repo's slow step.
 #
-# The hole that leaves: a test-only BEHAVIORAL regression — code that
-# compiles fine but fails at runtime — reaches main silently. It happened
-# with the test_keeper_owner actor-38 incident; nothing ran the suite before
-# the breakage landed.
+# The PR gate (pr-check.yml) stopped there too until 2026-09-06. Since #33507
+# its `@check` job ends by running scripts/ci/run-edited-tests.sh over the
+# suites the pull request selects, inside a 1080-second budget. The step log
+# names them in four groups, in the script's own words:
 #
-# This lane closes that hole on a schedule instead of in the PR gate. It
-# runs the full behavioral suite nightly (02:43 KST, off-peak) and on
-# manual dispatch, so a test-only regression surfaces within ~24h instead
-# of never. The measured runtime of this lane is the evidence for any
-# future proposal to move tests into the PR gate; until that proposal
-# exists, the gate is unchanged by design.
+#   - test sources this pull request edits
+#   - suites named after the sources this pull request edits
+#   - guards that name the sources this pull request edits
+#   - suites whose code calls a module this pull request edits
+#
+# The fourth is call-graph reachability rather than naming, and it is the
+# widest by far: on #37371 the four groups were 1, 1, 4 and 18 suites, and
+# the step reported "ran 22, skipped 0". Sizing this gate from the first two
+# groups alone understates it several times over.
+#
+# A suite the budget does not reach fails the step by name. So a red `@check`
+# there can be a failing assertion rather than a compile error, and a green
+# one is a real run of those suites — read the step log, not the job
+# conclusion.
+#
+# What that still leaves: a behavioural regression in a suite the pull
+# request neither edits, nor names, nor calls. Nothing in the gate runs
+# those. It happened with the test_keeper_owner actor-38 incident; nothing
+# ran the suite before the breakage landed.
+#
+# This lane covers that rest on a schedule. It runs the full behavioral suite
+# nightly (02:43 KST, off-peak) and on manual dispatch, so a regression the
+# gate does not select surfaces within ~24h instead of never. RFC-0428 moved
+# the selected part into the gate; what is left here is the unselected part
+# and the link cost that keeps it out of every push.
 #
 # A red scheduled run used to reach nobody: GitHub emails only the last
 # editor of the cron line, and a dispatched run notifies only the

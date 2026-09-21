@@ -98,7 +98,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc ["name", `String keeper_name; "trace_id", `String "synthetic-trace"])
     |> ok in
-  ignore (R.For_testing.register ~base_path keeper_name meta : R.registry_entry);
+  let registry_entry = R.For_testing.register ~base_path keeper_name meta in
   Fun.protect
     ~finally:(fun () -> R.For_testing.unregister ~base_path keeper_name)
     (fun () ->
@@ -107,7 +107,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
         ~err:error ~error_text:raw_error;
       let count = R.get_turn_failures ~base_path keeper_name in
       Keeper_heartbeat_loop.refresh_failure_reason_after_turn
-        ~base_path ~keeper_name ~turn_fail_count:count;
+        ~registry_entry ~turn_fail_count:count;
       (match R.get ~base_path keeper_name with
        | Some { last_failure_reason = Some (R.Official_client_recovery_required payload as observed); _ } ->
          Alcotest.(check bool) "heartbeat retains typed claim refusal" true (payload = expected);

@@ -23,6 +23,9 @@ action, args = argv[1], argv[2:]
 if (root / "daemon-unavailable").exists():
     print("fixture daemon unavailable", file=sys.stderr)
     raise SystemExit(7)
+if (root / "hang-control").exists():
+    (root / "control.blocked").write_text(action)
+    while True: signal.pause()
 def value(flag):
     return args[args.index(flag) + 1]
 def path(cid):
@@ -172,8 +175,10 @@ let package directory mode : Types.package = {
 let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
 let sources mode = `Assoc [ "mode", `String mode ]
 let observe worker mode = Worker.observe worker ~binding:(`Assoc []) ~sources:(sources mode)
+let control_timeout_sec = 1.
 let start ?(instance_id = Random_id.uuid_v7 ()) env sw dir docker mode =
-  Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
+  Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
     ~package:(package dir mode) ~docker_command:docker ()
 
 let await_marker clock file =
@@ -218,7 +223,8 @@ let test_hanging_observation_is_optional_and_detachable () = with_fixture (fun e
 let test_initialize_can_be_detached () = with_fixture (fun env sw dir docker ->
   let created, resolver = Eio.Promise.create () in
   let starting = Eio.Fiber.fork_promise ~sw (fun () ->
-    Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"starting-test"
+    Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"starting-test"
       ~package:(package dir "hang_initialize") ~docker_command:docker
       ~on_created:(Eio.Promise.resolve resolver) ()) in
   let worker = Eio.Promise.await created in
@@ -251,7 +257,8 @@ let test_cleanup_failure_can_be_retried () = with_fixture (fun env sw dir docker
 
 let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir docker ->
   let worker = unwrap (start ~instance_id:"worker-test" env sw dir docker "good") in
-  let recover instance_id = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+  let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:(Some (Worker.container_id worker)) ~max_reply_bytes:4096
       ~docker_command:docker () in
   check bool "another binding cannot remove this container" true
@@ -265,7 +272,8 @@ let test_restart_without_create_receipt () = with_fixture (fun env sw dir docker
   let instance_id = "lost-create-receipt" in
   let worker = unwrap (start ~instance_id env sw dir docker "good") in
   let other = unwrap (start env sw dir docker "good") in
-  let recover () = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+  let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
   unwrap (recover ());
   check bool "container is found without a retained create response" false
@@ -286,7 +294,8 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
         :: List.remove_assoc "Config" fields)
     | _ -> fail "expected fixture container object" in
   write path (Yojson.Safe.to_string changed);
-  let recover () = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+  let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
   check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
   check bool "foreign owner survives recovery refusal" true (Sys.file_exists path);
@@ -298,7 +307,8 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
   unwrap (Worker.stop worker))
 
 let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir docker ->
-  let recover container_id = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+  let recover container_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id:"not-created" ~container_id ~max_reply_bytes:4096 ~docker_command:docker () in
   unwrap (recover None);
   let marker = Filename.concat dir "daemon-unavailable" in
@@ -310,10 +320,33 @@ let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir do
   Sys.remove marker;
   unwrap (recover None))
 
+let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir docker ->
+  let marker = Filename.concat dir "hang-control" in
+  write marker "hang";
+  let clock = Eio.Stdenv.clock env in
+  let started_at = Eio.Time.now clock in
+  let result = Worker.recover_stop ~clock ~control_timeout_sec:0.05
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
+      ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+  check bool "hung control command is reported" true (Result.is_error result);
+  check bool "timeout names the failed control operation" true
+    (match result with
+     | Error error ->
+         String.ends_with ~suffix:"timed out after 0.05 seconds"
+           (Worker.error_to_string error)
+     | Ok () -> false);
+  check bool "control timeout returns promptly" true
+    (Eio.Time.now clock -. started_at < 1.);
+  Sys.remove marker;
+  unwrap (Worker.recover_stop ~clock ~control_timeout_sec:0.05
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
+    ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker ()))
+
 let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fun env sw dir docker ->
   let other = unwrap (start env sw dir docker "good") in
   let notified = ref false in
-  let result = Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"receipt-lost"
+  let result = Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"receipt-lost"
       ~package:(package dir "lost_create_response") ~docker_command:docker
       ~on_created:(fun _ -> notified := true) () in
   check bool "invalid create receipt is reported" true (Result.is_error result);
@@ -330,7 +363,8 @@ let test_created_identity_precedes_blocked_inspection () = with_fixture (fun env
   let allocated, resolver = Eio.Promise.create () in
   let starting = Eio.Fiber.fork_promise ~sw (fun () ->
     try Eio.Switch.run (fun owner_sw ->
-      Worker.start ~sw:owner_sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"inspect-test"
+      Worker.start ~sw:owner_sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+        ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"inspect-test"
         ~package:(package dir "hang_inspect") ~docker_command:docker
         ~on_created:(fun worker -> Eio.Promise.resolve resolver (worker, owner_sw)) ())
     with Owner_detached -> Error Worker.Stopped) in
@@ -348,7 +382,8 @@ let test_created_identity_precedes_blocked_inspection () = with_fixture (fun env
 
 let test_world_action_artifact_ingress () = with_fixture (fun env sw dir docker ->
   let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "evidence-store") in
-  let read_only = unwrap (Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+  let read_only = unwrap (Worker.start ~sw ~clock:(Eio.Stdenv.clock env)
+    ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
     ~instance_id:"artifact-observer" ~package:(package dir "artifacts")
     ~artifact_store:store ~docker_command:docker ()) in
   check bool "observation artifacts do not require an action port" false (Option.is_some (Worker.action_schema read_only));
@@ -365,7 +400,8 @@ let test_world_action_artifact_ingress () = with_fixture (fun env sw dir docker 
   let instance_id = "artifact-instance" in
   let package = { (package dir "artifacts") with action_tool = Some "lane_act";
     contributions = [Types.Observe; Types.Act] } in
-  let worker = unwrap (Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
+  let worker = unwrap (Worker.start ~sw ~clock:(Eio.Stdenv.clock env)
+    ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
     ~package ~artifact_store:store ~docker_command:docker ()) in
   check bool "actual MCP action schema is discoverable" true (Option.is_some (Worker.action_schema worker));
   let output = unwrap (observe worker "good") in
@@ -394,7 +430,8 @@ let test_world_action_artifact_ingress () = with_fixture (fun env sw dir docker 
     (Masc.Lane_addon_store.read_blob store reference = Ok bytes))
 
 let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir docker ->
-  let inspect () = Worker.inspect_image ~mgr:(Eio.Stdenv.process_mgr env)
+  let inspect () = Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~package:(package dir "good") ~docker_command:docker () in
   check string "image identity is the engine reply" ("sha256:" ^ String.make 64 'a') (unwrap (inspect ()));
   check bool "preview creates no container" false
@@ -414,6 +451,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "restart recovers without a create receipt" `Quick test_restart_without_create_receipt;
   test_case "deterministic name cannot authorize foreign cleanup" `Quick test_name_collision_preserves_foreign_owner;
   test_case "absence requires a successful Docker query" `Quick test_absence_requires_available_daemon;
+  test_case "recovery bounds an unresponsive Docker control command" `Quick test_recovery_control_command_times_out;
   test_case "lost create response preserves unrelated containers" `Quick test_failed_create_receipt_cleans_only_owned_container;
   test_case "created identity precedes blocked inspect" `Quick test_created_identity_precedes_blocked_inspection;
 ]]

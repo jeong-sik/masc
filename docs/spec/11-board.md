@@ -102,7 +102,6 @@ and persistence success remain objective write invariants.
 |-----------|--------|------|
 | `sweeper_interval_sec` | 10 | 스위퍼 실행 주기 (초, `MASC_BOARD_SWEEPER_INTERVAL_SEC`) |
 | `sweeper_batch_size` | 100 | 스위퍼 배치 크기 (`MASC_BOARD_SWEEPER_BATCH_SIZE`) |
-| `max_jsonl_bytes` | 10 MiB | 초과 시 rotation (`Board_paths.max_jsonl_bytes`) |
 
 ---
 
@@ -355,7 +354,7 @@ authorization. It is model-authored projection data with provenance only.
 
 ## 13. Storage maintenance
 
-Filesystem/JSONL maintenance는 compaction, rotation, replay 안정화를 다룬다.
+Filesystem/JSONL maintenance는 compaction 과 replay 안정화를 다룬다. 글·댓글·투표 파일은 메모리 상태를 통째로 적은 스냅숏이라 크기로 잘라 내지 않는다.
 
 ---
 

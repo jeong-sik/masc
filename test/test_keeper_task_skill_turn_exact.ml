@@ -832,6 +832,7 @@ let test_revision_mismatch_is_typed_before_tool_projection () =
 ;;
 
 let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
+  let open Masc in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in

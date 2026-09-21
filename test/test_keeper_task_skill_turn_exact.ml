@@ -854,7 +854,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let server = Exact_output_fixture.start_server ~sw ~net ~clock
       (Exact_output_fixture.Replies
         [ response "not_applicable"; response "applicable"; response "insufficient_context"
-        ; response "not-an-offered-choice"; "not-json" ]) in
+        ; response "not-an-offered-choice"; "not-json"; response "applicable" ]) in
   let policy = { Runtime_schema.default_typesafeai with
       skill_applicability = true; lane_endpoint = server.base_url } in
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-skill-key") @@ fun () ->
@@ -892,6 +892,32 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   check string "bad choice remains explicit" "invalid_answer" (invalid |> member "status" |> to_string);
   let failed = invoke "advice unavailable" in
   check string "service decode failure remains explicit" "failed" (failed |> member "status" |> to_string);
+  let activation_failed_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+      ~assess_applicability:(fun ~reference ~body ->
+        Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
+          ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
+          ~reference ~body ())
+      ~record_activation:(fun ~invocation:_ ~content:_ _ ->
+        Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
+      ~on_result:(fun ~input:_ result -> captured := Some result)
+      ~instruction_skills:[ instruction_skill reference selected.skill ] () in
+  let refused = run_skill_tool activation_failed_tool (Reference.to_yojson reference) in
+  check bool "activation failure still withholds the Skill body" false
+    (String_util.contains_substring refused "FROZEN_SKILL_BODY");
+  let result = Option.get !captured in
+  check bool "a received JEV answer is not successful activation" false (Tool_result.is_success result);
+  let metadata = Tool_result.metadata result |> Option.get in
+  check string "received assessment survives activation failure" "judged"
+    (metadata |> member "skill_applicability" |> member "status" |> to_string);
+  check string "received model provenance survives activation failure" "fixture-jev"
+    (metadata |> member "skill_applicability" |> member "model" |> to_string);
+  check bool "activation failure does not claim advice delivery" false
+    (metadata |> member "applicability_advice_in_model_content" |> to_bool);
+  check string "failed delivery names its boundary" "withheld_activation_failure"
+    (metadata |> member "applicability_projection" |> to_string);
+  check bool "existing activation failure evidence remains" true
+    (Tool_result.data result |> member "skill_activation_error" <> `Null);
   let sent = Exact_output_fixture.post_count server in
   ignore (run_skill_tool tool (`Assoc [ "name", `String "guide" ]));
   check int "unavailable reference does not call JEV" sent (Exact_output_fixture.post_count server);

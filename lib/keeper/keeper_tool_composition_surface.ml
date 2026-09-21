@@ -1544,11 +1544,19 @@ let make_instruction_skill_tool
                   | Some record ->
                     (match record ~invocation ~content reference with
                      | Error error ->
-                       activation_failure
-                         ~reference
-                         ~tool_name:name
-                         ~start_time
-                         error
+                       let failure = activation_failure ~reference ~tool_name:name ~start_time error in
+                       (match List.assoc_opt "skill_applicability" metadata with
+                        | None -> failure
+                        | Some assessment ->
+                          Tool_result.with_metadata
+                            (`Assoc
+                               [ "reference", Skill_reference.to_yojson reference
+                               ; "skill_tool_use_id", `String skill_tool_use_id
+                               ; "skill_applicability", assessment
+                               ; "applicability_advice_in_model_content", `Bool false
+                               ; "applicability_projection", `String "withheld_activation_failure"
+                               ])
+                            failure)
                      | Ok
                          ( Activation_ledger.Recorded _
                          | Activation_ledger.Already_recorded _ ) ->

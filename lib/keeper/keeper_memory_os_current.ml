@@ -103,10 +103,6 @@ let durable_range_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ durable_range_receipt_suffix)
 ;;
 
-(* schema-compat: the removed [progress] field and the earlier singleton
-   receipt both existed only on unmerged #37208 heads; no released binary
-   wrote this sidecar. [receipt_scope] and the ledger wrapper are therefore
-   still its first deployable schema. *)
 type durable_range_id =
   { receipt_scope : string
   ; trace_id : string
@@ -118,19 +114,29 @@ type durable_range_id =
   ; boundary_lines_seen : int
   }
 
+type official_range_id =
+  { receipt_scope : string
+  ; after_boundary_line : int
+  ; turns : (int * Ids.Turn_ref.t) list
+  }
+
+type consumed_range =
+  | Atom_range of durable_range_id
+  | Official_range of official_range_id
+
 type durable_range_receipt =
   | Prepared of
-      { range_id : durable_range_id
+      { range_id : consumed_range
       ; snapshot_revision : int
       ; snapshot_sha256 : string
       }
   | Committed of
-      { range_id : durable_range_id
+      { range_id : consumed_range
       ; snapshot_revision : int
       ; snapshot_sha256 : string
       }
 
-let durable_range_id_to_json range_id =
+let durable_range_id_to_json (range_id : durable_range_id) =
   `Assoc
     [ "receipt_scope", `String range_id.receipt_scope
     ; "trace_id", `String range_id.trace_id
@@ -221,18 +227,93 @@ let durable_range_id_of_json = function
     wire_here Expected_object
 ;;
 
+let official_range_id_to_json (range_id : official_range_id) =
+  `Assoc
+    [ "receipt_scope", `String range_id.receipt_scope
+    ; "after_boundary_line", `Int range_id.after_boundary_line
+    ; "turns", `List (List.map (fun (line, turn_ref) ->
+        `Assoc [ "line", `Int line; "turn_ref", Ids.Turn_ref.to_yojson turn_ref ]) range_id.turns)
+    ]
+;;
+
+let official_range_id_of_json = function
+  | `Assoc fields ->
+    let* () = exact_field_names_result [ "receipt_scope"; "after_boundary_line"; "turns" ] fields in
+    let* receipt_scope = wire_string_field "receipt_scope" fields in
+    let* after_boundary_line = wire_int_field "after_boundary_line" fields in
+    let* turns = wire_list_field "turns" fields in
+    let* () =
+      if String.equal (String.trim receipt_scope) ""
+      then wire_fail [ Wire_field "receipt_scope" ] Blank_string
+      else if after_boundary_line < 0
+      then wire_fail [ Wire_field "after_boundary_line" ] Negative
+      else Ok ()
+    in
+    let rec parse previous index = function
+      | [] -> Ok []
+      | json :: rest ->
+        let* line, turn_ref =
+          wire_at (Wire_field "turns") (wire_at (Wire_index index)
+            (match json with
+             | `Assoc row ->
+               let* () = exact_field_names_result [ "line"; "turn_ref" ] row in
+               let* line = wire_int_field "line" row in
+               let* text = wire_string_field "turn_ref" row in
+               let* turn_ref =
+                 match Ids.Turn_ref.of_string text with
+                 | Some value -> Ok value
+                 | None -> wire_fail [ Wire_field "turn_ref" ] (Unknown_token text)
+               in
+               if line <= previous
+               then wire_fail [ Wire_field "line" ] Not_ascending
+               else Ok (line, turn_ref)
+             | _ -> wire_here Expected_object))
+        in
+        let+ rest = parse line (index + 1) rest in
+        (line, turn_ref) :: rest
+    in
+    let* turns =
+      match turns with
+      | [] -> wire_fail [ Wire_field "turns" ] Empty_list
+      | _ :: _ -> parse after_boundary_line 0 turns
+    in
+    Ok { receipt_scope; after_boundary_line; turns }
+  | _ -> wire_here Expected_object
+;;
+
+(* schema-compat: receipt identities now explicitly name their source kind.
+   This is a hard-cut codec; no reader accepts the previous atom-only shape. *)
+let consumed_range_to_json = function
+  | Atom_range range ->
+    `Assoc [ "kind", `String "atom"; "range", durable_range_id_to_json range ]
+  | Official_range range ->
+    `Assoc [ "kind", `String "official"; "range", official_range_id_to_json range ]
+;;
+
+let consumed_range_of_json = function
+  | `Assoc fields ->
+    let* () = exact_field_names_result [ "kind"; "range" ] fields in
+    let* kind = wire_string_field "kind" fields in
+    let* range = wire_json_field "range" fields in
+    (match kind with
+     | "atom" -> Result.map (fun range -> Atom_range range) (durable_range_id_of_json range)
+     | "official" -> Result.map (fun range -> Official_range range) (official_range_id_of_json range)
+     | token -> wire_fail [ Wire_field "kind" ] (Unknown_token token))
+  | _ -> wire_here Expected_object
+;;
+
 let durable_range_receipt_to_json = function
   | Prepared { range_id; snapshot_revision; snapshot_sha256 } ->
     `Assoc
       [ "state", `String "prepared"
-      ; "range_id", durable_range_id_to_json range_id
+      ; "range_id", consumed_range_to_json range_id
       ; "snapshot_revision", `Int snapshot_revision
       ; "snapshot_sha256", `String snapshot_sha256
       ]
   | Committed { range_id; snapshot_revision; snapshot_sha256 } ->
     `Assoc
       [ "state", `String "committed"
-      ; "range_id", durable_range_id_to_json range_id
+      ; "range_id", consumed_range_to_json range_id
       ; "snapshot_revision", `Int snapshot_revision
       ; "snapshot_sha256", `String snapshot_sha256
       ]
@@ -250,7 +331,7 @@ let durable_range_receipt_of_json = function
     let* range_id =
       wire_at
         (Wire_field "range_id")
-        (durable_range_id_of_json range_id_json)
+        (consumed_range_of_json range_id_json)
     in
     let* snapshot_revision = wire_int_field "snapshot_revision" fields in
     let* () =
@@ -349,13 +430,14 @@ let receipt_range_id = function
   | Prepared { range_id; _ } | Committed { range_id; _ } -> range_id
 ;;
 
+let range_key = function
+  | Atom_range range -> range.receipt_scope, `Atom
+  | Official_range range -> range.receipt_scope, `Official
+;;
+
 let upsert_durable_range_receipt receipts receipt =
-  let scope = (receipt_range_id receipt).receipt_scope in
-  receipt
-  :: List.filter
-       (fun prior ->
-          not (String.equal (receipt_range_id prior).receipt_scope scope))
-       receipts
+  let key = range_key (receipt_range_id receipt) in
+  receipt :: List.filter (fun prior -> range_key (receipt_range_id prior) <> key) receipts
 ;;
 
 let reconcile_durable_range_receipts
@@ -1394,12 +1476,21 @@ let update_locked_with_error
       ?dropped_statements
       ?before_replace
       ?durable_range_id
+      ?official_range_id
       ~store_error
       ~keepers_dir
       ~keeper_id
       ~now
       build
   =
+  let* () =
+    match official_range_id with
+    | None -> Ok ()
+    | Some range ->
+      official_range_id_of_json (official_range_id_to_json range)
+      |> Result.map (fun _ -> ())
+      |> Result.map_error (fun error -> store_error (wire_error_to_string error))
+  in
   let dropped_statements_are_valid =
     match dropped_statements with
     | None -> true
@@ -1509,24 +1600,23 @@ let update_locked_with_error
            | Some write -> write ~previous ~next
          in
          let snapshot_sha256 = sha256 content in
+         let ranges =
+           Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
+           @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
+         in
+         let receipts_for make =
+           List.fold_left (fun receipts range_id ->
+             upsert_durable_range_receipt receipts (make range_id)) durable_range_receipts ranges
+         in
          let* () =
-           match durable_range_id with
-           | None -> Ok ()
-           | Some range_id ->
-             write_durable_range_receipts
-               ~keepers_dir
-               ~keeper_id
-               (upsert_durable_range_receipt
-                  durable_range_receipts
-                  (Prepared
-                     { range_id
-                     ; snapshot_revision = next.revision
-                     ; snapshot_sha256
-                     }))
+           match ranges with
+           | [] -> Ok ()
+           | _ :: _ ->
+             write_durable_range_receipts ~keepers_dir ~keeper_id
+               (receipts_for (fun range_id ->
+                  Prepared { range_id; snapshot_revision = next.revision; snapshot_sha256 }))
              |> Result.map_error store_error
          in
-         (* schema-compat: Snapshot, journal and range-receipt codecs above are
-            unchanged; this adds a process-local observer to commit effects. *)
          (* Locks and preparation remain cancellable. Once replacement starts,
             retain its result and publish commit evidence before cancellation
             can interrupt the journal/receipt writes for this snapshot. *)
@@ -1541,27 +1631,17 @@ let update_locked_with_error
                };
              Option.iter (fun observe -> observe next) on_committed;
              append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
-             (match durable_range_id with
-              | None -> ()
-              | Some range_id ->
-                (match
-                   write_durable_range_receipts
-                     ~keepers_dir
-                     ~keeper_id
-                     (upsert_durable_range_receipt
-                        durable_range_receipts
-                        (Committed
-                           { range_id
-                           ; snapshot_revision = next.revision
-                           ; snapshot_sha256
-                           }))
+             (match ranges with
+              | [] -> ()
+              | _ :: _ ->
+                (match write_durable_range_receipts ~keepers_dir ~keeper_id
+                   (receipts_for (fun range_id ->
+                      Committed { range_id; snapshot_revision = next.revision; snapshot_sha256 }))
                  with
                  | Ok () -> ()
                  | Error detail ->
-                   Log.Keeper.warn
-                     ~keeper_name:keeper_id
-                     "%s; prepared receipt remains recoverable"
-                     detail));
+                   Log.Keeper.warn ~keeper_name:keeper_id
+                     "%s; prepared receipt remains recoverable" detail));
              List.iter
                (fun invalidation ->
                   Log.Keeper.info
@@ -1601,6 +1681,7 @@ let update_locked
       ?dropped_statements
       ?before_replace
       ?durable_range_id
+      ?official_range_id
       ~keepers_dir
       ~keeper_id
       ~now
@@ -1612,6 +1693,7 @@ let update_locked
     ?dropped_statements
     ?before_replace
     ?durable_range_id
+    ?official_range_id
     ~store_error:Fun.id
     ~keepers_dir
     ~keeper_id
@@ -1619,7 +1701,7 @@ let update_locked
     build
 ;;
 
-let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
+let committed_range ~keepers_dir ~keeper_id select =
   try
     Fs_compat.mkdir_p keepers_dir;
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -1641,10 +1723,8 @@ let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
         Ok
           (List.find_map
              (function
-               | Committed { range_id; _ }
-                 when String.equal range_id.receipt_scope receipt_scope ->
-                 Some range_id
-               | Committed _ | Prepared _ -> None)
+               | Committed { range_id; _ } -> select range_id
+               | Prepared _ -> None)
              receipts)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1654,6 +1734,18 @@ let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
          "durable Librarian range receipt check failed keeper=%s: %s"
          keeper_id
          (Printexc.to_string exn))
+;;
+
+let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
+  committed_range ~keepers_dir ~keeper_id (function
+    | Atom_range range when String.equal range.receipt_scope receipt_scope -> Some range
+    | Atom_range _ | Official_range _ -> None)
+;;
+
+let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
+  committed_range ~keepers_dir ~keeper_id (function
+    | Official_range range when String.equal range.receipt_scope receipt_scope -> Some range
+    | Atom_range _ | Official_range _ -> None)
 ;;
 
 let make_snapshot_from_maintained
@@ -1717,6 +1809,7 @@ let apply_disposition
       ?clock
       ?dropped_statements
       ?durable_range_id
+      ?official_range_id
       ~absorbed
       ~keepers_dir
       ~keeper_id
@@ -1777,6 +1870,7 @@ let apply_disposition
     ?clock
     ?dropped_statements
     ?durable_range_id
+    ?official_range_id
     ~before_replace:write_absorbed_rows
     ~keepers_dir
     ~keeper_id

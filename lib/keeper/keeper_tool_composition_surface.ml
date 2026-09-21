@@ -412,9 +412,12 @@ let observe_node_result
             (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation) )
       ; "turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
       ; "execution_id", Ids.Execution_id.to_yojson result.execution_id
-      ; "success", `Bool (Tool_result.is_success observed_result)
       ; "duration_ms", `Float (Tool_result.duration_ms observed_result)
       ; "disposition", `String (Tool_result.string_of_disposition observed_result)
+      ; ( "wire_outcome"
+        , `String
+            (Tool_result.string_of_tool_call_outcome
+               (wire_outcome_of_result observed_result)) )
       ; "result_bytes", `Int result.result_bytes
       ; "truncated_to", Json_util.int_opt_to_json result.truncated_to
       ; "planned_index", `Int schedule.planned_index

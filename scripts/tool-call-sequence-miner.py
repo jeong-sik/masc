@@ -123,11 +123,6 @@ class NgramAggregate:
     occurrences: list[tuple[tuple[str, str, int], tuple[Call, ...]]] | None = None
 
 
-@dataclass(slots=True)
-class EvidenceBudget:
-    remaining: int
-
-
 LoadedCall = Call | CompactCall
 
 
@@ -425,7 +420,7 @@ def _ngram_report(
     size: int,
     *,
     evidence_sequences: frozenset[tuple[str, ...]],
-    evidence_budget: EvidenceBudget | None,
+    evidence_limit: int | None,
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, ...], NgramAggregate] = {}
     for turn_key in sorted(turns):
@@ -460,13 +455,10 @@ def _ngram_report(
                     raise AssertionError(
                         "evidence report requires full call identities"
                     )
-                if evidence_budget is None:
-                    raise AssertionError(
-                        "targeted evidence requires an explicit budget"
-                    )
-                if evidence_budget.remaining > 0:
+                if evidence_limit is None:
+                    raise AssertionError("targeted evidence requires an explicit limit")
+                if len(aggregate.occurrences) < evidence_limit:
                     aggregate.occurrences.append((turn_key, full_occurrence))
-                    evidence_budget.remaining -= 1
 
     report = []
     for tools in sorted(grouped):
@@ -618,29 +610,24 @@ def analyze(
                 call.source.line if isinstance(call, Call) else call.source_line,
             )
         )
-    evidence_budget = (
-        EvidenceBudget(remaining=evidence_limit) if evidence_limit is not None else None
-    )
     pairs = _ngram_report(
         turns,
         2,
         evidence_sequences=evidence_sequences,
-        evidence_budget=evidence_budget,
+        evidence_limit=evidence_limit,
     )
     triplets = _ngram_report(
         turns,
         3,
         evidence_sequences=evidence_sequences,
-        evidence_budget=evidence_budget,
-    )
-    evidence_included = (
-        evidence_limit - evidence_budget.remaining
-        if evidence_limit is not None and evidence_budget is not None
-        else 0
+        evidence_limit=evidence_limit,
     )
     evidence_items = [
         item for item in pairs + triplets if tuple(item["tools"]) in evidence_sequences
     ]
+    evidence_included = sum(
+        item.get("evidence_included_count", 0) for item in evidence_items
+    )
     evidence_omitted = sum(
         item.get("evidence_omitted_count", 0) for item in evidence_items
     )
@@ -679,6 +666,7 @@ def analyze(
                 list(sequence) for sequence in sorted(evidence_sequences)
             ],
             "limit": evidence_limit,
+            "limit_scope": "per_target_sequence",
             "included_occurrences": evidence_included,
             "omitted_occurrences": evidence_omitted,
             "omitted": [
@@ -724,7 +712,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--evidence-limit",
         type=int,
-        help="maximum total occurrences retained for requested evidence sequences",
+        help="maximum occurrences retained for each requested evidence sequence",
     )
     return parser
 

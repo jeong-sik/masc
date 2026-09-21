@@ -439,7 +439,7 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
                 1,
             )
 
-    def test_targeted_evidence_uses_one_explicit_global_limit(self) -> None:
+    def test_targeted_evidence_applies_the_limit_per_sequence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             write_rows(
@@ -447,23 +447,34 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
                 [
                     fixture_call("a", 1.0),
                     fixture_call("b", 2.0),
-                    fixture_call("a", 3.0),
-                    fixture_call("b", 4.0),
+                    fixture_call("c", 3.0),
+                    fixture_call("d", 4.0),
                 ],
             )
 
             report = MINER.analyze(
                 root,
-                evidence_sequences=frozenset({("a", "b")}),
+                evidence_sequences=frozenset({("a", "b"), ("c", "d"), ("a", "b", "c")}),
                 evidence_limit=1,
             )
-            pair = next(item for item in report["pairs"] if item["tools"] == ["a", "b"])
+            evidence_items = {
+                tuple(item["tools"]): item
+                for item in report["pairs"] + report["triplets"]
+                if "occurrences" in item
+            }
 
-            self.assertEqual(pair["occurrence_count"], 2)
-            self.assertEqual(pair["evidence_included_count"], 1)
-            self.assertEqual(pair["evidence_omitted_count"], 1)
-            self.assertEqual(report["evidence"]["included_occurrences"], 1)
-            self.assertEqual(report["evidence"]["omitted_occurrences"], 1)
+            self.assertEqual(
+                set(evidence_items), {("a", "b"), ("c", "d"), ("a", "b", "c")}
+            )
+            self.assertTrue(
+                all(
+                    item["evidence_included_count"] == 1
+                    for item in evidence_items.values()
+                )
+            )
+            self.assertEqual(report["evidence"]["limit_scope"], "per_target_sequence")
+            self.assertEqual(report["evidence"]["included_occurrences"], 3)
+            self.assertEqual(report["evidence"]["omitted_occurrences"], 0)
 
     def test_malformed_row_fails_closed_with_source_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

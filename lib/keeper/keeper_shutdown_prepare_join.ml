@@ -464,29 +464,10 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
            | Keeper_lane.Shutdown_cancel_failed _
            | Keeper_lane.Cancelled_by_parent _
            | Keeper_lane.Failed _ -> ());
-          let memory_join_error =
-            match
-              Keeper_memory_lane.drain_and_join_librarian
-                ~base_path:config.Workspace.base_path
-                ~keeper_name:current.name
-            with
-            | Ok Keeper_memory_lane.No_librarian_work
-            | Ok Keeper_memory_lane.Librarian_drained -> None
-            | Error error ->
-              Some (Keeper_memory_lane.librarian_drain_error_to_string error)
-          in
-          let cleanup_error =
-            match lane_exit.cleanup_error, memory_join_error with
-            | None, None -> None
-            | Some detail, None | None, Some detail -> Some detail
-            | Some lane_detail, Some memory_detail ->
-              Some
-                (Printf.sprintf
-                   "lane cleanup failed: %s; Librarian join failed: %s"
-                   lane_detail
-                   memory_detail)
-          in
-          (match cleanup_error with
+          (* The Librarian lane is not joined here: it is the server's, not
+             this Keeper's, and a unit still running reads from disk and
+             commits on its own (RFC librarian-lifecycle section 4.3, I7). *)
+          (match lane_exit.cleanup_error with
            | Some detail -> join_error ~config operation detail
            | None ->
           let terminal_result = Eio.Promise.await current.done_p in

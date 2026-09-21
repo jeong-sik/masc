@@ -8,6 +8,8 @@ let unavailable_runtime_json =
     ; "default_runtime", `Null
     ; "runtimes", `List []
     ; "lanes", `List []
+    ; "media_failover", `List []
+    ; "media_failover_declared", `List []
     ; ( "assignments"
       , `List
           [ `Assoc

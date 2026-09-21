@@ -32,8 +32,10 @@ let turn_boundary_position ~checkpoint_owner saved_checkpoint =
 let record_turn_boundary
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~turn
+      ~turn_ref
+      ~session
       ~checkpoint_owner
+      ~tool_observations
       ~history_at_start
       ~restart_notice_pending
       saved_checkpoint
@@ -42,7 +44,7 @@ let record_turn_boundary
     Log.Keeper.error
       ~keeper_name:meta.name
       "turn boundary not recorded turn=%d: %s"
-      turn
+      (Ids.Turn_ref.absolute_turn turn_ref)
       detail;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string TurnBoundaryFailures)
@@ -50,6 +52,19 @@ let record_turn_boundary
       ()
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  (* This function owns the durable commit order for a finished turn. Keeping
+     the observations here makes it impossible to move them below the turn's
+     end line without changing this function. *)
+  List.iter
+    (fun (detail : Keeper_agent_result.tool_call_detail) ->
+       Keeper_context_runtime.persist_tool_observation
+         ~keeper_name:meta.name
+         ~turn_ref
+         session
+         ~tool_name:
+           (Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
+         ~outcome:detail.execution_outcome)
+    tool_observations;
   (* Outside the position below, and before the line that ends the turn.
      Before, because a reader takes a restart that follows a line as proof
      that the line's history is gone and would drop this turn's own atoms.
@@ -74,11 +89,7 @@ let record_turn_boundary
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
       ; event =
-          Keeper_turn_boundaries.Turn_ended
-            { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-            ; history_at_start
-            ; position
-            }
+          Keeper_turn_boundaries.Turn_ended { turn_ref; history_at_start; position }
       }
     in
     (match
@@ -175,22 +186,27 @@ let finalize
   in
   let ( let* ) = Result.bind in
   receipt_response_text_present_ref := raw_response_text_present;
-  let assistant_msg =
+  let turn_ref =
+    Ids.Turn_ref.make
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~absolute_turn:manifest_keeper_turn_id
+  in
+  (* The assistant's line is this turn's record of what it said; the durable
+     consumer reads it back by [turn_ref], so nothing here keeps it. *)
+  let (_ : unit option) =
     Keeper_replay_checkpoint.consume_replay_response
       ~suppress_visible_response
       ~response_text
       ~consume:(fun ~response_text ->
-        let assistant_msg =
-          Agent_core.Types.make_message
-           ~role:Agent_core.Types.Assistant
-           [ Agent_core.Types.Text response_text ]
-        in
         Keeper_context_runtime.persist_message
+          ~keeper_name:meta.name
+          ~turn_ref
           ~source:history_assistant_source
           session
-          assistant_msg;
-        capture_replay_response ~response_text;
-        assistant_msg)
+          (Agent_core.Types.make_message
+             ~role:Agent_core.Types.Assistant
+             [ Agent_core.Types.Text response_text ]);
+        capture_replay_response ~response_text)
   in
   let save_agent_core_checkpoint result_checkpoint =
     let checkpoint, source_already_persisted =
@@ -332,43 +348,24 @@ let finalize
     record_turn_boundary
       ~config
       ~meta
-      ~turn:manifest_keeper_turn_id
+      ~turn_ref
+      ~session
       ~checkpoint_owner
+      ~tool_observations:
+        (match checkpoint_owner with
+         | Runtime_execution.Official_client -> List.rev acc.tool_calls
+         | Runtime_execution.Masc_agent_core -> [])
       ~history_at_start
       ~restart_notice_pending
       saved_checkpoint;
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)
-    let librarian_messages =
-      match saved_checkpoint with
-      | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
-      | None -> Option.to_list assistant_msg
-    in
-    let librarian_tool_observations =
-      acc.tool_calls
-      |> List.rev
-      |> List.map (fun (detail : Keeper_agent_result.tool_call_detail) ->
-        ({ tool_name =
-             Keeper_tool_descriptor_resolution.canonical_tool_name
-               detail.tool_name
-         ; outcome =
-             (match detail.execution_outcome with
-              | Tool_result.Ok -> Keeper_librarian.Succeeded
-              | Tool_result.Error -> Keeper_librarian.Failed
-              | Tool_result.Unknown -> Keeper_librarian.Unknown)
-         }
-          : Keeper_librarian.tool_observation))
-    in
-    (* Capture the immutable post-tool snapshot: this turn may have claimed,
-       switched, or released its task after admission. *)
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta:acc.meta
       ~turn:manifest_keeper_turn_id
       ~agent_core_turn_count:result.turns
-      ~tool_observations:librarian_tool_observations
-      ~librarian_messages
       ~checkpoint_owner
       ~post_turn_t0
       ~inference_telemetry:result.response.telemetry

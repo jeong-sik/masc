@@ -1071,3 +1071,18 @@ describe('declaration-only roster', () => {
     expect(keeper.lifecycle_phase).toBe('Offline')
   })
 })
+
+
+describe('official-client local claim refusal', () => {
+  it('retains the typed blocker and recovery identity, then accepts a clear update', () => {
+    const summary = 'Local claim refused for runtime synthetic; recovery synthetic-recovery (effect_fenced).'
+    const [failed] = normalizeKeepers([{ name: 'synthetic', status: 'active',
+      runtime_blocker_class: 'official_client_recovery_required', runtime_blocker_summary: summary }])
+    expect(failed?.runtime_blocker_class).toBe('official_client_recovery_required')
+    expect(failed?.runtime_blocker_summary).toBe(summary)
+    const [cleared] = normalizeKeepers([{ name: 'synthetic', status: 'active',
+      runtime_blocker_class: null, runtime_blocker_summary: null }])
+    expect(cleared?.runtime_blocker_class).toBeNull()
+    expect(cleared?.runtime_blocker_summary).toBeNull()
+  })
+})

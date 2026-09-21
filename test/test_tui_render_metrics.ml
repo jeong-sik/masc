@@ -35,7 +35,15 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_added = facts
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
-  ; mkh_librarian_lane_busy = 0
+  ; mkh_librarian =
+      { Decode.mlh_state = Some "drained"
+      ; mlh_detail = None
+      ; mlh_measured_at = Some 1_775_000_000.0
+      ; mlh_unread_atom_turns = Some 0
+      ; mlh_unread_official_turns = Some 0
+      ; mlh_last_success_at = None
+      ; mlh_last_failure_kind = None
+      }
   ; mkh_librarian_failures = 0
   ; mkh_vision_ingest_errors = 0
   ; mkh_vision_ingest_error_reasons = []
@@ -62,6 +70,7 @@ let make_memory_health ~total_facts ~source_facts ~keepers : Decode.memory_healt
   ; mhs_total_source_invalidations = 0
   ; mhs_total_source_snapshot_bytes = 1024
   ; mhs_total_librarian_failures = 0
+  ; mhs_total_librarian_unread_turns = Some 0
   ; mhs_total_vision_ingest_errors = 0
   ; mhs_total_read_errors = 0
   ; mhs_total_source_read_errors = 0

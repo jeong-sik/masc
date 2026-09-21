@@ -112,6 +112,89 @@ attribute_failures() {
   ' "$1"
 }
 
+# The ledger of suites that left output in the log, in the order dune ran
+# them: a test/*.exe or test/*.py command line, then its first output line.
+# Other Dune actions (generators, compilers, linkers) terminate the preceding
+# entry but never become a suite entry themselves.
+# Dune holds a suite's output until the suite exits, so a log ends with the
+# last suite that finished -- and when dune exits nonzero without printing
+# a failure header, no header reader has anything to resolve and this
+# ledger is the only record of which suites spoke and what they claimed.
+# Run 35545965998 (2026-09-20) is the shape that cost a day: two PASS
+# lines and a BrokenPipe traceback survived in the tail, the failing
+# suite's block was cut off, and the full dune log was not uploaded. A
+# PASS line here is the suite's own verdict, not dune's exit code; a suite
+# that printed nothing (a compile error, a rule that never ran) has no
+# line here and stays the header reader's business.
+suite_output_ledger() {
+  awk '
+    function is_suite_command(line) {
+      if (line !~ /^\(cd _build\/[^ ]*\/test(\/[^ ]*)? && /) return 0
+      return line ~ /&& ([^ ]*\/)?test_[^ )]+\.exe([ )]|$)/ \
+          || line ~ /&& ([^ ]*\/)?python[0-9.]* +\.\/test_[^ )]+\.py([ )]|$)/
+    }
+    /^\(cd _build\// {
+      if (cmd != "") printf "%s\t%s\n", cmd, (first == "" ? "(no output before the log ends)" : first)
+      cmd = ""
+      first = ""
+      if (is_suite_command($0)) {
+        cmd = $0; sub(/^\(cd /, "", cmd); sub(/\)$/, "", cmd)
+      }
+      next
+    }
+    cmd != "" && first == "" && $0 !~ /^-+$/ { first = $0 }
+    END { if (cmd != "") printf "%s\t%s\n", cmd, (first == "" ? "(no output before the log ends)" : first) }
+  ' "$1"
+}
+
+full_log_evidence() {
+  local source_log="$1"
+  if [ -n "${MASC_TEST_SUITE_LOG_ARTIFACT:-}" ]; then
+    echo "[test-suite] the full dune log is uploaded as the ${MASC_TEST_SUITE_LOG_ARTIFACT} artifact."
+  else
+    echo "[test-suite] the full dune log is at ${source_log} on the runner;" \
+         "the workflow does not upload that file."
+  fi
+}
+
+workflow_step_block() {
+  local step_name="$1"
+  local workflow="$2"
+  awk -v heading="      - name: ${step_name}" '
+    $0 == heading { printing = 1 }
+    printing && $0 != heading && $0 ~ /^      - name: / { exit }
+    printing { print }
+  ' "$workflow"
+}
+
+workflow_log_artifact_contract() {
+  local workflow=".github/workflows/test.yml"
+  local test_step
+  local upload_step
+  # The GitHub expression is the literal workflow text this contract checks.
+  # shellcheck disable=SC2016
+  local artifact_path='path: ${{ runner.temp }}/test-suite.log'
+  if [ ! -f "$workflow" ]; then
+    echo "[test-suite] self-test FAIL - $workflow is missing" >&2
+    return 1
+  fi
+  test_step="$(workflow_step_block "Test" "$workflow")"
+  upload_step="$(workflow_step_block "Upload the full Dune suite log" "$workflow")"
+  if ! printf '%s\n' "$test_step" \
+       | grep -Fq 'MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log'; then
+    echo "[test-suite] self-test FAIL - Test does not name the full-log artifact" >&2
+    return 1
+  fi
+  if [ -z "$upload_step" ] \
+     || ! printf '%s\n' "$upload_step" | grep -Fq 'if: always()' \
+     || ! printf '%s\n' "$upload_step" | grep -Eq 'uses: actions/upload-artifact@v[0-9]+' \
+     || ! printf '%s\n' "$upload_step" | grep -Fq 'name: test-suite-log' \
+     || ! printf '%s\n' "$upload_step" | grep -Fq "$artifact_path"; then
+    echo "[test-suite] self-test FAIL - the full-log upload step is absent or incomplete" >&2
+    return 1
+  fi
+}
+
 extract_failed_names() {
   attribute_failures "$1" | awk -F'\t' '$2 == "failure" && $1 != "-" { print $1 }'
 }
@@ -270,6 +353,9 @@ print_alcotest_outputs() {
 }
 
 self_test() {
+  workflow_log_artifact_contract || exit 1
+  echo "[test-suite] self-test OK - the full-log artifact name and upload step land together"
+
   local exact_block
   local longer_block
   fixture_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-self-test.XXXXXX")"
@@ -446,6 +532,55 @@ EOF
 
   rm -f "$gap_log" "$gap_tsv"
   echo "[test-suite] self-test OK - a header that names no suite is counted, a warning is not"
+
+  # The ledger is what a headerless red has instead of a name: the command
+  # dune printed, then the suite's first output line, in run order. The
+  # shape is run 35545965998's: a BrokenPipe traceback between two suites,
+  # a PASS line that is the suite's own claim, and a suite whose output
+  # never arrived before the log ends.
+  ledger_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-ledger.XXXXXX")"
+  cat > "$ledger_log" <<'EOF'
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keeper_current_failure_pty.py ../bin/masc_tui.exe)
+keeper current failure: PASS
+(cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+generated sse_event.ml
+(cd _build/default/test && ./test_keeper_projection_change.exe)
+keeper projection change: PASS
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe)
+tui keyboard PTY regression: PASS
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 38410)
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+(cd _build/default/test && /usr/bin/python3 ./test_tui_lane_pagination.py ../bin/masc_tui.exe)
+EOF
+  ledger="$(suite_output_ledger "$ledger_log" | paste -sd ';' - | tr '\t' '|')"
+  [ "$ledger" = "_build/default/test && /usr/bin/python3 ./test_tui_keeper_current_failure_pty.py ../bin/masc_tui.exe|keeper current failure: PASS;_build/default/test && ./test_keeper_projection_change.exe|keeper projection change: PASS;_build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe|tui keyboard PTY regression: PASS;_build/default/test && /usr/bin/python3 ./test_tui_lane_pagination.py ../bin/masc_tui.exe|(no output before the log ends)" ] \
+    || { echo "[test-suite] self-test FAIL - the output ledger misread the run: $ledger" >&2
+         rm -f "$ledger_log"; exit 1; }
+  rm -f "$ledger_log"
+  echo "[test-suite] self-test OK - the output ledger names test suites, not build actions"
+
+  ledger_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-empty-ledger.XXXXXX")"
+  cat > "$ledger_log" <<'EOF'
+[test-suite] FAIL - dune exited 1 and printed no failure header
+Traceback (most recent call last):
+  File "test/test_tui_keyboard_input.py", line 10, in handle
+BrokenPipeError: [Errno 32] Broken pipe
+EOF
+  [ -z "$(suite_output_ledger "$ledger_log")" ] \
+    || { echo "[test-suite] self-test FAIL - a log without a suite command produced a ledger" >&2
+         rm -f "$ledger_log"; exit 1; }
+  missing="$(MASC_TEST_SUITE_LOG_ARTIFACT='' full_log_evidence "$ledger_log")"
+  printf '%s\n' "$missing" | grep -Fq 'the workflow does not upload that file' \
+    || { echo "[test-suite] self-test FAIL - a missing full-log artifact is not reported" >&2
+         rm -f "$ledger_log"; exit 1; }
+  uploaded="$(MASC_TEST_SUITE_LOG_ARTIFACT=test-suite-log full_log_evidence "$ledger_log")"
+  printf '%s\n' "$uploaded" | grep -Fq 'uploaded as the test-suite-log artifact' \
+    || { echo "[test-suite] self-test FAIL - the configured artifact name is not reported" >&2
+         rm -f "$ledger_log"; exit 1; }
+  rm -f "$ledger_log"
+  echo "[test-suite] self-test OK - an empty ledger is distinct from full-log artifact availability"
 
   # What the deadline snapshot reads from process rows: a dune-run suite, a
   # python rule and a server binary a suite spawned; not a shell.
@@ -663,6 +798,22 @@ awk -F'\t' '$2 == "warning" { print "[test-suite] dune warning, not a failure: "
 # a suite is what makes an unexplained red look like a green.
 if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
   echo "[test-suite] FAIL - dune exited ${rc} and printed no failure header"
+  echo
+  echo "[test-suite] suites that left output in the log (command, first output line; in run order):"
+  ledger="$(suite_output_ledger "$log")"
+  if [ -n "$ledger" ]; then
+    printf '%s\n' "$ledger" | sed 's/^/  /'
+  else
+    echo "  (none: the full dune log contains no test-suite command; dune did not"
+    echo "  print one before exit, or its command format changed)"
+  fi
+  echo
+  echo "[test-suite] a PASS line above is that suite's own verdict, not dune's exit code:" \
+       "dune exited ${rc} somewhere this log does not name."
+  # The self-test checks that the workflow's artifact name and upload step
+  # land together. #37529 remains open until a real failed run proves both
+  # this receipt and the artifact exist outside the runner.
+  full_log_evidence "$log"
   echo
   tail -60 "$log"
   exit 2

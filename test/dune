@@ -5179,6 +5179,8 @@
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
+(include stanzas/test_keeper_context_core_history.inc)
+(include stanzas/test_keeper_turn_fragments.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
@@ -6584,6 +6586,8 @@
  (name test_tui_fork_guard)
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
+
+(include stanzas/test_official_client_claim_cause.inc)
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 

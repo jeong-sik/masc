@@ -210,6 +210,7 @@ describe('keeperRuntimeBlockerLabel', () => {
       '런타임 호출 오류',
     )
     expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
+    expect(keeperRuntimeBlockerLabel('official_client_recovery_required')).toBe('공식 클라이언트 세션 복구 필요')
   })
 
   it('labels the active agent-core blocker variants', () => {

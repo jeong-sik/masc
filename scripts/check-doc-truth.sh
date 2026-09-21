@@ -30,6 +30,20 @@ fail() {
   exit 1
 }
 
+# rg exits 1 when it finds nothing, which is a normal outcome for these scans;
+# exit 2 means the scan itself broke (bad regex, unreadable path). `|| true`
+# would erase both and let a broken scan report success, so tolerate only 1.
+# The result lands in RG_OUT: callers must not pipe this function, or `fail`
+# would end only the pipeline's subshell instead of the script.
+RG_OUT=""
+rg_or_empty() {
+  local pattern="$1"
+  shift
+  local status=0
+  RG_OUT="$(rg -o "$pattern" "$@")" || status=$?
+  ((status <= 1)) || fail "rg exited $status scanning $*"
+}
+
 require_contains() {
   local file="$1"
   local needle="$2"
@@ -222,7 +236,8 @@ require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
 # form is intentionally outside the INV-SUBSYSTEM-NNN census and is documented
 # beside the table.
 declared_prefixes="$(sed -nE 's/^\| `(INV-[A-Z]+)` \|.*$/\1/p' docs/spec/SPEC-INDEX.md | sort -u)"
-used_prefixes="$(rg -o --no-filename 'INV-[A-Z]+-[0-9]+' docs/spec -g '*.md' -g '!SPEC-INDEX.md' | sed -E 's/-[0-9]+$//' | sort -u)"
+rg_or_empty 'INV-[A-Z]+-[0-9]+' --no-filename docs/spec -g '*.md' -g '!SPEC-INDEX.md'
+used_prefixes="$(printf '%s\n' "$RG_OUT" | sed -E 's/-[0-9]+$//' | sort -u)"
 # The census counts every ID that appears anywhere in a spec file, including
 # prose, code blocks and quotes, not only the ones a spec declares. Today the
 # two sets coincide; if this guard goes red unexpectedly, look first at a
@@ -233,6 +248,9 @@ if [[ "$declared_prefixes" != "$used_prefixes" ]]; then
   fail "SPEC-INDEX invariant-prefix table drifted from docs/spec usage"
 fi
 
+# Every local path these docs name must still exist. The glossary is here
+# because its `→` coordinates are the term-to-code SSOT: when a file is
+# renamed, the entry keeps pointing at the old path and reads as current.
 docs_to_scan=(
   README.md
   README.ko.md
@@ -241,6 +259,7 @@ docs_to_scan=(
   docs/MCP-TEMPLATE.md
   docs/TUI-GUIDE.md
   docs/spec/SPEC-INDEX.md
+  docs/spec/00-glossary.md
   docs/spec/01-system-overview.md
   docs/spec/09-server-transport.md
   docs/spec/10-dashboard.md
@@ -250,17 +269,16 @@ docs_to_scan=(
 
 missing_refs=()
 for file in "${docs_to_scan[@]}"; do
+  rg_or_empty '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file"
+  links="$(printf '%s\n' "$RG_OUT" | sed 's/^('// | sed 's/)$//')"
+  rg_or_empty '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
+  refs="$(printf '%s\n%s\n' "$links" "$RG_OUT" | sort -u)"
   while IFS= read -r ref; do
     [[ -n "$ref" ]] || continue
     [[ "$ref" == *"*"* ]] && continue
     [[ "$ref" == *"..."* ]] && continue
     [[ -e "$ref" ]] || missing_refs+=("$file -> $ref")
-  done < <(
-    {
-      rg -o '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file" | sed 's/^('// | sed 's/)$//'
-      rg -o '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
-    } | sort -u
-  )
+  done <<< "$refs"
 done
 
 if ((${#missing_refs[@]} > 0)); then

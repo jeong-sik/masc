@@ -457,38 +457,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               "%s: supervisor restart deferred because crashed lane disappeared"
               old_entry.name
           | Error
-              (Keeper_keepalive_launch_transaction.Lifecycle_open_failed
-                 { error; rollback_error }) ->
-            Log.Keeper.warn
-              "%s: supervisor restart deferred until Librarian owner exits: %s%s"
-              old_entry.name
-              (Keeper_memory_lane.lifecycle_open_error_to_string error)
-              (match rollback_error with
-               | None -> ""
-               | Some detail -> "; rollback failed: " ^ detail);
-            ignore
-              (Keeper_memory_lane.abort_librarian
-                 ~base_path
-                 ~keeper_name:old_entry.name
-                : (Keeper_memory_lane.librarian_abort_outcome,
-                   Keeper_memory_lane.librarian_abort_error)
-                    result);
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string RestartOutcomes)
-              ~labels:[ "keeper", old_entry.name; "outcome", "librarian_deferred" ]
-              ()
-          | Error
               (Keeper_keepalive_launch_transaction.Launch_failed
-                 { exception_detail; librarian_abort_error; rollback_error }) ->
+                 { exception_detail; rollback_error }) ->
             let cleanup_detail label = function
               | None -> ""
               | Some detail -> "; " ^ label ^ " failed: " ^ detail
             in
             Log.Keeper.error
-              "%s: supervisor restart launch callback failed: %s%s%s"
+              "%s: supervisor restart launch callback failed: %s%s"
               old_entry.name
               exception_detail
-              (cleanup_detail "Librarian abort" librarian_abort_error)
               (cleanup_detail "registry rollback" rollback_error);
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartOutcomes)

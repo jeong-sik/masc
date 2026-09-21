@@ -122,6 +122,7 @@ type outward_effect =
 
 type exact_execution_error =
   { outward_effect : outward_effect
+  ; capacity_refused : bool
   ; detail : string
   }
 
@@ -197,7 +198,7 @@ let rec extraction_error_to_string = function
   | Execution_clock_unavailable ->
     "memory os librarian execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
-  | Exact_execution_failed { outward_effect; detail } ->
+  | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
       "librarian exact execution failed outward_effect=%s cause=%s"
       (match outward_effect with
@@ -267,8 +268,11 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
-let resolve_librarian_prompt input =
+let resolve_librarian_prompt ?continuity input =
   let variables = Keeper_librarian.prompt_variables input in
+  let variables = match continuity with None -> variables | Some prepared ->
+    ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
+    :: List.remove_assoc "continuity" variables in
   ( variables
   , Result.map
       (fun (resolution, rendered) -> { resolution; rendered })
@@ -439,6 +443,31 @@ let prepare_attempt ~selected_slots messages =
       Exact_setup_failed (Exact_flow_start_failed error))
 ;;
 
+let capacity_refused_by_flow = function
+  | Exact_output.Flow_candidates_exhausted { rejection; _ } ->
+    (match Exact_output.candidate_rejection_disposition rejection with
+     | Input_capacity (Context_window_exceeded _
+         | Token_capacity_rejected (Capacity_input_rejected _)) -> true
+     | _ -> false)
+  | Exact_output.Flow_exact_execution_failed { cause; _ } ->
+    (match cause.Exact_output.cause with
+     | Provider_response_refused
+         { refusal = Request_body_refused | Context_overflow | Input_capacity; _ } -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let extraction_capacity_refused = function
+  | Exact_execution_failed error -> error.capacity_refused
+  | Cli_slots_exhausted { failures; _ } ->
+    (match List.rev failures with
+     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity_refused final
+     | [] -> false)
+  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Cli_prompt_unavailable _ | No_transport_declared
+  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> false
+;;
+
 let exact_execution_error error =
   let outward_effect =
     match Exact_output.flow_execution_error_generation_dispatch error with
@@ -446,7 +475,7 @@ let exact_execution_error error =
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
   let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
-  { outward_effect; detail }
+  { outward_effect; detail; capacity_refused = capacity_refused_by_flow error }
 ;;
 
 (* The librarian's whole prompt is one User message; the cli one-shot needs
@@ -795,11 +824,23 @@ let input_for_projection projection input =
   | Already_selected_range -> input
 ;;
 
+let commit_continuity ~commit ~observe =
+  (* The executor job has its own cancellation scope. Keep its caller alive
+     until all disk effects and their observation finish; shutdown/purge must
+     not run past a detached writer after cancellation of the await. *)
+  Eio.Cancel.protect (fun () ->
+    observe (Domain_pool_ref.submit_io_or_inline commit));
+  Eio.Fiber.check ()
+;;
+
 let run_best_effort
       ?(trigger = Conversation_completed)
       ?(input_projection = Recent_window)
       ?(write_scope = Context_and_memory)
+      ?continuity
       ?(on_memory_committed = fun () -> ())
+      ?(on_capacity_refused = fun () -> ())
+      ?(on_continuity_committed = fun _ -> ())
       ?durable_range_id
       ?official_range_id
       ?cli_runner
@@ -829,7 +870,7 @@ let run_best_effort
         in
         let prompt_input = input_for_projection input_projection inp in
         let prompt_variables, prompt_material =
-          resolve_librarian_prompt prompt_input
+          resolve_librarian_prompt ?continuity prompt_input
         in
         Exact_lane_run_registry.register_running
           registry
@@ -847,7 +888,11 @@ let run_best_effort
                   ]));
         let observed_context_review = ref None in
         let context_write = ref Not_attempted in
+        let continuity_write = ref (`Assoc ["status", `String "not_attempted"]) in
         let complete ?selected_slot outcome output =
+          let output = match continuity, output with
+            | Some _, `Assoc fields -> `Assoc (("continuity_write", !continuity_write) :: fields)
+            | _ -> output in
           let output = match !observed_context_review, output with
             | None, _ -> output
             | Some review, `Assoc fields ->
@@ -956,8 +1001,31 @@ let run_best_effort
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
+             let publish_continuity () =
+               match continuity, selection.working_state with
+              | None, _ -> ()
+              | Some _, None -> continuity_write := `Assoc ["status", `String "not_provided"]
+              | Some prepared, Some working_state ->
+                continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
+                commit_continuity
+                  ~commit:(fun () ->
+                   Keeper_librarian_continuity.commit
+                     ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
+                     ~prepared ~working_state)
+                  ~observe:(function
+                 | Ok snapshot ->
+                   continuity_write := `Assoc
+                     ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
+                      "prefix_sha256", `String snapshot.prefix_sha256];
+                   on_continuity_committed snapshot
+                 | Error detail ->
+                   continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
+                   Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail)
+             in
              match write_scope with
-             | Context_only -> Ok (`Context_organized (exact_output, selected_slot))
+             | Context_only ->
+               publish_continuity ();
+               Ok (`Context_organized (exact_output, selected_slot))
              | Context_and_memory ->
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
@@ -1004,6 +1072,9 @@ let run_best_effort
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })
              in
+             (* Only saved Memory authorizes publishing the corresponding
+                continuity frontier. A failed disposition leaves input intact. *)
+             publish_continuity ();
              (* The snapshot is committed; each supersede the answer stated is
                 now a Revised event on the old id (RFC-0418). A sidecar that
                 cannot be written is said here and does not undo the pass. *)
@@ -1051,6 +1122,7 @@ let run_best_effort
                 normally. Propagate it here even when no later I/O yields. *)
              Eio.Fiber.check ()
            | Error error ->
+             if extraction_capacity_refused error then on_capacity_refused ();
              let detail = extraction_error_to_string error in
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)
@@ -1203,4 +1275,5 @@ module For_testing = struct
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
   let input_for_projection = input_for_projection
+  let commit_continuity = commit_continuity
 end

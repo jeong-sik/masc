@@ -6615,7 +6615,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/dashboard/keeper-memory-health"] = (
         200,
         {
-            "schema": "keeper.memory_os.current_health.v5",
+            "schema": "keeper.memory_os.current_health.v6",
             "generated_at": 1787348000.0,
             "keepers": [
                 {
@@ -6630,6 +6630,11 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                     "removed": 0,
                     "snapshot_present": True,
                     "updated_at": 1700000000.0,
+                    "context_cycle": {
+                        "saved": None,
+                        "saved_read_error": None,
+                        "prepared": None,
+                    },
                     "librarian": {
                         "state": "drained",
                         "detail": None,

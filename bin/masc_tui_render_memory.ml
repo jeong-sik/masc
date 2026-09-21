@@ -128,6 +128,27 @@ let memory_context_lines (k : memory_keeper_health) =
       (Option.value librarian.mlh_last_failure_kind ~default:"-")
       k.mkh_librarian_failures
   in
+  let context_lines =
+    let cycle = k.mkh_context_cycle in
+    let frontier value = Printf.sprintf "atom %d / boundary %d · trace %s"
+      value.mcf_end_atom value.mcf_boundary_line (Terminal_text.single_line value.mcf_trace_id) in
+    let saved = match cycle.mcc_saved with
+      | Some value -> frontier value
+      | None -> if cycle.mcc_saved_unreadable then "unreadable" else "absent" in
+    let prepared, input = match cycle.mcc_prepared with
+      | None -> "not observed since server start", "not observed"
+      | Some value ->
+        let input = match value.mcp_input with
+          | Context_summarized value -> "summary " ^ frontier value
+          | Context_uncompressed -> "full history"
+          | Context_not_applied -> "saved context not applied" in
+        Printf.sprintf "%s · %d request bytes · %s"
+          (memory_updated_text (Some value.mcp_prepared_at))
+          value.mcp_request_bytes (Terminal_text.single_line value.mcp_runtime_id), input in
+    ["  Context saved · " ^ saved;
+     "  Request prepared (not provider success) · " ^ prepared;
+     "  Context used · " ^ input]
+  in
   let source_line =
     Printf.sprintf
       "  source-bound snapshot r%d · facts %d · invalidations %d · recall %s tok · %s"
@@ -171,8 +192,8 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  current_line :: facts_line :: source_line :: librarian_line :: vision_line
-  :: (read_error_lines @ alert_lines)
+  [current_line; facts_line; source_line; librarian_line] @ context_lines
+  @ (vision_line :: (read_error_lines @ alert_lines))
 
 type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current

@@ -2,7 +2,7 @@
 description: Memory OS 현재 기억 선별 — 유지·삭제·신규 사실을 구조화 판정
 category: librarian
 operator_surface: primary
-template_variables: [working_context, current_memory, conversation_history, counterpart_observations, keeper_instructions, turn_tool_observations, goal_context]
+template_variables: [continuity, working_context, current_memory, conversation_history, counterpart_observations, keeper_instructions, turn_tool_observations, goal_context]
 ---
 
 당신은 Keeper의 장기 기억을 선별하는 Librarian입니다. 아래 자료를 읽고,
@@ -137,6 +137,7 @@ template_variables: [working_context, current_memory, conversation_history, coun
 ## 출력
 
 {
+  "working_state": null,
   "working_contexts": [],
   "new_claims": [
     {
@@ -223,3 +224,16 @@ template_variables: [working_context, current_memory, conversation_history, coun
 
 ### 호스트가 작성한 현재 턴 도구 관측 (payload 없음)
 {{turn_tool_observations}}
+
+## 완료된 대화의 이어갈 상태
+
+다음 `continuity` 자료가 null이면 `working_state`는 null입니다. 자료가 있으면
+`previous_working_state`와 `completed_conversation` 전체를 읽고, 다음 턴이 이어갈
+작업·사용자 제약·결정과 근거·미해결 사항을 `working_state` 문자열로 정리하세요.
+대화 속 도구 결과와 아직 완료되지 않은 일을 구분하고, 이전 상태를 갱신하되
+유효한 제약과 남은 일을 지우지 마세요. 요약만 읽은 다음 턴도 올바르게 이어갈
+수 있어야 합니다. 이 자료는 대화 상태 정리용이며, 아래 자료만을 근거로
+`new_claims`·`dropped`를 만들지 마세요. Memory 판단은 기존 Memory 입력을 따릅니다.
+큐 원본 정리인 `working_contexts`와는 별도이며, 새 실행이나 완료 선언이 아닙니다.
+
+{{continuity}}

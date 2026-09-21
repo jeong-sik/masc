@@ -18,6 +18,11 @@ val last_measurement : config:Workspace.config -> keeper_name:string -> measurem
     for admission or scheduling. An unread count unavailable at that pass is
     [None], not the prior pass's count. *)
 
+val forget_measurement : config:Workspace.config -> keeper_name:string -> unit
+(** Clear after the purge has quiesced the lane and while submissions remain
+    excluded, so a deleted keeper's observation cannot outlive its identity. *)
+
+
 type runtime_entry = Not_entered | Entered
 (** Whether the post-turn callback reached Librarian runtime. Input preparation
     and live-config refusal return [Not_entered]; [Entered] is not commit success. *)
@@ -72,6 +77,7 @@ val run_completed_turn : base_path:string -> keeper_name:string -> unit
     or commit success. A pre-entry refusal leaves the input pending. *)
 
 module For_testing : sig
+  val run_continuity : base_path:string -> keeper_name:string -> unit
   val run_durable_with_commit
     :  config:Workspace.config
     -> keeper_name:string

@@ -2500,6 +2500,28 @@ type memory_librarian_health = {
   mlh_last_failure_kind : string option;
 }
 
+type memory_context_frontier = {
+  mcf_trace_id : string;
+  mcf_end_atom : int;
+  mcf_boundary_line : int;
+}
+type memory_context_input =
+  | Context_summarized of memory_context_frontier
+  | Context_uncompressed
+  | Context_not_applied
+
+type memory_context_prepared = {
+  mcp_prepared_at : float;
+  mcp_runtime_id : string;
+  mcp_input : memory_context_input;
+  mcp_request_bytes : int;
+}
+type memory_context_cycle = {
+  mcc_saved : memory_context_frontier option;
+  mcc_saved_unreadable : bool;
+  mcc_prepared : memory_context_prepared option;
+}
+
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
@@ -2512,6 +2534,7 @@ type memory_keeper_health = {
   mkh_added : int;
   mkh_removed : int;
   mkh_snapshot_present : bool;
+  mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;
   mkh_vision_ingest_errors : int;
@@ -4788,6 +4811,52 @@ let decode_memory_alert json =
           && not (String.equal ma_message "") -> Ok { ma_code; ma_label; ma_message }
    | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
+let decode_memory_context_cycle keeper_json =
+  let* json = required_member keeper_json "context_cycle" in
+  let* () = require_exact_object_fields "context cycle"
+    ["saved"; "saved_read_error"; "prepared"] json in
+  let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
+  let frontier json =
+    let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
+    let* mcf_trace_id = required_string_field json "trace_id" in
+    let* mcf_end_atom = required_int_field json "end_atom" in
+    let* mcf_boundary_line = required_int_field json "boundary_line" in
+    if String.trim mcf_trace_id = "" || mcf_end_atom < 1 || mcf_boundary_line < 1
+    then Error "invalid context frontier"
+    else Ok {mcf_trace_id; mcf_end_atom; mcf_boundary_line} in
+  let prepared json =
+    let* () = require_exact_object_fields "prepared context"
+      ["prepared_at"; "runtime_id"; "input"; "request_bytes"] json in
+    let* prepared_at = required_nullable_float_field json "prepared_at" in
+    let* mcp_prepared_at = match prepared_at with
+      | Some time when Float.is_finite time && time >= 0. -> Ok time
+      | _ -> Error "invalid prepared context time" in
+    let* mcp_runtime_id = required_string_field json "runtime_id" in
+    let* mcp_request_bytes = required_int_field json "request_bytes" in
+    let* () = if String.trim mcp_runtime_id <> "" && mcp_request_bytes >= 0
+      then Ok () else Error "invalid prepared context runtime or bytes" in
+    let* input = required_member json "input" in
+    let* () = require_exact_object_fields "context input" ["kind"; "frontier"] input in
+    let* kind = required_string_field input "kind" in
+    let* value = required_member input "frontier" in
+    let* value = nullable frontier value in
+    let* mcp_input = match kind, value with
+      | "summarized", Some value -> Ok (Context_summarized value)
+      | "uncompressed", None -> Ok Context_uncompressed
+      | "not_applied", None -> Ok Context_not_applied
+      | _ -> Error "context input kind disagrees with frontier" in
+    Ok {mcp_prepared_at; mcp_runtime_id; mcp_request_bytes; mcp_input} in
+  let* saved = required_member json "saved" in
+  let* mcc_saved = nullable frontier saved in
+  let* read_error = required_nullable_string_field json "saved_read_error" in
+  let* mcc_saved_unreadable = match read_error, mcc_saved with
+    | None, _ -> Ok false
+    | Some "snapshot_unreadable", None -> Ok true
+    | _ -> Error "context saved frontier disagrees with read error" in
+  let* value = required_member json "prepared" in
+  let* mcc_prepared = nullable prepared value in
+  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared}
+
 let decode_memory_keeper_health json =
   let* () =
     require_exact_object_fields
@@ -4803,6 +4872,7 @@ let decode_memory_keeper_health json =
       ; "added"
       ; "removed"
       ; "snapshot_present"
+      ; "context_cycle"
       ; "librarian"
       ; "librarian_failures"
       ; "vision_ingest_errors"
@@ -4842,6 +4912,7 @@ let decode_memory_keeper_health json =
     then Ok ()
     else Error "memory updated_at must describe a readable snapshot"
   in
+  let* mkh_context_cycle = decode_memory_context_cycle json in
   let* mkh_librarian = decode_memory_librarian_health json in
   let* mkh_librarian_failures = required_int_field json "librarian_failures" in
   let* vision_reasons_json =
@@ -4936,6 +5007,7 @@ let decode_memory_keeper_health json =
     ; mkh_added
     ; mkh_removed
     ; mkh_snapshot_present
+    ; mkh_context_cycle
     ; mkh_librarian
     ; mkh_librarian_failures
     ; mkh_vision_ingest_errors
@@ -4964,7 +5036,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v5"
+    if String.equal schema "keeper.memory_os.current_health.v6"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in

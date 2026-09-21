@@ -388,7 +388,10 @@ status: reference
 
 **Message**
 : History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content
-  조각(`Text`, `Thinking`, `ToolUse`, `ToolResult`, `Image`)의 목록으로 이뤄진다.
+  조각의 목록으로 이뤄진다. 조각은 아홉 가지다: `Text`, `Thinking`,
+  `ReasoningDetails`, `RedactedThinking`, `ToolUse`, `ToolResult`, `Image`,
+  `Document`, `Audio`. 정본은 `packages/agent_core/lib/llm_provider/types.mli`의
+  `content_block`이다.
 
 **Atom**
 : History를 자를 때 쓰는 가장 작은 단위. `User` message 하나, 또는 `Assistant`
@@ -461,6 +464,17 @@ status: reference
   같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
   Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
 
+**Continuity Snapshot (하던 일 저장본)**
+: 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
+  한 파일. 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
+  Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
+  저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
+  Agent Core는 저장본을 검증한 뒤, 완료된 원문 구간 대신 하던 일을 다음
+  요청에 전달한다. 원본 checkpoint는 보존한다. 저장 완료와 요청에 사용한
+  상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
+  `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
+  → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
+
 **Working Context**
 : Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
   operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
@@ -472,13 +486,14 @@ status: reference
   SHA-256이다. 글자가 하나라도 다르면 다른 Fact다.
 
 **Origin**
-: Fact를 누가 적었나. `authored`는 Keeper가 `memory_write`로 직접 적은 것,
+: Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다.
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
-  `derived`는 근거가 된 다른 Fact의 Memory ID를 갖는다. 근거가 사라지면 `derived`
-  Fact도 무효가 된다.
+  `derived`는 유도(derivation)를 하나 이상 갖고, 유도마다 전제가 된 다른 Fact의
+  Memory ID를 갖는다. 전제가 모두 살아 있는 유도가 하나라도 남아 있으면 `derived`
+  Fact는 유지되고, 그런 유도가 하나도 없으면 무효가 된다.
 
 **Dropped / Supersedes / Absorbs**
 : Librarian이 기억을 바꾸는 세 가지 말. `dropped`는 이유를 적고 버린다.
@@ -524,3 +539,10 @@ status: reference
   입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
   게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
   Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
+
+### 대화 작업 상태 (working_state)
+
+Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
+같은 파일에 저장된 정확한 대화 범위와 한 쌍이며, 큐 원본을 정리한
+`working_contexts`나 장기 Memory facts와 다릅니다. 모델의 출력만으로 범위가
+소비된 것은 아닙니다. pair 저장과 소비 시 이력 검증이 필요합니다.

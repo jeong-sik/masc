@@ -209,7 +209,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v5"
+    "keeper.memory_os.current_health.v6"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -707,11 +707,64 @@ let test_curator_inventory_binds_actual_commits () =
         && string_field "status" (Yojson.Safe.Util.member "observation" row) = "unavailable")))
 ;;
 
+let test_context_cycle_separates_saved_and_prepared () =
+  let module O = Masc.Keeper_continuity_observation in
+  let module S = Masc.Librarian_continuity_snapshot in
+  let module B = Masc.Keeper_turn_boundaries in
+  let base = fresh_dir "masc-context-health" in
+  let config = Masc.Workspace.default_config base in
+  let keeper_name = "context-observed" in
+  Fun.protect ~finally:(fun () -> O.forget ~config ~keeper_name; Fs_compat.remove_tree base) @@ fun () ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  let cycle () = member "context_cycle"
+    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  Alcotest.(check bool) "no prepared request inferred from saved state" true
+    (is_null (member "prepared" (cycle ())));
+  let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
+    [Agent_core.Types.Text "PRIVATE_CONVERSATION_TEXT"]] in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let position = B.position_of_messages messages |> get in
+  let trace_id = "saved-trace" in
+  let lines = [1, Ok {B.recorded_at = test_now; event = B.Turn_ended
+    {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+     history_at_start = B.Fresh_history; position}}] in
+  let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:"PRIVATE_WORKING_STATE"
+    |> Result.map_error S.error_to_string |> get in
+  let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Yojson.Safe.to_file path (S.to_json snapshot);
+  O.record ~config ~keeper_name
+    {prepared_at = test_now; runtime_id = "fixture-runtime";
+     input = O.Summarized {trace_id = "previous-trace"; end_atom = 4; boundary_line = 7}; request_bytes = 2048};
+  let observed = cycle () in
+  Alcotest.(check string) "saved identity comes from disk" trace_id
+    (string_field "trace_id" (member "saved" observed));
+  let prepared = member "prepared" observed in
+  Alcotest.(check int) "prepared bytes are observed" 2048 (int_field "request_bytes" prepared);
+  Alcotest.(check string) "prepared frontier is not replaced by newer saved frontier" "previous-trace"
+    (string_field "trace_id" (member "frontier" (member "input" prepared)));
+  let other = Masc.Workspace.default_config (Filename.concat base "other-runtime") in
+  Alcotest.(check bool) "observation does not cross runtimes" true
+    (Option.is_none (O.latest ~config:other ~keeper_name));
+  Out_channel.with_open_bin path (fun oc -> output_string oc "{PRIVATE_WORKING_STATE");
+  let unreadable = cycle () in
+  Alcotest.(check string) "corrupt state error exposes no source text" "snapshot_unreadable"
+    (string_field "saved_read_error" unreadable);
+  Alcotest.(check bool) "corrupt state has no saved frontier" true (is_null (member "saved" unreadable));
+  Alcotest.(check bool) "prepared observation survives independent disk read failure" false
+    (is_null (member "prepared" unreadable));
+  O.forget ~config ~keeper_name;
+  Alcotest.(check bool) "forgotten request is unknown" true (is_null (member "prepared" (cycle ())))
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
-      , [ Alcotest.test_case "curator canonical owners and malformed config" `Quick
+      , [ Alcotest.test_case "saved versus prepared context" `Quick
+            test_context_cycle_separates_saved_and_prepared
+        ; Alcotest.test_case "curator canonical owners and malformed config" `Quick
             test_curator_inventory_canonical_owner_discovery
         ; Alcotest.test_case "curator inventory binds committed sources and retractions" `Quick
             test_curator_inventory_binds_actual_commits

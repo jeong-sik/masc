@@ -66,7 +66,7 @@ let test_every_variant_lands_in_its_class () =
     (Codex.Protocol_error { stage = "turn"; detail = "bad frame" })
     "provider:parse_error";
   check "rpc_error"
-    (Codex.Rpc_error { method_ = "thread/start"; code = Some 3; message = "no" })
+    (Codex.Rpc_error { method_ = "thread/start"; code = Some 3; message = "no"; data = None })
     "provider:reported:rpc_error";
   check "unsupported_server_request"
     (Codex.Unsupported_server_request "applyPatch")

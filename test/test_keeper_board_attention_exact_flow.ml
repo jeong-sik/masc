@@ -739,7 +739,7 @@ let test_mixed_semantic_rejection_and_cli_failure_keep_both_causes () =
       in
       let before = board_attention_run_ids () in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-        Error "client unavailable"
+        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
       in
       (match
          Exact_flow.execute
@@ -970,7 +970,7 @@ let test_mixed_cli_failure_keeps_http_evidence () =
       let cli_calls = ref 0 in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         incr cli_calls;
-        Error "client unavailable"
+        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
       in
       match
         Exact_flow.execute

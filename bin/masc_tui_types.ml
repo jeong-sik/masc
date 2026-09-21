@@ -8636,11 +8636,14 @@ let plan_slot_edit (state : state) edit =
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
-         match target, edit with
-         | Media_failover_slots, _ when Option.is_some (media_failover_write_refusal state)
-           ->
-           Refuse_slot_edit (Option.get (media_failover_write_refusal state))
-         | Exact_lane_slots _, Drop_slot when count <= 1 ->
+         let route_refusal =
+           match target with
+           | Media_failover_slots -> media_failover_write_refusal state
+           | Exact_lane_slots _ -> None
+         in
+         match route_refusal, target, edit with
+         | Some refusal, _, _ -> Refuse_slot_edit refusal
+         | None, Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip
               for edits that can land. *)
            Refuse_slot_edit
@@ -8649,10 +8652,10 @@ let plan_slot_edit (state : state) edit =
                    "%s is the last slot of %s; an exact-output lane needs at least one"
                    slot
                    name))
-         | Exact_lane_slots _, Drop_slot ->
+         | None, Exact_lane_slots _, Drop_slot ->
            Send_slot_write
              { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
-         | Media_failover_slots, Drop_slot ->
+         | None, Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
               vision fleet. So the last entry may go. *)
            Send_slot_write
@@ -8663,7 +8666,7 @@ let plan_slot_edit (state : state) edit =
                    (List.filter (fun id -> not (String.equal id slot)) order)
              ; cursor_after = cursor_after_drop
              }
-         | _, Move_slot move ->
+         | None, _, Move_slot move ->
            let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
            let moved_to = editor.se_cursor + by in
            if moved_to < 0 || moved_to >= count

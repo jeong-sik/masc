@@ -1380,7 +1380,7 @@ let collect_board_events_with_cursor_policy
         match events_of_post p with
         | Ok events ->
           mention_count := !mention_count + List.length
-              (List.filter (fun event -> event.explicit_mention) events);
+              (List.filter (fun (event : pending_board_event) -> event.explicit_mention) events);
           consume_posts (Some next_cursor) (List.rev_append events acc) rest
         | Error unavailable ->
           (match log_and_count_unavailable ~context:"signal replay" unavailable with

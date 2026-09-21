@@ -30,6 +30,12 @@ fail() {
   exit 1
 }
 
+rg_or_empty() {
+  local status=0
+  rg -o "$1" "$2" || status=$?
+  ((status <= 1)) || fail "rg exited $status scanning $2"
+}
+
 require_contains() {
   local file="$1"
   local needle="$2"
@@ -261,12 +267,13 @@ for file in "${docs_to_scan[@]}"; do
     [[ -e "$ref" ]] || missing_refs+=("$file -> $ref")
   done < <(
     {
-      # rg exits 1 on no match. Under `set -e` that aborts the block before the
-      # second scan runs, so a doc whose links are not `(docs/...)` -- the
-      # glossary points at `../../lib/...` -- would have its code paths skipped
-      # and read as checked. `|| true` keeps both scans running for every doc.
-      rg -o '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file" | sed 's/^('// | sed 's/)$//' || true
-      rg -o '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file" || true
+      # rg exits 1 on no match and 2 on an error. Under `set -e` the 1 would
+      # abort this block before the second scan runs, so a doc whose links are
+      # not `(docs/...)` -- the glossary points at `../../lib/...` -- would have
+      # its code paths skipped and read as checked. [rg_or_empty] accepts the 1
+      # and stops on a 2, so a broken pattern cannot pass as an empty scan.
+      rg_or_empty '\((docs/[^)# ]+|ROADMAP\.md|CHANGELOG\.md)\)' "$file" | sed 's/^('// | sed 's/)$//'
+      rg_or_empty '(docs/[A-Za-z0-9._/-]+\.md|lib/[A-Za-z0-9._/-]+\.(ml|mli)|scripts/[A-Za-z0-9._/-]+\.sh|test/[A-Za-z0-9._/-]+\.ml|dune-project|[A-Za-z0-9._-]+\.opam|ROADMAP\.md|CHANGELOG\.md)' "$file"
     } | sort -u
   )
 done

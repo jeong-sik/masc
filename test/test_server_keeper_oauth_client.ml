@@ -104,27 +104,52 @@ let test_an_undeclared_provider_is_refused () =
 
 let test_the_listing_says_whether_an_app_is_on_file () =
   let base_path = base_path () in
-  let has id json =
+  let client_state id json =
     match json with
     | `List rows ->
-      List.exists
+      List.find_map
         (function
           | `Assoc pairs ->
-            List.assoc_opt "id" pairs = Some (`String id)
-            && List.assoc_opt "has_client" pairs = Some (`Bool true)
-          | _ -> false)
+            if List.assoc_opt "id" pairs = Some (`String id)
+            then List.assoc_opt "client_state" pairs
+            else None
+          | _ -> None)
         rows
     | _ -> Alcotest.fail "the listing is not a list"
   in
-  check Alcotest.bool "nothing on file to begin with" false
-    (has "slack" (Oauth.declarations_json ~base_path ~now:0.0));
+  check (Alcotest.option Alcotest.string) "nothing on file to begin with"
+    (Some "none")
+    (Option.bind
+       (client_state "slack" (Oauth.declarations_json ~base_path ~now:0.0))
+       Yojson.Safe.Util.to_string_option);
   let _ = set base_path ~client_secret:None in
-  check Alcotest.bool "and it says so once there is" true
-    (has "slack" (Oauth.declarations_json ~base_path ~now:0.0));
-  check Alcotest.bool "without claiming it for another provider" false
-    (has "figma" (Oauth.declarations_json ~base_path ~now:0.0))
+  check (Alcotest.option Alcotest.string) "and it says so once there is"
+    (Some "on_file")
+    (Option.bind
+       (client_state "slack" (Oauth.declarations_json ~base_path ~now:0.0))
+       Yojson.Safe.Util.to_string_option);
+  check (Alcotest.option Alcotest.string) "without claiming it for another provider"
+    (Some "none")
+    (Option.bind
+       (client_state "figma" (Oauth.declarations_json ~base_path ~now:0.0))
+       Yojson.Safe.Util.to_string_option);
+  let unreadable_base = base_path () in
+  let provider = provider_or_fail "slack" in
+  let masc_dir = Filename.concat unreadable_base ".masc" in
+  let identity_dir = Filename.concat masc_dir "identity" in
+  let provider_dir =
+    Filename.concat identity_dir provider.Keeper_oauth_provider.client_group
+  in
+  List.iter (fun path -> Unix.mkdir path 0o700) [ masc_dir; identity_dir; provider_dir ];
+  Unix.mkdir (Filename.concat provider_dir "client_id") 0o700;
+  check Alcotest.bool "an unreadable store says what failed rather than none" true
+    (match
+       client_state "slack" (Oauth.declarations_json ~base_path:unreadable_base ~now:0.0)
+     with
+     | Some (`Assoc [ "problem", `String problem ]) -> String.trim problem <> ""
+     | _ -> false)
 
-let test_a_lapsed_registration_is_not_on_file () =
+let test_a_lapsed_registration_is_named_as_lapsed () =
   (* The listing exists so an operator is not asked to retype an app that is
      already there. A registration whose secret has lapsed is not that: the
      next login registers a new one, and saying "on file" would name an app
@@ -134,20 +159,25 @@ let test_a_lapsed_registration_is_not_on_file () =
      on file however late it is read -- the case above already covers it, at
      now = 0; this one reads the same store far in the future. *)
   let base_path = base_path () in
-  let on_file now =
+  let state now =
     match Oauth.declarations_json ~base_path ~now with
     | `List rows ->
-      List.exists
+      List.find_map
         (function
           | `Assoc pairs ->
-            List.assoc_opt "id" pairs = Some (`String "slack")
-            && List.assoc_opt "has_client" pairs = Some (`Bool true)
-          | _ -> false)
+            if List.assoc_opt "id" pairs = Some (`String "slack")
+            then
+              Option.bind
+                (List.assoc_opt "client_state" pairs)
+                Yojson.Safe.Util.to_string_option
+            else None
+          | _ -> None)
         rows
     | _ -> Alcotest.fail "the listing is not a list"
   in
   let _ = set base_path ~client_secret:(Some "s3cret") in
-  check Alcotest.bool "an operator's own app does not lapse" true (on_file 1.7e9);
+  check (Alcotest.option Alcotest.string) "an operator's own app does not lapse"
+    (Some "on_file") (state 1.7e9);
   let provider = provider_or_fail "slack" in
   let dir = Filename.concat (Filename.concat base_path ".masc") "identity" in
   (match
@@ -160,8 +190,10 @@ let test_a_lapsed_registration_is_not_on_file () =
    with
    | Ok () -> ()
    | Error message -> Alcotest.failf "save failed: %s" message);
-  check Alcotest.bool "still on file before the deadline" true (on_file 99.0);
-  check Alcotest.bool "and not after it" false (on_file 101.0)
+  check (Alcotest.option Alcotest.string) "still on file before the deadline"
+    (Some "on_file") (state 99.0);
+  check (Alcotest.option Alcotest.string) "and says why it will be replaced"
+    (Some "lapsed") (state 101.0)
 
 let test_one_google_app_answers_for_all_of_them () =
   (* Google publishes eight MCP resources behind one accounts.google.com,
@@ -262,8 +294,8 @@ let () =
             test_an_undeclared_provider_is_refused;
           Alcotest.test_case "the listing says whether an app is on file"
             `Quick test_the_listing_says_whether_an_app_is_on_file;
-          Alcotest.test_case "a lapsed registration is not on file"
-            `Quick test_a_lapsed_registration_is_not_on_file;
+          Alcotest.test_case "a lapsed registration is named as lapsed"
+            `Quick test_a_lapsed_registration_is_named_as_lapsed;
           Alcotest.test_case "one Google app answers for all of them" `Quick
             test_one_google_app_answers_for_all_of_them;
           Alcotest.test_case "recorded scopes are what gets asked for" `Quick

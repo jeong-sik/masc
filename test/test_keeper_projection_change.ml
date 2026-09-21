@@ -80,7 +80,10 @@ let test_digest_memo_commit_is_explicit () =
   let _first, first_fresh =
     Change.digest_request ~seen ~tools:fixture_tools ~messages:[ message ]
   in
-  check int "first job computed one digest" 1 (List.length first_fresh);
+  check int "first job computed one message digest" 1
+    (Change.fresh_message_count first_fresh);
+  check int "first job computed one tool schema digest" 1
+    (Change.fresh_tool_count first_fresh);
   let seen_before_commit = Change.snapshot_digest_memo memo in
   let _again, repeated_fresh =
     Change.digest_request
@@ -88,8 +91,10 @@ let test_digest_memo_commit_is_explicit () =
       ~tools:fixture_tools
       ~messages:[ message ]
   in
-  check int "an uncommitted job changed no shared memo" 1
-    (List.length repeated_fresh);
+  check int "an uncommitted job changed no shared message memo" 1
+    (Change.fresh_message_count repeated_fresh);
+  check int "an uncommitted job changed no shared tool memo" 1
+    (Change.fresh_tool_count repeated_fresh);
   Change.remember_digests memo first_fresh;
   let seen_after_commit = Change.snapshot_digest_memo memo in
   let _cached, cached_fresh =

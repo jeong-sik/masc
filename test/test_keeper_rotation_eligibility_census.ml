@@ -152,6 +152,21 @@ let api_invalid_request_unknown_model =
        ; reason = Agent_core.Retry.Unknown_invalid_request
        })
 
+(* A 404 the provider answers for a model it does not serve. [Retry.classify_error]
+   reads the status as [NotFound] and [Keeper_runtime_failure_route] routes it to
+   [Model_unavailable]; the walk must rotate on it rather than stop on the
+   candidate whose model does not exist. Both constructors carry the same fact:
+   the HTTP classifier produces [Api (NotFound _)], the official clients produce
+   [Provider (NotFound _)]. *)
+let api_not_found =
+  Agent_core.Error.Api
+    (Agent_core.Retry.NotFound { message = "model not found" })
+
+let provider_not_found =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.NotFound
+       { provider = "ollama_cloud"; detail = "model not found" })
+
 let api_attempt_rejected =
   Agent_core.Provider_failure_attribution.core_error_of_http_error
     (Llm_provider.Http_client.AcceptRejected
@@ -226,6 +241,8 @@ let census_rows =
   ; "api:context_overflow", api_context_overflow, 9
   ; "internal:remote_command_failed", internal_remote_command_failed, 4
   ; "api:invalid_request", api_invalid_request_unknown_model, 2
+  ; "api:not_found", api_not_found, 0
+  ; "provider:not_found", provider_not_found, 0
   ; "api:attempt_rejected", api_attempt_rejected, 0
   ; "api:invalid_request_vendor_400", api_invalid_request_vendor_400, 0
   ; "api:turn_budget_timeout", api_turn_budget_timeout, 0
@@ -300,6 +317,8 @@ let expected_rotation =
   ; "api:context_overflow", true
   ; "internal:remote_command_failed", false
   ; "api:invalid_request", false
+  ; "api:not_found", true
+  ; "provider:not_found", true
   ; "api:attempt_rejected", true
   ; "api:invalid_request_vendor_400", false
   ; "api:turn_budget_timeout", true

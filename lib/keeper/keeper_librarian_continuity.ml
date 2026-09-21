@@ -13,6 +13,7 @@ type prepared =
   ; previous_state : string option
   ; recovery_receipt : Keeper_memory_os_current.durable_range_id option
   ; range : R.range
+  ; covering_cut : R.atom_cut
   ; start_atom : int
   ; end_atom : int
   ; unread : Agent_core.Types.message list
@@ -54,6 +55,9 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
             | Ok restored -> Some restored.working_state, snapshot.end_atom
             | Error _ -> None, 0)
         | None -> None, 0 in
+      let cuts = R.cut_lines ~trace_id ~lines ~messages range
+        |> List.sort (fun (left : R.atom_cut) (right : R.atom_cut) ->
+          compare (left.cut_end_atom, left.cut_line) (right.cut_end_atom, right.cut_line)) in
       let* receipt = Keeper_memory_os_current.committed_durable_range
         ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
         ~keeper_id:keeper_name ~receipt_scope:(path ~config ~keeper_name) in
@@ -64,41 +68,32 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
             && receipt.end_atom <= range.end_atom
             && W.atom_opening_digest messages (receipt.end_atom - 1) = Some receipt.last_atom_digest
             && List.exists (fun (cut : R.atom_cut) -> cut.cut_line = receipt.end_boundary_line
-                 && cut.cut_end_atom >= receipt.end_atom)
-                 (R.cut_lines ~trace_id ~lines ~messages range) -> Some receipt
+                 && cut.cut_end_atom >= receipt.end_atom) cuts -> Some receipt
         | _ -> None in
       let end_atom = match recovery_receipt with
         | Some receipt -> receipt.end_atom
-        | None -> Option.value end_atom ~default:range.end_atom in
+        | None ->
+          (match end_atom with
+           | Some requested -> requested
+           | None ->
+             match List.find_opt (fun (cut : R.atom_cut) -> cut.cut_end_atom > start_atom) cuts with
+             | Some cut -> cut.cut_end_atom
+             | None -> range.end_atom) in
       if end_atom > range.end_atom || end_atom < 1 then
         Error "continuity cut is outside the completed checkpoint prefix"
       else if end_atom <= start_atom then Ok None
-      else let unread = R.slice messages {range with R.start_atom; end_atom} in
-        Ok (Some {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;start_atom;end_atom;unread})
-let messages prepared = prepared.unread
-let turn_ref prepared =
-  (* [prepare] obtained this range from a verified completed boundary. *)
-  (List.find (fun (cut : R.atom_cut) -> cut.cut_end_atom = prepared.range.end_atom)
-    (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
-      ~messages:prepared.messages prepared.range)).cut_turn_ref
-let end_atom prepared = prepared.end_atom
-let fit ~fits prepared =
-  let* whole_fits = fits prepared in
-  if whole_fits then Ok (Some prepared)
-  else if Option.is_some prepared.recovery_receipt then Ok None
-  else
-    let rec search low high best =
-      if low > high then Ok best
       else
-        let end_atom = low + (high - low) / 2 in
-        let unread = R.slice prepared.messages
-          {prepared.range with R.start_atom = prepared.start_atom; end_atom} in
-        let candidate = {prepared with end_atom; unread} in
-        let* accepted = fits candidate in
-        if accepted then search (end_atom + 1) high (Some candidate)
-        else search low (end_atom - 1) best
-    in
-    search (prepared.start_atom + 1) (prepared.end_atom - 1) None
+        let* covering_cut = match List.find_opt (fun (cut : R.atom_cut) ->
+          match recovery_receipt with
+          | Some receipt -> cut.cut_line = receipt.end_boundary_line
+          | None -> cut.cut_end_atom >= end_atom) cuts with
+          | Some cut -> Ok cut
+          | None -> Error "continuity source has no covering completed boundary" in
+        let unread = R.slice messages {range with R.start_atom; end_atom} in
+        Ok (Some {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread})
+let messages prepared = prepared.unread
+let turn_ref prepared = prepared.covering_cut.cut_turn_ref
+let end_atom prepared = prepared.end_atom
 let narrow prepared =
   let count = prepared.end_atom - prepared.start_atom in
   if count <= 1 || Option.is_some prepared.recovery_receipt then None
@@ -106,13 +101,17 @@ let narrow prepared =
     let end_atom = prepared.start_atom + count / 2 in
     let unread = R.slice prepared.messages {prepared.range with R.start_atom = prepared.start_atom; end_atom} in
     Some {prepared with end_atom; unread; recovery_receipt = None}
+let rec fit ~fits prepared =
+  let* accepted = fits prepared in
+  if accepted then Ok (Some prepared)
+  else match narrow prepared with
+    | None -> Ok None
+    | Some smaller -> fit ~fits smaller
 let memory_range_id ~config ~keeper_name prepared =
   match prepared.recovery_receipt with Some receipt -> Ok receipt | None ->
-  let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
-    ~messages:prepared.messages prepared.range in
-  match List.find_opt (fun (cut : R.atom_cut) -> cut.cut_end_atom = prepared.range.end_atom) cuts,
-        W.atom_opening_digest prepared.messages (prepared.end_atom - 1) with
-  | Some cut, Some last_atom_digest -> Ok
+  let cut = prepared.covering_cut in
+  match W.atom_opening_digest prepared.messages (prepared.end_atom - 1) with
+  | Some last_atom_digest -> Ok
     { Keeper_memory_os_current.receipt_scope = path ~config ~keeper_name;
       trace_id = prepared.trace_id;
       history_start_boundary_line = prepared.range.history_start_boundary_line;
@@ -120,7 +119,7 @@ let memory_range_id ~config ~keeper_name prepared =
       end_boundary_line = cut.cut_line;
       boundary_lines_seen = List.fold_left (fun count (_, read) ->
         match read with Error B.Incomplete_line -> count | _ -> count + 1) 0 prepared.lines }
-  | _ -> Error "continuity source has no covering completed boundary"
+  | None -> Error "continuity source has no covering completed boundary"
 let memory_committed ~config ~keeper_name prepared =
   let* expected = memory_range_id ~config ~keeper_name prepared in
   let* actual = Keeper_memory_os_current.committed_durable_range
@@ -156,8 +155,15 @@ let prompt_json prepared =
 let commit ~config ~keeper_name ~prepared ~working_state =
   let* covered = memory_committed ~config ~keeper_name prepared in
   let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in
+  (* Capture against this work unit's actual completed turn, not a later
+     backlog boundary. Keep the full frozen checkpoint in [prepared] for
+     Memory coverage checks; only this capture view ends at the chosen cut. *)
+  let messages = W.annotate prepared.messages |> fst |> List.filter_map (fun (message, label) ->
+    match label with
+    | W.Pinned -> Some message
+    | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom then Some message else None) in
   let* snapshot = S.capture_checkpoint_prefix ~end_atom:prepared.end_atom
-    ~trace_id:prepared.trace_id ~lines:prepared.lines ~messages:prepared.messages
+    ~trace_id:prepared.trace_id ~lines:prepared.lines ~messages
     ~working_state () |> Result.map_error S.error_to_string in
   let file = path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname file);

@@ -159,9 +159,9 @@ let test_baseline_partial_bootstrap () = with_source @@ fun _env config save _ap
     (P.memory_committed ~config ~keeper_name recovered |> get);
   let saved=P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"A and B" |> get in
   check bool "explicit captured provenance" true (saved.origin=S.Captured_checkpoint_prefix);
-  check int "partial cut is independent of real completed anchor" 5 saved.covering_end_atom;
+  check int "recovery retains its original completed anchor" 4 saved.covering_end_atom;
   let later=prepare config |> some in
-  check int "remaining source is still supplied" 3 (List.length (P.messages later));
+  check int "remaining part of the same turn is supplied" 2 (List.length (P.messages later));
   let receipt=P.memory_range_id ~config ~keeper_name later |> get in
   check int "next read starts exactly after captured prefix" 2 receipt.start_atom;
   let ordinary=Masc.Keeper_memory_os_current.committed_durable_range
@@ -178,26 +178,89 @@ let record_ordinary config prepared ~start_atom =
     ~absorbed:[] ~new_claims:[] () |> get)
 let test_ordinary_witnessed_coverage () = with_source @@ fun _env config save _append boundary ->
   let prefix=[message "A";message "B"] in save prefix;boundary ~fresh:true 1 prefix;
+  let full=prefix@[message "C";message "D"] in save full;boundary ~fresh:false 2 full;
+  let all=P.prepare ~end_atom:4 ~config ~keeper_name ~trace_id () |> get |> some in
+  record_ordinary config all ~start_atom:0;
   let prepared=prepare config |> some in
-  record_ordinary config prepared ~start_atom:0;
+  check int "continuity selects first turn despite later ordinary receipt" 2 (P.end_atom prepared);
   check bool "serial witnessed Memory already read this prefix" true
     (P.memory_committed ~config ~keeper_name prepared |> get);
   ignore (P.commit ~config ~keeper_name ~prepared ~working_state:"A and B" |> get)
 let test_ordinary_baseline_coverage () = with_source @@ fun _env config save _append boundary ->
   let baseline=[message "A";message "B"] in save baseline;boundary ~fresh:false 1 baseline;
   let full=baseline@[message "C";message "D"] in save full;boundary ~fresh:false 2 full;
-  let all=prepare config |> some in
+  let all=P.prepare ~end_atom:4 ~config ~keeper_name ~trace_id () |> get |> some in
   record_ordinary config all ~start_atom:2;
   check bool "normal receipt never certifies unknown baseline prefix" false
     (P.memory_committed ~config ~keeper_name all |> get);
-  let prefix=P.narrow all |> some in
+  let prefix=prepare config |> some in
   ignore (commit config prefix "A and B");
   let suffix=prepare config |> some in
   check int "next source starts after baseline" 2
     (P.memory_range_id ~config ~keeper_name suffix |> get).start_atom;
   check bool "normal serial receipt certifies already consumed suffix" true
     (P.memory_committed ~config ~keeper_name suffix |> get)
-let test_fit_largest_request_prefix () = with_source @@ fun _env config save _append boundary ->
+let test_completed_turn_work_units () =
+  List.iter (fun fresh -> with_source @@ fun _env config save append boundary ->
+    let first = [message "A"; message "B"] in
+    let second = first @ [message "C"; message "D"; message "E"] in
+    let full = second @ [message "F"; message "G"] in
+    save full;
+    boundary ~fresh 1 first; boundary ~fresh:false 2 second;
+    boundary ~fresh:false 3 full;
+    List.iter (fun (endpoint, count, turn) ->
+      let prepared = prepare config |> some in
+      check int "next completed turn only" endpoint (P.end_atom prepared);
+      check int "only newly completed messages" count (List.length (P.messages prepared));
+      check bool "actual covering turn" true
+        (P.turn_ref prepared = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn);
+      let fitted = P.fit ~fits:(fun _ -> Ok true) prepared |> get |> some in
+      check bool "large capacity never widens the work unit" true (fitted == prepared);
+      let receipt = P.memory_range_id ~config ~keeper_name prepared |> get in
+      check int "receipt names selected boundary" turn receipt.end_boundary_line;
+      let saved = commit config prepared "Prior work remains available." in
+      check int "later boundary rows cannot replace selected anchor" endpoint saved.covering_end_atom;
+      check bool "snapshot retains selected turn" true (saved.end_turn_ref = P.turn_ref prepared);
+      let lines = B.read ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name |> get in
+      let restored = S.restore ~trace_id ~lines ~messages:full saved
+        |> Result.map_error S.error_to_string |> get in
+      check int "restore preserves all later messages" (7 - endpoint) (List.length restored.messages))
+      [2, 2, 1; 5, 3, 2; 7, 2, 3];
+    check bool "backlog exhausted" true (Option.is_none (prepare config));
+    append (B.History_restarted {trace_id});
+    boundary ~fresh:false 10 first; boundary ~fresh:false 11 full;
+    let restarted = prepare config |> some in
+    check int "restart selects first new-generation turn" 2 (P.end_atom restarted);
+    check bool "restart discards previous state" true
+      (U.member "previous_working_state" (P.prompt_json restarted) = `Null);
+    let saved = commit config restarted "Restarted work." in
+    check int "restart snapshot uses new-generation boundary" 5 saved.end_boundary_line;
+    check int "restart does not absorb later backlog" 2 saved.covering_end_atom)
+    [true; false]
+
+let test_recovery_overrides_next_turn () = with_source @@ fun _env config save _append boundary ->
+  let first = [message "A"; message "B"] in
+  let second = first @ [message "C"; message "D"] in
+  let full = second @ [message "E"; message "F"] in
+  save full; boundary ~fresh:true 1 first; boundary ~fresh:false 2 second;
+  boundary ~fresh:false 3 full;
+  let pending = P.prepare ~end_atom:5 ~config ~keeper_name ~trace_id () |> get |> some in
+  let receipt = P.memory_range_id ~config ~keeper_name pending |> get in
+  record_prepared_memory config pending;
+  let recovered = P.prepare ~end_atom:1 ~config ~keeper_name ~trace_id () |> get |> some in
+  check int "pending publication keeps exact interval ahead of natural turn" 5 (P.end_atom recovered);
+  check bool "pending publication keeps exact receipt" true
+    (P.memory_range_id ~config ~keeper_name recovered |> get = receipt);
+  check bool "pending publication cannot be subdivided" true (Option.is_none (P.narrow recovered));
+  let saved = P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"Five atoms." |> get in
+  check int "recovery retains actual covering turn" 6 saved.covering_end_atom;
+  check int "recovery retains exact boundary line" 3 saved.end_boundary_line;
+  let next = prepare config |> some in
+  check int "remaining turn endpoint" 6 (P.end_atom next);
+  check int "remaining turn suffix" 1 (List.length (P.messages next))
+
+let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config save _append boundary ->
   let messages = List.init 8 (fun index -> message (String.make (index + 1) 'x')) in
   save messages; boundary ~fresh:true 1 messages;
   let prepared = prepare config |> some in
@@ -211,11 +274,15 @@ let test_fit_largest_request_prefix () = with_source @@ fun _env config save _ap
   ignore (commit config first "Prior work preserved.");
   let suffix = prepare config |> some in
   let exact_size candidate = P.prompt_json candidate |> Yojson.Safe.to_string |> String.length in
-  let expected = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
-  let limit = exact_size expected in
-  let fitted = P.fit ~fits:(fun candidate -> Ok (exact_size candidate <= limit)) suffix
-    |> get |> some in
-  check int "largest fitting whole-atom endpoint" 7 (P.end_atom fitted);
+  let room_for_more = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
+  let limit = exact_size room_for_more in
+  let expected = P.narrow suffix |> some in
+  visited := [];
+  let fitted = P.fit ~fits:(fun candidate ->
+      visited := !visited @ [P.end_atom candidate];
+      Ok (exact_size candidate <= limit)) suffix |> get |> some in
+  check int "split work unit stops below capacity even with room for another atom" 6 (P.end_atom fitted);
+  check (list int) "no capacity-filling search after a fitting split" [8;6] !visited;
   check string "exact suffix and prior state preserved" (P.prompt_json expected |> Yojson.Safe.to_string)
     (P.prompt_json fitted |> Yojson.Safe.to_string);
   check string "frozen original unaffected" original (P.prompt_json prepared |> Yojson.Safe.to_string);
@@ -327,9 +394,11 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     (match !alternative_bytes with Some size -> size > max_chars | None -> false)
 
 let () = run "production continuity pair"
-  ["cycle",[test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
+  ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;
+    test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
+    test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
-    test_case "largest request-fitting prefix" `Quick test_fit_largest_request_prefix;
+    test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;
     test_case "normal baseline excludes unknown prefix" `Quick test_ordinary_baseline_coverage;test_case "baseline partial bootstrap and recovery" `Quick test_baseline_partial_bootstrap;test_case "executor cancellation joins commit" `Quick test_worker_cancellation_waits_for_commit;
     test_case "Memory frontier proves publication coverage" `Quick test_memory_coverage_required;

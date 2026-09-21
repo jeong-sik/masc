@@ -119,15 +119,11 @@ let runtime_keys =
       (b Act "J/K" "move candidate" ~help:"move the candidate under the cursor down or up its lane")
   ; Keeper_lanes_only
       (b Act "f" "default runtime"
-         ~help:"replace [runtime].default, the runtime a keeper with no \
-                assignment walks; it is a route, not a lane, so the lane keys \
-                do not act on it")
+         ~help:"replace [runtime].default, what a keeper with no assignment walks")
   ; Keeper_lanes_only
       (b Act "m" "vision fleet"
-         ~help:"open [runtime].media_failover in the slot editor: j/k moves, \
-                a adds, x drops, J/K reorders, Esc closes. Refused while boot \
-                could not resolve one of its entries, because the route is \
-                written as a whole list")
+         ~help:"edit [runtime].media_failover in the slot editor; refused while \
+                boot dropped one of its entries")
   ; Keeper_lanes_only
       (b Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \

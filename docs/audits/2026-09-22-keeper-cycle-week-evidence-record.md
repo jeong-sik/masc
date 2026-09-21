@@ -84,6 +84,27 @@ PR에서 다시 확인한다. #37630은 다른 작업의 JEV destinations #37620
   이번 검토는 소스 검토이며 이 테스트들을 새로 실행한 것은 아니다. `deferred`는
   Keeper 작업 실패나 새 실행을 뜻하지 않는다.
 
+## 공식 벤치 요구와 이 호스트의 실행 가능 범위
+
+2026-09-22 KST에 [Terminal-Bench 4.0 공식 발표](https://www.tbench.ai/news/terminal-bench-4-0)와
+[Harbor 자원 계약](https://docs.harborframework.com/core-concepts/tasks/resources)을
+다시 확인했다. 공식 4.0.0은 각 작업에 8시간을 부여한다. 저장소가 내려받은 고정
+4.0.0 데이터셋도 66개 task.toml 모두 `agent.timeout_sec=28800`이다.
+
+- H100을 요구하는 작업은 `fp8-rmsnorm-gemm`, `jax-speedrun-gpu`,
+  `math-eval-grader` 3개다. 모든 작업에 GPU가 필요한 것은 아니지만 전체 세트에는 필요하다.
+- 저장소 pin은 Harbor 0.23.0이다. 해당 Docker backend는 GPU capability를
+  선언하지 않으며 `dataset_plan.py`도 GPU 작업을 제외한다. GPU가 장착된 Runpod
+  호스트를 마련하는 것만으로 이 backend가 전체 세트를 실행하게 되지는 않는다.
+  GPU가 실제 작업 컨테이너에 전달되는 backend 검증이 별도로 필요하다.
+- 현재 Docker daemon은 4 CPU/15972 MiB를 보고했다. 전체 데이터셋에 대한
+  `dataset_plan.py --env docker --concurrency 1`은 GPU 제외를 표시하고 CPU·메모리
+  부족으로 exit1을 반환했다. 이 결과는 실행 전 환경 거절이며 MASC의 과제 실패 점수가 아니다.
+- `test_dataset_plan.py`와 `test_harbor_pin.py`는 12개 테스트가 통과했다.
+  새 모델 호출·전체 benchmark·Runpod 자원 생성은 하지 않았다. 버전이나 자원 조건을
+  바꾼 결과와 기존 점수를 섞지 않는다. 최신 Harbor 문서를 고정된 0.23.0의 구현으로
+  간주하지도 않는다.
+
 ## 전체 완료 판정에 아직 필요한 것
 
 Board/Task/Goal/HITL/Access Control/Multi Lane/Schedule은 이 문서의 좁은

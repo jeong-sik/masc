@@ -908,8 +908,11 @@ let run_best_effort
                ~observe:(fun observation -> observed_context_review := Some observation)
                ~clock ~keeper_id ~input:inp.working_context
                ~proposed:selection.working_contexts () in
-             if not (Keeper_librarian_context_review.permits_publication context_review) then
-               context_write := Withheld
+             if not (Keeper_librarian_context_review.permits_publication context_review) then (
+               context_write := Withheld;
+               Log.Keeper.info ~keeper_name:keeper_id
+                 "working context withheld by review: run_id=%s pockets=%d"
+                 run_id (List.length selection.working_contexts))
              else (
              context_write := Outcome_unconfirmed;
              (try match Domain_pool_ref.submit_io_or_inline (fun () ->

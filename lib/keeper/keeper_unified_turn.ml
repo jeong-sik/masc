@@ -1365,6 +1365,7 @@ let run_keeper_cycle
                     ~observation
                     ~latency_ms
                     ~outcome:"error"
+                    ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
                     ~degraded_retry_applied
                     ~degraded_retry_deferred
                     ~error:e_str

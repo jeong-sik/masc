@@ -381,6 +381,7 @@ max-concurrent = 1
     Keeper_unified_metrics_decision.append_decision_record ~config ~meta
       ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
       ~observation ~latency_ms:0 ~outcome:"completed"
+      ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
       ~degraded_retry_applied:None ~degraded_retry_deferred:None ();
     let rows = Fs_compat.load_file log_path |> String.split_on_char '\n'
       |> List.filter (fun row -> row <> "") in

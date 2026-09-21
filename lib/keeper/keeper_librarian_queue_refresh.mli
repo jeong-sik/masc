@@ -36,7 +36,7 @@ module For_testing : sig
     -> keeper_name:string
     -> commit:
          (expected_revision:int option
-          -> range_id:Keeper_memory_os_current.durable_range_id
+          -> range_id:Keeper_memory_os_current.durable_range_id option
           -> Keeper_librarian.input
           -> bool)
     -> unit

@@ -1064,6 +1064,7 @@ max-concurrent = 1
       Masc.Keeper_unified_metrics_decision.append_decision_record
         ~config ~meta ~observation ~latency_ms:3 ~outcome:"success"
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+        ~degraded_retry_applied:None ~degraded_retry_deferred:None
         ~result:(Some result) ();
       let log_path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
       let row = Fs_compat.load_file log_path |> String.split_on_char '\n'

@@ -815,7 +815,7 @@ let run_turn
       ?autonomous_yield_requested
       ?on_checkpoint_stage
       ()
-  : (run_result, Agent_core.Error.t) result
+  : Keeper_agent_result.turn_settlement
   =
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
   let deferred_runtime_lane_ref = ref None in

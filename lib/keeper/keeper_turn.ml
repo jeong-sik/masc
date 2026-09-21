@@ -375,8 +375,8 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
     ~prev:Keeper_turn_fsm.Awaiting_provider
     Keeper_turn_fsm.Streaming;
   try
-    let result = f () in
-    (match result with
+    let settlement : Keeper_agent_run.turn_settlement = f () in
+    (match settlement.result with
      | Ok _ -> ()
      | Error err ->
        let reason =
@@ -390,7 +390,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
          ~turn_id
          ~prev:Keeper_turn_fsm.Streaming
          (Keeper_turn_fsm.Failed reason));
-    result
+    settlement
   with
   | Eio.Cancel.Cancelled _ as e ->
     (* Cooperative cancellation must be preserved and reflected as a

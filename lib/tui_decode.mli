@@ -1271,6 +1271,11 @@ type standalone_lane = {
       (** Slot ids the lane declared that publication could not admit — the
           per-lane answer to "configured single, or configured double with
           one silently dropped". *)
+  sl_declared_slots : string list;
+      (** [slots] in the order [runtime.exact_output_lanes.<id>] writes them,
+          admitted or not. The two lists above are an admission reading and
+          lose file order once a sibling was rejected; the slot editor moves
+          and drops by position, so it reads this one. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;

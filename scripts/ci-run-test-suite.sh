@@ -147,6 +147,54 @@ suite_output_ledger() {
   ' "$1"
 }
 
+full_log_evidence() {
+  local source_log="$1"
+  if [ -n "${MASC_TEST_SUITE_LOG_ARTIFACT:-}" ]; then
+    echo "[test-suite] the full dune log is uploaded as the ${MASC_TEST_SUITE_LOG_ARTIFACT} artifact."
+  else
+    echo "[test-suite] the full dune log is at ${source_log} on the runner;" \
+         "the workflow does not upload that file."
+  fi
+}
+
+workflow_step_block() {
+  local step_name="$1"
+  local workflow="$2"
+  awk -v heading="      - name: ${step_name}" '
+    $0 == heading { printing = 1 }
+    printing && $0 != heading && $0 ~ /^      - name: / { exit }
+    printing { print }
+  ' "$workflow"
+}
+
+workflow_log_artifact_contract() {
+  local workflow=".github/workflows/test.yml"
+  local test_step
+  local upload_step
+  # The GitHub expression is the literal workflow text this contract checks.
+  # shellcheck disable=SC2016
+  local artifact_path='path: ${{ runner.temp }}/test-suite.log'
+  if [ ! -f "$workflow" ]; then
+    echo "[test-suite] self-test FAIL - $workflow is missing" >&2
+    return 1
+  fi
+  test_step="$(workflow_step_block "Test" "$workflow")"
+  upload_step="$(workflow_step_block "Upload the full Dune suite log" "$workflow")"
+  if ! printf '%s\n' "$test_step" \
+       | grep -Fq 'MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log'; then
+    echo "[test-suite] self-test FAIL - Test does not name the full-log artifact" >&2
+    return 1
+  fi
+  if [ -z "$upload_step" ] \
+     || ! printf '%s\n' "$upload_step" | grep -Fq 'if: always()' \
+     || ! printf '%s\n' "$upload_step" | grep -Eq 'uses: actions/upload-artifact@v[0-9]+' \
+     || ! printf '%s\n' "$upload_step" | grep -Fq 'name: test-suite-log' \
+     || ! printf '%s\n' "$upload_step" | grep -Fq "$artifact_path"; then
+    echo "[test-suite] self-test FAIL - the full-log upload step is absent or incomplete" >&2
+    return 1
+  fi
+}
+
 extract_failed_names() {
   attribute_failures "$1" | awk -F'\t' '$2 == "failure" && $1 != "-" { print $1 }'
 }
@@ -305,6 +353,9 @@ print_alcotest_outputs() {
 }
 
 self_test() {
+  workflow_log_artifact_contract || exit 1
+  echo "[test-suite] self-test OK - the full-log artifact name and upload step land together"
+
   local exact_block
   local longer_block
   fixture_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-self-test.XXXXXX")"
@@ -511,12 +562,25 @@ EOF
   echo "[test-suite] self-test OK - the output ledger names test suites, not build actions"
 
   ledger_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-empty-ledger.XXXXXX")"
-  printf '%s\n' 'dune exited before printing a suite command' > "$ledger_log"
+  cat > "$ledger_log" <<'EOF'
+[test-suite] FAIL - dune exited 1 and printed no failure header
+Traceback (most recent call last):
+  File "test/test_tui_keyboard_input.py", line 10, in handle
+BrokenPipeError: [Errno 32] Broken pipe
+EOF
   [ -z "$(suite_output_ledger "$ledger_log")" ] \
     || { echo "[test-suite] self-test FAIL - a log without a suite command produced a ledger" >&2
          rm -f "$ledger_log"; exit 1; }
+  missing="$(MASC_TEST_SUITE_LOG_ARTIFACT='' full_log_evidence "$ledger_log")"
+  printf '%s\n' "$missing" | grep -Fq 'the workflow does not upload that file' \
+    || { echo "[test-suite] self-test FAIL - a missing full-log artifact is not reported" >&2
+         rm -f "$ledger_log"; exit 1; }
+  uploaded="$(MASC_TEST_SUITE_LOG_ARTIFACT=test-suite-log full_log_evidence "$ledger_log")"
+  printf '%s\n' "$uploaded" | grep -Fq 'uploaded as the test-suite-log artifact' \
+    || { echo "[test-suite] self-test FAIL - the configured artifact name is not reported" >&2
+         rm -f "$ledger_log"; exit 1; }
   rm -f "$ledger_log"
-  echo "[test-suite] self-test OK - a log without a suite command has an explicit empty ledger"
+  echo "[test-suite] self-test OK - an empty ledger is distinct from full-log artifact availability"
 
   # What the deadline snapshot reads from process rows: a dune-run suite, a
   # python rule and a server binary a suite spawned; not a shell.
@@ -740,28 +804,16 @@ if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
   if [ -n "$ledger" ]; then
     printf '%s\n' "$ledger" | sed 's/^/  /'
   else
-    echo "  (none: no test-suite command in the log — either no suite printed"
-    echo "  anything, or dune's command format changed)"
+    echo "  (none: the full dune log contains no test-suite command; dune did not"
+    echo "  print one before exit, or its command format changed)"
   fi
   echo
   echo "[test-suite] a PASS line above is that suite's own verdict, not dune's exit code:" \
        "dune exited ${rc} somewhere this log does not name."
-  # The workflow half of this (not in this PR -- the lane token has no
-  # workflow scope; tracked in #37529) is one step and one env var, and
-  # they must land together or this message lies:
-  #
-  #   - name: Upload dune log
-  #     if: always()
-  #     uses: actions/upload-artifact@v4
-  #     with: { name: test-suite-log, path: ${{ runner.temp }}/test-suite.log }
-  #   env:
-  #     MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
-  if [ -n "${MASC_TEST_SUITE_LOG_ARTIFACT:-}" ]; then
-    echo "[test-suite] the full dune log is uploaded as the ${MASC_TEST_SUITE_LOG_ARTIFACT} artifact."
-  else
-    echo "[test-suite] the full dune log is at ${log} on the runner;" \
-         "no workflow step uploads it yet."
-  fi
+  # The self-test checks that the workflow's artifact name and upload step
+  # land together. #37529 remains open until a real failed run proves both
+  # this receipt and the artifact exist outside the runner.
+  full_log_evidence "$log"
   echo
   tail -60 "$log"
   exit 2

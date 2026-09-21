@@ -317,6 +317,8 @@ let policy
       ?(model = C.default_model)
       ?(board_attention = true)
       ?(absorb_gate = false)
+      ?(context_review = false)
+      ?(skill_applicability = false)
       ?(excluded_keepers = [])
       ()
   : Runtime_schema.typesafeai
@@ -326,6 +328,8 @@ let policy
   ; lane_model = model
   ; board_attention
   ; absorb_gate
+  ; context_review
+  ; skill_applicability
   ; excluded_keepers
   }
 ;;
@@ -423,6 +427,37 @@ let test_an_excluded_keeper_keeps_its_content_home () =
 
 (* The names in [excluded_keepers] are checked against the keepers of the
    base path at boot: a misspelt name excludes nobody, so it is reported. *)
+let test_context_and_skill_reviews_require_their_own_opt_in () =
+  let state = function
+    | Ok _ -> "enabled"
+    | Error reason -> C.unavailable_reason_to_string reason
+  in
+  let check_reviews label expected =
+    Alcotest.(check (pair string string)) label expected
+      (state (C.context_review_api_key ~keeper_id:"polisher"),
+       state (C.skill_applicability_api_key ~keeper_id:"polisher"))
+  in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ()) (fun () ->
+      check_reviews "a key alone does not send new Context or Skill data"
+        ("context_review_disabled", "skill_applicability_disabled"));
+    with_policy (policy ~context_review:true ()) (fun () ->
+      check_reviews "Context opt-in leaves Skill review off"
+        ("enabled", "skill_applicability_disabled"));
+    with_policy (policy ~skill_applicability:true ()) (fun () ->
+      check_reviews "Skill opt-in leaves Context review off"
+        ("context_review_disabled", "enabled"));
+    with_policy (policy ~context_review:true ~skill_applicability:true
+        ~excluded_keepers:[ "polisher" ] ()) (fun () ->
+      check_reviews "both reviews honor the common exclusion"
+        ("keeper_excluded", "keeper_excluded"));
+    with_policy (policy ~enabled:false ~context_review:true ~skill_applicability:true ()) (fun () ->
+      check_reviews "lane disabled" ("lane_disabled", "lane_disabled")));
+  with_key None (fun () ->
+    with_policy (policy ~context_review:true ~skill_applicability:true ()) (fun () ->
+      check_reviews "both reviews require a key" ("missing_api_key", "missing_api_key")))
+;;
+
 let test_unknown_excluded_keepers_are_named () =
   with_policy (policy ~excluded_keepers:[ "kidsnote-slack-context-collector"; "collecter" ] ()) (fun () ->
     Alcotest.(check (list string)) "the name that is no keeper" [ "collecter" ]
@@ -472,6 +507,8 @@ let () =
             test_config_reads_the_published_policy
         ; Alcotest.test_case "an excluded keeper keeps its content home, at both gates" `Quick
             test_an_excluded_keeper_keeps_its_content_home
+        ; Alcotest.test_case "Context and Skill reviews require separate opt-in" `Quick
+            test_context_and_skill_reviews_require_their_own_opt_in
         ; Alcotest.test_case "unknown excluded keepers are named" `Quick
             test_unknown_excluded_keepers_are_named
         ; Alcotest.test_case "each gate has its own switch" `Quick

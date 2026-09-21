@@ -135,6 +135,15 @@ type degraded_retry =
 val recoverable_runtime_failure_reason :
   Agent_core.Error.t -> degraded_retry_reason option
 
+(** The labelled retry a deferred lane stands for: the runtime the lane names
+    next, and why the failure that deferred it is continuable. Falls back to
+    [Deferred_runtime_lane] when that failure carries no continuation reason
+    of its own. Callers: [Keeper_unified_turn] for the decision record,
+    [Keeper_agent_run] for both halves of the receipt's degraded-retry
+    report. *)
+val degraded_retry_of_deferred_lane :
+  Keeper_turn_driver.deferred_runtime_lane -> degraded_retry
+
 val is_provider_timeout_error : Agent_core.Error.t -> bool
 (** True when [err] is a typed provider-timeout class failure. Live caller:
     [keeper_unified_turn.ml] degraded-retry classification. *)

@@ -194,7 +194,7 @@ let close_acquisition_fd ~operation ~path ~context fd =
     Unix.close fd;
     Ok ()
   with
-  | exn ->
+  | exn -> (* cancel-guard-ok: Unix.close performs no Eio operation. *)
     let rejection =
       Lease_io_failed
         { operation
@@ -695,7 +695,7 @@ let prepare_base_path_lease_exec_handoff lease =
          Unix.clear_close_on_exec lease.fd;
          Ok ()
        with
-       | exn ->
+       | exn -> (* cancel-guard-ok: Unix.clear_close_on_exec performs no Eio operation. *)
          Error
            (Lease_io_failed
               { operation = "prepare_exec_handoff"
@@ -887,7 +887,7 @@ let prepare_base_path_lock ~run_dir base_path =
   let ( let* ) = Result.bind in
   let* canonical_base_path =
     try Ok (Unix.realpath base_path) with
-    | exn ->
+    | exn -> (* cancel-guard-ok: Unix.realpath performs no Eio operation. *)
       Error
         (Base_path_canonicalization_failed
            { base_path; reason = Printexc.to_string exn })
@@ -899,7 +899,7 @@ let prepare_base_path_lock ~run_dir base_path =
       Error
         (Base_path_not_directory
            { path = canonical_base_path; kind = stat.st_kind })
-    | exception exn ->
+    | exception exn -> (* cancel-guard-ok: Unix.lstat performs no Eio operation. *)
       Error
         (Lease_io_failed
            { operation = "lstat_base_path"
@@ -909,7 +909,7 @@ let prepare_base_path_lock ~run_dir base_path =
   in
   let* run_directory =
     try Ok (Unix.realpath run_dir) with
-    | exn ->
+    | exn -> (* cancel-guard-ok: Unix.realpath performs no Eio operation. *)
       Error
         (Run_directory_canonicalization_failed
            { run_dir; reason = Printexc.to_string exn })
@@ -921,7 +921,7 @@ let prepare_base_path_lock ~run_dir base_path =
       Error
         (Run_directory_not_directory
            { path = run_directory; kind = stat.st_kind })
-    | exception exn ->
+    | exception exn -> (* cancel-guard-ok: Unix.lstat performs no Eio operation. *)
       Error
         (Lease_io_failed
            { operation = "lstat_run_directory"
@@ -1145,7 +1145,7 @@ let open_existing_lease_file prepared expected_file_stat =
       let fd = Unix.openfile prepared.path [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
       verify_open_lease_file prepared fd (Some expected_file_stat)
     with
-    | exn ->
+    | exn -> (* cancel-guard-ok: Unix.openfile, and the Unix.fstat inside verify_open_lease_file, perform no Eio operation. *)
       Error
         (Lease_io_failed
            { operation = "open_existing_lease_file"
@@ -1218,7 +1218,7 @@ let parsed_pid_fd fd =
     let length = read 0 in
     Bytes.sub_string payload 0 length |> String.trim |> int_of_string_opt
   with
-  | exn ->
+  | exn -> (* cancel-guard-ok: Unix.lseek and Unix.read perform no Eio operation. *)
     Log.Server.error
       "BasePath lease owner read failed path_fd error=%s"
       (Printexc.to_string exn);

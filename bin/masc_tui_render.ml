@@ -382,11 +382,13 @@ let render_overview (state : state) =
            question that header answers; at this width the row says only that
            one did. *)
         let approval_count =
-          let on_screen = List.length (Masc_tui_types.approval_items state) in
+          let on_screen = Masc_tui_types.approvals_surface_pending state in
           let source_unread =
             Option.is_none state.approval_snapshot
             || Option.is_some state.approvals_error
             || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_none state.asks_snapshot
+            || Option.is_some state.asks_error
             || Option.is_some state.gate_error
             || Option.is_some state.gate_queue_unavailable
           in
@@ -5244,52 +5246,56 @@ let render_lane_run_list (state : state) ~lane_id =
    that fit stay complete; oversized fields share the space left after each
    field's minimum preview. If even those minima do not fit, preserve the
    original prefix and name the omitted suffix count. Stored bytes do not change. *)
-let lane_run_render_max_bytes = 65536
+let lane_run_preview_source_max_bytes = 65536
+
+type lane_run_prepared_document =
+  { full_text : string
+  ; document : string
+  ; notice : string
+  }
+
+type lane_run_prepared_field =
+  { index : int
+  ; heading : string
+  ; heading_bytes : int
+  ; prepared : lane_run_prepared_document
+  ; minimum_bytes : int
+  ; full_bytes : int
+  }
 
 let lane_run_payload_lines ~width json =
   let fence = fenced_document_text ~language:"json" in
   let prepare_document value =
-    let full = Yojson.Safe.pretty_to_string value in
-    let full_document = fence full in
-    let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full) in
-    full, full_document, notice
+    let full_text = Yojson.Safe.pretty_to_string value in
+    let document = fence full_text in
+    let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full_text) in
+    { full_text; document; notice }
   in
-  let minimum_document_bytes (full, full_document, notice) =
-    min (String.length full_document)
-      (String.length full_document - String.length full + String.length notice + 1)
+  let minimum_document_bytes prepared =
+    min (String.length prepared.document)
+      (String.length prepared.document - String.length prepared.full_text
+       + String.length prepared.notice + 1)
   in
-  let render_document ~budget (full, full_document, notice) =
-    let preview =
-      if String.length full_document <= budget then Some (full_document, [])
+  (* Field allocation reserves the minimum above; non-object payloads receive
+     the full preview budget. Both callers therefore leave a non-negative room. *)
+  let render_document ~budget prepared =
+    let document, notices =
+      if String.length prepared.document <= budget then prepared.document, []
       else
-        let wrapper_bytes = String.length full_document - String.length full in
-        let room = budget - wrapper_bytes - String.length notice - 1 in
-        if room < 0 then None
-        else
-          let cut =
-            match String.rindex_from_opt full room '\n' with
-            | Some newline -> newline
-            | None -> String_util.utf8_char_boundary full room
-          in
-          Some (fence (String.sub full 0 cut), [ Theme.warn (), notice ])
+        let wrapper_bytes = String.length prepared.document - String.length prepared.full_text in
+        let room = budget - wrapper_bytes - String.length prepared.notice - 1 in
+        let cut =
+          match String.rindex_from_opt prepared.full_text room '\n' with
+          | Some newline -> newline
+          | None -> String_util.utf8_char_boundary prepared.full_text room
+        in
+        fence (String.sub prepared.full_text 0 cut), [ Theme.warn (), prepared.notice ]
     in
-    Option.map
-      (fun (document, notices) ->
-        let used =
-          String.length document
-          + List.fold_left (fun n (_, text) -> n + String.length text + 1) 0 notices
-        in
-        let lines =
-          document_markdown ~width document
-          |> List.map (fun line -> Ansi.reset, line)
-        in
-        used, lines @ notices)
-      preview
-  in
-  let document_lines ~budget prepared =
-    match render_document ~budget prepared with
-    | Some (_, lines) -> lines
-    | None -> [ Theme.warn (), "… payload not rendered" ]
+    let lines =
+      document_markdown ~width document
+      |> List.map (fun line -> Ansi.reset, line)
+    in
+    lines @ notices
   in
   match json with
   | `Assoc (_ :: _ as fields) ->
@@ -5299,58 +5305,58 @@ let lane_run_payload_lines ~width json =
         (fun index (name, value) ->
           let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
           let heading_bytes = String.length heading + 1 in
-          let ((_, full_document, _) as prepared) = prepare_document value in
-          ( index, heading, heading_bytes, prepared
-          , heading_bytes + minimum_document_bytes prepared
-          , heading_bytes + String.length full_document ))
+          let prepared = prepare_document value in
+          { index; heading; heading_bytes; prepared
+          ; minimum_bytes = heading_bytes + minimum_document_bytes prepared
+          ; full_bytes = heading_bytes + String.length prepared.document })
         fields
     in
-    let render_field budget (_, heading, heading_bytes, prepared, _, _) =
-      (Ansi.bold, heading)
-      :: document_lines ~budget:(budget - heading_bytes) prepared
+    let render_field budget field =
+      (Ansi.bold, field.heading)
+      :: render_document ~budget:(budget - field.heading_bytes) field.prepared
     in
-    let total = List.fold_left (fun n (_, _, _, _, _, bytes) -> n + bytes) 0 fields in
-    if total <= lane_run_render_max_bytes then
-      List.concat_map (fun ((_, _, _, _, _, bytes) as field) -> render_field bytes field) fields
+    let total = List.fold_left (fun n field -> n + field.full_bytes) 0 fields in
+    if total <= lane_run_preview_source_max_bytes then
+      List.concat_map (fun field -> render_field field.full_bytes field) fields
     else begin
       let minimum_total fields =
-        List.fold_left (fun n (_, _, _, _, bytes, _) -> n + bytes) 0 fields
+        List.fold_left (fun n field -> n + field.minimum_bytes) 0 fields
       in
       let notice_bytes = function None -> 0 | Some text -> String.length text + 1 in
       let fields, suffix_notice =
-        if minimum_total fields <= lane_run_render_max_bytes then fields, None
+        if minimum_total fields <= lane_run_preview_source_max_bytes then fields, None
         else
           let rec prefix used remaining notice acc = function
             | [] -> List.rev acc, None
-            | ((_, _, _, _, minimum, _) as field) :: rest ->
+            | field :: rest ->
               let next_notice =
                 if List.is_empty rest then None else Some (omitted (remaining - 1))
               in
-              if used + minimum + notice_bytes next_notice <= lane_run_render_max_bytes then
-                prefix (used + minimum) (remaining - 1) next_notice (field :: acc) rest
+              if used + field.minimum_bytes + notice_bytes next_notice <= lane_run_preview_source_max_bytes then
+                prefix (used + field.minimum_bytes) (remaining - 1) next_notice (field :: acc) rest
               else List.rev acc, notice
           in
           let count = List.length fields in
           prefix 0 count (Some (omitted count)) [] fields
       in
-      let needed (_, _, _, _, minimum, full) = full - minimum in
+      let needed field = field.full_bytes - field.minimum_bytes in
       let ranked = List.stable_sort (fun a b -> Int.compare (needed a) (needed b)) fields in
       let rec allocate extra remaining = function
         | [] -> []
-        | ((_, _, _, _, minimum, _) as field) :: rest ->
+        | field :: rest ->
           let added = min (needed field) (extra / remaining) in
-          (field, minimum + added) :: allocate (extra - added) (remaining - 1) rest
+          (field, field.minimum_bytes + added) :: allocate (extra - added) (remaining - 1) rest
       in
-      let extra = lane_run_render_max_bytes - notice_bytes suffix_notice - minimum_total fields in
+      let extra = lane_run_preview_source_max_bytes - notice_bytes suffix_notice - minimum_total fields in
       let allocated =
         allocate extra (List.length fields) ranked
-        |> List.sort (fun ((a, _, _, _, _, _), _) ((b, _, _, _, _, _), _) -> Int.compare a b)
+        |> List.sort (fun (a, _) (b, _) -> Int.compare a.index b.index)
       in
       let lines = List.concat_map (fun (field, budget) -> render_field budget field) allocated in
       match suffix_notice with None -> lines | Some text -> lines @ [ Theme.warn (), text ]
     end
   | _ ->
-    document_lines ~budget:lane_run_render_max_bytes (prepare_document json)
+    render_document ~budget:lane_run_preview_source_max_bytes (prepare_document json)
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_decision with

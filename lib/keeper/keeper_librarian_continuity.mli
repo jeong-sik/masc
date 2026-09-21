@@ -7,8 +7,10 @@ val read : config:Workspace.config -> keeper_name:string ->
 val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->
   (prepared option, string) result
 (** Read boundaries before the locked checkpoint. Supply previous valid state
-    plus the new suffix, or an explicitly captured checkpoint prefix. Pending
-    in-flight atoms are excluded. [None] means no new complete coverage. *)
+    plus the suffix through the next real completed turn. Capacity is a ceiling,
+    not a reason to include later turns. An explicit [end_atom] selects a prefix;
+    an unpublished exact Memory receipt takes precedence over either choice.
+    Pending in-flight atoms are excluded. [None] means no new complete coverage. *)
 val prompt_json : prepared -> Yojson.Safe.t
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
   working_state:string -> (Librarian_continuity_snapshot.t, string) result

@@ -660,6 +660,7 @@ let dashboard_config_string_fields =
     "sandbox_profile";
     "network_mode";
     "activation_mode";
+    "input_policy";
   ]
 
 let dashboard_config_string_list_fields =
@@ -832,6 +833,10 @@ let validate_dashboard_config_field key value =
     (match value with
      | `Assoc _ -> Ok ()
      | other -> dashboard_field_type_error key "an object" other)
+  else if key = "input_policy" then
+    (match value with
+     | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
+     | other -> dashboard_field_type_error key "small or wide" other)
   else if key = "max_context_override" then
     validate_dashboard_max_context_override value
   else if key = confirm_context_shrink_field then

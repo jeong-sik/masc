@@ -2530,6 +2530,19 @@ let test_parse_requires_a_sandbox_profile () =
    field vanish with no error. The gate must reject every key the parse body
    does not consume, and the known set must stay derived from that body,
    not from a stale schema list. *)
+let test_input_policy () =
+  with_test_context @@ fun ctx ->
+  List.iter (fun (wire, expected) ->
+    match parse_stating_a_profile ctx (`Assoc ["name", `String "input-policy"; "input_policy", `String wire]) with
+    | Ok parsed -> check bool "typed input policy" true (parsed.input_policy_opt = Some expected)
+    | Error result -> fail (Keeper_types_profile.tool_result_body result))
+    ["small", Masc.Keeper_input_policy.Small; "wide", Masc.Keeper_input_policy.Wide];
+  List.iter (fun value ->
+    match parse_stating_a_profile ctx (`Assoc ["name", `String "input-policy"; "input_policy", value]) with
+    | Error _ -> () | Ok _ -> fail "invalid input policy accepted")
+    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
+;;
+
 let test_parse_rejects_unknown_keys () =
   with_test_context @@ fun ctx ->
   List.iter
@@ -2549,7 +2562,7 @@ let test_parse_rejects_unknown_keys () =
     ];
   check (list string) "known set is exactly the parse-consumed keys"
     (List.sort String.compare
-       [ "name"; "runtime_id"; "activation_mode"; "mention_targets"
+       [ "name"; "runtime_id"; "activation_mode"; "input_policy"; "mention_targets"
        ; "board_interests"
        ; "max_context_override"; "sandbox_profile"; "sandbox_image"
        ; "microvm_backend"; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
@@ -2668,6 +2681,7 @@ let () =
             "unknown arguments are rejected, not silently dropped"
             `Quick
             test_parse_rejects_unknown_keys
+        ; test_case "typed input policy" `Quick test_input_policy
         ] )
     ; ( "sandbox_profile"
       , [ test_case

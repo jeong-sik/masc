@@ -64,6 +64,11 @@ let covered_messages ~end_atom messages =
     labelled
 ;;
 
+let completed_history_end ~trace_id ~lines ~messages =
+  Librarian_continuity_snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages
+  |> Result.map (fun range -> range.Keeper_librarian_range.end_atom)
+;;
+
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
   Result.map (fun _ ->
     Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
@@ -100,6 +105,8 @@ type try_provider_ctx =
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; continuity : continuity option
+  ; input_policy : Keeper_input_policy.t
+  ; completed_end_atom : int
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
@@ -732,6 +739,7 @@ let last_resort_demotes ~measure_message_bytes ~base_path messages =
 ;;
 
 let compose_carried_model_input
+      ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
@@ -758,8 +766,10 @@ let compose_carried_model_input
     | None, None -> None, None
   in
   let demote_before =
-    if Option.is_some continuity then 0
-    else if last_resort then history_atom_count else demote_before in
+    match input_policy, continuity with
+    | Keeper_input_policy.Small, _ -> demote_before
+    | Keeper_input_policy.Wide, Some _ -> 0
+    | Wide, None -> if last_resort then history_atom_count else demote_before in
   let planned =
     demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
   in
@@ -842,6 +852,7 @@ type request_view =
   }
 
 let request_view
+      ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
       ~provider_config
       ~measure_message_bytes
@@ -856,7 +867,7 @@ let request_view
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ?continuity
+        ~input_policy ?continuity
         ~measure_message_bytes
         ~front
         ~history_digest_at
@@ -964,9 +975,6 @@ let bounded_model_input_projection
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
   in
-  (* A position in the durable history, which is what the composition
-     annotates: the messages the turn was seeded with come first. *)
-  let initial_message_index = List.length ctx.initial_messages in
   (* One memo per provider attempt, not per request.  A turn issues one
      projection per provider request — measured on the live wire capture:
      83 requests for turn 12263, 62 for 15638 — and every request re-measures
@@ -994,6 +1002,17 @@ let bounded_model_input_projection
      be thrown away between the attempt's 62 to 83 requests, which is what it
      was before. *)
   let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
+  let store_failure_reported = ref false in
+  let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
+  let references_enabled = match ctx.input_policy, ctx.recovery_view with
+    | Keeper_input_policy.Small, None -> reader_available && ctx.completed_end_atom > 0
+    | _ -> false in
+  let demotion_base_path = if references_enabled then ctx.base_path else "" in
+  Log.Keeper.info ~keeper_name:ctx.keeper_name
+    "input policy runtime=%s selected=%s context_owner=agent_core completed_end_atom=%d blob_reader_available=%b body_externalization_enabled=%b"
+    ctx.runtime_id (Keeper_input_policy.to_string ctx.input_policy)
+    ctx.completed_end_atom reader_available references_enabled;
+
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
@@ -1064,40 +1083,17 @@ let bounded_model_input_projection
        compose with the ordinary boundary again. *)
     let last_resort = !(state.last_resort_armed) in
     state.last_resort_armed := false;
-    let demotion_base_path =
-      (* #27268 A/B kill-switch: an empty base path makes the composition
-         keep every atom verbatim, so the RFC-0363 demotion effect can be
-         measured on and off in one deployment. Default on preserves
-         current behavior. *)
-      if Env_config_core.get_bool ~default:true "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
-      then ctx.base_path
-      else ""
-    in
-    state.last_resort_probe
-    := Some
-         (fun () ->
-            offload_model_input_cpu (fun () ->
-              last_resort_demotes
-                ~measure_message_bytes
-                ~base_path:demotion_base_path
-                messages));
-    (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
-       reasoning over right now is what this turn produced, and
-       [ctx.initial_messages] is exactly the history the turn was seeded
-       with — so everything past it is this turn's own work and stays
-       verbatim, and everything before it was already reported through a
-       receipt or a board post and becomes a readable address. The
-       boundary moves once per turn, so appending a message cannot
-       rewrite the retained prefix. *)
-    let demote_before =
-      offload_model_input_cpu (fun () ->
-        Runtime_model_input_tail_window.first_atom_at_or_after
-          messages
-          ~message_index:initial_message_index)
-    in
+    (* Completed-turn evidence, not attempt seed length, protects unfinished
+       resumed tool work. Capacity refusal does not move this boundary. *)
+    let demote_before = ctx.completed_end_atom in
+    state.last_resort_probe :=
+      (match ctx.input_policy, ctx.continuity with
+       | Keeper_input_policy.Small, _ | _, Some _ -> None
+       | Wide, None -> Some (fun () -> offload_model_input_cpu (fun () ->
+           last_resort_demotes ~measure_message_bytes ~base_path:demotion_base_path messages)));
     let view =
       request_view
-        ?continuity:ctx.continuity
+        ~input_policy:ctx.input_policy ?continuity:ctx.continuity
         ~provider_config
         ~measure_message_bytes
         ~front
@@ -1124,6 +1120,11 @@ let bounded_model_input_projection
               ~pending
               messages
           in
+          if outcome.Keeper_model_input_demotion.reverted > 0 && not !store_failure_reported then (
+            store_failure_reported := true;
+            Log.Keeper.warn ~keeper_name:ctx.keeper_name
+              "input policy kept original tool bodies after externalization failure: count=%d"
+              outcome.reverted);
           outcome.Keeper_model_input_demotion.messages)
         messages
     in

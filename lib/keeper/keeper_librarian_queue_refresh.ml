@@ -219,7 +219,9 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
       (* One fallback's limit cannot prohibit other providers. If no indivisible
          range fits it, keep the source for the normal lane walk; only a real
          final refusal may stop this attempt. *)
-      let selected = Option.value selected ~default:prepared in
+      let selected = match selected with
+        | Some selected -> selected
+        | None -> prepared in
       let* memory_committed = P.memory_committed ~config ~keeper_name selected in
       let* range_id = P.memory_range_id ~config ~keeper_name selected in
       Ok (current, memory_committed, range_id, selected,

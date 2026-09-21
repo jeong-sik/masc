@@ -17,6 +17,7 @@ type parsed_args =
   { name : string
   ; runtime_id_opt : string option
   ; activation_mode_opt : Keeper_activation_mode.t option
+  ; input_policy_opt : Keeper_input_policy.t option
   ; mention_targets_opt : string list option
   ; board_interests_opt : string list option
   ; max_context_override_opt : int option

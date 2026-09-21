@@ -483,6 +483,14 @@ status: reference
   `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 
+**Input Policy (입력 구성 방식)**
+: Keeper의 `input_policy` 설정. `small`은 Agent Core에 보내는 완료된 과거 도구 결과를
+  조회 가능한 원문 참조로 바꾸고, `wide`는 그 본문을 함께 보낸다. 둘 다 검증된
+  하던 일 저장본을 사용하며, 아직 완료되지 않은 작업과 일반 대화는 유지한다.
+  원본 checkpoint나 Memory의 처리 위치를 바꾸지 않는다. 기본은 `small`이다.
+  `max_context_override`는 별도의 토큰 상한이며, 이 설정이나 채워야 할 목표가 아니다.
+  공식 클라이언트는 자체 문맥 처리를 사용하므로 선택값과 실제 적용 여부를 구분한다.
+
 **Working Context**
 : Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
   operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.

@@ -50,6 +50,7 @@ type profile_update =
   ; mention_targets : string list
   ; board_interests : string list
   ; max_context_override : int option
+  ; input_policy : Keeper_input_policy.t
   ; activation_mode : Keeper_activation_mode.t
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
@@ -452,6 +453,7 @@ let apply_existing (state : state) meta command =
          ; board_interests = update.board_interests
          ; max_context_override = update.max_context_override
          ; activation_mode = update.activation_mode
+         ; input_policy = update.input_policy
          ; telemetry_feedback_enabled = update.telemetry_feedback_enabled
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow

@@ -7,7 +7,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
+import type { KeeperInputPolicy, KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
 import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
@@ -31,6 +31,11 @@ function asLooseNumber(value: unknown): number | undefined {
 
 function asLooseNullableNumber(value: unknown): number | null {
   return asLooseNumber(value) ?? null
+}
+
+function decodeInputPolicy(value: unknown): KeeperInputPolicy {
+  if (value === 'small' || value === 'wide') return value
+  throw new Error('Invalid keeper config response: input_policy must be small or wide')
 }
 
 function decodeMaxContextOverride(value: unknown): number | null {
@@ -344,6 +349,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     config_transaction_warnings:
       decodeConfigWarnings(data.config_transaction_warnings),
     activation_mode: requireKeeperActivationMode(data.activation_mode),
+    input_policy: decodeInputPolicy(data.input_policy),
     max_context_override: maxContextOverride,
     sandbox_profile: asNullableString(data.sandbox_profile) ?? UNKNOWN_SANDBOX_PROFILE,
     network_mode: asNullableString(data.network_mode) ?? UNKNOWN_NETWORK_MODE,
@@ -446,6 +452,7 @@ export type KeeperConfigUpdatePayload = {
   mention_targets?: string[]
   board_interests?: string[]
   activation_mode?: KeeperActivationMode
+  input_policy?: KeeperInputPolicy
   max_context_override?: number | null
   // Sandbox
   sandbox_profile?: SandboxProfile

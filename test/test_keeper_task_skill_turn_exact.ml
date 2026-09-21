@@ -837,9 +837,17 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
   Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
   Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let log_root = Filename.temp_dir "skill-jev-tool-log-" "" in
+  Keeper_tool_call_log.reset_for_testing ();
+  Eio.Switch.on_release sw (fun () ->
+    Keeper_tool_call_log.reset_for_testing ();
+    Fs_compat.remove_tree log_root);
+  Keeper_tool_call_log.init ~base_path:log_root ();
   let fixture_config = config (source_row ~id:"only" ~path:"skills") in
+  let frozen_body = "FROZEN_SKILL_BODY" ^ String.make Keeper_tool_call_log.max_output_len 'x' in
   let captured_snapshot = snapshot fixture_config
-      [ [ "guide", document ~name:"guide" ~description:"exact" "FROZEN_SKILL_BODY" ] ] in
+      [ [ "guide", document ~name:"guide" ~description:"exact" frozen_body ] ] in
   let source_id = (List.hd fixture_config.sources).id in
   let reference = exact_reference captured_snapshot ~source_id ~package_id:"guide" ~name:"guide" in
   let selected = resolve_one captured_snapshot reference in
@@ -860,6 +868,15 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-skill-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy policy @@ fun () ->
   let captured = ref None in
+  let call_number = ref 0 in
+  let persist ~case ~success ~output =
+    incr call_number;
+    let call_id = Printf.sprintf "skill-jev-%d-%s" !call_number case in
+    Keeper_tool_call_log.log_call ~keeper_name:"skill-fixture" ~tool_name:"keeper_skill"
+      ~input:(Reference.to_yojson reference) ~output_text:output ~success ~duration_ms:0.
+      ~execution_id:(Ids.Execution_id.of_string call_id)
+      ~tool_use_id:call_id ()
+  in
   let tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~assess_applicability:(fun ~reference ~body ->
@@ -874,6 +891,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       (String_util.contains_substring output "FROZEN_SKILL_BODY");
     check bool "advice reaches actual Agent-Core content" true
       (String_util.contains_substring output expected);
+    persist ~case:expected ~success:true ~output;
     let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
     let open Yojson.Safe.Util in
     check bool "model advice delivery is explicit" true
@@ -905,6 +923,11 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let refused = run_skill_tool activation_failed_tool (Reference.to_yojson reference) in
   check bool "activation failure still withholds the Skill body" false
     (String_util.contains_substring refused "FROZEN_SKILL_BODY");
+  check bool "received assessment also crosses the actual failed Agent-Core wire" true
+    (String_util.contains_substring refused "fixture-jev");
+  check bool "failed wire names advice withholding" true
+    (String_util.contains_substring refused "withheld_activation_failure");
+  persist ~case:"activation-failed" ~success:false ~output:refused;
   let result = Option.get !captured in
   check bool "a received JEV answer is not successful activation" false (Tool_result.is_success result);
   let metadata = Tool_result.metadata result |> Option.get in
@@ -934,8 +957,17 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let sent_bodies = Atomic.get server.requests in
   List.iter (fun encoded ->
     let state = Yojson.Safe.from_string encoded |> member "state" in
-    check string "request uses frozen content" "FROZEN_SKILL_BODY"
+    check string "request uses frozen content" frozen_body
       (state |> member "skill" |> member "body" |> to_string)) sent_bodies;
+  let rows = match Keeper_tool_call_log.read_recent ~keeper_name:"skill-fixture" ~n:10 () with
+    | Ok rows -> rows
+    | Error (Keeper_tool_call_log.Index_unavailable detail) -> fail detail in
+  check int "every actual projected result reached the durable log" 6 (List.length rows);
+  List.iter (fun row ->
+    let output = member "output" row |> Yojson.Safe.to_string in
+    check bool "durable output retains applicability despite a long body" true
+      (String_util.contains_substring output "applicability");
+    Printf.printf "SKILL_APPLICABILITY_TOOL_CALL %s\n%!" (Yojson.Safe.to_string row)) rows;
   let near_body = String.make Common.max_tool_result_wire_bytes 'x' in
   let near_snapshot = snapshot fixture_config
       [ [ "guide", document ~name:"guide" ~description:"near limit" near_body ] ] in

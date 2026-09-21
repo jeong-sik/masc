@@ -1526,7 +1526,7 @@ let make_instruction_skill_tool
                       let advice = Typesafeai_skill_applicability.model_advice assessment in
                       let projected = match advice with
                         | None -> wire_content
-                        | Some text -> wire_content ^ "\n\n---\n" ^ text in
+                        | Some text -> text ^ "\n\n--- Skill body ---\n" ^ wire_content in
                       let fits = String.length projected <= Common.max_tool_result_wire_bytes in
                       let metadata =
                         ("skill_applicability", Typesafeai_skill_applicability.to_yojson assessment)

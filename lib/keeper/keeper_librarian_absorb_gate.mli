@@ -137,6 +137,8 @@ type evaluation =
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
+(** [endpoint] is already an observation URL without userinfo, query or
+    fragment. It is not the credential-bearing outbound destination. *)
 
 type run_result =
   | Skipped of
@@ -165,8 +167,10 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     rejected answers retain their decoder diagnostic.
     Endpoint and model are captured once per run; a request failure has no
     fabricated response model or request receipt. Endpoint observations remove
-    userinfo, query and fragment. HTTP failures retain the response as
-    a JSON string, including invalid JSON and rejected typed responses.
+    userinfo, query and fragment before constructing [evaluation]. HTTP failures
+    retain response bytes except configured credentials; invalid UTF-8 uses
+    the existing base64 representation. Invalid JSON and rejected typed
+    responses remain inspectable.
     State, question wording and raw responses are private run evidence, like
     the existing [actual_input]. The existing exact-run HTTP detail requires
     CanAdmin; this payload is not a public or secret-free projection. *)

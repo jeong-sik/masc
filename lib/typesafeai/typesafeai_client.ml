@@ -23,13 +23,17 @@ let endpoint_for_observation endpoint =
   |> Uri.to_string
 ;;
 
-let redact_diagnostic ~endpoint ~api_key detail =
+let redact_credentials ~endpoint ~api_key detail =
   let displayed = endpoint_for_observation endpoint in
   let normalized = Uri.of_string endpoint |> Uri.to_string in
   detail
   |> String_util.replace_substring ~needle:endpoint ~by:displayed
   |> String_util.replace_substring ~needle:normalized ~by:displayed
   |> String_util.replace_substring ~needle:api_key ~by:"[REDACTED]"
+;;
+
+let redact_diagnostic ~endpoint ~api_key detail =
+  redact_credentials ~endpoint ~api_key detail
   |> Observability_redact.redact_text
   |> String_util.sanitize_utf8
 ;;
@@ -101,7 +105,7 @@ let evaluate
       (Http_response_failure
          { status
          ; destination_uri = endpoint_for_observation endpoint
-         ; body = response_body
+         ; body = redact_credentials ~endpoint ~api_key response_body
          ; detail = redact_diagnostic ~endpoint ~api_key detail
          })
   in

@@ -70,6 +70,10 @@ type machine = {
   program : string;
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
+  (* ocaml-dos's set_mouse has no matching getter, so the lane is the only
+     place that remembers what it last put on the mouse. {!click} is the one
+     writer; {!mouse_buttons} the one reader. *)
+  mutable mouse_buttons : int;
 }
 
 let state : machine option ref = ref None
@@ -286,7 +290,9 @@ let load ~ledger_dir ~program_name ~program_bytes ~files ~announce =
         (* A new machine starts a new ledger. *)
         Out_channel.with_open_bin ledger_path (fun _ -> ());
         let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = [] }
+          { m; steps = 0; program = program_name; ledger_path; entries = []
+          ; mouse_buttons = 0
+          }
         in
         state := Some st;
         announce ();
@@ -411,6 +417,7 @@ let click ~who ~x ~y ~buttons ~steps =
         append_entry st
           { at_step = st.steps; who; key_name = Printf.sprintf "mouse(%d,%d,%d)" x y buttons };
         Dos_machine.set_mouse st.m ~x ~y ~buttons;
+        st.mouse_buttons <- buttons;
         if buttons = 0 then begin
           let ran = advance st ~budget ~until_ready:true in
           Ok (observe st, ran)
@@ -419,6 +426,7 @@ let click ~who ~x ~y ~buttons ~steps =
           let half = max 1 (budget / 2) in
           let down = advance st ~budget:half ~until_ready:true in
           Dos_machine.set_mouse st.m ~x ~y ~buttons:0;
+          st.mouse_buttons <- 0;
           let up = advance st ~budget:(budget - down.steps_run) ~until_ready:true in
           Ok
             ( observe st
@@ -475,4 +483,11 @@ let ledger () =
     match !state with
     | None -> []
     | Some st -> List.rev st.entries)
+;;
+
+let mouse_buttons () =
+  locked (fun () ->
+    match !state with
+    | None -> 0
+    | Some st -> st.mouse_buttons)
 ;;

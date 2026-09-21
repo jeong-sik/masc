@@ -10143,7 +10143,6 @@ def standalone_lane_fixture(
         # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
         "dropped_slots": [],
-        "declared_slots": ["glm-coding.glm-5-turbo"],
         "admission_error": None,
         "status": status,
         "retained_run_count": 12,

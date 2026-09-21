@@ -88,7 +88,7 @@ status: reference
 
 **Operator Disposition**
 : 끝난 turn을 운영자 관점에서 분류한 (kind, reason) 쌍. `Keeper_execution_receipt.operator_disposition`이
-  영수증 필드에서 파생한다. kind는 여덟이고 `keeper_execution_receipt.mli`의 `disposition_kind`가
+  영수증 필드에서 파생한다. kind는 여덟이고 `keeper_execution_receipt.mli`의 `operator_disposition_kind`가
   전부다 — `Disp_pass`·`Disp_fail_open_next_runtime`·`Disp_retry_later`·`Disp_pass_next_model`·
   `Disp_operator_action_required`·`Disp_user_cancelled`·`Disp_skipped`·`Disp_unknown`.
   reason도 닫힌 집합이다. `Disp_operator_action_required`는 운영자만 고칠 수 있는 알려진 원인을

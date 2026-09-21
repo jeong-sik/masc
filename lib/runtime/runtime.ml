@@ -3379,6 +3379,82 @@ let lane_references (config : Runtime_schema.config) ~lane_id =
   assignments @ default
 ;;
 
+(* A lane's name is its routing key: [\[runtime.assignments\]] entries and
+   [\[runtime\].default] name it as a string, and {!resolve_assignment} reads
+   those before it reads a runtime of the same id. So a rename is not a rename
+   of one table -- it is that header and every reference to it, and any file
+   written with some of them changed routes the keepers whose reference was
+   missed to a lane that is no longer there. All of it goes in the one
+   validated write {!edit_runtime_lanes} already commits, which is why this is
+   a writer of its own rather than a remove followed by a create: between
+   those two the file declares no such lane, and the keepers pointing at it
+   would not load. *)
+let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
+  let* lane_id = validated_lane_id lane_id in
+  let* new_lane_id = validated_lane_id new_lane_id in
+  if String.equal lane_id new_lane_id
+  then Error (Printf.sprintf "lane %S already has that name" lane_id)
+  else
+    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
+      if not (lane_is_declared config lane_id)
+      then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
+      else if lane_is_declared config new_lane_id
+      then Error (Printf.sprintf "lane %S already exists" new_lane_id)
+      else
+        match
+          Toml_line_editor.rename_table
+            content
+            ~path:(lane_table_path lane_id)
+            ~to_path:(lane_table_path new_lane_id)
+        with
+        | Toml_line_editor.Table_rename_conflict ->
+          (* [lane_is_declared] read the parsed config; this reads the text.
+             A file that declares the name some other way -- inline, or
+             through dotted keys -- reaches here. *)
+          Error
+            (Printf.sprintf
+               "the file already declares %S; renaming onto it would declare the lane \
+                twice"
+               new_lane_id)
+        | Toml_line_editor.Table_rename_absent ->
+          Error
+            (Printf.sprintf
+               "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
+                renamed here"
+               lane_id)
+        | Toml_line_editor.Table_renamed renamed ->
+          let references = lane_references config ~lane_id in
+          if List.exists (function Default_runtime -> true | Keeper_assignment _ -> false)
+               references
+          then
+            (* [\[runtime\].default] takes a runtime id, not a lane name
+               ({!set_runtime_default} refuses one), so a lane it reaches is a
+               lane named after that runtime -- the shape the install path
+               writes. Renaming the lane would leave the default naming the
+               bare runtime and every unassigned keeper walking it alone, with
+               no line in the file saying the lane had stopped applying to
+               them. Move them off it first. *)
+            Error
+              (Printf.sprintf
+                 "lane %S is named after the runtime in [runtime].default, so every \
+                  unassigned keeper walks it; renaming it would hand them that runtime \
+                  alone. Point [runtime].default elsewhere first"
+                 lane_id)
+          else
+            Ok
+              (List.fold_left
+                 (fun text reference ->
+                    match reference with
+                    | Keeper_assignment keeper_name ->
+                      update_runtime_assignment_text
+                        text
+                        ~keeper_name
+                        ~runtime_id:new_lane_id
+                    | Default_runtime -> text)
+                 renamed
+                 references))
+;;
+
 let remove_runtime_lane ?runtime_config_path ~lane_id () =
   let* lane_id = validated_lane_id lane_id in
   edit_runtime_lanes ?runtime_config_path (fun ~content config ->

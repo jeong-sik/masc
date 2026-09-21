@@ -165,14 +165,32 @@ let () =
             (fun () ->
               expect_error "unknown-action"
                 ~message:
-                  "unknown lane action: rename (expected set, create, remove, \
-                   append, drop or move)"
-                {|{"lane":"runpod_mtp.qwen","action":"rename","runtime_ids":[]}|})
+                  "unknown lane action: renombrar (expected set, create, remove, \
+                   rename, append, drop or move)"
+                {|{"lane":"runpod_mtp.qwen","action":"renombrar","runtime_ids":[]}|})
         ; Alcotest.test_case "append adds one slot to an exact lane" `Quick
             (fun () ->
               check_case "append"
                 {|{"lane":"exact/board_attention_exact","action":"append","runtime_id":"runpod_mtp.qwen"}|}
                 "exact/board_attention_exact" "append" [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "rename names the lane and what it becomes" `Quick
+            (fun () ->
+              check_case "rename"
+                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"primary"}|}
+                "runpod_mtp.qwen" "rename" [ "primary" ])
+        ; Alcotest.test_case "rename needs a name to take" `Quick
+            (fun () ->
+              expect_error "rename-no-to"
+                ~message:"to required"
+                {|{"lane":"runpod_mtp.qwen","action":"rename"}|})
+        ; Alcotest.test_case "rename refuses another route at either end" `Quick
+            (fun () ->
+              expect_error "rename-from-default"
+                ~message:{|"default" names another route, not a lane|}
+                {|{"lane":"default","action":"rename","to":"primary"}|};
+              expect_error "rename-to-media-failover"
+                ~message:{|"media_failover" names another route, not a lane|}
+                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"media_failover"}|})
         ; Alcotest.test_case "drop names one slot of an exact lane" `Quick
             (fun () ->
               check_case "drop"

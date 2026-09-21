@@ -1,7 +1,7 @@
 open Alcotest
 
 module Detail = Masc_tui_board_detail
-module Schedule = Masc_tui_render_schedule
+module Layout = Masc_tui_layout
 
 (* The Board read pane measures its comment section from the detail view:
    Ready renders one line per comment (or more), while the Loading, Absent,
@@ -16,10 +16,10 @@ let comment_line_count = function
 let project_view_scroll view ~terminal_rows ~body_line_count scroll =
   let comment_count = comment_line_count view in
   let allocation =
-    Schedule.allocate_board_read ~terminal_rows ~body_line_count
+    Layout.allocate_board_read ~terminal_rows ~body_line_count
       ~comment_count
   in
-  Schedule.project_board_read_scroll ~body_line_count
+  Layout.project_board_read_scroll ~body_line_count
     ~body_rows:allocation.body_rows ~comment_count
     ~comment_rows:allocation.comment_rows scroll
 

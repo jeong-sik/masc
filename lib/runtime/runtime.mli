@@ -773,6 +773,14 @@ val pricing_of_runtime_id : string -> float option * float option
     turn-record writer (RFC-0233 §8) so the dashboard renders actual cost or
     absence rather than a fabricated Claude default. *)
 
+val get_default_route : unit -> string
+(** [\[runtime\].default] as the file writes it: a declared lane's id or a
+    runtime's. A keeper with no assignment is routed by this, resolved through
+    {!resolve_assignment} like any assignment, so the default walks a lane's
+    candidates whenever it names one. {!get_default_runtime_id} answers with
+    the runtime that route enters on. Raises when no runtime is loaded, like
+    {!get_default_runtime_id}. *)
+
 val get_default_runtime_id : unit -> string
 (** @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a
@@ -956,12 +964,8 @@ val rename_runtime_lane :
     [new_lane_id] (as a lane or as a header the line editor can see), and when
     the lane is not written as its own table.
 
-    Also refused while [\[runtime\].default] reaches the lane. That entry takes
-    a runtime id ({!set_runtime_default} refuses a lane name), so a lane it
-    reaches is one named after that runtime -- what {!set_first_run_runtime}
-    writes. Renaming it would leave the default naming the bare runtime and
-    every unassigned keeper walking it alone, with nothing in the file saying
-    the lane had stopped applying to them. *)
+    [\[runtime\].default] takes the new name like an assignment does, because
+    it holds a route ({!get_default_route}). *)
 
 val remove_runtime_lane :
   ?runtime_config_path:string ->

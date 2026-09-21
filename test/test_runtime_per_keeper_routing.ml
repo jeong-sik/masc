@@ -1409,17 +1409,50 @@ let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
       (fun () ->
          Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
            ~new_lane_id:"coding" ());
-    (* A lane the default reaches is one named after the runtime the default
-       names -- [runtime].default takes a runtime id. Renaming it would hand
-       every unassigned keeper that bare runtime. *)
+    ())
+;;
+
+(* [\[runtime\].default] holds a route, so the rename takes it with the rest.
+   While the entry resolved against runtimes alone, a lane the default reached
+   had to carry that runtime's own id and could not be renamed at all. *)
+let test_a_rename_carries_the_default_route_too () =
+  with_runtime_file (fun path ->
     Runtime.set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
-    |> lane_write_ok "declare the default's own lane";
-    lane_write_refused "rename the lane the default reaches" ~path
-      ~names:[ "named after the runtime in [runtime].default" ]
+    |> lane_write_ok "declare the lane the default reaches";
+    Runtime.rename_runtime_lane ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~new_lane_id:"primary" ()
+    |> lane_write_ok "rename it";
+    Alcotest.(check string) "the default follows the lane" "primary"
+      (Runtime.get_default_route ());
+    Alcotest.(check string) "and still enters on the lane's head" "runpod_mtp.qwen"
+      (Runtime.get_default_runtime_id ());
+    (* A keeper with no assignment walks the renamed lane, candidates and all. *)
+    match Runtime.resolve_assignment (Runtime.get_default_route ()) with
+    | `Lane lane ->
+      Alcotest.(check (list string)) "the default walks the lane"
+        [ "runpod_mtp.qwen"; "openai.gpt" ]
+        (Runtime_lane.ordered_candidates lane)
+    | `Missing | `Unavailable _ -> Alcotest.fail "the renamed default resolves to nothing")
+;;
+
+(* A default that names a lane with a name of its own, which the entry refused
+   before: it was resolved against runtimes alone. *)
+let test_the_default_may_name_a_lane () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"coding" ~runtime_ids:[ "openai.gpt"; "openai.small" ] ()
+    |> lane_write_ok "declare a lane with its own name";
+    Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"coding" ()
+    |> lane_write_ok "point the default at it";
+    Alcotest.(check string) "the route is the lane" "coding" (Runtime.get_default_route ());
+    Alcotest.(check string) "the runtime it enters on is the lane's head" "openai.gpt"
+      (Runtime.get_default_runtime_id ());
+    (* Removing it is still refused, and for the same reason as before. *)
+    lane_write_refused "remove the lane the default names" ~path
+      ~names:[ "[runtime].default" ]
       (fun () ->
-         Runtime.rename_runtime_lane ~runtime_config_path:path
-           ~lane_id:"runpod_mtp.qwen" ~new_lane_id:"primary" ()))
+         Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
 ;;
 
 (* [drop] and [move] read the same declaration under the same lock, for the
@@ -3350,6 +3383,14 @@ let () =
             "a rename refuses a name in use and an absent table"
             `Quick
             test_a_rename_refuses_a_name_in_use_and_an_absent_table
+        ; Alcotest.test_case
+            "a rename carries the default route too"
+            `Quick
+            test_a_rename_carries_the_default_route_too
+        ; Alcotest.test_case
+            "the default may name a lane"
+            `Quick
+            test_the_default_may_name_a_lane
         ; Alcotest.test_case
             "an exact slot drop and move read the declaration"
             `Quick

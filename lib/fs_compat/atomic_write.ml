@@ -2662,6 +2662,7 @@ let write_file_atomic_with_parent_sync
          sync_parent dir;
          Ok ()
        with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exception_ ->
          let backtrace = Printexc.get_raw_backtrace () in
          (try Stdlib.Sys.remove tmp with

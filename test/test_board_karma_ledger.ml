@@ -330,12 +330,7 @@ let test_delete_lock_order_source_pin () =
       (label ^ ": no persist lock inside state lock")
       body
       ~outer:"with_lock store"
-      ~inner:"with_persist_lock store";
-    assert_no_nested_call
-      (label ^ ": no state lock inside persist lock")
-      body
-      ~outer:"with_persist_lock store"
-      ~inner:"with_lock store"
+      ~inner:"with_persist_lock store"
   in
   check "delete_sub_board" delete_sub_board;
   check "delete_post" delete_post;

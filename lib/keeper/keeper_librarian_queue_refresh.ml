@@ -209,7 +209,7 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           keeper_instructions = meta.Keeper_meta_contract.instructions;
           current = Option.map (fun (value : Keeper_memory_os_current.t) ->
             {Keeper_librarian.facts = value.facts}) current;
-          working_context = Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name;
+          working_context = Keeper_librarian_context.empty;
           messages = P.messages prepared;
           tool_observations = []; counterpart_observations = [] } in
       let* selected = match !capacity with

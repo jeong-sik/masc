@@ -80,6 +80,7 @@ let test_prefit_real_continuity ~base_path () =
   let module B = Keeper_turn_boundaries in
   let module C = Keeper_checkpoint_store in
   let module Current = Keeper_memory_os_current in
+  let module Context = Keeper_librarian_context in
   let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let some = function Some value -> value | None -> Alcotest.fail "missing continuity source" in
   Fixture.with_official_client_runtimes @@ fun () ->
@@ -90,6 +91,20 @@ let test_prefit_real_continuity ~base_path () =
   let keeper_id = "prefit-real-continuity" and trace_id = "prefit-source" in
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let queued_source : Context.source =
+    {reference="pending-chat"; content=`String "Unrelated pending question."} in
+  let pocket : Context.pocket =
+    {id="pending-pocket"; merge_contexts=[]; sources=[queued_source.reference];
+     context="An unresolved question still needs an answer.";
+     next_steps=["Answer the original question."]; completeness=Context.Current} in
+  let previous_context = Context.commit ~keepers_dir ~keeper_id
+      ~expected_version:None ~execution_basis:"pending-execution"
+      ~sources:[queued_source] [pocket] |> get in
+  let context_path = Context.path ~keepers_dir ~keeper_id in
+  let context_before = Fs_compat.load_file_opt context_path |> some in
+  let working_context : Context.input =
+    {sources=[queued_source]; previous=Some previous_context; unavailable=[];
+     execution_basis=Some "pending-execution"} in
   let source = List.init 4 (fun index -> Agent_core.Types.user_msg
     (string_of_int index ^ String.make 2000 'a')) in
   let checkpoint : Agent_core.Checkpoint.t =
@@ -118,11 +133,12 @@ let test_prefit_real_continuity ~base_path () =
     {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
      keeper_instructions="Preserve evidence.";
      current=Option.map (fun (s : Current.t) -> {Keeper_librarian.facts=s.facts}) current;
-     working_context=Keeper_librarian_context.empty; messages=P.messages prepared;
+     working_context; messages=P.messages prepared;
      tool_observations=[];counterpart_observations=[]} in
   (* Independently measure the exact prompt contract to derive the fixture's
      server limit, including template, current facts, continuity and schema. *)
   let rendered prepared input =
+    let input = {input with Keeper_librarian.working_context=Context.empty} in
     let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json prepared))
       :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input) in
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
@@ -150,15 +166,24 @@ let test_prefit_real_continuity ~base_path () =
       Ok (Yojson.Safe.to_string (`Assoc [
         "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
         "working_state", `String state])) in
-    let committed = ref false in
+    let committed = ref false and memory_committed = ref false in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     Runtime.run_best_effort ~trigger:Runtime.Durable_range
       ~input_projection:Runtime.Already_selected_range ~continuity:prepared
       ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
       ~cli_runner:runner ~on_continuity_committed:(fun _ -> committed:=true)
+      ~on_memory_committed:(fun () -> memory_committed:=true)
       ~base_path ~keepers_dir ~keeper_id
       ~expected_revision:(Option.map (fun (s : Current.t) -> s.revision) current) input;
-    Alcotest.(check bool) "actual Memory and continuity publication completed" true !committed in
+    Alcotest.(check bool) "actual Memory publication completed" true !memory_committed;
+    Alcotest.(check bool) "actual continuity publication completed" true !committed;
+    let saved = P.read ~config ~keeper_name:keeper_id |> get |> some in
+    Alcotest.(check int) "stored frontier advances to the selected atom group"
+      (P.end_atom prepared) saved.end_atom;
+    Alcotest.(check bool) "stored Memory receipt covers the selected atom group" true
+      (P.memory_committed ~config ~keeper_name:keeper_id prepared |> get);
+    Alcotest.(check string) "continuity leaves pending context bytes unchanged"
+      context_before (Fs_compat.load_file_opt context_path |> some) in
   let fit prepared = Runtime.fit_continuity ~capacity ~base_path ~keeper_id
       ~input:(input prepared) prepared |> get |> some in
   let first = fit full in

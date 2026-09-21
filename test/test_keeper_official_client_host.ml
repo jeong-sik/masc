@@ -2282,12 +2282,18 @@ let absorbed_snapshot () =
   | Error error -> fail (Snapshot.error_to_string error)
 ;;
 
-let start_range ?(librarian_front = fun _ -> None) ?(own_first_atom = 0) messages =
+let start_range
+      ?(librarian_front = fun _ -> Host.No_saved_position)
+      ?budget_bytes
+      ?(own_first_atom = 0)
+      messages
+  =
   Host.carried_start_range
     ~keeper_name:"alpha"
     ~runtime_id:"claude_code.claude-sonnet-5"
     ~carried_front_seed:None
     ~librarian_front
+    ~budget_bytes
     ~own_first_atom
     messages
 ;;
@@ -2305,7 +2311,7 @@ let texts messages =
    after them and carries the working state in their place. *)
 let test_a_start_seed_begins_at_the_librarian_position () =
   let snapshot = absorbed_snapshot () in
-  let carried = start_range ~librarian_front:(fun _ -> Some snapshot) start_seed_messages in
+  let carried = start_range ~librarian_front:(fun _ -> Host.Absorbed snapshot) start_seed_messages in
   check int "the first atom is the one the Librarian did not read"
     snapshot.Snapshot.end_atom carried.Host.first_atom;
   check bool "the front says so" true
@@ -2341,13 +2347,69 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
      | _ -> false)
 ;;
 
+(* A position was saved and it does not describe these messages: the history
+   moved under it. A seed measured on that same history names atoms that are
+   no longer there either, so only the lane's own cut stands. *)
+let test_an_unusable_saved_position_falls_back_to_the_lane_cut () =
+  let carried =
+    start_range
+      ~librarian_front:(fun _ -> Host.Saved_position_unusable)
+      ~own_first_atom:1
+      start_seed_messages
+  in
+  check int "the lane's cut" 1 carried.Host.first_atom;
+  check bool "and nothing else" true
+    (match carried.Host.front with
+     | Host.Lane_cut -> true
+     | _ -> false);
+  check bool "no working state is carried" false
+    (List.exists
+       (fun text ->
+          let needle = working_state in
+          let extra = String.length text - String.length needle in
+          extra >= 0 && String.equal (String.sub text extra (String.length needle)) needle)
+       (texts carried.Host.messages))
+;;
+
+(* The working state is pinned, so a lane whose ceiling the composition passes
+   would refuse the turn rather than trim it. The range it replaces is carried
+   instead, because that one the ceiling is allowed to cut. *)
+let test_a_working_state_that_does_not_fit_is_not_carried () =
+  let snapshot = absorbed_snapshot () in
+  let carried =
+    start_range
+      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
+      ~budget_bytes:1
+      start_seed_messages
+  in
+  check int "starts at the oldest atom" 0 carried.Host.first_atom;
+  check bool "the front is the lane's own" true
+    (match carried.Host.front with
+     | Host.Whole_history -> true
+     | _ -> false);
+  check bool "the absorbed atoms are carried in its place" true
+    (List.exists (String.equal "The build passed.") (texts carried.Host.messages))
+;;
+
+(* A budget the composition fits changes nothing. *)
+let test_a_working_state_that_fits_is_carried () =
+  let snapshot = absorbed_snapshot () in
+  let carried =
+    start_range
+      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
+      ~budget_bytes:100_000
+      start_seed_messages
+  in
+  check int "the librarian position stands" snapshot.Snapshot.end_atom carried.Host.first_atom
+;;
+
 (* The lane's own cut is later than what the Librarian read: the request must
    not widen back to the Librarian's position. *)
 let test_a_later_lane_cut_wins () =
   let snapshot = absorbed_snapshot () in
   let carried =
     start_range
-      ~librarian_front:(fun _ -> Some snapshot)
+      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
       ~own_first_atom:(snapshot.Snapshot.end_atom + 1)
       start_seed_messages
   in
@@ -2591,6 +2653,18 @@ let () =
             "a later lane cut wins"
             `Quick
             test_a_later_lane_cut_wins
+        ; test_case
+            "an unusable saved position falls back to the lane cut"
+            `Quick
+            test_an_unusable_saved_position_falls_back_to_the_lane_cut
+        ; test_case
+            "a working state that does not fit is not carried"
+            `Quick
+            test_a_working_state_that_does_not_fit_is_not_carried
+        ; test_case
+            "a working state that fits is carried"
+            `Quick
+            test_a_working_state_that_fits_is_carried
         ] )
     ]
 ;;

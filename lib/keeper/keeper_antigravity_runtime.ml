@@ -131,7 +131,10 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
       ~keeper_name
       ~runtime_id
       ~carried_front_seed
-      ~librarian_front:(Host.librarian_front_or_none librarian_front)
+      ~librarian_front:(Host.librarian_front_or_absent librarian_front)
+      (* The byte window below cannot drop a pinned message, so a working
+         state that does not fit here would refuse the turn outright. *)
+      ~budget_bytes:(Some (capacity_bytes - reserved_bytes))
       ~own_first_atom:0
       history_messages
   in

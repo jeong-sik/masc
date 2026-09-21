@@ -147,7 +147,13 @@ let model_input_projection_for_capacity
           ~keeper_name
           ~runtime_id
           ~carried_front_seed
-          ~librarian_front:(Host.librarian_front_or_none librarian_front)
+          ~librarian_front:(Host.librarian_front_or_absent librarian_front)
+          (* The declared ceiling above cannot drop a pinned message, so a
+             working state that does not fit refuses the turn outright. *)
+          ~budget_bytes:
+            (if capacity_bytes = unbounded_model_input_capacity_bytes
+             then None
+             else Some capacity_bytes)
           ~own_first_atom
           messages
       in

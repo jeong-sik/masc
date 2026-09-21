@@ -1613,9 +1613,14 @@ let run_named
 	  (* The Librarian's own position, for the official-client branches. The
 	     Agent Core branch takes it through [continuity] above; these lanes cut
 	     their start seed themselves, so they are handed a reading they apply to
-	     the exact list they are about to cut. The snapshot and the boundary log
-	     are read once; the covered messages are checked on every call, because
-	     a lane composes more than once in a turn and the list can grow. *)
+	     the exact list they are about to cut.
+
+	     Read once per turn: the snapshot file and the boundary log are both
+	     taken at the first composition and not re-read, so a Librarian round
+	     that lands mid-turn is seen by the next turn, not this one. What is
+	     checked on every call is the list against that one snapshot, because a
+	     lane composes more than once in a turn and the list grows between
+	     compositions. *)
 	  let librarian_front_source =
 	    Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
 	      match session_id, recovery_view with
@@ -1645,21 +1650,30 @@ let run_named
 	               None
 	             | Ok lines -> Some (trace_id, lines, snapshot))))
 	  in
-	  let official_client_librarian_front messages =
+	  let official_client_librarian_front messages
+	    : Keeper_official_client_host.librarian_position
+	    =
 	    match Eio.Lazy.force librarian_front_source with
-	    | None -> None
+	    | None -> Keeper_official_client_host.No_saved_position
 	    | Some (trace_id, lines, snapshot) ->
-	      (match Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot with
-	       | Ok (_ : Librarian_continuity_snapshot.restored) -> Some snapshot
+	      (* [restore] hashes the whole covered prefix, so it runs on the CPU
+	         pool rather than on the fiber that is composing the request. *)
+	      (match
+	         Domain_pool_ref.submit_cpu_or_inline (fun () ->
+	           Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot)
+	       with
+	       | Ok (_ : Librarian_continuity_snapshot.restored) ->
+	         Keeper_official_client_host.Absorbed snapshot
 	       | Error error ->
-	         (* The snapshot does not describe this list: the history was
-	            rewritten, restarted, or the list is not the one it covered.
-	            The seed falls back to the front it had before. *)
-	         Log.Keeper.info
+	         (* A position was saved and it does not describe this list: the
+	            history was rewritten, restarted, or the list is not the one it
+	            covered. A seed measured on that same history is no safer, so
+	            the range falls back to the lane's own cut. *)
+	         Log.Keeper.warn
 	           ~keeper_name
-	           "official client start seed keeps its own front: %s"
+	           "official client start seed drops the saved librarian position: %s"
 	           (Librarian_continuity_snapshot.error_to_string error);
-	         None)
+	         Keeper_official_client_host.Saved_position_unusable)
 	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)

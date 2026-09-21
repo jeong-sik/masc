@@ -164,7 +164,7 @@ let spawn_detached ~argv ~env ~cwd =
            Error
              (Printf.sprintf "spawn_detached %s: %s (%s %s)"
                 bin (Unix.error_message err) fn arg)
-       | exn ->
+       | exn -> (* cancel-guard-ok: the body is fd setup and the fork path, all Unix syscalls through resume_syscall (line 26), which performs no Eio operation *)
            cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached %s: %s" bin
@@ -220,7 +220,7 @@ let spawn_detached_quiet ~label ~argv ~env ~cwd ~output =
            Error
              (Printf.sprintf "%s %s: %s (%s %s)"
                 label bin (Unix.error_message err) fn arg)
-       | exn ->
+       | exn -> (* cancel-guard-ok: the body is fd setup and the fork path, all Unix syscalls through resume_syscall (line 26), which performs no Eio operation *)
            cleanup_setup_fds ();
            Error
              (Printf.sprintf "%s %s: %s" label bin
@@ -244,7 +244,7 @@ let is_pgid_alive ~pgid =
       (* EPERM means the process exists but we can't signal it —
          conservative "alive" answer. *)
       true
-  | _ -> false
+  | _ -> false (* cancel-guard-ok: Unix.kill performs no Eio operation, so a cancellation cannot become the false absent answer this arm returns *)
 
 let tree_kill ~pgid ~signal ~grace_sec =
   let safe_kill s =

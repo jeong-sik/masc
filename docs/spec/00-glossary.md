@@ -126,6 +126,25 @@ status: reference
 : Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
+**Standalone Lane**
+: TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
+  admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
+  (Runtime Lane)과 다른 것이다 — Runtime Lane은 Keeper turn이 Runtime 후보를
+  시도할 순서이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
+  실행했는지의 투영이다. 두 축을 함께 갖는다:
+  - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
+    `Standalone_degraded`·`Standalone_no_retained_observation`·
+    `Standalone_unavailable`.
+  - `sl_configuration_state`(구성): `Lane_ready`·`Lane_slotless`·
+    `Lane_unconfigured`·`Lane_registry_unavailable`.
+  서버는 구성 축의 마지막 둘을 `sl_status`에서 "unavailable" 한 단어로
+  합치지만, 아무도 구성하지 않은 lane과 registry를 읽지 못한 lane은 다른
+  문제이고 다른 처방을 갖기에 여기서는 나눈다. `Lane_slotless`는 서버가
+  "degraded"라 부르는 것 — 구성됐으나 catalog slot도 CLI slot도 admit되지
+  않은 상태다. lane id로는 `Board_attention`(Board lane)·`Hitl_auto_judge`·
+  `Librarian`·verifier exact lane 등이 있다.
+  → [tui_decode.mli](../../lib/tui_decode.mli)
+
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)

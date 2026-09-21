@@ -491,6 +491,10 @@ status: reference
   반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면
   `output.after`에 저장된 snapshot과 revision을 남긴다. 저장 전 취소는 이 기록이 없다.
   이미 저장된 실행 완료 결과는 이후 화면 갱신 알림의 취소로 덮어쓰지 않는다.
+  Board lane 상세의 `JEV OFF`·`JEV CONFIGURED · <model>`·`JEV unavailable: Board lane
+  is CLI-only`·`JEV unavailable: Board lane is not ready`는 JEV 모델 자체의 상태가
+  아니라 그 lane이 JEV를 쓸 수 있는지의 구성 상태다. decode는 `state` 값 `off`·
+  `configured`(+`model`)·`cli_only`·`lane_unavailable`을 받는다.
 
 **Continuity Measurement (의미 보존 측정)**
 : 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과

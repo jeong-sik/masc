@@ -187,11 +187,33 @@ let test_prefit_real_continuity ~base_path () =
     (P.read ~config ~keeper_name:keeper_id |> get |> Option.is_none);
   (match Runtime.For_testing.execute_exact_output_classified
      ~cli_runner:invalid_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
-     ~selected_input:(input half) ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
+     ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
    | Ok ((selection, _), _) ->
      Alcotest.(check bool) "ordinary Memory still accepts null working state" true
        (Option.is_none selection.Keeper_librarian.working_state)
    | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
+  let api_answer = `Assoc ["new_claims", `List []; "dropped", `List [];
+    "working_contexts", `List []; "working_state", `String "API saved state."] in
+  let api_server output = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
+    (Fixture.Reply (Fixture.openai_response output)) in
+  let invalid_api = api_server null_state and valid_api = api_server api_answer in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:["missing-state"; "valid-state"]
+    (Fixture.resolver_snapshot ~source:"continuity-api-validation"
+      [{Fixture.id="missing-state";base_url=invalid_api.base_url};
+       {Fixture.id="valid-state";base_url=valid_api.base_url}]));
+  (match Runtime.For_testing.execute_exact_output_classified ~continuity:half
+     ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
+     ~messages:[Agent_core.Types.user_msg "synthesize completed source"] () with
+   | Ok ((selection, _), slot) ->
+     Alcotest.(check string) "API validation advances to declared successor" "valid-state" slot;
+     Alcotest.(check (option string)) "API successor supplies working state"
+       (Some "API saved state.") selection.Keeper_librarian.working_state
+   | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
+  Alcotest.(check int) "null-state API candidate ran exactly once" 1 (Fixture.post_count invalid_api);
+  Alcotest.(check int) "valid API successor ran exactly once" 1 (Fixture.post_count valid_api);
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
   let calls = ref [] in
   let execute prepared state =
     let input = input prepared in
@@ -265,7 +287,9 @@ let test_prefit_real_continuity ~base_path () =
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
-    ~last_resort:false ~base_path ~demote_before:0
+    ~last_resort:false ~base_path
+    ~demote_before:(Driver.completed_history_end ~trace_id ~lines ~messages:canonical
+      |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get)
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
   let wire = view.wire
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in

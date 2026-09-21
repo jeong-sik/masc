@@ -55,7 +55,7 @@ let request = R.judge_request ~endpoint:"https://judge.invalid/eval" ~model:"con
 
 let evaluated answers : Masc.Typesafeai_client.evaluated =
   { response = { model = "actual-judge"; answers; usage = None }
-  ; destination_uri = request.endpoint
+  ; destination = { destination_uri = request.endpoint; model = request.model }
   ; request_body_sha256 = Digestif.SHA256.(to_hex (digest_string "synthetic request"))
   ; passed_over = []
   }

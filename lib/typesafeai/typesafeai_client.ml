@@ -33,14 +33,10 @@ type failure =
 
 type evaluated =
   { response : Typesafeai_types.eval_response
-  ; destination_uri : string
+  ; destination : destination_id
   ; request_body_sha256 : string
   ; passed_over : attempt list
   }
-
-type disposition =
-  | Ask_next_destination
-  | Stop_walk
 
 let endpoint_for_observation endpoint =
   Uri.of_string endpoint
@@ -140,19 +136,6 @@ let failure_to_yojson failure =
     ]
 ;;
 
-(* The statuses both servers document as answers about the request body
-   itself: OpenRouter 400 (malformed input) and 413 (payload too large),
-   TypeSafe 422 (validation failed). The next destination would read the
-   same bytes, so the walk stops there. Every other status is about the
-   destination that returned it. *)
-let request_refused_statuses = [ 400; 413; 422 ]
-
-let disposition_of_refusal = function
-  | Transport_failure _ -> Ask_next_destination
-  | Http_response_failure { status; _ } ->
-    if List.mem status request_refused_statuses then Stop_walk else Ask_next_destination
-;;
-
 (* One destination: post the body with its model id and decode what it
    returns. [Error] is that destination's refusal. *)
 let ask ~timeout_sec ?clock ~state ~questions { endpoint; model; api_key } =
@@ -194,6 +177,12 @@ let ask ~timeout_sec ?clock ~state ~questions { endpoint; model; api_key } =
     failed response_body
 ;;
 
+(* Every refusal moves the walk on, whatever it says. The destinations share
+   the state and the questions but not the body: each is asked for its own
+   model id, and their limits differ, so one server calling a request wrong
+   or too large says nothing about the next. A request that really is wrong
+   costs one refused call per destination and ends with all of them on
+   record. *)
 let evaluate
       ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
       ?clock
@@ -213,16 +202,14 @@ let evaluate
     | Ok (response, request_body_sha256) ->
       Ok
         { response
-        ; destination_uri = endpoint_for_observation destination.endpoint
+        ; destination = identify destination
         ; request_body_sha256
         ; passed_over = attempts_so_far refused_so_far
         }
     | Error refusal ->
+      let asked = identify destination in
       let attempt =
-        { destination_uri = endpoint_for_observation destination.endpoint
-        ; model = destination.model
-        ; refusal
-        }
+        { destination_uri = asked.destination_uri; model = asked.model; refusal }
       in
       let refused =
         match refused_so_far with
@@ -230,9 +217,9 @@ let evaluate
         | Some { first_attempt; later_attempts } ->
           { first_attempt; later_attempts = later_attempts @ [ attempt ] }
       in
-      (match disposition_of_refusal refusal, rest with
-       | Ask_next_destination, next :: rest -> walk (Some refused) next rest
-       | Ask_next_destination, [] | Stop_walk, _ -> Error refused)
+      (match rest with
+       | next :: rest -> walk (Some refused) next rest
+       | [] -> Error refused)
   in
   walk None first rest
 ;;

@@ -487,7 +487,9 @@ let evaluation_to_yojson { destinations; state; questions; result } =
       in
       answers
       @ [ "request_body_sha256", `String evaluated.request_body_sha256
-        ; "destination_uri", `String evaluated.destination_uri
+        ; "destination_uri", `String evaluated.destination.destination_uri
+        ; "requested_model", `String evaluated.destination.model
+        ; "passed_over", `List (List.map Typesafeai_client.attempt_to_yojson evaluated.passed_over)
         ; "usage",
           (match evaluated.response.usage with
            | None -> `Null

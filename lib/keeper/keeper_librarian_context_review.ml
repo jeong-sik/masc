@@ -58,7 +58,9 @@ let state (input : Context.input) (proposed : Context.pocket list) =
 
 let receipt_json (r : Typesafeai_client.evaluated) =
   `Assoc ["model", `String r.response.model;
-    "destination_uri", `String r.destination_uri;
+    "destination_uri", `String r.destination.destination_uri;
+    "requested_model", `String r.destination.model;
+    "passed_over", `List (List.map Typesafeai_client.attempt_to_yojson r.passed_over);
     "request_body_sha256", `String r.request_body_sha256;
     "answers", `Assoc (List.map (fun (id, answer) -> id, Jev.answer_to_yojson answer) r.response.answers);
     "usage", (match r.response.usage with None -> `Null | Some u ->

@@ -96,7 +96,9 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
 ;;
 
 let evaluated_fields (evaluated : Client.evaluated) =
-  [ "destination_uri", `String evaluated.destination_uri
+  [ "destination_uri", `String evaluated.destination.destination_uri
+  ; "requested_model", `String evaluated.destination.model
+  ; "passed_over", `List (List.map Client.attempt_to_yojson evaluated.passed_over)
   ; "model", `String evaluated.response.model
   ; "request_body_sha256", `String evaluated.request_body_sha256
   ]

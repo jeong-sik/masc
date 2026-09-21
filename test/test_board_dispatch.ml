@@ -1024,6 +1024,7 @@ let test_comment_signal_preserves_comment_and_parent_identity () =
          (Some (Board.Comment_id.to_string parent.id))
          (Option.map Board.Comment_id.to_string parent_id)
      | Board_dispatch.Board_post_created
+     | Board_dispatch.Board_post_updated _
      | Board_dispatch.Board_reaction_changed _
      | Board_dispatch.Board_vote_cast _ ->
        Alcotest.fail "comment write emitted the wrong Board signal kind")

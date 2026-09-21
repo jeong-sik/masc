@@ -382,10 +382,13 @@ let ensure_masc_dir = Board_paths.ensure_masc_dir
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
-let posts_jsonl_unlocked store =
+let posts_jsonl_unlocked ?replacement store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
-    (fun _ (pst : post) ->
+    (fun key (pst : post) ->
+       let pst = match replacement with
+         | Some (updated : post) when String.equal key (Post_id.to_string updated.id) -> updated
+         | Some _ | None -> pst in
        Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
        Buffer.add_char buf '\n')
     store.posts;
@@ -819,7 +822,7 @@ let update_post_with_outcome
       ?body
       ?new_author
       ()
-  : (post, board_error) Result.t
+  : (post * bool, board_error) Result.t
   =
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -827,7 +830,10 @@ let update_post_with_outcome
   match Agent_id.of_string editor with
   | Error e -> Error e
   | Ok editor_id ->
-    let snapshot_result =
+    (* Persist-before-commit: acquire persistence first, then state. Keeping
+       state locked through the write preserves unrelated concurrent fields
+       without a rollback or a stale staged-row replacement. *)
+    with_persist_lock store (fun () ->
       with_lock store (fun () ->
         let key = Post_id.to_string pid in
         match Hashtbl.find_opt store.posts key with
@@ -875,7 +881,16 @@ let update_post_with_outcome
             | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
               if String.length normalized_body = 0
               then Error (Validation_error "Content cannot be empty")
-              else (
+              else match Board_audience.audience_for_post ~visibility:existing.visibility
+                  ~title:normalized_title ~content:normalized_body with
+              | Error error -> Error error
+              | Ok _ -> (
+                let content_changed =
+                  not (String.equal existing.title normalized_title
+                       && String.equal existing.body normalized_body
+                       && String.equal (Agent_id.to_string existing.author)
+                            (Agent_id.to_string next_author))
+                in
                 let now = Time_compat.now () in
                 let updated =
                   { existing with
@@ -884,30 +899,16 @@ let update_post_with_outcome
                   ; body = normalized_body
                   ; meta_json = normalized_meta
                   ; content_updated_at =
-                      if String.equal existing.title normalized_title
-                         && String.equal existing.body normalized_body
-                         && String.equal (Agent_id.to_string existing.author)
-                              (Agent_id.to_string next_author)
-                      then existing.content_updated_at
-                      else now
+                      if content_changed then now else existing.content_updated_at
                   ; updated_at = now
                   }
                 in
-                Hashtbl.replace store.posts key updated;
-                mark_dirty_post store key;
-                invalidate_post_caches store;
-                Ok (updated, posts_jsonl_unlocked store))))
-    in
-    match snapshot_result with
-    | Error _ as e -> e
-    | Ok (updated, posts_jsonl) ->
-      (* The rewrite carries the edit and the post's updated_at, and a keeper
-         board cursor advances on updated_at. Discarding the failure here
-         reported an edit that a restart would not show, and moved no cursor
-         to say so (#26168). The result variant is right here. *)
-      (match
-         with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl)
-       with
-       | Error _ as e -> e
-       | Ok () -> Ok updated)
+                let snapshot = posts_jsonl_unlocked ~replacement:updated store in
+                match save_posts_jsonl_result snapshot with
+                | Error _ as error -> error
+                | Ok () ->
+                  Hashtbl.replace store.posts key updated;
+                  mark_dirty_post store key;
+                  invalidate_post_caches store;
+                  Ok (updated, content_changed)))))
 ;;

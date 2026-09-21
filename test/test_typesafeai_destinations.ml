@@ -69,12 +69,11 @@ let with_env f =
   @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  Eio_context.with_test_env
-    ~net
-    ~clock
-    ~mono_clock:(Eio.Stdenv.mono_clock env)
-    ~sw
-    (fun () -> f ~sw ~net ~clock)
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  (* The client posts through the shared outbound pool, which a test has to
+     open for itself: no server bootstrap runs here. *)
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () -> f ~sw ~net ~clock
 ;;
 
 (* The fixture answers with the model id it was asked for, as both servers do. *)

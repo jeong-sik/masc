@@ -2043,12 +2043,15 @@ type async_msg =
       (((string * string) list * (string * string) list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
-      * Approval.Flow.generation
       (** The stance listing replaces the whole yolo set, so a fetch that
           started before an operator armed a gate would put the pre-press
-          answer back. The generation says which flow the answer belongs to
-          and a stale one is dropped, the same guard the held-call listing
-          already rides. *)
+          answer back. This no longer rides the held-call listing's refresh
+          generation: that counter also advances on every unrelated
+          background poll tick, so a tool-modes fetch racing any poll (not
+          only a press) was dropped even with no press ever armed (#37461).
+          The handler instead re-checks [Approval.Flow.action_inflight] when
+          the answer arrives, which asks the one question this guard needs:
+          is a press still open right now. *)
   | Keeper_tool_mode_set of
       string
       * Masc.Keeper_tool_approval_mode.mode
@@ -3260,42 +3263,42 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
         (Gate_mode_set (lane, mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
-  (* [reserve_refresh] declines while the operator's own press is still in
-     flight: the answer on the way back would be the stance from before it. *)
-  let flow, reserved = Approval.Flow.reserve_refresh state.approval_flow in
-  state.approval_flow <- flow;
-  match reserved with
-  | None -> ()
-  | Some generation -> (
-      let host = server_peer_host in
-      let port = state.port in
-      let run () =
-        let result =
-          try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation));
-        (* Same trip, because both answer "what did somebody set about this
-           Keeper" and a detail pane showing one fresh and one stale would be
-           two different moments beside each other. No generation guard: this
-           listing has no operator press to be superseded by. *)
-        let settings =
-          try Masc_tui_loader.load_keeper_gate_settings ~host ~port with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Keeper_gate_settings_loaded settings)
+  (* Declines while the operator's own press is still in flight: the answer
+     on the way back would be the stance from before it. This checks the
+     press slot directly rather than reserving a shared refresh generation
+     -- see [Keeper_tool_modes_loaded]'s doc comment for why sharing that
+     counter with the background poll dropped answers no press ever
+     raced (#37461). *)
+  if Approval.Flow.action_inflight state.approval_flow then ()
+  else
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
       in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          enqueue_async mailbox
-            (Keeper_tool_modes_loaded
-               (Error "Eio switch is unavailable", generation)))
+      enqueue_async mailbox (Keeper_tool_modes_loaded result);
+      (* Same trip, because both answer "what did somebody set about this
+         Keeper" and a detail pane showing one fresh and one stale would be
+         two different moments beside each other. No generation guard: this
+         listing has no operator press to be superseded by. *)
+      let settings =
+        try Masc_tui_loader.load_keeper_gate_settings ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_gate_settings_loaded settings)
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw ->
+         Eio.Fiber.fork_daemon ~sw (fun () ->
+             run ();
+             `Stop_daemon)
+     | None ->
+         enqueue_async mailbox
+           (Keeper_tool_modes_loaded (Error "Eio switch is unavailable")))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
   (* [begin_action] takes the newest generation, so a stance listing already
@@ -14208,11 +14211,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               following the workspace, which is the looser reading and the one
               an operator would act on. *)
            ())
-  | Keeper_tool_modes_loaded (result, generation) ->
-      (* A listing from an older flow describes the stance before the press
-         that superseded it. Dropping it is what keeps an armed gate armed
-         on screen. *)
-      if Approval.Flow.is_current state.approval_flow generation then
+  | Keeper_tool_modes_loaded result ->
+      (* A listing that lands while a press is still open describes the
+         stance from before that press. Dropping it is what keeps an armed
+         gate armed on screen; re-checking here (not only at launch) covers
+         a press that opened after this fetch was already on the wire. *)
+      if not (Approval.Flow.action_inflight state.approval_flow) then
         (match result with
          | Ok overrides ->
              state.keeper_tool_modes_observed <- true;

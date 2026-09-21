@@ -50,10 +50,12 @@ let keeper_chat_timeout_sec = 180.0
 let preset_restore_timeout_sec = 120.0
 
 (* A config save can land mid-turn: the server commits the metadata, then
-   stops the lane for the restart, and that stop waits the turn out. A turn
-   is cut by [turn] provider_call_deadline_sec (900s in config/runtime.toml),
-   so waiting longer can never succeed; the 10s default drops the save
-   before the commit instead. #37612. *)
+   stops the lane for the restart, and that stop waits the turn out with no
+   deadline of its own. A stuck attempt is ended by the provider_call_deadline
+   failsafe floor (900s, provider_call_deadline_failsafe_floor_sec in
+   lib/config/env_config_keeper.ml), and observed turns ran 12-160s
+   (2026-09-21), so 900s covers the realistic wait. A turn that stays healthy
+   past it can still drop the save; the server-side fix is #37612. *)
 let keeper_config_save_timeout_sec = 900.0
 
 (* The server asks every declared endpoint in turn, and a provider that is

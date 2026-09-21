@@ -158,18 +158,18 @@ let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
   | Error e -> Error e
 
 (** GET with structured error handling. *)
-let get_response_sync ?clock ?timeout_sec ~url ~headers () =
+let get_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes
           ~method_:`GET ~url ~headers () with
   | Ok { Pool.status; headers; body } ->
     Ok { status; headers; body }
   | Error e -> Error e
 
 (** GET with structured error handling. *)
-let get_sync ?clock ?timeout_sec ~url ~headers () =
-  match get_response_sync ?clock ?timeout_sec ~url ~headers () with
+let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
+  match get_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () with
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
 

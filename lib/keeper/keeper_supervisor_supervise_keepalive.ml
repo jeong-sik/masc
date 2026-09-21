@@ -157,11 +157,11 @@ let supervise_keepalive
            "supervised"
            ()
        with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         (* The lane crossed its start boundary successfully. Observation
-            failure must not escape into launch rollback and detach it from
-            the registry. *)
+       (* The lane crossed its start boundary successfully. Observation
+          failure must not escape into launch rollback and detach it from
+          the registry. A cancellation raised by the publication is such a
+          failure: the lane is running either way. *)
+       | exn -> (* cancel-guard-ok: the lane already started; escaping here rolls the launch back and detaches a running lane *)
          Log.Keeper.error
            "supervisor launch lifecycle publication failed keeper=%s: %s"
            meta.name

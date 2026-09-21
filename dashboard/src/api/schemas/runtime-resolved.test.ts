@@ -17,6 +17,7 @@ const validRuntime = {
 
 const validLane = {
   id: 'lane-x',
+  declared: true,
   runtime_ids: ['rt-a', 'rt-b'],
 } as const
 
@@ -51,6 +52,12 @@ describe('runtime-resolved schema', () => {
 
   it('rejects a lane without its candidates (schema drift guard)', () => {
     const { runtime_ids: _ids, ...lane } = validLane
+    expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] }))
+      .toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
+  it('rejects a lane without its declaration origin', () => {
+    const { declared: _declared, ...lane } = validLane
     expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] }))
       .toThrow(RuntimeResolvedSchemaDriftError)
   })

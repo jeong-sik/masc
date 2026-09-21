@@ -116,7 +116,13 @@ class LaneStore:
                 self.fail_next_resolved = False
                 return 503, {"error": "resolved unavailable"}
             lanes = [
-                {"id": lane["id"], "runtime_ids": list(lane["runtime_ids"])}
+                {
+                    "id": lane["id"],
+                    "runtime_ids": list(lane["runtime_ids"]),
+                    # Every lane this fixture serves is one its file declares;
+                    # the assignment-made singleton has no row here.
+                    "declared": True,
+                }
                 for lane in self.lanes
             ]
         return 200, {**self.body, "lanes": lanes}

@@ -5250,6 +5250,7 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
+(include stanzas/test_keeper_projection_change.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
 
@@ -5407,6 +5408,9 @@
  (modules test_keeper_task_skill_turn_exact)
  (libraries
   alcotest
+  masc_test_deps
+  exact_output_fixture
+  eio_main
   fs_compat
   masc
   masc.agent_core
@@ -6595,3 +6599,12 @@
  (deps (alias runtest-test_tui_jev_readiness)))
 
 (include stanzas/test_pool_h2_request_body.inc)
+
+(include stanzas/test_tui_skill_applicability.inc)
+
+(test
+ (name test_keeper_librarian_context_review)
+ (modules test_keeper_librarian_context_review)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+(include stanzas/test_tui_librarian_context_review.inc)

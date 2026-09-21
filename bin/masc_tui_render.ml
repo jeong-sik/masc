@@ -11028,6 +11028,14 @@ let runtime_detail_lines state target ~width =
                | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
+      let probe_limitations =
+        match state.runtime_surface with
+        | Some { rss_probe = Some snapshot; _ } ->
+            List.concat_map
+              (runtime_detail_field ~width ~style:Ansi.reset "Probe limitation")
+              snapshot.rps_limitations
+        | Some { rss_probe = None; _ } | None -> []
+      in
       let keeper_lines =
         let target_keepers =
           match target with
@@ -11055,7 +11063,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ quota @ keeper_lines @ probe_lines
+      fields @ candidate @ quota @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -11458,9 +11466,18 @@ let render_runtime (state : state) =
             else []
           in
           let lane_fact =
-            if candidate.rcr_candidate_count = 1 then [ "single candidate" ]
-            else if is_first then [ "head" ]
-            else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
+            (* [Lane_undeclared] reads like a one-candidate lane on the wire --
+               one candidate, first position -- so until this row said so there
+               was nothing on the surface telling them apart. A declared lane
+               of one candidate walks no failover either; what separates this
+               one is that [D] has no table to remove. *)
+            match Masc_tui_types.runtime_lane_fact_of_row candidate with
+            | Masc_tui_types.Lane_undeclared ->
+              [ (Theme.recede ()) ^ "runtime, not a declared lane" ^ Ansi.reset ]
+            | Masc_tui_types.Lane_single_candidate -> [ "single candidate" ]
+            | Masc_tui_types.Lane_head -> [ "head" ]
+            | Masc_tui_types.Lane_fallback position ->
+              [ Printf.sprintf "fallback #%d" position ]
           in
           let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
           (* The lane fact leads. This cell is what is left of the row after
@@ -11720,15 +11737,15 @@ let render_keeper_calls (state : state) =
            @ labeled_rows ~call_index ~style:Ansi.dim ~label:"input" call.kc_input
          in
          let output_rows =
-           match
-             Option.bind call.kc_output (fun result ->
-               Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
-           with
+           (* This is the recorded-call inspector. A timeline digest drops
+              structured receipt fields and can hide an assessment behind a
+              later failure; preserve the stored output and let rows scroll. *)
+           match call.kc_output with
            | None -> []
-           | Some digest ->
+           | Some output ->
              labeled_rows ~call_index
                ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
-               ~label:"output" digest
+               ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)
     |> List.concat

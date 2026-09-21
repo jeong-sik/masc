@@ -67,7 +67,7 @@ let unlink_path_blocking path =
     Ok Path_removed
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Path_absent
-  | exn -> Error (path_error "unlink" path exn)
+  | exn -> Error (path_error "unlink" path exn) (* cancel-guard-ok: Unix.unlink performs no Eio operation *)
 ;;
 
 let rmdir_path_blocking path =
@@ -76,7 +76,7 @@ let rmdir_path_blocking path =
     Ok Path_removed
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Path_absent
-  | exn -> Error (path_error "rmdir" path exn)
+  | exn -> Error (path_error "rmdir" path exn) (* cancel-guard-ok: Unix.rmdir performs no Eio operation *)
 ;;
 
 let rec remove_path_strict_blocking path =

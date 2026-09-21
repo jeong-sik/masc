@@ -195,7 +195,7 @@ let read_file path =
     |> fun contents -> Some contents
   with
   | Sys_error _ -> None
-  | exn ->
+  | exn -> (* cancel-guard-ok: the body is Stdlib channel IO (open_in, really_input_string, close_in_noerr) and performs no Eio operation *)
     Log.Identity.warn "build_identity read_file %s failed: %s" path (Printexc.to_string exn);
     None
 ;;
@@ -262,7 +262,7 @@ let probe_commit_unix_ts_from_candidates candidates commit_hash_opt =
                     (string_of_process_status status)));
             None
         with
-        | exn ->
+        | exn -> (* cancel-guard-ok: observe_probe_failure (line 138) re-raises Eio.Cancel.Cancelled; only other exceptions become a counter and a log line *)
           observe_probe_failure ~site:"commit_ts_git_capture" exn;
           None
       in

@@ -2441,8 +2441,8 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
-    ~turn_instructions =
+let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
+    ~user_message ~cli_path ~model ~turn_instructions =
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "codex-production-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -2460,6 +2460,40 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                     ~mono_clock:(Eio.Stdenv.mono_clock env)
                     ~sw
                     (fun () ->
+                       let runtime_id = match http_requests with
+                         | None -> "codex.codex"
+                         | Some requests ->
+                           let callback _connection _request body =
+                             ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
+                             incr requests;
+                             (* Empty HTTP completion is rejected before
+                                AfterTurn; its projection is still observed. *)
+                             Cohttp_eio.Server.respond_string ~status:`OK
+                               ~body:{|{"id":"projection-a","model":"projection-http-fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}|} ()
+                           in
+                           let socket = Eio.Net.listen env#net ~sw ~backlog:1
+                             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+                           let port = match Eio.Net.listening_addr socket with
+                             | `Tcp (_, port) -> port
+                             | `Unix _ -> fail "expected loopback TCP socket" in
+                           Eio.Fiber.fork_daemon ~sw (fun () ->
+                             Cohttp_eio.Server.run socket
+                               (Cohttp_eio.Server.make ~callback ()) ~on_error:raise);
+                           write_fixture_file runtime_path
+                             (codex_runtime_toml ~model cli_path ^ Printf.sprintf {|
+[providers.projection]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d"
+[models.http]
+api-name = "projection-http-fixture"
+max-context = 400000
+streaming = false
+[projection.http]
+[runtime.lanes.projection_then_codex]
+candidates = ["projection.http", "codex.codex"]
+|} port);
+                           "projection_then_codex"
+                       in
                        match Runtime.init_default ~config_path:runtime_path with
                        | Error error -> fail error
                        | Ok () ->
@@ -2511,8 +2545,129 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                   (Skill_catalog_snapshot.config_unreadable
                                      ~detail:"test fixture has no Skill publication")
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
-                                ~runtime_id:"codex.codex"
+                                ~runtime_id
                                 ()))))))
+;;
+
+let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
+    ~turn_instructions =
+  run_production_keeper_turn_with_predecessor ~http_requests:None ~base_path
+    ~trace_id ~user_message ~cli_path ~model ~turn_instructions
+;;
+
+(* The actual turn collector and writer, not a callback replica. A later
+   candidate can fail its durable claim before projecting any input. That
+   candidate has no request attribution, but must not erase an earlier cut. *)
+let test_production_last_projection ~http_predecessor ~reject_codex () =
+  let base_path = temp_workspace "masc-last-projection-" in
+  let capture_path = Filename.concat base_path "codex-requests.jsonl" in
+  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    (match catalog_snapshot with
+     | None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    cleanup_tree base_path) (fun () ->
+    let catalog_path = Filename.concat base_path "models.toml" in
+    write_fixture_file catalog_path {|
+[[models]]
+id_prefix = "projection-http-fixture"
+provider_name = "projection"
+base = "openai_chat"
+max_context_tokens = 400000
+max_output_tokens = 128
+supports_tools = true
+supports_native_streaming = false
+|};
+    (match Llm_provider.Model_catalog.load_file catalog_path with
+     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Error detail -> fail detail);
+    let keeper_name = "codex-production-fixture" in
+    let trace_id = "last-projection-trace" in
+    let history = List.map (fun (role, text) ->
+      { Agent_core.Types.role; content = [Text text]; name = None;
+        tool_call_id = None; metadata = [] })
+      [Agent_core.Types.User, "Earlier question";
+       Agent_core.Types.Assistant, "Earlier answer"] in
+    let checkpoint = Keeper_context_runtime.create ~eio:false
+      ~system_prompt:"Synthetic persisted history."
+      |> fun ctx -> List.fold_left Keeper_context_runtime.append ctx history
+      |> Keeper_context_runtime.checkpoint_of_context in
+    let checkpoint = { checkpoint with session_id = trace_id; turn_count = 1 } in
+    (match Keeper_checkpoint_store.save_agent_core_if_absent
+      ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
+      checkpoint with
+     | Installed {auxiliary = []; _} -> ()
+     | Installed _ | Not_installed _ -> fail "could not seed the synthetic checkpoint");
+    let recovery = if reject_codex then (
+      let module Store = Keeper_official_client_session_store in
+      let claimed = Store.claim ~base_path ~keeper_name ~expected:None
+        ~client_kind:Codex ~runtime_id:"codex.codex"
+        ~owner_epoch:(Store.process_epoch ())
+        ~tool_surface_sha256:(Store.tool_surface_sha256
+          ~native_posture:Runtime_native_tools.Native_none []) ~updated_at:1.0
+        |> Result.get_ok in
+      Some (Store.require_recovery ~base_path ~keeper_name ~expected:claimed
+        ~failure:(Input_rejected Bootstrap_floor_exceeded)
+        ~detail:"synthetic input rejection" ~required_at:2.0 |> Result.get_ok)
+    ) else None in
+    let requests = ref 0 in
+    with_fixture ~capture_path ~inject_items:true
+      [init_result; account_chatgpt; thread_result;
+       {|{"id":4,"result":{}}|};
+       {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|};
+       item_completed; turn_completed]
+      (fun cli_path ->
+        let result = run_production_keeper_turn_with_predecessor
+          ~http_requests:(if http_predecessor then Some requests else None)
+          ~base_path ~trace_id
+          ~user_message:"Continue the synthetic turn."
+          ~cli_path ~model:"gpt-fixture" ~turn_instructions:None in
+        (match result with
+         | Error (Agent_core.Error.Config (InvalidConfig {field; _})) when reject_codex ->
+           check string "B refuses its claim before projection"
+             "official_client_session.claim" field
+         | Ok _ when not reject_codex -> ()
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "blocked Codex claim completed");
+        check int "the actual HTTP predecessor completed exactly once"
+          (if http_predecessor then 1 else 0) !requests;
+        if reject_codex then (
+          check bool "the rejected claim sent no Codex app-server request" false
+            (Sys.file_exists capture_path);
+          check bool "the prior recovery binding is untouched" true
+            (Keeper_official_client_session_store.load ~base_path ~keeper_name = Ok recovery));
+        let rows = Keeper_types_support.keeper_turn_record_store
+          (Workspace.default_config base_path) keeper_name
+          |> fun store -> Dated_jsonl.read_recent store 2 in
+        let record = match rows with
+          | [row] -> (match Turn_record.of_json row with
+            | Ok record -> record | Error detail -> fail detail)
+          | _ -> fail "expected one actual turn record" in
+        if reject_codex then check bool "B did not inherit A's wire attribution"
+          true (Option.is_none record.request_wire_observation);
+        (match record.response_observed_model_input with
+         | Some observed when not reject_codex ->
+           check string "response fact retains its own runtime"
+             "codex.codex" observed.runtime_profile;
+           check bool "B's response retains the exact projected window" true
+             (record.model_input_window = Some observed.window)
+         | None when reject_codex -> ()
+         | _ -> fail "response fact does not match the last actual response");
+        match record.model_input_window with
+        | Some window when http_predecessor || not reject_codex ->
+          (* HTTP carries the new goal as an atom; Codex gets it separately
+             from the two persisted history atoms. Neither path cuts here. *)
+          let atoms = if reject_codex then 3 else 2 in
+          let expected : Turn_record.model_input_window =
+            { transmitted_atoms = atoms; total_atoms = atoms
+            ; measurement = if reject_codex then Wire_shape else Durable_shape
+            ; front_atom_digest =
+                Runtime_model_input_tail_window.atom_opening_digest history 0
+                |> Option.get } in
+          check bool "last projection retains the exact observed range and digest"
+            true (window = expected)
+        | None when not http_predecessor && reject_codex -> ()
+        | _ -> fail "the turn lost its last observed model-input projection"))
 ;;
 
 (* [system_prompt] is what the production keeper path always supplies
@@ -3989,7 +4144,10 @@ let assert_production_keeper_result result =
    so the line it leaves at its end names the turn, repeats that the history
    was fresh, and states that there is no atom history. *)
 let assert_official_client_turn_boundary ~base_path ~trace_id =
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let keepers_dir =
+    Filename.concat (Workspace.backend_config_for base_path).base_path
+      Common.keepers_runtime_dirname
+  in
   match
     Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:"codex-production-fixture"
   with
@@ -4809,7 +4967,15 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    [ ( "last projection"
+      , [ test_case "later claim refusal preserves the earlier projection" `Quick
+            (test_production_last_projection ~http_predecessor:true ~reject_codex:true)
+        ; test_case "a later projection replaces the earlier projection" `Quick
+            (test_production_last_projection ~http_predecessor:true ~reject_codex:false)
+        ; test_case "no projection remains explicitly absent" `Quick
+            (test_production_last_projection ~http_predecessor:false ~reject_codex:true)
+        ] )
+    ; ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "images"
       , [ test_case "image reaches the turn input" `Quick
             test_image_reaches_the_turn_input

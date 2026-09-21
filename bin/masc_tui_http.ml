@@ -199,22 +199,24 @@ let percent_encode_query_value value =
 let request_clock () = Eio_context.get_clock_opt ()
 
 (** Send an HTTP GET request and return the structured status/body pair. *)
-let http_get ~(host : string) ~(port : int) ~(path : string) :
+let http_get_with_body_limit ~max_body_bytes ~(host : string) ~(port : int) ~(path : string) :
     (int * string, string) result =
   let url = url_of ~host ~port ~path in
   timed ~verb:"GET" ~path @@ fun () ->
   match
     Masc_http_client.get_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
+      ~timeout_sec:(request_timeout_sec ()) ?max_body_bytes ~url ~headers:(auth_headers ()) ()
   with
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+
+let http_get = http_get_with_body_limit ~max_body_bytes:None
 
 (** Fetch an arbitrary external URL's body for web link previews. Unlike the
     dashboard helpers above this sends NO masc auth header -- the URL is a
     third-party site, so leaking the operator's token there would be a real
     credential exposure. Only http(s) is followed, and only a 2xx response
-    yields a body. Response size is capped by {!Masc_http_client} (8 MB). *)
+    yields a body. *)
 let fetch_link_preview_body ~(url : string) : (string, string) result =
   if not (String.starts_with ~prefix:"http://" url
           || String.starts_with ~prefix:"https://" url)
@@ -961,6 +963,22 @@ let lane_run_list_limit = 50
    would truncate anyway. *)
 let lane_run_detail_max_body_bytes = 4 * 1024 * 1024
 
+let fetch_measurement_artifact ~host ~port ~sha256 =
+  match Tool_blob_store.validate_sha256 sha256 with
+  | Error error -> Error (Tool_blob_store.invalid_sha256_to_string error)
+  | Ok () ->
+    (match http_get_with_body_limit
+        ~max_body_bytes:(Some lane_run_detail_max_body_bytes)
+        ~host ~port ~path:("/api/v1/artifacts/" ^ sha256) with
+     | Error detail -> Error ("Measurement: " ^ detail)
+     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+       Error (named_refusal "Measurement artifact" ~status ~body)
+     | Ok (_, body) ->
+       (match Yojson.Safe.from_string body with
+        | json -> Masc_tui_types.Measurement.decode_artifact ~sha256 json
+        | exception Yojson.Json_error detail ->
+          Error ("Measurement artifact response is not JSON: " ^ detail)))
+
 (** One server-filtered page, with the exact continuation cursor retained. *)
 let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
     (Masc.Tui_decode.lane_run_page, string) result =
@@ -984,26 +1002,20 @@ let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
 let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     (Masc.Tui_decode.lane_run_detail, string) result =
   match
-    http_get ~host ~port
+    http_get_with_body_limit ~max_body_bytes:(Some lane_run_detail_max_body_bytes)
+      ~host ~port
       ~path:
         ("/api/v1/dashboard/exact-lane-runs/"
          ^ percent_encode_path_segment run_id)
   with
-  | Error detail -> Error ("lane run detail request failed: " ^ detail)
+  | Error detail -> Error ("Lane run detail: " ^ detail)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
       Error (named_refusal "lane run detail" ~status ~body)
   | Ok (_, body) ->
-      if String.length body > lane_run_detail_max_body_bytes then
-        Error
-          (Printf.sprintf
-             "lane run record is %d bytes; the TUI does not render a payload \
-              above %d bytes"
-             (String.length body) lane_run_detail_max_body_bytes)
-      else
-        (match Yojson.Safe.from_string body with
-         | json -> Masc.Tui_decode.decode_lane_run_detail json
-         | exception Yojson.Json_error detail ->
-             Error ("lane run detail was not JSON: " ^ detail))
+      (match Yojson.Safe.from_string body with
+       | json -> Masc.Tui_decode.decode_lane_run_detail json
+       | exception Yojson.Json_error detail ->
+           Error ("lane run detail was not JSON: " ^ detail))
 
 (** Fetch one page of chat rows older than [before].
 
@@ -1737,9 +1749,9 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
 
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server
-    stamps the author from the agent header, so the payload carries text
-    only. The response is the tools envelope [{ok, message}]; interpreting it
-    stays with the caller. *)
+    stamps the author from the HTTP auth resolver, so the payload carries
+    text only. The response is the tools envelope [{ok, message}]; interpreting
+    it stays with the caller. *)
 let post_board_new ~(host : string) ~(port : int) ~(title : string)
     ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
   let hearth_field =
@@ -1798,8 +1810,8 @@ let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_vote"
     ~body:(Yojson.Safe.to_string payload)
 
-(** POST /api/v1/tools/masc_board_comment. The author is stamped by the
-    route from the agent header, exactly as for a new post. *)
+(** POST /api/v1/tools/masc_board_comment. The route stamps the author from the
+    HTTP auth resolver, exactly as for a new post. *)
 let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =

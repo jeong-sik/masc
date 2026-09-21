@@ -22,6 +22,7 @@ import json
 import re
 import shutil
 import tempfile
+import tomllib
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ from pathlib import Path
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BENCH_ROOT.parents[1]
 OUT_ROOT = BENCH_ROOT / "configs" / "out"
+PROVIDER_CATALOG = REPO_ROOT / "packages" / "agent_core" / "models.toml"
 
 # keepers, skills, composition, parallel
 ARMS: dict[str, dict] = {
@@ -55,6 +57,9 @@ ARMS: dict[str, dict] = {
 # filter하고 built-in/composition 도구는 gate하지 못하는 no-op이라 쓰지 않는다
 # (keeper_run_tools_setup.ml: Keeper_identity_tool_allow.apply 대상 확인).
 COMPOSITION_FENCE = "```toml composition"
+TASK_SKILL_SOURCE_ID = "terminal-bench-task"
+TASK_SKILLS_CONFIG_DIR = "task-skills"
+TASK_SKILLS_RUNTIME_PATH = ".masc/task-skills"
 
 # spawn/delegate 게이트 (masc v0.35.6+, #35169): keeper TOML tools.deny는
 # model-visible 이름의 built-in tool을 capability surface에서 완전 제거한다
@@ -307,12 +312,14 @@ def effective_runtime_id(runtime_id: str) -> str:
     provider, _, wire_model = runtime_id.partition(".")
     if not provider or not wire_model:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
-    return f"{provider}.{model_binding_id(wire_model)}"
+    runtime_provider = PROVIDERS[provider].get("runtime_provider", provider)
+    return f"{runtime_provider}.{model_binding_id(wire_model)}"
 
 
 # provider 프로토콜 매핑. 새 provider 추가 시 여기만 고친다.
 PROVIDERS = {
-    "anthropic": dict(protocol="messages-http",
+    "anthropic": dict(runtime_provider="claude",
+                      protocol="messages-http",
                       endpoint="https://api.anthropic.com",
                       api_key_env="ANTHROPIC_API_KEY",
                       carries_effort=True,
@@ -324,15 +331,13 @@ PROVIDERS = {
                       # boundary before completion" at 775s after the truncation
                       # recovery exhausted the same ceiling. fable-5 takes 64k.
                       max_output_tokens=64000),
-    "openai": dict(protocol="openai-compatible-http",
-                   endpoint="https://api.openai.com/v1",
+    "openai": dict(runtime_provider="openai-responses",
+                   protocol="openai-compatible-http",
+                   endpoint="https://api.openai.com",
                    api_key_env="OPENAI_API_KEY",
-                   carries_effort=True,
-                   # Chat completions carries an effort only when the model row
-                   # declares the reasoning_effort dialect
-                   # (reasoning_dialect.validate_request_control_inputs:
-                   # Chat_completions + Reasoning_effort is the admitted pair).
-                   thinking_control_line='thinking-control-format = "reasoning-effort"\n'),
+                   # The canonical catalog provider selects Responses and its
+                   # scoped model rows own the reasoning-effort dialect.
+                   carries_effort=True),
     # 한 계정 크레딧으로 여러 vendor 모델을 태우는 스윕 레인. 모델 id 에
     # 슬래시가 들어가므로 --model openrouter/z-ai/glm-5.3 처럼 주면
     # runtime_id 는 openrouter.z-ai/glm-5.3 이 된다. glm/deepseek 계열은
@@ -368,6 +373,28 @@ PROVIDERS = {
 def is_official_client(provider: str) -> bool:
     return bool(PROVIDERS[provider].get("official_client"))
 
+
+@functools.lru_cache(maxsize=None)
+def provider_parallel_suppression_contract(provider: str) -> bool:
+    """Whether the checked-in Agent Core provider declaration permits it.
+
+    An absent row and an omitted field both mean false. That is the same
+    fail-closed contract the runtime enforces; the HTTP protocol alone does
+    not prove that a service accepts this request policy.
+    """
+    rows = tomllib.loads(PROVIDER_CATALOG.read_text()).get("providers") or []
+    matches = [row for row in rows
+               if provider == row.get("id") or provider in (row.get("aliases") or [])]
+    if len(matches) > 1:
+        raise ValueError(f"provider catalog declares {provider!r} more than once")
+    if not matches:
+        return False
+    value = matches[0].get("supports_parallel_tool_suppression", False)
+    if not isinstance(value, bool):
+        raise ValueError(
+            f"provider catalog {provider!r} parallel suppression contract is not boolean")
+    return value
+
 # reasoning-effort / thinking-support in [models.X] seed the keeper turn's
 # reasoning controls (Runtime_inference.thinking_support_of_runtime_id ->
 # keeper_turn_driver.attempt_inference_policy). Emit them only where the
@@ -376,9 +403,8 @@ def is_official_client(provider: str) -> bool:
 #   enable_thinking=false reaches
 #   backend_anthropic.validate_thinking_controls, which rejects
 #   reasoning_effort + enable_thinking=false outright).
-# - openai: chat-completions carries reasoning_effort only under the
-#   reasoning_effort thinking-control dialect, which the rendered
-#   [models.X.capabilities] block declares.
+# - openai: the canonical openai-responses provider and its scoped model row
+#   declare the reasoning_effort dialect.
 # - kimi: capabilities_base"kimi" declares thinking_control_format =
 #   No_thinking_control, so any reasoning_effort is rejected by
 #   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
@@ -430,9 +456,54 @@ def seed_skills_block() -> str:
     return "\n".join(lines[start:end]).rstrip() + "\n"
 
 
-def keeper_toml(arm: str) -> str:
+def task_skill_names(skills_dir: Path) -> list[str]:
+    """Package names from one Harbor task-provided Agent Skills directory."""
+    if not skills_dir.is_dir():
+        raise ValueError(f"task skills directory is missing: {skills_dir}")
+    names = sorted(
+        child.name
+        for child in skills_dir.iterdir()
+        if child.is_dir() and (child / "SKILL.md").is_file()
+    )
+    if not names:
+        raise ValueError(f"task skills directory has no */SKILL.md packages: {skills_dir}")
+    collisions = sorted(set(names) & set(_skill_names()))
+    if collisions:
+        raise ValueError(
+            "task Skill package names collide with MASC seed Skills: "
+            + ", ".join(collisions))
+    return names
+
+
+def _toml_string(value: str) -> str:
+    # A JSON string is also a TOML basic string. json.dumps owns escaping so a
+    # task package name never becomes TOML syntax.
+    return json.dumps(value, ensure_ascii=False)
+
+
+def skills_block_with_task_source(*, include_seed_sources: bool) -> str:
+    """Render a complete section; never edit already-rendered TOML."""
+    seed = tomllib.loads((REPO_ROOT / "config" / "runtime.toml").read_text())["skills"]
+    sources = [dict(id=TASK_SKILL_SOURCE_ID, anchor="base-path",
+                    path=TASK_SKILLS_RUNTIME_PATH, access="read-only")]
+    if include_seed_sources:
+        sources.extend(seed["sources"])
+    lines = ["[skills]", f'resource-read-max-bytes = {seed["resource-read-max-bytes"]}']
+    for source in sources:
+        lines += [
+            "", "[[skills.sources]]",
+            f'id = {_toml_string(source["id"])}',
+            f'anchor = {_toml_string(source["anchor"])}',
+            f'path = {_toml_string(source["path"])}',
+            f'access = {_toml_string(source["access"])}',
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def keeper_toml(arm: str, task_skills: list[str] | None = None) -> str:
     """Every keeper in an arm gets the same profile; only the filename differs."""
     spec = ARMS[arm]
+    task_skills = task_skills or []
     lines = [
         "[keeper]",
         "always_allow = true",
@@ -445,13 +516,16 @@ def keeper_toml(arm: str) -> str:
         '"""',
     ]
     if not spec["skills"]:
-        # 명시적 빈 배열 = skills 없음 (키 생략은 "전부"라 반대 의미).
-        lines += ["", "skills.names = []"]
+        # Task Skills are common benchmark input. With none, this is byte-for-
+        # byte the old explicit empty selection.
+        names = ", ".join(_toml_string(n) for n in task_skills)
+        lines += ["", f"skills.names = [{names}]"]
     elif not spec["composition"]:
         # composition OFF: skills.names를 비-composition skill로 명시 제한한다.
         # composition skill이 scope 밖이면 keeper_compose_<name> 도구 자체가
         # 만들어지지 않는다. 키 생략(arms d-h)은 전 skill 허용.
-        names = ", ".join(f'"{n}"' for n in instruction_skill_names())
+        names = ", ".join(
+            _toml_string(n) for n in task_skills + instruction_skill_names())
         lines += ["", f"skills.names = [{names}]"]
     denied = denied_tools(spec)
     if denied:
@@ -460,7 +534,8 @@ def keeper_toml(arm: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = None) -> Path:
+def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = None,
+               task_skills_dir: Path | None = None) -> Path:
     """arm config를 (out_root/<arm>/)에 렌더하고 디렉터리를 반환한다.
 
     레포 config/ 시드(도구 정의·프롬프트 등)를 복사한 뒤 runtime.toml 과
@@ -469,14 +544,16 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     if arm not in ARMS:
         raise ValueError(f"unknown arm {arm!r}; expected one of {sorted(ARMS)}")
     spec = ARMS[arm]
+    task_skills = task_skill_names(task_skills_dir) if task_skills_dir else []
     provider, _, model_alias = runtime_id.partition(".")
     if not provider or not model_alias:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
     pcfg = PROVIDERS[provider]
+    runtime_provider = pcfg.get("runtime_provider", provider)
     # The binding is named by a slug; the wire name stays in api-name.
     # See model_binding_id.
     binding_id = model_binding_id(model_alias)
-    runtime_id = f"{provider}.{binding_id}"
+    runtime_id = f"{runtime_provider}.{binding_id}"
     if is_official_client(provider) and effort not in CLAUDE_CODE_EFFORTS:
         raise ValueError(
             f"effort {effort!r} is not admitted by Claude Code; "
@@ -486,6 +563,12 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             f"arm {arm} requires disabling parallel tool calls, but the "
             f"{provider} runtime cannot carry that request policy; "
             "use an HTTP runtime for arms b, c, d")
+    suppression = provider_parallel_suppression_contract(runtime_provider)
+    if not spec["parallel"] and not suppression:
+        raise ValueError(
+            f"arm {arm} requires disabling parallel tool calls, but provider "
+            f"{runtime_provider!r} has no catalog-declared suppression contract; "
+            "use arm e or later with this provider")
 
     # Before anything is written: a lookup that fails must not leave a
     # half-rendered config directory behind.
@@ -521,25 +604,25 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             fusion=str(spec["fusion"]).lower(),
             max_concurrent=4 if spec["parallel"] else 1,
             remote_root=REMOTE_ROOT)
-        if spec["skills"]:
+        if task_skills:
+            runtime_toml += "\n" + skills_block_with_task_source(
+                include_seed_sources=spec["skills"])
+        elif spec["skills"]:
             runtime_toml += "\n" + seed_skills_block()
         (root / "runtime.toml").write_text(runtime_toml)
         if spec["skills"]:
             shutil.copytree(REPO_ROOT / "skills", root / "skills")
+        if task_skills:
+            assert task_skills_dir is not None
+            shutil.copytree(task_skills_dir, root / TASK_SKILLS_CONFIG_DIR)
         keepers = root / "keepers"
         keepers.mkdir(exist_ok=True)
         for i in range(1, spec["keepers"] + 1):
-            (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm))
+            (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, task_skills))
         return root
 
-    # OpenAI chat-completions carries effort only when the model row declares
-    # the reasoning_effort thinking-control dialect
-    # (reasoning_dialect.validate_request_control_inputs:
-    # Chat_completions + Reasoning_effort is the admitted pair).
-    # What each provider needs is declared on its own entry above, beside the
-    # observation that put it there. Read here rather than re-derived from the
-    # protocol: a name in a branch is a classifier, and this file already has
-    # one place that knows which provider is which.
+    # Provider-specific overrides live on the provider entry above. Read them
+    # here rather than deriving capabilities from the HTTP protocol.
     thinking_control = pcfg.get("thinking_control_line", "")
     max_output = pcfg.get("max_output_tokens")
     if max_output is None and openrouter is not None:
@@ -547,7 +630,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     max_output_lines = (
         f"max-output-tokens = {max_output}\n" if max_output is not None else "")
     runtime_toml = RUNTIME_TOML.format(
-        runtime_id=runtime_id, provider=provider, model_alias=model_alias,
+        runtime_id=runtime_id, provider=runtime_provider, model_alias=model_alias,
         binding_id=binding_id,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
@@ -561,7 +644,10 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         thinking_control=thinking_control,
         disable_parallel=str(not spec["parallel"]).lower(),
         **pcfg)
-    if spec["skills"]:
+    if task_skills:
+        runtime_toml += "\n" + skills_block_with_task_source(
+            include_seed_sources=spec["skills"])
+    elif spec["skills"]:
         # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.
         # skills=False이면 이 블록을 빼서 skill source가 없어 어떤 skill도
         # 로드되지 않는다 (keeper TOML의 skills.names = []와 같은 방향).
@@ -574,6 +660,9 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     # skills=False이면 디렉터리 자체를 만들지 않는다.
     if spec["skills"]:
         shutil.copytree(REPO_ROOT / "skills", root / "skills")
+    if task_skills:
+        assert task_skills_dir is not None
+        shutil.copytree(task_skills_dir, root / TASK_SKILLS_CONFIG_DIR)
 
     # NOTE: 예전에는 anthropic arm의 tool_execute.toml에서 [[one_of]]를 벤치 측
     # strip 했다 (Anthropic API의 top-level combinator 400 때문). masc v0.35.6
@@ -584,7 +673,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     keepers = root / "keepers"
     keepers.mkdir(exist_ok=True)
     for i in range(1, spec["keepers"] + 1):
-        (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm))
+        (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, task_skills))
     return root
 
 

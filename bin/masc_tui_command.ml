@@ -36,6 +36,8 @@ type t =
   | Open_fleet_memory
   | Find_in_chat of string
   | Find_next
+  | Open_measurement of string
+  | Measurement_missing_sha
   | Inspect_context
   | View_image of string
   | View_image_missing_path
@@ -164,6 +166,11 @@ let catalog =
     ; aliases = []
     ; args = "[text]"
     ; summary = "go to the newest message holding text; again for the next"
+    }
+  ; { word = "measurement"
+    ; aliases = []
+    ; args = "<sha256>"
+    ; summary = "inspect a published meaning-preservation measurement"
     }
   ; { word = "context"
     ; aliases = []
@@ -355,6 +362,9 @@ let parse text =
     | "fleet-memory", _ -> Open_fleet_memory
     | "find", "" -> Find_next
     | "find", text -> Find_in_chat text
+    | "measurement", "" -> Measurement_missing_sha
+    | "measurement", sha ->
+        Open_measurement (if body = "" then sha else sha ^ "\n" ^ body)
     | "context", _ -> Inspect_context
     | "image", "" -> View_image_missing_path
     | "image", path -> View_image path

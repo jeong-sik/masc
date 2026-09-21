@@ -84,7 +84,7 @@ describe('InternalAgentsMonitor', () => {
   beforeEach(() => {
     rawApi.fetchKeeperRawTraces.mockResolvedValue([])
     api.fetchStandaloneLanes.mockResolvedValue({
-      schema: 'masc.standalone_llm_lanes.v1',
+      schema: 'masc.standalone_llm_lanes.v2',
       generatedAt: 'now',
       observedAtUnix: 1,
       observationOnly: true,
@@ -123,36 +123,95 @@ describe('InternalAgentsMonitor', () => {
     expect(rawApi.fetchKeeperRawTraces).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['succeeded', null],
+    ['completion_persistence_failed', 'not_persisted'],
+    ['completion_durability_unknown', 'durability_unknown'],
+  ] as const)('shows Vendor System One as the Board answer source for %s', async (status, persistenceState) => {
+    const persistence = persistenceState === null
+      ? {}
+      : {
+          intended_status: 'succeeded',
+          persistence_error: 'completion append did not settle',
+          persistence_state: persistenceState,
+        }
+    const run = parseExactLaneRunResponse({
+      generated_at: '2026-09-20T00:00:00Z',
+      run: {
+        run_id: 'jev-board-answer', run_kind: 'exact_output', lane: 'board_attention_exact',
+        subject_id: 'board-candidate-1', actor: 'keeper-a', started_at: 1,
+        status, elapsed_s: 0.1, selected_slot: null, ...persistence,
+        skill_evidence: { state: 'no_keeper_skills' },
+        payload_availability: { input: { state: 'available' }, output: { state: 'available' } },
+        input: { kind: 'exact', payload: { candidate_id: 'board-candidate-1' } },
+        output: {
+          verdict: { decision: 'relevant', rationale: 'the Board post needs attention' },
+          slot_id: 'jev-latest',
+          source: {
+            kind: 'vendor_system_one',
+            endpoint: 'https://jev.invalid/v1/judge',
+            model: 'jev-latest',
+            request_body_sha256: 'a'.repeat(64),
+          },
+          judged_at: 42,
+        },
+      },
+    })
+    api.fetchExactLaneRuns.mockResolvedValue({
+      runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now',
+    })
+    api.fetchExactLaneRun.mockResolvedValue(run)
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    fireEvent.click(await screen.findByRole('button', { name: /Board Attention board-candidate-1/i }))
+    await screen.findByText('Exact-output registry metadata', { exact: false })
+
+    expect(container.textContent).toContain('답변 출처 Vendor System One · jev-latest · exact-flow receipt 없음')
+    expect(container.textContent).not.toContain('선택 slot 미기록')
+    expect(container.textContent).toContain('기록된 Board 후보만 판단')
+    if (persistenceState !== null) {
+      expect(container.textContent).toContain(`persistence ${persistenceState}`)
+    }
+  })
+
   it('shows configured, running, and no-retained-observation lanes without controlling them', async () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
-    const lane = (overrides: Record<string, unknown>) => ({
-      laneId: 'board_attention_exact',
-      label: 'Board Attention',
-      required: true,
-      observationOnly: true,
-      configured: true,
-      configurationState: 'ready',
-      admittedSlots: ['qwen3-5-cloud'],
-      cliSlots: [],
-      droppedSlots: [],
-      admissionError: null,
-      status: 'idle',
-      retainedRunCount: 4,
-      runningCount: 0,
-      succeededCount: 4,
-      failedCount: 0,
-      cancelledCount: 0,
-      lastStartedAt: 10,
-      lastTerminalAt: 12,
-      lastOutcome: 'succeeded',
-      p50ElapsedSeconds: 2,
-      selectedSlots: [{ slotId: 'qwen3-5-cloud', count: 4 }],
-      ...overrides,
-    })
-    api.fetchStandaloneLanes.mockResolvedValue({
-      schema: 'masc.standalone_llm_lanes.v1',
+    const lane = (overrides: Record<string, unknown>) => {
+      const laneId = typeof overrides.laneId === 'string'
+        ? overrides.laneId
+        : 'board_attention_exact'
+      return {
+        laneId,
+        label: 'Board Attention',
+        required: true,
+        observationOnly: true,
+        configured: true,
+        configurationState: 'ready',
+        jev: laneId === 'board_attention_exact' ? { state: 'off' as const } : null,
+        admittedSlots: ['qwen3-5-cloud'],
+        cliSlots: [],
+        droppedSlots: [],
+        admissionError: null,
+        status: 'idle',
+        retainedRunCount: 4,
+        runningCount: 0,
+        succeededCount: 4,
+        failedCount: 0,
+        cancelledCount: 0,
+        lastStartedAt: 10,
+        lastTerminalAt: 12,
+        lastOutcome: 'succeeded',
+        p50ElapsedSeconds: 2,
+        selectedSlots: [{ slotId: 'qwen3-5-cloud', count: 4 }],
+        ...overrides,
+      }
+    }
+    const laneSnapshot = {
+      schema: 'masc.standalone_llm_lanes.v2',
       generatedAt: 'now',
       observedAtUnix: 20,
       observationOnly: true,
@@ -165,7 +224,8 @@ describe('InternalAgentsMonitor', () => {
         lane({ laneId: 'librarian_exact', label: 'Librarian', status: 'no_retained_observation', retainedRunCount: 0, lastStartedAt: null, lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [] }),
         lane({ laneId: 'verifier_exact', label: 'Verifier', required: false }),
       ],
-    })
+    }
+    api.fetchStandaloneLanes.mockResolvedValue(laneSnapshot)
 
     const { container } = render(html`<${InternalAgentsMonitor} />`)
 
@@ -173,8 +233,34 @@ describe('InternalAgentsMonitor', () => {
     const matrix = await screen.findByTestId('standalone-lane-matrix')
     expect(within(matrix).getAllByText('Running')).toHaveLength(2)
     expect(within(matrix).getAllByText('No retained observation')).toHaveLength(1)
+    expect(within(matrix).getByText('JEV OFF')).toBeTruthy()
     expect(container.textContent).toContain('qwen3-5-cloud ×4')
     expect(container.textContent).toContain('관측 기록 없음')
+
+    api.fetchStandaloneLanes.mockResolvedValue({
+      ...laneSnapshot,
+      lanes: laneSnapshot.lanes.map(item => item.laneId === 'board_attention_exact'
+        ? { ...item, jev: { state: 'configured' as const, model: 'jev-next' } }
+        : item),
+    })
+    sse.refresh?.()
+    expect(await within(matrix).findByText('JEV CONFIGURED · jev-next')).toBeTruthy()
+    expect(within(matrix).queryByText('JEV OFF')).toBeNull()
+
+    for (const [state, label] of [
+      ['cli_only', 'JEV unavailable: Board lane is CLI-only'],
+      ['lane_unavailable', 'JEV unavailable: Board lane is not ready'],
+    ] as const) {
+      api.fetchStandaloneLanes.mockResolvedValue({
+        ...laneSnapshot,
+        lanes: laneSnapshot.lanes.map(item => item.laneId === 'board_attention_exact'
+          ? { ...item, jev: { state } }
+          : item),
+      })
+      sse.refresh?.()
+      expect(await within(matrix).findByText(label)).toBeTruthy()
+      expect(within(matrix).queryByText('JEV CONFIGURED · jev-next')).toBeNull()
+    }
   })
 
   it('does not let an older refresh overwrite the latest lane matrix', async () => {
@@ -185,14 +271,14 @@ describe('InternalAgentsMonitor', () => {
     const older = new Promise(resolve => { resolveOlder = resolve })
     const lane = (label: string) => ({
       laneId: 'board_attention_exact', label, required: true, observationOnly: true,
-      configured: true, configurationState: 'ready', admittedSlots: ['primary'], cliSlots: [], droppedSlots: [],
+      configured: true, configurationState: 'ready', jev: { state: 'off' as const }, admittedSlots: ['primary'], cliSlots: [], droppedSlots: [],
       admissionError: null, status: 'idle', retainedRunCount: 1, runningCount: 0,
       succeededCount: 1, failedCount: 0, cancelledCount: 0, lastStartedAt: 10,
       lastTerminalAt: 11, lastOutcome: 'succeeded', p50ElapsedSeconds: 1,
       selectedSlots: [{ slotId: 'primary', count: 1 }],
     })
     const snapshot = (label: string) => ({
-      schema: 'masc.standalone_llm_lanes.v1', generatedAt: 'now', observedAtUnix: 20,
+      schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now', observedAtUnix: 20,
       observationOnly: true, exactRunProjectionCount: 1, exactRunSourceTotal: 1,
       exactRunProjectionTruncated: false, lanes: [lane(label)],
     })
@@ -556,6 +642,36 @@ describe('InternalAgentsMonitor', () => {
       expect(memoryApi.fetchKeeperMemoryJournal).not.toHaveBeenCalled()
     },
   )
+
+  it('shows the durable exact failure code and detail', async () => {
+    const run = parseExactLaneRunResponse({
+      generated_at: '2026-09-20T00:00:00Z',
+      run: {
+        run_id: 'failed-exact', run_kind: 'exact_output', lane: 'librarian_exact',
+        subject_id: null, actor: 'keeper-fixture', started_at: 1, status: 'failed',
+        elapsed_s: 0.1, selected_slot: 'glm-coding.glm-5.3-flash',
+        code: 'missing_deadline', detail: 'target has no finite request window',
+        input: { kind: 'exact', payload: { request: 'input' } },
+        output: { state: 'failed' },
+        payload_availability: {
+          input: { state: 'available' }, output: { state: 'available' },
+        },
+        skill_evidence: { state: 'no_keeper_skills' },
+      },
+    })
+    api.fetchExactLaneRun.mockResolvedValue(run)
+    api.fetchExactLaneRuns.mockResolvedValue({
+      runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now',
+    })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    fireEvent.click(await screen.findByRole('button', { name: /failed-exact/i }))
+    await screen.findByText('Exact-output registry metadata', { exact: false })
+    expect(container.textContent).toContain('missing_deadline')
+    expect(container.textContent).toContain('target has no finite request window')
+  })
 
   it('states that exact lanes and RAW require an Admin bearer', async () => {
     api.fetchExactLaneRuns.mockRejectedValue(new ApiRequestError({

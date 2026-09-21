@@ -145,6 +145,22 @@ endpoint = "https://ollama.com/v1"
 # default: omit it and no connect budget applies. Key spelling is mirrored by
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
+# Providers may separately declare `exact-body-timeout-s` as a positive finite
+# float in seconds. This is the caller-owned total HTTP request deadline for
+# Exact-output lanes: connection, response headers and the full response body.
+# It does not change connect-timeout-s or ordinary Keeper per-call deadlines.
+# Omission remains None; no value is inferred from the connect deadline. A
+# connect-only declaration still leaves an Exact response body unbounded.
+# Bootstrap applies it to AGENT_CORE targets derived from these bindings.
+# The deployment operator owns the value in the resolved runtime.toml's
+# [providers.<id>] table. Saving that file does not rebuild existing Exact
+# targets: the value takes effect when server bootstrap rebuilds the registry.
+# This seed intentionally supplies no numeric body deadline.
+# Each visited Exact candidate retains its own deadline. Their HTTP wait can
+# accumulate across sequential candidates; this is not a deadline for the
+# whole Librarian pass, its CLI tail, or Memory processing.
+# AGENT_CORE_MODEL_CATALOG replacements keep their own target body_timeout_s;
+# this key does not set an official-client CLI timeout.
 
 [providers.ollama_cloud.healthcheck]
 path = "/models"
@@ -490,6 +506,11 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1000000
+# Last prompt size proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
+# Keepers later reached 21-48 MB and failed before their first turn (#37123).
+# This conservative ceiling is a measured success point, not the CLI maximum
+# or a tokenizer estimate; raise it only after a larger end-to-end probe.
+max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
@@ -540,10 +561,12 @@ streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
 # This runtime rides AGENT_CORE native Ollama /api/chat, which does not serialize
-# tool_choice (agent_core backend_ollama.ml:24). Declaring true here would override
-# agent_core models.toml's supports_tool_choice=false (provider_runtime_binding.ml
-# applies this override last) while the transport silently drops forced tool
-# choice. Do not re-enable without a serializer path + model-side proof.
+# tool_choice (agent_core backend_ollama.ml:24). The catalog row for this model
+# names no supports_tool_choice, so the ollama preset's false is what reaches the
+# wire. A supports-tool-choice line in this block would not change that: for a
+# model the catalog names, runtime_adapter reads only thinking-control-format,
+# reasoning-streaming-format and max-output-tokens from here. Re-enabling needs a
+# serializer path + model-side proof, written on the catalog row.
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
 supports-top-k = true
@@ -674,9 +697,17 @@ streaming = true
 [models.minimax-m3.capabilities]
 max-output-tokens = 131072
 thinking-control-format = "none"
-# SSOT = agent-core models.toml per official MiniMax Chat documentation; Chat
-# tool_choice, response_format, and structured output are not documented.
-supports-response-format-json = false
+# SSOT = agent-core models.toml. This binding reaches MiniMax over Ollama
+# Cloud's OpenAI-compatible wire ([providers.ollama_cloud] points at
+# https://ollama.com/v1), not MiniMax's own Chat API, and that wire documents
+# response_format as supported and tool_choice as not
+# (docs.ollama.com/api/openai-compatibility, checked 2026-09-21). A capability
+# this binding has therefore comes from the wire as much as from the model, and
+# models.toml carries a row per wire: a bare minimax-m3 row for MiniMax's own
+# API and an ollama_cloud row for this one. That row declares structured output
+# off as well — /v1 accepts json_schema but does not guarantee schema-shaped
+# output, and strict schemas belong on the native /api/chat lane — which is
+# what the line below states.
 supports-structured-output = false
 supports-image-input = true
 supports-multimodal-inputs = true

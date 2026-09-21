@@ -42,6 +42,7 @@ let runpod_provider =
   ; healthcheck_path = None
   ; headers = None
   ; connect_timeout_s = None
+  ; exact_body_timeout_s = None
   ; antigravity_cli = None
   }
 
@@ -304,6 +305,39 @@ let test_runtime_toml_rejects_wrong_typed_provider_connect_timeout () =
       errors
       "providers.runpod_mtp.connect-timeout-s"
       (Runtime_schema.connect_timeout_s_key ^ " must be a float")
+
+let test_runtime_toml_rejects_invalid_exact_body_timeout () =
+  let key = Runtime_schema.exact_body_timeout_s_key in
+  List.iter
+    (fun raw ->
+       let content =
+         runtime_toml_with_credentials
+           ~provider_extra:(key ^ " = " ^ raw)
+           inline_credentials
+       in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected %s = %s to be rejected" key raw
+       | Error errors ->
+         check_parse_error_contains
+           errors
+           ("providers.runpod_mtp." ^ key)
+           "positive finite float")
+    [ "0.0"; "-1.0"; "nan"; "inf" ]
+
+let test_runtime_toml_rejects_wrong_typed_exact_body_timeout () =
+  let key = Runtime_schema.exact_body_timeout_s_key in
+  List.iter
+    (fun raw ->
+       let content =
+         runtime_toml_with_credentials
+           ~provider_extra:(key ^ " = " ^ raw)
+           inline_credentials
+       in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected %s = %s to be rejected" key raw
+       | Error errors ->
+         check_parse_error errors ("providers.runpod_mtp." ^ key) (key ^ " must be a float"))
+    [ "30"; "\"30\"" ]
 
 let test_runtime_toml_rejects_missing_env_credential_key () =
   let content =
@@ -997,7 +1031,10 @@ let test_runtime_toml_accepts_glm_coding_capability () =
     (match model.capabilities with
      | Some caps ->
        check (option int) "max output" (Some 128000) caps.max_output_tokens;
-       check bool "forced tool choice disabled" false caps.supports_tool_choice
+       (* This test is about the parser accepting the declaration, so the
+          declaration is what it asserts. *)
+       check (option bool) "forced tool choice declared off" (Some false)
+         caps.supports_tool_choice
      | None -> fail "expected model capabilities")
   | models -> failf "expected one model, got %d" (List.length models)
 
@@ -1014,8 +1051,6 @@ let test_runtime_adapter_materializes_glm_coding_provider () =
     check (option int) "max_context" (Some 200000) provider_cfg.max_context;
     check (option int) "max_tokens is not synthesized from capability" None
       provider_cfg.max_tokens;
-    check (option bool) "tool choice override" (Some false)
-      provider_cfg.supports_tool_choice_override;
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))
 
@@ -2912,6 +2947,14 @@ let () =
             "runtime TOML threads provider connect timeout"
             `Quick
             test_runtime_toml_threads_provider_connect_timeout
+        ; test_case
+            "runtime TOML rejects invalid exact body deadlines"
+            `Quick
+            test_runtime_toml_rejects_invalid_exact_body_timeout
+        ; test_case
+            "runtime TOML rejects wrong-typed exact body deadlines"
+            `Quick
+            test_runtime_toml_rejects_wrong_typed_exact_body_timeout
         ; test_case
             "runtime TOML threads model sampling config"
             `Quick

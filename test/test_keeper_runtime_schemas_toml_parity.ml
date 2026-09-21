@@ -28,6 +28,7 @@ open Alcotest
 let expected =
   [ "keeper_artifact_transfer"
   ; "keeper_artifact_read"
+  ; "keeper_skill_validate"
   ; "masc_fusion"
   ; "masc_fusion_decision"
   ; "masc_fusion_status"

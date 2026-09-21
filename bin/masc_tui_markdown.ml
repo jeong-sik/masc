@@ -530,7 +530,20 @@ let wrap_pieces ~max_cells pieces =
             in
             if String.length head > 0 then row := (head, kind) :: !row;
             flush ();
-            place tail
+            (* The remaining rows are full-width. Segment their text once,
+               rather than measuring and splitting every shrinking suffix. *)
+            let rec place_chunks = function
+              | [] -> ()
+              | [last] ->
+                  row := [(last, kind)];
+                  used := Layout.display_width last
+              | chunk :: rest ->
+                  row := [(chunk, kind)];
+                  flush ();
+                  place_chunks rest
+            in
+            if String.length tail > 0 then
+              place_chunks (Layout.split_cells ~max_cells tail)
           end
       in
       place text)

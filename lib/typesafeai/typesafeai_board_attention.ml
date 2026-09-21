@@ -68,6 +68,7 @@ let judge_candidate ?clock ~api_key ~candidate ~material () =
       ~state
       ~questions:[ relevance_question_id, relevance_question ~choices candidate ]
       ()
+    |> Result.map_error Typesafeai_client.failure_to_string
   in
   let response = evaluated.Typesafeai_client.response in
   let* answer =

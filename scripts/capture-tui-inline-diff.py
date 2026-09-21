@@ -268,6 +268,7 @@ def roster_payload() -> dict[str, object]:
         "keepers": [
             {
                 "runtime_class": "keeper",
+                "runtime_blocker_summary": None,
                 "name": KEEPER,
                 "agent_name": f"keeper-{KEEPER}-agent",
                 "meta": {

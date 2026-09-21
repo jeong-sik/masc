@@ -149,6 +149,15 @@ val parse_skill : directory:string -> string -> (skill, error) result
     composition block must declare exactly one composition and its [name]
     must equal the skill name. *)
 
+type authored_source_error =
+  | Source_too_large of { bytes : int; max_bytes : int }
+  | Invalid_document of error
+
+val validate_authored_source :
+  directory:string -> string -> (skill, authored_source_error) result
+(** Apply the editor's source-size limit and {!parse_skill} to proposed document
+    bytes. This neither publishes a Skill nor proves its execution succeeds. *)
+
 val partition_documents :
   (string * string) list -> t * rejected_document list
 (** Build the usable catalog and retain every rejected document separately.

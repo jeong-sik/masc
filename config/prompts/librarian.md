@@ -136,6 +136,10 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 
 ## 출력
 
+아래 예시의 `working_state: null`은 `continuity` 자료가 없을 때만 사용합니다.
+`continuity` 자료가 있으면 반드시 실제 이어갈 상태를 빈 문자열이 아닌 문자열로
+작성하세요. 새 Memory claim이 없어도 대화 상태 요약은 필요합니다.
+
 {
   "working_state": null,
   "working_contexts": [],

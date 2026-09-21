@@ -72,6 +72,7 @@ val build_turn_context
   -> user_message:string
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> turn_ref:Ids.Turn_ref.t
   -> history_user_source:string
   -> user_turn_record:user_turn_record
   -> start_turn_count:int

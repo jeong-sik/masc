@@ -1032,10 +1032,13 @@ let with_history_search ?(additional_traces = []) ~checkpoint_texts ~current_tex
         ~session_id:trace
         ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config)
     in
-    List.iter
-      (fun text ->
-         Masc.Keeper_context_runtime.persist_message session (user text);
-         Masc.Keeper_context_runtime.persist_message session
+    List.iteri
+      (fun index text ->
+         let turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:(index + 1) in
+         Masc.Keeper_context_runtime.persist_message
+           ~keeper_name:trace ~turn_ref session (user text);
+         Masc.Keeper_context_runtime.persist_message
+           ~keeper_name:trace ~turn_ref session
            (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
               [ Agent_core.Types.Text "Recorded." ]))
       texts;
@@ -1177,7 +1180,10 @@ let test_history_search_reports_read_errors ~malformed () =
     (fun trace ->
        let session = Masc.Keeper_context_runtime.create_session
            ~session_id:trace ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config) in
-       Masc.Keeper_context_runtime.persist_message session
+       Masc.Keeper_context_runtime.persist_message
+         ~keeper_name:meta.name
+         ~turn_ref:(Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:1)
+         session
          (Agent_core.Types.make_message ~role:Agent_core.Types.User
             [ Agent_core.Types.Text "amber database" ]))
     [ current_trace; previous_trace ];

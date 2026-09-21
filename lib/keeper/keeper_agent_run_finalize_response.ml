@@ -32,7 +32,7 @@ let turn_boundary_position ~checkpoint_owner saved_checkpoint =
 let record_turn_boundary
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~turn
+      ~turn_ref
       ~checkpoint_owner
       ~history_at_start
       ~restart_notice_pending
@@ -42,7 +42,7 @@ let record_turn_boundary
     Log.Keeper.error
       ~keeper_name:meta.name
       "turn boundary not recorded turn=%d: %s"
-      turn
+      (Ids.Turn_ref.absolute_turn turn_ref)
       detail;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string TurnBoundaryFailures)
@@ -74,11 +74,7 @@ let record_turn_boundary
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
       ; event =
-          Keeper_turn_boundaries.Turn_ended
-            { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-            ; history_at_start
-            ; position
-            }
+          Keeper_turn_boundaries.Turn_ended { turn_ref; history_at_start; position }
       }
     in
     (match
@@ -175,6 +171,11 @@ let finalize
   in
   let ( let* ) = Result.bind in
   receipt_response_text_present_ref := raw_response_text_present;
+  let turn_ref =
+    Ids.Turn_ref.make
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~absolute_turn:manifest_keeper_turn_id
+  in
   let assistant_msg =
     Keeper_replay_checkpoint.consume_replay_response
       ~suppress_visible_response
@@ -186,12 +187,32 @@ let finalize
            [ Agent_core.Types.Text response_text ]
         in
         Keeper_context_runtime.persist_message
+          ~keeper_name:meta.name
+          ~turn_ref
           ~source:history_assistant_source
           session
           assistant_msg;
         capture_replay_response ~response_text;
         assistant_msg)
   in
+  (* An official-client turn has no AGENT_CORE checkpoint, so its tool calls
+     live nowhere durable but here. The lines go down before the turn's end
+     line: a reader takes that line as the cut and then asks for this turn's
+     fragments, so a fragment written after it could be read as absent. An
+     agent-core turn's calls are atoms of its checkpoint and are not repeated. *)
+  (match checkpoint_owner with
+   | Runtime_execution.Official_client ->
+     List.iter
+       (fun (detail : Keeper_agent_result.tool_call_detail) ->
+          Keeper_context_runtime.persist_tool_observation
+            ~keeper_name:meta.name
+            ~turn_ref
+            session
+            ~tool_name:
+              (Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
+            ~outcome:detail.execution_outcome)
+       (List.rev acc.tool_calls)
+   | Runtime_execution.Masc_agent_core -> ());
   let save_agent_core_checkpoint result_checkpoint =
     let checkpoint, source_already_persisted =
         Keeper_replay_checkpoint.select_finalization_checkpoint
@@ -332,7 +353,7 @@ let finalize
     record_turn_boundary
       ~config
       ~meta
-      ~turn:manifest_keeper_turn_id
+      ~turn_ref
       ~checkpoint_owner
       ~history_at_start
       ~restart_notice_pending

@@ -939,6 +939,7 @@ let run_turn
   let runtime_config_path = ctx.runtime_config_path in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:manifest_keeper_turn_id in
   let turn_start = Mtime_clock.now () in
   let seq_ref = Atomic.make 0 in
   let runtime_manifest_context =
@@ -1010,6 +1011,7 @@ let run_turn
       ~user_message
       ~config
       ~meta
+      ~turn_ref
       ~history_user_source
       ~user_turn_record:prompt_user_turn_record
       ~start_turn_count

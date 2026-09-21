@@ -630,25 +630,25 @@ let handle_dashboard_keeper_purge_completion config operation =
           read position back for a keeper that no longer exists, and a wake
           during the removal would start a loop that reads the same files
           (RFC librarian-lifecycle §4.6). *)
-       let release =
-         Keeper_librarian_loop.retire ~config ~keeper_name:operation.keeper_name
-       in
        let result =
-         match
-           Server_schedule_consumers.cancel_keeper_schedules
-             config
-             ~keeper_name:operation.keeper_name
-         with
-         | Error error ->
-           Error (Schedule_store.store_error_to_string error)
-         | Ok () ->
-           purge_keeper_artifacts
-             config
-             ~keeper_name:operation.keeper_name
-             ~remove_configuration:true
-             context
+         Keeper_librarian_loop.retire
+           ~config
+           ~keeper_name:operation.keeper_name
+           (fun () ->
+              match
+                Server_schedule_consumers.cancel_keeper_schedules
+                  config
+                  ~keeper_name:operation.keeper_name
+              with
+              | Error error ->
+                Error (Schedule_store.store_error_to_string error)
+              | Ok () ->
+                purge_keeper_artifacts
+                  config
+                  ~keeper_name:operation.keeper_name
+                  ~remove_configuration:true
+                  context)
        in
-       release ();
        (match result with
         | Error _ as error -> error
         | Ok () ->

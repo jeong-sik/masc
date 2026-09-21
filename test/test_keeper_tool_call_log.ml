@@ -666,8 +666,10 @@ let test_file_change_evidence_persists_with_execution_identity () =
     | _ -> Alcotest.fail "expected exactly one file change entry")
 ;;
 
-(* A row with neither says so by omission rather than by guessing. *)
-let test_row_without_a_typed_outcome_omits_the_field () =
+(* A missing typed disposition remains absent, but the closed wire-outcome
+   type uses its explicit [Unknown] case instead of adding field absence as a
+   fourth state for every reader to interpret. *)
+let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"epsilon"
@@ -682,7 +684,11 @@ let test_row_without_a_typed_outcome_omits_the_field () =
       Alcotest.(check (option string))
         "no disposition is written when none was known"
         None
-        (Safe_ops.json_string_opt "disposition" entry)
+        (Safe_ops.json_string_opt "disposition" entry);
+      Alcotest.(check (option string))
+        "an unobserved wire outcome is explicit"
+        (Some "unknown")
+        (Safe_ops.json_string_opt "wire_outcome" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
 
 let test_composition_action_context_persisted () =
@@ -2623,8 +2629,8 @@ let () =
             test_ordinary_path_disposition_persisted
         ; eio_test "file evidence shares the execution identity row"
             test_file_change_evidence_persists_with_execution_identity
-        ; eio_test "no typed outcome omits the field"
-            test_row_without_a_typed_outcome_omits_the_field
+        ; eio_test "no typed outcome writes unknown wire outcome"
+            test_row_without_a_typed_outcome_writes_unknown_wire_outcome
         ; eio_test "composition action context"
             test_composition_action_context_persisted
         ; eio_test "composition rows separate submitted from autonomous turn"

@@ -733,8 +733,11 @@ let test_operator_disposition_display_uses_typed_parser () =
     ~operator_disposition_reason:"transient_runtime_retry"
     ~expected_disposition:"Pass" ~expected_reason:"transient_runtime_retry";
   check_case ~operator_disposition:"operator_action_required"
-    ~operator_disposition_reason:"preflight_config_error"
-    ~expected_disposition:"Blocked" ~expected_reason:"preflight_config_error";
+    ~operator_disposition_reason:"config_invalid" ~expected_disposition:"Blocked"
+    ~expected_reason:"config_invalid";
+  check_case ~operator_disposition:"operator_action_required"
+    ~operator_disposition_reason:"authorization_refused" ~expected_disposition:"Blocked"
+    ~expected_reason:"authorization_refused";
   check_case ~operator_disposition:"blocked_runtime" ~operator_disposition_reason:""
     ~expected_disposition:"Alert" ~expected_reason:"unmapped_operator_disposition";
   check_case ~operator_disposition:"<missing operator_disposition field>"

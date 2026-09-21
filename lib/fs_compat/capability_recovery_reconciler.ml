@@ -217,14 +217,6 @@ type cancellation =
 exception Reconciliation_cancelled of cancellation
 exception Internal_resource_scope_callback_not_entered
 
-type record_scope_callback_and_release_failure =
-  { callback : Eio.Exn.with_bt
-  ; release : cleanup_failure
-  }
-
-exception Record_scope_callback_and_release_failed of
-  record_scope_callback_and_release_failure
-
 type report =
   { owner : string
   ; rows : row list
@@ -696,14 +688,10 @@ let run_record_scope
       ~cleanup_failures
       cancellation
   | Some (Resource_scope.Raised failure) ->
-    (match release_failure with
-     | None ->
-       Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-     | Some release ->
-       Printexc.raise_with_backtrace
-         (Record_scope_callback_and_release_failed
-            { callback = failure.exception_, failure.backtrace; release })
-         failure.backtrace)
+    (* A release failure here used to be wrapped with the callback exception
+       in an exception nothing caught, so it reached only a top-level print.
+       The callback exception continues with its own backtrace. *)
+    Printexc.raise_with_backtrace failure.exception_ failure.backtrace
   | Some (Resource_scope.Returned row) ->
     (match outcome.parent_cancellation with
      | Some cancellation ->

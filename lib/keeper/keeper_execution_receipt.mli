@@ -173,10 +173,19 @@ val operator_disposition_kind_of_string : string -> operator_disposition_kind op
 type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
-  | Reason_preflight_config_error
-  (** Terminal configuration or authorization failure before provider
-      dispatch. Paired with [Disp_operator_action_required]; the receipt does
-      not claim a fallback that did not happen. *)
+  | Reason_config_invalid
+  (** A setting the runtime rejected before provider dispatch
+      ({!Keeper_terminal_reason.Config_invalid}). Paired with
+      [Disp_operator_action_required]; the operator edits the runtime's toml.
+      The receipt does not claim a fallback that did not happen. *)
+  | Reason_authorization_refused
+  (** The provider refused the request under authorization before the turn
+      could proceed ({!Keeper_terminal_reason.Authorization_refused}). Paired
+      with [Disp_operator_action_required] for the same reason as before the
+      split: the wire carries weekly and five-hour usage limits, which hold
+      that runtime for days, so the operator moves the slot rather than
+      waiting. Kept apart from [Reason_config_invalid] because the operator
+      does a different thing for each. *)
   | Reason_degraded_retry
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry

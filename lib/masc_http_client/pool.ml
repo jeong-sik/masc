@@ -177,7 +177,7 @@ let piaf_error_message (err : Piaf.Error.t) =
 let reraise_after_close cleanup exn =
   let bt = Printexc.get_raw_backtrace () in
   (try cleanup () with
-   | cleanup_exn ->
+   | cleanup_exn -> (* cancel-guard-ok: this arm guards cleanup, whose failure must not replace the exception being propagated, and the function's last statement re-raises that exception with its backtrace; the comment above records that cleanup delivers stop signals and is not a cancellation point. *)
      Log.Http.warn "HTTP client scope cleanup: %s"
        (exn_message cleanup_exn));
   Printexc.raise_with_backtrace exn bt
@@ -807,6 +807,21 @@ let read_response_body ?max_body_bytes ~status body =
         | Error _ as error -> error
       with Body_limit_exceeded -> too_large ()
 
+(* A fixed-length stream waits for the transport to flush its payload before
+   closing the writer. Piaf's eager string body closes before flushing; H2
+   0.13 can then emit END_STREAM while bytes remain behind a closed send
+   window. Preserve Content-Length and let the peer's window govern progress. *)
+let request_body body =
+  let length = String.length body in
+  let pending = ref (Some
+    (Piaf.IOVec.make (Bigstringaf.of_string ~off:0 ~len:length body)
+       ~off:0 ~len:length)) in
+  let stream = Piaf.Stream.from ~f:(fun () ->
+    let chunk = !pending in
+    pending := None;
+    chunk) in
+  Piaf.Body.of_stream ~length:(`Fixed (Int64.of_int length)) stream
+
 (* Wrap a single request: acquire-or-create client, send, release.
    Errors return [Error string]; the connection is dropped (close)
    on error, parked on success. *)
@@ -838,7 +853,7 @@ let do_request t ?headers ?body ?max_body_bytes ~method_ uri : (response, string
       end
     in
     let path = path_and_query uri in
-    let body_piaf = Option.map Piaf.Body.of_string body in
+    let body_piaf = Option.map request_body body in
     Fun.protect
       ~finally:(fun () ->
         close_unreleased_client released release_once)
@@ -1038,7 +1053,7 @@ let do_request_streaming
       end
     in
     let path = path_and_query uri in
-    let body_piaf = Option.map Piaf.Body.of_string body in
+    let body_piaf = Option.map request_body body in
     Fun.protect
       ~finally:(fun () -> close_unreleased_client released release_once)
       (fun () ->
@@ -1135,6 +1150,7 @@ let stats t : stats =
 (* ── Test-only ─────────────────────────────────────────────────── *)
 
 module For_testing = struct
+  let request_body = request_body
   let with_request_timeout ~clock ~timeout_seconds f =
     with_optional_timeout ~clock ~timeout_seconds f
 

@@ -691,6 +691,7 @@ let log_call
       ?batch_index
       ?batch_size
       ?execution_mode
+      ?wire_outcome
       ?typed_result
       ?disposition
       ?file_change_evidence
@@ -893,6 +894,14 @@ let log_call
              @ failure_class_of_shape
            | None -> [])
       in
+      let wire_outcome_field =
+        let outcome =
+          match wire_outcome with
+          | Some outcome -> outcome
+          | None -> Tool_result.Unknown
+        in
+        [ "wire_outcome", `String (Tool_result.string_of_tool_call_outcome outcome) ]
+      in
       let file_change_evidence_field =
         match file_change_evidence with
         | Some evidence ->
@@ -1026,6 +1035,7 @@ let log_call
            @ batch_index_field
            @ batch_size_field
            @ execution_mode_field
+           @ wire_outcome_field
            @ typed_result_fields
            @ artifact_ref_fields
            @ file_change_evidence_field

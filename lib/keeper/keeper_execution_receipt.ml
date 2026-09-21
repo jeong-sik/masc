@@ -70,7 +70,8 @@ let operator_disposition_kind_of_string = function
 type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
-  | Reason_preflight_config_error
+  | Reason_config_invalid
+  | Reason_authorization_refused
   | Reason_degraded_retry
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry
@@ -91,7 +92,8 @@ type operator_disposition_reason =
 let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
   | Reason_runtime_exhausted -> "runtime_exhausted"
-  | Reason_preflight_config_error -> "preflight_config_error"
+  | Reason_config_invalid -> "config_invalid"
+  | Reason_authorization_refused -> "authorization_refused"
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_runtime_fallback -> "runtime_fallback"
   | Reason_transient_runtime_retry -> "transient_runtime_retry"
@@ -136,11 +138,6 @@ let operator_disposition (receipt : t)
   let provider_runtime_failure =
     match terminal_reason with
     | Keeper_terminal_reason.Provider_runtime_failure _ -> true
-    | _ -> false
-  in
-  let preflight_config_failure =
-    match terminal_reason with
-    | Keeper_terminal_reason.Config_or_auth _ -> true
     | _ -> false
   in
   (* Either half puts this turn on a degraded-retry lane: it dispatched on a
@@ -204,8 +201,22 @@ let operator_disposition (receipt : t)
        candidate. It must neither claim a completed fallback nor page a
        human. *)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
-  | _ when preflight_config_failure ->
-    Disp_operator_action_required, Reason_preflight_config_error
+  (* Two refusals that both stop the turn before dispatch and both need a
+     human, but need different things from that human. They are constructor
+     arms rather than a boolean guard, so a third pre-dispatch refusal added
+     later cannot silently inherit either label. *)
+  | Keeper_terminal_reason.Config_invalid _ ->
+    Disp_operator_action_required, Reason_config_invalid
+  | Keeper_terminal_reason.Authorization_refused _ ->
+    (* The wire says the provider refused under authorization and nothing
+       more. In September every one of these 852 turns was a usage limit
+       (838 weekly, 14 five-hour), which holds that runtime for days, so
+       [Disp_retry_later] would put the keeper against the same wall on every
+       later cycle. The operator moves the slot instead, and the audit log
+       records that they do: all 316 [runtime_config_write] entries came from
+       operator surfaces, none from a keeper. Short-period limits arrive as
+       [api_error_rate_limited] and never reach this arm. *)
+    Disp_operator_action_required, Reason_authorization_refused
   | _ when provider_runtime_failure && degraded_retry_on_the_receipt ->
     Disp_fail_open_next_runtime, Reason_degraded_retry
   | _
@@ -230,18 +241,18 @@ let operator_disposition (receipt : t)
     Disp_retry_later, Reason_provider_runtime_error
   | Keeper_terminal_reason.Internal_error _ ->
     Disp_fail_open_next_runtime, Reason_internal_error
-  | Config_or_auth _
   | Provider_runtime_failure _
   | Accept_rejected _
   | Pre_dispatch_success _
   | Unknown _ ->
-    (* Generic fall-through. [Config_or_auth] and
-       [Provider_runtime_failure] are caught by the guarded branches above
-       (their constructors force [preflight_config_failure] /
+    (* Generic fall-through. [Provider_runtime_failure] is caught by the
+       guarded branches above (its constructor forces
        [provider_runtime_failure] true), so only [Pre_dispatch_success] and
-       [Unknown] reach here in practice;
-       [Config_or_auth] and [Provider_runtime_failure] are listed to keep the
-       match exhaustive without a wildcard. *)
+       [Unknown] reach here in practice; it is listed to keep the match
+       exhaustive without a wildcard. [Config_invalid] and
+       [Authorization_refused] are absent because they now have unguarded
+       constructor arms above, which OCaml counts towards exhaustiveness —
+       listing them here would be a dead branch. *)
     if degraded_retry_on_the_receipt
     then Disp_fail_open_next_runtime, Reason_degraded_retry
     else if
@@ -256,7 +267,8 @@ let operator_disposition (receipt : t)
        | Keeper_terminal_reason.Pre_dispatch_success _ -> true
        | Runtime_exhausted _
        | Capacity_backpressure _
-       | Config_or_auth _
+       | Config_invalid _
+       | Authorization_refused _
        | Provider_runtime_failure _
        | Transcript_corruption _
        | Official_client_recovery_required _
@@ -302,7 +314,8 @@ let operator_disposition (receipt : t)
               | Keeper_terminal_reason.Accept_rejected _ -> true
               | Runtime_exhausted _
               | Capacity_backpressure _
-              | Config_or_auth _
+              | Config_invalid _
+              | Authorization_refused _
               | Provider_runtime_failure _
               | Transcript_corruption _
               | Official_client_recovery_required _

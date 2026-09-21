@@ -516,6 +516,16 @@ let force_refresh ~token_post ~discover ~base_path ~keeper_name
         ~provider
     with
     | Error message -> Error (Renew_permanent message)
+    (* A lapsed secret cannot be redeemed, and sending it anyway returns the
+       authorization server's own wording for an id it has forgotten --
+       which says nothing about what to do. Answer with the sentence that
+       does: a fresh login registers a new client. *)
+    | Ok (Some credentials)
+      when Keeper_oauth_client_store.secret_expired credentials ~now ->
+      Error
+        (Renew_permanent
+           "this install's registered client has expired; attach a keeper to \
+            the provider again to register a new one")
     | Ok (Some credentials) -> Ok credentials
     | Ok None ->
       Error (Renew_permanent "this install has no registered client; attach a keeper first")

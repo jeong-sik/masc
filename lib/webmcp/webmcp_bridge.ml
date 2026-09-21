@@ -46,6 +46,7 @@ let exit_surface_or_tool_missing = 3
 
 let default_runner ~timeout_sec argv =
   try Ok (Process_eio.run_argv_with_status_split ~timeout_sec argv) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 ;;
 
@@ -64,7 +65,7 @@ let materialize_script () =
          script_path := Some path;
          Ok path
        with
-       | exn -> Error (Bridge_unavailable (Printexc.to_string exn))))
+       | exn -> Error (Bridge_unavailable (Printexc.to_string exn)))) (* cancel-guard-ok: the body is Out_channel file writing and performs no Eio operation. *)
 ;;
 
 let bridge_argv ~script_path ~cdp_port ~page ~subcommand =

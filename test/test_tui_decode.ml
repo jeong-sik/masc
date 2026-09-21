@@ -1537,7 +1537,16 @@ let test_decode_context_unavailable_reasons () =
   Alcotest.(check bool) "unknown unavailable reason rejected" true
     (Result.is_error
        (Tui_decode.decode_context_observation
-          ~expected_trace_id:"trace-current" unknown))
+          ~expected_trace_id:"trace-current" unknown));
+  let malformed_usage_scope =
+    unavailable_context "context_measurement_missing"
+    |> update_field "context_metrics_unavailable"
+         (set_field "usage_scope" (`Int 42))
+  in
+  Alcotest.(check bool) "malformed usage scope rejected" true
+    (Result.is_error
+       (Tui_decode.decode_context_observation
+          ~expected_trace_id:"trace-current" malformed_usage_scope))
 
 let test_context_observation_rejects_hybrids_and_prior_trace () =
   let prior_trace =

@@ -1261,10 +1261,15 @@ let optional_int_field json key =
 let context_unavailable_reason_of_json json raw =
   let* raw_input_tokens = optional_int_field json "raw_input_tokens" in
   let* context_window = optional_int_field json "context_window" in
-  let usage_scope =
+  let* usage_scope =
     match Json_util.assoc_member_opt "usage_scope" json with
-    | Some (`String value) -> Some value
-    | Some _ | None -> None
+    | Some (`String value) -> Ok (Some value)
+    | None -> Ok None
+    | Some other ->
+      Error
+        (Printf.sprintf
+           "field 'usage_scope' must be a string when present (received %s)"
+           (Json_util.kind_name other))
   in
   match raw with
   | "context_measurement_missing" -> Ok Context_measurement_missing

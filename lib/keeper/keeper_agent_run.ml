@@ -891,10 +891,17 @@ let run_turn
   @@ fun () ->
   let runtime_id_string = runtime_id in
   let direct_resume_checkpoint = Option.bind direct_resume direct_checkpoint in
-  let ( let* ) = Result.bind in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
-  let* ctx =
+  (* Not a [let*] bind. Result.bind put every later expression -- including the
+     [match setup] a hundred and seventy lines down and the turn body under it
+     -- in the result monad, so the settlement this function returns could not
+     appear anywhere after this point. The failure is handled here instead.
+
+     Context preparation failing means nothing dispatched and
+     [Keeper_agent_run_receipt.finalize] never ran: no receipt, and neither
+     degraded-retry lane settled. *)
+  match
     Keeper_run_context.prepare_run_context
       ~config
       ~meta
@@ -916,7 +923,13 @@ let run_turn
                 ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ; detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error
           }))
-  in
+  with
+  | Error e ->
+    ({ result = Error e
+     ; degraded_retry_applied = None
+     ; degraded_retry_deferred = None }
+     : Keeper_agent_result.turn_settlement)
+  | Ok ctx ->
   let ctx = match direct_resume_checkpoint with
     | None -> ctx
     | Some checkpoint ->

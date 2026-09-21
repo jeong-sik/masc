@@ -474,9 +474,8 @@ status: reference
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
   이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
   `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`·`masc-librarian-continuity`가
-  공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다. 실행 기록에서 Skill 후보를
-  찾아 검증·발행하는 `Tool Librarian`은 RFC 제안(#36925)일 뿐 구현된 자동 생산 경로가
-  아니다([Skills](../SKILLS.md)).
+  공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다. `Tool Librarian`의
+  현재 지위는 [Skills](../SKILLS.md) 도입부가 정한다.
 
 **Librarian Replay**
 : `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에
@@ -486,6 +485,11 @@ status: reference
   낸다. 아무것도 쓰지 않는다 — progress 파일·boundary line·checkpoint 모두 없다.
   서버의 Librarian 실행이 아니라 그 읽기 규칙의 측정 하네스다.
   → [masc_librarian_replay](../../bin/masc_librarian_replay.ml)
+
+**Librarian Continuity**
+: `masc-librarian-continuity` CLI. 의미 보존 측정을 돌리는 하네스다. 개념과
+  결과의 한계는 아래 Continuity Measurement 항목이 정한다.
+  → [masc_librarian_continuity](../../bin/masc_librarian_continuity.ml)
 
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이

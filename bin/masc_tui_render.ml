@@ -382,11 +382,13 @@ let render_overview (state : state) =
            question that header answers; at this width the row says only that
            one did. *)
         let approval_count =
-          let on_screen = List.length (Masc_tui_types.approval_items state) in
+          let on_screen = Masc_tui_types.approvals_surface_pending state in
           let source_unread =
             Option.is_none state.approval_snapshot
             || Option.is_some state.approvals_error
             || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_none state.asks_snapshot
+            || Option.is_some state.asks_error
             || Option.is_some state.gate_error
             || Option.is_some state.gate_queue_unavailable
           in

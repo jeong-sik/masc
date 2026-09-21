@@ -508,17 +508,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
      waited for before any file goes, or it could write the progress file back
      after the purge deleted it (RFC librarian-lifecycle section 8).
      [request_cancel] only accepts a request from the lane's owner domain. *)
-  match
-    Eio_context.run_on_owner_domain (fun () ->
-      Keeper_memory_lane.cancel_and_await_librarian
-        ~base_path:config.Workspace.base_path
-        ~keeper_name)
-  with
-  | Error error ->
-    Error
-      ("Librarian lane could not be stopped before purge: "
-       ^ Keeper_memory_lane.purge_cancel_error_to_string error)
-  | Ok () ->
+  let remove_artifacts () =
+    Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
     let artifacts =
       Keeper_shutdown_types.dashboard_purge_artifact_plan
         ~keeper_name:keeper_name
@@ -631,6 +622,14 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
               remove rest))
     in
     remove artifacts
+  in
+  match Eio_context.run_on_owner_domain (fun () ->
+    Keeper_memory_lane.with_librarian_purge
+      ~base_path:config.Workspace.base_path ~keeper_name remove_artifacts)
+  with
+  | Ok result -> result
+  | Error error -> Error ("Librarian lane could not be stopped before purge: "
+      ^ Keeper_memory_lane.purge_cancel_error_to_string error)
 ;;
 
 let handle_dashboard_keeper_purge_completion config operation =

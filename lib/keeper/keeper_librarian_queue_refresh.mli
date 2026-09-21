@@ -42,8 +42,29 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
 (** Submit disk-selected catch-up for this Keeper on the server-owned
     Librarian lane. Each stored progress advance continues to the next unread
     range; an empty backlog, failure, or disabled/invalid setting ends this
-    wake. Launch admission owns restart catch-up; there is no pre-admission
-    fleet scan and no process-local remembered closure participates. *)
+    wake. A launch submits its own Keeper's catch-up;
+    {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
+    did not launch. No process-local remembered closure participates. *)
+
+val unlaunched_keeper_names
+  :  persisted:string list
+  -> launched:string list
+  -> string list
+(** The [persisted] names, in their order, that are not in [launched]. *)
+
+val submit_durable_for_unlaunched
+  :  base_path:string
+  -> persisted:string list
+  -> launched:string list
+  -> string list
+(** The boot scan (RFC librarian-lifecycle section 8, stage 4, item 2).
+    Called once by the autoboot subsystem after
+    [Runtime_startup_state.await_available]: for every persisted Keeper that
+    autoboot did not launch (excluded, fenced by a durable shutdown, failed to
+    boot, or autoboot disabled) it submits the same durable catch-up a launch
+    would have, and returns the names it submitted for. A Keeper that boots
+    later on retry submits its own; the lane runs the two in order and the
+    second finds nothing unread. *)
 
 val run_completed_turn : base_path:string -> keeper_name:string -> unit
 (** Drain successful durable Agent-Core ranges, then attempt an official-client

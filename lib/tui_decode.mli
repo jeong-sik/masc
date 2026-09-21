@@ -2615,6 +2615,15 @@ type file_change_kind =
       line : int;
       text : string;
     }
+  | Fc_materialized of {
+      sha256 : string;
+      bytes : int;
+    }
+      (** A blob's bytes written into a file by [keeper_artifact_transfer]'s
+          [materialize] action. The call's input names the blob by its
+          [sha256] and byte count, so the reader has the blob's identity and
+          size and no body text. The same handler's [export] action reads a
+          file into the blob store and is not a file change. *)
 
 type file_change = {
   fc_at : float;

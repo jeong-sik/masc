@@ -1496,6 +1496,27 @@ let post_runtime_lane_action ~host ~port fields =
     |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 ;;
 
+(** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
+    vision read fleet, in order. The endpoint takes the whole list for this
+    route -- it has no per-entry action -- so a caller must know it is sending
+    everything the file should hold. *)
+let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)
+  : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String "media_failover"
+    ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
+
+(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the runtime
+    a keeper with no assignment walks. [None] clears the entry. *)
+let set_runtime_default ~(host : string) ~(port : int)
+      ~(runtime_id : string option) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String "default"
+    ; ( "runtime_id"
+      , match runtime_id with None -> `Null | Some id -> `String id )
+    ]
+
 (** POST /api/v1/runtime/config/routing with [action = "create"]: declare a
     lane under [lane] with [runtime_ids] as its candidates. The server refuses
     a name the file already declares. *)
@@ -1519,6 +1540,40 @@ let append_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
     [ "lane", `String (exact_lane_route name)
     ; "action", `String "append"
     ; "runtime_id", `String runtime_id
+    ]
+
+(** Which way {!move_exact_lane_slot} walks a slot through the declared
+    order. *)
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+
+(** POST /api/v1/runtime/config/routing with [action = "drop"]: take
+    [runtime_id] out of the standalone lane [name]. Only the one id is sent,
+    for the reason the append gives -- this caller can see the slots the
+    registry admitted, and an order rebuilt from that view would delete every
+    declared slot it rejected. The server refuses a slot the lane does not
+    declare, and its last one. *)
+let drop_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "drop"
+    ; "runtime_id", `String runtime_id
+    ]
+
+(** POST /api/v1/runtime/config/routing with [action = "move"]: exchange
+    [runtime_id] with its neighbour in the lane's declared order. Sent as one
+    id and a direction for the same reason as the drop. The server refuses a
+    slot already at the end the move heads for. *)
+let move_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "move"
+    ; "runtime_id", `String runtime_id
+    ; ( "direction"
+      , `String (match move with Move_slot_up -> "up" | Move_slot_down -> "down") )
     ]
 
 (** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the

@@ -2520,7 +2520,7 @@ candidates = ["projection.http", "codex.codex"]
                                 ; keeper_name = meta.name
                                 }
                               in
-                              Keeper_agent_run.run_turn
+                              (Keeper_agent_run.run_turn
                                 ~config
                                 ~meta
                                 ~publication_recovery
@@ -2546,7 +2546,7 @@ candidates = ["projection.http", "codex.codex"]
                                      ~detail:"test fixture has no Skill publication")
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
-                                ()))))))
+                                ()).Keeper_agent_run.result))))))
 ;;
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
@@ -3587,6 +3587,15 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
            fail "dashboard recovery fixture was not recovery-required"
        in
+       Keeper_registry.set_failure_reason
+         ~base_path
+         keeper_name
+         (Some
+            (Keeper_registry.Official_client_recovery_required
+               { runtime_id = recovery.runtime_id
+               ; recovery_id
+               ; reason = Keeper_internal_error.Effect_fenced
+               }));
        let snapshot =
          Server_dashboard_official_client_session.snapshot ~base_path ~keeper_name
          |> Result.get_ok
@@ -3669,6 +3678,10 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          "dashboard resolution audit recorded"
          true
          (resolved |> member "audit" |> member "recorded" |> to_bool);
+       (match Keeper_registry.get ~base_path keeper_name with
+        | Some { last_failure_reason = None; _ } -> ()
+        | Some _ -> fail "resolution left the matching registry recovery cause"
+        | None -> fail "resolution lost the registered Keeper");
        let replayed =
          Server_dashboard_official_client_session.resolve_body
            ~config

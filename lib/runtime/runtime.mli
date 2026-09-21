@@ -592,6 +592,11 @@ val media_failover : unit -> string list
     reroute stays inside its lane. [[]] = no vision fleet. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
+val declared_media_failover : unit -> string list
+(** [\[runtime\].media_failover] in file order before runtime admission. This
+    preserves entries excluded from the active fleet so an operator surface
+    can edit the declaration without silently erasing them. *)
+
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
     an ordered list of runtime ids validated at load. *)
@@ -983,6 +988,38 @@ val append_exact_output_lane_slot :
     exact-output registry did not admit stay in place. Refused, by name, when
     the lane already declares [slot] as a slot or as a CLI slot. Tables are
     created and refused as {!set_exact_output_lane_slots} says. *)
+
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+      (** Which way {!move_exact_output_lane_slot} walks a slot through the
+          declared order, which is the order the lane walks. *)
+
+val drop_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Take [slot] out of [\[runtime.exact_output_lanes.<id>\]].slots as the file
+    declares them, read under the write lock for the reason
+    {!append_exact_output_lane_slot} gives: the caller names one slot rather
+    than an order rebuilt from the admitted view, so declared slots the
+    registry rejected stay. Refused when the lane declares no such slot,
+    naming what it does declare, and when [slot] is its last one -- a lane
+    that resolves to nothing is not this edit; remove the lane's table. *)
+
+val move_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  move:exact_slot_move ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Exchange [slot] with its neighbour in the declared order, read under the
+    write lock like {!drop_exact_output_lane_slot}. Refused when the lane
+    declares no such slot, and when the slot is already at the end the move
+    heads for. CLI slots are a separate list and do not move. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

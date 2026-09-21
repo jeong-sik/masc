@@ -183,6 +183,13 @@ let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
         | Some rt -> runtime_resolution_json rt
         | None -> `Null )
     ; "runtimes", `List (List.map runtime_resolution_json (Runtime.get_runtimes ()))
+      (* [\[runtime\].media_failover] is a route, not a lane: no keeper turn
+         dispatches to it, and it has no table of its own. Keep both the active
+         fleet and the file's declaration so an operator can distinguish a
+         rejected entry without losing its position when rewriting the route. *)
+    ; "media_failover", Json_util.json_string_list (Runtime.media_failover ())
+    ; ( "media_failover_declared"
+      , Json_util.json_string_list (Runtime.declared_media_failover ()) )
     ; "lanes", `List (List.map lane_json (dispatchable_lanes ~config default))
     ; ( "assignments"
       , `List (List.map (assignment_json default) (all_keeper_names ~config)) )

@@ -55,7 +55,7 @@ function toolCalls(): ToolCallsResponse {
         tool: 'fs_read',
         input: { file_path: '/tmp/current' },
         output: 'current result',
-        success: true,
+        wire_outcome: 'ok',
         duration_ms: 120,
         trace_id: 'trace-1',
         turn: 1,

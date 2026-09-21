@@ -547,6 +547,7 @@ let test_checkpoint_read_error_stops_turn ~io_failure () =
       ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
       ~runtime_id:"unconfigured-test-runtime" ()
   in
+  let result = result.Keeper_agent_run.result in
   (match result with
    | Error (Agent_core.Error.Io (FileOpFailed { op; path = failed_path; detail })) ->
      check string "the failed operation is a checkpoint load" "load checkpoint" op;

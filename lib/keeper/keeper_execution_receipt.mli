@@ -145,6 +145,12 @@ val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> s
 val sandbox_kind_of_meta : Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val to_json : t -> Yojson.Safe.t
 
+(** One deferred lane as [{"runtime": _, "reason": _}], or [`Null]. Re-exported
+    from [Keeper_execution_receipt_types] so the decision record writes the two
+    lanes in the shape the receipt writes them. *)
+val degraded_retry_json :
+  Keeper_error_classify.degraded_retry option -> Yojson.Safe.t
+
 (** Operator-facing classification of a finished turn. Closed set.
 
     Producer is [operator_disposition]; consumers

@@ -1405,6 +1405,7 @@ type loaded_state =
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
   ; media_failover : string list
+  ; declared_media_failover : string list
   ; lanes : Runtime_lane.t list
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
@@ -1416,6 +1417,7 @@ let empty_loaded_state =
   ; runtimes = []
   ; keeper_assignments = []
   ; media_failover = []
+  ; declared_media_failover = []
   ; lanes = []
   ; lsp_servers = []
   ; config_path = None
@@ -1433,6 +1435,7 @@ let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded
     ?startup_degradation
+    ?declared_media_failover
     ~config_path
     ( runtimes
     , rt
@@ -1459,11 +1462,17 @@ let set_loaded
   in
   let runtimes = List.map preserve_candidate runtimes in
   let rt = preserve_candidate rt in
+  let declared_media_failover =
+    match declared_media_failover with
+    | Some declared -> declared
+    | None -> media_failover
+  in
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
     ; media_failover
+    ; declared_media_failover
     ; lanes
     ; lsp_servers
     ; config_path = Some config_path
@@ -1515,6 +1524,11 @@ let init_default_strict ~config_path =
    same catalog exclusion so a save cannot reactivate an unavailable route. *)
 let prepare_degraded_loaded ~config_path
     (((runtimes, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+  (* [\[runtime\].media_failover] as the file declares it, read before the
+     catalog exclusion below drops what it could not resolve. The surface
+     needs both: the admitted list it draws, and what was dropped, which is
+     what stops the route being written back from a list missing them. *)
+  let _, _, _, declared_media_failover, _, _, _ = loaded in
   let* loaded, startup_degradation =
     match missing_runtime_model_capabilities ~config_path runtimes with
     | None -> Ok (loaded, None)
@@ -1527,7 +1541,11 @@ let prepare_degraded_loaded ~config_path
     validate_runtime_max_context active_runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
-  Ok (loaded, exact_output_lane_decls, startup_degradation)
+  Ok
+    ( loaded
+    , exact_output_lane_decls
+    , startup_degradation
+    , declared_media_failover )
 ;;
 
 let initialize_degraded_loaded ~config_path parsed =
@@ -1536,11 +1554,15 @@ let initialize_degraded_loaded ~config_path parsed =
       (fun failure -> Runtime_config_error (to_diagnostic_text ~config_path failure))
       parsed
   in
-  let* loaded, _, startup_degradation =
+  let* loaded, _, startup_degradation, declared_media_failover =
     prepare_degraded_loaded ~config_path parsed
     |> Result.map_error (fun msg -> Runtime_config_error msg)
   in
-  set_loaded ?startup_degradation ~config_path loaded;
+  set_loaded
+    ?startup_degradation
+    ~declared_media_failover
+    ~config_path
+    loaded;
   Ok (match startup_degradation with
     | None -> Initialized
     | Some degradation -> Initialized_degraded degradation)
@@ -1864,6 +1886,7 @@ let verifier_exact_lane_readiness () =
 (* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
    by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
+let declared_media_failover () = (runtime_state ()).declared_media_failover
 
 (* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref
    set by [init_default]. *)
@@ -2616,7 +2639,7 @@ let commit_runtime_config_text
     content
   =
   let observation = config_observation ~path content in
-  let* loaded, exact_output_lanes, startup_degradation =
+  let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     parse_and_validate_config_text ~config_path:path content
   in
   match
@@ -2625,7 +2648,11 @@ let commit_runtime_config_text
   | Error Runtime_exact_output_registry.Registry_not_published ->
     (match replace_file path content with
      | Ok () ->
-       set_loaded ?startup_degradation ~config_path:path loaded;
+       set_loaded
+         ?startup_degradation
+         ~declared_media_failover
+         ~config_path:path
+         loaded;
        Ok (committed_receipt ~observation ~durability:Durable)
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
@@ -2635,7 +2662,11 @@ let commit_runtime_config_text
             ~observation
             failure
         | Fs_compat.After_rename ->
-          set_loaded ?startup_degradation ~config_path:path loaded;
+          set_loaded
+            ?startup_degradation
+            ~declared_media_failover
+            ~config_path:path
+            loaded;
           runtime_config_atomic_failure
             ~replacement_visible:true
             ~observation
@@ -2652,7 +2683,11 @@ let commit_runtime_config_text
            (runtime_config_write_outcome
               ~replace_file
               ~on_replacement_visible:(fun () ->
-                set_loaded ?startup_degradation ~config_path:path loaded)
+                set_loaded
+                  ?startup_degradation
+                  ~declared_media_failover
+                  ~config_path:path
+                  loaded)
               ~path
               content)
      with
@@ -2717,7 +2752,7 @@ let edit_config_text ?runtime_config_path edit =
 
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* _loaded, _exact_output_lanes, _degradation =
+  let* _loaded, _exact_output_lanes, _degradation, _declared_media_failover =
     parse_and_validate_config_text ~config_path:path content
   in
   Ok ()
@@ -3469,4 +3504,100 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
              ~path:(exact_lane_table_path lane)
              ~key:"slots"
              ~values:(slots @ [ slot ])))
+;;
+
+(* Which way [move_exact_output_lane_slot] walks a slot through the declared
+   order. A lane's walk is that order, so one step is the whole edit; naming
+   the direction keeps the caller from sending an order rebuilt from what it
+   can see, which is the mistake {!append_exact_output_lane_slot} exists to
+   avoid. *)
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+
+(* Both edits below read the declaration under the write lock for the reason
+   the append does: the standalone-lane projection shows the slots the
+   registry admitted, so an order rebuilt from that view drops every declared
+   slot the catalog rejected. The caller names one slot, and the file's own
+   order decides the rest. *)
+let with_declared_exact_slots ~lane ~slot decide =
+  let slot = String.trim slot in
+  let lane_id = exact_lane_id lane in
+  if String.equal slot ""
+  then Error "slot must not be empty"
+  else if contains_newline slot
+  then Error "slot must not contain newlines"
+  else
+    Ok
+      (fun ~content config ->
+         let* () = exact_lane_editable ~content config lane in
+         let slots =
+           match exact_lane_decl config lane with
+           | Some decl -> decl.slot_ids
+           | None -> []
+         in
+         match List.find_index (String.equal slot) slots with
+         | None ->
+           Error
+             (Printf.sprintf
+                "%s is not a slot of %s; the lane declares %s"
+                slot
+                lane_id
+                (match slots with [] -> "none" | _ -> String.concat ", " slots))
+         | Some position ->
+           let* values = decide ~lane_id ~slot ~slots ~position in
+           Ok
+             (Toml_line_editor.edit_table_multiline_array
+                content
+                ~path:(exact_lane_table_path lane)
+                ~key:"slots"
+                ~values))
+;;
+
+let drop_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
+  let* edit =
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
+      match List.filteri (fun index _ -> index <> position) slots with
+      | [] ->
+        (* The same floor {!set_exact_output_lane_slots} holds: a mandatory
+           lane with no slot fails the boot fail-closed, and emptying a lane is
+           not the edit dropping its last slot means. Remove the lane's table
+           instead. *)
+        Error
+          (Printf.sprintf
+             "%s is the last slot of %s; an exact-output lane needs at least one"
+             slot
+             lane_id)
+      | remaining -> Ok remaining)
+  in
+  edit_runtime_lanes ?runtime_config_path edit
+;;
+
+let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
+  let* edit =
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
+      let count = List.length slots in
+      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 in
+      if target < 0 || target >= count
+      then
+        Error
+          (Printf.sprintf
+             "%s is already %s in %s"
+             slot
+             (match move with Move_slot_up -> "first" | Move_slot_down -> "last")
+             lane_id)
+      else
+        let at_position = List.nth slots position
+        and at_target = List.nth slots target in
+        Ok
+          (List.mapi
+             (fun index declared ->
+                if index = position
+                then at_target
+                else if index = target
+                then at_position
+                else declared)
+             slots))
+  in
+  edit_runtime_lanes ?runtime_config_path edit
 ;;

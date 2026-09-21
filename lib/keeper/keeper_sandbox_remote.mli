@@ -75,14 +75,18 @@ val name : t -> string
 (** Endpoint name for logs and error codes: the registry key for OpenSSH,
     the container name for a guest. *)
 
-val remote_root : t -> string
-val remote_keeper_root : t -> string
-(** [<remote_root>/<sanitized keeper name>]. *)
+val workspace_root : t -> string
+(** The exact request jail/default cwd used by ordinary payloads. *)
+
+val keeper_control_root : t -> string
+(** OpenSSH [<endpoint_root>/<sanitized keeper name>], currently both its
+    workspace and Keeper-scoped GitHub control root. The separate name
+    prevents callers from inferring either role from the endpoint root. *)
 
 val gh_config_dir : t -> string
 (** Where this endpoint's [gh] keeps the Keeper's identity, and the value the
     lane injects as [GH_CONFIG_DIR] on every request:
-    [<remote_keeper_root>/.config/gh] for OpenSSH, the mounted snapshot path
+    [<keeper_control_root>/.config/gh] for OpenSSH, the mounted snapshot path
     for a guest. *)
 
 val transport : t -> transport
@@ -107,6 +111,19 @@ val check_preflight : ?force:bool -> t -> (unit, string) result
 (** Verify endpoint reachability, shim major version, remote git/rg, the
     roots, free disk, and per-keeper GitHub identity. Results are cached for
     [Env_config_sandbox.Preflight.ssh_ttl_sec] unless [force=true]. *)
+
+val check_endpoint_preflight : t -> (unit, string) result
+(** Uncached endpoint-root half of the OpenSSH preflight. GitHub login uses
+    this before its one fixed Keeper-workspace bootstrap. *)
+
+val check_workspace_preflight : t -> (unit, string) result
+(** Uncached Keeper-workspace structure check. It verifies only that the
+    request root exists, so GitHub login is not blocked by payload tool or disk
+    readiness. Ordinary payloads use the full cached {!check_preflight}. *)
+
+val invalidate_preflight : t -> unit
+(** Forget this endpoint and Keeper's cached preflight after bootstrap or
+    login changes the remote workspace or identity. *)
 
 val observe_supported : t -> bool
 (** Whether this endpoint's shim advertises the box (RFC-0422): the
@@ -193,12 +210,22 @@ val runner :
     to build, {!Exec_ssh_protocol.Effect} when omitted; a caller passes
     [Observe] or [Guest_local] only for an endpoint {!observe_supported}
     answered yes for. Docker accepts only [Observe], even when called without
-    an explicit mode. The local wall-clock budget includes the
+    an explicit mode. OpenSSH and guest requests use the Keeper workspace as
+    both request root and default cwd; Docker uses its already-resolved workdir.
+    The local wall-clock budget includes the
     endpoint connect timeout and a bounded drain grace in addition to the
     remote payload timeout.
 
     [on_receipt] receives only this runner call's response evidence. The caller
     owns its collection; endpoint-wide [last_dispatch] is never consulted. *)
+
+val bootstrap_keeper_control_root :
+  timeout_sec:float -> t -> Masc_exec.Sandbox_target.run_outcome
+(** Create an OpenSSH Keeper's control root with one fixed [mkdir] request
+    rooted at the endpoint base. Under the current per-Keeper layout this is
+    also its workspace. Ordinary payloads cannot select the wider endpoint
+    root. Other transports are already provisioned by their runtime and fail
+    here. *)
 
 module For_testing : sig
   val clear_preflight_cache : unit -> unit

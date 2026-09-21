@@ -14,6 +14,12 @@
 #   - skips worktrees referenced by tmux, running processes, or launchd plists
 #   - never uses --force
 #   - leaves the branch in place (only removes the worktree directory)
+#   - a detached worktree has no branch to leave its commit on, so the commit
+#     is tagged archive/worktree/<name>-<sha> before the directory goes
+#   - archive tags are permanent recovery refs until an operator verifies the
+#     commit is no longer needed. List them with
+#       git for-each-ref --format='%(refname:short)' refs/tags/archive/worktree/
+#     and remove a confirmed-obsolete one with git tag -d <tag>.
 #
 # Usage:
 #   ./scripts/cleanup-stale-worktrees.sh                # dry run, 7-day threshold
@@ -30,7 +36,9 @@ while [ $# -gt 0 ]; do
     --apply) APPLY=1; shift ;;
     --days) DAYS="$2"; shift 2 ;;
     -h|--help)
-      sed -n '1,22p' "$0"; exit 0 ;;
+      # The header up to its first blank line, so help stays whole when the
+      # header grows. A line count here goes stale the next time it does.
+      sed -n '1,/^$/p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -54,6 +62,18 @@ nested=0
 active=0
 removed=0
 skipped=0
+archived=0
+would_archive=0
+
+# One reachability walk for the whole run. Calling [for-each-ref --contains]
+# once per detached worktree scales with worktrees x refs, and every archive
+# tag makes the next run slower. This snapshot answers the same question -- is
+# the detached HEAD an ancestor of any current ref? -- with one graph walk.
+# A file, rather than an associative array, keeps this script compatible with
+# macOS's system Bash 3.2.
+reachable_commits_file=$(mktemp -t masc-cleanup-reachable.XXXXXX)
+trap 'rm -f "$reachable_commits_file"' EXIT
+git rev-list --branches --remotes --tags > "$reachable_commits_file"
 
 # `git worktree list --porcelain` emits one stanza per worktree, separated by
 # blank lines. Stanzas always start with `worktree <path>`. Process via
@@ -63,8 +83,9 @@ while read -r wt_path; do
   [ -z "$wt_path" ] && continue
   [ "$wt_path" = "$REPO_ROOT" ] && continue
 
-  # Last-commit timestamp (Unix epoch). If the working tree is broken or
-  # detached, skip — operator should diagnose manually.
+  # Last-commit timestamp (Unix epoch). A detached HEAD answers this as well
+  # as a branch does, so a detached worktree is processed like any other; only
+  # an unreadable HEAD is skipped.
   if ! last_ts=$(git -C "$wt_path" log -1 --format='%ct' 2>/dev/null); then
     echo "BROKEN  $wt_path (cannot read HEAD) — skipped"
     skipped=$((skipped+1))
@@ -101,25 +122,73 @@ while read -r wt_path; do
   age_days=$(( ( $(date +%s) - last_ts ) / 86400 ))
   stale=$((stale+1))
 
+  # What holds this worktree's commit after the directory goes. A branch does,
+  # which is why removal is safe for one. A detached worktree whose commit sits
+  # on no ref at all has only this directory holding it, so removing it leaves
+  # the commit unreachable -- work lost by a script that promises above to
+  # leave commits alone. Measured 2026-09-20: 19 of 265 worktrees in this repo
+  # were detached with their commit on no other ref.
+  archive_tag=""
+  head_sha=""
+  if ! git -C "$wt_path" symbolic-ref --quiet HEAD >/dev/null 2>&1; then
+    head_sha=$(git -C "$wt_path" rev-parse HEAD 2>/dev/null || echo "")
+    if [ -n "$head_sha" ] && ! grep -Fqx "$head_sha" "$reachable_commits_file"; then
+      archive_tag="archive/worktree/$(basename "$wt_path")-${head_sha:0:10}"
+      would_archive=$((would_archive+1))
+      if [ "$APPLY" -eq 0 ]; then
+        printf '%s\n' "$head_sha" >> "$reachable_commits_file"
+      fi
+    fi
+  fi
+
   if [ "$APPLY" -eq 1 ]; then
+    if [ -n "$archive_tag" ]; then
+      existing=$(git rev-parse -q --verify "refs/tags/$archive_tag^{commit}" 2>/dev/null || echo "")
+      if [ "$existing" = "$head_sha" ]; then
+        : # A previous run tagged the commit but stopped before removal.
+      else
+        if [ -n "$existing" ]; then
+          echo "SKIP    $wt_path (archive tag $archive_tag points at $existing, not $head_sha)"
+          skipped=$((skipped+1))
+          continue
+        fi
+        if ! tag_err=$(git tag -a "$archive_tag" "$head_sha" \
+               -m "detached worktree $wt_path archived on cleanup; its commit was on no other ref" \
+               2>&1); then
+          echo "SKIP    $wt_path (detached commit could not be archived: $tag_err)"
+          skipped=$((skipped+1))
+          continue
+        fi
+      fi
+      archived=$((archived+1))
+      printf '%s\n' "$head_sha" >> "$reachable_commits_file"
+    fi
     if git worktree remove "$wt_path" 2>/dev/null; then
-      echo "REMOVED $wt_path (last commit ${age_days}d ago)"
+      if [ -n "$archive_tag" ]; then
+        echo "REMOVED $wt_path (last commit ${age_days}d ago, commit kept at $archive_tag)"
+      else
+        echo "REMOVED $wt_path (last commit ${age_days}d ago)"
+      fi
       removed=$((removed+1))
     else
-      echo "SKIP    $wt_path (remove failed — likely locked)"
+      echo "SKIP    $wt_path (remove failed -- likely locked)"
       skipped=$((skipped+1))
     fi
   else
-    echo "CANDID  $wt_path (last commit ${age_days}d ago)"
+    if [ -n "$archive_tag" ]; then
+      echo "CANDID  $wt_path (last commit ${age_days}d ago, detached -- would tag $archive_tag)"
+    else
+      echo "CANDID  $wt_path (last commit ${age_days}d ago)"
+    fi
   fi
 done < <(git worktree list --porcelain | awk '/^worktree /{print $2}')
 
 if [ "$APPLY" -eq 1 ]; then
   git worktree prune
   echo ""
-  echo "Summary (--days $DAYS --apply): stale=$stale removed=$removed dirty=$dirty nested=$nested active=$active skipped=$skipped"
+  echo "Summary (--days $DAYS --apply): stale=$stale removed=$removed archived=$archived dirty=$dirty nested=$nested active=$active skipped=$skipped"
 else
   echo ""
-  echo "Summary (--days $DAYS dry-run): stale=$stale dirty=$dirty nested=$nested active=$active skipped=$skipped"
+  echo "Summary (--days $DAYS dry-run): stale=$stale would_archive=$would_archive dirty=$dirty nested=$nested active=$active skipped=$skipped"
   echo "Pass --apply to remove the listed candidates."
 fi

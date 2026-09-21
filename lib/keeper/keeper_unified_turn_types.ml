@@ -25,7 +25,11 @@ type turn_state =
   ; manifest_seq : int
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
-  ; degraded_retry_info : Keeper_error_classify.degraded_retry option
+  (* The verdict the turn's receipt recorded, carried up from
+     [Keeper_agent_result.turn_settlement] so the decision record reports what
+     the receipt reported instead of deciding again (#37376). Absent until a
+     turn settles, and on a turn that never reached [finalize]. *)
+  ; degraded_retry_settled : Keeper_agent_result.turn_settlement option
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; runtime_attempt_errors : runtime_attempt_error list
@@ -123,32 +127,6 @@ let runtime_attempt_errors_to_string (attempts : runtime_attempt_error list) =
          (Keeper_types_profile.short_preview (Agent_core.Error.to_string attempt.error)))
   |> String.concat ", "
   |> Printf.sprintf "[%s]"
-;;
-
-(** Whether the deferred lane a previous turn hinted at was the lane this turn
-    actually ran on. Reader: the unified path's decision record only. The
-    execution receipt answers the same question in
-    [Keeper_agent_run_receipt.degraded_retry_taken_up], which reads the
-    runtime observation rather than a routed runtime id.
-
-    [turn_state.degraded_retry_info] is seeded at [initial_turn_state] from the
-    [deferred_runtime_lane] argument and no path writes it afterwards, so its
-    presence means a deferred lane is pending — not that a retry ran.
-
-    [last_execution] carries the runtime this turn resolved to. Absent it,
-    nothing ran, so nothing was applied.
-
-    The equality itself has little left to say on this path:
-    [Keeper_unified_turn.main_path] routes a turn carrying a hint to
-    [hint.next_runtime_id], so the two sides agree whenever both are present.
-    The condition that still bites is [last_execution = None] — a turn the
-    phase gate or pre-dispatch validation ended before any execution. *)
-let degraded_retry_applied_for_turn ~degraded_retry_info ~last_execution =
-  match degraded_retry_info, last_execution with
-  | ( Some (retry : Keeper_error_classify.degraded_retry)
-    , Some (execution : Keeper_turn_runtime_budget.runtime_execution) ) ->
-    String.equal retry.next_runtime execution.runtime_id
-  | Some _, None | None, _ -> false
 ;;
 
 let turn_event_bus_manifest_decision

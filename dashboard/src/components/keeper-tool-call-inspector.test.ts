@@ -15,7 +15,7 @@ function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
     tool: 'keeper_context_status',
     input: {},
     output: 'ok',
-    success: true,
+    wire_outcome: 'ok',
     duration_ms: 5,
     ...overrides,
   }
@@ -229,7 +229,7 @@ describe('groupToolCallTree', () => {
 describe('deriveKeeperToolCallDossier outcome', () => {
   it('keeps a clean call clean and falls back to transport success', () => {
     const dossier = deriveKeeperToolCallDossier(
-      [toolCall({ success: true })],
+      [toolCall({ wire_outcome: 'ok' })],
       null,
     )
     expect(dossier.headline).toBe('1 calls clean')
@@ -245,15 +245,15 @@ describe('latest call tone', () => {
     deriveKeeperToolCallDossier(entries, null).cards.find(c => c.key === 'latest')?.tone
 
   it('reads ok for a successful call', () => {
-    expect(latestTone([toolCall({ success: true })])).toBe('ok')
+    expect(latestTone([toolCall({ wire_outcome: 'ok' })])).toBe('ok')
   })
 
   it('reads warn for a deferred call', () => {
-    expect(latestTone([toolCall({ success: false, disposition: 'deferred' })])).toBe('warn')
+    expect(latestTone([toolCall({ wire_outcome: 'error', disposition: 'deferred' })])).toBe('warn')
   })
 
   it('reads bad for a failed call', () => {
-    expect(latestTone([toolCall({ success: false })])).toBe('bad')
+    expect(latestTone([toolCall({ wire_outcome: 'error' })])).toBe('bad')
   })
 
   it('reads neutral when there is no call at all', () => {

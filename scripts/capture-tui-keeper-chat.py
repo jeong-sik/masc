@@ -536,7 +536,11 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/health": {"paths": paths},
         "/health?full=1": {
             "paths": paths,
-            "keeper_fleet_safety": {"status": "ok"},
+            "keeper_fleet_safety": {
+                "status": "ok",
+                "official_client_recovery_required_keeper_count": 0,
+                "official_client_recovery_required_keeper_names": [],
+            },
         },
         "/api/v1/dashboard/transport-health": {
             "summary": {

@@ -126,7 +126,7 @@ function toolCallOutput(overrides: Partial<ToolCallEntry> & Pick<ToolCallEntry, 
     tool: 'keeper_context_status',
     input: {},
     output: 'context window ok',
-    success: true,
+    wire_outcome: 'ok',
     duration_ms: 12,
     execution_id: overrides.execution_id ?? `exec-${overrides.tool_use_id}`,
     ...overrides,
@@ -976,7 +976,7 @@ describe('ChatTranscript', () => {
 
   it('marks a failed tool call with the error status glyph', () => {
     recordToolCallOutputs([
-      toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),
+      toolCallOutput({ tool_use_id: 'toolu_y', wire_outcome: 'error', output: 'boom' }),
     ])
     render(
       html`<${ChatTranscript} keeperName="sangsu"
@@ -3364,7 +3364,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
   it('surfaces real failure status and result inside the card when expanded', async () => {
     recordToolCallOutputs([
-      toolCallOutput({ tool_use_id: 't1', success: false, output: 'BOOM' }),
+      toolCallOutput({ tool_use_id: 't1', wire_outcome: 'error', output: 'BOOM' }),
     ])
     render(
       html`<${ChatTranscript} keeperName="sangsu"

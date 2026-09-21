@@ -957,6 +957,28 @@ let test_from_atom_view_past_the_newest_atom_keeps_it () =
   Alcotest.(check int) "a negative front is the whole history" 0 projection.Window.dropped_atoms
 ;;
 
+let test_saved_summary_controls_only_empty_suffix_preamble () =
+  let project ~announced ~first_atom history =
+    let projection, bytes = Window.project_from_atom
+      ~allow_empty_history:true ~history_already_announced:announced
+      ~measure_message_bytes ~first_atom history in
+    Alcotest.(check int) "bytes come from exactly the transmitted messages"
+      (total_bytes projection.Window.messages) bytes;
+    projection.Window.messages in
+  let history = extra_context :: atoms 4 in
+  let covered = project ~announced:true ~first_atom:4 history in
+  Alcotest.(check bool) "saved summary needs no omission preamble" false
+    (List.exists is_preamble covered);
+  Alcotest.(check int) "only pinned summary context remains" 1 (List.length covered);
+  Alcotest.(check bool) "ordinary empty-history projection still announces omission" true
+    (List.exists is_preamble (project ~announced:false ~first_atom:4 history));
+  Alcotest.(check bool) "assistant suffix still needs a valid opening message" true
+    (List.exists is_preamble
+      (project ~announced:true ~first_atom:1 [extra_context; user 0; assistant 1; tool 1]));
+  Alcotest.(check bool) "initial pinned-only input has no fabricated history" false
+    (List.exists is_preamble (project ~announced:true ~first_atom:0 [extra_context]))
+;;
+
 (* A position is the atom index plus the message that opens the atom. The
    opener is the first message [annotate] gives the index: pinned context is
    no atom and shifts nothing, and a tool result joins the assistant's atom
@@ -1094,6 +1116,8 @@ let () =
             test_from_atom_view_at_zero_is_the_whole_history
         ; Alcotest.test_case "from-atom view past the newest atom keeps it" `Quick
             test_from_atom_view_past_the_newest_atom_keeps_it
+        ; Alcotest.test_case "saved summary controls empty suffix preamble" `Quick
+            test_saved_summary_controls_only_empty_suffix_preamble
         ; Alcotest.test_case "deterministic" `Quick test_deterministic
         ] )
     ]

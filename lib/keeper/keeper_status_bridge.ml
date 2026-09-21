@@ -12,6 +12,7 @@ let auto_execution_session_surface_json () =
 let workspace_surface_json (meta : keeper_meta) =
   `Assoc
     [ "mention_targets", Json_util.json_string_list meta.mention_targets
+    ; "board_interests", Json_util.json_string_list meta.board_interests
     ]
 ;;
 
@@ -61,6 +62,10 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        "workspace.mention_targets"
        defaults.mention_targets
        (default_nonempty_string_list defaults.mention_targets meta.mention_targets)
+  |> nonempty_string_list_override
+       "workspace.board_interests"
+       defaults.board_interests
+       (default_nonempty_string_list defaults.board_interests meta.board_interests)
   |> (fun acc ->
   let runtime_id = runtime_id_of_meta meta in
   if effective_runtime_id <> runtime_id

@@ -16,6 +16,7 @@ type unavailable_reason =
   | Absorb_gate_disabled
   | Board_attention_disabled
   | Context_review_disabled
+  | Skill_applicability_disabled
   | Keeper_excluded
 
 let unavailable_reason_to_string = function
@@ -24,6 +25,7 @@ let unavailable_reason_to_string = function
   | Absorb_gate_disabled -> "absorb_gate_disabled"
   | Board_attention_disabled -> "board_attention_disabled"
   | Context_review_disabled -> "context_review_disabled"
+  | Skill_applicability_disabled -> "skill_applicability_disabled"
   | Keeper_excluded -> "keeper_excluded"
 ;;
 
@@ -76,6 +78,11 @@ let board_attention_api_key ~keeper_id =
 let context_review_api_key ~keeper_id =
   gate_api_key ~keeper_id ~switched_on:(policy ()).Runtime_schema.context_review
     ~off:Context_review_disabled
+;;
+
+let skill_applicability_api_key ~keeper_id =
+  gate_api_key ~keeper_id ~switched_on:(policy ()).Runtime_schema.skill_applicability
+    ~off:Skill_applicability_disabled
 ;;
 
 let is_board_attention_enabled () = is_enabled () && (policy ()).Runtime_schema.board_attention

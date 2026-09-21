@@ -451,7 +451,7 @@ val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned
     in [\[runtime.assignments\]] (runtime.toml SSOT) — a declared lane name or a
     runtime id — or [None] when no explicit assignment exists (caller falls back
-    to {!get_default_runtime_id}). It is a routing label, not necessarily a
+    to {!get_default_route}). It is a routing label, not necessarily a
     materialized binding: pass it to {!resolve_assignment} to walk the lane, or
     to {!entry_runtime_id_of_route} for the binding the turn opens first. The id is opaque (only the AGENT_CORE adapter parses
     it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
@@ -591,6 +591,11 @@ val media_failover : unit -> string list
     cannot take the image. A keeper turn never dispatches to them; its image
     reroute stays inside its lane. [[]] = no vision fleet. Every entry is
     validated at load so each resolves to a configured runtime. *)
+
+val declared_media_failover : unit -> string list
+(** [\[runtime\].media_failover] in file order before runtime admission. This
+    preserves entries excluded from the active fleet so an operator surface
+    can edit the declaration without silently erasing them. *)
 
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
@@ -773,8 +778,18 @@ val pricing_of_runtime_id : string -> float option * float option
     turn-record writer (RFC-0233 §8) so the dashboard renders actual cost or
     absence rather than a fabricated Claude default. *)
 
+val get_default_route : unit -> string
+(** [\[runtime\].default] as the file writes it: a declared lane's id or a
+    runtime's. A keeper with no assignment is routed by this, resolved through
+    {!resolve_assignment} like any assignment, so the default walks a lane's
+    candidates whenever it names one. {!get_default_runtime_id} answers with
+    the runtime that route enters on. Raises when no runtime is loaded, like
+    {!get_default_runtime_id}. *)
+
 val get_default_runtime_id : unit -> string
-(** @raise Failure if {!init_default} has not run. No silent fallback
+(** The runtime binding where the current default route enters: the route
+    itself may be a lane name, which {!get_default_route} returns instead.
+    @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a
     recoverable condition. Callers must invoke this at runtime, never as a
     module-level [let] binding (would crash config-less test binaries). *)
@@ -940,6 +955,27 @@ val create_runtime_lane :
     output beyond an operator's reach. The Runtime surface marks which lanes a
     table declares. *)
 
+val rename_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  new_lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Rename [\[runtime.lanes."<lane_id>"\]] to [new_lane_id] and rewrite every
+    reference to it in the same validated write: the [\[runtime.assignments\]]
+    entries that name it, and [\[runtime\].default] when it does. A lane's name
+    is its routing key ({!resolve_assignment} reads a lane before a runtime of
+    the same id), so a file written with a reference missed would route those
+    keepers to a lane that is no longer declared -- which is also why this is
+    not a remove followed by a create.
+
+    Refused when the file does not declare [lane_id], when it already declares
+    [new_lane_id] (as a lane or as a header the line editor can see), and when
+    the lane is not written as its own table.
+
+    [\[runtime\].default] takes the new name like an assignment does, because
+    it holds a route ({!get_default_route}). *)
+
 val remove_runtime_lane :
   ?runtime_config_path:string ->
   lane_id:string ->
@@ -983,6 +1019,38 @@ val append_exact_output_lane_slot :
     exact-output registry did not admit stay in place. Refused, by name, when
     the lane already declares [slot] as a slot or as a CLI slot. Tables are
     created and refused as {!set_exact_output_lane_slots} says. *)
+
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+      (** Which way {!move_exact_output_lane_slot} walks a slot through the
+          declared order, which is the order the lane walks. *)
+
+val drop_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Take [slot] out of [\[runtime.exact_output_lanes.<id>\]].slots as the file
+    declares them, read under the write lock for the reason
+    {!append_exact_output_lane_slot} gives: the caller names one slot rather
+    than an order rebuilt from the admitted view, so declared slots the
+    registry rejected stay. Refused when the lane declares no such slot,
+    naming what it does declare, and when [slot] is its last one -- a lane
+    that resolves to nothing is not this edit; remove the lane's table. *)
+
+val move_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  move:exact_slot_move ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Exchange [slot] with its neighbour in the declared order, read under the
+    write lock like {!drop_exact_output_lane_slot}. Refused when the lane
+    declares no such slot, and when the slot is already at the end the move
+    heads for. CLI slots are a separate list and do not move. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

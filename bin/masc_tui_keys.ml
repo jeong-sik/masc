@@ -118,6 +118,19 @@ let runtime_keys =
   ; Keeper_lanes_only
       (b Act "J/K" "move candidate" ~help:"move the candidate under the cursor down or up its lane")
   ; Keeper_lanes_only
+      (b Act "f" "default runtime"
+         ~help:"replace [runtime].default, what a keeper with no assignment walks")
+  ; Keeper_lanes_only
+      (b Act "m" "vision fleet"
+         ~help:"edit [runtime].media_failover in the slot editor; refused while \
+                boot dropped one of its entries")
+  ; Keeper_lanes_only
+      (b Act "R" "rename lane"
+         ~help:"give the lane under the cursor another name; the assignments \
+                that route to it and [runtime].default, when it names it, are \
+                rewritten in the same write. The field opens on the name it \
+                has now")
+  ; Keeper_lanes_only
       (b Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
                 assigned to it")
@@ -432,6 +445,9 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a failover candidate to this lane's walk order"
+      ; b Act "s" "slots"
+          ~help:"edit the lane's declared slots in walk order: x drops, J/K \
+                 reorders, Esc closes"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)

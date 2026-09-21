@@ -106,7 +106,14 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
         | Error (Log.Index_unavailable detail) -> fail detail in
       let row = match rows with [row] -> row | _ -> fail "production observer must commit exactly one node row" in
       let open Yojson.Safe.Util in
-      check bool "node log records schema rejection" (not reject_schema) (row |> member "success" |> to_bool);
+      check string
+        "node log records the typed schema disposition"
+        (if reject_schema then "failed" else "completed")
+        (row |> member "disposition" |> to_string);
+      check string
+        "node log records the wire schema outcome"
+        (if reject_schema then "error" else "ok")
+        (row |> member "wire_outcome" |> to_string);
       check string "node receipt preserves composition identity" "page" (row |> member "composition_node_id" |> to_string);
       let roots = Tool_output.normalized_artifact_refs_in_json (row |> member "artifact_refs") in
       check bool "retained producer root survives output schema rejection" true

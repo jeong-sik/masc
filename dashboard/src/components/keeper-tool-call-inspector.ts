@@ -5,6 +5,7 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
+import { toolCallCompletion } from '../api/dashboard-keeper-tool-calls'
 import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { lastEvent } from '../sse'
 import { formatTimeHms } from '../lib/format-time'
@@ -341,7 +342,7 @@ function entryScopeLabel(entry: ToolCallEntry): string {
 }
 
 function toolCallSucceeded(entry: ToolCallEntry): boolean {
-  return entry.disposition === 'completed' || (entry.disposition === undefined && entry.success)
+  return toolCallCompletion(entry) === true
 }
 
 function toolCallDeferred(entry: ToolCallEntry): boolean {
@@ -349,7 +350,7 @@ function toolCallDeferred(entry: ToolCallEntry): boolean {
 }
 
 function toolCallFailed(entry: ToolCallEntry): boolean {
-  return entry.disposition === 'failed' || (entry.disposition === undefined && !entry.success)
+  return toolCallCompletion(entry) === false
 }
 
 function toolCallStatusLabel(entry: ToolCallEntry): string {
@@ -960,8 +961,9 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
 
   // Summary stats
   const totalCalls = entries.length
-  const successRate = totalCalls > 0
-    ? Math.round((entries.filter(e => e.success).length / totalCalls) * 100)
+  const settledCalls = entries.filter(entry => toolCallCompletion(entry) !== undefined)
+  const successRate = settledCalls.length > 0
+    ? Math.round((settledCalls.filter(entry => toolCallCompletion(entry) === true).length / settledCalls.length) * 100)
     : 0
   const uniqueTools = new Set(entries.map(e => e.tool)).size
 

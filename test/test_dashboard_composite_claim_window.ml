@@ -60,7 +60,7 @@ let log_claim ~keeper ~task_id ~goal_id =
     ~tool_name:(Keeper_tooling.Name.to_string Keeper_tooling.Name.Task_claim)
     ~input:(`Assoc [])
     ~output_text:(claim_output ~task_id ~goal_id)
-    ~success:true
+    ~wire_outcome:Tool_result.Ok
     ~duration_ms:1.0
     ()
 ;;
@@ -72,7 +72,7 @@ let log_noise ~keeper ~n =
       ~tool_name:(Keeper_tooling.Name.to_string Keeper_tooling.Name.Tasks_list)
       ~input:(`Assoc [])
       ~output_text:(Printf.sprintf {|{"row":%d}|} index)
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:1.0
       ()
   done

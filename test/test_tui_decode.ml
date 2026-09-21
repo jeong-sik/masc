@@ -1007,6 +1007,8 @@ let fleet_safety_json ?(missing = true) () =
            ; "failing_keeper_fiber_count", `Int 1
            ; "recovering_keeper_fiber_count", `Int 0
            ; "turn_configuration_error_keeper_count", `Int 1
+           ; "official_client_recovery_required_keeper_count", `Int 0
+           ; "official_client_recovery_required_keeper_names", `List []
            ; "paused_keeper_count", `Int 0
            ; "target_reaction_capacity_count", `Int 10
            ; "reaction_capacity_shortfall_count", `Int 1
@@ -1050,6 +1052,8 @@ let test_decode_fleet_safety_carries_both_name_lists () =
         fleet.fs_turn_configuration_error_count;
       Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
         fleet.fs_turn_configuration_error_names;
+      Alcotest.(check int) "no session recovery required" 0
+        fleet.fs_official_client_recovery_required_count;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
         [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
@@ -1065,6 +1069,19 @@ let test_decode_fleet_safety_carries_both_name_lists () =
            fleet.fs_bootable_names)
 
 (* A fleet where every bootable keeper runs leaves the difference empty. *)
+let test_decode_fleet_safety_requires_session_recovery_fields () =
+  let section = Yojson.Safe.Util.member "keeper_fleet_safety" (fleet_safety_json ()) in
+  match section with
+  | `Assoc fields ->
+    List.iter
+      (fun field ->
+        let json = `Assoc [ "keeper_fleet_safety", `Assoc (List.remove_assoc field fields) ] in
+        Alcotest.(check bool) ("missing observation is not zero: " ^ field) true
+          (Result.is_error (Tui_decode.decode_fleet_safety json)))
+      [ "official_client_recovery_required_keeper_count"
+      ; "official_client_recovery_required_keeper_names" ]
+  | _ -> Alcotest.fail "fleet fixture must be an object"
+
 let test_decode_fleet_safety_with_nothing_missing () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
   | Error err -> Alcotest.fail err
@@ -3362,6 +3379,9 @@ let test_decode_repository_requires_resolved_local_path () =
    failed Librarian with no ordinary snapshot may still have source evidence;
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
+let empty_memory_context_cycle =
+  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null; "synthesis", `Null]
+
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
     let ordinary_count value = if present then value else 0 in
@@ -3377,7 +3397,17 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
       ; ("updated_at", if present then `Float 1700000000. else `Null)
-      ; ("librarian_lane_busy", `Int 0)
+      ; ("context_cycle", empty_memory_context_cycle)
+      ; ( "librarian"
+        , `Assoc
+            [ ("state", `String "drained")
+            ; ("detail", `Null)
+            ; ("measured_at", `Float 1_775_000_000.0)
+            ; ("unread_atom_turns", `Int 0)
+            ; ("unread_official_turns", `Int 0)
+            ; ("last_success_at", `Null)
+            ; ("last_failure_kind", `Null)
+            ] )
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
       ; ( "vision_ingest_error_reasons"
@@ -3413,9 +3443,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v4")
+      [ ("schema", `String "keeper.memory_os.current_health.v7")
       ; ("generated_at", `Float 1_775_000_000.0)
-      ; ("cadence_counter_entries", `Int 0)
       ; ( "keepers"
         , `List
             [ keeper "source-only" false 4 true
@@ -3433,7 +3462,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("source_facts", `Int 2)
             ; ("source_invalidations", `Int 1)
             ; ("source_snapshot_bytes", `Int 1024)
-            ; ("librarian_lane_busy", `Int 0)
+            ; ("librarian_unread_turns", `Int 0)
             ; ("librarian_failures", `Int 4)
             ; ("vision_ingest_errors", `Int 3)
             ; ("read_errors", `Int 0)
@@ -3447,7 +3476,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("keepers_with_alerts", `Int 1)
             ; ("snapshot_read_error_keepers", `Int 0)
             ; ("source_snapshot_read_error_keepers", `Int 0)
-            ; ("librarian_lane_busy_keepers", `Int 0)
+            ; ("librarian_stopped_keepers", `Int 0)
             ; ("librarian_starving_keepers", `Int 1)
             ] )
       ]
@@ -3461,6 +3490,77 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            fields)
     | json -> json
   in
+  let map_keeper target_index update = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "keepers"
+              then
+                match value with
+                | `List keepers ->
+                  field, `List (List.mapi (fun index keeper ->
+                    if index = target_index then update keeper else keeper) keepers)
+                | _ -> field, value
+              else field, value)
+           fields)
+    | json -> json
+  in
+  let frontier = `Assoc ["trace_id", `String "context-trace";
+    "end_atom", `Int 3; "boundary_line", `Int 5] in
+  let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
+  let prepared = `Assoc ["prepared_at", `Float 1700000000.; "runtime_id", `String "fixture-runtime";
+    "input", input; "request_bytes", `Int 2048] in
+  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared; "synthesis", `Null] in
+  let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
+  let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
+    "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
+      "end_atom", `Int 5; "completed_end_atom", `Int 20]] in
+  let with_synthesis = replace_field "synthesis" synthesis cycle in
+  (match Tui_decode.decode_memory_health_snapshot (context_payload with_synthesis) with
+   | Ok snapshot ->
+     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_synthesis with
+      | Some {state=Masc.Keeper_continuity_observation.Not_committed;
+          range=Some {start_atom=3;end_atom=5;completed_end_atom=20};_} -> ()
+      | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun invalid -> Alcotest.(check bool) "invalid synthesis cannot look caught up" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+      (context_payload (replace_field "synthesis" invalid cycle)))))
+    [replace_field "state" (`String "drained") synthesis;
+     replace_field "trace_id" `Null synthesis;
+     replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
+  (match Tui_decode.decode_memory_health_snapshot (context_payload cycle) with
+   | Ok snapshot ->
+     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
+      | Some {mcp_input = Tui_decode.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
+      | _ -> Alcotest.fail "prepared frontier or bytes lost")
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot (context_payload invalid))))
+    [ replace_field "saved_read_error" (`String "snapshot_unreadable") cycle
+    ; replace_field "saved" (replace_field "end_atom" (`Int (-1)) frontier) cycle
+    ; replace_field "prepared" (replace_field "request_bytes" (`Int (-1)) prepared) cycle
+    ; replace_field "prepared" (replace_field "prepared_at" (`Float nan) prepared) cycle
+    ; replace_field "prepared" (replace_field "input" (replace_field "kind" (`String "accepted") input) prepared) cycle
+    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null input) prepared) cycle
+    ];
+  let unknown_unread = map_keeper 0
+      (fun keeper -> match keeper with
+       | `Assoc fields ->
+         `Assoc (List.map (fun (key, value) -> key,
+           if key = "librarian" then replace_field "unread_atom_turns" `Null value else value) fields)
+       | _ -> keeper) json in
+  Alcotest.(check bool) "unknown unread cannot report a zero fleet total" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot unknown_unread));
+  let unknown_total = match unknown_unread with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
+        if key = "totals" then replace_field "librarian_unread_turns" `Null value else value) fields)
+    | _ -> unknown_unread in
+  (match Tui_decode.decode_memory_health_snapshot unknown_total with
+   | Ok snapshot -> Alcotest.(check (option int)) "unknown fleet total retained" None
+       snapshot.mhs_total_librarian_unread_turns
+   | Error detail -> Alcotest.fail detail);
   let mismatched_totals =
     match json with
     | `Assoc fields ->
@@ -3473,7 +3573,38 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            fields)
     | json -> json
   in
-  let negative_counter = replace_field "cadence_counter_entries" (`Int (-1)) json in
+  let negative_unread =
+    map_keeper
+      0
+      (replace_field
+         "librarian"
+         (`Assoc
+            [ ("state", `String "drained")
+            ; ("detail", `Null)
+            ; ("measured_at", `Float 1_775_000_000.0)
+            ; ("unread_atom_turns", `Int (-1))
+            ; ("unread_official_turns", `Int 0)
+            ; ("last_success_at", `Null)
+            ; ("last_failure_kind", `Null)
+            ]))
+      json
+  in
+  let unknown_librarian_state =
+    map_keeper
+      0
+      (replace_field
+         "librarian"
+         (`Assoc
+            [ ("state", `String "resting")
+            ; ("detail", `Null)
+            ; ("measured_at", `Float 1_775_000_000.0)
+            ; ("unread_atom_turns", `Int 0)
+            ; ("unread_official_turns", `Int 0)
+            ; ("last_success_at", `Null)
+            ; ("last_failure_kind", `Null)
+            ]))
+      json
+  in
   let unknown_field =
     match json with
     | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
@@ -3489,22 +3620,6 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
               then
                 match value with
                 | `List (first :: _) -> field, `List [ first; first ]
-                | _ -> field, value
-              else field, value)
-           fields)
-    | json -> json
-  in
-  let map_keeper target_index update = function
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (field, value) ->
-              if String.equal field "keepers"
-              then
-                match value with
-                | `List keepers ->
-                  field, `List (List.mapi (fun index keeper ->
-                    if index = target_index then update keeper else keeper) keepers)
                 | _ -> field, value
               else field, value)
            fields)
@@ -3545,7 +3660,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
        Alcotest.(check bool) label true
          (Result.is_error (Tui_decode.decode_memory_health_snapshot invalid)))
     [ "fleet total mismatch rejects", mismatched_totals
-    ; "negative observation counter rejects", negative_counter
+    ; "negative unread turn count rejects", negative_unread
+    ; "unknown librarian state rejects", unknown_librarian_state
     ; "unknown root field rejects", unknown_field
     ; "duplicate keeper identity rejects", duplicate_keeper
     ; "alert target mismatch rejects", wrong_alert_target
@@ -3628,9 +3744,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v4")
+    [ ("schema", `String "keeper.memory_os.current_health.v7")
     ; ("generated_at", `Float 1_775_000_000.0)
-    ; ("cadence_counter_entries", `Int 0)
     ; ( "keepers"
       , `List
           [ `Assoc
@@ -3645,7 +3760,17 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("removed", `Int 0)
               ; ("snapshot_present", `Bool false)
               ; ("updated_at", `Null)
-              ; ("librarian_lane_busy", `Int 0)
+              ; ("context_cycle", empty_memory_context_cycle)
+              ; ( "librarian"
+                , `Assoc
+                    [ ("state", `String "drained")
+                    ; ("detail", `Null)
+                    ; ("measured_at", `Float 1_775_000_000.0)
+                    ; ("unread_atom_turns", `Int 0)
+                    ; ("unread_official_turns", `Int 0)
+                    ; ("last_success_at", `Null)
+                    ; ("last_failure_kind", `Null)
+                    ] )
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)
               ; ("vision_ingest_error_reasons", `List [])
@@ -3681,7 +3806,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
           ; ("source_facts", `Int 0)
           ; ("source_invalidations", `Int 0)
           ; ("source_snapshot_bytes", `Int 0)
-          ; ("librarian_lane_busy", `Int 0)
+          ; ("librarian_unread_turns", `Int 0)
           ; ("librarian_failures", `Int 4)
           ; ("vision_ingest_errors", `Int 0)
           ; ("read_errors", `Int 0)
@@ -3695,7 +3820,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
           ; ("keepers_with_alerts", `Int 1)
           ; ("snapshot_read_error_keepers", `Int 0)
           ; ("source_snapshot_read_error_keepers", `Int 0)
-          ; ("librarian_lane_busy_keepers", `Int 0)
+          ; ("librarian_stopped_keepers", `Int 0)
           ; ("librarian_starving_keepers", `Int 1)
           ] )
     ]
@@ -3729,7 +3854,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
        ~target:"librarian_starvation");
   rejected "a target that disagrees with the code is refused"
     (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
-       ~target:"librarian_lane_busy");
+       ~target:"librarian_stopped");
   rejected "legacy threshold field is rejected by exact fields"
     (memory_alert_snapshot_with_extra [ ("threshold", `Float 0.0) ]
        ~code:"librarian_starvation" ~severity:"error"
@@ -4197,6 +4322,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "admitted_slots", `List [ `String "qwen-primary" ]
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
+    ; "declared_slots", `List [ `String "qwen-primary" ]
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained
@@ -6027,6 +6153,8 @@ let runtime_resolved_json =
     ; ("source", `String "/api/v1/runtime/resolved")
     ; ("config_path", `String "/workspace/config/runtime.toml")
     ; ("default_runtime", picker_default_runtime)
+    ; "media_failover", `List []
+    ; "media_failover_declared", `List []
     ; ( "runtimes"
       , `List
           [ picker_default_runtime
@@ -6307,6 +6435,8 @@ let runtime_resolved_surface_json () =
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", `String "/workspace/config/runtime.toml"
     ; "default_runtime", runtime_a
+    ; "media_failover", `List []
+    ; "media_failover_declared", `List []
     ; "runtimes", `List runtimes
     ; ( "lanes"
       , `List
@@ -6530,7 +6660,30 @@ let test_runtime_limits_reject_unknown_or_invalid_values () =
      replace "declared_reasoning_effort" (`String "turbo") picker_default_runtime;
      (match picker_default_runtime with
       | `Assoc fields -> `Assoc (List.remove_assoc "declared_reasoning_effort" fields)
-      | json -> json)]
+     | json -> json)]
+
+let test_runtime_route_keeps_declared_order () =
+  let replace name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | json -> json
+  in
+  let json =
+    runtime_resolved_json
+    |> replace "media_failover" (`List [ `String "a"; `String "b" ])
+    |> replace
+         "media_failover_declared"
+         (`List [ `String "a"; `String "gone.model"; `String "b" ])
+  in
+  match Tui_decode.decode_runtime_resolved_snapshot json with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check (list string)) "active fleet"
+      [ "a"; "b" ]
+      snapshot.rrs_media_failover;
+    Alcotest.(check (list string)) "declared order"
+      [ "a"; "gone.model"; "b" ]
+      snapshot.rrs_media_failover_declared
+;;
 
 let test_runtime_default_limits_must_match_listed_row () =
   let replace key value = function
@@ -9451,6 +9604,8 @@ let () =
           test_runtime_catalog_probe_is_independent_of_dispatch
       ; Alcotest.test_case "limits reject invalid values" `Quick
           test_runtime_limits_reject_unknown_or_invalid_values
+      ; Alcotest.test_case "keeps the declared route order" `Quick
+          test_runtime_route_keeps_declared_order
       ; Alcotest.test_case "default limits match listed runtime" `Quick
           test_runtime_default_limits_must_match_listed_row
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
@@ -9778,6 +9933,8 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "session recovery fields are required" `Quick
+          test_decode_fleet_safety_requires_session_recovery_fields;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick
           test_decode_fleet_safety_with_nothing_missing;
         Alcotest.test_case "a body without the section is refused" `Quick

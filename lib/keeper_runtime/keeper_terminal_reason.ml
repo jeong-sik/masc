@@ -45,9 +45,11 @@ let wire_provider_error_network_timeout_prefix = "provider_error_network:timeout
 type t =
   | Runtime_exhausted of string
   | Capacity_backpressure of string
-  | Config_or_auth of string
+  | Config_invalid of string
+  | Authorization_refused of string
   | Provider_runtime_failure of string
   | Transcript_corruption of string
+  | Official_client_recovery_required of string
   | Provider_attempt_effect_fenced of string
   | Tool_correction_lost of string
   | Accept_rejected of string
@@ -56,13 +58,23 @@ type t =
   | Pre_dispatch_success of string
   | Unknown of string
 
-let is_config_or_auth_wire wire =
+(* Two closed wire sets. They are disjoint — no config wire equals or prefixes
+   an authorization wire — so their order relative to each other cannot change
+   a classification. Both must stay ranked ahead of the [api_error_] /
+   [provider_error_] prefix tests in [of_wire], because two of the
+   authorization wires begin with [api_error_] and two with [provider_error_]
+   and would otherwise be claimed as generic provider failures. *)
+let is_config_invalid_wire wire =
+  String.equal wire "config_error"
+  || String.starts_with ~prefix:wire_provider_error_invalid_config_prefix wire
+;;
+
+let is_authorization_refused_wire wire =
   match wire with
-  | "config_error" | "api_error_auth" | "api_error_authorization" -> true
+  | "api_error_auth" | "api_error_authorization" -> true
   | _ ->
     String.equal wire wire_provider_error_auth
     || String.equal wire wire_provider_error_authorization
-    || String.starts_with ~prefix:wire_provider_error_invalid_config_prefix wire
 ;;
 
 (* The keeper's own internal-error family, classified from the producer's
@@ -86,11 +98,12 @@ let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_provider_attempt_effect_fenced ->
     Provider_attempt_effect_fenced wire
   | Keeper_internal_error.Wire_tool_correction_lost -> Tool_correction_lost wire
+  | Keeper_internal_error.Wire_official_client_recovery_required ->
+    Official_client_recovery_required wire
   (* RFC-0454 P2. Both wires are new spellings of failures that already
      reached this classifier, and each keeps the bucket it had: a host stop
      used to arrive as the bare ["internal_error"] wire, and a closed runtime
      connection as a [provider_error_*] one. *)
-  | Keeper_internal_error.Wire_official_client_recovery_required -> Internal_error wire
   | Keeper_internal_error.Wire_host_stopped_turn -> Internal_error wire
   | Keeper_internal_error.Wire_runtime_connection_closed ->
     Provider_runtime_failure wire
@@ -128,8 +141,10 @@ let of_wire wire =
   match Keeper_internal_error.wire_kind_of_string wire with
   | Some kind -> of_masc_internal_kind wire kind
   | None ->
-    if is_config_or_auth_wire wire
-    then Config_or_auth wire
+    if is_config_invalid_wire wire
+    then Config_invalid wire
+    else if is_authorization_refused_wire wire
+    then Authorization_refused wire
     else if
       String.starts_with ~prefix:"api_error_" wire
       || String.equal wire "provider_error"
@@ -149,9 +164,11 @@ let of_wire wire =
 let to_wire = function
   | Runtime_exhausted wire -> wire
   | Capacity_backpressure wire -> wire
-  | Config_or_auth wire -> wire
+  | Config_invalid wire -> wire
+  | Authorization_refused wire -> wire
   | Provider_runtime_failure wire -> wire
   | Transcript_corruption wire -> wire
+  | Official_client_recovery_required wire -> wire
   | Provider_attempt_effect_fenced wire -> wire
   | Tool_correction_lost wire -> wire
   | Accept_rejected wire -> wire
@@ -182,8 +199,10 @@ let is_transient_provider_runtime_failure = function
     || String.starts_with ~prefix:wire_provider_error_network_timeout_prefix wire
   | Runtime_exhausted _
   | Capacity_backpressure _
-  | Config_or_auth _
+  | Config_invalid _
+  | Authorization_refused _
   | Transcript_corruption _
+  | Official_client_recovery_required _
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
   | Accept_rejected _

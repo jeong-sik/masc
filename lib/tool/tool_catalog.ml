@@ -254,6 +254,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_dos_eject", mutating_tool);
     ("masc_dos_step", mutating_tool);
     ("masc_dos_press", mutating_tool);
+    ("masc_dos_click", mutating_tool);
     ("masc_dos_type", mutating_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
@@ -503,6 +504,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_lane_status", keeper_shard_read);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);
+    ("keeper_skill_validate", keeper_shard_read);
     ("keeper_artifact_transfer", keeper_shard_write);
     ("keeper_analyze_image", keeper_shard_read);
     ("masc_browser_tabs", keeper_shard_read);

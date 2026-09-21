@@ -15,6 +15,20 @@ import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _swap_fixture(text, old, new, *, what):
+    # str.replace returns the original unchanged when the needle is gone, so
+    # a fixture edit would surface far below, at whatever reads the result.
+    # Stop at the substitution that broke, and say what it expected.
+    if old not in text:
+        raise AssertionError(
+            f'release-evidence fixture no longer contains {what}; '
+            'update this test together with '
+            'scripts/fixtures/release-evidence/runtime.toml.')
+    return text.replace(old, new)
+
+
 BINARY = None
 
 
@@ -196,14 +210,34 @@ class Setup(unittest.TestCase):
                 (base / '.masc').symlink_to(volume, target_is_directory=True)
             config = base / '.masc/config'
             runtime = config / 'runtime.toml'
-            runtime.write_bytes((ROOT / 'scripts/fixtures/release-evidence/runtime.toml').read_bytes().replace(b'ollama_cloud', b'setup_fixture'))
+            runtime.write_bytes(_swap_fixture(
+                (ROOT / 'scripts/fixtures/release-evidence/runtime.toml').read_bytes(),
+                b'ollama_cloud', b'setup_fixture', what='provider ollama_cloud'))
             # setup_fixture/setup-fixture-owned-model is the one catalog row no
             # other runtime names, so a pass here cannot be an embedded alias
             # answering in its place.
-            runtime.write_text(runtime.read_text().replace('deepseek-v4-flash','setup-fixture-owned-model'))
+            runtime.write_text(_swap_fixture(
+                runtime.read_text(), 'deepseek-v4-flash', 'setup-fixture-owned-model',
+                what='model deepseek-v4-flash'))
             if missing_key:
                 runtime = config / 'runtime.toml'
-                runtime.write_text(runtime.read_text() + '\n[providers.setup_fixture.credentials]\ntype = "env"\nkey = "MASC_SETUP_TEST_KEY"\n')
+                # The shared fixture already declares one credentials table for
+                # this provider (#37316 made the loopback smoke hermetic with an
+                # inline value). Appending a second table for the same provider
+                # is a duplicate-table TOML error, and the command then exits
+                # before it can print its receipt -- which is what this test
+                # reads. Swap the declared block instead of adding one.
+                inline = ('[providers.setup_fixture.credentials]\n'
+                          'type = "inline"\n'
+                          'value = "release-evidence-loopback"\n')
+                env_block = ('[providers.setup_fixture.credentials]\n'
+                             'type = "env"\n'
+                             'key = "MASC_SETUP_TEST_KEY"\n')
+                text = runtime.read_text()
+                text = _swap_fixture(
+                    text, inline, env_block,
+                    what='the inline credentials block this test swaps')
+                runtime.write_text(text)
             manifest = config / 'keepers/imp.toml'
             original = manifest.read_bytes()
             if stale_token:
@@ -284,8 +318,10 @@ class Setup(unittest.TestCase):
                     pass
             with http.server.HTTPServer(('127.0.0.1', 0), Handler) as server:
                 path = config / 'runtime.toml'
-                path.write_text(path.read_text().replace('http://127.0.0.1:9/v1',
-                                                         'http://127.0.0.1:'+str(server.server_port)+'/v1'))
+                path.write_text(_swap_fixture(
+                    path.read_text(), 'http://127.0.0.1:9/v1',
+                    'http://127.0.0.1:'+str(server.server_port)+'/v1',
+                    what='base_url http://127.0.0.1:9/v1'))
                 thread = threading.Thread(target=server.serve_forever)
                 thread.start()
                 try:

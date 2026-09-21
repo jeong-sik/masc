@@ -35,6 +35,7 @@ import {
   type TurnRecordRow,
 } from '../api/dashboard'
 import { KeeperPromptCapture } from './keeper-turn-inspector-panel'
+import { USAGE_SCOPE_LABELS } from './common/turn-usage-scope'
 
 export interface MemoryKeeper {
   readonly id: string
@@ -315,7 +316,7 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
   const requestBodyBytes = row.record.request_body_bytes
   const inputComponentsUnavailable = row.record.input_components === null
   const ctxWin = row.record.context_window
-  const pct = inputTok != null && ctxWin != null && ctxWin > 0
+  const pct = row.record.usage_scope === 'per_request' && inputTok != null && ctxWin != null && ctxWin > 0
     ? Math.round((inputTok / ctxWin) * 100)
     : null
   return html`
@@ -328,8 +329,11 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
         </span>
         <span class="mem-compo-sub">
           ${inputTok != null
-            ? html`${memFmtTok(inputTok)} provider tok${ctxWin != null ? html` / ${memFmtTok(ctxWin)} 윈도우` : null}${pct != null ? html` · ${pct}%` : null}`
+            ? html`${memFmtTok(inputTok)} provider tok`
             : html`${parts.length}개 구성요소`}
+          · ${USAGE_SCOPE_LABELS[row.record.usage_scope]}
+          ${ctxWin != null ? html` · ${memFmtTok(ctxWin)} 윈도우` : null}
+          · 점유율 ${pct != null ? `${pct}%` : '미상'}
           ${row.record.request_runtime_profile != null
             ? html` · ${row.record.request_runtime_profile}`
             : null}

@@ -4,11 +4,18 @@
     Wire decoding is deliberately narrower than wire encoding: a wire value
     that discarded typed evidence cannot reconstruct a cause. *)
 
+(** The agent-core error boundary that produced a timeout. *)
+type timeout_source =
+  | Agent_core_api
+  | Agent_core_provider
+
 (** Typed observation derived where the original agent-core error is still
     in hand, carried alongside the verbatim wire (RFC-0371 §6.1(3)).
     [None] on values rehydrated from persisted wire strings. *)
 type agent_core_timeout =
-  { phase : Llm_provider.Http_client.timeout_phase option }
+  { source : timeout_source
+  ; phase : Llm_provider.Http_client.timeout_phase option
+  }
 
 type t =
   | Healthy

@@ -39,6 +39,7 @@ let record ?(tokens = Some 18_000) ~wire ~scope () : Turn_record.t =
           })
         wire
   ; model_input_window = None
+  ; response_observed_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
@@ -106,6 +107,81 @@ let index_of needle rows =
 let approx = "\xe2\x89\x88"
 
 let per_request = Runtime_usage_scope.Per_request
+
+let forecast_success : Masc_tui_context_inspector.forecast =
+  { checkpoint_messages = 1
+  ; wake_line_bytes = 32
+  ; walk =
+      Ok
+        { lane_id = "context-forecast-fixture"
+        ; declared = [ "forecast.runtime" ]
+        }
+  ; candidates =
+      [ { runtime_id = "forecast.runtime"
+        ; lane = Masc_tui_context_inspector.Lane_agent_core
+        ; marks = None
+        ; parts = Error "fixed parts unavailable in fixture"
+        ; history_atoms = 0
+        ; carried = None
+        ; assembly = None
+        ; place =
+            { walks_at = 0
+            ; declared_at = Some 0
+            ; rest = Masc_tui_context_inspector.Rest_serving
+            }
+        }
+      ]
+  }
+
+let context_pane_lines turn =
+  let state =
+    Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+  in
+  state.context_inspector_reading <-
+    Some
+      ( "alpha"
+      , { Masc_tui_context_inspector.turn
+        ; provider_input = Error "provider input not needed by this tab"
+        ; response = Error "response not needed by this tab"
+        ; forecast = Ok forecast_success
+        } );
+  match Masc_tui_render_prim.context_inspector_content_lines ~cols:140 state with
+  | Masc_tui_render_prim.Plain (rows, _) -> rows
+  | Masc_tui_render_prim.Split _ ->
+      Alcotest.fail "the composition tab must render one pane"
+
+let check_forecast_survives_turn_failure ~label ~failure ~turn =
+  let rows = context_pane_lines turn in
+  Alcotest.(check bool)
+    (label ^ " keeps the historical failure visible")
+    true
+    (says ("Composition unavailable: " ^ failure) rows);
+  Alcotest.(check bool)
+    (label ^ " keeps the independent forecast band")
+    true
+    (says "NEXT REQUEST" rows);
+  Alcotest.(check bool)
+    (label ^ " keeps the forecast candidate")
+    true
+    (says "forecast.runtime" rows);
+  Alcotest.(check bool)
+    (label ^ " names the fleet scale used without a turn record")
+    true
+    (says "this screen has no turn record to take a ratio from" rows)
+
+let test_empty_turn_record_keeps_forecast () =
+  check_forecast_survives_turn_failure
+    ~label:"empty turn record"
+    ~failure:"turn-records returned no rows"
+    ~turn:
+      (Masc_tui_context_inspector.decode_turn_records
+         (`Assoc [ "entries", `List [] ]))
+
+let test_turn_read_error_keeps_forecast () =
+  check_forecast_survives_turn_failure
+    ~label:"turn read error"
+    ~failure:"turn-record read failed"
+    ~turn:(Error "turn-record read failed")
 
 (* 8,192 schema bytes at 18,000 tokens over 560,513 wire bytes is 263 tokens. *)
 let test_rows_read_at_this_turns_ratio () =
@@ -178,7 +254,20 @@ let test_a_count_of_unknown_scope_never_becomes_the_ratio () =
          ~scope:Runtime_usage_scope.Usage_scope_unavailable ())
   in
   Alcotest.(check bool) "the ratio fell through to the fleet figure" true
-    (says "fleet median measured 2026-09-13..15" rows)
+    (says "fleet median measured 2026-09-13..15" rows);
+  Alcotest.(check bool) "unknown scope is not context occupancy" false
+    (says "of the window" rows)
+
+let test_a_turn_total_never_becomes_context_occupancy () =
+  let rows =
+    lines (record ~wire:(Some 560_513) ~scope:Runtime_usage_scope.Turn_total ())
+  in
+  Alcotest.(check bool) "raw total stays visible" true
+    (says "18.0k tokens counted across the client turn" rows);
+  Alcotest.(check bool) "total is not context occupancy" false
+    (says "of the window" rows);
+  Alcotest.(check bool) "total does not divide request bytes" true
+    (says "this count is the client turn's total over requests, so it is not divided" rows)
 
 let test_the_request_band_leads_with_the_providers_count () =
   let rows = lines (record ~wire:(Some 560_513) ~scope:per_request ()) in
@@ -228,7 +317,11 @@ let test_no_body_names_what_masc_handed_over () =
     | None -> rows
   in
   Alcotest.(check bool) "and never calls it unobserved" false
-    (says "not observed" request_band)
+    (says "not observed" request_band);
+  Alcotest.(check bool) "the absent history measurement stays explicit" true
+    (says "Conversation history window was not observed" rows);
+  Alcotest.(check bool) "no projected range is invented for an absent measurement" false
+    (Option.is_some (find "projected range" rows))
 
 let with_window measurement turn =
   { turn with
@@ -241,25 +334,39 @@ let with_window measurement turn =
         }
   }
 
-let test_a_wire_shape_cut_is_labelled_sent () =
+let test_a_wire_shape_cut_is_a_projection_not_a_transmission () =
   let rows =
     lines (with_window Turn_record.Wire_shape (record ~wire:(Some 560_513) ~scope:per_request ()))
   in
-  Alcotest.(check bool) "the pointer says sent" true
+  Alcotest.(check bool) "the pointer names a projected range" true
+    (Option.is_some (find "projected range" rows));
+  Alcotest.(check bool) "the wire basis is still explicit" true
+    (Option.is_some (find "wire shape" rows));
+  Alcotest.(check bool) "the recorded atom counts are preserved" true
+    (says "26 of 9137 kept atoms" rows);
+  Alcotest.(check bool) "the omitted count describes this projection" true
+    (says "9111 older atoms were outside this projected range" rows);
+  Alcotest.(check bool) "the pointer does not claim transmission" false
     (Option.is_some (find "sent this turn" rows));
-  Alcotest.(check bool) "9111 atoms stayed behind" true
-    (says "9111 older atoms stayed behind" rows)
+  Alcotest.(check bool) "the row runtime is not attributed to the range" true
+    (says "Range observation runtime: not recorded" rows)
 
-let test_a_durable_shape_cut_is_not_labelled_sent () =
+let test_a_durable_shape_cut_is_prepared_history () =
   let rows =
     lines (with_window Turn_record.Durable_shape (record ~wire:None ~scope:per_request ()))
   in
-  Alcotest.(check bool) "the pointer says in reach" true
-    (Option.is_some (find "in reach this turn" rows));
-  Alcotest.(check bool) "and never sent" false
+  Alcotest.(check bool) "the pointer names prepared history" true
+    (Option.is_some (find "prepared history" rows));
+  Alcotest.(check bool) "the durable basis is still explicit" true
+    (Option.is_some (find "durable shape" rows));
+  Alcotest.(check bool) "and never claims it was sent" false
     (Option.is_some (find "sent this turn" rows));
-  Alcotest.(check bool) "the prose names the resumed client session" true
-    (says "resumed client session already holds the earlier ones" rows)
+  Alcotest.(check bool) "the final client request remains unmeasured" true
+    (says "Measured on the history list prepared for a client; its final request is not measured here" rows);
+  Alcotest.(check bool) "preparation does not prove retained session history" false
+    (says "resumed client session already holds the earlier ones" rows);
+  Alcotest.(check bool) "the row runtime is not attributed to the range" true
+    (says "Range observation runtime: not recorded" rows)
 
 (* A record that carried a body but a conversation-cumulative count: the
    page supplies the ratio and the note says why this turn could not. *)
@@ -335,6 +442,8 @@ let () =
             `Quick test_rows_read_at_the_fleet_figure_when_the_page_has_no_body
         ; Alcotest.test_case "a cumulative count never becomes the ratio" `Quick
             test_a_cumulative_count_never_becomes_the_ratio
+        ; Alcotest.test_case "a client turn total is not context occupancy" `Quick
+            test_a_turn_total_never_becomes_context_occupancy
         ; Alcotest.test_case "a count of unknown scope never becomes the ratio"
             `Quick test_a_count_of_unknown_scope_never_becomes_the_ratio
         ; Alcotest.test_case "the page note says why this turn was refused"
@@ -342,6 +451,10 @@ let () =
         ; Alcotest.test_case
             "attributed rows read at the attributed turn's ratio" `Quick
             test_attributed_rows_read_at_the_attributed_turns_ratio
+        ; Alcotest.test_case "empty turn record keeps the next request forecast"
+            `Quick test_empty_turn_record_keeps_forecast
+        ; Alcotest.test_case "turn read error keeps the next request forecast"
+            `Quick test_turn_read_error_keeps_forecast
         ] )
     ; ( "serialized request"
       , [ Alcotest.test_case "the band leads with the provider's count" `Quick
@@ -352,10 +465,10 @@ let () =
             test_no_body_names_what_masc_handed_over
         ] )
     ; ( "history reach"
-      , [ Alcotest.test_case "a wire shape cut is labelled sent" `Quick
-            test_a_wire_shape_cut_is_labelled_sent
-        ; Alcotest.test_case "a durable shape cut is not labelled sent" `Quick
-            test_a_durable_shape_cut_is_not_labelled_sent
+      , [ Alcotest.test_case "a wire shape cut is a projection, not a transmission" `Quick
+            test_a_wire_shape_cut_is_a_projection_not_a_transmission
+        ; Alcotest.test_case "a durable shape cut is prepared history" `Quick
+            test_a_durable_shape_cut_is_prepared_history
         ] )
     ; ( "token scale"
       , [ Alcotest.test_case "this turn outranks the page" `Quick

@@ -80,6 +80,168 @@ let test_raw_agent_core_api_timeout_preserves_typed_observation () =
   | KPB.Provider_timeout { source = KPB.Agent_core_api; phase = None } -> ()
   | _ -> Alcotest.fail "expected typed phase-free AGENT_CORE API timeout observation"
 
+let check_registry_observation terminal ~core_error ~expected ~expected_timeout_prefix =
+  with_temp_dir "timeout-observation" @@ fun base_path ->
+  let meta = make_meta "timeout-observation" in
+  let raw_error = "synthetic observation" in
+  let reason =
+    Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+      ?core_error terminal ~raw_error
+  in
+  Fun.protect ~finally:R.For_testing.clear (fun () ->
+    ignore (R.For_testing.register ~base_path meta.name meta);
+    R.set_failure_reason ~base_path meta.name reason;
+    let registry_entry =
+      match R.get ~base_path meta.name with
+      | Some entry -> entry
+      | None -> Alcotest.fail "registered keeper disappeared before refresh"
+    in
+    KHL.refresh_failure_reason_after_turn
+      ~registry_entry
+      ~turn_fail_count:1;
+    let stored =
+      match R.get ~base_path meta.name with
+      | Some { last_failure_reason = Some reason; _ } -> reason
+      | _ -> Alcotest.fail "terminal cause was not stored in the registry"
+    in
+    let code, observed =
+      match stored with
+      | R.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
+        let expected_presence =
+          match core_error, expected with
+          | Some _, KPB.Provider_timeout _ -> true
+          | None, _ | Some _, KPB.Not_provider_runtime_failure -> false
+        in
+        Alcotest.(check bool) "typed timeout evidence survives post-turn refresh"
+          expected_presence (Option.is_some agent_core_timeout);
+        code,
+        KPB.classify_provider_runtime_error_record
+          ?agent_core_timeout ~code ~detail ()
+      | _ -> Alcotest.fail "expected the actual provider error registry record"
+    in
+    Alcotest.(check bool) "registry retains the timeout source and phase"
+      true (observed = expected);
+    let expected_summary =
+      match expected_timeout_prefix with
+      | Some prefix ->
+        Printf.sprintf
+          "%s (%s): %s; keeper can soft-fail and retry with provider cooldown."
+          prefix code raw_error
+      | None ->
+        Printf.sprintf
+          "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
+          code raw_error
+    in
+    match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason stored with
+    | Some surface ->
+      Alcotest.(check string) "public status describes the observed failure"
+        expected_summary surface.summary
+    | None -> Alcotest.fail "registry cause was missing from public status")
+
+let check_error_observation err expected expected_timeout_prefix () =
+  Alcotest.(check bool) "raw error retains the timeout source and phase"
+    true (KPB.classify_core_error err = expected);
+  let terminal = Keeper_turn_terminal.of_failure ~raw_error:"synthetic observation" err in
+  check_registry_observation terminal ~core_error:(Some err) ~expected
+    ~expected_timeout_prefix
+
+let timeout_observation_cases =
+  let api phase =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.Timeout { message = "synthetic timeout"; phase })
+  in
+  let network kind timeout_phase =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { provider = "fixture"; kind; timeout_phase; detail = "synthetic timeout" })
+  in
+  [ "API timeout without phase", api None,
+      KPB.Provider_timeout { source = KPB.Agent_core_api; phase = None },
+      Some "API timeout"
+  ; "API timeout with phase", api (Some Llm_provider.Http_client.Non_streaming_body),
+      KPB.Provider_timeout
+        { source = KPB.Agent_core_api; phase = Some KPB.Non_streaming_body },
+      Some "API timeout during non_streaming_body"
+  ; "API stream idle timeout",
+      api (Some (Llm_provider.Http_client.Stream_idle Llm_provider.Http_client.Streaming_thinking)),
+      KPB.Provider_timeout
+        { source = KPB.Agent_core_api; phase = Some (KPB.Stream_idle KPB.Streaming_thinking) },
+      Some "API timeout during stream_idle:streaming_thinking"
+  ; "API explicit unknown phase", api (Some Llm_provider.Http_client.Unknown_timeout),
+      KPB.Provider_timeout
+        { source = KPB.Agent_core_api; phase = Some KPB.Unknown_timeout },
+      Some "API timeout during unknown_timeout"
+  ; "Provider timeout without phase", raw_provider_timeout_error ~phase:None,
+      KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = None },
+      Some "Provider timeout"
+  ; "Provider timeout with phase",
+      raw_provider_timeout_error ~phase:(Some Llm_provider.Http_client.First_token),
+      KPB.Provider_timeout
+        { source = KPB.Agent_core_provider; phase = Some KPB.First_token },
+      Some "Provider timeout during first_token"
+  ; "Provider network timeout with phase",
+      network Llm_provider.Http_client.Timeout
+        (Some Llm_provider.Http_client.Http_operation),
+      KPB.Provider_timeout
+        { source = KPB.Agent_core_provider; phase = Some KPB.Http_operation },
+      Some "Provider timeout during http_operation"
+  ; "Provider network error without timeout evidence",
+      network Llm_provider.Http_client.Dns_failure None,
+      KPB.Not_provider_runtime_failure, None
+  ]
+
+let test_wire_only_api_timeout_does_not_invent_evidence () =
+  let terminal =
+    Keeper_turn_terminal.of_disposition
+      (Keeper_turn_disposition.Provider_error
+         (Keeper_turn_terminal_code.of_core_error_wire "api_error_timeout"))
+  in
+  check_registry_observation terminal ~core_error:None
+    ~expected:KPB.Not_provider_runtime_failure
+    ~expected_timeout_prefix:None
+
+let test_wire_only_provider_timeout_keeps_its_known_phase () =
+  let terminal =
+    Keeper_turn_terminal.of_disposition
+      (Keeper_turn_disposition.Provider_error
+         (Keeper_turn_terminal_code.of_core_error_wire "provider_error_timeout:queue"))
+  in
+  check_registry_observation terminal ~core_error:None
+    ~expected:
+      (KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = Some KPB.Queue })
+    ~expected_timeout_prefix:(Some "Provider timeout during queue")
+
+let test_api_specific_bridge_preserves_timeout_phase () =
+  let error =
+    Llm_provider.Retry.Timeout
+      { message = "synthetic timeout"; phase = Some Llm_provider.Http_client.Queue }
+  in
+  let terminal =
+    Keeper_turn_terminal.of_disposition
+      (Keeper_turn_disposition.Provider_error
+         (Keeper_agent_error.api_error_terminal_reason_code_typed error))
+  in
+  check_registry_observation terminal
+    ~core_error:(Some (Agent_core.Error.Api error))
+    ~expected:
+      (KPB.Provider_timeout { source = KPB.Agent_core_api; phase = Some KPB.Queue })
+    ~expected_timeout_prefix:(Some "API timeout during queue")
+
+let test_provider_network_timeout_without_phase_reaches_registry () =
+  let error =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { provider = "fixture"
+         ; kind = Llm_provider.Http_client.Timeout
+         ; timeout_phase = None
+         ; detail = "synthetic timeout"
+         })
+  in
+  let terminal = Keeper_turn_terminal.of_failure ~raw_error:"synthetic observation" error in
+  check_registry_observation terminal ~core_error:(Some error)
+    ~expected:(KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = None })
+    ~expected_timeout_prefix:(Some "Provider timeout")
+
 let test_tls_handshake_internal_error_is_transient () =
   let err = tls_handshake_internal_error () in
   Alcotest.(check bool)
@@ -265,7 +427,12 @@ let record_failed_turn ~config ~meta err =
   KUF.record_failure_observation ~config ~meta ~terminal_reason ~err ~error_text
 
 let refresh_failure_reason ~base_path ~keeper_name =
-  KHL.refresh_failure_reason_after_turn ~base_path ~keeper_name
+  let registry_entry =
+    match R.get ~base_path keeper_name with
+    | Some entry -> entry
+    | None -> Alcotest.fail "registered keeper disappeared before refresh"
+  in
+  KHL.refresh_failure_reason_after_turn ~registry_entry
     ~turn_fail_count:(R.get_turn_failures ~base_path keeper_name)
 
 let failure_reason ~base_path ~keeper_name =
@@ -316,11 +483,13 @@ let test_crashed_tick_replaces_previous_configuration_cause () =
   let config = Workspace.default_config base_path in
   let meta = make_meta "failure-cause-crash" in
   Fun.protect ~finally:(fun () -> R.For_testing.clear ()) (fun () ->
-    ignore (R.For_testing.register ~base_path meta.name meta);
+    let registry_entry = R.For_testing.register ~base_path meta.name meta in
     record_failed_turn ~config ~meta
       (Agent_core.Error.Config (MissingEnvVar { var_name = "TEST_PROVIDER_KEY" }));
     refresh_failure_reason ~base_path ~keeper_name:meta.name;
-    KHL.record_crashed_cycle_failure ~base_path ~keeper_name:meta.name (Failure "synthetic cycle crash");
+    KHL.record_crashed_cycle_failure
+      ~registry_entry
+      (Failure "synthetic cycle crash");
     refresh_failure_reason ~base_path ~keeper_name:meta.name;
     Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);
     match failure_reason ~base_path ~keeper_name:meta.name with
@@ -348,6 +517,21 @@ let test_extra_system_context_preserves_typed_blocks () =
 let () =
   Alcotest.run "keeper_runtime_observation_boundaries"
   [
+    ( "terminal to registry to status",
+      List.map
+        (fun (name, error, expected, expected_timeout_prefix) ->
+          Alcotest.test_case name `Quick
+            (check_error_observation error expected expected_timeout_prefix))
+        timeout_observation_cases
+      @ [ Alcotest.test_case "wire-only API timeout retains missing evidence" `Quick
+            test_wire_only_api_timeout_does_not_invent_evidence
+        ; Alcotest.test_case "API-specific producer retains phase" `Quick
+            test_api_specific_bridge_preserves_timeout_phase
+        ; Alcotest.test_case "wire-only Provider timeout keeps its known phase" `Quick
+            test_wire_only_provider_timeout_keeps_its_known_phase
+        ; Alcotest.test_case "Provider network timeout without phase reaches registry" `Quick
+            test_provider_network_timeout_without_phase_reaches_registry
+        ] );
     ( "typed observations",
       [
         Alcotest.test_case "raw AGENT_CORE provider timeout remains typed" `Quick

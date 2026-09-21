@@ -292,6 +292,36 @@ let test_prune_keeper_scoped_stores_missing_root () =
   Alcotest.(check int) "missing keepers root counts 0" 0 n;
   Alcotest.(check int) "prune_dir never called" 0 (List.length !visited)
 
+(* An excluded keeper is named; the names a base path declares are the .toml
+   basenames of its keepers directory, and every other file there (memory
+   stores share the directory) declares nobody. *)
+let test_unknown_typesafeai_exclusions_come_from_declarations () =
+  let root = fresh_dir "masc_typesafeai_exclusions" in
+  List.iter
+    (fun name ->
+       Out_channel.with_open_text (Filename.concat root name) (fun oc -> output_string oc ""))
+    [ "alpha.toml"; "beta.toml"; "alpha.memory-current.json" ];
+  let inherited = Runtime_typesafeai_policy.current () in
+  Runtime_typesafeai_policy.publish
+    { Runtime_schema.default_typesafeai with excluded_keepers = [ "alpha"; "gamma" ] };
+  Fun.protect
+    ~finally:(fun () -> Runtime_typesafeai_policy.publish inherited)
+    (fun () ->
+       Alcotest.(check (list string)) "declared names are the toml basenames"
+         [ "alpha"; "beta" ]
+         (SM.declared_keeper_names ~keepers_dir:root
+          |> Result.get_ok
+          |> List.sort compare);
+       Alcotest.(check (list string)) "gamma is no keeper" [ "gamma" ]
+         (SM.unknown_typesafeai_exclusions ~keepers_dir:root |> Result.get_ok));
+  let missing = Filename.concat root "missing" in
+  Alcotest.(check bool) "a missing directory is a read failure" true
+    (Result.is_error (SM.declared_keeper_names ~keepers_dir:missing));
+  Alcotest.(check bool)
+    "an unreadable directory cannot accuse every excluded keeper"
+    true
+    (Result.is_error (SM.unknown_typesafeai_exclusions ~keepers_dir:missing))
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -317,6 +347,11 @@ let () =
             test_prune_keeper_scoped_stores_visits_all_stores;
           Alcotest.test_case "missing keepers root counts zero" `Quick
             test_prune_keeper_scoped_stores_missing_root;
+        ] );
+      ( "typesafeai exclusions",
+        [
+          Alcotest.test_case "unknown names come from the declarations" `Quick
+            test_unknown_typesafeai_exclusions_come_from_declarations;
         ] );
       ( "prune_shared_jsonl_stores",
         [

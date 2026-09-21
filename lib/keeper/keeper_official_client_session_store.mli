@@ -84,6 +84,10 @@ type recovery_resolution_application =
   | Applied
   | Replayed
 
+type recovery_commit =
+  | Committed
+  | Recovery_already_resolved
+
 type recovery_resolution_error =
   | Invalid_resolved_by
   | Invalid_resolved_at
@@ -170,6 +174,46 @@ val tool_surface_sha256 :
 val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
+
+val clear_then :
+  base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result
+(** [clear_then ... after_clear] durably removes the current binding, then runs
+    [after_clear] before releasing the same claim lock. New claims therefore
+    cannot observe an absent binding until the caller's paired durable mutation
+    has finished. [after_clear] must not take this claim lock again, and every
+    other lock it takes is ordered under this one. Missing state still runs
+    [after_clear] without creating the optional session-store directory or its
+    sibling lock. A completed callback result survives a lock-release failure;
+    that release failure is logged separately. A binding that cannot decode is
+    not resumable, so clear warns and removes it under the lock instead of
+    wedging the Keeper permanently. *)
+
+module For_testing : sig
+  val clear_then_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error ->
+    base_path:string ->
+    keeper_name:string ->
+    (unit -> 'a) ->
+    ('a, string) result
+end
+
+val commit_if_input_recovery_current :
+  base_path:string ->
+  keeper_name:string ->
+  expected:Keeper_internal_error.official_client_recovery ->
+  commit:(unit -> unit) ->
+  (recovery_commit, string) result
+(** Run [commit] under the durable session lock only while the same runtime,
+    recovery id, and typed input-rejection reason are still current.
+    [Recovery_already_resolved] means recovery was resolved or replaced before
+    the commit. The callback must not suspend or re-enter this session store.
+    It runs while the file lock is held. The registry-publication callback used
+    by [Keeper_unified_turn_failure] then acquires
+    [Keeper_lifecycle_reservation.with_key_lock], establishing the order
+    session-store lock before lifecycle-reservation lock. Callers must not hold
+    the lifecycle-reservation lock before entering this function. The callback
+    stays inside the lock so recovery cannot change between the current-state
+    check and its publication. *)
 
 val claim_error_to_string : claim_error -> string
 val core_error_of_claim_error : claim_error -> Agent_core.Error.t

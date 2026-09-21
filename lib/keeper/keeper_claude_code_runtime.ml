@@ -80,6 +80,9 @@ let model_input_projection_for_capacity
     ~observed_next_shrink_capacity_bytes
     ~observed_floor_capacity_bytes
     ?on_model_input_window_observation
+    ?carried_front_seed
+    ~keeper_name
+    ~runtime_id
     source_projection
     messages =
   (* Atoms, not messages: the window's front is named by the message that
@@ -99,20 +102,12 @@ let model_input_projection_for_capacity
               projection))
       on_model_input_window_observation
   in
-  let windowed =
+  (* The declared ceiling names a front of its own: the atoms it dropped. The
+     seeded front names another, the range the last completed turn carried on
+     this history, and the two are positions in the same vocabulary. *)
+  let capacity_cut =
     if capacity_bytes = unbounded_model_input_capacity_bytes
-    then (
-      (* No cut is still a reading: everything offered was carried, reported
-         with the atom it starts from. Leaving this branch silent would put
-         the turn record's absent window back for any runtime whose declared
-         cap is unbounded. A list with no atom has no front to report, and
-         [Runtime_model_input_tail_window.observe] reports nothing for it. *)
-      observe_window
-        { Runtime_model_input_tail_window.messages
-        ; dropped_atoms = 0
-        ; atom_count = history_atom_count
-        };
-      Ok messages)
+    then Ok None
     else
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         match
@@ -123,14 +118,45 @@ let model_input_projection_for_capacity
             ~reserved_bytes:0
             messages
         with
-        | Ok projection ->
-          observe_window projection;
-          Ok projection.Runtime_model_input_tail_window.messages
+        | Ok projection -> Ok (Some projection)
         | Error error ->
           Error
             (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
-  let* windowed = windowed in
+  let* capacity_cut = capacity_cut in
+  let windowed =
+    match capacity_cut with
+    | Some projection
+      when projection.Runtime_model_input_tail_window.dropped_atoms
+           >= history_atom_count ->
+      (* The ceiling reached its zero-prior-history floor, which the shrink
+         ladder's last rung composes on purpose. A range always carries the
+         newest atom, so seeding this one would put an atom back into the view
+         the provider just refused. The floor stands. *)
+      observe_window projection;
+      projection.Runtime_model_input_tail_window.messages
+    | Some _ | None ->
+      let own_first_atom =
+        match capacity_cut with
+        | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
+        | None -> 0
+      in
+      let carried =
+        Host.carried_start_range
+          ~keeper_name
+          ~runtime_id
+          ~carried_front_seed
+          ~own_first_atom
+          messages
+      in
+      (* No cut is still a reading: what was carried, reported with the atom
+         it starts from. Leaving it silent would put the turn record's absent
+         window back for any runtime whose declared cap is unbounded and whose
+         seed named no front. A list with no atom has no front to report, and
+         [Runtime_model_input_tail_window.observe] reports nothing for it. *)
+      observe_window carried.Host.projection;
+      carried.Host.messages
+  in
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
       let full_bytes =
@@ -373,8 +399,7 @@ let recovery_failure_of_client_error = function
 ;;
 
 (* The CLI frame carries Anthropic exclusive counts; the shared constructor
-   produces the canonical inclusive api_usage. One mapping for the result
-   frame's total and for the sum a host stop carries. *)
+   produces the canonical inclusive api_usage without changing its scope. *)
 let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
   Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
     ~input_tokens:usage.input_tokens
@@ -401,6 +426,23 @@ module For_testing = struct
   let bounded_probe_config = bounded_probe_config
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
+
+  let start_seed_projection ~capacity_bytes ?carried_front_seed
+        ?on_model_input_window_observation ~keeper_name ~runtime_id messages
+    =
+    model_input_projection_for_capacity
+      ~capacity_bytes
+      ~observed_next_shrink_capacity_bytes:(ref None)
+      ~observed_floor_capacity_bytes:(ref None)
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ~keeper_name
+      ~runtime_id
+      None
+      messages
+  ;;
+
+  let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
 end
 
 (* RFC claude-code-context-overflow-bounded-restart §6.3: the same-run shrink
@@ -1074,12 +1116,20 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            let latency_ms =
              Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)
            in
+           let usage, usage_scope =
+             match turn.usage with
+             | Some (Runtime_claude_code.Latest_request usage) ->
+               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Per_request
+             | Some (Runtime_claude_code.Turn_total usage) ->
+               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Turn_total
+             | None -> None, Runtime_usage_scope.Usage_scope_unavailable
+           in
            let response =
              { Agent_core.Types.id = turn.turn_id
              ; model = turn.model
              ; stop_reason = EndTurn
              ; content = [ Text turn.text ]
-             ; usage = Option.map api_usage_of_turn_usage turn.usage
+             ; usage
              ; telemetry =
                  Some
                    { Agent_core.Types.default_inference_telemetry with
@@ -1131,10 +1181,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                ~capture
                ~attempt_details_source:"claude_code"
                ~agent_core_internal_runtime_allowed:false
-               ~usage_scope:
-                 (if Option.is_some turn.usage
-                  then Runtime_usage_scope.Per_request
-                  else Runtime_usage_scope.Usage_scope_unavailable)
+               ~usage_scope
                ()
            in
            Ok
@@ -1200,6 +1247,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?carried_front_seed
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
@@ -1290,6 +1338,9 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
                     ~observed_next_shrink_capacity_bytes
                     ~observed_floor_capacity_bytes
                     ?on_model_input_window_observation
+                    ?carried_front_seed
+                    ~keeper_name
+                    ~runtime_id
                     model_input_projection))
             (* Reported inside the attempt rather than from the projection.
                The projection cannot see [session_mode], and on this lane that

@@ -70,6 +70,7 @@ type capabilities =
     startup does not use it for admission. [headers] is retained for
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
+let exact_body_timeout_s_key = "exact-body-timeout-s"
 
 type antigravity_effort =
   | Antigravity_low
@@ -118,6 +119,11 @@ type provider =
       On an exact-output lane a target with neither this key nor a body
       budget is rejected at plan admission (Missing_deadline, #36979): the
       wire would otherwise carry no deadline at all. *)
+  ; exact_body_timeout_s : float option
+    (** Explicit total HTTP request deadline for Exact-output calls through
+        this provider, including connection, response headers and the full
+        response body. [None] declares no body deadline. This does not replace
+        [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
@@ -159,50 +165,49 @@ type reasoning_streaming_format =
     duplicated here, to avoid two-SSOT drift. *)
 type model_capabilities =
   { max_output_tokens : int option
-  ; supports_tool_choice : bool
-  ; supports_required_tool_choice : bool
-  ; supports_named_tool_choice : bool
-  ; supports_parallel_tool_calls : bool
+  ; supports_tool_choice : bool option
+  ; supports_required_tool_choice : bool option
+  ; supports_named_tool_choice : bool option
+  ; supports_parallel_tool_calls : bool option
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
   ; reasoning_streaming_format : reasoning_streaming_format option
-  ; supports_image_input : bool
-  ; supports_audio_input : bool
-  ; supports_video_input : bool
-  ; supports_multimodal_inputs : bool
-  ; supports_response_format_json : bool
-  ; supports_structured_output : bool
-  ; supports_system_prompt : bool
-  ; supports_prompt_caching : bool
-  ; supports_top_k : bool
-  ; supports_min_p : bool
-  ; supports_seed : bool
-  ; emits_usage_tokens : bool
+  ; supports_image_input : bool option
+  ; supports_audio_input : bool option
+  ; supports_video_input : bool option
+  ; supports_multimodal_inputs : bool option
+  ; supports_response_format_json : bool option
+  ; supports_structured_output : bool option
+  ; supports_system_prompt : bool option
+  ; supports_prompt_caching : bool option
+  ; supports_top_k : bool option
+  ; supports_min_p : bool option
+  ; supports_seed : bool option
+  ; emits_usage_tokens : bool option
   }
 [@@deriving show, eq]
 
 let model_capabilities_default =
   { max_output_tokens = None
-  ; supports_tool_choice = false
-  ; supports_required_tool_choice = false
-  ; supports_named_tool_choice = false
-  ; supports_parallel_tool_calls = false
+  ; supports_tool_choice = None
+  ; supports_required_tool_choice = None
+  ; supports_named_tool_choice = None
+  ; supports_parallel_tool_calls = None
   ; thinking_control_format = No_thinking_control
   ; declared_thinking_control_format = None
   ; reasoning_streaming_format = None
-  ; supports_image_input = false
-  ; supports_audio_input = false
-  ; supports_video_input = false
-  ; supports_multimodal_inputs = false
-  ; supports_response_format_json = false
-  ; supports_structured_output = false
-  ; supports_system_prompt = false
-  ; supports_prompt_caching = false
-  ; supports_top_k = false
-  ; supports_min_p = false
-  ; supports_seed = false
-  ; (* stricter default: most providers report usage; CLI wrappers opt out *)
-    emits_usage_tokens = true
+  ; supports_image_input = None
+  ; supports_audio_input = None
+  ; supports_video_input = None
+  ; supports_multimodal_inputs = None
+  ; supports_response_format_json = None
+  ; supports_structured_output = None
+  ; supports_system_prompt = None
+  ; supports_prompt_caching = None
+  ; supports_top_k = None
+  ; supports_min_p = None
+  ; supports_seed = None
+  ; emits_usage_tokens = None
   }
 ;;
 
@@ -385,6 +390,39 @@ type exact_output_lane_decl =
     Routes/aliases/profiles/system_targets/strategy from the deleted
     [runtime_config] are dropped (RFC-0206 §5): the single-binding Runtime model
     has no routing layer. *)
+(** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. The key stays in
+    the environment ([TYPESAFEAI_API_KEY]); everything else about the lane is
+    here. [lane_enabled] turns the lane off; it cannot turn it on without a
+    key. Two gates ask the vendor: [board_attention] (the Board attention
+    judgment, {!Keeper_board_attention_exact_flow}, which sends the post and
+    the keeper's context) and [absorb_gate] (the librarian absorb gate,
+    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Both reach
+    the same endpoint, so one [excluded_keepers] answers for both: a keeper
+    named there is never asked about, whichever gate asks. *)
+type typesafeai =
+  { lane_enabled : bool
+  ; lane_endpoint : string
+  ; lane_model : string
+  ; board_attention : bool
+  ; absorb_gate : bool
+  ; excluded_keepers : string list
+  }
+[@@deriving show, eq]
+
+(* What an absent [typesafeai] table means: the lane on when a key is set,
+   the vendor's own endpoint and latest model, Board attention on, the absorb
+   gate off (it sends memories out, so the operator turns it on by name),
+   nobody excluded. *)
+let default_typesafeai =
+  { lane_enabled = true
+  ; lane_endpoint = "https://api.typesafe.ai/v1/systemone"
+  ; lane_model = "jev-latest"
+  ; board_attention = true
+  ; absorb_gate = false
+  ; excluded_keepers = []
+  }
+;;
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -426,6 +464,8 @@ type config =
         Replaces {!Lsp_process_manager.command_of_language} for that language
         and no other. A key naming no language, or a value that is not a
         non-empty array of strings, is refused at load. *)
+  ; typesafeai : typesafeai
+    (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list
     (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
         reach (RFC-0415). Beside the endpoint registry rather than in the

@@ -13,6 +13,7 @@ include Dashboard_goals_types
 
 let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       let error = Printexc.to_string exn in
       `Assoc

@@ -355,7 +355,8 @@ export function operatorDispositionLabel(value: string | null | undefined): stri
 const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   healthy: '정상',
   runtime_exhausted: '런타임 후보 소진',
-  preflight_config_error: '실행 전 설정 오류',
+  config_invalid: '실행 전 설정 오류 - toml 을 고쳐야 함',
+  authorization_refused: '제공자가 거절함 - 대개 사용량 한도, 슬롯을 옮겨야 함',
   degraded_retry: '저하 상태 재시도',
   runtime_fallback: '런타임 폴백',
   transient_runtime_retry: '일시적 런타임 재시도',
@@ -366,6 +367,7 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
   transcript_corruption: '도구 호출 기록이 끊김 - 재기동 때 자동 복구',
+  official_client_recovery_required: '공식 클라이언트 세션 복구 필요',
   provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
   // tool_correction_lost has been a backend reason since #29038 and was
   // missing here, so the table fell back to printing the raw wire string.

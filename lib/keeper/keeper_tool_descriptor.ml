@@ -106,6 +106,7 @@ type runtime_handler =
   | Tool_context_status
   | Tool_peer_artifact
   | Tool_artifact_read
+  | Tool_skill_validate
   | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract
@@ -238,6 +239,7 @@ let runtime_handler_to_string = function
   | Tool_context_status -> "tool_context_status"
   | Tool_peer_artifact -> "keeper_artifact_transfer"
   | Tool_artifact_read -> "tool_artifact_read"
+  | Tool_skill_validate -> "tool_skill_validate"
   | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_retract -> "tool_memory_retract"
@@ -464,6 +466,7 @@ let descriptor
       | Tool_context_status
       | Tool_peer_artifact
   | Tool_artifact_read
+      | Tool_skill_validate
       | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_library_search
@@ -2406,6 +2409,17 @@ let internal_descriptors : t list =
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.skill.validate"
+      ~name:Keeper_runtime_schemas_toml.skill_validate.name
+      ~description:Keeper_runtime_schemas_toml.skill_validate.description
+      ~input_schema:Keeper_runtime_schemas_toml.skill_validate.input_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_skill_validate
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:workspace_memory_schema_source
       ~id:"keeper.workspace.memory.read"
       ~name:"keeper_workspace_memory_read"
@@ -2871,6 +2885,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "dos_screen" "masc_dos_screen" ~readonly:true
   ; masc_misc_descriptor "dos_step" "masc_dos_step" ~readonly:false
   ; masc_misc_descriptor "dos_press" "masc_dos_press" ~readonly:false
+  ; masc_misc_descriptor "dos_click" "masc_dos_click" ~readonly:false
   ; masc_misc_descriptor "dos_type" "masc_dos_type" ~readonly:false
   ; masc_misc_descriptor "dos_peek" "masc_dos_peek" ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"

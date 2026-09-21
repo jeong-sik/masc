@@ -56,10 +56,19 @@ val preflight_slots
     place it reaches disk; this function is the one place the classification
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
-type trigger = Conversation_completed | Queue_changed
+type trigger = Conversation_completed | Queue_changed | Durable_range
+
+type input_projection =
+  | Recent_window
+  | Already_selected_range
 
 val run_best_effort
   :  ?trigger:trigger
+  -> ?input_projection:input_projection
+  -> ?on_memory_committed:(unit -> unit)
+       (** Synchronous observation at the snapshot commit. Must only update
+           caller-owned in-memory state, without I/O, yielding or raising. *)
+  -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
        (** Injectable effect edge for the cli lane-slot fallback walked after
            catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
@@ -70,8 +79,14 @@ val run_best_effort
   -> expected_revision:int option
   -> Keeper_librarian.input
   -> unit
-(** Execute a Librarian unit already admitted and fenced by the post-turn
-    entrypoint. This runtime owns cadence, not the live configuration gate. *)
+(** Execute a Librarian unit already admitted by its producer. The default
+    [Recent_window] preserves the direct official-client path. A durable range
+    consumer passes [Already_selected_range], because applying the retired
+    recent-message window again would drop the front of the selected range.
+    [on_memory_committed] runs only after the current Memory OS snapshot write
+    succeeds. [durable_range_id] is committed through the Memory store's WAL
+    sidecar, so a durable consumer can recover a later progress-file failure
+    without submitting the completed-turn range again. *)
 
 module For_testing : sig
   type classified_error
@@ -100,4 +115,9 @@ module For_testing : sig
     -> detail:string
     -> cadence_deferred:bool
     -> unit
+
+  val input_for_projection
+    :  input_projection
+    -> Keeper_librarian.input
+    -> Keeper_librarian.input
 end

@@ -346,7 +346,7 @@ let composite_snapshot_is_idle snapshot =
 let composite_execution_config_blocked execution =
   string_opt_is_any
     (json_string "operator_disposition_reason" execution)
-    [ "preflight_config_error" ]
+    [ "config_invalid"; "authorization_refused" ]
 ;;
 
 let composite_execution_claim_no_eligible execution =

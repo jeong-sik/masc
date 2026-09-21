@@ -417,6 +417,30 @@ let json_string_opt = function
   | Some value -> `String value
 ;;
 
+type jev_lane_readiness =
+  | Jev_off
+  | Jev_configured of { model : string }
+  | Jev_cli_only
+  | Jev_lane_unavailable
+
+let jev_lane_readiness configuration = function
+  | Typesafeai_config.Off -> Jev_off
+  | Typesafeai_config.Configured { model } ->
+    (match configuration with
+     | Configured { admitted_slots = _ :: _; _ } -> Jev_configured { model }
+     | Configured { admitted_slots = []; cli_slots = _ :: _; _ } -> Jev_cli_only
+     | Configured { admitted_slots = []; cli_slots = []; _ }
+     | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
+;;
+
+let jev_readiness_json = function
+  | Jev_off -> `Assoc [ "state", `String "off" ]
+  | Jev_cli_only -> `Assoc [ "state", `String "cli_only" ]
+  | Jev_lane_unavailable -> `Assoc [ "state", `String "lane_unavailable" ]
+  | Jev_configured { model } ->
+    `Assoc [ "state", `String "configured"; "model", `String model ]
+;;
+
 let terminal_of_exact_outcome = function
   | Exact_lane_run_registry.Succeeded -> Succeeded
   | Exact_lane_run_registry.Cancelled -> Cancelled
@@ -566,6 +590,7 @@ let slot_counts runs =
 let lane_json
       ~now:_
       ~resolve_lane
+      ~jev_readiness
       (all_runs : observed_run list)
       (spec : lane_spec)
   =
@@ -637,8 +662,15 @@ let lane_json
       then Some (run.started_at +. terminal.elapsed_s)
       else None)
   in
+  let jev_field =
+    if
+      String.equal spec.lane_id
+        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention)
+    then [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
+    else []
+  in
   `Assoc
-    [ "lane_id", `String spec.lane_id
+    ([ "lane_id", `String spec.lane_id
     ; "label", `String spec.label
     ; "purpose", `String spec.purpose
     ; "required", `Bool spec.required
@@ -669,11 +701,13 @@ let lane_json
                 `Assoc [ "slot_id", `String slot_id; "count", `Int count ])
              (slot_counts runs)) )
     ]
+     @ jev_field)
 ;;
 
 let snapshot_json_with
       ~now
       ~resolve_lane
+      ~jev_readiness
       ~exact_runs_total
       ~exact_runs
       ~verification_runs
@@ -687,7 +721,7 @@ let snapshot_json_with
   let exact_run_projection_count = List.length exact_runs in
   let exact_run_source_total = max exact_run_projection_count exact_runs_total in
   `Assoc
-    [ "schema", `String "masc.standalone_llm_lanes.v1"
+    [ "schema", `String "masc.standalone_llm_lanes.v2"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "observed_at_unix", `Float now
     ; "observation_only", `Bool true
@@ -695,7 +729,11 @@ let snapshot_json_with
     ; "exact_run_source_total", `Int exact_run_source_total
     ; ( "exact_run_projection_truncated"
       , `Bool (exact_run_projection_count < exact_run_source_total) )
-    ; "lanes", `List (List.map (lane_json ~now ~resolve_lane all_runs) lane_specs)
+    ; ( "lanes"
+      , `List
+          (List.map
+             (lane_json ~now ~resolve_lane ~jev_readiness all_runs)
+             lane_specs) )
     ]
 ;;
 
@@ -714,17 +752,70 @@ let live_lane_configuration registry lane_id =
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots; cli_slots } ->
+    (* [verifier_exact] dispatches each of its slots as a judge, so the ids it
+       can actually judge through are a shorter list than the declaration
+       whenever one names a binding that takes no inline tools or no system
+       prompt, a client with no native-tool suppression, or a Claude Code
+       binding without tools-support. Showing the declaration here would read
+       as a configured judge that then refuses every review (#37179, #37382).
+       Sibling lanes answer an unresolved cli id with a typed error at
+       execution and walk on, so their declaration is what to show. *)
+    let registry_admitted_catalog_slots =
+      List.map
+        (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+        selected_slots
+    in
+    let admitted_catalog_slots, admitted_cli_slots, slot_rejections =
+      match
+        Runtime.exact_lane_of_id lane_id,
+        Runtime_exact_output_registry.declared_lane registry ~lane_id
+      with
+      | Some Runtime.Verifier, Some declared ->
+        let lane =
+          Runtime.verifier_exact_lane_admission ~declared ~registry_admitted_catalog_slots
+        in
+        ( lane.Runtime.admitted_catalog_slot_ids
+        , lane.Runtime.admitted_cli_slot_ids
+        , lane.Runtime.slot_rejections )
+      | Some Runtime.Verifier, None
+      | Some
+          ( Runtime.Librarian
+          | Runtime.Hitl_auto_judge
+          | Runtime.Board_attention
+          | Runtime.Workspace_curator )
+        , _
+      | None, _ -> registry_admitted_catalog_slots, cli_slots, []
+    in
+    let dropped_slots =
+      dropped_slots
+      @ List.map
+          (fun (rejection : Runtime.verifier_slot_rejection) ->
+             rejection.Runtime.slot_id)
+          slot_rejections
+    in
     Configured
-      { admitted_slots =
-          List.map
-            (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-            selected_slots
-      ; cli_slots
+      { admitted_slots = admitted_catalog_slots
+      ; cli_slots = admitted_cli_slots
       ; dropped_slots
       ; admission_error =
-          if String.equal lane_id Server_workspace_memory_curator.lane_id && cli_slots <> []
-          then Some "Workspace curator requires admitted exact-output slots; CLI tails are not supported"
-          else None
+          (match admitted_catalog_slots, admitted_cli_slots with
+           | [], [] ->
+             (match slot_rejections with
+              | [] -> None
+              | _ :: _ as rejections ->
+                Some
+                  (String.concat
+                     "; "
+                     (List.map Runtime.verifier_slot_rejection_to_string rejections)))
+           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
+             if
+               String.equal lane_id Server_workspace_memory_curator.lane_id
+               && admitted_cli_slots <> []
+             then
+               Some
+                 "Workspace curator requires admitted exact-output slots; CLI tails \
+                  are not supported"
+             else None)
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured
@@ -773,6 +864,7 @@ let snapshot_json () =
   snapshot_json_with
     ~now:(Time_compat.now ())
     ~resolve_lane
+    ~jev_readiness:(Typesafeai_config.readiness ())
     ~exact_runs_total:(List.length exact_run_source)
     ~exact_runs
     ~verification_runs:

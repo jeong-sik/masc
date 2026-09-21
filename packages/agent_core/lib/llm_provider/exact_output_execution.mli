@@ -39,6 +39,7 @@ type one_dispatch_receipt =
 type execute_once_error_cause =
   | Clock_required_for_timeout
   | Frozen_request_mismatch
+  | Response_body_deadline_exceeded
   | Provider_error of Http_client.http_error
   | Output_normalization_failed of output_normalization_error
 

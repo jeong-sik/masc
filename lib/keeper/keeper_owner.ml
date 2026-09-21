@@ -4,12 +4,13 @@ let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
 let notify_state_change_observer ~keeper_name =
-  try (Atomic.get state_change_observer) () with
-  | exn ->
-    Log.Keeper.warn
-      "keeper Owner state-change observer failed keeper=%s: %s"
-      keeper_name
-      (Printexc.to_string exn)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "keeper Owner state-change observer failed keeper=%s: %s"
+        keeper_name
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ())
 ;;
 
 type store =
@@ -451,12 +452,13 @@ let notify_turn_slot_released t =
     if Option.is_none (Atomic.get t.turn_in_flight) && !(t.autonomous_lost_slot)
     then (
       t.autonomous_lost_slot := false;
-      try notify () with
-      | exn ->
-        Log.Keeper.routine
-          ~keeper_name:t.keeper_name
-          "turn slot release listener raised: %s"
-          (Printexc.to_string exn))
+      Cancel_safe.observe
+        ~on_exn:(fun exn ->
+          Log.Keeper.routine
+            ~keeper_name:t.keeper_name
+            "turn slot release listener raised: %s"
+            (Printexc.to_string exn))
+        notify)
 ;;
 
 let turn_lane_to_string = function
@@ -1077,6 +1079,7 @@ let start
                    (Printexc.to_string exn));
               `Stop_daemon)
           with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
             Log.Keeper.warn
               "keeper_owner: cooling retry wake not scheduled keeper=%s error=%s"
@@ -1123,6 +1126,7 @@ let start
                 (Printexc.to_string exn));
            `Stop_daemon)
        with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Keeper.warn
            "keeper_owner: transient retry wake not scheduled keeper=%s error=%s"
@@ -1869,7 +1873,27 @@ let start
                                      });
                                 run ()))
                          with
-                         | exn -> Error (exn, Printexc.get_raw_backtrace ())
+                         (* Two different cancellations land here and both
+                            belong in [outcome] rather than on the stack.
+
+                            An operator interrupt fails [child_sw] from
+                            above, so it is the child's own result;
+                            [run_autonomous_if_idle] re-raises it at the
+                            bottom of this file with this backtrace, in the
+                            fiber that asked for the turn.
+
+                            An ambient cancellation reaches this fiber
+                            because [sw] is the server root switch
+                            ([keeper_owner_registry.ml] passes [pool.sw],
+                            which is the switch [bin/main_eio.ml] fails on
+                            shutdown). Raising here would escape the
+                            [Fiber.fork ~sw] body, and eio hands that to
+                            [Switch.fail sw] -- so one cancelled turn would
+                            turn a clean shutdown into an error exit. It
+                            would also skip the [child_cancel] reset, the
+                            [notify] below and [resolve], leaving whoever
+                            awaits the promise parked forever. *)
+                         | exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: carried out as a value and re-raised in the requesting fiber; raising here fails the root switch *)
                        in
                        Atomic.set t.child_cancel None;
                        notify
@@ -2050,6 +2074,20 @@ let run_autonomous_if_idle t run =
        escape into the keepalive fiber, and the registry recorded a crash
        and restarted the Keeper for an operator's message. *)
     Ok `Interrupted
+  (* A [Cancelled] arriving here came from the server root switch, which is
+     also this fiber's ancestor: [pool.sw] is the switch [bin/main_eio.ml]
+     fails on shutdown, and the HTTP listener and its per-connection switches
+     hang off the same root. [Cancel.cancel] walks that tree in one recursion
+     (eio [cancel.ml:134-146]), so by the time the child's outcome gets here
+     this fiber is cancelled too and re-raising is the consistent answer --
+     [Eio.Fiber.check ()] would raise the same way.
+
+     That holds only while every caller shares the root. [cancel_child] skips
+     a protected context ([cancel.ml:145]), so wrapping a call to this
+     function in [Eio.Cancel.protect] would leave the caller running while
+     the owner is cancelled, and this line would then raise a cancellation
+     the caller's own context never produced. Nothing in the types prevents
+     that; this comment is the only thing that does. *)
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
 ;;
@@ -2062,6 +2100,11 @@ let run_maintenance_if_idle t run =
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
   | Ok (Autonomous_raised (Stop_active_child, _)) -> Error Owner_stopping
+  (* Same reasoning as the autonomous lane above, and the same way to break
+     it: the four callers of this function all sit under the server root
+     switch, so a cancellation that reached the owner reached them too. A
+     caller wrapped in [Eio.Cancel.protect] would not be, and this line would
+     hand it a cancellation its own context never produced. *)
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
 ;;

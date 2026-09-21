@@ -56,6 +56,22 @@ type t =
   ; change : change
   }
 
+(** Identity of one selected durable completed-turn range. Boundary row
+    identities distinguish restarted histories that reuse atom numbers and
+    checkpoint digests. *)
+type durable_range_id =
+  { receipt_scope : string
+      (** Stable runtime-cluster scope. Receipts for the same Keeper name in
+          other clusters remain independently recoverable. *)
+  ; trace_id : string
+  ; history_start_boundary_line : int
+  ; start_atom : int
+  ; end_atom : int
+  ; last_atom_digest : string
+  ; end_boundary_line : int
+  ; boundary_lines_seen : int
+  }
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -117,6 +133,11 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
     Never read on the turn path. *)
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
+val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> string
+(** WAL sidecar joining each runtime cluster's typed durable completed-turn
+    range identity to the exact shared Memory snapshot revision and bytes
+    produced from it. *)
+
 (** Record a librarian pass that produced no snapshot. The commit path already
     journals its own line, so this is the failure counterpart and never runs
     after a successful commit. Append failure degrades to a warning: the pass
@@ -160,9 +181,24 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
 
+val committed_durable_range
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> receipt_scope:string
+  -> (durable_range_id option, string) result
+(** Return this runtime cluster's last completed-turn range whose receipt is still proved by the
+    current Memory snapshot. A prepared receipt requires its exact snapshot
+    revision and SHA-256. A committed receipt accepts that same snapshot or a
+    higher parsed revision written later under the same store lock. Missing,
+    lower, or same-revision/different-byte snapshots invalidate the receipt.
+    Other cluster receipts share the sidecar but are not replaced by this
+    scope's commit. *)
+
 val apply_disposition
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?on_committed:(t -> unit)
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
+  -> ?durable_range_id:durable_range_id
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> keepers_dir:string
   -> keeper_id:string
@@ -187,6 +223,17 @@ val apply_disposition
     A fact the decision never mentions is left alone. A retired fact is retired
     even if the keeper re-observed it during the pass: the judgment was about
     the claim, and a re-observation does not answer it.
+
+    [on_committed] observes the successful snapshot replacement before any
+    later journal, receipt, unlock or notification can be interrupted. It runs
+    once under the store locks and must only update caller-owned in-memory
+    state: no I/O, yielding or exceptions. It is not a scheduling callback.
+
+    [durable_range_id] joins this disposition to the completed-turn range that
+    produced it. The store writes a prepared transaction receipt
+    before replacing the snapshot and marks it committed afterwards. Recovery
+    compares a prepared receipt with the exact snapshot SHA-256, so neither
+    side of a process interruption is guessed.
 
     An [absorbed] fact that is still current leaves the snapshot too, and its
     row is appended to {!Keeper_memory_absorbed} under the lock, after the next

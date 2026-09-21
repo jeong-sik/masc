@@ -147,12 +147,77 @@ let test_other_failures_without_a_suffix_keep_the_cadence () =
     [ ( "network transient"
       , KFR.Retry_after_observed
           { retry_class = KFR.Network_transient; retry_after = None } )
+    ; ( "empty completion"
+      , KFR.Retry_after_observed
+          { retry_class =
+              KFR.Empty_completion { stop_reason = Agent_core.Types.EndTurn }
+          ; retry_after = None
+          } )
     ; ( "server error"
       , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
     ; ( "provider timeout"
       , KFR.Retry_after_observed
           { retry_class = KFR.Provider_timeout; retry_after = None } )
     ; "model unavailable", KFR.Rotate_now { rotate = KFR.Model_unavailable }
+    ]
+;;
+
+(* #36583: the deferred suffix is the unfinished turn. It starts the next
+   cycle even when no second Event Queue stimulus exists. Resting paths and
+   ordinary cadence retain the previous acknowledged-pending rule, so #34653
+   still prevents a queued wake from cutting a provider rest short. *)
+let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
+  let continued =
+    Some (Loop.Continue_on_deferred_lane { next_runtime_id = "lane-b" })
+  in
+  let waiting =
+    Some
+      (Loop.Wait_for_path_release
+         { release_at = now +. 60.0
+         ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
+         ; waiting_on = "lane-a"
+         })
+  in
+  let pending_calls = ref 0 in
+  check bool
+    "deferred unfinished input starts without acknowledging stimuli"
+    true
+    (Loop.For_testing.next_cycle_starts_now
+       ~after_failure:continued
+       ~stimuli_acked:false
+       ~pending_stimulus:(fun () ->
+         incr pending_calls;
+         false));
+  check int "the deferred path does not inspect the Event Queue" 0 !pending_calls;
+  List.iter
+    (fun (label, after_failure) ->
+       check bool
+         label
+         false
+         (Loop.For_testing.next_cycle_starts_now
+            ~after_failure
+            ~stimuli_acked:false
+            ~pending_stimulus:(fun () ->
+              incr pending_calls;
+              true)))
+    [ "a resting path with unacked stimuli keeps sleeping", waiting
+    ; "ordinary cadence with unacked stimuli keeps sleeping", None
+    ];
+  check int "unacked outcomes do not inspect the Event Queue" 0 !pending_calls;
+  List.iter
+    (fun (label, after_failure, stimuli_acked, pending_stimulus, expected) ->
+       check bool
+         label
+         expected
+         (Loop.For_testing.next_cycle_starts_now
+            ~after_failure
+            ~stimuli_acked
+            ~pending_stimulus:(fun () -> pending_stimulus)))
+    [ "deferred unfinished input starts without a stimulus", continued, false, false, true
+    ; "a resting path keeps sleeping", waiting, false, true, false
+    ; "an acknowledged pending stimulus retains the existing wake", waiting, true, true, true
+    ; "ordinary cadence keeps sleeping without a pending stimulus", None, true, false, false
+    ; "ordinary cadence retains the existing wake", None, true, true, true
     ]
 ;;
 
@@ -210,7 +275,17 @@ let exhausted_route label terminal =
 ;;
 
 let observed_failure_routes =
-  [ "no progress truncated", KFR.Rotate_now { rotate = KFR.No_progress_truncated }
+  let empty_completion =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.EmptyCompletion
+         { provider = "openrouter"
+         ; stop_reason = Agent_core.Types.EndTurn
+         ; detail = "empty assistant turn"
+         })
+    |> KFR.route_of_error ~boundary:KFR.Agent_core_execution
+  in
+  [ "typed empty completion", empty_completion
+  ; "no progress truncated", KFR.Rotate_now { rotate = KFR.No_progress_truncated }
   ; "no progress empty", KFR.Rotate_now { rotate = KFR.No_progress_empty }
   ; ( "no progress thinking only"
     , KFR.Rotate_now { rotate = KFR.No_progress_thinking_only } )
@@ -515,6 +590,10 @@ let () =
             "other failures without a suffix keep the cadence"
             `Quick
             test_other_failures_without_a_suffix_keep_the_cadence
+        ; test_case
+            "a serving deferred suffix starts without another stimulus"
+            `Quick
+            test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus
         ] )
     ]
 ;;

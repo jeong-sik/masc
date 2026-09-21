@@ -299,6 +299,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Task_outcome_pending
   | Task_cancellation_pending
   | Workspace_message_pending
+  | Deferred_runtime_lane_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -378,7 +379,7 @@ let collect_own_recent_board_posts ~(meta : keeper_meta) : Board.post list =
         ~limit:max_posts
         ()
     with
-    | exn ->
+    | exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-raising the same exception eleven lines down, past the guard's eight-line lookahead. *)
       (* Same fail-loud contract as board event collection: counted, warned,
          re-raised — never an empty list on a storage failure. *)
       Otel_metric_store.inc_counter
@@ -1670,7 +1671,7 @@ let has_pending_task_cancellation (observation : world_observation) =
   List.exists is_task_cancellation_event observation.pending_board_events
 ;;
 
-type cycle_wake = Periodic_tick | Attention_wake
+type cycle_wake = Periodic_tick | Attention_wake | Deferred_runtime_lane
 
 let keeper_cycle_decision
       ?(wake = Periodic_tick)
@@ -1687,6 +1688,7 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
+  let deferred_runtime_lane_pending = wake = Deferred_runtime_lane in
   (* A scheduler wake delivered through the event queue is a scheduled
      stimulus, not a reactive one. Routing it through the reactive trigger
      list ran the turn with [channel = Reactive], which applied the
@@ -1710,6 +1712,7 @@ let keeper_cycle_decision
       | Task_outcome_pending
       | Task_cancellation_pending
       | Workspace_message_pending
+      | Deferred_runtime_lane_pending
       | Scheduled_autonomous_turn
       | Task_backlog _
       | Never_started -> false)
@@ -1742,6 +1745,7 @@ let keeper_cycle_decision
                  | Task_outcome_pending
                  | Task_cancellation_pending
                  | Workspace_message_pending
+                 | Deferred_runtime_lane_pending
                  | Scheduled_autonomous_turn
                  | Scheduled_automation_due
                  | Task_backlog _
@@ -1794,7 +1798,10 @@ let keeper_cycle_decision
         scheduled_due_from_queue
         || observation.scheduled_automation.due_ready_count > 0
       in
-      if not proactive_gate_enabled && not requested_schedule_due
+      if
+        not proactive_gate_enabled
+        && not requested_schedule_due
+        && not deferred_runtime_lane_pending
       then
         { should_run = false
         ; channel = Scheduled_autonomous
@@ -1834,14 +1841,24 @@ let keeper_cycle_decision
           ]
           |> List.filter_map Fun.id
         in
+        let first_reason, remaining_reasons =
+          if deferred_runtime_lane_pending
+          then Deferred_runtime_lane_pending, Scheduled_autonomous_turn :: run_reasons
+          else Scheduled_autonomous_turn, run_reasons
+        in
         { should_run = true
         ; channel = Scheduled_autonomous
-        ; verdict = Run { reasons = Scheduled_autonomous_turn, run_reasons }
+        ; verdict = Run { reasons = first_reason, remaining_reasons }
         ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
         })
     in
     match reactive_triggers with
     | first :: rest when reactive_gate_enabled ->
+      let rest =
+        if deferred_runtime_lane_pending
+        then rest @ [ Deferred_runtime_lane_pending ]
+        else rest
+      in
       { should_run = true
       ; channel = Reactive
       ; verdict = Run { reasons = first, rest }

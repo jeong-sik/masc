@@ -112,6 +112,12 @@ export function normalizeTask(raw: unknown): Task | null {
     description_revision: asString(raw.description_revision),
     status: normalizeTaskStatus(raw.status),
     status_raw: asString(raw.status_raw) ?? null,
+    // The task status carries the verification question ("complete" | "cancel")
+    // at the top level (task_to_yojson merges task_status_to_yojson). It is the
+    // reliable stop signal; the request's cancellation_reason is null for a stop
+    // submitted before the record kept the sentence.
+    verification_intent:
+      raw.intent === 'cancel' || raw.intent === 'complete' ? raw.intent : null,
     priority: asNumber(raw.priority),
     assignee: asString(raw.assignee),
     description: typeof raw.description === 'string' ? raw.description : undefined,

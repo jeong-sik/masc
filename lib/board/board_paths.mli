@@ -18,5 +18,3 @@ val reactions_path : unit -> string
 val sub_boards_path : unit -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir : unit -> unit
-val max_jsonl_bytes : int
-val rotate_if_needed : string -> unit

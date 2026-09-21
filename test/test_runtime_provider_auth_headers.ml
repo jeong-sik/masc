@@ -42,6 +42,7 @@ let runpod_provider =
   ; healthcheck_path = None
   ; headers = None
   ; connect_timeout_s = None
+  ; exact_body_timeout_s = None
   ; antigravity_cli = None
   }
 
@@ -304,6 +305,39 @@ let test_runtime_toml_rejects_wrong_typed_provider_connect_timeout () =
       errors
       "providers.runpod_mtp.connect-timeout-s"
       (Runtime_schema.connect_timeout_s_key ^ " must be a float")
+
+let test_runtime_toml_rejects_invalid_exact_body_timeout () =
+  let key = Runtime_schema.exact_body_timeout_s_key in
+  List.iter
+    (fun raw ->
+       let content =
+         runtime_toml_with_credentials
+           ~provider_extra:(key ^ " = " ^ raw)
+           inline_credentials
+       in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected %s = %s to be rejected" key raw
+       | Error errors ->
+         check_parse_error_contains
+           errors
+           ("providers.runpod_mtp." ^ key)
+           "positive finite float")
+    [ "0.0"; "-1.0"; "nan"; "inf" ]
+
+let test_runtime_toml_rejects_wrong_typed_exact_body_timeout () =
+  let key = Runtime_schema.exact_body_timeout_s_key in
+  List.iter
+    (fun raw ->
+       let content =
+         runtime_toml_with_credentials
+           ~provider_extra:(key ^ " = " ^ raw)
+           inline_credentials
+       in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected %s = %s to be rejected" key raw
+       | Error errors ->
+         check_parse_error errors ("providers.runpod_mtp." ^ key) (key ^ " must be a float"))
+    [ "30"; "\"30\"" ]
 
 let test_runtime_toml_rejects_missing_env_credential_key () =
   let content =
@@ -997,7 +1031,10 @@ let test_runtime_toml_accepts_glm_coding_capability () =
     (match model.capabilities with
      | Some caps ->
        check (option int) "max output" (Some 128000) caps.max_output_tokens;
-       check bool "forced tool choice disabled" false caps.supports_tool_choice
+       (* This test is about the parser accepting the declaration, so the
+          declaration is what it asserts. *)
+       check (option bool) "forced tool choice declared off" (Some false)
+         caps.supports_tool_choice
      | None -> fail "expected model capabilities")
   | models -> failf "expected one model, got %d" (List.length models)
 
@@ -1014,8 +1051,6 @@ let test_runtime_adapter_materializes_glm_coding_provider () =
     check (option int) "max_context" (Some 200000) provider_cfg.max_context;
     check (option int) "max_tokens is not synthesized from capability" None
       provider_cfg.max_tokens;
-    check (option bool) "tool choice override" (Some false)
-      provider_cfg.supports_tool_choice_override;
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))
 
@@ -1033,7 +1068,7 @@ let test_runtime_adapter_file_credentials () =
       ; bindings = [ runpod_binding ]
       ; default_runtime_id = Some "runpod_mtp.qwen"
       ; keeper_assignments = []; media_failover = []; lane_decls = []
-      ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+      ; exact_output_lane_decls = []; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
       ; egress_allowlists = []; lsp_servers = []
       }
     in
@@ -1084,7 +1119,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1119,7 +1154,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1155,7 +1190,7 @@ let provider_cfg () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1256,7 +1291,7 @@ thinking_control_format = "ollama_think"
          ; media_failover = []
          ; lane_decls = []
          ; exact_output_lane_decls = []
-         ; exec_ssh_endpoints = []
+         ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
          ; egress_allowlists = []
          ; lsp_servers = []
          }
@@ -1297,7 +1332,7 @@ let glm_vision_binding_config ~runtime_caps =
     { Runtime_schema.providers = [ provider ]; models = [ model ]
     ; bindings = [ binding ]; default_runtime_id = Some "glm-coding.glm-4.6v"
     ; keeper_assignments = []; media_failover = []; lane_decls = []
-    ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+    ; exact_output_lane_decls = []; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []; lsp_servers = [] }
   in
   match Runtime_adapter.binding_to_provider_config cfg binding with
@@ -1441,7 +1476,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1549,7 +1584,7 @@ let test_runtime_of_binding_preserves_failure_reason () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1781,7 +1816,7 @@ let test_dashboard_runtime_probe_groups_models_by_provider () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -2912,6 +2947,14 @@ let () =
             "runtime TOML threads provider connect timeout"
             `Quick
             test_runtime_toml_threads_provider_connect_timeout
+        ; test_case
+            "runtime TOML rejects invalid exact body deadlines"
+            `Quick
+            test_runtime_toml_rejects_invalid_exact_body_timeout
+        ; test_case
+            "runtime TOML rejects wrong-typed exact body deadlines"
+            `Quick
+            test_runtime_toml_rejects_wrong_typed_exact_body_timeout
         ; test_case
             "runtime TOML threads model sampling config"
             `Quick

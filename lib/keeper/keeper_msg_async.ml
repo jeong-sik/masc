@@ -542,7 +542,7 @@ let with_keeper_lane_lock observation table ~lane_label ?wait_budget ~base_path 
           let outcome =
             match f () with
             | value -> Lane_lock_returned value
-            | exception exn ->
+            | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. The exception is stashed as Lane_lock_raised and thrown again at line 563 once the lane in-flight counter is decremented. *)
               Lane_lock_raised (exn, Printexc.get_raw_backtrace ())
           in
           `Persistence (outcome, elapsed_seconds started))
@@ -2461,7 +2461,8 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
              match callback request_id with
              | Ok () -> Ok ()
              | Error _ as error -> error
-             | exception exn -> Error (Printexc.to_string exn))
+             | exception exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
+               Error (Printexc.to_string exn))
        in
        (match acceptance_result with
         | Error reason ->
@@ -2482,7 +2483,7 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                 match callback reason with
                 | Ok () -> Ok ()
                 | Error detail -> Error detail
-                | exception exn ->
+                | exception exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string LifecycleCallbackFailures)
                     ~labels:[ "callback", "keeper_msg_async_on_worker_aborted" ]
@@ -2680,7 +2681,16 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
         | exception exn ->
-          background_start_failed (Printexc.to_string exn))))))
+          (* The request is already persisted and no worker scope was
+             admitted, so this Lost status is the only record that it will
+             never run. Write it on the cancelled path too, before the
+             exception leaves -- [set_status_protected] completes while
+             unwinding. *)
+          let backtrace = Printexc.get_raw_backtrace () in
+          let outcome = background_start_failed (Printexc.to_string exn) in
+          (match exn with
+           | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace exn backtrace
+           | _ -> outcome))))))
      with
      | Lane_admission_timeout lane ->
        (* Submission-lane admission expired before any reservation existed,

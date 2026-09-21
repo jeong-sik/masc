@@ -314,6 +314,38 @@ let warn_rejected_exact_output_slots registry =
           | Runtime_exact_output_registry.Configured_runtime_only _ -> false)))
 ;;
 
+(* Publication carries [verifier_exact] cli ids verbatim, because only
+   [Runtime] holds the runtime table that answers whether an official client
+   can judge. A slot that cannot leaves the lane shorter than its declaration
+   instead of failing it (#37179), so the boot report has to name it or the
+   lane reads as configured. *)
+let report_verifier_exact_lane_admission () =
+  match Runtime.verifier_exact_lane_resolution () with
+  | Error detail ->
+    (* [verifier_exact] is not a mandatory lane, so an unconfigured one is a
+       supported shape; completion review reports the same sentence when it
+       refuses admission. *)
+    Log.Server.info
+      "exact_output: lane %S cannot judge: %s"
+      Runtime.verifier_exact_lane_id
+      detail
+  | Ok (lane : Runtime.verifier_exact_lane_slots) ->
+    List.iter
+      (fun (rejection : Runtime.verifier_slot_rejection) ->
+         Log.Server.warn
+           "exact_output: lane %S %s; the lane runs its remaining slots without it"
+           Runtime.verifier_exact_lane_id
+           (Runtime.verifier_slot_rejection_to_string rejection))
+      lane.Runtime.slot_rejections;
+    (match lane.Runtime.admitted_catalog_slot_ids, lane.Runtime.admitted_cli_slot_ids with
+     | [], [] ->
+       Log.Server.error
+         "exact_output: lane %S can judge through none of its %d declared slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
+         Runtime.verifier_exact_lane_id
+         (List.length lane.Runtime.slot_rejections)
+     | [], _ :: _ | _ :: _, _ -> ())
+;;
+
 (* Retracted (2026-08-28, hours after #31445): the classifier reuses
    Exact_output.admit_target_ref, whose authority is exact-output LANE
    admission. Keeper turn assignments resolve through a different path —
@@ -371,32 +403,29 @@ let exact_output_targets_of_runtimes () =
      by [command] — so declaring one as a target only to have the binding
      resolver reject it reports a missing catalog provider where the truth is
      that this kind of runtime does no exact output. *)
-  let runtimes =
-    List.filter
-      (fun (rt : Runtime.t) ->
-         match rt.execution with
-         | Runtime_execution.Agent_core _ -> true
-         | Runtime_execution.Codex_app_server _
-         | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _ -> false)
-      runtimes
-  in
-  List.map
-    (fun (rt : Runtime.t) : Exact_output.declared_target ->
-       { target_ref = rt.id
-       ; provider_ref = rt.provider.Runtime_schema.id
-       ; model_id = rt.model.Runtime_schema.api_name
-       ; enable_thinking = rt.model.Runtime_schema.thinking_support
-       ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
-       ; body_timeout_s = None
-       ; (* A slot's credential is the one its binding names; the catalog row
-            carries the provider's usual environment name, not this
-            deployment's. *)
-         api_key_env =
-           (match rt.provider.Runtime_schema.credentials with
-            | Some (Runtime_schema.Env name) -> Some name
-            | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
-       })
+  List.filter_map
+    (fun (rt : Runtime.t) ->
+       match rt.execution with
+       | Runtime_execution.Agent_core config ->
+         Some
+           ({ target_ref = rt.id
+            ; provider_ref = rt.provider.Runtime_schema.id
+            ; model_id = rt.model.Runtime_schema.api_name
+            ; enable_thinking = rt.model.Runtime_schema.thinking_support
+             ; reasoning_effort = config.reasoning_effort
+             ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
+             ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
+            ; (* A slot's credential is the one its binding names; the catalog row
+                 carries the provider's usual environment name, not this
+                 deployment's. *)
+              api_key_env =
+                (match rt.provider.Runtime_schema.credentials with
+                 | Some (Runtime_schema.Env name) -> Some name
+                 | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
+            } : Exact_output.declared_target)
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _ -> None)
     runtimes
 ;;
 
@@ -448,6 +477,7 @@ let configure_exact_output_registry ?config_root () =
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
        warn_rejected_exact_output_slots registry;
+       report_verifier_exact_lane_admission ();
        warn_catalog_absent_keeper_assignments resolver_snapshot;
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry published%s"
@@ -1531,7 +1561,29 @@ let resume_model_configuration () =
           Runtime_startup_state.set Available;
           Server_routes_http_runtime.invalidate_full_health_snapshot ();
           let authority_available =
-            registry_published && Result.is_ok (Runtime.verifier_exact_lane_readiness ())
+            registry_published
+            && (match Runtime.verifier_exact_lane_readiness () with
+                | Ok [] -> true
+                | Ok (_ :: _ as rejections) ->
+                  (* The authority starts, but on fewer slots than runtime.toml
+                     declares. Say so where the decision is made, not only in
+                     the publication report. *)
+                  Log.Server.warn
+                    "exact_output: completion authority starts on a short lane %S: %s"
+                    Runtime.verifier_exact_lane_id
+                    (String.concat
+                       "; "
+                       (List.map
+                          Runtime.verifier_slot_rejection_to_string
+                          rejections));
+                  true
+                | Error detail ->
+                  Log.Server.warn
+                    "exact_output: completion authority stays off because lane %S \
+                     has no dispatchable slot: %s"
+                    Runtime.verifier_exact_lane_id
+                    detail;
+                  false)
           in
           Ok authority_available)
     in
@@ -1565,6 +1617,8 @@ let start_post_ready_owner_lanes
 
   start_microvm_guest_maintenance ~sw
     ~sweep:(fun () -> startup_sweep_microvm_guests state);
+  Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions
+    ~base_path:(Mcp_server.workspace_config state).base_path;
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =

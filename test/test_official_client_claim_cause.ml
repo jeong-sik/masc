@@ -79,7 +79,16 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     (I.official_client_recovery_summary expected) terminal.summary;
   (match Route.route_of_error ~boundary:Route.Masc_execution error with
    | Route.Exhausted_visible_alive
-       { terminal = Route.Contract_violation; provenance = Route.Masc_internal_error; _ } -> ()
+       { terminal = Route.Session_claim_refused; provenance = Route.Masc_internal_error; _ }
+       as route ->
+     Alcotest.(check string)
+       "local claim refusal has its own route label"
+       "session_claim_refused"
+       (Route.route_class_label route);
+     Alcotest.(check bool)
+       "local claim refusal happened before a provider response"
+       false
+       (Route.response_observed route)
    | _ -> Alcotest.fail "local refusal must not rotate, retry or claim a remote effect");
   let reason = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
       ~core_error:error terminal ~raw_error in
@@ -89,7 +98,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc ["name", `String keeper_name; "trace_id", `String "synthetic-trace"])
     |> ok in
-  ignore (R.For_testing.register ~base_path keeper_name meta : R.registry_entry);
+  let registry_entry = R.For_testing.register ~base_path keeper_name meta in
   Fun.protect
     ~finally:(fun () -> R.For_testing.unregister ~base_path keeper_name)
     (fun () ->
@@ -98,7 +107,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
         ~err:error ~error_text:raw_error;
       let count = R.get_turn_failures ~base_path keeper_name in
       Keeper_heartbeat_loop.refresh_failure_reason_after_turn
-        ~base_path ~keeper_name ~turn_fail_count:count;
+        ~registry_entry ~turn_fail_count:count;
       (match R.get ~base_path keeper_name with
        | Some { last_failure_reason = Some (R.Official_client_recovery_required payload as observed); _ } ->
          Alcotest.(check bool) "heartbeat retains typed claim refusal" true (payload = expected);
@@ -197,6 +206,140 @@ let check_codec () =
   rejected "extra field rejected" (("detail", `String "not part of contract") :: fields);
   rejected "duplicate field rejected" (("recovery_id", `String "other") :: fields)
 
+let check_resolved_recovery_is_not_restored () =
+  let base_path = Filename.temp_dir "official-claim-resolved-race-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let keeper_name = "resolved-recovery-race" in
+    let runtime_id = "resolved-recovery-runtime" in
+    let claimed =
+      S.claim
+        ~base_path
+        ~keeper_name
+        ~expected:None
+        ~client_kind:S.Codex
+        ~owner_epoch:(S.process_epoch ())
+        ~runtime_id
+        ~tool_surface_sha256:
+          (S.tool_surface_sha256
+             ~native_posture:Runtime_native_tools.Native_read
+             [])
+        ~updated_at:1.
+      |> ok
+    in
+    let held =
+      S.require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~failure:(S.Input_rejected S.Effect_fenced)
+        ~detail:"synthetic held recovery"
+        ~required_at:2.
+      |> ok
+    in
+    let recovery =
+      match held.phase with
+      | S.Recovery_required recovery -> recovery
+      | S.Ready | S.Start _ | S.Active _ | S.Turn_inflight _ | S.Settled _ ->
+        Alcotest.fail "fixture did not enter recovery"
+    in
+    let expected : I.official_client_recovery =
+      { runtime_id; recovery_id = recovery.recovery_id; reason = I.Effect_fenced }
+    in
+    let error = I.core_error_of_masc_internal_error (I.Official_client_recovery_required expected) in
+    let raw_error = Agent_core.Error.to_string error in
+    let terminal = Keeper_turn_terminal.of_failure ~raw_error error in
+    let _resolved, _application =
+      match
+        S.resolve_recovery
+          ~base_path
+          ~keeper_name
+          ~expected:held
+          ~recovery_id:recovery.recovery_id
+          ~resolution:S.Restart_fresh
+          ~resolved_by:"operator"
+          ~resolved_at:3.
+      with
+      | Ok resolved -> resolved
+      | Error _ -> Alcotest.fail "fixture recovery resolution failed"
+    in
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String keeper_name; "trace_id", `String "resolved-race" ])
+      |> ok
+    in
+    let _entry = R.For_testing.register ~base_path keeper_name meta in
+    Fun.protect
+      ~finally:(fun () -> R.For_testing.unregister ~base_path keeper_name)
+      (fun () ->
+         Keeper_unified_turn_failure.record_failure_observation
+           ~config:(Workspace.default_config base_path)
+           ~meta
+           ~terminal_reason:terminal
+           ~err:error
+           ~error_text:raw_error;
+         match R.get ~base_path keeper_name with
+         | Some { last_failure_reason = None; _ } -> ()
+         | Some { last_failure_reason = Some reason; _ } ->
+           Alcotest.failf
+             "stale turn restored resolved recovery: %s"
+             (R.failure_reason_to_string reason)
+         | None -> Alcotest.fail "registry entry disappeared"))
+
+let check_unreadable_store_preserves_recovery_cause () =
+  let base_path = Filename.temp_dir "official-claim-unreadable-store-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let keeper_name = "unreadable-recovery-store" in
+    let expected : I.official_client_recovery =
+      { runtime_id = "synthetic-runtime"
+      ; recovery_id = "synthetic-recovery"
+      ; reason = I.Effect_fenced
+      }
+    in
+    let path = S.path ~base_path ~keeper_name |> ok in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    write_file path "not-json\n";
+    let error =
+      I.core_error_of_masc_internal_error
+        (I.Official_client_recovery_required expected)
+    in
+    let raw_error = Agent_core.Error.to_string error in
+    let terminal = Keeper_turn_terminal.of_failure ~raw_error error in
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "unreadable-store"
+          ])
+      |> ok
+    in
+    let _entry = R.For_testing.register ~base_path keeper_name meta in
+    Fun.protect
+      ~finally:(fun () -> R.For_testing.unregister ~base_path keeper_name)
+      (fun () ->
+        Keeper_unified_turn_failure.record_failure_observation
+          ~config:(Workspace.default_config base_path)
+          ~meta
+          ~terminal_reason:terminal
+          ~err:error
+          ~error_text:raw_error;
+        match R.get ~base_path keeper_name with
+        | Some
+            { last_failure_reason =
+                Some (R.Official_client_recovery_required actual)
+            ; _
+            } ->
+          Alcotest.(check bool)
+            "unreadable store keeps the actionable recovery"
+            true
+            (actual = expected)
+        | Some { last_failure_reason = Some reason; _ } ->
+          Alcotest.failf
+            "unreadable store replaced the recovery cause: %s"
+            (R.failure_reason_to_string reason)
+        | Some { last_failure_reason = None; _ } ->
+          Alcotest.fail "unreadable store dropped the recovery cause"
+        | None -> Alcotest.fail "registry entry disappeared"))
+
 let check_remote_fence () =
   let cause = I.Provider_attempt_effect_fenced
       { runtime_id = "synthetic-runtime"
@@ -213,7 +356,15 @@ let check_remote_fence () =
 let () =
   Alcotest.run "official-client claim cause"
     [ "typed contract", [ Alcotest.test_case "strict codec" `Quick check_codec
-                        ; Alcotest.test_case "remote fence stays distinct" `Quick check_remote_fence ]
+                        ; Alcotest.test_case "remote fence stays distinct" `Quick check_remote_fence
+                        ; Alcotest.test_case
+                            "resolved recovery is not restored by a stale turn"
+                            `Quick
+                            check_resolved_recovery_is_not_restored
+                        ; Alcotest.test_case
+                            "unreadable store preserves the recovery cause"
+                            `Quick
+                            check_unreadable_store_preserves_recovery_cause ]
     ; "actual adapters",
       List.concat_map (fun (client_kind, label) ->
         List.map (fun (reason, suffix) ->

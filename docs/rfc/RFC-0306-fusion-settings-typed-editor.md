@@ -89,8 +89,9 @@ in Phase 0. This RFC covers the remaining editability work.
    the same source the default-runtime select already uses. `runtime_id` is
    `provider.model`.
 5. **MASC → agent_core stays one-way.** Model resolution uses the existing MASC→agent_core
-   catalog path (agent_core embedded catalog plus deployment overlay; `Runtime_oas_runner`,
-   `Fusion_oas`). No new coupling; agent_core remains unaware of fusion.
+   catalog path (the agent_core embedded catalog, or its explicit whole-catalog
+   `AGENT_CORE_MODEL_CATALOG` replacement; `Runtime_oas_runner`, `Fusion_oas`).
+   No new coupling; agent_core remains unaware of fusion.
 6. **No silent failure.** Every write step returns `result`; failures produce a
    JSON error body plus an audit `Failure` record, mirroring
    `save_config_text` (`server_routes_http_routes_dashboard.ml:562`).

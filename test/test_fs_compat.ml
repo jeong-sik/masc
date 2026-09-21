@@ -13,6 +13,85 @@ let with_tmp_dir (f : string -> unit) : unit =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () -> f tmp)
 ;;
 
+let with_optional_read_fs fs test () =
+  let previous = Fs_compat.get_fs_opt () in
+  let restore = function
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  restore fs;
+  Fun.protect ~finally:(fun () -> restore previous) test
+;;
+
+let check_optional_read_error path =
+  match Fs_compat.load_file_opt path with
+  | exception Sys_error _ -> ()
+  | None -> fail "an unreadable path must not become an absent file"
+  | Some _ -> fail "an unreadable path must not return content"
+;;
+
+let test_optional_read_absence_and_content () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  check (option string) "missing leaf" None (Fs_compat.load_file_opt path);
+  check (option string) "missing ancestors" None
+    (Fs_compat.load_file_opt (Filename.concat base "fresh/nested/snapshot"));
+  Fs_compat.save_file path "";
+  check (option string) "empty is present" (Some "") (Fs_compat.load_file_opt path);
+  Fs_compat.save_file path "snapshot bytes";
+  let alias = Filename.concat base "alias" in
+  Unix.symlink path alias;
+  check (option string) "file aliases remain readable" (Some "snapshot bytes")
+    (Fs_compat.load_file_opt alias);
+  Sys.remove path;
+  check (option string) "dangling alias is absent" None (Fs_compat.load_file_opt alias)
+;;
+
+let test_optional_read_non_directory_parent () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "file" in
+  Fs_compat.save_file path "parent is a file";
+  check_optional_read_error (Filename.concat path "child")
+;;
+
+let with_optional_read_permission path mode test =
+  let previous = (Unix.stat path).Unix.st_perm in
+  Unix.chmod path mode;
+  Fun.protect ~finally:(fun () -> Unix.chmod path previous) test
+;;
+
+let test_optional_read_parent_permission () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  Fs_compat.save_file path "retained bytes";
+  with_optional_read_permission base 0o600 (fun () ->
+    (match Unix.stat path with
+     | exception Unix.Unix_error (Unix.EACCES, _, _) -> ()
+     | _ -> fail "fixture must deny parent-directory search");
+    check_optional_read_error path);
+  check (option string) "bytes survive the denied read" (Some "retained bytes")
+    (Fs_compat.load_file_opt path)
+;;
+
+let test_optional_read_leaf_permission () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  Fs_compat.save_file path "retained bytes";
+  with_optional_read_permission path 0o000 (fun () -> check_optional_read_error path);
+  check (option string) "bytes survive the denied read" (Some "retained bytes")
+    (Fs_compat.load_file_opt path)
+;;
+
+let optional_read_cases =
+  [ "absence, empty content and aliases", test_optional_read_absence_and_content
+  ; "non-directory parent is an error", test_optional_read_non_directory_parent
+  ; "parent permission failure is an error", test_optional_read_parent_permission
+  ; "leaf permission failure is an error", test_optional_read_leaf_permission
+  ]
+;;
+
 (* [raise_with_backtrace] uses the supplied trace as the exception's origin;
    propagation through the callback, cleanup and atomic writer may append
    frames. Every original raw slot must remain in order at the front. Raw
@@ -224,6 +303,11 @@ let test_save_file_atomic_strict_payload_sync_cancellation () =
   let cancellation = Eio.Cancel.Cancelled Exit in
   let cancellation_backtrace = Printexc.get_callstack 32 in
   Fs_compat.save_file target "old";
+  (* #37372: a cancelled payload sync leaves as a cancellation rather than
+     arriving as a typed failure. Everything the ordinary-failure sibling
+     asserts about the target and the stage still holds, and this checks that
+     rather than assuming it: the rename has not run, so the target keeps its
+     old bytes and the stage file is removed on the way out. *)
   (match
      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
        ~sync_file:(fun _ ->
@@ -232,14 +316,14 @@ let test_save_file_atomic_strict_payload_sync_cancellation () =
        target
        "new"
    with
-   | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
-     check bool "original cancellation preserved" true
-       (failure.exception_ == cancellation);
+   | exception (Eio.Cancel.Cancelled _ as raised) ->
+     check bool "original cancellation propagates unchanged" true
+       (raised == cancellation);
      check_backtrace_origin "original cancellation backtrace preserved"
-       cancellation_backtrace failure.backtrace
+       cancellation_backtrace (Printexc.get_raw_backtrace ())
    | Error failure ->
      failf
-       "payload sync cancellation reported after rename: %s"
+       "payload sync cancellation was absorbed into a typed failure: %s"
        (Fs_compat.atomic_replace_failure_to_string failure)
    | Ok () -> fail "payload sync cancellation was accepted");
   check bool "parent sync not reached" false !parent_sync_called;
@@ -316,10 +400,39 @@ let test_save_file_atomic_strict_parent_sync_error () =
     ~exception_:(Unix.Unix_error (Unix.EIO, "fsync", "parent"))
 ;;
 
+(* #37372: the cancellation sibling of the helper above. The rename has already
+   run when sync_parent is reached -- which is why the ordinary-failure case
+   asserts stage = After_rename and a visible "new" -- so propagating costs no
+   half-written state, and this asserts the visible "new" on the cancelled path
+   too rather than taking it on trust. *)
 let test_save_file_atomic_strict_parent_sync_cancellation () =
-  check_save_file_atomic_strict_parent_sync_failure
-    ~label:"parent sync cancellation"
-    ~exception_:(Eio.Cancel.Cancelled Exit)
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "out.json" in
+  let cancellation = Eio.Cancel.Cancelled Exit in
+  let injected_backtrace = Printexc.get_callstack 32 in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+       ~sync_file:(fun _ -> ())
+       ~sync_parent:(fun _ ->
+         Printexc.raise_with_backtrace cancellation injected_backtrace)
+       target
+       "new"
+   with
+   | exception (Eio.Cancel.Cancelled _ as raised) ->
+     check bool "parent sync cancellation propagates unchanged" true
+       (raised == cancellation);
+     check_backtrace_origin "parent sync cancellation backtrace preserved"
+       injected_backtrace (Printexc.get_raw_backtrace ())
+   | Error failure ->
+     failf
+       "parent sync cancellation was absorbed into a typed failure: %s"
+       (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "parent sync cancellation was accepted");
+  check string "parent sync cancellation leaves the new target visible" "new"
+    (Fs_compat.load_file target)
 ;;
 
 let test_streaming_atomic_replace_preserves_bytes () =
@@ -371,6 +484,40 @@ let check_streaming_atomic_callback_failure ~exception_ () =
   check string "failed stream preserves original bytes" "old"
     (Fs_compat.load_file target);
   check (list string) "partial stage is removed" [ "runs.jsonl" ]
+    (Sys.readdir base |> Array.to_list)
+;;
+
+(* #37372: the cancellation sibling of the helper above. The callback raises
+   before the rename, so the two facts that helper asserts after the match --
+   the target keeps its old bytes, and the partial stage is gone -- have to
+   hold here too, and are checked rather than assumed. *)
+let check_streaming_atomic_callback_cancellation () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "runs.jsonl" in
+  let cancellation = Eio.Cancel.Cancelled Exit in
+  let injected_backtrace = Printexc.get_callstack 32 in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.write_file_atomic_strict_staged target ~write:(fun channel ->
+       output_string channel "partial row";
+       flush channel;
+       Printexc.raise_with_backtrace cancellation injected_backtrace)
+   with
+   | exception (Eio.Cancel.Cancelled _ as raised) ->
+     check bool "callback cancellation propagates unchanged" true
+       (raised == cancellation);
+     check_backtrace_origin "callback cancellation backtrace preserved"
+       injected_backtrace (Printexc.get_raw_backtrace ())
+   | Error failure ->
+     failf
+       "callback cancellation was absorbed into a typed failure: %s"
+       (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "cancelled streaming callback was published");
+  check string "cancelled stream preserves original bytes" "old"
+    (Fs_compat.load_file target);
+  check (list string) "cancelled stage is removed" [ "runs.jsonl" ]
     (Sys.readdir base |> Array.to_list)
 ;;
 
@@ -709,7 +856,14 @@ let () =
   Eio_guard.enable ();
   run
     "fs_compat"
-    [ ( "mkdir_p"
+    [ ( "optional read fallback"
+      , List.map (fun (name, test) ->
+          test_case name `Quick (with_optional_read_fs None test)) optional_read_cases )
+    ; ( "optional read Eio"
+      , List.map (fun (name, test) ->
+          test_case name `Quick (with_optional_read_fs (Some (Eio.Stdenv.fs env)) test))
+          optional_read_cases )
+    ; ( "mkdir_p"
       , [ test_case "creates nested dirs" `Quick test_mkdir_p_creates_nested_dirs
         ; test_case "no shell injection" `Quick test_mkdir_p_does_not_shell_inject
         ] )
@@ -763,10 +917,9 @@ let () =
             (check_streaming_atomic_callback_failure
                ~exception_:(Unix.Unix_error (Unix.EIO, "write", "stage")))
         ; test_case
-            "stream callback cancellation preserves the target and cleans its stage"
+            "stream callback cancellation propagates and cleans its stage"
             `Quick
-            (check_streaming_atomic_callback_failure
-               ~exception_:(Eio.Cancel.Cancelled Exit))
+            check_streaming_atomic_callback_cancellation
         ; test_case
             "stream parent sync failure retains the published target"
             `Quick

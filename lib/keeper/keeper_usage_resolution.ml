@@ -2,6 +2,7 @@ type cumulative_position = Fresh | Resumed
 
 type basis =
   | Per_request
+  | Turn_total
   | Conversation_counter of
       { runtime_id : string
       ; conversation_id : string
@@ -70,6 +71,7 @@ let status_to_string = function
 
 let scope_of_basis = function
   | Per_request -> Runtime_usage_scope.Per_request
+  | Turn_total -> Runtime_usage_scope.Turn_total
   | Conversation_counter _ -> Runtime_usage_scope.Conversation_cumulative
   | Unavailable -> Runtime_usage_scope.Usage_scope_unavailable
 ;;
@@ -164,6 +166,7 @@ let sample_is_valid sample =
 
 let basis_to_json = function
   | Per_request -> `Assoc [ "kind", `String "per_request" ]
+  | Turn_total -> `Assoc [ "kind", `String "turn_total" ]
   | Unavailable -> `Assoc [ "kind", `String "unavailable" ]
   | Conversation_counter { runtime_id; conversation_id; position } ->
     `Assoc
@@ -176,6 +179,7 @@ let basis_to_json = function
 
 let basis_of_json = function
   | `Assoc [ "kind", `String "per_request" ] -> Ok Per_request
+  | `Assoc [ "kind", `String "turn_total" ] -> Ok Turn_total
   | `Assoc [ "kind", `String "unavailable" ] -> Ok Unavailable
   | `Assoc fields
     when exact_fields [ "kind"; "runtime_id"; "conversation_id"; "position" ] fields ->
@@ -242,10 +246,12 @@ let validate_resolution resolution =
       (match resolution.basis with
        | Unavailable -> Error "exact resolution cannot have unavailable basis"
        | Per_request
+       | Turn_total
        | Conversation_counter { position = Fresh; _ }
          when observation <> delta ->
-         Error "fresh or per-request exact delta must equal its observation"
+         Error "fresh, per-request or turn-total exact delta must equal its observation"
        | Per_request
+       | Turn_total
        | Conversation_counter { position = Fresh; _ }
        | Conversation_counter { position = Resumed; _ } -> Ok ())
     | Some _, Some _ -> Error "exact resolution samples must be valid"
@@ -379,7 +385,7 @@ let resolve ~cursor ~basis ~observation ~observed_at =
   | Some sample, _ when not (sample_is_valid sample) ->
     ( { observation; basis; delta = None; status = Invalid_observation; observed_at }
     , cursor )
-  | Some sample, Per_request ->
+  | Some sample, (Per_request | Turn_total) ->
     ( { observation
       ; basis
       ; delta = Some sample

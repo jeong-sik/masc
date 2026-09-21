@@ -305,10 +305,7 @@ let run (ctx : ctx)
       (* Authority rejected the dispatch, so no provider ran, no receipt was
          written, and neither lane settled. *)
       | Error err ->
-        { result = Error err
-        ; degraded_retry_applied = None
-        ; degraded_retry_deferred = None
-        }
+        Keeper_agent_run.not_dispatched err
     in
     (* The receipt's own verdict rides up on [turn_state] so the decision
        record below reports it rather than deciding again. *)

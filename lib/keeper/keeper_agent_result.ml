@@ -121,6 +121,19 @@ type turn_settlement =
   ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
   }
 
+(* A turn that ended before [Keeper_agent_run_receipt.finalize] ran. It wrote
+   no receipt, so it took up no deferred lane and left none behind: both empty
+   here means nothing happened, not that the answer is unknown. Named once
+   because six exits reach it -- context preparation, tool setup, checkpoint
+   admission, gate evidence, the authority gate and a continuation that could
+   not be consumed. *)
+let not_dispatched error =
+  { result = Error error
+  ; degraded_retry_applied = None
+  ; degraded_retry_deferred = None
+  }
+;;
+
 let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
 let tool_call_count (result : run_result) = List.length result.tool_calls
 

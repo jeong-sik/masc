@@ -790,10 +790,7 @@ let run_keeper_invocation_turn_admitted_inner
                             ~operation_id admission in
                       match consume with
                       | Error detail ->
-                        ({ result = Error (Agent_core.Error.Internal detail)
-                         ; degraded_retry_applied = None
-                         ; degraded_retry_deferred = None }
-                         : Keeper_agent_run.turn_settlement)
+                        Keeper_agent_run.not_dispatched (Agent_core.Error.Internal detail)
                       | Ok () ->
                   run_direct_turn_with_fsm
                     ~keeper_name:meta.name

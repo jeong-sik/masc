@@ -925,10 +925,7 @@ let run_turn
           }))
   with
   | Error e ->
-    ({ result = Error e
-     ; degraded_retry_applied = None
-     ; degraded_retry_deferred = None }
-     : Keeper_agent_result.turn_settlement)
+    Keeper_agent_result.not_dispatched e
   | Ok ctx ->
   let ctx = match direct_resume_checkpoint with
     | None -> ctx
@@ -1108,10 +1105,7 @@ let run_turn
      so fixes the match's type -- which is why an inferred return type let the
      compiler blame the block's last expression a thousand lines down. *)
   | Error e ->
-    ({ result = Error e
-     ; degraded_retry_applied = None
-     ; degraded_retry_deferred = None }
-     : Keeper_agent_result.turn_settlement)
+    Keeper_agent_result.not_dispatched e
   | Ok s ->
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
@@ -1154,7 +1148,11 @@ let run_turn
       | _ -> Ok None
     in
     match admission with
-    | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+    (* Checkpoint admission failed, so the turn never dispatched. Same shape as
+       the setup and context-preparation exits above: no receipt, no lanes. *)
+    | Error detail ->
+      Keeper_agent_result.not_dispatched
+        (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok admitted_checkpoint ->
     let admitted_checkpoint = match admitted_checkpoint, direct_resume with
       | Some checkpoint, _ -> Some checkpoint
@@ -1165,7 +1163,9 @@ let run_turn
       | Some callback, Some checkpoint -> callback checkpoint
       | Some _, None -> Error "direct Gate continuation has no admitted checkpoint" in
     match evidence_admission with
-    | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+    | Error detail ->
+      Keeper_agent_result.not_dispatched
+        (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () ->
     let continue_from_checkpoint = Option.is_some admitted_checkpoint in
     let ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks =

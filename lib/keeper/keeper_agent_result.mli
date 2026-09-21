@@ -77,6 +77,13 @@ type turn_settlement =
         (** The lane this turn leaves for a later one. *)
   }
 
+(** The settlement of a turn that ended before
+    [Keeper_agent_run_receipt.finalize] ran: it wrote no receipt, so it took up
+    no deferred lane and left none behind. Both lanes empty here means nothing
+    happened, not that the answer is unknown — the distinction the receipt's own
+    [unreadable] marker draws on the other side. *)
+val not_dispatched : Agent_core.Error.t -> turn_settlement
+
 val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
 (** Serialize a tool call detail to JSON. Reached via the
     [include Keeper_agent_result] chain in [Keeper_agent_run], where

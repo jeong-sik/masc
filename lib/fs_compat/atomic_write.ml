@@ -2662,7 +2662,15 @@ let write_file_atomic_with_parent_sync
          sync_parent dir;
          Ok ()
        with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | Eio.Cancel.Cancelled _ as exn ->
+         (* The stage file goes before the cancellation leaves, the same way
+            the failure arm below removes it -- otherwise a cancelled replace
+            is the one exit that leaves an orphan behind. Sys.remove performs
+            no Eio operation, so it completes while unwinding; past a
+            successful rename tmp is already gone and Sys_error absorbs it. *)
+         (try Stdlib.Sys.remove tmp with
+          | Sys_error _ -> ());
+         raise exn
        | exception_ ->
          let backtrace = Printexc.get_raw_backtrace () in
          (try Stdlib.Sys.remove tmp with

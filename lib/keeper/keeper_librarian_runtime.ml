@@ -798,6 +798,15 @@ let input_for_projection projection input =
   | Already_selected_range -> input
 ;;
 
+let commit_continuity ~commit ~observe =
+  (* The executor job has its own cancellation scope. Keep its caller alive
+     until all disk effects and their observation finish; shutdown/purge must
+     not run past a detached writer after cancellation of the await. *)
+  Eio.Cancel.protect (fun () ->
+    observe (Domain_pool_ref.submit_io_or_inline commit));
+  Eio.Fiber.check ()
+;;
+
 let run_best_effort
       ?(trigger = Conversation_completed)
       ?(input_projection = Recent_window)
@@ -964,23 +973,29 @@ let run_best_effort
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
-             (match continuity, selection.working_state with
+             let publish_continuity () =
+               match continuity, selection.working_state with
               | None, _ -> ()
               | Some _, None -> continuity_write := `Assoc ["status", `String "not_provided"]
               | Some prepared, Some working_state ->
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
-                (match Domain_pool_ref.submit_io_or_inline (fun () ->
+                commit_continuity
+                  ~commit:(fun () ->
                    Keeper_librarian_continuity.commit
                      ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
-                     ~prepared ~working_state) with
+                     ~prepared ~working_state)
+                  ~observe:(function
                  | Ok snapshot -> continuity_write := `Assoc
                      ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
                       "prefix_sha256", `String snapshot.prefix_sha256]
                  | Error detail ->
                    continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
-                   Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail));
+                   Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail)
+             in
              match write_scope with
-             | Context_only -> Ok (`Context_organized (exact_output, selected_slot))
+             | Context_only ->
+               publish_continuity ();
+               Ok (`Context_organized (exact_output, selected_slot))
              | Context_and_memory ->
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
@@ -1027,6 +1042,9 @@ let run_best_effort
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })
              in
+             (* Only saved Memory authorizes publishing the corresponding
+                continuity frontier. A failed disposition leaves input intact. *)
+             publish_continuity ();
              (* The snapshot is committed; each supersede the answer stated is
                 now a Revised event on the old id (RFC-0418). A sidecar that
                 cannot be written is said here and does not undo the pass. *)
@@ -1226,4 +1244,5 @@ module For_testing = struct
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
   let input_for_projection = input_for_projection
+  let commit_continuity = commit_continuity
 end

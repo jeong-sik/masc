@@ -194,7 +194,7 @@ let run ~trigger ~base_path ~keeper_name =
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~meta ~sources_changed ~trigger in
     let continuity = Domain_pool_ref.submit_io_or_inline (fun () ->
-      Keeper_librarian_continuity.prepare ~config:(Workspace.default_config base_path)
+      Keeper_librarian_continuity.prepare_committed ~config:(Workspace.default_config base_path)
         ~keeper_name ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)) in
     let continuity = match continuity with
       | Ok value -> value

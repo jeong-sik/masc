@@ -676,3 +676,10 @@ Context-only 경로에서 생산할 수 있습니다. 별도 daemon이나 타이
 않으며, remembered-turn 처리가 있다는 이유로 이 생산을 생략하지 않습니다.
 이 생산 단계 자체는 provider 전송을 자르지 않습니다. 실제 전송 제외는 후속
 소비자가 저장된 pair를 원본 이력에 대조한 뒤 적용해야 합니다.
+
+대화 상태 pair의 publication은 Memory disposition 저장 성공 뒤에 합니다.
+같은 trace·history 시작·끝 경계 줄·atom·digest에 대한 Memory WAL 증거가
+있어야 하며, 좁혀 재시도한 Memory 범위보다 앞선 준비 입력은 게시하지 않습니다.
+Context-only bootstrap도 같은 증거를 확인합니다. executor에 넘긴 실제 파일
+저장과 결과 기록이 끝날 때까지 호출자의 취소를 보호하고, 그 뒤 취소를 다시
+전파합니다. 따라서 종료·purge가 아직 실행 중인 저장 작업을 추월하지 않습니다.

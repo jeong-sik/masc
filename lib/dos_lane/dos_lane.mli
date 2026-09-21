@@ -181,3 +181,10 @@ val peek_max_bytes : int
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
+
+val mouse_buttons : unit -> int
+(** The bitmask {!click} last set on the mouse -- 0 when nothing is held, or
+    when no machine is loaded. ocaml-dos exposes {!Dos_machine.set_mouse} but
+    no getter, so the lane remembers its own last setting rather than asking
+    the driver to read itself back; it is the same value {!click}'s up half
+    writes, not a second guess at it. *)

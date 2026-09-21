@@ -425,8 +425,6 @@ let test_an_excluded_keeper_keeps_its_content_home () =
         (state (C.absorb_gate_api_key ~keeper_id:"polisher"))))
 ;;
 
-(* The names in [excluded_keepers] are checked against the keepers of the
-   base path at boot: a misspelt name excludes nobody, so it is reported. *)
 let test_context_and_skill_reviews_require_their_own_opt_in () =
   let state = function
     | Ok _ -> "enabled"
@@ -458,6 +456,7 @@ let test_context_and_skill_reviews_require_their_own_opt_in () =
       check_reviews "both reviews require a key" ("missing_api_key", "missing_api_key")))
 ;;
 
+(* Names are checked against the declared Keeper roster at boot. *)
 let test_unknown_excluded_keepers_are_named () =
   with_policy (policy ~excluded_keepers:[ "kidsnote-slack-context-collector"; "collecter" ] ()) (fun () ->
     Alcotest.(check (list string)) "the name that is no keeper" [ "collecter" ]

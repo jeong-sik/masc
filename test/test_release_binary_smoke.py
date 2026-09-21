@@ -12,7 +12,7 @@ SCRIPT = ROOT / "scripts" / "release-binary-smoke.sh"
 
 
 class ReleaseBinarySmokeTests(unittest.TestCase):
-    def smoke(self, readme, commands):
+    def smoke(self, readme, commands, boot_snippet=None):
         with tempfile.TemporaryDirectory(prefix="masc-release-smoke-") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
@@ -24,12 +24,16 @@ class ReleaseBinarySmokeTests(unittest.TestCase):
             (root / "README.md").write_text(readme)
             binary = root / "stub-masc"
             help_text = "COMMANDS\n" + "".join(f"       {name}\n" for name in commands)
+            if boot_snippet is None:
+                boot_snippet = "print('MASC MCP Server listening (fixture)')"
             binary.write_text(
                 "#!/usr/bin/env python3\n"
                 "import sys\n"
                 f"help_text = {help_text!r}\n"
-                "print(help_text if '--help=plain' in sys.argv "
-                "else 'MASC MCP Server listening (fixture)')\n"
+                "if '--help=plain' in sys.argv:\n"
+                "    print(help_text)\n"
+                "else:\n"
+                f"    {boot_snippet}\n"
             )
             binary.chmod(0o755)
             return subprocess.run(
@@ -102,6 +106,39 @@ class ReleaseBinarySmokeTests(unittest.TestCase):
             ["start", "init", "setup", "mcp-config", "login", "token", "sandbox-image", "keeper-create"],
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_timeout_reports_whether_the_boot_process_survived(self):
+        # A boot that never reaches the listening line has two very different
+        # causes: the process is still working (slow boot) or it died on its
+        # own (crash). The script used to discard the process state entirely,
+        # so a release could not tell them apart from the smoke output alone.
+        # masc#37486-era v0.35.21 publish: linux-x64 timed out with the boot
+        # log frozen after "[ServerBootstrap] resolved" and no FATAL line, and
+        # the only evidence the process was still alive came from its SIGTERM
+        # shutdown log, which the smoke itself discards on success.
+        result = self.smoke(
+            "```sh\nmasc start\n```\n",
+            ["start"],
+            boot_snippet="import time; time.sleep(30)",
+        )
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn("did not reach listening", result.stderr)
+        self.assertIn("boot process still alive", result.stderr)
+        self.assertIn("slow boot", result.stderr)
+
+    def test_timeout_reports_a_boot_process_that_died_on_its_own(self):
+        # The complementary case: the process exits before the deadline with
+        # no FATAL line in its log. Without the wait status this looked
+        # identical to a slow boot.
+        result = self.smoke(
+            "```sh\nmasc start\n```\n",
+            ["start"],
+            boot_snippet="import sys; sys.stderr.write('dying quietly\\n'); sys.exit(7)",
+        )
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn("did not reach listening", result.stderr)
+        self.assertIn("boot process exited on its own", result.stderr)
+        self.assertIn("exit status 7", result.stderr)
 
 
 if __name__ == "__main__":

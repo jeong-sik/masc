@@ -115,6 +115,16 @@ let test_no_machine () =
       (contains "masc_dos_load" (Tool_result.message result)))
 ;;
 
+(* A click needs a machine to land on, like every other input tool: without one
+   it is refused and names the tool that starts one. *)
+let test_click_without_a_machine_is_refused () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_click" [ ("x", `Int 1); ("y", `Int 1) ] in
+    check bool "click without a machine is refused" false (is_completed result);
+    check bool "and says which tool starts one" true
+      (contains "masc_dos_load" (Tool_result.message result)))
+;;
+
 let test_inventory_when_unnamed () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -313,6 +323,7 @@ let test_read_only_classification () =
   check bool "peek reads" true (read_only "masc_dos_peek");
   check bool "load changes the machine" false (read_only "masc_dos_load");
   check bool "press changes the machine" false (read_only "masc_dos_press");
+  check bool "click changes the machine" false (read_only "masc_dos_click");
   check bool "step changes the machine" false (read_only "masc_dos_step")
 ;;
 
@@ -327,13 +338,14 @@ let test_every_tool_is_declared () =
            check string "schema name" name schema.name
          | None -> fail (name ^ " registers no schema")))
     [ "masc_dos_load"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
-      "masc_dos_press"; "masc_dos_type"; "masc_dos_peek" ]
+      "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek" ]
 ;;
 
 let () =
   run "dos-lane-tools"
     [ ( "tools"
       , [ test_case "no machine" `Quick test_no_machine
+        ; test_case "click no machine" `Quick test_click_without_a_machine_is_refused
         ; test_case "inventory" `Quick test_inventory_when_unnamed
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger

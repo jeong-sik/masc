@@ -133,6 +133,7 @@ type post = {
   meta_json : Yojson.Safe.t option;
   visibility : visibility;
   created_at : float;
+  content_updated_at: float; (* Last title, body or author change. *)
   updated_at : float;
   expires_at : float;
   votes_up : int;

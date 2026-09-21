@@ -90,4 +90,9 @@ module For_testing : sig
 
   val pending : base_path:string -> keeper_name:string -> int option
   (** Current pending count for a keeper ([None] if it has no entry). *)
+
+  val await_idle : base_path:string -> keeper_name:string -> unit
+  (** Wait until the keeper's current drain, if any, has exited. Observes
+      only; nothing is cancelled or changed. A test uses it where production
+      has no reason to wait for the Librarian. *)
 end

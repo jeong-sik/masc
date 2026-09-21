@@ -466,4 +466,22 @@ module For_testing = struct
     Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
     |> Option.map (fun e -> Stdlib.Mutex.protect e.state_mu (fun () -> e.pending))
   ;;
+
+  let await_idle ~base_path ~keeper_name =
+    let key = entry_key ~base_path ~keeper_name in
+    let owner_lane =
+      match
+        Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
+      with
+      | None -> None
+      | Some entry ->
+        Stdlib.Mutex.protect entry.state_mu (fun () ->
+          match entry.librarian_drain with
+          | Some drain -> Some drain.owner_lane
+          | None -> entry.last_owner_lane)
+    in
+    Option.iter
+      (fun owner_lane -> ignore (Keeper_lane.await_exit owner_lane : Keeper_lane.exit))
+      owner_lane
+  ;;
 end

@@ -5407,6 +5407,9 @@
  (modules test_keeper_task_skill_turn_exact)
  (libraries
   alcotest
+  masc_test_deps
+  exact_output_fixture
+  eio_main
   fs_compat
   masc
   masc.agent_core

@@ -1387,6 +1387,7 @@ let load_instruction_resource location relative_path =
 let make_instruction_skill_tool
       ~(config : Workspace.config)
       ?record_activation
+      ?assess_applicability
       ?on_result
       ~instruction_skills
       ()
@@ -1518,6 +1519,27 @@ let make_instruction_skill_tool
                        wire_bytes
                        Common.max_tool_result_wire_bytes)
                 else
+                  let wire_content, metadata =
+                    match content, assess_applicability with
+                    | Keeper_skill_activation_recorder.Body body, Some assess ->
+                      let assessment = assess ~reference ~body in
+                      let advice = Typesafeai_skill_applicability.model_advice assessment in
+                      let projected = match advice with
+                        | None -> wire_content
+                        | Some text -> wire_content ^ "\n\n---\n" ^ text in
+                      let fits = String.length projected <= Common.max_tool_result_wire_bytes in
+                      let metadata =
+                        ("skill_applicability", Typesafeai_skill_applicability.to_yojson assessment)
+                        :: ("applicability_advice_in_model_content", `Bool (fits && Option.is_some advice))
+                        :: ("applicability_projection", `String
+                              (match advice with
+                               | None -> "not_requested"
+                               | Some _ -> if fits then "inline" else "omitted_inline_limit"))
+                        :: metadata in
+                      (if fits then projected else wire_content), metadata
+                    | Keeper_skill_activation_recorder.Resource _, _
+                    | Keeper_skill_activation_recorder.Body _, None -> wire_content, metadata
+                  in
                   match record_activation with
                   | Some record ->
                     (match record ~invocation ~content reference with
@@ -2119,6 +2141,10 @@ let make_tools_with_authority
       @ [ make_instruction_skill_tool
             ~config
             ?record_activation:record_instruction_activation
+            ~assess_applicability:(fun ~reference ~body ->
+              let context = Option.map (fun capture -> (capture ()).Keeper_gate.snapshot) gate_context in
+              Typesafeai_skill_applicability.assess ?clock ~keeper_id:meta.name
+                ~context ~reference ~body ())
             ~instruction_skills:skills
             ()
         ]

@@ -831,6 +831,130 @@ let test_revision_mismatch_is_typed_before_tool_projection () =
   | Ok _ -> fail "stale reference resolved"
 ;;
 
+let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let fixture_config = config (source_row ~id:"only" ~path:"skills") in
+  let captured_snapshot = snapshot fixture_config
+      [ [ "guide", document ~name:"guide" ~description:"exact" "FROZEN_SKILL_BODY" ] ] in
+  let source_id = (List.hd fixture_config.sources).id in
+  let reference = exact_reference captured_snapshot ~source_id ~package_id:"guide" ~name:"guide" in
+  let selected = resolve_one captured_snapshot reference in
+  let response decision = Yojson.Safe.to_string (`Assoc
+    [ "model", `String "fixture-jev"
+    ; "answers", `Assoc [ "applicability", `Assoc
+        [ "type", `String "choice"; "choice", `String decision
+        ; "confidence", `Float 0.8
+        ; "probabilities", `Assoc
+            [ "applicable", `Float 0.2; "not_applicable", `Float 0.7
+            ; "insufficient_context", `Float 0.1 ] ] ] ]) in
+  let server = Exact_output_fixture.start_server ~sw ~net ~clock
+      (Exact_output_fixture.Replies
+        [ response "not_applicable"; response "applicable"; response "insufficient_context"
+        ; response "not-an-offered-choice"; "not-json" ]) in
+  let policy = { Runtime_schema.default_typesafeai with
+      skill_applicability = true; lane_endpoint = server.base_url } in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-skill-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy policy @@ fun () ->
+  let captured = ref None in
+  let tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+      ~assess_applicability:(fun ~reference ~body ->
+        Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
+          ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
+          ~reference ~body ())
+      ~on_result:(fun ~input:_ result -> captured := Some result)
+      ~instruction_skills:[ instruction_skill reference selected.skill ] () in
+  let invoke expected =
+    let output = run_skill_tool tool (Reference.to_yojson reference) in
+    check bool "model still receives the frozen Skill body" true
+      (String_util.contains_substring output "FROZEN_SKILL_BODY");
+    check bool "advice reaches actual Agent-Core content" true
+      (String_util.contains_substring output expected);
+    let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
+    let open Yojson.Safe.Util in
+    check bool "model advice delivery is explicit" true
+      (metadata |> member "applicability_advice_in_model_content" |> to_bool);
+    metadata |> member "skill_applicability"
+  in
+  let judged = invoke "not_applicable" in
+  let open Yojson.Safe.Util in
+  check string "negative advice is not a tool failure" "judged" (judged |> member "status" |> to_string);
+  check string "returned model is retained" "fixture-jev" (judged |> member "model" |> to_string);
+  check string "exact reference is retained" (Yojson.Safe.to_string (Reference.to_yojson reference))
+    (judged |> member "reference" |> Yojson.Safe.to_string);
+  ignore (invoke "applicable");
+  ignore (invoke "insufficient_context");
+  let invalid = invoke "advice unavailable" in
+  check string "bad choice remains explicit" "invalid_answer" (invalid |> member "status" |> to_string);
+  let failed = invoke "advice unavailable" in
+  check string "service decode failure remains explicit" "failed" (failed |> member "status" |> to_string);
+  let sent = Exact_output_fixture.post_count server in
+  ignore (run_skill_tool tool (`Assoc [ "name", `String "guide" ]));
+  check int "unavailable reference does not call JEV" sent (Exact_output_fixture.post_count server);
+  List.iter (fun policy ->
+    Masc_test_deps.with_typesafeai_policy policy (fun () ->
+      let output = run_skill_tool tool (Reference.to_yojson reference) in
+      check bool "policy skip leaves body readable" true
+        (String_util.contains_substring output "FROZEN_SKILL_BODY");
+      check bool "policy skip does not invent a model judgment" false
+        (String_util.contains_substring output "JEV applicability advice");
+      check int "excluded or disabled review sends no request" sent (Exact_output_fixture.post_count server)))
+    [ { policy with excluded_keepers = [ "skill-fixture" ] }
+    ; { policy with skill_applicability = false } ];
+  let sent_bodies = Atomic.get server.requests in
+  List.iter (fun encoded ->
+    let state = Yojson.Safe.from_string encoded |> member "state" in
+    check string "request uses frozen content" "FROZEN_SKILL_BODY"
+      (state |> member "skill" |> member "body" |> to_string)) sent_bodies;
+  let near_body = String.make Common.max_tool_result_wire_bytes 'x' in
+  let near_snapshot = snapshot fixture_config
+      [ [ "guide", document ~name:"guide" ~description:"near limit" near_body ] ] in
+  let near_reference = exact_reference near_snapshot ~source_id ~package_id:"guide" ~name:"guide" in
+  let near_selected = resolve_one near_snapshot near_reference in
+  let near_server = Exact_output_fixture.start_server ~sw ~net ~clock
+      (Exact_output_fixture.Reply (response "applicable")) in
+  Masc_test_deps.with_typesafeai_policy { policy with lane_endpoint = near_server.base_url }
+    (fun () ->
+      let near_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+          ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+          ~assess_applicability:(fun ~reference ~body ->
+            Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
+              ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
+              ~reference ~body ())
+          ~on_result:(fun ~input:_ result -> captured := Some result)
+          ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () in
+      let output = run_skill_tool near_tool (Reference.to_yojson near_reference) in
+      check string "advice cannot displace a body at the existing inline boundary" near_body output;
+      let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
+      check string "non-delivery is explicit, not claimed as consumed advice" "omitted_inline_limit"
+        (metadata |> member "applicability_projection" |> to_string);
+      check bool "projection does not claim model receipt" false
+        (metadata |> member "applicability_advice_in_model_content" |> to_bool));
+  let blocked = Exact_output_fixture.start_server ~sw ~net ~clock
+      ~on_request_before_reply:(fun () -> Eio.Fiber.await_cancel ())
+      (Exact_output_fixture.Reply (response "applicable")) in
+  Masc_test_deps.with_typesafeai_policy { policy with lane_endpoint = blocked.base_url } @@ fun () ->
+  captured := None;
+  let cancellation, resolve_cancellation = Eio.Promise.create () in
+  let pending = Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun context ->
+      Eio.Promise.resolve resolve_cancellation context;
+      run_skill_tool tool (Reference.to_yojson reference))) in
+  let await failure promise = Exact_output_fixture.await_within_fixture_budget ~clock ~failure promise in
+  let context = await "Skill review did not start" cancellation in
+  await "Skill review did not reach JEV" blocked.first_request_arrived;
+  Eio.Cancel.cancel context (Failure "fixture cancelled Skill applicability");
+  (match await "cancelled Skill review did not return" pending with
+   | Error (Eio.Cancel.Cancelled _) -> ()
+   | Error error -> fail (Printexc.to_string error)
+   | Ok _ -> fail "cancellation was converted to a successful Skill read");
+  check bool "cancelled advice does not publish a successful tool result" true (Option.is_none !captured)
+;;
+
 let () =
   run
     "Keeper Task Skill frozen exact selection"
@@ -855,6 +979,8 @@ let () =
             test_resolved_body_stays_frozen_after_new_snapshot
         ; test_case "resource read is exact and deferred" `Quick
             test_resource_is_read_only_when_exact_file_is_requested
+        ; test_case "JEV advice reaches model without changing selection" `Quick
+            test_jev_advice_reaches_the_model_without_selecting_or_authorizing
         ; test_case "revision mismatch remains typed" `Quick
             test_revision_mismatch_is_typed_before_tool_projection
         ] )

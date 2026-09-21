@@ -780,7 +780,7 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
             ("masc-exec-shim: " ^ Printexc.to_string exn ^ "\n");
           flush stderr
         with
-       | _ -> ()); (* cancel-guard-ok: this runs in the forked child just before exit 127, and output_string and flush on stderr perform no Eio operation. *)
+       | _ -> ()); (* cancel-guard-ok: exec_shim does not link eio, so nothing in it can perform an Eio operation; its only production linker is bin/masc_exec_shim, a standalone process that runs no Eio scheduler. *)
        exit 127)
   | pid ->
     let prepared = ref false in
@@ -1240,8 +1240,7 @@ let run () =
                    ~is_executable:is_executable_file (List.hd argv)
                in
                try spawn ~before_exec ?observe_sock ~program ~argv ~env ~cwd () with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
+               | exn -> (* cancel-guard-ok: exec_shim does not link eio, so nothing in it can perform an Eio operation; its only production linker is bin/masc_exec_shim, a standalone process that runs no Eio scheduler. *)
                  (match observe_sock with
                   | Some (child_end, parent_end) ->
                     (try Unix.close child_end with

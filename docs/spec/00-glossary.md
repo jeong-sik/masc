@@ -147,6 +147,19 @@ status: reference
 **Board**
 : 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
 
+**Broadcast**
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) 워크스페이스 broadcast: `Workspace.broadcast
+  ~audience:Workspace_broadcast.Fleet_conversation`으로 모든 Keeper의 대화창에 닿는
+  발화. 입구는 Keeper 도구 `keeper_broadcast`, MCP 도구 `masc_broadcast`, 운영자
+  제어(`lib/operator/operator_control.ml`), dashboard HTTP
+  (`lib/server/server_routes_http_dashboard_handlers.ml`),
+  gRPC(`lib/server/masc_grpc_service.ml`)다. (2) SSE broadcast: 서버가 연결된 client
+  전부의 stream에 event를 밀어 넣는 전송 동작(`09-server-transport.md`).
+  (3) Board `audience`의 `Broadcast`: 글을 특정 대상 없이 모두에게 라우팅하는 값
+  (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
+  (`lib/masc_log/log.ml`).
+
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.

@@ -83,7 +83,7 @@ def run_case(executable: str, fixture_path: Path) -> None:
 
         if gate["status"] == "skipped":
             needles = [cast(str, gate["reason"]).encode()]
-        elif scenario == "cancel-second-judgment":
+        elif scenario in ("cancel-second-judgment", "cancel-after-commit"):
             needles = [
                 b"completed-jev",
                 b"requested-cancel-model",
@@ -126,6 +126,13 @@ def run_case(executable: str, fixture_path: Path) -> None:
             ]
             if scenario == "memory-write-failure":
                 needles.append(cast(str, run["detail"]).encode())
+        if scenario == "cancel-after-commit":
+            needles.extend(
+                [
+                    b'"after"',
+                    f'"revision": {run["output"]["after"]["revision"]}'.encode(),
+                ]
+            )
         if gate["status"] != "skipped":
             needles.append(
                 cast(str, gate["evaluations"][0]["request"]["endpoint"]).encode()
@@ -133,7 +140,15 @@ def run_case(executable: str, fixture_path: Path) -> None:
         seen = first_screen
         # Only the short report is searched. The unrelated exact_output can
         # be much larger, so its size must not decide how far this test walks.
-        for _ in range(len(json.dumps(gate, indent=2).splitlines()) + 1):
+        for _ in range(
+            len(
+                json.dumps(
+                    run["output"] if scenario == "cancel-after-commit" else gate,
+                    indent=2,
+                ).splitlines()
+            )
+            + 1
+        ):
             if all(needle in seen for needle in needles):
                 break
             h.read_available(fd, output)
@@ -236,15 +251,18 @@ def main() -> None:
             if line.startswith(prefix):
                 encoded = line[len(prefix) :]
                 fixture = cast(dict[str, Any], json.loads(encoded))
-                if fixture["scenario"] == "cancel-second-judgment":
+                if fixture["scenario"] in (
+                    "cancel-second-judgment",
+                    "cancel-after-commit",
+                ):
                     partial.append(encoded)
-        if len(partial) != 1:
-            raise AssertionError(
-                f"expected one cancellation fixture, got {len(partial)}"
-            )
-        fixture_path = Path(directory, "cancel-second-judgment.json")
-        fixture_path.write_text(partial[0], encoding="utf-8")
-        run_case(executable, fixture_path)
+        scenarios = [json.loads(encoded)["scenario"] for encoded in partial]
+        if sorted(scenarios) != ["cancel-after-commit", "cancel-second-judgment"]:
+            raise AssertionError(f"unexpected cancellation fixtures: {scenarios}")
+        for encoded in partial:
+            fixture_path = Path(directory, json.loads(encoded)["scenario"] + ".json")
+            fixture_path.write_text(encoded, encoding="utf-8")
+            run_case(executable, fixture_path)
     print("Librarian absorb gate durable evidence reaches the TUI: PASS")
 
 

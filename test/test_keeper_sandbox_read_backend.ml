@@ -513,8 +513,8 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
      | Keeper_sandbox_remote.Openssh _ | Keeper_sandbox_remote.Docker_exec _ ->
        Alcotest.fail "a microvm attach produced another transport");
     Alcotest.(check string)
-      "reads land on the guest work volume, not the host playground"
-      Keeper_sandbox_microvm.work_volume_guest_root
+      "reads land on this keeper's guest workspace, not the host playground"
+      (Filename.concat Keeper_sandbox_microvm.work_volume_guest_root microvm.name)
       (Keeper_sandbox_remote.workspace_root endpoint)
 
 (* The reachable half of the same guard: attaching is reached by routing, and

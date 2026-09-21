@@ -50,6 +50,18 @@ type observation = {
       (** the 80x25 (or 40x25) text page as UTF-8, code page 437 kept — box
           drawing and game glyphs survive. Rows are newline-separated. Text
           modes only; a graphics mode leaves whatever the text page held. *)
+  frame_nonblack : int;
+      (** graphics-mode reading of the same frame: the number of 8x16 cells
+          holding any pixel brighter than near-black. A text mode has a value
+          here too — its frame is the text page rendered — so a caller can
+          fingerprint either kind of screen with one field. Two different
+          screens can share a count; use it to notice change, not to read. *)
+  frame_ascii : string;
+      (** the whole frame as a coarse luminance map: 8x16 pixel cells, each
+          one character of " .:-=+*#%@", rows newline-separated. This is the
+          only field that shows what a graphics mode drew. A VGA game's
+          title screen, map and menus read here the way text programs read
+          in [screen_text]. *)
   program : string option;  (** the loaded program's name *)
   files : string list;  (** file names the guest can open, sorted *)
 }
@@ -139,6 +151,21 @@ val press :
     insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
     character. A name the machine has no key for is refused before anything
     is pressed. *)
+
+val click :
+  who:string -> x:int -> y:int -> buttons:int -> steps:int ->
+  (observation * ran, error) result
+(** Sets the mouse and runs. The mouse is state, not a queue: the cursor and
+    buttons stay where they are put until the next call moves them. A click
+    ([buttons] 1 left or 2 right) is button down, run, button up, run, in one
+    call — the up half always runs so the button is never left held. A move
+    ([buttons = 0]) sets the position and runs once. Coordinates are frame
+    pixels and must land inside the frame; [steps] is the shared ceiling of
+    the whole call, as in {!press}. A program that polls the mouse rather
+    than asking the BIOS for keys never reaches {!settled}; its clicks read
+    as [settled = false] with the budget spent, which is the expected shape
+    for a game driven this way. The action is appended to the ledger like a
+    key, so a replay reproduces it. *)
 
 val type_text :
   who:string -> text:string -> steps:int -> (observation * ran, error) result

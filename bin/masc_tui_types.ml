@@ -8355,7 +8355,7 @@ let lane_picker_existing_slots (state : state) = function
     (match state.runtime_surface with
      | None -> []
      | Some snapshot ->
-       snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover)
+       snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
   | Pick_route_default ->
     (* One entry, and a pick replaces it rather than joining it. Listing it
        here is what marks it "(already a candidate)" in the choices, which is
@@ -8527,12 +8527,24 @@ let plan_runtime_lane_edit (state : state) = function
                   (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
+        | Rename_lane, _ when not row.Tui_decode.rcr_lane_declared ->
+          Refuse_lane_edit
+            (Lane_write_refused
+               (Printf.sprintf
+                  "%s is a runtime, not a declared lane; there is no table to rename"
+                  lane))
         | Rename_lane, _ ->
           (* The name is the routing key, so the writer changes the table and
              every reference in one write. Nothing to check here beyond having
              a lane under the cursor: the file decides whether the lane is
              declared as its own table and whether the new name is free. *)
           Open_lane_rename_field lane
+        | Remove_lane, _ when not row.Tui_decode.rcr_lane_declared ->
+          Refuse_lane_edit
+            (Lane_write_refused
+               (Printf.sprintf
+                  "%s is a runtime, not a declared lane; there is no table to remove"
+                  lane))
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->
@@ -8571,37 +8583,19 @@ let slot_editor_rows (state : state) =
               lane.Tui_decode.sl_declared_slots)
        |> Option.value ~default:[])
   | Some { se_target = Media_failover_slots; _ } ->
-    (* The route reaches the surface as boot admitted it, so every row here is
-       admitted by construction. What boot dropped is not listed, and its
-       presence is what stops this list from being written back at all --
-       [media_failover_write_refusal] below. *)
+    (* Edit the file's declaration, not the shorter active fleet. A rejected
+       runtime keeps its position and is marked just like a rejected exact-lane
+       slot, so removing or moving it cannot erase a neighbour by accident. *)
     (match state.runtime_surface with
      | None -> []
      | Some snapshot ->
+       let admitted = snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover in
        List.map
-         (fun runtime_id -> { sr_slot = runtime_id; sr_admitted = true })
-         snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover)
-;;
-
-(* A write of the route sends the whole list, which is the only shape the
-   routing endpoint takes for it. That is safe only while boot admitted every
-   entry: the list on screen is missing whatever it dropped, and sending it
-   would delete those from the file. Refused by name rather than written and
-   half-lost. *)
-let media_failover_write_refusal (state : state) =
-  match state.runtime_surface with
-  | None -> Some (Lane_write_refused "the runtime surface has not been read")
-  | Some snapshot ->
-    (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_dropped with
-     | [] -> None
-     | dropped ->
-       Some
-         (Lane_write_refused
-            (Printf.sprintf
-               "boot could not resolve %s in [runtime].media_failover; edit the file \
-                until it does, or this write would delete %s from it"
-               (String.concat ", " dropped)
-               (match dropped with [ _ ] -> "it" | _ -> "them"))))
+         (fun runtime_id ->
+            { sr_slot = runtime_id
+            ; sr_admitted = List.exists (String.equal runtime_id) admitted
+            })
+         snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
 
 let slot_editor_cursor_row (state : state) =
@@ -8631,8 +8625,7 @@ type slot_write_request =
   | Move_declared_slot of runtime_lane_move
   | Write_route_order of string list
       (* [\[runtime\].media_failover] has no per-entry action on the routing
-         endpoint -- it is written as a whole list. Safe only because the
-         editor refuses to write it at all while boot dropped an entry. *)
+         endpoint, so the editor writes its complete declared order. *)
 
 type slot_edit_plan =
   | Send_slot_write of
@@ -8664,14 +8657,8 @@ let plan_slot_edit (state : state) edit =
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
-         let route_refusal =
-           match target with
-           | Media_failover_slots -> media_failover_write_refusal state
-           | Exact_lane_slots _ -> None
-         in
-         match route_refusal, target, edit with
-         | Some refusal, _, _ -> Refuse_slot_edit refusal
-         | None, Exact_lane_slots _, Drop_slot when count <= 1 ->
+         match target, edit with
+         | Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip
               for edits that can land. *)
            Refuse_slot_edit
@@ -8680,10 +8667,10 @@ let plan_slot_edit (state : state) edit =
                    "%s is the last slot of %s; an exact-output lane needs at least one"
                    slot
                    name))
-         | None, Exact_lane_slots _, Drop_slot ->
+         | Exact_lane_slots _, Drop_slot ->
            Send_slot_write
              { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
-         | None, Media_failover_slots, Drop_slot ->
+         | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
               vision fleet. So the last entry may go. *)
            Send_slot_write
@@ -8691,10 +8678,10 @@ let plan_slot_edit (state : state) edit =
              ; slot
              ; request =
                  Write_route_order
-                   (List.filter (fun id -> not (String.equal id slot)) order)
+                   (List.filteri (fun index _ -> index <> editor.se_cursor) order)
              ; cursor_after = cursor_after_drop
              }
-         | None, _, Move_slot move ->
+         | _, Move_slot move ->
            let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
            let moved_to = editor.se_cursor + by in
            if moved_to < 0 || moved_to >= count
@@ -8719,12 +8706,44 @@ let plan_slot_edit (state : state) edit =
              Send_slot_write { target; slot; request; cursor_after = Some moved_to })))
 ;;
 
+(* What a Runtime row says about the position it holds in its lane. The
+   renderer spells and colours these; the reading itself is here because it is
+   the one fact that table exists to carry, and [Lane_undeclared] is not
+   derivable from the position alone. *)
+type runtime_lane_fact =
+  | Lane_undeclared
+      (* No [runtime.lanes.<id>] table declares this lane: it is the single
+         candidate an assignment naming a runtime rests on. It reads exactly
+         like [Lane_single_candidate] on the wire -- one candidate, first
+         position. A declared lane of one candidate walks no failover either;
+         what separates this one is that [D] has no table to remove. *)
+  | Lane_single_candidate
+  | Lane_head
+  | Lane_fallback of int
+
+let runtime_lane_fact_of_row (row : Tui_decode.runtime_candidate_row) =
+  if not row.Tui_decode.rcr_lane_declared then Lane_undeclared
+  else if row.Tui_decode.rcr_candidate_count = 1 then Lane_single_candidate
+  else if row.Tui_decode.rcr_position = 1 then Lane_head
+  else Lane_fallback (row.Tui_decode.rcr_position - 1)
+;;
+
 type runtime_pick_item =
   | Pick_lane of Tui_decode.runtime_resolved_lane
   | Pick_model of Tui_decode.runtime_option
 
 let runtime_picker_items (state : state) : runtime_pick_item list =
-  let lanes = List.map (fun lane -> Pick_lane lane) state.runtime_lanes in
+  (* Only declared lanes are offered as lanes. A lane no
+     [runtime.lanes.<id>] table declares carries the id of the runtime it
+     rests on and that runtime as its only candidate, so picking it writes the
+     same assignment as the [MODEL] row of the same id further down this
+     list -- the picker showed both and called one of them a lane. *)
+  let lanes =
+    state.runtime_lanes
+    |> List.filter (fun (lane : Tui_decode.runtime_resolved_lane) ->
+         lane.Tui_decode.rrl_declared)
+    |> List.map (fun lane -> Pick_lane lane)
+  in
   let models =
     state.runtime_catalog
     |> List.map (fun model -> Pick_model model)

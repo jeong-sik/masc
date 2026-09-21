@@ -113,9 +113,12 @@ Keeper–런타임 연결이 정해지는 곳은 이 표 하나뿐입니다. 다
 5,706개는 실패했습니다. 그중 5,405개의 운영자 판정이 `fail_open_next_runtime`
 이었습니다 — 레인의 다음 후보로 넘어가서 계속 갔다는 뜻입니다.
 
-현재 영수증은 최종 preflight 설정 오류에 이 값을 쓰지 않습니다.
-`operator_action_required`와 `preflight_config_error`를 기록합니다. 운영자가 설정을
-고치기 전에는 다음 런타임으로 넘어갔다고 주장하지 않습니다.
+현재 영수증은 실행 전에 막힌 턴에 이 값을 쓰지 않습니다. `operator_action_required`
+와 함께 이유를 둘 중 하나로 적습니다. 운영자가 할 일이 서로 다르기 때문입니다.
+런타임이 설정값을 거부하면 `config_invalid` 이고, 제공자가 요청을 거절하면
+`authorization_refused` 입니다. 뒤쪽은 실제로는 주간·5시간 사용량 한도라서, 설정을
+고치는 게 아니라 슬롯을 옮겨야 합니다. 둘 다 다음 런타임으로 넘어갔다고 주장하지
+않습니다.
 
 fallback이 관측되지 않은 최종 network/timeout 오류는 `retry_later`와
 `transient_runtime_retry`를 기록합니다. 현재 턴은 끝났고 Keeper는 살아 있어 이후

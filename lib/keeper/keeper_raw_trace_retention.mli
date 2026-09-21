@@ -36,6 +36,10 @@ type error =
   | Invalid_raw_trace_reference of string
   | Raw_trace_directory_unreadable of string
 
+val error_kind : error -> string
+(** Bounded constructor label for retention-skip metrics. Details and paths
+    remain in {!error_to_string} and never enter metric labels. *)
+
 val error_to_string : error -> string
 
 val prune :

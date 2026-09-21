@@ -417,7 +417,8 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   | ( ( Route.Retry_after_observed
           { retry_class =
               ( Route.Rate_limited | Route.Hard_quota | Route.Server_error
-              | Route.Network_transient | Route.Provider_timeout )
+              | Route.Empty_completion _ | Route.Network_transient
+              | Route.Provider_timeout )
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -441,7 +442,9 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     in
     Some (Wait_until { release_at; waiting_on; wait = Path_release })
   | ( ( Route.Retry_after_observed
-          { retry_class = Route.Server_error | Route.Network_transient | Route.Provider_timeout
+          { retry_class =
+              Route.Empty_completion _ | Route.Server_error
+              | Route.Network_transient | Route.Provider_timeout
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -744,6 +747,19 @@ let attempt_runtime_candidates
        response to the replacement catalog row. *)
     let attempt_quota_scope = quota_scope_of candidate in
     let attempt_candidate_backpressure = candidate_backpressure_of candidate in
+    let clear_answered_candidate_evidence () =
+      Option.iter
+        (fun candidate ->
+           Runtime_candidate_backpressure.note_candidate_success ~candidate)
+        attempt_candidate_backpressure;
+      (* A call getting through is the only evidence a quota came back that
+         a provider stating no reset time leaves available, so it is what
+         clears the observation. A stated window is left alone: it names a
+         time, and one answer inside it does not make that untrue. *)
+      match attempt_quota_scope with
+      | Some scope -> Runtime_quota_window.note_succeeded ~scope
+      | None -> ()
+    in
     emit_runtime_manifest
       ~status:"attempt"
       ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -760,17 +776,7 @@ let attempt_runtime_candidates
           queued person before the first token -- says nothing about the
           candidate, so it clears no evidence (RFC-0458 §3.4). *)
        if provider_answered value
-       then (
-         Option.iter
-           (fun candidate -> Runtime_candidate_backpressure.note_candidate_success ~candidate)
-           attempt_candidate_backpressure;
-         (* A call getting through is the only evidence a quota came back that
-            a provider stating no reset time leaves available, so it is what
-            clears the observation. A stated window is left alone: it names a
-            time, and one success inside it does not make that untrue. *)
-         match attempt_quota_scope with
-         | Some scope -> Runtime_quota_window.note_succeeded ~scope
-         | None -> ());
+       then clear_answered_candidate_evidence ();
        Ok value
      | Error error, checkpoint_after, effect_disposition, dispatch ->
        emit_runtime_manifest
@@ -862,6 +868,14 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Server_error
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Empty_completion _
+            ; retry_after = _
+            } ->
+          (* The provider answered. It disproves an earlier "failed without
+             answering" observation and an undated quota, even though this
+             turn still fails for having no usable completion. *)
+          clear_answered_candidate_evidence ()
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Network_transient; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Network_transient

@@ -1162,15 +1162,32 @@ let test_a_lane_the_default_walks_is_not_removed () =
       Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"runpod_mtp.qwen" ()))
 ;;
 
-(* A new lane under a runtime id would take over that runtime for every keeper
-   that names it. That runtime's own lane is what [set] writes. *)
-let test_a_new_lane_under_a_runtime_id_is_refused () =
+(* A lane named after a runtime takes that runtime over for every keeper that
+   names it, which is the shape [set_first_run_runtime] writes at install and
+   the one [set_runtime_lane_candidates] has always produced. [create] used to
+   be the only writer refusing it. *)
+let test_a_new_lane_under_a_runtime_id_is_declared () =
   with_runtime_file (fun path ->
-    lane_write_refused "create" ~path ~names:[ "is a runtime id" ] (fun () ->
-      Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
-        ~runtime_ids:[ "openai.gpt" ] ());
-    Alcotest.(check bool) "no lane was declared" true
-      (Option.is_none (Runtime.get_lane_by_id "openai.small")))
+    lane_write_ok "create under a runtime id"
+      (Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
+         ~runtime_ids:[ "openai.small"; "openai.gpt" ] ());
+    match Runtime.get_lane_by_id "openai.small" with
+    | None -> Alcotest.fail "the lane was not declared"
+    | Some lane -> (
+      Alcotest.(check (list string))
+        "the lane shadows the runtime with its own candidates"
+        [ "openai.small"; "openai.gpt" ]
+        (Runtime_lane.ordered_candidates lane);
+      (* The point of allowing it: a keeper that names the runtime now walks
+         the lane, which is what [resolve_assignment] reads first. *)
+      (match Runtime.resolve_assignment "openai.small" with
+       | `Lane resolved ->
+         Alcotest.(check (list string))
+           "the assignment resolves through the lane"
+           [ "openai.small"; "openai.gpt" ]
+           (Runtime_lane.ordered_candidates resolved)
+       | `Missing | `Unavailable _ ->
+         Alcotest.fail "the runtime id no longer resolves")))
 ;;
 
 (* A lane written inline has no header for the line editor to remove. With no
@@ -3318,7 +3335,7 @@ let () =
         ; Alcotest.test_case
             "a new lane under a runtime id is refused"
             `Quick
-            test_a_new_lane_under_a_runtime_id_is_refused
+            test_a_new_lane_under_a_runtime_id_is_declared
         ; Alcotest.test_case
             "an inline lane is not reported removed"
             `Quick

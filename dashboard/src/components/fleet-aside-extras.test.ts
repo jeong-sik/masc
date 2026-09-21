@@ -214,6 +214,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
     lanes: [
       {
         id: 'lane-main',
+        declared: true,
         runtime_ids: ['claude/main', 'codex/main', 'local/gguf'],
       },
     ],

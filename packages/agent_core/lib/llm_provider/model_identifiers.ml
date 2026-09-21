@@ -93,6 +93,8 @@ module Model_id = struct
         let label = "Model_identifiers.Model_id"
       end)
 
+  let equal_id_prefix ~prefix t = equal (Id_prefix.to_string prefix) t
+
   let starts_with ~prefix t =
     starts_with_folded ~prefix:(Id_prefix.to_string prefix) t
   ;;

@@ -390,6 +390,41 @@ type exact_output_lane_decl =
     Routes/aliases/profiles/system_targets/strategy from the deleted
     [runtime_config] are dropped (RFC-0206 §5): the single-binding Runtime model
     has no routing layer. *)
+(** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. The key stays in
+    the environment ([TYPESAFEAI_API_KEY]); everything else about the lane is
+    here. [lane_enabled] turns the lane off; it cannot turn it on without a
+    key. Two gates ask the vendor: [board_attention] (the Board attention
+    judgment, {!Keeper_board_attention_exact_flow}, which sends the post and
+    the keeper's context) and [absorb_gate] (the librarian absorb gate,
+    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context preservation review is opt-in too.
+    All reach the same endpoint, so one [excluded_keepers] applies to every review: a keeper
+    named there is never asked about, whichever gate asks. *)
+type typesafeai =
+  { lane_enabled : bool
+  ; lane_endpoint : string
+  ; lane_model : string
+  ; board_attention : bool
+  ; absorb_gate : bool
+  ; context_review : bool
+  ; excluded_keepers : string list
+  }
+[@@deriving show, eq]
+
+(* What an absent [typesafeai] table means: the lane on when a key is set,
+   the vendor's own endpoint and latest model, Board attention on, the absorb
+   gate off (it sends memories out, so the operator turns it on by name),
+   nobody excluded. *)
+let default_typesafeai =
+  { lane_enabled = true
+  ; lane_endpoint = "https://api.typesafe.ai/v1/systemone"
+  ; lane_model = "jev-latest"
+  ; board_attention = true
+  ; absorb_gate = false
+  ; context_review = false
+  ; excluded_keepers = []
+  }
+;;
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -431,6 +466,8 @@ type config =
         Replaces {!Lsp_process_manager.command_of_language} for that language
         and no other. A key naming no language, or a value that is not a
         non-empty array of strings, is refused at load. *)
+  ; typesafeai : typesafeai
+    (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list
     (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
         reach (RFC-0415). Beside the endpoint registry rather than in the

@@ -2401,6 +2401,7 @@ type runtime_option = {
 type runtime_resolved_lane = {
   rrl_id : string;
   rrl_runtime_ids : string list;
+  rrl_declared : bool;
 }
 
 type runtime_resolved_snapshot = {
@@ -2408,13 +2409,14 @@ type runtime_resolved_snapshot = {
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
   rrs_media_failover : string list;
-  rrs_media_failover_dropped : string list;
+  rrs_media_failover_declared : string list;
   rrs_runtimes : runtime_option list;
   rrs_lanes : runtime_resolved_lane list;
 }
 
 type runtime_candidate_row = {
   rcr_lane_id : string;
+  rcr_lane_declared : bool;
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
@@ -4339,6 +4341,7 @@ let decode_runtime_default_member json =
 
 let decode_runtime_resolved_lane json =
   let* rrl_id = required_string_field json "id" in
+  let* rrl_declared = required_bool_field json "declared" in
   let* runtime_ids = required_list_field json "runtime_ids" in
   let* rrl_runtime_ids =
     decode_list "runtime_ids"
@@ -4368,7 +4371,7 @@ let decode_runtime_resolved_lane json =
     in
     loop rrl_runtime_ids
   in
-  Ok { rrl_id; rrl_runtime_ids }
+  Ok { rrl_id; rrl_runtime_ids; rrl_declared }
 
 let decode_runtime_resolved_snapshot json =
   let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
@@ -4391,7 +4394,7 @@ let decode_runtime_resolved_snapshot json =
       items
   in
   let* rrs_media_failover = string_list_field "media_failover" in
-  let* rrs_media_failover_dropped = string_list_field "media_failover_dropped" in
+  let* rrs_media_failover_declared = string_list_field "media_failover_declared" in
   let* default_json, rrs_default_runtime_id =
     decode_runtime_default_member json
   in
@@ -4471,7 +4474,7 @@ let decode_runtime_resolved_snapshot json =
     ; rrs_config_path
     ; rrs_default_runtime_id
     ; rrs_media_failover
-    ; rrs_media_failover_dropped
+    ; rrs_media_failover_declared
     ; rrs_runtimes
     ; rrs_lanes
     }
@@ -4503,6 +4506,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
            | Some runtime ->
                loop (position + 1)
                  ({ rcr_lane_id = lane.rrl_id
+                  ; rcr_lane_declared = lane.rrl_declared
                   ; rcr_position = position
                   ; rcr_candidate_count = candidate_count
                   ; rcr_runtime = runtime

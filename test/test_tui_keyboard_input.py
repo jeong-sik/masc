@@ -11834,7 +11834,7 @@ def runtime_probe_response(*, fresh: bool) -> HttpResponse:
                 "providers": providers,
                 "errors": [] if fresh else ["runtime-c: network_error"],
                 "observations": ["provider metadata endpoints only"],
-                "limitations": ["no completion request"],
+                "limitations": ["no completion request", "CLI execution skipped"],
             },
         },
     )
@@ -11869,10 +11869,10 @@ def runtime_resolved_response() -> HttpResponse:
             "config_path": "/workspace/config/runtime.toml",
             "default_runtime": runtime_a,
             # The two routes that are not lanes. Both lists are required by
-            # the decoder; empty is a configuration (no vision fleet), and an
-            # empty dropped list is what lets the route be written back.
+            # the decoder; empty is a configuration (no vision fleet), and
+            # the declared list is what the editor writes back.
             "media_failover": [],
-            "media_failover_dropped": [],
+            "media_failover_declared": [],
             "runtimes": [
                 runtime_a,
                 runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),
@@ -11884,14 +11884,17 @@ def runtime_resolved_response() -> HttpResponse:
                 {
                     "id": "primary",
                     "runtime_ids": ["runtime-a", "runtime-b"],
+                    "declared": True,
                 },
                 {
                     "id": "degraded",
                     "runtime_ids": ["runtime-c"],
+                    "declared": True,
                 },
                 {
                     "id": "unobserved",
                     "runtime_ids": ["runtime-d"],
+                    "declared": True,
                 },
             ],
             "assignments": [
@@ -12095,6 +12098,8 @@ def runtime_surface_interaction(
                 # status in agreement, so the row said the status twice.
                 b"HTTP status: 200",
                 b"Latency: 18ms",
+                b"Probe limitation: no completion request",
+                b"Probe limitation: CLI execution skipped",
             ):
                 if needle not in lane_detail_plain:
                     raise AssertionError(

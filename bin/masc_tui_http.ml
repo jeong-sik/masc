@@ -49,6 +49,13 @@ let keeper_chat_timeout_sec = 180.0
    lose the only report that says what landed. *)
 let preset_restore_timeout_sec = 120.0
 
+(* A config save can land mid-turn: the server commits the metadata, then
+   stops the lane for the restart, and that stop waits the turn out. A turn
+   is cut by [turn] provider_call_deadline_sec (900s in config/runtime.toml),
+   so waiting longer can never succeed; the 10s default drops the save
+   before the commit instead. #37612. *)
+let keeper_config_save_timeout_sec = 900.0
+
 (* The server asks every declared endpoint in turn, and a provider that is
    simply slow can hold one of them for tens of seconds. The ordinary 10s
    deadline gave up while the scan was still running and the pane reported a
@@ -2041,7 +2048,10 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
     Printf.sprintf "/api/v1/keepers/%s/config"
       (percent_encode_path_segment keeper_name)
   in
-  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body:patch_json with
+  match
+    http_post_with_timeout ~timeout_sec:keeper_config_save_timeout_sec
+      ~headers:(auth_headers ()) ~host ~port ~path ~body:patch_json
+  with
   | Error detail -> Error (Keeper_config_transport_error detail)
   | Ok (status, body) when Masc.Tui_decode.is_success_http_status status ->
     (match Yojson.Safe.from_string body with

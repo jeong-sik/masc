@@ -107,7 +107,12 @@ def run_side_by_side(executable: str) -> None:
         _, beside = comment_row(output)
         at = beside.index(b"Comment 000")
         if at < SIDE_COMMENT_COLUMN_LEAST:
-            raise AssertionError(f"the comment starts at column {at}, not in the right-hand column: " + repr(beside))
+            # The whole screen, not just this row: whether the columns right of
+            # the read pane hold the acting pane or nothing decides whether the
+            # test's width model or the pane reservation is wrong.
+            raise AssertionError(
+                f"the comment starts at column {at}, not in the right-hand column: " + repr(beside)
+                + "\nscreen:\n" + h.screen_text(bytes(output)))
         if beside[:at].count("│".encode()) < 2:
             raise AssertionError(
                 f"at {SIDE_COLUMNS} columns the comment has no separate body/comment columns: " + repr(beside))

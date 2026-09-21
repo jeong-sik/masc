@@ -131,7 +131,7 @@ let run_grpc_heartbeat_fiber
             close_stream ();
             Ok ()
           with
-          | exn -> Error exn)
+          | exn -> Error exn) (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
     in
     let report_close_error = function
       | Ok () -> ()

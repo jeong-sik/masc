@@ -382,11 +382,13 @@ let render_overview (state : state) =
            question that header answers; at this width the row says only that
            one did. *)
         let approval_count =
-          let on_screen = List.length (Masc_tui_types.approval_items state) in
+          let on_screen = Masc_tui_types.approvals_surface_pending state in
           let source_unread =
             Option.is_none state.approval_snapshot
             || Option.is_some state.approvals_error
             || Option.is_some state.keeper_tool_approvals_error
+            || Option.is_none state.asks_snapshot
+            || Option.is_some state.asks_error
             || Option.is_some state.gate_error
             || Option.is_some state.gate_queue_unavailable
           in
@@ -5244,52 +5246,56 @@ let render_lane_run_list (state : state) ~lane_id =
    that fit stay complete; oversized fields share the space left after each
    field's minimum preview. If even those minima do not fit, preserve the
    original prefix and name the omitted suffix count. Stored bytes do not change. *)
-let lane_run_render_max_bytes = 65536
+let lane_run_preview_source_max_bytes = 65536
+
+type lane_run_prepared_document =
+  { full_text : string
+  ; document : string
+  ; notice : string
+  }
+
+type lane_run_prepared_field =
+  { index : int
+  ; heading : string
+  ; heading_bytes : int
+  ; prepared : lane_run_prepared_document
+  ; minimum_bytes : int
+  ; full_bytes : int
+  }
 
 let lane_run_payload_lines ~width json =
   let fence = fenced_document_text ~language:"json" in
   let prepare_document value =
-    let full = Yojson.Safe.pretty_to_string value in
-    let full_document = fence full in
-    let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full) in
-    full, full_document, notice
+    let full_text = Yojson.Safe.pretty_to_string value in
+    let document = fence full_text in
+    let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full_text) in
+    { full_text; document; notice }
   in
-  let minimum_document_bytes (full, full_document, notice) =
-    min (String.length full_document)
-      (String.length full_document - String.length full + String.length notice + 1)
+  let minimum_document_bytes prepared =
+    min (String.length prepared.document)
+      (String.length prepared.document - String.length prepared.full_text
+       + String.length prepared.notice + 1)
   in
-  let render_document ~budget (full, full_document, notice) =
-    let preview =
-      if String.length full_document <= budget then Some (full_document, [])
+  (* Field allocation reserves the minimum above; non-object payloads receive
+     the full preview budget. Both callers therefore leave a non-negative room. *)
+  let render_document ~budget prepared =
+    let document, notices =
+      if String.length prepared.document <= budget then prepared.document, []
       else
-        let wrapper_bytes = String.length full_document - String.length full in
-        let room = budget - wrapper_bytes - String.length notice - 1 in
-        if room < 0 then None
-        else
-          let cut =
-            match String.rindex_from_opt full room '\n' with
-            | Some newline -> newline
-            | None -> String_util.utf8_char_boundary full room
-          in
-          Some (fence (String.sub full 0 cut), [ Theme.warn (), notice ])
+        let wrapper_bytes = String.length prepared.document - String.length prepared.full_text in
+        let room = budget - wrapper_bytes - String.length prepared.notice - 1 in
+        let cut =
+          match String.rindex_from_opt prepared.full_text room '\n' with
+          | Some newline -> newline
+          | None -> String_util.utf8_char_boundary prepared.full_text room
+        in
+        fence (String.sub prepared.full_text 0 cut), [ Theme.warn (), prepared.notice ]
     in
-    Option.map
-      (fun (document, notices) ->
-        let used =
-          String.length document
-          + List.fold_left (fun n (_, text) -> n + String.length text + 1) 0 notices
-        in
-        let lines =
-          document_markdown ~width document
-          |> List.map (fun line -> Ansi.reset, line)
-        in
-        used, lines @ notices)
-      preview
-  in
-  let document_lines ~budget prepared =
-    match render_document ~budget prepared with
-    | Some (_, lines) -> lines
-    | None -> [ Theme.warn (), "… payload not rendered" ]
+    let lines =
+      document_markdown ~width document
+      |> List.map (fun line -> Ansi.reset, line)
+    in
+    lines @ notices
   in
   match json with
   | `Assoc (_ :: _ as fields) ->
@@ -5299,58 +5305,58 @@ let lane_run_payload_lines ~width json =
         (fun index (name, value) ->
           let heading = Yojson.Safe.to_string (`String name) |> Terminal_text.single_line in
           let heading_bytes = String.length heading + 1 in
-          let ((_, full_document, _) as prepared) = prepare_document value in
-          ( index, heading, heading_bytes, prepared
-          , heading_bytes + minimum_document_bytes prepared
-          , heading_bytes + String.length full_document ))
+          let prepared = prepare_document value in
+          { index; heading; heading_bytes; prepared
+          ; minimum_bytes = heading_bytes + minimum_document_bytes prepared
+          ; full_bytes = heading_bytes + String.length prepared.document })
         fields
     in
-    let render_field budget (_, heading, heading_bytes, prepared, _, _) =
-      (Ansi.bold, heading)
-      :: document_lines ~budget:(budget - heading_bytes) prepared
+    let render_field budget field =
+      (Ansi.bold, field.heading)
+      :: render_document ~budget:(budget - field.heading_bytes) field.prepared
     in
-    let total = List.fold_left (fun n (_, _, _, _, _, bytes) -> n + bytes) 0 fields in
-    if total <= lane_run_render_max_bytes then
-      List.concat_map (fun ((_, _, _, _, _, bytes) as field) -> render_field bytes field) fields
+    let total = List.fold_left (fun n field -> n + field.full_bytes) 0 fields in
+    if total <= lane_run_preview_source_max_bytes then
+      List.concat_map (fun field -> render_field field.full_bytes field) fields
     else begin
       let minimum_total fields =
-        List.fold_left (fun n (_, _, _, _, bytes, _) -> n + bytes) 0 fields
+        List.fold_left (fun n field -> n + field.minimum_bytes) 0 fields
       in
       let notice_bytes = function None -> 0 | Some text -> String.length text + 1 in
       let fields, suffix_notice =
-        if minimum_total fields <= lane_run_render_max_bytes then fields, None
+        if minimum_total fields <= lane_run_preview_source_max_bytes then fields, None
         else
           let rec prefix used remaining notice acc = function
             | [] -> List.rev acc, None
-            | ((_, _, _, _, minimum, _) as field) :: rest ->
+            | field :: rest ->
               let next_notice =
                 if List.is_empty rest then None else Some (omitted (remaining - 1))
               in
-              if used + minimum + notice_bytes next_notice <= lane_run_render_max_bytes then
-                prefix (used + minimum) (remaining - 1) next_notice (field :: acc) rest
+              if used + field.minimum_bytes + notice_bytes next_notice <= lane_run_preview_source_max_bytes then
+                prefix (used + field.minimum_bytes) (remaining - 1) next_notice (field :: acc) rest
               else List.rev acc, notice
           in
           let count = List.length fields in
           prefix 0 count (Some (omitted count)) [] fields
       in
-      let needed (_, _, _, _, minimum, full) = full - minimum in
+      let needed field = field.full_bytes - field.minimum_bytes in
       let ranked = List.stable_sort (fun a b -> Int.compare (needed a) (needed b)) fields in
       let rec allocate extra remaining = function
         | [] -> []
-        | ((_, _, _, _, minimum, _) as field) :: rest ->
+        | field :: rest ->
           let added = min (needed field) (extra / remaining) in
-          (field, minimum + added) :: allocate (extra - added) (remaining - 1) rest
+          (field, field.minimum_bytes + added) :: allocate (extra - added) (remaining - 1) rest
       in
-      let extra = lane_run_render_max_bytes - notice_bytes suffix_notice - minimum_total fields in
+      let extra = lane_run_preview_source_max_bytes - notice_bytes suffix_notice - minimum_total fields in
       let allocated =
         allocate extra (List.length fields) ranked
-        |> List.sort (fun ((a, _, _, _, _, _), _) ((b, _, _, _, _, _), _) -> Int.compare a b)
+        |> List.sort (fun (a, _) (b, _) -> Int.compare a.index b.index)
       in
       let lines = List.concat_map (fun (field, budget) -> render_field budget field) allocated in
       match suffix_notice with None -> lines | Some text -> lines @ [ Theme.warn (), text ]
     end
   | _ ->
-    document_lines ~budget:lane_run_render_max_bytes (prepare_document json)
+    render_document ~budget:lane_run_preview_source_max_bytes (prepare_document json)
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_decision with
@@ -5604,13 +5610,169 @@ let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
   | Some availability, output ->
     lane_run_payload_availability_lines ~width availability output
 
-let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
-  let input_title, output_title = lane_run_panel_titles detail in
+module Continuity_report = Masc.Librarian_continuity_report
+
+type run_inspection =
+  | Inspection_lane of Tui_decode.lane_run_detail
+  | Inspection_measurement of string * Measurement.t
+
+let measurement_summary_lines (report : Continuity_report.t) =
+  let counts = Measurement.counts report in
+  let provenance = match report.provenance with
+    | Continuity_report.Synthetic -> "SYNTHETIC INPUT" in
+  [ Ansi.reset, "  MEANING PRESERVATION  " ^ Terminal_text.single_line report.run_id
+  ; Ansi.dim, "  " ^ provenance ^ "  ·  " ^ Terminal_text.single_line report.started_at
+  ; Ansi.reset,
+    Printf.sprintf "  SAMPLES  %d  ·  SCORED %d  ·  FAILED %d  ·  INCOMPLETE %d"
+      (List.length report.samples) counts.scored counts.failed counts.incomplete
+  ]
+
+let measurement_text_lines ~width lines =
+  List.concat_map
+    (fun (style, text) ->
+      String.split_on_char '\n' text
+      |> List.concat_map (fun line ->
+        Message_layout.wrap_words ~max_cells:(max 1 width)
+          (Terminal_text.single_line line)
+        |> List.map (fun line -> style, line)))
+    lines
+
+let measurement_input_lines ~width ~sha256 (measurement : Measurement.t) =
+  let report = measurement.report in
+  let module R = Continuity_report in
+  let metadata =
+    [ "AUTHORITATIVE FILE  " ^ report.output_path
+    ; "BLOB SHA256  " ^ sha256
+    ; "Published blob is a copy; it may be collected."
+    ; "INPUT  " ^ report.input_path
+    ; "INPUT SHA256  " ^ report.input_sha256
+    ; "CONFIG REVISION  " ^ report.config_revision
+    ]
+    @ (match report.binary_commit with None -> [] | Some value -> [ "BINARY COMMIT  " ^ value ])
+    @ (match report.executable_sha256 with None -> [] | Some value -> [ "EXECUTABLE SHA256  " ^ value ])
+    @ List.map (fun (id, sha256) ->
+        "CONTEXT SHA256  " ^ id ^ "  " ^ sha256) measurement.context_hashes
+  in
+  measurement_text_lines ~width (List.map (fun text -> Ansi.dim, text) metadata)
+  @ lane_run_payload_lines ~width
+      (`List (List.map (fun (sample : R.sample) -> R.case_to_yojson sample.case) report.samples))
+
+(* Apply the same byte ceiling as exact lane payloads before wrapping. The
+   report and its full score distribution remain intact; only text is a preview. *)
+let measurement_output_preview ~width ~output_path lines =
+  let rec take remaining reversed = function
+    | [] -> List.rev reversed, false
+    | (style, text) :: rest ->
+      let bytes = String.length text + 1 in
+      if bytes <= remaining then take (remaining - bytes) ((style, text) :: reversed) rest
+      else
+        let prefix = String_util.utf8_prefix ~max_bytes:(max 0 remaining) text in
+        List.rev ((style, prefix) :: reversed), true
+  in
+  let preview, truncated = take lane_run_preview_source_max_bytes [] lines in
+  let notice =
+    if truncated then
+      [ Theme.warn (), Printf.sprintf
+          "PREVIEW · output truncated at %d bytes; full report: %s"
+          lane_run_preview_source_max_bytes output_path ]
+    else []
+  in
+  measurement_text_lines ~width (notice @ preview)
+
+let measurement_output_lines ~width (report : Continuity_report.t) =
+  let module R = Continuity_report in
+  let prepared (request : R.generation_request) =
+    List.concat_map
+      (fun (wire : Llm_provider.Request_wire_observer.observation) ->
+        [ "PREPARED REQUEST  " ^ wire.provider ^ "  ·  " ^ wire.model
+        ; "PRE-DISPATCH SHA256  " ^ wire.body_sha256 ])
+      request.prepared_requests
+  in
+  let generation label (value : R.generation) =
+    [ label ^ "  " ^ value.response.model ^ "  ·  runtime " ^ value.request.runtime_id
+    ; "RESPONSE  " ^ value.response.response_id
+    ; value.response.text
+    ] @ prepared value.request
+  in
+  let question_lines = function
+    | R.Provided text -> [ "QUESTION PROVIDED"; text ]
+    | R.Generated value -> generation "QUESTION GENERATED" value
+  in
+  let failed_generation label (value : R.failed_generation) =
+    [ label ^ " FAILED  " ^ value.error
+    ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
+    ] @ prepared value.request
+    @ (match value.incomplete_response with
+       | None -> []
+       | Some response -> [ "INCOMPLETE RESPONSE  " ^ response.model ^ "  ·  " ^ response.response_id; response.text ])
+  in
+  let values =
+    List.filter_map (fun (sample : R.sample) -> match sample.progress with
+      | R.Scored { judgment; _ } -> Some (judgment.probability, sample.case.id)
+      | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
+      | R.Answer_ready _ | R.Judge_failed _ -> None) report.samples
+    |> List.sort (fun (a, id_a) (b, id_b) ->
+        let order = Float.compare a b in if order = 0 then String.compare id_a id_b else order)
+  in
+  let probabilities =
+    (Ansi.bold, "RAW PROBABILITIES · NO PASS THRESHOLD")
+    :: (match values with
+        | [] -> [ Theme.muted (), "No scored samples" ]
+        | values -> List.map (fun (probability, id) ->
+            Ansi.reset, id ^ "  " ^ Yojson.Safe.to_string (`Float probability)) values)
+  in
+  let samples = List.concat_map (fun (sample : R.sample) ->
+      let style, status, lines = match sample.progress with
+        | R.Not_started -> Theme.muted (), "NOT STARTED", []
+        | R.Question_failed failed -> Theme.bad (), "QUESTION FAILED", failed_generation "QUESTION" failed
+        | R.Question_ready question -> Theme.info (), "INCOMPLETE · QUESTION READY", question_lines question
+        | R.Answer_failed (question, failed) -> Theme.bad (), "ANSWER FAILED",
+            question_lines question @ failed_generation "ANSWER" failed
+        | R.Answer_ready { question; answer } -> Theme.info (), "INCOMPLETE · ANSWER READY",
+            question_lines question @ generation "ANSWER" answer
+        | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
+            question_lines question @ generation "ANSWER" answer
+            @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
+              ; "JUDGE FAILED  " ^ failure.error ]
+        | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
+            question_lines question @ generation "ANSWER" answer
+            @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
+              ; "Noul  " ^ Yojson.Safe.to_string (`Float judgment.probability)
+              ; "TRUE  " ^ judgment.request.true_criteria
+              ; "FALSE  " ^ judgment.request.false_criteria
+              ; "REQUEST SHA256  " ^ judgment.request_body_sha256 ]
+      in
+      [ Ansi.dim, ""; style, sample.case.id ^ "  ·  " ^ status ]
+      @ List.map (fun line -> Ansi.reset, line) lines) report.samples
+  in
+  measurement_output_preview ~width ~output_path:report.output_path (probabilities @ samples)
+
+let inspection_summary_lines = function
+  | Inspection_lane detail -> lane_run_summary_lines detail
+  | Inspection_measurement (_, measurement) -> measurement_summary_lines measurement.report
+
+let inspection_panel_titles = function
+  | Inspection_lane detail -> lane_run_panel_titles detail
+  | Inspection_measurement (_, measurement) ->
+    (match measurement.report.provenance with
+     | Continuity_report.Synthetic -> "INPUT · SYNTHETIC CASES"),
+    "OBSERVATIONS · NO VERDICT"
+
+let inspection_input_lines ~width = function
+  | Inspection_lane detail -> lane_run_input_lines ~width detail
+  | Inspection_measurement (sha256, report) -> measurement_input_lines ~width ~sha256 report
+
+let inspection_output_lines ~width = function
+  | Inspection_lane detail -> lane_run_output_lines ~width detail
+  | Inspection_measurement (_, measurement) -> measurement_output_lines ~width measurement.report
+
+let lane_run_stacked_lines ~width detail =
+  let input_title, output_title = inspection_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
-  @ indent (lane_run_input_lines ~width detail)
+  @ indent (inspection_input_lines ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
-  @ indent (lane_run_output_lines ~width detail)
+  @ indent (inspection_output_lines ~width detail)
 
 let lane_run_split_line buf cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
@@ -5633,15 +5795,19 @@ let render_lane_run_detail (state : state) ~run_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
+  let measurement = match state.lanes_mode with
+    | Lanes_measurement_detail _ -> true
+    | Lanes_overview | Lanes_run_list _ | Lanes_run_detail _ -> false in
   let detail =
-    match state.lane_run_detail with
+    if measurement then Option.map (fun report -> Inspection_measurement (run_id, report)) state.measurement_report
+    else match state.lane_run_detail with
     | Some detail when String.equal detail.Tui_decode.lrd_run_id run_id ->
-        Some detail
+        Some (Inspection_lane detail)
     | Some _ | None -> None
   in
   let header =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Lane Run")
+      (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run"))
       (fit_width (Terminal_text.single_line run_id) 38)
       (connection_badge state)
   in
@@ -5669,7 +5835,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let filler_rows = max 1 (rows - lane_run_chrome_rows_without_summary - chrome_rows_for_error) in
       let line =
         match error with
-        | None -> Ansi.dim, "  (loading exact run record)"
+        | None -> Ansi.dim, (if measurement then "  (loading measurement artifact)" else "  (loading exact run record)")
         | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
@@ -5678,7 +5844,7 @@ let render_lane_run_detail (state : state) ~run_id =
       done;
       0, None, 0
     | Some detail, (Some _ | None) ->
-      let summary = lane_run_summary_lines detail in
+      let summary = inspection_summary_lines detail in
       let payload_rows =
         max 0
           (rows - List.length summary - lane_run_chrome_rows - chrome_rows_for_error)
@@ -5695,9 +5861,9 @@ let render_lane_run_detail (state : state) ~run_id =
         let left_width = max 1 ((inner - divider_width) / 2) in
         let right_width = max 1 (inner - left_width - divider_width) in
         let input_lines =
-          lane_run_input_lines ~width:left_width detail
+          inspection_input_lines ~width:left_width detail
         in
-        let output_lines = lane_run_output_lines ~width:right_width detail in
+        let output_lines = inspection_output_lines ~width:right_width detail in
         if payload_rows = 0
         then 0, None, content_height
         else begin
@@ -5716,7 +5882,7 @@ let render_lane_run_detail (state : state) ~run_id =
           let input_scroll = min scroll input_max_scroll in
           let input_lines_window = Rows.of_list ~first:input_scroll ~height:content_height input_lines in
           let output_scroll = min scroll output_max_scroll in
-          let input_title, output_title = lane_run_panel_titles detail in
+          let input_title, output_title = inspection_panel_titles detail in
           lane_run_split_line buf cols ~left_width
             ~left:
               ( Ansi.bold
@@ -5907,6 +6073,7 @@ let render_lanes (state : state) =
   | Lanes_overview -> render_lanes_overview state
   | Lanes_run_list lane_id -> render_lane_run_list state ~lane_id
   | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
+  | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
 
 (** Render keeper detail view with live context and scrolling *)
 (* The detail box alone -- borders, title, scrolled content -- written into

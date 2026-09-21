@@ -878,6 +878,64 @@ let test_remembered_turn_uses_current_policy () =
   | _ -> Alcotest.fail "current policy was not delivered with completed evidence"
 ;;
 
+(* RFC librarian-lifecycle stage 4, item 2: the boot scan submits the durable
+   catch-up for the Keepers autoboot did not launch. *)
+let test_boot_catchup_names_only_the_unlaunched () =
+  Alcotest.(check (list string))
+    "persisted order kept, launched removed"
+    [ "a"; "c" ]
+    (Queue_refresh.unlaunched_keeper_names
+       ~persisted:[ "a"; "b"; "c" ]
+       ~launched:[ "b"; "not-persisted" ]);
+  Alcotest.(check (list string))
+    "nothing launched: every persisted Keeper"
+    [ "a"; "b" ]
+    (Queue_refresh.unlaunched_keeper_names ~persisted:[ "a"; "b" ] ~launched:[]);
+  Alcotest.(check (list string))
+    "nothing persisted: nobody"
+    []
+    (Queue_refresh.unlaunched_keeper_names ~persisted:[] ~launched:[ "a" ])
+;;
+
+let test_boot_catchup_submits_one_unit_per_unlaunched_keeper () =
+  Lane.For_testing.reset ();
+  let root = temp_dir "test-boot-catchup-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Lane.For_testing.reset ();
+      remove_tree root)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc_test_deps.init_eio_clock env;
+       let config = Masc.Workspace.default_config root in
+       ignore (Masc.Workspace.init config ~agent_name:None);
+       Config_dir_resolver.reset ();
+       Eio.Switch.run @@ fun sw ->
+       Lane.init ~sw;
+       let submitted =
+         Queue_refresh.submit_durable_for_unlaunched
+           ~base_path:root
+           ~persisted:[ "a"; "b"; "c" ]
+           ~launched:[ "b" ]
+       in
+       Alcotest.(check (list string))
+         "submitted for the unlaunched"
+         [ "a"; "c" ]
+         submitted;
+       (* A unit that finds nothing unread ends at once, so the entry, not
+          the count, is the evidence that a submission reached the lane. *)
+       let reached_lane name =
+         Option.is_some (Lane.For_testing.pending ~base_path:root ~keeper_name:name)
+       in
+       Alcotest.(check bool) "a reached the lane" true (reached_lane "a");
+       Alcotest.(check bool) "b was launched: nothing submitted" false (reached_lane "b");
+       Alcotest.(check bool) "c reached the lane" true (reached_lane "c");
+       Lane.For_testing.await_idle ~base_path:root ~keeper_name:"a";
+       Lane.For_testing.await_idle ~base_path:root ~keeper_name:"c")
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -925,6 +983,14 @@ let () =
             "purge with nothing running returns at once"
             `Quick
             test_purge_with_nothing_running_returns_at_once
+        ; Alcotest.test_case
+            "boot catch-up names only the unlaunched"
+            `Quick
+            test_boot_catchup_names_only_the_unlaunched
+        ; Alcotest.test_case
+            "boot catch-up submits one unit per unlaunched keeper"
+            `Quick
+            test_boot_catchup_submits_one_unit_per_unlaunched_keeper
         ; Alcotest.test_case
             "finished switch drops without leak"
             `Quick

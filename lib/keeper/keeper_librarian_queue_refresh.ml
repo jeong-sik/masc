@@ -193,6 +193,16 @@ let submit_durable ~base_path ~keeper_name =
   ()
 ;;
 
+let unlaunched_keeper_names ~persisted ~launched =
+  List.filter (fun name -> not (List.mem name launched)) persisted
+;;
+
+let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
+  let names = unlaunched_keeper_names ~persisted ~launched in
+  List.iter (fun keeper_name -> submit_durable ~base_path ~keeper_name) names;
+  names
+;;
+
 module For_testing = struct
   let attempt_remembered = attempt_remembered
   let run_durable_with_commit = run_durable_with_commit

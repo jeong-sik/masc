@@ -54,6 +54,8 @@ let describe = function
   | Command.Open_fleet_memory -> "open-fleet-memory"
   | Command.Find_in_chat text -> "find:" ^ text
   | Command.Find_next -> "find-next"
+  | Command.Open_measurement sha -> "measurement:" ^ sha
+  | Command.Measurement_missing_sha -> "measurement-missing-sha"
   | Command.Inspect_context -> "inspect-context"
   (* [describe] is total on purpose: it is what makes a new command show up
      here as a compile error instead of silently going untested. #30234 added
@@ -74,6 +76,17 @@ let describe = function
   | Command.Preset_show name -> "preset-show:" ^ name
   | Command.Preset_show_missing_name -> "preset-show-missing-name"
   | Command.Unknown word -> "unknown:" ^ word
+
+let test_measurement_command () =
+  check string "missing SHA is local command" "measurement-missing-sha"
+    (describe (Command.parse "/measurement"));
+  let sha = String.make 64 'a' in
+  check string "explicit artifact" ("measurement:" ^ sha)
+    (describe (Command.parse ("/measurement " ^ sha)));
+  check string "second line is retained for SHA rejection" ("measurement:" ^ sha ^ "\nextra")
+    (describe (Command.parse ("/measurement " ^ sha ^ "\nextra")));
+  check string "prefix is not a command" "unknown:measure"
+    (describe (Command.parse ("/measure " ^ sha)))
 
 let test_ref_command_parses_url_and_bare_id () =
   check (list string) "a whole http(s) URL and a bare id both stage as references"
@@ -916,7 +929,8 @@ let test_resource_read_keeps_each_part_type () =
 let () =
   run "tui command"
     [ ( "composer"
-      , [ test_case "plain text is a message" `Quick test_plain_text_is_a_message
+      , [ test_case "measurement artifact is an exact local command" `Quick test_measurement_command
+        ; test_case "plain text is a message" `Quick test_plain_text_is_a_message
         ; test_case "ref command parses url and bare id" `Quick
             test_ref_command_parses_url_and_bare_id
         ; test_case "keeper names resolve by unique prefix" `Quick

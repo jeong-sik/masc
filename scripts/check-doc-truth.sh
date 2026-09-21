@@ -216,6 +216,23 @@ require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure i
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
 require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
 
+# Keep the spec-index invariant-prefix table synchronized with the prefixes
+# actually declared by the spec files. SPEC-INDEX is excluded from the census
+# so its table cannot validate itself; the testing file's INV-T1..INV-T5 short
+# form is intentionally outside the INV-SUBSYSTEM-NNN census and is documented
+# beside the table.
+declared_prefixes="$(sed -nE 's/^\| `(INV-[A-Z]+)` \|.*$/\1/p' docs/spec/SPEC-INDEX.md | sort -u)"
+used_prefixes="$(rg -o --no-filename 'INV-[A-Z]+-[0-9]+' docs/spec -g '*.md' -g '!SPEC-INDEX.md' | sed -E 's/-[0-9]+$//' | sort -u)"
+# The census counts every ID that appears anywhere in a spec file, including
+# prose, code blocks and quotes, not only the ones a spec declares. Today the
+# two sets coincide; if this guard goes red unexpectedly, look first at a
+# sentence that merely mentions an ID.
+if [[ "$declared_prefixes" != "$used_prefixes" ]]; then
+  echo "SPEC-INDEX prefix table vs docs/spec usage (< table only, > docs only):" >&2
+  diff <(printf '%s\n' "$declared_prefixes") <(printf '%s\n' "$used_prefixes") >&2 || true
+  fail "SPEC-INDEX invariant-prefix table drifted from docs/spec usage"
+fi
+
 docs_to_scan=(
   README.md
   README.ko.md

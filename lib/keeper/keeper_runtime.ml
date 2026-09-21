@@ -521,7 +521,7 @@ let park_unreadable_meta_before_rematerialization config name =
         "parked unreadable keeper meta %s -> %s (counters preserved for operator recovery)"
         path
         parked
-    | exception e ->
+    | exception e -> (* cancel-guard-ok: Sys.rename performs no Eio operation, so Cancelled cannot originate in this body. *)
       Log.Keeper.warn
         "could not park unreadable keeper meta %s before re-materialization: %s"
         path

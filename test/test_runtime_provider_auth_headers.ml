@@ -1031,7 +1031,10 @@ let test_runtime_toml_accepts_glm_coding_capability () =
     (match model.capabilities with
      | Some caps ->
        check (option int) "max output" (Some 128000) caps.max_output_tokens;
-       check bool "forced tool choice disabled" false caps.supports_tool_choice
+       (* This test is about the parser accepting the declaration, so the
+          declaration is what it asserts. *)
+       check (option bool) "forced tool choice declared off" (Some false)
+         caps.supports_tool_choice
      | None -> fail "expected model capabilities")
   | models -> failf "expected one model, got %d" (List.length models)
 

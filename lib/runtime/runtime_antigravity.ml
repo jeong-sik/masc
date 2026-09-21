@@ -599,9 +599,9 @@ let drain_stderr flow tail =
 let signal_spawned_process proc stdin_w =
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
-     | _ -> ());
+     | _ -> ()); (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
     (try Eio.Process.signal proc Sys.sigterm with
-     | _ -> ()))
+     | _ -> ())) (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
 ;;
 
 let terminate_spawned_process ~clock proc stdin_w =
@@ -616,7 +616,7 @@ let terminate_spawned_process ~clock proc stdin_w =
          Eio.Process.signal proc Sys.sigkill;
          Eio.Process.await proc |> ignore
        with
-       | _ -> ())
+       | _ -> ()) (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
     | _ -> ())
 ;;
 

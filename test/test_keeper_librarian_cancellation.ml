@@ -1,0 +1,225 @@
+open Masc
+
+module Runtime = Keeper_librarian_runtime
+module Librarian = Keeper_librarian
+module Current = Keeper_memory_os_current
+module Types = Keeper_memory_os_types
+module Runs = Exact_lane_run_registry
+module Fixture = Exact_output_fixture
+
+exception Operator_cancelled
+
+type stage = Provider | Second_judgment
+
+let require = function Ok value -> value | Error detail -> Alcotest.fail detail
+let member = Yojson.Safe.Util.member
+let string = Yojson.Safe.Util.to_string
+let check_json label expected actual =
+  Alcotest.(check string) label
+    (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
+
+let test_cancel ~base_path ~registry stage () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let keeper_id = match stage with
+    | Provider -> "cancel-provider"
+    | Second_judgment -> "cancel-second-judgment" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let fact claim =
+    Types.observed ~claim ~category:Types.Fact ~now:100.
+      ~origin:{ kind = Types.Authored; trace_id = "cancel-fixture" } in
+  let facts =
+    [ fact "The alpha service deploys every Tuesday."
+    ; fact "The beta service deploys every Friday." ] in
+  let source : Current.source = { kind = Current.Librarian; trace_id = keeper_id } in
+  let seeded =
+    Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+      ~now:100. ~source ~facts () |> require in
+  let input : Librarian.input =
+    { turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1
+    ; goal_context = Librarian.No_task
+    ; keeper_instructions = "Keep both service deployment instructions."
+    ; current = Some { Librarian.facts = seeded.facts }
+    ; working_context = Keeper_librarian_context.empty
+    ; messages = []; tool_observations = []; counterpart_observations = [] } in
+  let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let before_bytes = Fs_compat.load_file current_path in
+  let claim text token =
+    `Assoc [ "claim", `String text; "category", `String "fact"
+           ; "absorbs", `List [ `String token ] ] in
+  let answer = `Assoc
+    [ "new_claims", `List
+        [ claim "Tuesday is the alpha service's deployment day." "m1"
+        ; claim "Friday is the beta service's deployment day." "m2" ]
+    ; "dropped", `List []; "working_contexts", `List [] ] in
+  let blocked, signal_blocked = Eio.Promise.create () in
+  let block () =
+    Eio.Promise.resolve signal_blocked ();
+    Eio.Fiber.await_cancel () in
+  let librarian = Fixture.start_server ~sw ~net ~clock
+      ~on_request_before_reply:(fun () -> match stage with
+        | Provider -> block ()
+        | Second_judgment -> ())
+      (Fixture.Reply (Fixture.openai_response answer)) in
+  let judgments = ref 0 in
+  let jev = Fixture.start_server ~sw ~net ~clock
+      ~on_request_before_reply:(fun () ->
+        incr judgments;
+        if !judgments = 2 then block ())
+      (Fixture.Reply
+        {|{"model":"completed-jev","answers":{"s0_0":{"type":"noul","noul":0.875}}}|}) in
+  let resolver = Fixture.resolver_snapshot ~source:"cancel-fixture"
+    [ { Fixture.id = "cancel-librarian-fixture"; base_url = librarian.base_url } ] in
+  (match Runtime_exact_output_registry.publish
+      ~lanes:[ { Runtime_schema.id = "librarian_exact"
+               ; slot_ids = [ "cancel-librarian-fixture" ]; cli_slot_ids = [] } ] resolver with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail
+       (Runtime_exact_output_registry.publication_error_to_string error));
+  let bind = Masc_test_deps.with_process_env in
+  bind "TYPESAFEAI_API_KEY" (Some "synthetic-cancel-key") @@ fun () ->
+  bind "MASC_TYPESAFEAI_ENABLED" (Some "true") @@ fun () ->
+  bind "MASC_TYPESAFEAI_ABSORB_GATE_ENABLED" (Some "true") @@ fun () ->
+  bind "MASC_TYPESAFEAI_ENDPOINT" (Some jev.base_url) @@ fun () ->
+  bind "MASC_TYPESAFEAI_MODEL" (Some "requested-cancel-model") @@ fun () ->
+  let cancel_context, set_cancel_context = Eio.Promise.create () in
+  let memory_committed = ref false in
+  let runtime_cancelled = ref false in
+  let worker = Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun cc ->
+      Eio.Promise.resolve set_cancel_context cc;
+      try
+        Runtime.run_best_effort ~trigger:Runtime.Queue_changed
+          ~on_memory_committed:(fun () -> memory_committed := true)
+          ~base_path ~keepers_dir ~keeper_id
+          ~expected_revision:(Some seeded.revision) input
+      with Eio.Cancel.Cancelled _ as exn ->
+        runtime_cancelled := true;
+        raise exn)) in
+  let await failure = Fixture.await_within_fixture_budget ~clock ~failure in
+  let cc = await "worker did not enter its cancellation scope" cancel_context in
+  await "the selected HTTP request did not block" blocked;
+  Eio.Cancel.cancel cc Operator_cancelled;
+  (match await "cancelled Librarian did not return" worker with
+   | Error (Eio.Cancel.Cancelled Operator_cancelled) -> ()
+   | Error exn -> Alcotest.failf "wrong cancellation: %s" (Printexc.to_string exn)
+   | Ok () -> Alcotest.fail "Librarian swallowed cancellation");
+  Alcotest.(check bool) "the runtime itself propagated cancellation" true !runtime_cancelled;
+  Alcotest.(check int) "one actual Librarian request" 1 (Fixture.post_count librarian);
+  Alcotest.(check int) "only the intended JEV requests were sent"
+    (match stage with Provider -> 0 | Second_judgment -> 2) (Fixture.post_count jev);
+  Alcotest.(check bool) "Memory commit callback was not invoked" false !memory_committed;
+  Alcotest.(check string) "cancellation preserves the original Memory bytes"
+    before_bytes (Fs_compat.load_file current_path);
+  let run = match List.filter (fun (run : Runs.run) -> run.actor = keeper_id)
+      (Runs.list_runs registry) with
+    | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
+    | _ -> Alcotest.fail "one Librarian run must be retained" in
+  Alcotest.(check string) "cancellation is terminal in the live registry" "cancelled"
+    (Runs.status_label run.status);
+  let replayed = Runs.replay (Filename.concat base_path Runs.storage_filename) in
+  let replayed_run = Runs.get replayed ~run_id:run.run_id |> Option.get in
+  Alcotest.(check string) "restart retains cancellation rather than inventing interruption"
+    "cancelled" (Runs.status_label replayed_run.status);
+  let journal = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 in
+  let cancellations = List.filter (function
+    | Ok (Current.Journal_failed { kind = Current.Lane_cancelled; _ }) -> true
+    | Ok _ -> false
+    | Error detail -> Alcotest.fail detail) journal in
+  Alcotest.(check int) "the journal records this cancellation once" 1 (List.length cancellations);
+  let output = match replayed_run.status with
+    | Runs.Completed { outcome = Runs.Cancelled; output; _ } -> output
+    | _ -> Alcotest.fail "cancelled replay lost its output" in
+  (match stage with
+   | Provider -> check_json "no invented gate before a provider response" `Null
+       (member "absorb_gate" output)
+   | Second_judgment ->
+     let gate = member "absorb_gate" output in
+     Alcotest.(check string) "partial evaluation is explicitly incomplete" "incomplete"
+       (member "status" gate |> string);
+     let evaluations = member "evaluations" gate |> Yojson.Safe.Util.to_list in
+     Alcotest.(check int) "the pending request does not invent a response" 1
+       (List.length evaluations);
+     let evaluation = List.hd evaluations in
+     Alcotest.(check string) "the completed reply retains its actual model" "completed-jev"
+       (member "model" evaluation |> string);
+     check_json "the completed raw probability survives durable replay"
+       (`Assoc [ "s0_0", `Float 0.875 ]) (member "answers" evaluation);
+     let sent = Fixture.request_bodies jev |> List.hd |> Yojson.Safe.from_string in
+     let request = member "request" evaluation in
+     List.iter (fun key -> check_json ("actual completed request " ^ key)
+       (member key sent) (member key request)) [ "model"; "state"; "questions" ];
+     Alcotest.(check string) "the attempted endpoint survives replay" jev.base_url
+       (member "endpoint" request |> string);
+     List.iter (fun key -> check_json ("partial report has no " ^ key) `Null
+       (member key gate)) [ "applied_absorptions"; "left"; "conveyed" ]);
+  let module Projection = Server_standalone_lane_projection in
+  let detail = match Projection.For_testing.run_detail_json_with
+      ~run_id:replayed_run.run_id ~exact_runs:[ replayed_run ]
+      ~verification_runs:[] ~goal_verification_runs:[] with
+    | Projection.Detail_found detail -> detail
+    | Detail_not_found | Detail_ambiguous -> Alcotest.fail "cancelled run has no HTTP detail" in
+  let page = Projection.For_testing.recent_run_page_json_with
+      ~limit:1 ~before:None ~lane:(Some "librarian_exact") ~run_kind:None
+      ~exact_runs:[ replayed_run ] ~verification_runs:[] ~goal_verification_runs:[]
+    |> require in
+  Printf.printf "CANCELLATION_FIXTURE %s\n%!"
+    (Yojson.Safe.to_string (`Assoc
+       [ "scenario", `String keeper_id; "detail", detail; "page", page ]));
+  Printf.printf "CANCELLATION_EVIDENCE keeper=%s status=%s journal_cancelled=%d memory_unchanged=true jev_requests=%d\n%!"
+    keeper_id (Runs.status_label replayed_run.status) (List.length cancellations)
+    (Fixture.post_count jev);
+  (* A cancelled observation must not make the next accepted pass stick or
+     consume the original Memory. The same Keeper can finish its next pass. *)
+  (match stage with
+   | Provider -> ()
+   | Second_judgment ->
+     let successor = Eio.Fiber.fork_promise ~sw (fun () ->
+       Runtime.run_best_effort ~trigger:Runtime.Queue_changed
+         ~on_memory_committed:(fun () -> memory_committed := true)
+         ~base_path ~keepers_dir ~keeper_id
+         ~expected_revision:(Some seeded.revision) input) in
+     (match await "the pass after cancellation did not finish" successor with
+      | Ok () -> ()
+      | Error exn -> Alcotest.failf "successor raised: %s" (Printexc.to_string exn));
+     Alcotest.(check bool) "the next pass commits its Memory" true !memory_committed;
+     let current = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+       | Some current -> current
+       | None -> Alcotest.fail "successor lost current Memory" in
+     Alcotest.(check int) "only the successful pass advances Memory" (seeded.revision + 1)
+       current.revision;
+     Alcotest.(check (list string)) "the successful pass retains both merged claims"
+       [ "Friday is the beta service's deployment day."
+       ; "Tuesday is the alpha service's deployment day." ]
+       (List.sort String.compare (List.map (fun (f : Types.fact) -> f.claim) current.facts));
+     let statuses = Runs.list_runs registry
+       |> List.filter (fun (r : Runs.run) -> r.actor = keeper_id)
+       |> List.map (fun (r : Runs.run) -> Runs.status_label r.status)
+       |> List.sort String.compare in
+     Alcotest.(check (list string)) "both attempts have terminal evidence"
+       [ "cancelled"; "succeeded" ] statuses;
+     Printf.printf "CANCELLATION_SUCCESSOR keeper=%s statuses=cancelled,succeeded memory_revision=%d\n%!"
+       keeper_id current.revision)
+
+let () =
+  let base_path = Filename.temp_dir "librarian-cancellation-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let registry = Runs.create ~path:(Filename.concat base_path Runs.storage_filename) () in
+    (match Runs.install_global registry with
+     | Ok () -> ()
+     | Error Runs.Already_installed -> Alcotest.fail "registry already installed");
+    let root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> root | None -> Sys.getcwd () in
+    Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+    Prompt_defaults.init ();
+    Alcotest.run "Librarian cancellation evidence"
+      [ "durable cancellation",
+        [ Alcotest.test_case "pending provider preserves terminal evidence" `Quick
+            (test_cancel ~base_path ~registry Provider)
+        ; Alcotest.test_case "later JEV cancellation preserves completed evaluation" `Quick
+            (test_cancel ~base_path ~registry Second_judgment) ] ])

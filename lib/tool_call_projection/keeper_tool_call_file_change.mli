@@ -57,6 +57,16 @@ type kind =
           [text] is the comment line as the file received it, composed from
           the call's memo text, its kind and the keeper's name in the file's
           own comment syntax. *)
+  | Materialized of {
+      sha256 : string;
+      bytes : int;
+    }
+      (** A blob's bytes written into a file by [keeper_artifact_transfer]'s
+          [materialize] action. The content is not in the call's input — the
+          call names the blob by its [sha256] and byte count — so the
+          projection carries those coordinates rather than the text. The same
+          handler's [export] action reads a file into the blob store and is
+          not a file change. *)
 
 type t = {
   at : float;  (** Unix time the call was logged. *)

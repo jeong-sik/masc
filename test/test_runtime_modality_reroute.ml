@@ -645,7 +645,7 @@ supports-multimodal-inputs = true
      | _ -> fail "advertised vision model cannot make Antigravity transport carry pixels");
     let text_caps =
       { (Option.get native.model.capabilities) with
-        Runtime_schema.supports_image_input = false }
+        Runtime_schema.supports_image_input = Some false }
     in
     let text =
       { native with id = "text.only"

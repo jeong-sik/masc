@@ -31,6 +31,7 @@ let credentials_dir ~config ~keeper_name =
 
 let read_trimmed path =
   match Fs_compat.load_file path with
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn))
   | content ->

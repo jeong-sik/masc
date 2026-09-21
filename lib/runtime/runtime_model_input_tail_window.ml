@@ -346,7 +346,7 @@ let exact_drop ~available_bytes ~atom_count suffix =
 
 (* [assemble] and whether it prepended the synthetic preamble, which the
    target projection charges only when it is transmitted. *)
-let assemble_with_preamble ~allow_empty_history ~atom_count ~drop ~messages labelled =
+let assemble_with_preamble ?(history_already_announced = false) ~allow_empty_history ~atom_count ~drop ~messages labelled =
   if drop = 0
   then messages, false
   else (
@@ -368,7 +368,8 @@ let assemble_with_preamble ~allow_empty_history ~atom_count ~drop ~messages labe
     in
     let kept = List.map fst kept_labelled in
     match first_kept_atom_role with
-    | None when allow_empty_history && drop >= atom_count -> preamble_message :: kept, true
+    | None when allow_empty_history && drop >= atom_count
+                && not history_already_announced -> preamble_message :: kept, true
     | Some Agent_core.Types.User | None -> kept, false
     | Some Agent_core.Types.Assistant
     | Some Agent_core.Types.Tool
@@ -541,7 +542,8 @@ let project_target ~measure_message_bytes ~target_bytes ~reserved_bytes messages
     })
 ;;
 
-let project_from_atom ?(allow_empty_history = false) ~measure_message_bytes ~first_atom messages =
+let project_from_atom ?(allow_empty_history = false)
+    ?(history_already_announced = false) ~measure_message_bytes ~first_atom messages =
   let labelled, atom_count = annotate messages in
   let pinned_bytes = pinned_bytes_of ~measure_message_bytes labelled in
   if atom_count = 0
@@ -551,7 +553,7 @@ let project_from_atom ?(allow_empty_history = false) ~measure_message_bytes ~fir
     let drop = max 0 (min first_atom last) in
     let _, suffix = atom_suffix_bytes ~measure_message_bytes ~atom_count labelled in
     let assembled, preamble_prepended =
-      assemble_with_preamble ~allow_empty_history ~atom_count ~drop ~messages labelled
+      assemble_with_preamble ~history_already_announced ~allow_empty_history ~atom_count ~drop ~messages labelled
     in
     let transmitted_bytes =
       pinned_bytes

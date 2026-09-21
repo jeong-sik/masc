@@ -787,7 +787,8 @@ let compose_carried_model_input
       in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
-          ~allow_empty_history:true ~measure_message_bytes
+          ~allow_empty_history:true
+          ~history_already_announced:true ~measure_message_bytes
           ~first_atom:snapshot.end_atom
           (working :: planned.Keeper_model_input_demotion.messages)
       in

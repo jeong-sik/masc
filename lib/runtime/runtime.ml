@@ -1151,17 +1151,17 @@ let missing_reference_error
 ;;
 
 let degrade_loaded_for_missing_catalog
-    ( (runtimes, configured_default, assignments,
+    ( (runtimes, (configured_default_route, configured_default), assignments,
        media_failover, lanes, lsp_servers) :
       t list
-      * t
+      * (string * t)
       * (string * string) list
       * string list
       * Runtime_lane.t list
       * (string * (string * string list)) list )
     (report : missing_catalog_report)
   : ( ( t list
-        * t
+        * (string * t)
         * (string * string) list
         * string list
         * Runtime_lane.t list
@@ -1278,7 +1278,7 @@ let degrade_loaded_for_missing_catalog
     in
     Ok
       ( ( active_runtimes
-        , configured_default
+        , (configured_default_route, configured_default)
         , assignments
         , kept_media_failover
         , kept_lanes
@@ -1290,7 +1290,7 @@ let materialize_config
     ?(validate_max_context = true)
     (cfg : config)
   : ( (t list
-       * t
+       * (string * t)
        * (string * string) list
        * string list
        * Runtime_lane.t list
@@ -1318,7 +1318,7 @@ let materialize_config
   let* lanes =
     lanes_of_decls ~dropped_bindings runtimes cfg.lane_decls
   in
-  let* rt =
+  let* default_route, rt =
     match cfg.default_runtime_id with
     | None -> Error Default_runtime_absent
     | Some did ->
@@ -1341,7 +1341,7 @@ let materialize_config
            (Default_runtime_unresolved
               (resolution_of ~dropped_bindings
                  ~runtime_count:(List.length runtimes) did))
-       | Some rt -> Ok rt)
+       | Some rt -> Ok (did, rt))
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
@@ -1365,7 +1365,11 @@ let materialize_config
      degraded boot [init_default_degraded_report]. *)
   let loaded =
     ( runtimes
-    , rt
+    (* The route the operator wrote travels beside the runtime it opened: a
+       lane-named default must be handed back as that lane name, or the
+       consumer's [resolve_assignment] would look up the entry runtime and
+       find no lane behind it. *)
+    , (default_route, rt)
     , assignments
     , cfg.media_failover
     , lanes
@@ -1376,7 +1380,7 @@ let materialize_config
 
 let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
-       * t
+       * (string * t)
        * (string * string) list
        * string list
        * Runtime_lane.t list
@@ -1407,8 +1411,9 @@ let load_list_internal_text ~config_path:(_ : string) ~content ~validate_max_con
    back through [lsp_servers]. *)
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
-  |> Result.map (fun ((runtimes, rt, assignments, media_failover, lanes, _lsp_servers), _) ->
-       (runtimes, rt, assignments, media_failover, lanes))
+  |> Result.map
+       (fun ((runtimes, (_route, rt), assignments, media_failover, lanes, _lsp_servers), _) ->
+          (runtimes, rt, assignments, media_failover, lanes))
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)
@@ -1419,6 +1424,12 @@ let load_list ~config_path =
     refresh or test restore. *)
 type loaded_state =
   { default_runtime : t option
+    (* The entry runtime the default opens. *)
+  ; default_route_id : string option
+    (* The route id [\[runtime\].default] was written with — a lane name or a
+       runtime id. [default_runtime] alone cannot answer it: a lane-named
+       default resolves to the lane's entry runtime, whose id is not the
+       route the consumer must hand back to [resolve_assignment]. *)
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
   ; media_failover : string list
@@ -1430,6 +1441,7 @@ type loaded_state =
 
 let empty_loaded_state =
   { default_runtime = None
+  ; default_route_id = None
   ; runtimes = []
   ; keeper_assignments = []
   ; media_failover = []
@@ -1452,7 +1464,7 @@ let set_loaded
     ?startup_degradation
     ~config_path
     ( runtimes
-    , rt
+    , (default_route, rt)
     , assignments
     , media_failover
     , lanes
@@ -1477,6 +1489,7 @@ let set_loaded
   let rt = preserve_candidate rt in
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
+    ; default_route_id = Some default_route
     ; runtimes
     ; keeper_assignments = assignments
     ; media_failover
@@ -1583,8 +1596,12 @@ let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
 
 let default_runtime_id_or_fail () =
-  match (runtime_state ()).default_runtime with
-  | Some rt -> rt.id
+  let state = runtime_state () in
+  (* The route as written, not the binding it opened: [runtime_id_of_meta]
+     hands this to [resolve_assignment] for every keeper without an
+     assignment, and a lane name must survive that round trip. *)
+  match state.default_runtime with
+  | Some rt -> Option.value state.default_route_id ~default:rt.id
   | None when Runtime_startup_state.requires_setup () ->
     let message = match Runtime_startup_state.get () with
       | Setup_required reason -> Runtime_startup_state.message reason

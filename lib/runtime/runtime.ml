@@ -1305,24 +1305,43 @@ let materialize_config
      below can only describe an id something else referenced. *)
   let* () = validate_no_dangling_bindings ~dropped_bindings in
   let assignments = cfg.keeper_assignments in
+  (* Assignments name a declared lane or a runtime (RFC-0457), so they are
+     validated with the materialized lanes, like every other route id (#25394).
+     A typo'd lane candidate can now surface before a typo'd assignment — the
+     lane list the assignment names is the thing that had to exist first.
+
+     The lanes are built ahead of the default below because [\[runtime\].default]
+     is a route id too ([runtime_default_route_name]), and a lane id "carries no
+     structure" (runtime_lane.mli) — a route names it to walk it. Judging the
+     default against [runtimes] alone refused a lane-named default that
+     [resolve_assignment] would have resolved for every unassigned keeper. *)
+  let* lanes =
+    lanes_of_decls ~dropped_bindings runtimes cfg.lane_decls
+  in
   let* rt =
     match cfg.default_runtime_id with
     | None -> Error Default_runtime_absent
     | Some did ->
-      (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
+      (* Lane first, runtime second — the order [resolve_assignment] uses. The
+         lane's entry runtime is what an unassigned keeper opens; the rest of
+         the lane is its failover, which the consumer walks by re-reading the
+         lane, not through this value. *)
+      let resolved =
+        match find_declared_lane lanes did with
+        | Some lane ->
+          (match Runtime_lane.ordered_candidates lane with
+           | entry :: _ ->
+             List.find_opt (fun (r : t) -> String.equal r.id entry) runtimes
+           | [] -> None)
+        | None -> List.find_opt (fun (r : t) -> String.equal r.id did) runtimes
+      in
+      (match resolved with
        | None ->
          Error
            (Default_runtime_unresolved
               (resolution_of ~dropped_bindings
                  ~runtime_count:(List.length runtimes) did))
        | Some rt -> Ok rt)
-  in
-  (* Assignments name a declared lane or a runtime (RFC-0457), so they are
-     validated with the materialized lanes, like every other route id (#25394).
-     A typo'd lane candidate can now surface before a typo'd assignment — the
-     lane list the assignment names is the thing that had to exist first. *)
-  let* lanes =
-    lanes_of_decls ~dropped_bindings runtimes cfg.lane_decls
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes

@@ -1162,6 +1162,36 @@ let test_a_lane_the_default_walks_is_not_removed () =
       Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"runpod_mtp.qwen" ()))
 ;;
 
+(* [\[runtime\].default] is a route id ([runtime_default_route_name]), and a lane
+   id "carries no structure" (runtime_lane.mli) — a route names it to walk it.
+   So a default may name a lane by the lane's own name, and the keepers without
+   an assignment walk that lane's candidates. Before this, load validation
+   judged the default against the runtime list alone: the same spelling
+   [resolve_assignment] resolves at turn time was refused at boot, and the only
+   way to give unassigned keepers a failover ladder was to name the lane after
+   the default runtime id — a coupling through spelling that nothing enforced
+   on rename. *)
+let test_the_default_may_name_a_lane () =
+  with_runtime_file (fun path ->
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"fallback-ladder"
+      ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ] ()
+    |> lane_write_ok "declare a lane with a name of its own";
+    (match
+       Runtime.set_runtime_default ~runtime_config_path:path
+         ~runtime_id:"fallback-ladder" ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "a lane-named default was refused: %s" msg);
+    Alcotest.(check string)
+      "the default keeps the lane name it was given"
+      "fallback-ladder"
+      (Runtime.get_default_runtime_id ());
+    Alcotest.(check (option string))
+      "an unassigned keeper opens the lane's entry runtime"
+      (Some "openai.gpt")
+      (Runtime.entry_runtime_id_of_route (Runtime.get_default_runtime_id ())))
+;;
+
 (* A new lane under a runtime id would take over that runtime for every keeper
    that names it. That runtime's own lane is what [set] writes. *)
 let test_a_new_lane_under_a_runtime_id_is_refused () =
@@ -3207,6 +3237,10 @@ let () =
             "a lane the default walks is not removed"
             `Quick
             test_a_lane_the_default_walks_is_not_removed
+        ; Alcotest.test_case
+            "the default may name a lane"
+            `Quick
+            test_the_default_may_name_a_lane
         ; Alcotest.test_case
             "a new lane under a runtime id is refused"
             `Quick

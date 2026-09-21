@@ -137,8 +137,9 @@ status: reference
 : MCP/AGENT_CORE wire 응답에 대한 가벼운 관측(`Tool_result.tool_call_outcome` =
   `Ok`·`Error`·`Unknown`). 외부 투영이라 `Deferred`를 표현하지 못하며, MASC 내부 실행
   결과의 권위가 아니다. 투영 관측이 없으면 필드를 생략하지 않고 `Unknown`으로 기록한다.
-  실행이 완료·지연됐어도 결과 전달이 나중에 실패하면 `wire_outcome=error`가 될 수 있다.
-  권위 있는 값은 `wire_outcome`과 Execution Disposition이다.
+  이 관측은 `Keeper_tool_call_log.wire_outcome` 필드로 기록된다(결과 전달이 나중에
+  실패하면 실행이 완료·지연됐어도 `error`가 될 수 있다). 권위 있는 값은 Execution
+  Disposition이다.
   → [Tool_result](../../lib/tool_types/tool_result.mli)
 
 **Execution Disposition**

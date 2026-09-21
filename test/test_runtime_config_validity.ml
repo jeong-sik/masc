@@ -1533,6 +1533,159 @@ let test_kimi_for_coding_declares_the_reasoning_it_returns () =
     check bool "declares reasoning" true
       caps.Llm_provider.Capabilities.supports_reasoning
 
+(* For a model the catalog names, [Runtime_adapter] forwards only
+   max-output-tokens, thinking-control-format and reasoning-streaming-format out
+   of [models.<id>.capabilities]; the media four travel their own path through
+   [Runtime_agent.apply_runtime_model_input_capabilities]. The twelve paired
+   below reach nothing at all (#37435).
+
+   Every field of [Runtime_schema.model_capabilities] is bound by name so that a
+   twenty-first field cannot join the record without this list being read again.
+   Declared and resolved are spelled on one line each, because a pair that reads
+   one field and compares another is the defect this case exists to find. *)
+let catalog_decided_capability_pairs
+      (declared : Runtime_schema.model_capabilities)
+      (resolved : Llm_provider.Capabilities.capabilities)
+  : (string * bool option * bool) list
+  =
+  let { Runtime_schema.max_output_tokens = _
+      ; supports_tool_choice
+      ; supports_required_tool_choice
+      ; supports_named_tool_choice
+      ; supports_parallel_tool_calls
+      ; thinking_control_format = _
+      ; declared_thinking_control_format = _
+      ; reasoning_streaming_format = _
+      ; supports_image_input = _
+      ; supports_audio_input = _
+      ; supports_video_input = _
+      ; supports_multimodal_inputs = _
+      ; supports_response_format_json
+      ; supports_structured_output
+      ; supports_system_prompt
+      ; supports_prompt_caching
+      ; supports_top_k
+      ; supports_min_p
+      ; supports_seed
+      ; emits_usage_tokens
+      }
+    =
+    declared
+  in
+  [ "supports-tool-choice", supports_tool_choice, resolved.supports_tool_choice
+  ; ( "supports-required-tool-choice"
+    , supports_required_tool_choice
+    , resolved.supports_required_tool_choice )
+  ; ( "supports-named-tool-choice"
+    , supports_named_tool_choice
+    , resolved.supports_named_tool_choice )
+  ; ( "supports-parallel-tool-calls"
+    , supports_parallel_tool_calls
+    , resolved.supports_parallel_tool_calls )
+  ; ( "supports-response-format-json"
+    , supports_response_format_json
+    , resolved.supports_response_format_json )
+  ; ( "supports-structured-output"
+    , supports_structured_output
+    , resolved.supports_structured_output )
+  ; "supports-system-prompt", supports_system_prompt, resolved.supports_system_prompt
+  ; "supports-prompt-caching", supports_prompt_caching, resolved.supports_prompt_caching
+  ; "supports-top-k", supports_top_k, resolved.supports_top_k
+  ; "supports-min-p", supports_min_p, resolved.supports_min_p
+  ; "supports-seed", supports_seed, resolved.supports_seed
+  ; "emits-usage-tokens", emits_usage_tokens, resolved.emits_usage_tokens
+  ]
+
+(* The number of seed lines writing one of those twelve today. Pinned rather
+   than left open because a walk that finds nothing looks the same as a walk
+   whose matcher is broken. The change that removes the inert lines takes this
+   to zero; until then a diff here means the seed moved. *)
+let seed_catalog_decided_capability_lines = 13
+
+(* Prints every seed line that writes one of the twelve next to the value the
+   runtime resolves, and fails when the two disagree. A disagreement is not a
+   line to delete: it is a declaration losing an argument with the catalog,
+   which is either a defect or a deliberate override, and both want reading
+   before anything is removed. *)
+let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let runtimes =
+    match load_list_text ~config_path:path with
+    | Ok (runtimes, _, _, _, _) -> runtimes
+    | Error detail -> fail detail
+  in
+  let written = ref 0 in
+  let disagreements = ref [] in
+  List.iter
+    (fun (runtime : Runtime.t) ->
+       match runtime.execution, runtime.model.capabilities with
+       | Runtime_execution.Agent_core _, None
+       | ( ( Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ )
+         , _ ) -> ()
+       | Runtime_execution.Agent_core config, Some declared ->
+         let provider_label =
+           match config.Llm_provider.Provider_config.provider_id with
+           | Some label -> label
+           | None -> failf "%s: an agent_core seed binding without a provider id" runtime.id
+         in
+         (* The adapter's own lookup, argument for argument: the branch that
+            drops the twelve is the one this answers [Some] for. *)
+         (match
+            Llm_provider.Capabilities.for_provider_model_id
+              ~wire:(Some config.Llm_provider.Provider_config.kind)
+              ~allow_bare_fallback:false
+              ~provider_label
+              ~model_id:config.Llm_provider.Provider_config.model_id
+          with
+          | None -> ()
+          | Some _ ->
+            (match Llm_provider.Provider_config.capabilities_for_config_model config with
+             | None ->
+               failf "%s: no resolved capabilities for a catalogued model" runtime.id
+             | Some resolved ->
+               List.iter
+                 (fun (key, declared_value, resolved_value) ->
+                    match declared_value with
+                    | None -> ()
+                    | Some declared_value ->
+                      incr written;
+                      Printf.printf
+                        "seed %s [models.%s.capabilities].%s: declared %b, resolved %b%s\n"
+                        runtime.id
+                        runtime.model.id
+                        key
+                        declared_value
+                        resolved_value
+                        (if Bool.equal declared_value resolved_value
+                         then ""
+                         else "  <- DISAGREES");
+                      if not (Bool.equal declared_value resolved_value)
+                      then
+                        disagreements
+                        := Printf.sprintf
+                             "%s.%s (declared %b, resolved %b)"
+                             runtime.model.id
+                             key
+                             declared_value
+                             resolved_value
+                           :: !disagreements)
+                 (catalog_decided_capability_pairs declared resolved))))
+    runtimes;
+  check int
+    "seed lines writing a key the catalog row decides"
+    seed_catalog_decided_capability_lines
+    !written;
+  match List.rev !disagreements with
+  | [] -> ()
+  | disagreements ->
+    failf
+      "%d seed declaration(s) disagree with the catalog and must be read, not removed: %s"
+      (List.length disagreements)
+      (String.concat "; " disagreements)
+
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -5148,6 +5301,8 @@ let () =
             test_lane_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "seed capability keys the catalog row decides agree with it" `Quick
+            test_seed_catalog_decided_capability_keys_agree_with_the_catalog;
           test_case "kimi-for-coding declares the reasoning it returns" `Quick
             test_kimi_for_coding_declares_the_reasoning_it_returns;
           test_case "repo-runtime-toml-declares-no-clamped-max-context" `Quick

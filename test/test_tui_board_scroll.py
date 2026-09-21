@@ -59,18 +59,24 @@ def run(executable: str) -> None:
                             interact=interact, http_fixtures=fixtures)
 
 
-# The comment column's left edge in a 140-column terminal: the fixed 40-column
-# comment text and 2-column gutter (Masc_tui_layout.board_read_side_*) leave
-# the column at 98. In the stacked layout a comment starts at the row's left
-# edge, so a comment found this far right can only be beside the post.
-SIDE_COLUMNS = 140
-SIDE_COMMENT_COLUMN_LEAST = 90
+# From 110 columns the Board read screen keeps the 34-column roster pane on
+# the left (Masc_tui_roster_pane.threshold_cols, pane_cols), so the read pane
+# is the terminal minus 34, and the side layout needs 120 of those
+# (Masc_tui_layout.board_read_side_minimum_cols): a terminal of at least 154.
+# At 180 the read pane is 146 and the fixed 40-column comment text plus its
+# 2-column gutter put the comment column at 34 + 146 - 42 = 138. In the
+# stacked layout a comment starts at the row's left edge, so a comment found
+# this far right can only be beside the post.
+SIDE_COLUMNS = 180
+SIDE_COMMENT_COLUMN_LEAST = 120
 
 
 def run_side_by_side(executable: str) -> None:
-    """From 120 columns the comments stand beside the post, in a fixed-width
-    column on the right; narrower, they stay below it. The PTY starts at 100
-    columns and is resized, so both layouts are drawn in one run."""
+    """From 120 read-pane columns the comments stand beside the post, in a
+    fixed-width column on the right; narrower, they stay below it. The PTY
+    starts at 100 columns (no roster pane, stacked) and is resized to 180
+    (roster pane and a 146-column read pane, side by side), so both layouts
+    are drawn in one run."""
     fixtures = h.overview_event_http_fixtures()
     body = "\n".join(f"Side body line {i:02d}" for i in range(12))
     post = h.board_selection_post("side", "Side by side", body)

@@ -756,8 +756,13 @@ let test_failure_bodies_omit_configured_credentials () =
       ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
   List.iter (fun (status, suffix) ->
     reply := status, "gateway echo " ^ api_key ^ " url=" ^ endpoint ^ suffix;
-    let failure = match Client.evaluate ~clock ~endpoint ~api_key ~state:`Null ~questions:[] () with
-      | Error failure -> failure
+    let destination = { Client.endpoint; model = "gateway-echo-model"; api_key } in
+    let failure =
+      match Client.evaluate ~clock ~destinations:(destination, []) ~state:`Null ~questions:[] () with
+      | Error failure ->
+        (match Client.attempts failure with
+         | [ attempt ] -> attempt.refusal
+         | asked -> Alcotest.failf "one destination, %d attempts" (List.length asked))
       | Ok _ -> Alcotest.fail "the gateway response must remain a typed failure" in
     let expected = "gateway echo [REDACTED] url=" ^ displayed ^ suffix in
     (match failure with
@@ -765,7 +770,7 @@ let test_failure_bodies_omit_configured_credentials () =
        Alcotest.(check string) "the typed observation already omits known credentials" expected body;
        Alcotest.(check string) "the typed destination is safe" displayed destination_uri
      | Client.Transport_failure detail -> Alcotest.fail detail);
-    let json = Client.failure_to_yojson failure in
+    let json = Client.refusal_to_yojson failure in
     let body = member "body" json in
     let decoded = match body with
       | `String body -> body

@@ -980,7 +980,10 @@ let run_best_effort
               -- the server going down, a purge retiring the loop -- waits until
               both are down, so the two records agree with each other and with
               the Memory commit that preceded them. The cancellation branch
-              below then finds the row completed and does not write a second. *)
+              below then finds the row completed and does not write a second.
+              [Eio.Cancel.protect] masks an observer's late cancellation inside
+              the callback, so each branch checks the outer context immediately
+              after the protected writes. *)
            match result with
            | Ok (snapshot, exact_output, selected_slot, absorb_gate) ->
              Eio.Cancel.protect (fun () ->
@@ -995,7 +998,8 @@ let run_best_effort
                  snapshot.revision
                  (List.length snapshot.facts)
                  (List.length snapshot.change.added)
-                 (List.length snapshot.change.removed))
+                 (List.length snapshot.change.removed));
+             Eio.Fiber.check ()
            | Error error ->
              Eio.Cancel.protect (fun () ->
              let detail = extraction_error_to_string error in
@@ -1032,12 +1036,13 @@ let run_best_effort
                ~keeper_id
                ~trace_id
                ~kind:(extraction_error_kind error)
-               ~detail:
-                 (Printf.sprintf
-                    "memory os librarian failed lane=%s: %s"
-                    exact_lane_id
-                    detail)
-               ~cadence_deferred:true)
+                 ~detail:
+                   (Printf.sprintf
+                      "memory os librarian failed lane=%s: %s"
+                      exact_lane_id
+                      detail)
+                 ~cadence_deferred:true);
+             Eio.Fiber.check ()
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
             journal — the record of what the librarian did on this keeper —

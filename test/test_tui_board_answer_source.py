@@ -79,9 +79,7 @@ def run(executable: str, status: str, persistence_state: str) -> None:
         h.send_and_wait(
             process, master, output, b"\r", b"1 loaded / 1 retained \xc2\xb7 end"
         )
-        h.send_and_wait(
-            process, master, output, b"\r", b"INPUT \xc2\xb7 PROMPT PAYLOAD"
-        )
+        h.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7 RUN INPUT")
         h.resize_and_wait(
             process,
             master,

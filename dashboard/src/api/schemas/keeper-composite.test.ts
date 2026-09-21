@@ -273,9 +273,8 @@ describe('parseKeeperCompositeSnapshot', () => {
           attempt_count: 2,
           fallback_applied: true,
           outcome: 'exhausted',
-          degraded_retry_applied: false,
-          degraded_retry_runtime: null,
-          fallback_reason: 'fiber_unresolved',
+          degraded_retry_applied: null,
+          degraded_retry_deferred: { runtime: 'secondary', reason: 'server_error' },
         },
         claim_attempt: {
           present: false,

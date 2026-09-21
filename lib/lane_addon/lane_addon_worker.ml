@@ -59,9 +59,9 @@ let read_control ~max_bytes flow =
   in
   loop ()
 
-let run_control ~mgr ~docker_command ~max_bytes ~operation args =
-  try
-    Eio.Switch.run (fun sw ->
+let run_control ~clock ~timeout_sec ~mgr ~docker_command ~max_bytes ~operation args =
+  let run () =
+    try Eio.Switch.run (fun sw ->
       let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
       let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
       let child = Eio.Process.spawn ~sw mgr
@@ -80,14 +80,25 @@ let run_control ~mgr ~docker_command ~max_bytes ~operation args =
       | `Signaled signal ->
           Error (Docker_failed { operation;
             detail = Printf.sprintf "signal %d: %s" signal (String.trim stderr) }))
-  with
-  | Control_reply_too_large ->
-      Error (Docker_failed { operation; detail = "control response exceeds byte limit" })
-  | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
-      Error (Docker_failed { operation; detail = Printexc.to_string exn })
+    with
+    | Control_reply_too_large ->
+        Error (Docker_failed { operation; detail = "control response exceeds byte limit" })
+    | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
+        Error (Docker_failed { operation; detail = Printexc.to_string exn })
+  in
+  match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (run ())) with
+  | Ok result -> result
+  | Error `Timeout ->
+      Error (Docker_failed { operation;
+        detail = Printf.sprintf "timed out after %.3g seconds" timeout_sec })
 
-let inspect_image ~mgr ~(package : package) ?(docker_command="docker") () =
-  let* raw = run_control ~mgr ~docker_command ~max_bytes:package.resources.max_reply_bytes
+let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
+    ?(docker_command="docker") () =
+  if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
+    Error (Invalid_package "control_timeout_sec must be finite and positive")
+  else
+  let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
+      ~max_bytes:package.resources.max_reply_bytes
       ~operation:"image inspect" ["image";"inspect";"--format";"{{.Id}}";package.image] in
   let digest = String.trim raw in
   if digest="" then Error (Docker_failed {operation="image inspect";detail="empty image identity"})
@@ -201,14 +212,17 @@ let inspect_owned_container ~run ~instance_id ~name id =
   with Yojson.Json_error detail ->
     Error (Docker_failed { operation = "recover ownership"; detail })
 
-let recover_stop ~mgr ~instance_id ~container_id ~max_reply_bytes
+let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~max_reply_bytes
     ?(docker_command = "docker") () =
   if max_reply_bytes <= 0 then Error (Invalid_package "max_reply_bytes must be positive")
+  else if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
+    Error (Invalid_package "control_timeout_sec must be finite and positive")
   else if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
   else if Option.exists (fun id -> not (valid_container_id id)) container_id then
     Error (Docker_failed { operation = "recover ownership"; detail = "invalid container ID" })
   else
-    let run = run_control ~mgr ~docker_command ~max_bytes:max_reply_bytes in
+    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
+      ~max_bytes:max_reply_bytes in
     let* found, name = match container_id with
       | None ->
           let name = owned_name instance_id in
@@ -238,10 +252,12 @@ let stop t =
      | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> ());
     Ok ()
 
-let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
+let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?(mounts = [])
     ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
+  let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
+    else Error (Invalid_package "control_timeout_sec must be finite and positive") in
   let* () = validate_package package in
   let* () = match package.action_tool, artifact_store with
     | Some _, None -> Error (Invalid_package "action worker requires its owned artifact store")
@@ -257,7 +273,7 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
      stdout or persisting [on_created]. Domain labels are checked before any
      recovered container is removed. *)
   let name = owned_name instance_id in
-  let run = run_control ~mgr ~docker_command
+  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
       ~max_bytes:package.resources.max_reply_bytes in
   let identity = ref None in
   let cleanup_finished = ref false in
@@ -268,7 +284,7 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
           (* create can take effect before its stdout is received (or exceed
              a tiny reply limit). Verify the binding's deterministic name
              and label instead of removing an unverified name collision. *)
-          let* () = recover_stop ~mgr ~instance_id ~container_id:None
+          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None
               ~max_reply_bytes:package.resources.max_reply_bytes ~docker_command () in
           cleanup_finished := true;
           Ok ()

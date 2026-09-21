@@ -43,7 +43,7 @@ type choice_answer =
 
 type score_answer =
   { score : float
-  ; probabilities : float list
+  ; probabilities : (int * float) list
   ; confidence : float
   }
 
@@ -120,6 +120,19 @@ let request_to_yojson ~model ~state ~questions =
     ]
 ;;
 
+let parse_probabilities probabilities =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (key, `Float value) :: rest -> loop ((key, value) :: acc) rest
+    | (key, `Int value) :: rest -> loop ((key, float_of_int value) :: acc) rest
+    | (key, _) :: _ ->
+      Error (Printf.sprintf "typesafeai: probability for %S must be a number" key)
+  in
+  match probabilities with
+  | [] -> Error "typesafeai: 'probabilities' map is empty"
+  | _ :: _ -> loop [] probabilities
+;;
+
 let answer_of_yojson json =
   match json with
   | `Assoc fields ->
@@ -143,15 +156,7 @@ let answer_of_yojson json =
        in
        let* probabilities =
          match List.assoc_opt "probabilities" fields with
-         | Some (`Assoc probs) ->
-           let rec parse_probs acc = function
-             | [] -> Ok (List.rev acc)
-             | (k, `Float v) :: rest -> parse_probs ((k, v) :: acc) rest
-             | (k, `Int v) :: rest -> parse_probs ((k, float_of_int v) :: acc) rest
-             | (k, _) :: _ ->
-               Error (Printf.sprintf "typesafeai: probability for %S must be a number" k)
-           in
-           parse_probs [] probs
+         | Some (`Assoc probs) -> parse_probabilities probs
          | _ -> Error "typesafeai: choice answer missing 'probabilities' map"
        in
        Ok (Choice_answer { choice; probabilities; confidence })
@@ -170,15 +175,21 @@ let answer_of_yojson json =
        in
        let* probabilities =
          match List.assoc_opt "probabilities" fields with
-         | Some (`List probs) ->
-           let rec parse_probs acc = function
+         | Some (`Assoc probs) ->
+           let* probabilities = parse_probabilities probs in
+           let rec parse_levels acc = function
              | [] -> Ok (List.rev acc)
-             | (`Float v) :: rest -> parse_probs (v :: acc) rest
-             | (`Int v) :: rest -> parse_probs (float_of_int v :: acc) rest
-             | _ :: _ -> Error "typesafeai: score probability must be a number"
+             | (key, probability) :: rest ->
+               (match int_of_string_opt key with
+                | Some level when level >= 0 ->
+                  parse_levels ((level, probability) :: acc) rest
+                | _ ->
+                  Error
+                    (Printf.sprintf
+                       "typesafeai: score level %S must be a non-negative integer" key))
            in
-           parse_probs [] probs
-         | _ -> Ok []
+           parse_levels [] probabilities
+         | _ -> Error "typesafeai: score answer missing 'probabilities' map"
        in
        Ok (Score_answer { score; probabilities; confidence })
      | Some (`String other) ->

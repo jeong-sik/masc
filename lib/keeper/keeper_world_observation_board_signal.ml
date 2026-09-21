@@ -422,8 +422,8 @@ type wake_reason =
           reaction path already woke the author of the post it landed on; the
           comment path checked only whether the keeper had itself commented, so
           an answer to a keeper's own question did not reach it. *)
-  | Thread_reply_after_self_comment
-      (** A new external comment arrived on a post the keeper had commented on. *)
+  | Reply_to_self_comment
+      (** An external comment directly replies to a comment the keeper authored. *)
   | Reaction_after_self_activity
       (** An external reaction landed on a post the keeper authored or a thread
           the keeper had commented on. *)
@@ -436,7 +436,7 @@ let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Broadcast -> "broadcast"
   | Comment_on_self_post -> "comment_on_self_post"
-  | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
+  | Reply_to_self_comment -> "reply_to_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
   | Vote_on_self_post -> "vote_on_self_post"
   | Vote_on_self_comment -> "vote_on_self_comment"
@@ -504,22 +504,28 @@ let wake_reason
        | Available false -> Available None)
     | Board_dispatch.Board_vote_cast vote ->
       Available (vote_targets_self_writing ~self_ids vote)
-    | Board_dispatch.Board_comment_added _ ->
-      (* Authorship first, the same order [reaction_touches_self_activity] uses
-         above. Without it [check_self_comment_status] answers [`Never] for the
-         author of the post — it only looks for the keeper's own comments — so
-         an answer to a keeper's question never reached the keeper that asked.
-         Measured on the live Board: 72 of 98 external comments on Keeper posts
-         did not wake the poster, including a post whose title addressed the
-         replier by name. *)
+    | Board_dispatch.Board_comment_added identity ->
       (match self_authored_post ~self_ids ~post_id:signal.post_id with
        | Unavailable _ as unavailable -> unavailable
        | Available true -> Available (Some Comment_on_self_post)
        | Available false ->
-         (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-          | Unavailable _ as unavailable -> unavailable
-          | Available (`New_external _) ->
-            Available (Some Thread_reply_after_self_comment)
-          | Available (`Never | `No_new_external) -> Available None))
+         match identity.parent_id with
+         | None -> Available None
+         | Some parent_id ->
+           match Board_dispatch.get_comments ~post_id:signal.post_id with
+           | Error error -> Unavailable { operation = Get_comments; post_id = signal.post_id; error }
+           | Ok comments ->
+             match List.find_opt
+               (fun (comment : Board.comment) ->
+                 String.equal (Board.Comment_id.to_string comment.id)
+                   (Board.Comment_id.to_string parent_id)) comments with
+             | None ->
+               Unavailable { operation = Get_comments; post_id = signal.post_id;
+                 error = Board.Comment_not_found (Board.Comment_id.to_string parent_id) }
+             | Some parent ->
+               Available
+                 (if Message_scope.is_self_author ~self_ids
+                       (Board.Agent_id.to_string parent.author)
+                  then Some Reply_to_self_comment else None))
     | Board_dispatch.Board_post_created -> Available None)
 ;;

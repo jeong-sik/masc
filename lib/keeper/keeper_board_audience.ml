@@ -82,7 +82,7 @@ let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signa
        | Board_signal.Available (Some reason) -> Board_signal.Available (Deliver reason)
        | Board_signal.Available None ->
          (* #27329: a comment classified as [Thread_participants] has no
-            deterministic address for a lane that never touched the thread.
+            deterministic address for a lane that neither owns the post nor authored its direct parent.
             Folding those lanes to [Ignore] starved the attention judge on
             the comment surface — the push path is the only producer of
             comment judgment candidates (the replay scan re-synthesizes

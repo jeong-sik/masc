@@ -11155,11 +11155,18 @@ let render_runtime (state : state) =
          match resolved with
          | None -> field_missing_reading ~error:state.runtime_surface_error
          | Some resolved ->
-             (match resolved.rrs_media_failover, resolved.rrs_media_failover_dropped with
+             let declared = resolved.rrs_media_failover_declared in
+             let admitted = resolved.rrs_media_failover in
+             let dropped =
+               List.filter
+                 (fun id -> not (List.exists (String.equal id) admitted))
+                 declared
+             in
+             (match declared, dropped with
               | [], [] -> Ansi.dim ^ "none — no vision fleet" ^ Ansi.reset
-              | admitted, dropped ->
+              | declared, dropped ->
                   String.concat " → "
-                    (List.map Terminal_text.single_line admitted)
+                    (List.map Terminal_text.single_line declared)
                   ^
                   (match dropped with
                    | [] -> ""

@@ -8329,7 +8329,7 @@ let lane_picker_existing_slots (state : state) = function
     (match state.runtime_surface with
      | None -> []
      | Some snapshot ->
-       snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover)
+       snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
   | Pick_route_default ->
     (* One entry, and a pick replaces it rather than joining it. Listing it
        here is what marks it "(already a candidate)" in the choices, which is
@@ -8535,37 +8535,19 @@ let slot_editor_rows (state : state) =
               lane.Tui_decode.sl_declared_slots)
        |> Option.value ~default:[])
   | Some { se_target = Media_failover_slots; _ } ->
-    (* The route reaches the surface as boot admitted it, so every row here is
-       admitted by construction. What boot dropped is not listed, and its
-       presence is what stops this list from being written back at all --
-       [media_failover_write_refusal] below. *)
+    (* Edit the file's declaration, not the shorter active fleet. A rejected
+       runtime keeps its position and is marked just like a rejected exact-lane
+       slot, so removing or moving it cannot erase a neighbour by accident. *)
     (match state.runtime_surface with
      | None -> []
      | Some snapshot ->
+       let admitted = snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover in
        List.map
-         (fun runtime_id -> { sr_slot = runtime_id; sr_admitted = true })
-         snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover)
-;;
-
-(* A write of the route sends the whole list, which is the only shape the
-   routing endpoint takes for it. That is safe only while boot admitted every
-   entry: the list on screen is missing whatever it dropped, and sending it
-   would delete those from the file. Refused by name rather than written and
-   half-lost. *)
-let media_failover_write_refusal (state : state) =
-  match state.runtime_surface with
-  | None -> Some (Lane_write_refused "the runtime surface has not been read")
-  | Some snapshot ->
-    (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_dropped with
-     | [] -> None
-     | dropped ->
-       Some
-         (Lane_write_refused
-            (Printf.sprintf
-               "boot could not resolve %s in [runtime].media_failover; edit the file \
-                until it does, or this write would delete %s from it"
-               (String.concat ", " dropped)
-               (match dropped with [ _ ] -> "it" | _ -> "them"))))
+         (fun runtime_id ->
+            { sr_slot = runtime_id
+            ; sr_admitted = List.exists (String.equal runtime_id) admitted
+            })
+         snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
 
 let slot_editor_cursor_row (state : state) =
@@ -8595,8 +8577,7 @@ type slot_write_request =
   | Move_declared_slot of runtime_lane_move
   | Write_route_order of string list
       (* [\[runtime\].media_failover] has no per-entry action on the routing
-         endpoint -- it is written as a whole list. Safe only because the
-         editor refuses to write it at all while boot dropped an entry. *)
+         endpoint, so the editor writes its complete declared order. *)
 
 type slot_edit_plan =
   | Send_slot_write of
@@ -8628,14 +8609,8 @@ let plan_slot_edit (state : state) edit =
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
-         let route_refusal =
-           match target with
-           | Media_failover_slots -> media_failover_write_refusal state
-           | Exact_lane_slots _ -> None
-         in
-         match route_refusal, target, edit with
-         | Some refusal, _, _ -> Refuse_slot_edit refusal
-         | None, Exact_lane_slots _, Drop_slot when count <= 1 ->
+         match target, edit with
+         | Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip
               for edits that can land. *)
            Refuse_slot_edit
@@ -8644,10 +8619,10 @@ let plan_slot_edit (state : state) edit =
                    "%s is the last slot of %s; an exact-output lane needs at least one"
                    slot
                    name))
-         | None, Exact_lane_slots _, Drop_slot ->
+         | Exact_lane_slots _, Drop_slot ->
            Send_slot_write
              { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
-         | None, Media_failover_slots, Drop_slot ->
+         | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
               vision fleet. So the last entry may go. *)
            Send_slot_write
@@ -8655,10 +8630,10 @@ let plan_slot_edit (state : state) edit =
              ; slot
              ; request =
                  Write_route_order
-                   (List.filter (fun id -> not (String.equal id slot)) order)
+                   (List.filteri (fun index _ -> index <> editor.se_cursor) order)
              ; cursor_after = cursor_after_drop
              }
-         | None, _, Move_slot move ->
+         | _, Move_slot move ->
            let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
            let moved_to = editor.se_cursor + by in
            if moved_to < 0 || moved_to >= count

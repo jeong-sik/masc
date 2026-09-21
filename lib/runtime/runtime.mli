@@ -592,6 +592,11 @@ val media_failover : unit -> string list
     reroute stays inside its lane. [[]] = no vision fleet. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
+val declared_media_failover : unit -> string list
+(** [\[runtime\].media_failover] in file order before runtime admission. This
+    preserves entries excluded from the active fleet so an operator surface
+    can edit the declaration without silently erasing them. *)
+
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
     an ordered list of runtime ids validated at load. *)

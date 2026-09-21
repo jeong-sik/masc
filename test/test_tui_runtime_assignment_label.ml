@@ -9,7 +9,7 @@ let unavailable_runtime_json =
     ; "runtimes", `List []
     ; "lanes", `List []
     ; "media_failover", `List []
-    ; "media_failover_dropped", `List []
+    ; "media_failover_declared", `List []
     ; ( "assignments"
       , `List
           [ `Assoc

@@ -2408,7 +2408,7 @@ type runtime_resolved_snapshot = {
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
   rrs_media_failover : string list;
-  rrs_media_failover_dropped : string list;
+  rrs_media_failover_declared : string list;
   rrs_runtimes : runtime_option list;
   rrs_lanes : runtime_resolved_lane list;
 }
@@ -4391,7 +4391,7 @@ let decode_runtime_resolved_snapshot json =
       items
   in
   let* rrs_media_failover = string_list_field "media_failover" in
-  let* rrs_media_failover_dropped = string_list_field "media_failover_dropped" in
+  let* rrs_media_failover_declared = string_list_field "media_failover_declared" in
   let* default_json, rrs_default_runtime_id =
     decode_runtime_default_member json
   in
@@ -4471,7 +4471,7 @@ let decode_runtime_resolved_snapshot json =
     ; rrs_config_path
     ; rrs_default_runtime_id
     ; rrs_media_failover
-    ; rrs_media_failover_dropped
+    ; rrs_media_failover_declared
     ; rrs_runtimes
     ; rrs_lanes
     }

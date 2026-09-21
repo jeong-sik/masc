@@ -50,13 +50,31 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
         h.send_and_wait(process, fd, output, b"t", b"calls (1)")
         h.drain_until_quiet(process, fd, output)
         screen = h.screen_text(bytes(output))
-        expected = (
-            b"JEV applicability advice" if row["success"] else b"skill_activation_error"
+        needles = (
+            [b"JEV applicability advice"]
+            if row["success"]
+            else [
+                b"skill_activation_error",
+                b"skill_applicability",
+                b"fixture-jev",
+                b"withheld_activation_failure",
+            ]
         )
-        if expected not in screen:
-            raise AssertionError(
-                f"Skill call output did not render {expected!r}: {screen!r}"
-            )
+        seen = screen
+        # The exact call view wraps persisted output; walk rows instead of
+        # assuming the answer is contained in its old 72-byte timeline digest.
+        for _ in range(len(str(row["output"])) + 1):
+            if all(needle in seen for needle in needles):
+                break
+            h.read_available(fd, output)
+            start = len(output)
+            os.write(fd, b"j")
+            h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
+            h.drain_until_quiet(process, fd, output)
+            seen += b"\n" + h.screen_text(bytes(output))
+        for needle in needles:
+            if needle not in seen:
+                raise AssertionError(f"Skill call output did not render {needle!r}")
         if reads != [path]:
             raise AssertionError(f"unexpected log reads: {reads}")
         print(

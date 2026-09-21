@@ -1600,6 +1600,7 @@ let run_turn
                   ~checkpoint:resume_agent_core_checkpoint
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
+                      ~input_policy:meta.input_policy
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path
                       ~keeper_name:meta.name

@@ -463,6 +463,7 @@ let decode_current_meta fields =
       ; updated_at
       ; paused
       ; latched_reason
+      ; input_policy = Keeper_input_policy.default
       ; activation_mode = Keeper_activation_mode.default
       ; current_task_id
       ; max_context_override = None

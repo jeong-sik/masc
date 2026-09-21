@@ -154,8 +154,125 @@ let test_uncompressed_history_ignores_old_front_and_demotion () =
    | Ok () -> () | Error _ -> fail "uncompressed path borrowed stale prefix obligations")
 ;;
 
+let exchange id body =
+  [message T.Assistant [T.ToolUse {id; name = "read_file"; input = `Assoc []}];
+   { (message T.Tool [T.ToolResult {tool_use_id = id; content = body;
+       outcome = T.Tool_succeeded; json = None; content_blocks = None}]) with tool_call_id = Some id }]
+;;
+
+let body_for id messages =
+  List.find_map (fun (m : T.message) -> List.find_map (function
+    | T.ToolResult result when result.tool_use_id = id -> Some result.content
+    | _ -> None) m.content) messages |> Option.get
+;;
+
+let test_small_externalizes_only_completed_bodies () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "input-policy-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let store = Tool_blob_store.create ~base_path in
+  let older_body = String.make 8000 'o' and current_body = String.make 8000 'c' in
+  let completed = source @ exchange "older" older_body in
+  let current = [text T.User "Approval is still required."] @ exchange "unfinished" current_body in
+  let messages = completed @ current in
+  let original = encode messages in
+  let completed_end = snd (Window.annotate completed) in
+  let project ?(base_path = base_path) ?(continuity = Some Driver.uncompressed_history) policy =
+    Driver.For_testing.request_view ~input_policy:policy ?continuity
+      ~provider_config ~measure_message_bytes:measure ~front:None
+      ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:true
+      ~base_path ~demote_before:completed_end
+      ~materialize:(fun ~pending messages ->
+        (Masc.Keeper_model_input_demotion.materialize ~store
+          ~addresses:(Masc.Keeper_model_input_demotion.create_address_memo ())
+          ~pending messages).messages) messages |> wire in
+  let small = project Small in
+  check string "Small without continuity also protects unfinished work" current_body
+    (body_for "unfinished" (project ~continuity:None Small));
+  check int "externalization does not omit messages" (List.length messages) (List.length small);
+  check string "unfinished tool body remains raw even after refusal" current_body
+    (body_for "unfinished" small);
+  check bool "non-tool obligations are unchanged" true
+    (List.mem (List.hd current) small);
+  (match Tool_output.decode_from_agent_core (body_for "older" small) with
+   | Tool_output.Decoded reference ->
+     (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+      | Ok (Some bytes) -> check string "reference retrieves exact original" older_body bytes
+      | _ -> fail "materialized reference is not readable")
+   | _ -> fail "small policy did not externalize completed tool body");
+  check string "wide keeps exact raw source" original (encode (project Wide));
+  check string "disabled store/reader path keeps exact raw source" original
+    (encode (project ~base_path:"" Small));
+  let snapshot, lines = capture_source completed in
+  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
+  let summarized = project ~continuity:(Some continuity) Small |> without_working_state in
+  check string "covered prefix excluded, unfinished suffix intact" (encode (pinned :: current))
+    (encode summarized);
+  check string "durable source values unchanged" original (encode messages)
+;;
+
+let test_failed_externalization_keeps_raw_body () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "input-policy-write-failure-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let obstacle = open_out (Filename.concat base_path ".masc") in close_out obstacle;
+  let messages = source @ exchange "blocked" (String.make 8000 'b') in
+  let reverted = ref 0 in
+  let projected = Driver.For_testing.request_view ~input_policy:Small
+    ~continuity:Driver.uncompressed_history ~provider_config ~measure_message_bytes:measure
+    ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
+    ~last_resort:false ~base_path ~demote_before:(snd (Window.annotate messages))
+    ~materialize:(fun ~pending messages ->
+      let outcome = Masc.Keeper_model_input_demotion.materialize
+        ~store:(Tool_blob_store.create ~base_path)
+        ~addresses:(Masc.Keeper_model_input_demotion.create_address_memo ()) ~pending messages in
+      reverted := outcome.reverted; outcome.messages) messages in
+  check int "failed blob write reverted" 1 !reverted;
+  check string "failed store never leaves a dangling marker" (encode messages) (encode (wire projected))
+;;
+
+let test_completed_boundary_protects_resumed_work () =
+  let completed = source @ exchange "completed" (String.make 8000 'd') in
+  let _, lines = capture_source completed in
+  let resumed = completed @ [text T.User "Still awaiting approval"]
+    @ exchange "resumed-unfinished" (String.make 8000 'u') in
+  let endpoint = snd (Window.annotate completed) in
+  let completed_end lines messages = Driver.completed_history_end ~trace_id ~lines ~messages in
+  check bool "seed can contain resumed work beyond completed boundary" true
+    (snd (Window.annotate resumed) > endpoint);
+  check bool "typed completed endpoint excludes all resumed work" true
+    (completed_end lines resumed = Ok endpoint);
+  check bool "absence of source evidence never guesses seed length" true
+    (completed_end [] resumed = Error Snapshot.Uncovered_history);
+  let restarted = lines @ [2, Ok { Boundary.recorded_at = 2.;
+    event = Boundary.History_restarted {trace_id} }] in
+  check bool "restart invalidates older completed endpoint" true
+    (completed_end restarted resumed = Error Snapshot.Uncovered_history);
+  let mismatched = List.map (fun (m : T.message) ->
+    match m.content with
+    | [T.ToolUse fields] when fields.id = "completed" ->
+      {m with content = [T.ToolUse {fields with id = "changed"}]}
+    | _ -> m) resumed in
+  check bool "mismatching completed atom never authorizes demotion" true
+    (Result.is_error (completed_end lines mismatched));
+  let baseline = List.map (fun (line, record) -> line,
+    Result.map (fun (record : Boundary.record) ->
+      match record.event with
+      | Boundary.Turn_ended fields ->
+        {record with event = Boundary.Turn_ended {fields with history_at_start = Boundary.Continued_history}}
+      | _ -> record) record) lines in
+  check bool "verified baseline endpoint can externalize exact older bodies" true
+    (completed_end baseline resumed = Ok endpoint)
+;;
+
 let () = run "continuity request projection"
-  ["request", [test_case "actual wire and tool append" `Quick test_actual_wire_and_tool_append;
+  ["request", [test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
+               test_case "small and wide actual body projection" `Quick test_small_externalizes_only_completed_bodies;
+               test_case "failed blob write retains raw body" `Quick test_failed_externalization_keeps_raw_body;
+               test_case "actual wire and tool append" `Quick test_actual_wire_and_tool_append;
                test_case "old front and last resort" `Quick test_old_front_and_last_resort_do_not_drop_unread;
                test_case "all covered" `Quick test_all_covered_keeps_only_working_and_pinned;
                test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;

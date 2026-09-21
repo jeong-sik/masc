@@ -73,9 +73,11 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
          | Error failure -> Failed failure
          | Ok evaluated ->
            let decoded =
-             match List.assoc_opt "applicability" evaluated.response.answers with
-             | None -> Error "response is missing applicability"
-             | Some answer -> Types.decode_choice choices answer
+             match evaluated.response.answers with
+             | [ id, answer ] when String.equal id "applicability" ->
+               Types.decode_choice choices answer
+             | _ ->
+               Error "Skill applicability requires exactly one applicability answer"
            in
            (match decoded with
             | Ok judgment -> Judged (evaluated, judgment)
@@ -140,6 +142,6 @@ let model_advice = function
       | Invalid_answer (_, reason) -> "JEV applicability advice unavailable: " ^ reason
       | Judged (_, judgment) ->
         Printf.sprintf
-          "JEV applicability advice: %s (confidence %.6g). This is not authorization or execution evidence; decide how to use the Skill for the request."
-          (label judgment.choice) judgment.confidence)
+          "JEV applicability advice: %s. This is not authorization or execution evidence; decide how to use the Skill for the request."
+          (label judgment.choice))
 ;;

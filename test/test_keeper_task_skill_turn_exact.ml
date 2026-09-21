@@ -852,19 +852,22 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let source_id = (List.hd fixture_config.sources).id in
   let reference = exact_reference captured_snapshot ~source_id ~package_id:"guide" ~name:"guide" in
   let selected = resolve_one captured_snapshot reference in
-  let response decision = Yojson.Safe.to_string (`Assoc
+  let response ?(extra_answers = []) decision = Yojson.Safe.to_string (`Assoc
     [ "model", `String "fixture-jev"
-    ; "answers", `Assoc [ "applicability", `Assoc
+    ; "answers", `Assoc ([ "applicability", `Assoc
         [ "type", `String "choice"; "choice", `String decision
         ; "confidence", `Float 1.0
         ; "probabilities", `Assoc
             (List.map
                (fun option -> option, `Float (if String.equal option decision then 1.0 else 0.0))
-               [ "applicable"; "not_applicable"; "insufficient_context" ]) ] ] ]) in
+               [ "applicable"; "not_applicable"; "insufficient_context" ]) ] ]
+        @ extra_answers) ]) in
   let server = Exact_output_fixture.start_server ~sw ~net ~clock
       (Exact_output_fixture.Replies
         [ response "not_applicable"; response "applicable"; response "insufficient_context"
-        ; response "not-an-offered-choice"; "not-json"; response "applicable" ]) in
+        ; response "not-an-offered-choice"
+        ; response ~extra_answers:[ "surplus", `Bool true ] "applicable"
+        ; "not-json"; response "applicable" ]) in
   let policy = { Runtime_schema.default_typesafeai with
       skill_applicability = true; lane_endpoint = server.base_url } in
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-skill-key") @@ fun () ->
@@ -898,19 +901,26 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     let open Yojson.Safe.Util in
     check bool "model advice delivery is explicit" true
       (metadata |> member "applicability_advice_in_model_content" |> to_bool);
-    metadata |> member "skill_applicability"
+    output, metadata |> member "skill_applicability"
   in
-  let judged = invoke "not_applicable" in
+  let judged_output, judged = invoke "not_applicable" in
   let open Yojson.Safe.Util in
   check string "negative advice is not a tool failure" "judged" (judged |> member "status" |> to_string);
   check string "returned model is retained" "fixture-jev" (judged |> member "model" |> to_string);
   check string "exact reference is retained" (Yojson.Safe.to_string (Reference.to_yojson reference))
     (judged |> member "reference" |> Yojson.Safe.to_string);
+  check bool "model advice does not invite an invented confidence threshold" false
+    (String_util.contains_substring judged_output "confidence");
   ignore (invoke "applicable");
   ignore (invoke "insufficient_context");
-  let invalid = invoke "advice unavailable" in
+  let _, invalid = invoke "advice unavailable" in
   check string "bad choice remains explicit" "invalid_answer" (invalid |> member "status" |> to_string);
-  let failed = invoke "advice unavailable" in
+  let _, surplus = invoke "advice unavailable" in
+  check string "a surplus answer violates the one-question response contract"
+    "invalid_answer" (surplus |> member "status" |> to_string);
+  check int "the invalid receipt retains both returned answers" 2
+    (surplus |> member "returned_answers" |> to_assoc |> List.length);
+  let _, failed = invoke "advice unavailable" in
   check string "service decode failure remains explicit" "failed" (failed |> member "status" |> to_string);
   let activation_failed_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
@@ -981,7 +991,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let rows = match Keeper_tool_call_log.read_recent ~keeper_name:"skill-fixture" ~n:10 () with
     | Ok rows -> rows
     | Error (Keeper_tool_call_log.Index_unavailable detail) -> fail detail in
-  check int "every actual projected result reached the durable log" 6 (List.length rows);
+  check int "every actual projected result reached the durable log" 7 (List.length rows);
   List.iter (fun row ->
     let output = member "output" row |> Yojson.Safe.to_string in
     check bool "durable output retains applicability despite a long body" true

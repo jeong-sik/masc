@@ -140,8 +140,8 @@ def main() -> None:
         for line in result.stdout.splitlines()
         if line.startswith(prefix)
     ]
-    if len(rows) != 6:
-        raise AssertionError(f"expected six real handler records, got {len(rows)}")
+    if len(rows) != 7:
+        raise AssertionError(f"expected seven real handler records, got {len(rows)}")
     for row in rows:
         run_case(executable, row)
     print("Skill applicability durable calls reach the TUI: PASS")

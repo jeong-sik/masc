@@ -3071,7 +3071,7 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
       in
       let open Yojson.Safe.Util in
       let before = health () in
-      Alcotest.(check string) "current refusal degrades fleet health" "degraded"
+      Alcotest.(check string) "current refusal blocks the only fleet target" "blocked"
         (before |> member "status" |> to_string);
       Alcotest.(check int) "current refusal contributes one recovery" 1
         (before |> member "official_client_recovery_required_keeper_count" |> to_int);

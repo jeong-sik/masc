@@ -122,8 +122,11 @@ let test_cancel ~base_path ~registry stage () =
         Eio.Cancel.cancel (Eio.Promise.await cancel_context) Operator_cancelled;
         Eio.Fiber.check ());
   Fun.protect ~finally:(fun () ->
-    unsubscribe ();
-    Atomic.set Runs.change_observer_fn previous_observer) @@ fun () ->
+    (* Restore the global first: a raising unsubscribe must not leave this
+       fixture's observer installed for the rest of the binary, and a raising
+       finalizer would mask the body's own failure. *)
+    Atomic.set Runs.change_observer_fn previous_observer;
+    try unsubscribe () with _ -> ()) @@ fun () ->
   let runtime_cancelled = ref false in
   let worker = Eio.Fiber.fork_promise ~sw (fun () ->
     Eio.Cancel.sub (fun cc ->

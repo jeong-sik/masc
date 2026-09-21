@@ -8,6 +8,9 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
+val wire_field_origin : string
+val wire_field_basis : string
+val wire_field_derivations : string
 
 (** On a librarian claim: the short id of the dropped memory this claim
     continues (RFC-0418). *)
@@ -34,9 +37,10 @@ type wire_step =
   | Wire_index of int
 
 (** Why one node did not decode. Closed, so a new rejection has to name itself
-    here before a decoder can make it. [Not_ascending] and [Not_positive] are
-    produced only by the snapshot codec in {!Keeper_memory_os_current}, which
-    shares this vocabulary rather than keeping a parallel one. *)
+    here before a decoder can make it. [Not_ascending] is produced only by the
+    snapshot codec in {!Keeper_memory_os_current}, [Not_a_turn_ref] only by
+    {!Keeper_turn_boundaries}, and [Not_positive] by both; they share this
+    vocabulary rather than keeping a parallel one. *)
 type wire_reason =
   | Expected_object
   | Expected_array
@@ -53,6 +57,7 @@ type wire_reason =
   | Not_a_memory_id of string
   | Not_a_board_post_id of string
   | Not_a_board_comment_id of string
+  | Not_a_turn_ref of string
   | Not_finite
   | Negative
   | Not_positive
@@ -186,13 +191,17 @@ type origin =
   }
 
 (** One independently sufficient proof of a derived fact. Every [premise_id]
-    is the exact {!memory_id} of another current fact. [rule_id] is an opaque
+    is the exact {!memory_id} of another fact. An inactive alternative may
+    reference facts that are no longer current. [rule_id] is an opaque
     producer-owned identity used for explanation and rule evolution; Memory OS
     never branches on its spelling. *)
 type derivation =
   { rule_id : string
   ; premise_ids : string list
   }
+
+(** Canonical premise ordering; this does not validate the proof. *)
+val normalize_derivation : derivation -> derivation
 
 (** Where an observed fact was read from. [Transcript] is the keeper's own
     turn history, which was the only source before Board provenance existed.

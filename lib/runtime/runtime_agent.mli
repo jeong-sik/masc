@@ -228,7 +228,7 @@ val decide_modality_reroute :
 (** Pure pre-dispatch reroute decision over capability records. Returns
     [No_reroute_needed] when [assigned_caps] already admit [required_modalities];
     [Reroute] naming the first [candidates] entry whose capabilities admit them
-    (declaration/[media_failover] order is the caller's responsibility);
+    (candidate order is the caller's responsibility);
     [No_capable_runtime] when none qualify, which the caller answers with the
     media degrade or the loud capability rejection. Does no I/O and does not
     consult provider liveness (deferred to RFC-0260), so two identical inputs
@@ -258,26 +258,21 @@ val caps_admit_required_modalities :
     individual capability booleans. *)
 
 val media_candidates_of :
-  lane:Runtime.t list ->
   runtimes:Runtime.t list ->
   media_failover:string list ->
   Runtime.t list
-(** RFC-0440 media candidate set, pure over its inputs: [lane] in its own
-    order, then [media_failover] resolved against [runtimes] in declared order
-    (ids that resolve to nothing are skipped). Ids are unique; the first
-    occurrence wins. No capability or execution filter: callers admit by
-    [caps_admit_required_modalities] over [input_capabilities_of_runtime].
-
-    A declared runtime that is in neither list is not a candidate. It is also
-    the one boot does not validate dispatch caps for, and the walk dispatches
-    what it is given (#34823). An empty [lane] with no [media_failover] has no
+(** The vision read fleet, pure over its inputs: [media_failover] resolved
+    against [runtimes] in declared order (ids that resolve to nothing are
+    skipped). Ids are unique; the first occurrence wins. No capability or
+    execution filter: callers admit by [caps_admit_required_modalities] over
+    [input_capabilities_of_runtime]. An empty [media_failover] has no
     candidates. *)
 
-val media_candidates : lane:Runtime.t list -> Runtime.t list
+val media_candidates : unit -> Runtime.t list
 (** [media_candidates_of] over the loaded runtime state
-    ([Runtime.runtimes_and_media_failover]). The keeper modality reroute and
-    the vision tool both read this set, so a runtime that can take an image for
-    one of them is offered to the other. *)
+    ([Runtime.runtimes_and_media_failover]). The vision tool and the image
+    readings made for a runtime that cannot take the image read this set. A
+    keeper turn does not: its image reroute stays inside its lane. *)
 
 val media_walk :
   candidates:Runtime.t list ->
@@ -299,9 +294,8 @@ val decide_modality_reroute_for_runtime_candidates :
   Agent_core.Types.content_block list ->
   Runtime.t reroute_decision
 (** Keeper-dispatch variant over an explicit candidate list. Preserves the
-    caller-provided candidate order; the keeper driver passes [media_candidates]
-    so the set spans the lane, [runtime.media_failover], and the remaining
-    declared runtimes (RFC-0440). Removes [assigned] from [candidates] before
+    caller-provided candidate order; the keeper driver passes its lane's
+    candidates, so a reroute never leaves the lane. Removes [assigned] from [candidates] before
     selecting, and returns the selected [Runtime.t] itself rather than its id, so
     the caller dispatches to the runtime the decision picked without a second
     lookup. Required modalities are read from [blocks] together with
@@ -467,7 +461,10 @@ val run :
     [agent_core_checkpoint] is present, {!resume_from_checkpoint}
     is used; otherwise {!build} produces a fresh agent.
     Returns the wrapped {!run_result}; errors propagate
-    as [Agent_core.Error.t]. *)
+    as [Agent_core.Error.t].
+    [on_event] observes actual SSE events when the resolved model supports
+    native streaming. Otherwise the run uses sync JSON without invoking
+    [on_event]. *)
 
 val run_blocks :
   sw:Eio.Switch.t ->
@@ -481,7 +478,8 @@ val run_blocks :
   ?cooperative_yield_probe:cooperative_yield_probe ->
   Agent_core.Types.content_block list ->
   (run_result, Agent_core.Error.t) result
-(** Runs an Agent Core agent against structured user-authored content blocks. *)
+(** Runs an Agent Core agent against structured user-authored content blocks.
+    [on_event] follows the same streaming-capability rule as {!run}. *)
 
 val continue_from_checkpoint :
   sw:Eio.Switch.t ->
@@ -498,7 +496,8 @@ val continue_from_checkpoint :
 (** Resumes the checkpoint's next provider turn without appending another User
     message. The checkpoint must already contain the caller-authored request and
     every completed tool result. This is for same-turn continuation after a
-    typed incomplete provider terminal, not for starting a new Keeper turn. *)
+    typed incomplete provider terminal, not for starting a new Keeper turn.
+    [on_event] follows the same streaming-capability rule as {!run}. *)
 
 type agent_core_tool_projector =
   name:string ->

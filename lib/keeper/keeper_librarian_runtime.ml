@@ -130,19 +130,34 @@ type extraction_error =
   | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
-  | Cli_slots_exhausted
+  | Cli_slots_exhausted of
+      { prior_error : extraction_error option
+      ; failures : Keeper_lane_cli_oneshot.failure list
+      }
+  | Cli_prompt_unavailable of
+      { prior_error : extraction_error option
+      }
+  | No_transport_declared
   | Domain_output_invalid of string
   | Memory_snapshot_write_failed of
       { detail : string
       ; selected_slot : string
       }
 
-let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
+let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
-  | Exact_execution_failed _ | Cli_slots_exhausted -> Exact_execution_failure
+  | Exact_execution_failed _ ->
+    Exact_execution_failure
+  | Cli_slots_exhausted { prior_error = Some error; _ }
+  | Cli_prompt_unavailable { prior_error = Some error } ->
+    extraction_error_kind error
+  | Cli_slots_exhausted { prior_error = None; _ }
+  | Cli_prompt_unavailable { prior_error = None } ->
+    Exact_execution_failure
+  | No_transport_declared -> Exact_setup_failure
   | Domain_output_invalid _ -> Domain_output_invalid
   | Memory_snapshot_write_failed _ -> Memory_snapshot_write_failure
 ;;
@@ -177,7 +192,7 @@ let exact_setup_error_to_string = function
       slot_id reason
 ;;
 
-let extraction_error_to_string = function
+let rec extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
   | Execution_clock_unavailable ->
     "memory os librarian execution clock unavailable"
@@ -189,7 +204,29 @@ let extraction_error_to_string = function
        | No_outward_effect -> "none"
        | Outward_effect_started -> "started")
       detail
-  | Cli_slots_exhausted -> "librarian official-client slots exhausted; per-slot failures are logged"
+  | Cli_slots_exhausted { prior_error; failures } ->
+    let cli_detail =
+      let summary = "librarian official-client slots exhausted" in
+      match failures with
+      | [] -> summary
+      | _ :: _ ->
+        summary ^ ": "
+        ^ String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
+    in
+    (match prior_error with
+     | None -> cli_detail
+     | Some error ->
+       "API failure: " ^ extraction_error_to_string error ^ "; " ^ cli_detail)
+  | Cli_prompt_unavailable { prior_error } ->
+    let cli_detail =
+      "librarian official-client fallback skipped: fitted prompt is not one text message"
+    in
+    (match prior_error with
+     | None -> cli_detail
+     | Some error ->
+       "API failure: " ^ extraction_error_to_string error ^ "; " ^ cli_detail)
+  | No_transport_declared ->
+    "librarian lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
     "librarian domain output invalid: " ^ detail
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
@@ -202,7 +239,9 @@ let selected_slot_of_extraction_error = function
   | Execution_clock_unavailable
   | Exact_setup_failed _
   | Exact_execution_failed _
-  | Cli_slots_exhausted
+  | Cli_slots_exhausted _
+  | Cli_prompt_unavailable _
+  | No_transport_declared
   | Domain_output_invalid _ ->
     None
 ;;
@@ -296,36 +335,6 @@ type slot_projection =
         (** The projection refused the request outright -- a capability or
             serialization refusal. *)
 
-type lane_projection =
-  { usable : string list
-        (** Slot ids whose request projected, in ladder order. *)
-  ; unusable : (string * string) list
-        (** Slot id and refusal reason for each structurally unusable slot. *)
-  }
-
-(* Pure over one projection per slot in ladder order. A slot whose request
-   cannot be projected at all is structurally unusable and is excluded rather
-   than fatal. Until 2026-09-11 one such slot failed the whole pre-flight and
-   took down every slot the run would actually have used -- the appended
-   openrouter.openrouter-deepseek-v4-flash refused projection on every
-   librarian run of the evening while the first two slots were healthy. A
-   ladder with no projectable slot left is a misconfiguration; naming that
-   is the caller's job. *)
-let lane_projection_decision (projections : (string * slot_projection) list)
-  : lane_projection
-  =
-  List.fold_left
-    (fun (lane : lane_projection) (slot_id, projection) ->
-      match projection with
-      | Slot_admitted -> { lane with usable = slot_id :: lane.usable }
-      | Slot_unusable reason ->
-        { lane with unusable = (slot_id, reason) :: lane.unusable })
-    { usable = []; unusable = [] }
-    projections
-  |> fun lane ->
-  { usable = List.rev lane.usable; unusable = List.rev lane.unusable }
-;;
-
 let slot_reason_pairs ?(sep = "; ") (unusable : (string * string) list) : string =
   String.concat sep
     (List.map (fun (slot_id, reason) -> slot_id ^ ": " ^ reason) unusable)
@@ -343,32 +352,41 @@ let project_slot ~(slot : Runtime_exact_output_registry.selected_slot) ~messages
   | Ok (_ : Exact_output.request_body_projection) -> Slot_admitted
 ;;
 
-let project_lane ~selected_slots ~messages : lane_projection =
-  lane_projection_decision
-    (List.map
-       (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-         (slot.slot_id, project_slot ~slot ~messages))
-       selected_slots)
-;;
+type preflight_selection =
+  { selected_slots : Runtime_exact_output_registry.selected_slot list
+  ; unusable : (string * string) list
+  }
 
-(* The pre-flight over the ladder: which slots this run is without, or the
-   error naming every refusal when no slot projects. An empty ladder reports
-   nothing -- the production caller routes an empty slot list to the cli lane
-   before it gets here. *)
+(* The pre-flight over the ladder: the exact slots this run can use and the
+   slots it is without, or the error naming every refusal when no slot
+   projects. An empty ladder reports nothing -- the production caller routes
+   an empty slot list to the cli lane before it gets here. *)
 let preflight_slots ~selected_slots ~messages =
   match selected_slots with
-  | [] -> Ok []
+  | [] -> Ok { selected_slots = []; unusable = [] }
   | (first : Runtime_exact_output_registry.selected_slot) :: _ ->
-    let lane = project_lane ~selected_slots ~messages in
-    (match lane.usable with
+    let selected_slots, unusable =
+      List.fold_left
+        (fun (selected_slots, unusable)
+             (slot : Runtime_exact_output_registry.selected_slot) ->
+           match project_slot ~slot ~messages with
+           | Slot_admitted -> slot :: selected_slots, unusable
+           | Slot_unusable reason ->
+             selected_slots, (slot.slot_id, reason) :: unusable)
+        ([], [])
+        selected_slots
+      |> fun (selected_slots, unusable) ->
+      List.rev selected_slots, List.rev unusable
+    in
+    (match selected_slots with
      | [] ->
        Error
          (Exact_setup_failed
             (Exact_request_projection_failed
                { slot_id = first.slot_id
-               ; reason = slot_reason_pairs lane.unusable
+               ; reason = slot_reason_pairs unusable
                }))
-     | _ :: _ -> Ok lane.unusable)
+     | _ :: _ -> Ok { selected_slots; unusable })
 ;;
 
 let resolve_librarian_slots ~base_path ~keeper_id =
@@ -427,36 +445,7 @@ let exact_execution_error error =
     | Exact_output.No_generation_dispatch -> No_outward_effect
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
-  (* The static labels stay as prefixes (existing log greps keep working);
-     the payload each branch carries — failing slot, typed cause, raw provider
-     body, flow journey — is rendered after them instead of being discarded. *)
-  let detail =
-    match error with
-    | Exact_output.Flow_attempt_already_started _ ->
-      "attempt_already_started"
-    | Flow_attempt_start_failed _ ->
-      "attempt_start_failed"
-    | Flow_measurement_start_failed _ ->
-      "measurement_start_failed"
-    | Flow_candidates_exhausted { rejection; evidence } ->
-      Printf.sprintf
-        "candidates_exhausted: %s"
-        (Keeper_exact_flow_detail.candidates_exhausted_detail
-           ~rejection
-           ~evidence)
-    | Flow_before_measurement_dispatch_callback_failed _
-    | Flow_measurement_terminal_callback_failed _
-    | Flow_before_dispatch_callback_failed _
-    | Flow_before_advance_callback_failed _ ->
-      "unexpected_callback_failure"
-    | Flow_exact_execution_failed { candidate; cause; evidence } ->
-      Printf.sprintf
-        "agent_core_execution_failed: %s"
-        (Keeper_exact_flow_detail.execution_failure_detail
-           ~candidate
-           ~cause
-           ~evidence)
-  in
+  let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
   { outward_effect; detail }
 ;;
 
@@ -477,6 +466,11 @@ let cli_prompt_of_messages ~keeper_id (messages : Agent_core.Types.message list)
     None
 ;;
 
+type cli_fallback_failure =
+  | No_cli_slots
+  | Fitted_prompt_unavailable
+  | Slot_failures of Keeper_lane_cli_oneshot.failure list
+
 let try_cli_slots
       ~keeper_id
       ~base_path
@@ -486,10 +480,10 @@ let try_cli_slots
       ~messages
   =
   match cli_slots with
-  | [] -> None
+  | [] -> Error No_cli_slots
   | cli_slots ->
     (match cli_prompt_of_messages ~keeper_id messages with
-     | None -> None
+     | None -> Error Fitted_prompt_unavailable
      | Some prompt ->
        (match
           Keeper_lane_cli_oneshot.walk
@@ -509,9 +503,20 @@ let try_cli_slots
                 (Keeper_lane_cli_oneshot.failure_to_string failure))
             ()
         with
-        | Error _failures -> None
+        | Error failures -> Error (Slot_failures failures)
         | Ok (runtime_id, (selection, output)) ->
-          Some (runtime_id, selection, output)))
+          Ok (runtime_id, selection, output)))
+;;
+
+(* An API refusal says nothing about the CLI walk that followed it. Keep the
+   walk's typed failures with that refusal so the run record and Memory
+   journal cannot describe an answered CLI request as only API pre-flight. *)
+let with_cli_failure prior_error = function
+  | No_cli_slots -> prior_error
+  | Slot_failures failures ->
+    Cli_slots_exhausted { prior_error = Some prior_error; failures }
+  | Fitted_prompt_unavailable ->
+    Cli_prompt_unavailable { prior_error = Some prior_error }
 ;;
 
 let execute_exact_output_classified
@@ -528,18 +533,37 @@ let execute_exact_output_classified
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
   match selected_slots with
   | [] ->
+    (* Registry publication rejects a lane with neither transport, and lane
+       resolution rejects a lane with no admitted transport. Keep this final
+       classification defensive in case either upstream contract changes. *)
     (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
-     | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
-     | None -> Error Cli_slots_exhausted)
+     | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
+     | Error No_cli_slots -> Error No_transport_declared
+     | Error (Slot_failures failures) ->
+       Error (Cli_slots_exhausted { prior_error = None; failures })
+     | Error Fitted_prompt_unavailable ->
+       Error (Cli_prompt_unavailable { prior_error = None }))
   | _ :: _ ->
-  let* lane_unusable = preflight_slots ~selected_slots ~messages in
-  (if lane_unusable <> [] then
+  match preflight_slots ~selected_slots ~messages with
+  | Error error ->
+    (* No API slot can project this request. The independently admitted CLI
+       slots still own a chance to answer, just as after API exhaustion. *)
+    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+       ~selected_input ~messages with
+     | Ok (runtime_id, selection, output) ->
+       Log.Keeper.warn ~keeper_name:keeper_id
+         "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
+         exact_lane_id runtime_id (extraction_error_to_string error);
+       Ok ((selection, output), runtime_id)
+     | Error cli_failure -> Error (with_cli_failure error cli_failure))
+  | Ok preflight ->
+  (if preflight.unusable <> [] then
      Log.Keeper.warn ~keeper_name:keeper_id
        "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
        exact_lane_id
-       (slot_reason_pairs ~sep:", " lane_unusable));
-  let* attempt = prepare_attempt ~selected_slots messages in
+       (slot_reason_pairs ~sep:", " preflight.unusable));
+  let* attempt = prepare_attempt ~selected_slots:preflight.selected_slots messages in
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in
     match
@@ -570,12 +594,10 @@ let execute_exact_output_classified
     Ok (success.accepted, selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
     let terminal () = Error (Exact_execution_failed (exact_execution_error cause)) in
-    (* Only provider exhaustion may fall back to the cli walk; the
-       infrastructure causes keep their terminal (RFC
-       cli-runtimes-as-lane-slots, same split as the other lanes). *)
-    (match cause with
-     | Exact_output.Flow_candidates_exhausted _
-     | Exact_output.Flow_exact_execution_failed _ ->
+    (* The CLI tail follows the same advancement rule as HTTP successors;
+       input-specific and infrastructure failures keep their terminal. *)
+    (match Exact_output.flow_execution_terminal_kind cause with
+     | Exact_output.Advanceable_candidates_exhausted ->
        (match
           try_cli_slots
             ~keeper_id
@@ -585,16 +607,14 @@ let execute_exact_output_classified
             ~selected_input
             ~messages
         with
-        | Some (runtime_id, selection, output) ->
+        | Ok (runtime_id, selection, output) ->
           Ok ((selection, output), runtime_id)
-        | None -> terminal ())
-     | Exact_output.Flow_attempt_already_started _
-     | Exact_output.Flow_attempt_start_failed _
-     | Exact_output.Flow_measurement_start_failed _
-     | Exact_output.Flow_before_measurement_dispatch_callback_failed _
-     | Exact_output.Flow_measurement_terminal_callback_failed _
-     | Exact_output.Flow_before_dispatch_callback_failed _
-     | Exact_output.Flow_before_advance_callback_failed _ -> terminal ())
+        | Error cli_failure ->
+          Error
+            (with_cli_failure
+               (Exact_execution_failed (exact_execution_error cause))
+               cli_failure))
+     | Exact_output.Non_advanceable_terminal -> terminal ())
   | Error
       (Exact_output.Flow_semantic_candidates_exhausted
          { rejections; _ }) ->
@@ -613,12 +633,14 @@ let execute_exact_output_classified
          ~selected_input
          ~messages
      with
-     | Some (runtime_id, selection, output) ->
+     | Ok (runtime_id, selection, output) ->
        Ok ((selection, output), runtime_id)
-     | None ->
+     | Error cli_failure ->
        Error
-         (Domain_output_invalid
-            (Keeper_librarian.parse_error_to_string rejection.rejection)))
+         (with_cli_failure
+            (Domain_output_invalid
+               (Keeper_librarian.parse_error_to_string rejection.rejection))
+            cli_failure))
 ;;
 
 (* A failure while no current snapshot exists means the keeper is running
@@ -738,10 +760,23 @@ let completed_output
 let failed_output = `Assoc []
 ;;
 
-type trigger = Conversation_completed | Queue_changed
+type trigger = Conversation_completed | Queue_changed | Durable_range
+
+type input_projection =
+  | Recent_window
+  | Already_selected_range
+
+let input_for_projection projection input =
+  match projection with
+  | Recent_window -> prompt_input_for_librarian input
+  | Already_selected_range -> input
+;;
 
 let run_best_effort
       ?(trigger = Conversation_completed)
+      ?(input_projection = Recent_window)
+      ?(on_memory_committed = fun () -> ())
+      ?durable_range_id
       ?cli_runner
       ~base_path
       ~keepers_dir
@@ -750,7 +785,10 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  if (match trigger with Queue_changed -> true | Conversation_completed -> cadence_due ~keeper_id ~trace_id)
+  if
+    (match trigger with
+     | Queue_changed | Durable_range -> true
+     | Conversation_completed -> cadence_due ~keeper_id ~trace_id)
   then (
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
@@ -764,7 +802,7 @@ let run_best_effort
           | None -> 0
           | Some current -> List.length current.facts
         in
-        let prompt_input = prompt_input_for_librarian inp in
+        let prompt_input = input_for_projection input_projection inp in
         let prompt_variables, prompt_material =
           resolve_librarian_prompt prompt_input
         in
@@ -866,11 +904,27 @@ let run_best_effort
                 one fact of its own in that window ended the pass (masc
                 #32859). The decision itself has no such requirement: a fact it
                 never mentions is one it never saw. *)
+             (* An absorption the merged claim does not convey is not applied:
+                that memory stays current (RFC-librarian-absorb-gate). The
+                gate only narrows the list; without a key or an answer it is
+                the answer's list. *)
+             let absorbed =
+               Keeper_librarian_absorb_gate.run
+                 ~clock
+                 ~keeper_id
+                 ~facts:(match prompt_input.current with
+                   | None -> []
+                   | Some current -> current.facts)
+                 ~new_claims:selection.new_claims
+                 ~absorbed:selection.absorbed
+                 ()
+             in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
-               ~clock
-               ~dropped_statements:selection.dropped
-               ~absorbed:selection.absorbed
+                 ~clock
+                 ~dropped_statements:selection.dropped
+                 ?durable_range_id
+                 ~absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())
@@ -909,6 +963,7 @@ let run_best_effort
            in
            match result with
            | Ok (snapshot, exact_output, selected_slot) ->
+             on_memory_committed ();
              complete
                ~selected_slot
                Exact_lane_run_registry.Succeeded
@@ -1043,6 +1098,8 @@ module For_testing = struct
   type classified_error = extraction_error
 
   let classified_error_detail = extraction_error_to_string
+  let classified_error_kind = extraction_error_kind
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
+  let input_for_projection = input_for_projection
 end

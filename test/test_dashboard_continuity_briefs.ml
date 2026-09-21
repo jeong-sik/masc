@@ -150,7 +150,7 @@ let test_unknown_status_is_rejected_even_when_paused () =
   check_raises
     "unknown status stays a rejected parse"
     (Invalid_argument
-       "dashboard continuity: unknown keeper health \"suspended\"")
+       "dashboard continuity: keeper \"omega\" has unknown health \"suspended\"")
     (fun () ->
       ignore
         (build_one
@@ -166,6 +166,47 @@ let test_non_boolean_paused_is_rejected () =
         (build_one
            (keeper ~health:"healthy" ~status:"active"
               ~paused:(`String "true") ())))
+
+(* The operator snapshot lists a Keeper declared in config that has never
+   booted as a declaration row: no diagnostic, so no health. Its presence must
+   not take down the briefs of the keepers that do run. Seen live 2026-09-19:
+   [imp] had such a row and every execution render raised on its health "". *)
+let declared_row =
+  Masc.Keeper_declared_roster.to_json
+    { Masc.Keeper_declared_roster.name = "imp"
+    ; requirements = [ Masc.Keeper_declared_roster.Runtime_check_required ]
+    }
+
+let names_of rows =
+  List.map
+    (fun (row : continuity_context) ->
+      Yojson.Safe.Util.(row.json |> member "name" |> to_string))
+    rows
+
+let test_declaration_row_has_no_brief () =
+  let rows =
+    build_continuity_briefs ~now_ts:1_000_000_000.0
+      [ declared_row; keeper ~health:"healthy" ~status:"active" () ]
+  in
+  check (list string) "only the running keeper gets a brief" [ "omega" ]
+    (names_of rows)
+
+let test_declaration_row_alone_gives_no_briefs () =
+  check (list string) "a declared-only fleet has no continuity" []
+    (names_of (build_continuity_briefs ~now_ts:1_000_000_000.0 [ declared_row ]))
+
+let test_non_boolean_declaration_only_is_rejected () =
+  let row =
+    match keeper ~health:"healthy" () with
+    | `Assoc fields -> `Assoc (("declaration_only", `String "yes") :: fields)
+    | other -> other
+  in
+  check_raises
+    "declaration_only must be a boolean"
+    (Invalid_argument
+       "dashboard continuity: keeper \"omega\": keeper row declaration_only \
+        is not a boolean: \"yes\"")
+    (fun () -> ignore (build_one row))
 
 let () =
   run "dashboard_continuity_briefs"
@@ -192,5 +233,14 @@ let () =
             test_unknown_status_is_rejected_even_when_paused;
           test_case "non-boolean paused is rejected" `Quick
             test_non_boolean_paused_is_rejected;
+        ] );
+      ( "declaration rows",
+        [
+          test_case "declared keeper gets no brief beside a running one" `Quick
+            test_declaration_row_has_no_brief;
+          test_case "declared-only fleet has no continuity" `Quick
+            test_declaration_row_alone_gives_no_briefs;
+          test_case "non-boolean declaration_only is rejected" `Quick
+            test_non_boolean_declaration_only_is_rejected;
         ] );
     ]

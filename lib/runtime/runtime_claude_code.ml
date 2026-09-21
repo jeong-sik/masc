@@ -117,6 +117,10 @@ type assistant_usage =
   ; mutable last : turn_usage option
   }
 
+type observed_usage =
+  | Latest_request of turn_usage
+  | Turn_total of turn_usage
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -126,7 +130,7 @@ type turn_result =
   ; subscription : subscription
   ; rate_limit : rate_limit option
   ; resumed : bool
-  ; usage : turn_usage option
+  ; usage : observed_usage option
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -220,9 +224,8 @@ type error =
   | Stopped_by_host of
       { stop : host_stop
       ; usage : turn_usage option
-        (** Token counts summed over the assistant frames seen before the
-            host ended the turn. The result frame that would carry the turn
-            total never arrives after a host stop. *)
+        (** Latest assistant request's token counts before the host ended
+            the turn. A result total never arrives after a host stop. *)
       }
   | Quota_blocked of
       { api_error_status : int option
@@ -956,6 +959,34 @@ let native_tool_result_ids ~expected_session_id fields =
   | Some _ -> protocol_error stage "user message must be an object"
 ;;
 
+(* [terminal_reason] on the result frame is the CLI's own enum for why its
+   query loop stopped. CLI 2.1.278 groups these three values under its stop
+   cause "context_limit". [prompt_too_long] is the API refusing the request.
+   [blocking_limit] is the CLI refusing to send it when its token count reaches
+   the window minus 3000 tokens, with "Prompt is too long" and no API status.
+   [rapid_refill_breaker] stops repeated refills after automatic compaction.
+   Every other value leaves this lane's handling unchanged and is kept only
+   for the failure line. *)
+type terminal_reason =
+  | Prompt_too_long
+  | Blocking_limit
+  | Rapid_refill_breaker
+  | Other_terminal_reason of string
+
+let terminal_reason_of_wire = function
+  | "prompt_too_long" -> Prompt_too_long
+  | "blocking_limit" -> Blocking_limit
+  | "rapid_refill_breaker" -> Rapid_refill_breaker
+  | wire -> Other_terminal_reason wire
+;;
+
+let terminal_reason_to_wire = function
+  | Prompt_too_long -> "prompt_too_long"
+  | Blocking_limit -> "blocking_limit"
+  | Rapid_refill_breaker -> "rapid_refill_breaker"
+  | Other_terminal_reason wire -> wire
+;;
+
 let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     ~response_emitted fields =
   let stage = "result message" in
@@ -968,6 +999,7 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     let* turn_id = required_string stage "uuid" fields in
     let* api_error_status = optional_int stage "api_error_status" fields in
     let* terminal_reason = optional_string stage "terminal_reason" fields in
+    let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
     let result =
       match List.assoc_opt "result" fields with
       | None | Some `Null -> Ok None
@@ -1010,7 +1042,7 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
            ~none:"unknown"
            ~some:string_of_int
            api_error_status)
-        (Option.value terminal_reason ~default:"none")
+        (Option.fold ~none:"none" ~some:terminal_reason_to_wire terminal_reason)
         (match result with
          | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
          | Some _ | None -> "")
@@ -1019,9 +1051,11 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
       (* The CLI states why its query loop terminated as a typed enum on this
          frame; [prompt_too_long] is the CLI's own promotion of every provider
          context-window rejection ("Prompt is too long" / "Input is too long
-         for requested model", either status, or a 413 naming the window). A
-         frame that carries the verdict is authoritative in both directions,
-         like the codex lane's [codexErrorInfo].
+         for requested model", either status, or a 413 naming the window), and
+         [blocking_limit] is the same verdict reached before sending, while
+         [rapid_refill_breaker] reports repeated refills after compaction.
+         A frame that carries the verdict is authoritative in both directions, like
+         the codex lane's [codexErrorInfo].
 
          Frames without the enum fall back to the CLI's own sentence table,
          with no status requirement. The historical 400 requirement missed
@@ -1032,7 +1066,8 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
          unmapped internal error. Both sentences appear verbatim in the CLI
          binary (2.1.232). *)
       match terminal_reason with
-      | Some reason -> String.equal reason "prompt_too_long"
+      | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
+      | Some (Other_terminal_reason _) -> false
       | None ->
         Option.exists
           (fun detail ->
@@ -1196,14 +1231,12 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | None -> protocol_error "result message" "successful turn has no text"
     in
     emit_stream_event on_stream_event (Turn_finished { text });
-    (* The result frame's usage is the CLI's sum over the turn's calls. The
-       newest assistant frame is one request's, which is what the turn
-       reports; the frame's figure stands in only when no assistant frame
-       carried usage at all. *)
+    (* Preserve whether the count describes one request or the client turn.
+       A result total cannot stand in for a request's context occupancy. *)
     let usage =
       match assistant_usage.last with
-      | Some last -> Some last
-      | None -> usage
+      | Some last -> Some (Latest_request last)
+      | None -> Option.map (fun total -> Turn_total total) usage
     in
     Ok
       { session_id = expected_session_id

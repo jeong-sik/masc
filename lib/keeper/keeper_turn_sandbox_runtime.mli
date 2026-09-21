@@ -102,6 +102,44 @@ val forget_microvm_guest_booted :
   unit
 (** Evicts the guest from the booted set (e.g. after it was observed stopped or dead). *)
 
+(** What a microvm guest this process booted was booted with. Adopt matches a
+    guest by name, which carries none of these, so each is recorded at boot
+    and compared before a running guest is adopted. *)
+type microvm_boot =
+  { policy_port : int option
+      (** The egress proxy port in a [Network_policy] guest's environment;
+          [None] in the other modes. *)
+  ; image : string
+  ; guest_size : Keeper_microvm_guest_size.t
+  }
+
+type microvm_replacement_reason =
+  | Boot_not_recorded
+      (** This process has no record of booting the guest, so what it was
+          given is unknown. *)
+  | Image_changed of
+      { booted : string
+      ; target : string
+      }
+  | Memory_changed of
+      { booted : Keeper_microvm_guest_size.memory
+      ; target : Keeper_microvm_guest_size.memory
+      }
+  | Cpus_changed of
+      { booted : Keeper_microvm_guest_size.cpus
+      ; target : Keeper_microvm_guest_size.cpus
+      }
+  | Policy_route_stale of
+      { booted_port : int option
+      ; bound_port : int option
+      }
+      (** {!For_testing.policy_route_holds} said no. *)
+
+type microvm_adoption =
+  | Adopt_running_guest
+  | Replace_running_guest of microvm_replacement_reason list
+      (** Never empty: every reason the guest may not be adopted. *)
+
 module For_testing : sig
   val create_minimal
     :  config:Workspace.config
@@ -126,6 +164,19 @@ module For_testing : sig
       the lane's proxy port in its environment; the port is ephemeral and the
       guest is not, so the two can part. Answering this without a guest or a
       registry keeps the rule testable. *)
+
+  val microvm_adoption
+    :  booted:microvm_boot option
+    -> image:string
+    -> guest_size:Keeper_microvm_guest_size.t
+    -> network_mode:Keeper_types_profile_sandbox.network_mode
+    -> bound_port:int option
+    -> microvm_adoption
+  (** Whether a running guest whose identity snapshot this process holds may
+      be adopted, given what it was [booted] with and what the keeper asks
+      for now. No record, another image, another memory or CPU count, or a
+      policy route {!policy_route_holds} rejects each means replace, and every
+      one that applies is named. *)
 end
 
 module For_testing_microvm : sig

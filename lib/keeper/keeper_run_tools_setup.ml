@@ -331,7 +331,6 @@ let prepare_agent_setup
       ~(keeper_turn_id : int)
       ~(turn_kind : Turn_record.turn_kind)
       ~(runtime_id : string)
-      ~(is_retry : bool)
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
@@ -903,9 +902,7 @@ let prepare_agent_setup
       | None -> all_tool_names
     in
     let lane : Keeper_agent_tool_surface.turn_lane =
-      if is_retry
-      then Lane_retry
-      else if schema_filter <> []
+      if schema_filter <> []
       then Lane_tool_optional
       else (
         match current_tool_choice with
@@ -951,7 +948,7 @@ let prepare_agent_setup
     ~ctx ~session ~turn_system_prompt ~model_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count
-    ~runtime_id_string ~is_retry
+    ~runtime_id_string
     ~config_root ~runtime_config_path
     ~trajectory_acc
     ~skill_projection_diagnostics

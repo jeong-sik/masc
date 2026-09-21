@@ -274,10 +274,10 @@ let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
   | None ->
     false
 
-(* Classification of why a degraded retry is being attempted.  Closed set
-   covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
-   and [recoverable_runtime_failure_reason] (broader set including raw
-   provider API failures).  Wire form is the lowercase string via
+(* Why a turn continues on the next runtime of its lane. The producer is
+   [recoverable_runtime_failure_reason]; the value labels the deferred lane
+   suffix a failed turn leaves for the next one and the receipt that turn
+   writes. Wire form is the lowercase string via
    [degraded_retry_reason_to_string]. *)
 type degraded_retry_reason =
   | Hard_quota
@@ -342,12 +342,10 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     | Some
         (Keeper_turn_driver.Runtime_exhausted _) ->
         (* Generic runtime exhaustion: all candidates failed without a more
-           specific reason. Treat as recoverable so declarative
-           [fallback_runtime] hints declared in runtime.toml actually
-           escalate. Receipt-derived data on 2026-04-25 showed 31/39
-           silent turns ended with [(null)] fallback_reason because this
-           arm previously returned [None]. Other arms below remain
-           non-recoverable to keep the surface conservative. *)
+           specific reason. It still names a reason, so a receipt does not
+           end with a [(null)] fallback_reason: receipt-derived data on
+           2026-04-25 showed 31/39 silent turns did while this arm returned
+           [None]. *)
         Some Runtime_exhausted
     | Some (Keeper_turn_driver.Accept_rejected _) ->
         accept_rejection_degraded_retry_reason err
@@ -373,24 +371,22 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
         None
     | None ->
-        (* Typed runtime rotation: raw provider API errors that are
-           not wrapped in a MASC internal error (e.g. single-provider runtimes
-           where AGENT_CORE surfaces the error directly) should still trigger rotation
-           when a different runtime may succeed.
+        (* Raw provider API errors that are not wrapped in a MASC internal
+           error (e.g. single-provider runtimes where AGENT_CORE surfaces the
+           error directly) get a label too, so the deferred lane suffix records
+           why the turn continued on its next lane candidate.
 
-           429 rate-limit (non-hard-quota): rotate through explicitly declared
-           candidates. The error type does not carry model/account/provider
-           scope, so this boundary must not infer a broader blocked set.
+           429 rate-limit (non-hard-quota): [Rate_limit]. The error type does
+           not carry model/account/provider scope, so this boundary does not
+           infer a broader blocked set.
 
-           [ServerError]: the provider is unhealthy or overloaded; a
-           different runtime may be healthy.
+           [ServerError]: [Server_error]; the provider is unhealthy or
+           overloaded.
 
-           401/403 auth errors: the credential for this runtime is invalid; a
-           different runtime with different credentials may succeed.
+           401/403: [Auth_error]; the credential for this runtime is invalid.
 
            [PaymentRequired] and provider [HardQuota] are handled above by
-           [core_error_is_hard_quota]. Rate limits intentionally keep [Rate_limit]
-           so declared runtime fallback remains available. *)
+           [core_error_is_hard_quota]. *)
         (match err with
          | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
@@ -462,138 +458,23 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Orchestration _
          | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)
 
-let normalized_runtime_id ~catalog_names name =
-  let trimmed = String.trim name in
-  if List.exists (String.equal trimmed) catalog_names then trimmed
-  else if String.equal trimmed (Keeper_config.default_runtime_id ())
-  then trimmed
-  else trimmed
+(** The labelled retry a deferred lane stands for: the runtime the lane names
+    next, and why the failure that deferred it is continuable.
+    [Deferred_runtime_lane] is the label when that failure carries no
+    continuation reason of its own.
 
-let runtime_catalog_names () =
-  match Runtime.get_runtime_ids () with
-  | [] -> [ Keeper_config.default_runtime_id () ]
-  | names -> names
-;;
-
-let default_degraded_rotation_candidates
-    ~catalog_names
-    ~(fallback_reason : degraded_retry_reason option)
-    ~(base_runtime : string) =
-  let normalized_base = normalized_runtime_id ~catalog_names base_runtime in
-  let default_runtime =
-    normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
+    Three sites spelled this projection out by hand -- the unified turn's
+    [initial_turn_state], and the receipt's inbound hint and outbound
+    deferral -- so the fallback label had to be kept in step three times. *)
+let degraded_retry_of_deferred_lane
+      (lane : Keeper_turn_driver.deferred_runtime_lane)
+  =
+  let fallback_reason =
+    match recoverable_runtime_failure_reason lane.failure with
+    | Some reason -> reason
+    | None -> Deferred_runtime_lane
   in
-  let phase_recovery_runtime =
-    normalized_runtime_id ~catalog_names
-      (Runtime.get_default_runtime_id ())
-  in
-  let default_candidates = [ normalized_base; default_runtime; phase_recovery_runtime ] in
-  let catalog_runtimes =
-    Runtime.get_runtimes ()
-    |> List.map (fun (runtime : Runtime.t) ->
-           normalized_runtime_id ~catalog_names runtime.id)
-  in
-  let candidates_with_catalog =
-    dedupe_keep_order (default_candidates @ catalog_runtimes)
-  in
-  match fallback_reason with
-  | Some (Empty_no_progress | Thinking_only_no_progress | Truncated_no_progress)
-    ->
-    let tool_capable =
-      Runtime.get_runtimes ()
-      |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)
-      |> List.map (fun (runtime : Runtime.t) ->
-             normalized_runtime_id ~catalog_names runtime.id)
-    in
-    dedupe_keep_order (default_candidates @ tool_capable)
-  | Some
-      ( Capacity_backpressure
-      | Server_error
-      | Auth_error
-      | Runtime_exhausted
-      | Runtime_candidates_filtered
-      | Resumable_cli_session ) ->
-    (* Phase B-1: include the full runtime catalog so transient infrastructure
-       failures (notably capacity_backpressure) can fail over to a healthy
-       runtime outside the narrow [base; default; phase_recovery] set.
-       Without this, two unavailable runtimes had nowhere to go (#23373,
-       incidents 2026-05-21 / 2026-07-06). *)
-    candidates_with_catalog
-  | Some Deferred_runtime_lane -> []
-  | Some (Hard_quota | Rate_limit)
-  | None ->
-    default_candidates
-
-let degraded_rotation_candidates
-    ~catalog_names
-    ~(fallback_reason : degraded_retry_reason)
-    ~(fallback_hint : string option)
-    ~(base_runtime : string)
-    ~(effective_runtime : string) =
-  let normalized_effective =
-    normalized_runtime_id ~catalog_names effective_runtime
-  in
-  let raw_candidates =
-    default_degraded_rotation_candidates
-      ~catalog_names
-      ~fallback_reason:(Some fallback_reason)
-      ~base_runtime
-  in
-  let fallback_hint_candidate =
-    match fallback_hint with
-    | None -> None
-    | Some hint ->
-        let trimmed = String.trim hint in
-        if String.equal trimmed "" then None
-        else Some (normalized_runtime_id ~catalog_names trimmed)
-  in
-  let candidates =
-    match fallback_hint_candidate with
-    | None -> raw_candidates
-    | Some hint -> dedupe_keep_order (hint :: raw_candidates)
-  in
-  candidates
-  |> List.filter (fun candidate ->
-         not (String.equal candidate normalized_effective))
-
-let degraded_rotation_after_recoverable_error
-      ?fallback_hint
-      ~(base_runtime : string)
-      ~(effective_runtime : string)
-    ~(attempted_runtimes : string list)
-    (err : Agent_core.Error.t) : degraded_retry option =
-  match recoverable_runtime_failure_reason err with
-  | None -> None
-  | Some fallback_reason ->
-      (* Load the live catalog once at the degraded-rotation boundary and pass
-         the snapshot through normalization/filter helpers.  This preserves
-         concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = runtime_catalog_names () in
-      let attempted =
-        attempted_runtimes
-        |> List.map (normalized_runtime_id ~catalog_names)
-        |> dedupe_keep_order
-      in
-      let candidates =
-        degraded_rotation_candidates
-          ~catalog_names
-          ~fallback_reason
-          ~fallback_hint
-          ~base_runtime ~effective_runtime
-      in
-      let untried =
-        List.find_opt
-          (fun candidate ->
-             not (List.exists (String.equal candidate) attempted))
-          candidates
-      in
-      (match untried with
-       | Some next_runtime ->
-         Some { next_runtime; fallback_reason }
-       | None ->
-         (* One typed candidate pass is complete. A later Keeper turn may make
-            a fresh attempt; this boundary never invents a timed retry cycle. *)
-         None)
+  { next_runtime = lane.next_runtime_id; fallback_reason }
 
 (** [true] only for the typed API-side 400 rejection. Rendered provider text
     carries no recovery authority. *)
@@ -639,10 +520,8 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
    failure is visible.
 
    What this predicate still feeds: telemetry labels and downstream failure
-   routing (see [Keeper_runtime_failure_route]). Capacity backpressure
-   rotates runtimes via [recoverable_runtime_failure_reason]
-   ([Capacity_backpressure] walks the untried runtime catalog once, then
-   stops — it never invents a timed retry cycle). The heartbeat durably
+   routing (see [Keeper_runtime_failure_route]). A failed turn never leaves
+   its lane: the lane walk tries the declared candidates and stops. The heartbeat durably
    moves a failed source to its urgency-lane tail, so a persistently failing
    transport cannot monopolize other independent queued sources; the source
    is retained with a new incarnation and may be retried after independent

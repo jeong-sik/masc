@@ -1144,16 +1144,26 @@ let read_dir (path : string) : string list =
 ;;
 
 (** Load entire file contents as string, or [None] when the file is
-    missing. Option-returning sibling of {!load_file} (which raises on a
-    missing path). [Sys_error] from a vanished file (TOCTOU race after the
-    [file_exists] check) is also mapped to [None]; other I/O failures of an
-    existing file propagate as [Sys_error], matching {!load_file}. *)
+    missing. A path lookup failure is not absence. A file that vanishes
+    between lookup and open is also absent; all other I/O failures propagate
+    as [Sys_error], matching {!load_file}. *)
 let load_file_opt (path : string) : string option =
-  if not (file_exists path)
-  then None
-  else (
-    try Some (load_file path) with
-    | Sys_error _ when not (file_exists path) -> None)
+  let missing () =
+    match exact_path_kind path with
+    | Exact_missing -> true
+    | Exact_kind _ | Exact_unknown -> false
+  in
+  try
+    if missing ()
+    then None
+    else (
+      try Some (load_file path) with
+      | Sys_error _ when missing () -> None)
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+    raise
+      (Sys_error
+         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
 ;;
 
 let file_size (path : string) : int option =
@@ -1636,6 +1646,9 @@ let rec read_fd_chunks fd buffer =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_chunks fd buffer
 
 type durable_append_operation =
+  | Incomplete_tail_read
+  | Incomplete_tail_truncate
+  | Incomplete_tail_fsync
   | Write
   | Append_fsync
   | Rollback_truncate
@@ -1656,6 +1669,9 @@ type durable_append_error =
   }
 
 let durable_append_operation_to_string = function
+  | Incomplete_tail_read -> "incomplete tail read"
+  | Incomplete_tail_truncate -> "incomplete tail truncate"
+  | Incomplete_tail_fsync -> "incomplete tail fsync"
   | Write -> "write"
   | Append_fsync -> "append fsync"
   | Rollback_truncate -> "rollback truncate"
@@ -3511,6 +3527,7 @@ let rewrite_private_file_durable_locked_result path decide =
 
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
+  | Incomplete_jsonl_tail_truncate_failed of durable_append_failure
   | Invalid_jsonl_suffix
   | Negative_expected_end_offset of int
   | End_offset_mismatch of
@@ -3522,6 +3539,10 @@ type private_jsonl_append_error =
 let private_jsonl_append_error_to_string = function
   | Incomplete_jsonl_tail ->
     "existing JSONL file ends with an incomplete row"
+  | Incomplete_jsonl_tail_truncate_failed failure ->
+    Printf.sprintf
+      "existing JSONL file ends with an incomplete row that could not be cut: %s"
+      (durable_append_failure_to_string failure)
   | Invalid_jsonl_suffix ->
     "JSONL append suffix must be non-empty and newline-terminated"
   | Negative_expected_end_offset offset ->
@@ -3532,6 +3553,46 @@ let private_jsonl_append_error_to_string = function
       expected
       actual
   | Durable_jsonl_append_failed error -> durable_append_error_to_string error
+;;
+
+(* A final fragment with no '\n' is what an append leaves when the process
+   dies part way through it, so it is never a row. The caller holds the path
+   mutex, which the other appenders here also take ([append_file],
+   [append_jsonl], [update_private_file_durable_locked_result]), and the
+   exclusive [lockf], which every durable writer in another process takes. No
+   such writer is in the file while it is cut back to the last '\n' and
+   fsynced; a writer in another process that takes neither lock is not
+   excluded. Returns the length the append then starts from. *)
+let truncate_incomplete_jsonl_tail ~path ~fd ~end_offset =
+  let read_rows_end () =
+    match
+      (* See Unix.lseek: only the file-position side effect is required. *)
+      ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+      read_fd_chunks fd (Buffer.create end_offset)
+    with
+    | bytes ->
+      Ok
+        (match String.rindex_opt bytes '\n' with
+         | Some newline -> newline + 1
+         | None -> 0)
+    | exception Unix.Unix_error (error, function_name, argument) ->
+      Error
+        (unix_failure ~operation:Incomplete_tail_read error function_name argument)
+  in
+  Result.bind (read_rows_end ()) (fun rows_end ->
+    Result.bind
+      (run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
+         Unix.ftruncate fd rows_end))
+      (fun () ->
+         Result.map
+           (fun () ->
+              Stdlib.Printf.eprintf
+                "[fs_compat] WARN: cut an incomplete JSONL tail path=%s cut_bytes=%d kept_bytes=%d\n%!"
+                path
+                (end_offset - rows_end)
+                rows_end;
+              rows_end)
+           (run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd))))
 ;;
 
 let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
@@ -3599,20 +3660,37 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
                         in
                         read_tail ())
                     in
-                    if not tail_is_complete
-                    then Error Incomplete_jsonl_tail
-                    else (
-                      (* See Unix.lseek: only the file-position side effect is required. *)
-                      ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
-                      append_fd_durable
-                        ~io:durable_append_unix_io
-                        ~fd
-                        ~original_length
-                        suffix
-                      |> Result.map_error (fun error ->
-                        Durable_jsonl_append_failed error)
-                      |> Result.map (fun () ->
-                        original_length + String.length suffix)))))
+                    (* An offset-checked caller conditioned its write on the
+                       length it observed, fragment included, so only an
+                       append without that condition cuts the fragment. *)
+                    let append_from =
+                      if tail_is_complete
+                      then Ok original_length
+                      else (
+                        match expected_end_offset with
+                        | Some _ -> Error Incomplete_jsonl_tail
+                        | None ->
+                          truncate_incomplete_jsonl_tail
+                            ~path
+                            ~fd
+                            ~end_offset:original_length
+                          |> Result.map_error (fun failure ->
+                            Incomplete_jsonl_tail_truncate_failed failure))
+                    in
+                    (match append_from with
+                     | Error _ as error -> error
+                     | Ok append_from ->
+                       (* See Unix.lseek: only the file-position side effect is required. *)
+                       ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+                       append_fd_durable
+                         ~io:durable_append_unix_io
+                         ~fd
+                         ~original_length:append_from
+                         suffix
+                       |> Result.map_error (fun error ->
+                         Durable_jsonl_append_failed error)
+                       |> Result.map (fun () ->
+                         append_from + String.length suffix)))))
 ;;
 
 let append_private_jsonl_durable_locked_with_expected_end_offset_result

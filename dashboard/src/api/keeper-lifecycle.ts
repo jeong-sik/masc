@@ -249,6 +249,8 @@ interface KeeperCheckpointDeleteResponse {
   keeper: string
   deleted_snapshot_ids: string[]
   missing_snapshot_ids: string[]
+  refused_snapshot_ids: string[]
+  failed_snapshot_ids: string[]
   inventory: KeeperCheckpointInventory
 }
 
@@ -542,6 +544,7 @@ export const KEEPER_PURGE_ARTIFACTS: readonly string[] = [
   '결정·피드백·상태 전이 로그와 회전 보관본',
   '런타임 디렉터리',
   'Memory OS 스냅샷과 저널',
+  '턴 끝 기록과 Librarian 이 읽은 위치',
   '격리 작업 디렉터리',
   '런타임 배정과 Keeper별 egress 설정',
   'TOML 설정',

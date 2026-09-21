@@ -7,6 +7,12 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(* What the turn knows, when it starts, about the history saved for its trace. *)
+type saved_history =
+  | Saved_history_loaded
+  | Saved_history_absent
+  | Saved_history_superseded
+
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =
   { meta : keeper_meta
@@ -15,7 +21,7 @@ type run_context =
   ; shared_context : Agent_core.Context.t
   ; session_dir : string
   ; session : Keeper_types.session_context
-  ; loaded_checkpoint_present : bool
+  ; saved_history : saved_history
   ; base_system_prompt : string
   ; ctx_work : working_context
   ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
@@ -40,8 +46,10 @@ let prepare_run_context
       ~(runtime_id : string)
       ?temperature
       ?shared_context
+      ?checkpoint
       ()
   =
+  let ( let* ) = Result.bind in
   let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
   (* 0. Resolve inference parameters via Runtime_inference *)
@@ -69,10 +77,26 @@ let prepare_run_context
   in
   let (_ : string) = Keeper_fs.ensure_dir session_dir in
   (* 2. Load checkpoint *)
-  let session, ctx_opt =
-    Keeper_context_runtime.load_context_from_checkpoint
-      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~base_dir
+  let session, checkpoint_load =
+    match checkpoint with
+    | Some checkpoint ->
+      ( Keeper_context_runtime.create_session
+          ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~base_dir
+      , Keeper_context_runtime.Checkpoint_loaded
+          (Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint) )
+    | None ->
+      Keeper_context_runtime.load_context_from_checkpoint_classified
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~base_dir
+  in
+  let* ctx_opt, saved_history =
+    match checkpoint_load with
+    | Keeper_context_runtime.Checkpoint_loaded loaded -> Ok (Some loaded, Saved_history_loaded)
+    | Keeper_context_runtime.Checkpoint_absent -> Ok (None, Saved_history_absent)
+    | Keeper_context_runtime.Checkpoint_unread (Keeper_checkpoint_store.Superseded_version _) ->
+      Ok (None, Saved_history_superseded)
+    | Keeper_context_runtime.Checkpoint_unread error -> Error error
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
   (* 3. Build base system prompt from meta *)
@@ -98,10 +122,9 @@ let prepare_run_context
   let ctx_work =
     Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt
   in
-  (* Preserve the restored context exactly. MASC does not classify, compact,
-     truncate, or re-persist it before dispatch; AGENT_CORE owns provider context
-     handling. Checkpoint persistence failure therefore cannot block this
-     turn before the provider has observed the input. *)
+  (* Preserve the restored context exactly. Nothing is re-persisted before
+     dispatch; a failed read has already returned without creating a context
+     that could overwrite the saved history. *)
   let resume_agent_core_checkpoint =
     if loaded_checkpoint_present
     then Some (Keeper_context_runtime.checkpoint_of_context ctx_work)
@@ -112,13 +135,13 @@ let prepare_run_context
     | Some cp -> cp.turn_count
     | None -> 0
   in
-  { meta
+  Ok { meta
   ; temperature
   ; context_injector
   ; shared_context
   ; session_dir
   ; session
-  ; loaded_checkpoint_present
+  ; saved_history
   ; base_system_prompt
   ; ctx_work
   ; resume_agent_core_checkpoint
@@ -127,3 +150,9 @@ let prepare_run_context
   ; config_root
   ; runtime_config_path
   }
+
+let loaded_checkpoint_present (ctx : run_context) =
+  match ctx.saved_history with
+  | Saved_history_loaded -> true
+  | Saved_history_absent | Saved_history_superseded -> false
+;;

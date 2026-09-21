@@ -82,16 +82,14 @@ let test_second_pass_keeps_operator_edits () =
   check int "second pass wrote nothing" 0 second;
   check string "operator edit survives" edited (read_file runtime_toml)
 
-(* The narrow backfill for a config root that already exists: it repairs the two
-   files whose absence stops startup and touches nothing else. *)
+(* The narrow backfill for a config root that already exists repairs the runtime
+   configuration whose absence stops startup and touches nothing else. *)
 let test_backfill_repairs_only_startup_required () =
   let config_root = fresh_dst () in
   let written = Seed.backfill_startup_required_from_embedded ~config_root in
-  check int "wrote both startup-required files" 2 written;
+  check int "wrote the startup-required file" 1 written;
   check bool "runtime.toml present" true
     (Sys.file_exists (Filename.concat config_root "runtime.toml"));
-  check bool "overlay present" true
-    (Sys.file_exists (Filename.concat config_root "agent-core-models-overlay.toml"));
   check bool "prompts not filled in" false
     (Sys.file_exists (Filename.concat config_root "prompts"));
   check int "second call is a no-op" 0

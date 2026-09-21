@@ -75,7 +75,32 @@ let test_lookup_section_reaches_the_task_prompt () =
   check bool "the lookup section is rendered" true
     (Astring.String.is_infix ~affix:"<live_lookup>" text);
   check bool "the root listing inside it is rendered" true
-    (Astring.String.is_infix ~affix:(marker "root_layout") text)
+    (Astring.String.is_infix ~affix:(marker "root_layout") text);
+  check bool "the initial lookup success state reaches the judge" true
+    (Astring.String.is_infix
+       ~affix:{|"evidence_lookup_succeeded":false|}
+       text)
+;;
+
+let test_no_lookup_surface_exposes_that_no_lookup_can_succeed () =
+  init ();
+  match
+    AR.build_prompt
+      ~question:
+        { AR.completion_contract = None
+        ; required_evidence = []
+        ; evidence_posture = AR.Note_only
+        ; few_shot_block = ""
+        }
+      ~lookup:AR.No_lookup_surface
+      request
+  with
+  | Error detail -> failf "task prompt render failed: %s" detail
+  | Ok text ->
+    check bool "the no-lookup status reaches the judge" true
+      (Astring.String.is_infix
+         ~affix:{|{"lookup_surface":"none","evidence_lookup_succeeded":false}|}
+         text)
 ;;
 
 let test_supplied_evidence_refs_reach_the_task_prompt () =
@@ -276,6 +301,10 @@ let () =
             "lookup_section is rendered by the task review prompt"
             `Quick
             test_lookup_section_reaches_the_task_prompt
+        ; test_case
+            "no lookup surface exposes the unsuccessful lookup state"
+            `Quick
+            test_no_lookup_surface_exposes_that_no_lookup_can_succeed
         ; test_case
             "evidence_refs is rendered where evidence is judged"
             `Quick

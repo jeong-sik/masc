@@ -1,4 +1,5 @@
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -9,12 +10,24 @@ from render_configs import (  # noqa: E402
     ARMS,
     COMPOSITION_FENCE,
     REPO_ROOT,
+    TASK_SKILL_SOURCE_ID,
     effective_runtime_id,
     composition_skill_names,
     instruction_skill_names,
     keeper_toml,
+    provider_parallel_suppression_contract,
     render_arm,
 )
+
+
+def task_skills(tmp_path, name="task-guide"):
+    root = tmp_path / "task-skills"
+    package = root / name
+    (package / "references").mkdir(parents=True)
+    (package / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Task-provided guide.\n---\n\nRead references/guide.md.\n")
+    (package / "references" / "guide.md").write_text("task resource\n")
+    return root
 
 
 def test_skill_classification_agrees_with_the_files():
@@ -70,7 +83,7 @@ def test_arm_b_skills_off():
     assert "[keeper]" in keeper and "skills.names = []" in keeper
     rt = (out / "runtime.toml").read_text()
     assert '[fusion]' in rt and "enabled = false" in rt
-    assert 'default = "anthropic.claude-fable-5"' in rt
+    assert 'default = "claude.claude-fable-5"' in rt
     assert "[exec.ssh.endpoints.local]" in rt
     assert 'reasoning-effort = "high"' in rt
 
@@ -97,14 +110,67 @@ def test_skills_tree_copied_only_for_skills_arms():
     assert not (out_b / "skills").exists()
 
 
-def test_arm_e_parallel_on():
-    rt_e = render_arm("e", runtime_id="anthropic.claude-fable-5", effort="high")
-    overlay = (rt_e / "agent-core-models-overlay.toml").read_text()
-    assert "supports_parallel_tool_calls = true" in overlay
-    rt_b = render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
-    overlay_b = (rt_b / "agent-core-models-overlay.toml").read_text()
-    assert "supports_parallel_tool_calls = false" in overlay_b
-    assert "max-concurrent = 1" in (rt_b / "runtime.toml").read_text()
+@pytest.mark.parametrize("arm", list(ARMS))
+def test_task_skills_are_common_input_without_changing_arm_treatments(tmp_path, arm):
+    out = render_arm(
+        arm, "anthropic.claude-fable-5", "high", out_root=tmp_path / "out",
+        task_skills_dir=task_skills(tmp_path))
+    runtime = tomllib.loads((out / "runtime.toml").read_text())
+    sources = runtime["skills"]["sources"]
+    assert sources[0] == {
+        "id": TASK_SKILL_SOURCE_ID,
+        "anchor": "base-path",
+        "path": ".masc/task-skills",
+        "access": "read-only",
+    }
+    resource = out / "task-skills" / "task-guide" / "references" / "guide.md"
+    assert resource.read_text() == "task resource\n"
+    keeper = tomllib.loads((out / "keepers" / "bench-1.toml").read_text())["keeper"]
+    if arm == "b":
+        assert keeper["skills"]["names"] == ["task-guide"]
+        assert len(sources) == 1
+        assert not (out / "skills").exists()
+    elif arm == "c":
+        assert keeper["skills"]["names"] == ["task-guide"] + instruction_skill_names()
+        assert len(sources) > 1
+    else:
+        assert "skills" not in keeper
+        assert len(sources) > 1
+
+
+def test_task_skill_collision_empty_and_missing_fail_closed(tmp_path):
+    with pytest.raises(ValueError, match="collide"):
+        render_arm("b", "anthropic.claude-fable-5", "high",
+                   task_skills_dir=task_skills(tmp_path, instruction_skill_names()[0]))
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError, match=r"no \*/SKILL.md"):
+        render_arm("b", "anthropic.claude-fable-5", "high", task_skills_dir=empty)
+    with pytest.raises(ValueError, match="missing"):
+        render_arm("b", "anthropic.claude-fable-5", "high",
+                   task_skills_dir=tmp_path / "absent")
+
+
+def test_absent_task_skills_keep_the_existing_render(tmp_path):
+    default = render_arm("c", "anthropic.claude-fable-5", "high",
+                         out_root=tmp_path / "default")
+    explicit = render_arm("c", "anthropic.claude-fable-5", "high",
+                          out_root=tmp_path / "explicit", task_skills_dir=None)
+    files = sorted(path.relative_to(default) for path in default.rglob("*") if path.is_file())
+    assert files == sorted(path.relative_to(explicit)
+                           for path in explicit.rglob("*") if path.is_file())
+    for relative in files:
+        assert (default / relative).read_bytes() == (explicit / relative).read_bytes()
+
+
+@pytest.mark.parametrize("arm", list(ARMS))
+def test_parallel_arm_sets_request_policy_without_changing_model_facts(arm):
+    root = render_arm(arm, runtime_id="anthropic.claude-fable-5", effort="high")
+    config = tomllib.loads((root / "runtime.toml").read_text())
+    binding = config["claude"]["claude-fable-5"]
+    assert binding["disable-parallel-tool-use"] is (not ARMS[arm]["parallel"])
+    capabilities = config["models"]["claude-fable-5"]["capabilities"]
+    assert "supports-parallel-tool-calls" not in capabilities
 
 
 def test_arm_c_runtime_keeps_skills_sources():
@@ -149,8 +215,9 @@ def test_claude_code_lane_renders_official_client_provider():
     # masc protocol "claude-code" (runtime_adapter.claude_code_execution): the
     # provider is a CLI command with is-non-interactive = true, no endpoint
     # and no credentials table — the CLI owns the login. Effort lands on the
-    # model row (CLI --effort), and no overlay deployment row is written.
-    out = render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="high")
+    # model row (CLI --effort), and the lane declares no capabilities of its
+    # own: the embedded catalog answers for these models by api-name.
+    out = render_arm("e", runtime_id="claude_code.claude-sonnet-5", effort="high")
     rt = (out / "runtime.toml").read_text()
     assert 'default = "claude_code.claude-sonnet-5"' in rt
     assert 'protocol = "claude-code"' in rt
@@ -164,10 +231,9 @@ def test_claude_code_lane_renders_official_client_provider():
     assert "turn-timeout-s = 0.0" in rt
     assert "wall-clock-ceiling-s = 28800.0" in rt
     assert '[claude_code."claude-sonnet-5"]' in rt
-    assert "max-concurrent = 1" in rt
+    assert "max-concurrent = 4" in rt
     assert "[exec.ssh.endpoints.local]" in rt
-    overlay = (out / "agent-core-models-overlay.toml").read_text()
-    assert "[[providers]]" not in overlay and "[[models]]" not in overlay
+    assert '[models."claude-sonnet-5".capabilities]' not in rt
     keeper = (out / "keepers" / "bench-1.toml").read_text()
     assert 'sandbox_profile = "remote_ssh"' in keeper
 
@@ -189,6 +255,13 @@ def test_claude_code_lane_rejects_minimal_effort():
         render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="minimal")
 
 
+@pytest.mark.parametrize("arm", ["b", "c", "d"])
+def test_claude_code_refuses_parallel_off_before_writing_configs(arm, tmp_path):
+    with pytest.raises(ValueError, match="requires disabling parallel tool calls"):
+        render_arm(arm, "claude_code.claude-sonnet-5", "high", out_root=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.fixture
 def openrouter_lists(monkeypatch):
     import render_configs
@@ -203,13 +276,35 @@ def openrouter_lists(monkeypatch):
     return asked
 
 
+def test_nonparallel_openrouter_arm_is_refused_before_remote_limit_lookup(
+        monkeypatch, tmp_path):
+    import render_configs
+
+    def unexpected_lookup(_model):
+        raise AssertionError("invalid provider policy reached the network lookup")
+
+    monkeypatch.setattr(render_configs, "openrouter_limits", unexpected_lookup)
+    assert provider_parallel_suppression_contract("openrouter") is False
+    with pytest.raises(ValueError, match="no catalog-declared suppression contract"):
+        render_arm("b", runtime_id="openrouter.deepseek/deepseek-v4.1-flash",
+                   effort="low", out_root=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_absent_provider_catalog_row_does_not_admit_parallel_suppression():
+    assert provider_parallel_suppression_contract("not-in-the-catalog") is False
+    assert provider_parallel_suppression_contract("anthropic") is False
+    assert provider_parallel_suppression_contract("claude") is True
+    assert provider_parallel_suppression_contract("openai-responses") is True
+
+
 def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_lists):
     # runtime_toml.ml refuses a model id outside [A-Za-z0-9._-]+, and the
     # OpenRouter wire id carries a vendor slash. Rendering it verbatim made
     # the whole config fail to load ("model id must match"), which surfaced
     # as masc_keeper_up answering "no valid initialized runtime" — measured
     # 2026-09-12 against release 0.35.8.
-    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
+    out = render_arm("e", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
     rt = (out / "runtime.toml").read_text()
     assert 'default = "openrouter.z-ai-glm-4.7-flash"' in rt
     assert '[models."z-ai-glm-4.7-flash"]' in rt
@@ -217,25 +312,25 @@ def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_l
     # The wire name survives, because that is what reaches the provider.
     assert 'api-name = "z-ai/glm-4.7-flash"' in rt
     assert '[models."z-ai/glm-4.7-flash"]' not in rt
-    # Capability lookup reads api_name, so the overlay row keeps the wire name.
-    overlay = (out / "agent-core-models-overlay.toml").read_text()
-    assert 'id_prefix = "z-ai/glm-4.7-flash"' in overlay
 
 
 def test_the_router_lane_inherits_its_ladder_instead_of_declaring_one(
         openrouter_lists):
     # An accepted_reasoning_efforts list written here is a capability claim the
     # benchmark makes up about someone else's API. The router publishes one
-    # contract for everything it serves, so the catalog base carries it
-    # (Capabilities.openrouter_capabilities) and this lane names that base.
-    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
-    overlay = (out / "agent-core-models-overlay.toml").read_text()
-    assert 'base = "openrouter"' in overlay
-    assert "accepted_reasoning_efforts" not in overlay
-    # The dialect comes with the base too, so it is not repeated either.
-    assert "thinking_control_format" not in overlay
-    # The effort still reaches the runtime; inheriting is not disabling.
+    # contract for everything it serves, so the catalog carries it
+    # (Capabilities.openrouter_capabilities) and this lane inherits it.
+    out = render_arm("e", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
     rt = (out / "runtime.toml").read_text()
+    # Pin the capability block present first: a render that dropped it would
+    # satisfy the absences below without inheriting anything.
+    assert '[models."z-ai-glm-4.7-flash".capabilities]' in rt
+    for spelling in ("accepted_reasoning_efforts", "accepted-reasoning-efforts"):
+        assert spelling not in rt
+    # The dialect is inherited too, so it is not declared either — unlike the
+    # openai lane, which has to declare it (see PROVIDERS).
+    assert "thinking-control-format" not in rt
+    # The effort still reaches the runtime; inheriting is not disabling.
     assert 'reasoning-effort = "high"' in rt
 
 
@@ -253,22 +348,27 @@ def test_no_lane_writes_a_ladder_of_its_own():
     for runtime_id, model_alias in (
             ("anthropic.claude-fable-5", "claude-fable-5"),
             ("openai.gpt-6-astra", "gpt-6-astra")):
-        provider = runtime_id.split(".", 1)[0]
+        provider = effective_runtime_id(runtime_id).split(".", 1)[0]
         out = render_arm("b", runtime_id=runtime_id, effort="high")
-        overlay = (out / "agent-core-models-overlay.toml").read_text()
-        assert f'provider_name = "{provider}"' in overlay, runtime_id
-        assert f'id_prefix = "{model_alias}"' in overlay, runtime_id
-        assert "supports_reasoning = true" in overlay, runtime_id
-        assert "accepted_reasoning_efforts" not in overlay, runtime_id
+        rt = (out / "runtime.toml").read_text()
+        assert f'[{provider}."{model_alias}"]' in rt, runtime_id
+        assert f'api-name = "{model_alias}"' in rt, runtime_id
+        assert "thinking-support = true" in rt, runtime_id
+        for spelling in ("accepted_reasoning_efforts", "accepted-reasoning-efforts"):
+            assert spelling not in rt, runtime_id
 
 
 def test_effective_runtime_id_is_what_masc_resolves():
     assert effective_runtime_id("openrouter.z-ai/glm-4.7-flash") == (
         "openrouter.z-ai-glm-4.7-flash"
     )
-    # A model with no slash is untouched, so the existing lanes keep their ids.
+    # CLI-facing aliases are normalized to the catalog provider that MASC
+    # actually resolves; the binding id remains unchanged.
     assert effective_runtime_id("anthropic.claude-sonnet-5") == (
-        "anthropic.claude-sonnet-5"
+        "claude.claude-sonnet-5"
+    )
+    assert effective_runtime_id("openai.gpt-6-astra") == (
+        "openai-responses.gpt-6-astra"
     )
     for bad in ("no-dot", ".leading", "trailing."):
         try:
@@ -278,12 +378,37 @@ def test_effective_runtime_id_is_what_masc_resolves():
         raise AssertionError(f"{bad!r} should be rejected, not guessed at")
 
 
+@pytest.mark.parametrize(
+    ("input_id", "runtime_provider", "protocol", "endpoint", "key_env"),
+    (
+        ("anthropic.claude-fable-5", "claude", "messages-http",
+         "https://api.anthropic.com", "ANTHROPIC_API_KEY"),
+        ("openai.gpt-6-astra", "openai-responses", "openai-compatible-http",
+         "https://api.openai.com", "OPENAI_API_KEY"),
+    ),
+)
+def test_provider_alias_renders_the_catalog_runtime_identity(
+        input_id, runtime_provider, protocol, endpoint, key_env):
+    config = tomllib.loads(
+        (render_arm("b", input_id, "high") / "runtime.toml").read_text())
+    assert config["runtime"]["default"].startswith(f"{runtime_provider}.")
+    assert config["providers"] == {
+        runtime_provider: {
+            "display-name": "Bench provider",
+            "protocol": protocol,
+            "endpoint": endpoint,
+            "credentials": {"type": "env", "key": key_env},
+        },
+    }
+
+
 def test_http_lanes_declare_tool_calling():
     # `masc runtime-verify` refuses a binding without tools-support, so the
     # offline readiness check answered tools_not_declared for lanes that do
     # deliver tools (the Agent_core arm reads the catalog capability instead).
-    for runtime_id in ("anthropic.claude-sonnet-5", "openrouter.z-ai/glm-4.7-flash"):
-        rt = (render_arm("b", runtime_id=runtime_id, effort="high") / "runtime.toml")
+    for arm, runtime_id in (("b", "anthropic.claude-sonnet-5"),
+                            ("e", "openrouter.z-ai/glm-4.7-flash")):
+        rt = (render_arm(arm, runtime_id=runtime_id, effort="high") / "runtime.toml")
         assert "tools-support = true" in rt.read_text(), runtime_id
 
 
@@ -304,13 +429,13 @@ def test_an_openrouter_lane_declares_the_window_and_output_budget(openrouter_lis
     # the catalog: masc_keeper_up answered "Model setup required" (2026-09-17).
     import tomllib
 
-    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high",
+    out = render_arm("e", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high",
                      out_root=tmp_path)
     runtime = tomllib.loads((out / "runtime.toml").read_text())
-    assert runtime["models"]["z-ai-glm-4.7-flash"]["max-context"] == 111616
+    model = runtime["models"]["z-ai-glm-4.7-flash"]
+    assert model["max-context"] == 111616
     assert "max-context" not in runtime["providers"]["openrouter"]
-    overlay = tomllib.loads((out / "agent-core-models-overlay.toml").read_text())
-    assert overlay["models"][0]["max_output_tokens"] == 16384
+    assert model["capabilities"]["max-output-tokens"] == 16384
     assert openrouter_lists == ["z-ai/glm-4.7-flash"]
 
 

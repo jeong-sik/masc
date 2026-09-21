@@ -16,10 +16,6 @@ val assert_receipt_authoritative :
 type tool_surface = {
   turn_lane : Keeper_agent_tool_surface.turn_lane;
 }
-type runtime_rotation_outcome =
-    Rotation_setup_failed
-  | Rotation_retry_scheduled
-val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
 type runtime_outcome =
     Runtime_passed_to_next_model
   | Runtime_completed
@@ -34,17 +30,6 @@ type completion_contract_result =
   | Completion_response_observed
   | Completion_tool_execution_observed
 val completion_contract_result_to_string : completion_contract_result -> string
-type runtime_rotation_attempt = {
-  from_runtime : string;
-  to_runtime : string;
-  reason : Keeper_error_classify.degraded_retry_reason;
-  outcome : runtime_rotation_outcome;
-  productive_phase_elapsed_ms : int option;
-  retry_phase_elapsed_ms : int option;
-  error_kind : error_kind option;
-  error_message : string option;
-  recorded_at : string;
-}
 type t = {
   keeper_name : string;
   trace_id : string;
@@ -79,11 +64,14 @@ type t = {
   runtime_fallback_applied : bool;
   runtime_outcome : runtime_outcome;
   agent_core_internal_runtime_allowed : bool;
-  degraded_retry_applied : bool;
-  degraded_retry_runtime : string option;
-  fallback_reason :
-    Keeper_error_classify.degraded_retry_reason option;
-  runtime_rotation_attempts : runtime_rotation_attempt list;
+  degraded_retry_applied : Keeper_error_classify.degraded_retry option;
+      (** The lane an earlier turn deferred to and that this turn dispatched
+          on. Empty when no lane was deferred, when this turn started
+          somewhere else, or when it never reached a provider. *)
+  degraded_retry_deferred : Keeper_error_classify.degraded_retry option;
+      (** The lane this turn leaves for a later turn. Independent of the
+          field above: a turn can take up a deferred lane, fail there, and
+          defer again, and both facts belong on its receipt. *)
   stop_reason : Runtime_agent.stop_reason option;
   error_kind : error_kind option;
   error_message : string option;
@@ -104,3 +92,8 @@ val sandbox_kind_of_meta :
   Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val list_json : 'a list -> [> `List of [> `String of 'a ] list ]
 val string_opt_json : 'a option -> [> `Null | `String of 'a ]
+
+(** One object per deferred lane -- [{"runtime": _, "reason": _}] -- so a
+    reader cannot take a runtime without the reason it was deferred for. *)
+val degraded_retry_json :
+  Keeper_error_classify.degraded_retry option -> Yojson.Safe.t

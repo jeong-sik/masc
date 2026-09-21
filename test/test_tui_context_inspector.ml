@@ -34,6 +34,7 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
         ; measurement = Wire_shape
         ; front_atom_digest = String.make 64 'c'
         }
+  ; response_observed_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = Some 0.2
@@ -96,8 +97,8 @@ let test_recent_turns_carry_the_provider_counts () =
           check bool "a cumulative scope yields no per-request figure" true
             (second.Inspector.input_tokens = None);
           check bool
-            "an unknown scope keeps whatever figure the record carried" true
-            (unavailable_row.Inspector.input_tokens = Some 1000)
+            "an unknown scope is not a per-request figure" true
+            (unavailable_row.Inspector.input_tokens = None)
       | _ -> fail "the page held four rows")
 
 let test_newest_exact_composition_wins () =

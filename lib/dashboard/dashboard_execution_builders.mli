@@ -56,7 +56,7 @@ val build_continuity_briefs :
   Yojson.Safe.t list ->
   continuity_context list
 (** [build_continuity_briefs ~now_ts keepers]
-    returns one {!continuity_context} per keeper, classifying its
+    returns one {!continuity_context} per runtime keeper row, classifying its
     lifecycle / exec-state against the env-cached thresholds
     ([signal_stale_sec] / [signal_quiet_sec] / [signal_live_sec]
     + [ctx_handoff_imminent] / [ctx_preparing] / [ctx_high]).
@@ -64,4 +64,9 @@ val build_continuity_briefs :
     Threshold values are env-cached at module init — runtime env
     mutation does not affect the classification.  Pinned at the
     contract seam so operators understand why "I changed
-    SIGNAL_STALE_SEC and nothing happened" — restart required. *)
+    SIGNAL_STALE_SEC and nothing happened" — restart required.
+
+    A declaration row ({!Keeper_declared_roster.row_kind_of_json}) is a Keeper
+    that has never booted and has no continuity, so it gets no brief. Both the
+    full execution render and live keeper-row reconciliation build their
+    briefs here. *)

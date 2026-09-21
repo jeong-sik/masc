@@ -76,13 +76,13 @@ masc setup --base-path "$HOME/masc-workspace"
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.19)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.21)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.35.19 (check tag availability on GitHub Releases).
+> Installation target: v0.35.21 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.35.19
+TAG=v0.35.21
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -409,7 +409,6 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 | `keepers/<name>.toml` | Keeper 하나. 운영 설정, 프롬프트 지시, 도구 권한 |
 | `tools/*.toml` | 서버가 등록하는 도구의 선언형 스키마 |
 | `repositories.toml` | Workspace 화면에 올릴 저장소 등록 |
-| `agent-core-models-overlay.toml` | 내장 카탈로그 위에 얹는 모델 능력 행(선택) |
 | `<base-path>/.masc/skills/<name>/SKILL.md` | Keeper에게 이름으로 건넬 수 있는 능력. frontmatter의 `name`은 디렉터리 이름과 같아야 합니다 |
 
 런타임이 읽는 환경 변수는 [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md)에,

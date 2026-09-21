@@ -447,7 +447,9 @@ let test_cli_slot_completion_uses_its_durable_claim () =
     (match persisted.judgment.source with
      | A.Cli_lane_slot -> ()
      | A.Exact_attempt _ ->
-       Alcotest.fail "a cli completion must not be recorded as an exact attempt")
+       Alcotest.fail "a cli completion must not be recorded as an exact attempt"
+     | A.Vendor_system_one _ ->
+       Alcotest.fail "a cli completion must not be recorded as a vendor answer")
   | _ -> Alcotest.fail "cli completion did not reach Completed"
 ;;
 
@@ -915,8 +917,14 @@ let test_provider_neutral_blocked_reason_codec () =
     [ "setup", P.Exact_setup_unavailable "lane admission unavailable"
     ; "replay", P.Exact_flow_replayed
     ; "terminal", P.Exact_execution_terminal
-    ; "domain", P.Domain_output_invalid "judgment schema rejected"
-    ; "provenance", P.Execution_provenance_mismatch "opaque identity mismatch"
+    ; ( "domain"
+      , P.Domain_output_invalid
+          { detail = "judgment schema rejected"; progress = None } )
+    ; ( "provenance"
+      , P.Execution_provenance_mismatch
+          { detail = "opaque identity mismatch"
+          ; progress = Some (P.Bound (provenance ()))
+          } )
     ; "worker", P.Unexpected_worker_failure "worker terminated unexpectedly"
     ]
   in

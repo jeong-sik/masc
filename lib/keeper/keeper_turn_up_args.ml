@@ -553,8 +553,8 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
 
 let resolve_board_interests ~board_interests_opt ~fallback_interests =
   match board_interests_opt with
-  | Some interests -> normalize_board_interests interests
-  | None -> normalize_board_interests fallback_interests
+  | Some interests -> Keeper_types_profile_toml.normalize_board_interests interests
+  | None -> Keeper_types_profile_toml.normalize_board_interests fallback_interests
 ;;
 
 (* An explicit request wins over the TOML default. Neither source stating one

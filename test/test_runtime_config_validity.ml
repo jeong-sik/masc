@@ -1641,11 +1641,23 @@ List.iter
      with
      | None -> fail "expected DeepSeek Flash runtime in seed"
      | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "DeepSeek Flash structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Flash capabilities"));
+       (* This asserted "disabled" and passed, but the seed declares nothing
+          for it and the catalog row says supports_structured_output = true.
+          It was reading the declaration, which an unwritten key forced to
+          false, so the assertion was the opposite of what this binding does
+          (#37435). The behaviour the name claims is the resolved one. *)
+       (match
+          Llm_provider.Provider_config.capabilities_for_config_model
+            (agent_core_provider_config runtime)
+        with
+        | Some (resolved : Llm_provider.Capabilities.capabilities) ->
+          check bool "DeepSeek Flash structured output enabled by its catalog row"
+            true resolved.supports_structured_output;
+          check (option bool) "the seed declares nothing for it" None
+            (Option.bind runtime.model.capabilities (fun (caps :
+               Runtime_schema.model_capabilities) -> Some caps.supports_structured_output)
+             |> Option.join)
+        | None -> fail "expected DeepSeek Flash resolved capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1674,7 +1686,19 @@ List.iter
           check bool "MiniMax M3 structured output disabled" false
             resolved.supports_structured_output;
           check bool "MiniMax M3 forced tool_choice disabled" false
-            resolved.supports_tool_choice
+            resolved.supports_tool_choice;
+          (* config/runtime.toml declares supports-response-format-json = false
+             for this binding and the catalog row overrides it with true, so
+             the runtime uses JSON mode. The seed's fail-closed line does
+             nothing; this pins the behaviour until the seed and the row agree
+             (#37435). *)
+          check bool "MiniMax M3 response_format json is on despite the seed line"
+            true resolved.supports_response_format_json;
+          check (option bool) "and the seed still declares it off" (Some false)
+            (Option.bind runtime.model.capabilities (fun (caps :
+               Runtime_schema.model_capabilities) ->
+               Some caps.supports_response_format_json)
+             |> Option.join)
         | None -> fail "expected MiniMax M3 resolved capabilities"))
 
 (* The lane-resolution test below iterates the lanes a config declares, so it

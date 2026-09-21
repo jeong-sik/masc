@@ -1543,6 +1543,29 @@ let run_named
 	     next candidate composed the whole history again (2026-09-18:
 	     pr-updater shrank 16 MB to 3.7 MB on one candidate and sent 16 MB
 	     to the next). *)
+      (* Freeze the pair for the whole dispatch, including provider failover.
+         The checkpoint remains the source of every atom index. *)
+      let continuity = Domain_pool_ref.submit_io_or_inline (fun () ->
+        let config = Workspace.default_config base_path in
+          let ( let* ) = Result.bind in
+          let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
+          match saved, session_id with
+          | None, _ | Some _, None -> Ok None
+          | Some snapshot, Some trace_id ->
+            let* lines = Keeper_turn_boundaries.read
+              ~keepers_dir:(Workspace.keepers_runtime_dir config)
+              ~keeper_id:keeper_name in
+            match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
+              ~messages:initial_messages snapshot with
+            | Ok restored -> Ok (Some restored)
+            | Error (Librarian_continuity_snapshot.Trace_mismatch
+                     | Librarian_continuity_snapshot.History_changed
+                     | Librarian_continuity_snapshot.Uncovered_history) ->
+              Log.Keeper.info ~keeper_name
+                "Librarian continuity belongs to an earlier history; sending current history in full";
+              Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
+            | Error error -> Error (Librarian_continuity_snapshot.error_to_string error))
+      in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client
 	     branches: they cut their start seed from this very history
@@ -2404,6 +2427,11 @@ let run_named
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
+          match continuity, recovery_view with
+          | Error detail, None ->
+            Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+              { field = "librarian.continuity"; detail }))
+          | (Ok _ | Error _), _ ->
           match provider_config_transform with
           | None -> Ok runtime_provider_config
           | Some transform -> transform runtime_provider_config
@@ -2457,6 +2485,9 @@ let run_named
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
             ; context_marks
+            ; continuity = (match recovery_view, continuity with
+                | None, Ok snapshot -> snapshot
+                | Some _, _ | None, Error _ -> None)
             ; (* Read only when the process holds no ledger for this pair:
                  the range the newest completed Agent Core turn record on
                  this history measured, whichever runtime ran it, so a

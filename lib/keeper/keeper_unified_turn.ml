@@ -815,11 +815,8 @@ let run_keeper_cycle
                  |> Option.map (fun cap ->
                    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
                in
-               let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
-                 (* Named so a run on the main domain during prompt assembly
-                    reads as [keeper <name> cycle > turn:prompt] in the trace. *)
-                 Eio_guard.with_named_switch "turn:prompt" (fun () ->
-                   Keeper_unified_prompt.build_prompt
+               let render_prompt observation =
+                 Keeper_unified_prompt.build_prompt
                      ~meta
                      ~config
                      ~profile_defaults
@@ -833,8 +830,22 @@ let run_keeper_cycle
                      ~repository_freshness
                      ?context_budget_bytes
                      ~observation
-                     ())
+                     ()
                in
+               let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
+                 Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt observation)
+               in
+               let dynamic_context_for_tools = match meta.input_policy, observation.own_recent_actions with
+                 | Keeper_input_policy.Small, Ok turns ->
+                   Some (fun tools ->
+                     if Result.is_error (Keeper_recovery_transmission.require_reader tools)
+                     then world_state
+                     else Domain_pool_ref.submit_io_or_inline (fun () ->
+                       let own_recent_actions = Keeper_own_recent_actions.externalize_failures
+                         ~base_path:config.base_path ~keeper_name:meta.name
+                         ~policy:meta.input_policy ~tools turns in
+                       (render_prompt {observation with own_recent_actions=Ok own_recent_actions}).world_state))
+                 | Wide, _ | Small, Error _ -> None in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)
@@ -870,7 +881,7 @@ let run_keeper_cycle
                     (943/945 identical frames in one live checkpoint, #25193)
                     and exhausted the request window. Persisted user content is utterances
                     only (wake marker, answered Asks, and HITL resolutions). *)
-                 { system_prompt; dynamic_context = world_state }
+                 { system_prompt; dynamic_context = world_state; dynamic_context_for_tools }
                in
                (* 5. Run via Agent_core.Agent.run() with transient-error retry.
                   The turn-local AGENT_CORE Event_bus preserves factual

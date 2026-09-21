@@ -6,6 +6,9 @@
 type turn_prompt =
   { system_prompt : string
   ; dynamic_context : string
+  ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
+      (** Optional transmission view, evaluated only after the actual offered
+          tool surface is known. [dynamic_context] remains the full source. *)
   }
 
 (** Prompt segment metrics for effective keeper input attribution.

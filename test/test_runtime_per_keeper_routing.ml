@@ -1426,6 +1426,9 @@ let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
       (fun () ->
          Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
            ~new_lane_id:"coding" ());
+    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _ -> ()
+     | Error msg -> Alcotest.failf "set the default used by the rename refusal: %s" msg);
     Runtime.set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"openai.gpt" ~runtime_ids:[ "openai.small" ] ()
     |> lane_write_ok "declare a lane with the default runtime's name";

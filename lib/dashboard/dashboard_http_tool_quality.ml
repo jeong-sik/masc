@@ -102,40 +102,6 @@ let result_bytes_of_record record =
      | _ -> None)
   | _ -> None
 
-let tool_use_id_of_record record =
-  match Safe_ops.json_string_opt "tool_use_id" record with
-  | Some id when String.trim id <> "" -> Some id
-  | Some _ | None -> None
-
-(* The store can contain several lifecycle rows for one provider call. Fold
-   only rows with a usable correlation key; an absent or blank id is not an
-   identity and must not merge unrelated calls. A terminal disposition wins
-   over its earlier dispatch observation, malformed terminal evidence remains
-   visible over an unsettled dispatch, and the later row wins equal ranks. *)
-let collapse_tool_calls records =
-  let rank record =
-    match result_bytes_of_record record, tool_outcome_of_record record with
-    | Some _, Settled _ -> 4
-    | Some _, Deferred -> 3
-    | None, _ | Some _, Malformed_outcome -> 2
-    | Some _, Unsettled -> 1
-  in
-  let identified = Hashtbl.create (max 1 (List.length records)) in
-  let anonymous = ref [] in
-  List.iter
-    (fun record ->
-       match tool_use_id_of_record record with
-       | None -> anonymous := record :: !anonymous
-       | Some id ->
-         (match Hashtbl.find_opt identified id with
-          | Some previous when rank previous > rank record -> ()
-          | Some _ | None -> Hashtbl.replace identified id record))
-    records;
-  List.rev_append
-    !anonymous
-    (Hashtbl.fold (fun _ record acc -> record :: acc) identified [])
-;;
-
 let hour_key_of_record record =
   let hour_of_unix ts =
     let tm = Unix.gmtime ts in
@@ -225,7 +191,6 @@ let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malforme
 
 (* The payload over already-read [records]; the read is [aggregate]'s. *)
 let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
-  let records = collapse_tool_calls records in
   let deferred, unsettled, malformed, records =
     List.fold_left
       (fun (deferred, unsettled, malformed, acc) record ->

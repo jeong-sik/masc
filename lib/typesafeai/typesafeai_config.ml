@@ -134,5 +134,9 @@ let readiness () =
       Off
     | Ok (first, rest) ->
       Configured
-        { models = List.map (fun d -> d.Typesafeai_client.model) (first :: rest) })
+        { models =
+            List.map
+              (fun (destination : Typesafeai_client.destination) -> destination.model)
+              (first :: rest)
+        })
 ;;

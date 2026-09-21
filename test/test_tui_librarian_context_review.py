@@ -15,6 +15,13 @@ import zlib
 
 import test_tui_keyboard_input as h
 
+TUI_SCENARIOS = {
+    "faithful",
+    "needs-revision",
+    "http-failure",
+    "cancel-review",
+}
+
 
 def run_case(executable: str, fixture: dict[str, Any]) -> None:
     run = fixture["detail"]["run"]
@@ -133,13 +140,20 @@ def main() -> None:
     print(result.stdout, end="", flush=True)
     result.check_returncode()
     prefix = "CONTEXT_REVIEW_FIXTURE "
-    fixtures = [
+    all_fixtures = [
         cast(dict[str, Any], json.loads(line[len(prefix) :]))
         for line in result.stdout.splitlines()
         if line.startswith(prefix)
     ]
-    if not fixtures:
-        raise AssertionError("producer emitted no durable Context review fixtures")
+    fixtures = [
+        fixture for fixture in all_fixtures if fixture["scenario"] in TUI_SCENARIOS
+    ]
+    scenarios = {cast(str, fixture["scenario"]) for fixture in fixtures}
+    if scenarios != TUI_SCENARIOS:
+        raise AssertionError(
+            f"producer emitted TUI scenarios {sorted(scenarios)}, "
+            f"expected {sorted(TUI_SCENARIOS)}"
+        )
     for fixture in fixtures:
         run_case(executable, fixture)
     print("Context review durable evidence reaches the TUI: PASS")

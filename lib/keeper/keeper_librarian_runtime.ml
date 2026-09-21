@@ -457,15 +457,37 @@ let capacity_refused_by_flow = function
   | _ -> false
 ;;
 
+type capacity_refusal =
+  | Input_limit_unknown
+  | Cli_input_limit of Keeper_lane_cli_oneshot.input_capacity
+
 let extraction_capacity_refused = function
-  | Exact_execution_failed error -> error.capacity_refused
+  | Exact_execution_failed error ->
+    if error.capacity_refused then Some Input_limit_unknown else None
   | Cli_slots_exhausted { failures; _ } ->
     (match List.rev failures with
-     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity_refused final
-     | [] -> false)
+     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity final
+       |> Option.map (fun limit -> Cli_input_limit limit)
+     | [] -> None)
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
-  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> false
+  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> None
+;;
+
+let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
+  let open Result.Syntax in
+  let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
+    |> Result.map_error extraction_error_to_string in
+  if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
+  then Ok (Some prepared)
+  else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
+    let input = {input with Keeper_librarian.messages =
+      Keeper_librarian_continuity.messages continuity} in
+    let* material = snd (resolve_librarian_prompt ~continuity input) in
+    let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
+      ~requirement:librarian_output_requirement ~prompt:material.rendered in
+    let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
+    Ok (actual_chars <= capacity.capacity.max_chars))
 ;;
 
 let exact_execution_error error =
@@ -839,7 +861,7 @@ let run_best_effort
       ?(write_scope = Context_and_memory)
       ?continuity
       ?(on_memory_committed = fun () -> ())
-      ?(on_capacity_refused = fun () -> ())
+      ?(on_capacity_refused = fun _ -> ())
       ?(on_continuity_committed = fun _ -> ())
       ?durable_range_id
       ?official_range_id
@@ -1122,7 +1144,7 @@ let run_best_effort
                 normally. Propagate it here even when no later I/O yields. *)
              Eio.Fiber.check ()
            | Error error ->
-             if extraction_capacity_refused error then on_capacity_refused ();
+             Option.iter on_capacity_refused (extraction_capacity_refused error);
              let detail = extraction_error_to_string error in
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)

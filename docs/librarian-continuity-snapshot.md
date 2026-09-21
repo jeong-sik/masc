@@ -44,7 +44,9 @@ masc-librarian-continuity compare \
 
 운영 초기화는 `Captured_checkpoint_prefix` 출처로 잠긴 checkpoint의 실제 원문을 읽는다. 재시작 기록을 만들지 않는다. 실제 완료된 turn boundary가 전체 읽기 가능 범위를 보증하고, 저장본의 `end_atom`은 그 안에서 정리한 마지막 atom의 다음 위치다. `covering_end_atom`과 완료 경계의 digest는 그 범위를 보증하는 원래 경계를 남긴다. 도구 호출과 결과는 한 atom으로 유지한다.
 
-기존 Librarian lane에서 하던 일과 새 원문을 처리한다. 최종 실행이 typed 용량 초과로 끝났을 때만 원문 범위를 atom 중간 지점으로 줄여 재시도한다. 429, 인증, 출력 형식, 저장 실패는 범위를 줄이는 근거가 아니다. 한 atom이나 이미 Memory에 저장한 복구 범위는 더 줄이지 않고 실패를 남긴다. 고정 prompt 자체가 큰 경우도 이 경계에서 멈춘다. 처음 시도하는 큰 입력의 직렬화 비용까지 없애는 것은 아니다.
+기존 Librarian lane에서 하던 일과 새 원문을 처리한다. Codex가 구조화된 입력 초과 응답으로 글자 수 한도를 알려주면, 같은 처리 회차에서는 그 한도를 다음 조각에도 재사용한다. 매 조각마다 이전 요약, 현재 Memory, queued context, 출력 형식 지시문을 포함한 실제 제출 프롬프트를 다시 구성하고 Unicode scalar 수를 센다. 서버 한도에 들어가는 가장 긴 atom 경계를 전송 전에 선택한다. 이전 조각의 atom 개수를 용량으로 추측하지 않으며, 해당 runtime이 lane에서 빠지면 그 한도는 적용하지 않는다. 관측한 한도는 이 처리 회차에만 존재하고 영속 설정이나 Memory에 저장하지 않는다.
+
+한도를 알 수 없는 typed 용량 거절에는 원문 범위를 atom 중간 지점으로 줄이는 복구 경로를 쓴다. 429, 인증, 출력 형식, 저장 실패는 범위를 줄이는 근거가 아니다. 한 atom이나 이미 Memory에 저장한 복구 범위는 더 줄이지 않는다. 관측한 Codex 한도에 맞지 않더라도 다른 provider의 실행 기회를 막지는 않으며, 정상 lane 순회를 거친 최종 실패를 남긴다. 고정 prompt 자체가 큰 경우도 이 경계에서 멈춘다. 최초 한도 관측을 위한 거절과 큰 입력의 로컬 직렬화 비용까지 없애는 것은 아니다. 재시작이나 처리 회차 종료 뒤에는 한도를 다시 관측한다.
 
 이미 일반 Memory consumer가 읽었다는 근거가 있는 범위는 하던 일만 저장한다. 그 밖의 실제 새 source는 Memory와 하던 일을 같은 회차에서 생성한다. Memory WAL의 receipt scope를 continuity 파일 경로로 분리하므로 부분 처리가 일반 consumer의 위치를 전진시키지 않는다. Memory 저장 뒤 하던 일 저장이 실패하면, 다음 wake는 그 정확한 범위를 먼저 복구하며 Memory에 다시 적용하지 않는다. 완료된 checkpoint prefix는 기존 durable consumer와 동일하게 이후 변경되지 않는다는 전제를 쓴다.
 

@@ -225,7 +225,7 @@ let append_runtime_manifest ~config ~keeper_name ~trace_id
 let run_teardown_protected ~keeper_name ~site f =
   match Eio.Cancel.protect f with
   | () -> ()
-  | exception e ->
+  | exception e -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it; the comment above says why teardown reports instead of propagating. *)
       let backtrace = Printexc.get_backtrace () in
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DispatchEventFailures)

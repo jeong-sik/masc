@@ -1030,7 +1030,7 @@ let run_keeper_cycle
            observation. *)
                  let cleanup () =
                    (try Eio.Cancel.protect unsubscribe_event_bus with
-                    | e ->
+                    | e -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it; see the cleanup comment above for why a raise here must not escape. *)
                       Log.Keeper.warn
                         ~keeper_name:meta.name
                         "%s: unsubscribe_event_bus in turn cleanup raised: %s"
@@ -1046,7 +1046,7 @@ let run_keeper_cycle
                          ~base_path:config.base_path
                          meta.name)
                    with
-                   | e ->
+                   | e -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it; see the cleanup comment above for why a raise here must not escape. *)
                      Log.Keeper.warn
                        ~keeper_name:meta.name
                        "%s: mark_turn_finished in turn cleanup raised: %s"

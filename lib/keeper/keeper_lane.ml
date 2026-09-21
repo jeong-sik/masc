@@ -218,7 +218,7 @@ let rec request_cancel t =
               Eio.Cancel.cancel control.context Shutdown_cancel;
               Cancel_requested
             with
-            | exn ->
+            | exn -> (* cancel-guard-ok: Eio.Cancel.cancel suspends nothing in the calling fiber, so what lands here comes from the cancelled context's own fibers and never from this fiber being cancelled; the arm classifies it through Eio.Cancel.get_error. *)
               (match Eio.Cancel.get_error control.context with
                | Some (Eio.Cancel.Cancelled _) -> Cancel_committed_with_failure exn
                | None ->

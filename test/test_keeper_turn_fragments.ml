@@ -115,6 +115,7 @@ let test_a_tagged_line_that_cannot_be_named_is_refused () =
        ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"user","content_blocks":[],"extra":1}|}
        ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"user"}|}
        ; {|{"ts_unix":1.0,"turn_ref":"not a ref","kind":"message"}|}
+       ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"oracle","content_blocks":[]}|}
        ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"tool_observation","tool_name":"t","outcome":"ok"}|}
        ]
      ^ "\n");
@@ -132,7 +133,7 @@ let test_a_tagged_line_that_cannot_be_named_is_refused () =
       lines
   in
   check (list string) "each line is named for what is wrong with it"
-    [ "malformed"; "malformed"; "malformed"; "malformed"; "fragment" ]
+    [ "malformed"; "malformed"; "malformed"; "malformed"; "message_rejected"; "fragment" ]
     kinds
 ;;
 

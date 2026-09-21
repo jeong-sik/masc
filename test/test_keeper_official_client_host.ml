@@ -2233,6 +2233,131 @@ let test_persist_skips_when_no_checkpoint_exists () =
   | Error detail -> fail ("missing checkpoint must not be an error: " ^ detail)
 ;;
 
+(* {1 Where a start seed begins (창 RFC §7 (라), §10.4)} *)
+
+module Snapshot = Librarian_continuity_snapshot
+module Boundaries = Keeper_turn_boundaries
+
+let msg role text = Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
+
+let start_seed_trace = "official-front-trace"
+
+(* Two atoms the Librarian absorbed, then one the keeper is still on. *)
+let absorbed_messages =
+  [ msg Agent_core.Types.User "Build the patch."
+  ; msg Agent_core.Types.Assistant "The build passed."
+  ]
+;;
+
+let start_seed_messages =
+  absorbed_messages @ [ msg Agent_core.Types.User "Now review it." ]
+;;
+
+let working_state = "Build passed. Review is open."
+
+let absorbed_snapshot () =
+  let position =
+    match Boundaries.position_of_messages absorbed_messages with
+    | Ok position -> position
+    | Error detail -> fail detail
+  in
+  let boundary : Boundaries.record =
+    { recorded_at = 1.0
+    ; event =
+        Boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id:start_seed_trace ~absolute_turn:1
+          ; history_at_start = Boundaries.Fresh_history
+          ; position
+          }
+    }
+  in
+  match
+    Snapshot.capture
+      ~trace_id:start_seed_trace
+      ~lines:[ 1, Ok boundary ]
+      ~messages:absorbed_messages
+      ~working_state
+  with
+  | Ok snapshot -> snapshot
+  | Error error -> fail (Snapshot.error_to_string error)
+;;
+
+let start_range ?(librarian_front = fun _ -> None) ?(own_first_atom = 0) messages =
+  Host.carried_start_range
+    ~keeper_name:"alpha"
+    ~runtime_id:"claude_code.claude-sonnet-5"
+    ~carried_front_seed:None
+    ~librarian_front
+    ~own_first_atom
+    messages
+;;
+
+let texts messages =
+  List.filter_map
+    (fun (message : Agent_core.Types.message) ->
+       match message.content with
+       | [ Agent_core.Types.Text text ] -> Some text
+       | _ -> None)
+    messages
+;;
+
+(* The atoms the Librarian read are in the keeper's memory, so the seed starts
+   after them and carries the working state in their place. *)
+let test_a_start_seed_begins_at_the_librarian_position () =
+  let snapshot = absorbed_snapshot () in
+  let carried = start_range ~librarian_front:(fun _ -> Some snapshot) start_seed_messages in
+  check int "the first atom is the one the Librarian did not read"
+    snapshot.Snapshot.end_atom carried.Host.first_atom;
+  check bool "the front says so" true
+    (match carried.Host.front with
+     | Host.Librarian_snapshot { end_atom; boundary_line } ->
+       end_atom = snapshot.Snapshot.end_atom
+       && boundary_line = snapshot.Snapshot.end_boundary_line
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Whole_history -> false);
+  check string "and the log names it the same word the Agent Core lane logs"
+    "librarian_snapshot"
+    (Host.carried_start_front_to_string carried.Host.front);
+  let carried_texts = texts carried.Host.messages in
+  let ends_with ~suffix text =
+    let extra = String.length text - String.length suffix in
+    extra >= 0 && String.equal (String.sub text extra (String.length suffix)) suffix
+  in
+  check bool "the working state is carried" true
+    (List.exists (ends_with ~suffix:working_state) carried_texts);
+  check bool "the absorbed atoms are not" false
+    (List.exists (String.equal "The build passed.") carried_texts);
+  check bool "the atom the keeper is still on is" true
+    (List.exists (String.equal "Now review it.") carried_texts)
+;;
+
+(* A reading that does not describe these messages leaves the lane's own
+   front standing. *)
+let test_a_seed_without_a_librarian_position_is_unchanged () =
+  let carried = start_range start_seed_messages in
+  check int "starts at the oldest atom" 0 carried.Host.first_atom;
+  check bool "whole history" true
+    (match carried.Host.front with
+     | Host.Whole_history -> true
+     | _ -> false)
+;;
+
+(* The lane's own cut is later than what the Librarian read: the request must
+   not widen back to the Librarian's position. *)
+let test_a_later_lane_cut_wins () =
+  let snapshot = absorbed_snapshot () in
+  let carried =
+    start_range
+      ~librarian_front:(fun _ -> Some snapshot)
+      ~own_first_atom:(snapshot.Snapshot.end_atom + 1)
+      start_seed_messages
+  in
+  check int "the later position stands" (snapshot.Snapshot.end_atom + 1) carried.Host.first_atom;
+  check bool "and the front is the lane's" true
+    (match carried.Host.front with
+     | Host.Lane_cut -> true
+     | _ -> false)
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -2452,6 +2577,20 @@ let () =
             "missing checkpoint skips persistence"
             `Quick
             test_persist_skips_when_no_checkpoint_exists
+        ] )
+    ; ( "where a start seed begins"
+      , [ test_case
+            "it begins at the Librarian position"
+            `Quick
+            test_a_start_seed_begins_at_the_librarian_position
+        ; test_case
+            "without one the lane's own front stands"
+            `Quick
+            test_a_seed_without_a_librarian_position_is_unchanged
+        ; test_case
+            "a later lane cut wins"
+            `Quick
+            test_a_later_lane_cut_wins
         ] )
     ]
 ;;

@@ -1610,6 +1610,57 @@ let run_named
 	       | Some read -> read ()
 	       | None -> Keeper_carried_front.no_seed_read)
 	  in
+	  (* The Librarian's own position, for the official-client branches. The
+	     Agent Core branch takes it through [continuity] above; these lanes cut
+	     their start seed themselves, so they are handed a reading they apply to
+	     the exact list they are about to cut. The snapshot and the boundary log
+	     are read once; the covered messages are checked on every call, because
+	     a lane composes more than once in a turn and the list can grow. *)
+	  let librarian_front_source =
+	    Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+	      match session_id, recovery_view with
+	      | None, _ | _, Some _ -> None
+	      | Some trace_id, None ->
+	        Domain_pool_ref.submit_io_or_inline (fun () ->
+	          let config = Workspace.default_config base_path in
+	          match Keeper_librarian_continuity.read ~config ~keeper_name with
+	          | Error detail ->
+	            Log.Keeper.info
+	              ~keeper_name
+	              "official client start seed reads no librarian position: %s"
+	              detail;
+	            None
+	          | Ok None -> None
+	          | Ok (Some snapshot) ->
+	            (match
+	               Keeper_turn_boundaries.read
+	                 ~keepers_dir:(Workspace.keepers_runtime_dir config)
+	                 ~keeper_id:keeper_name
+	             with
+	             | Error detail ->
+	               Log.Keeper.info
+	                 ~keeper_name
+	                 "official client start seed reads no turn boundaries: %s"
+	                 detail;
+	               None
+	             | Ok lines -> Some (trace_id, lines, snapshot))))
+	  in
+	  let official_client_librarian_front messages =
+	    match Eio.Lazy.force librarian_front_source with
+	    | None -> None
+	    | Some (trace_id, lines, snapshot) ->
+	      (match Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot with
+	       | Ok (_ : Librarian_continuity_snapshot.restored) -> Some snapshot
+	       | Error error ->
+	         (* The snapshot does not describe this list: the history was
+	            rewritten, restarted, or the list is not the one it covered.
+	            The seed falls back to the front it had before. *)
+	         Log.Keeper.info
+	           ~keeper_name
+	           "official client start seed keeps its own front: %s"
+	           (Librarian_continuity_snapshot.error_to_string error);
+	         None)
+	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
   let routing_run_id = Random_id.hex ~bytes:16 in
@@ -2240,6 +2291,7 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
+            ~librarian_front:official_client_librarian_front
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
@@ -2358,6 +2410,7 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
+            ~librarian_front:official_client_librarian_front
             ~pre_tool_rejects
             ~base_path
             ~goal

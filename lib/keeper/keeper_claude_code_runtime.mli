@@ -36,6 +36,8 @@ module For_testing : sig
   val start_seed_projection
     :  capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
+    -> ?librarian_front:
+         (Agent_core.Types.message list -> Librarian_continuity_snapshot.t option)
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> keeper_name:string
@@ -81,6 +83,8 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?librarian_front:
+    (Agent_core.Types.message list -> Librarian_continuity_snapshot.t option) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -107,6 +111,11 @@ val run :
     range does not widen it and the ceiling does not undo the seed. A caller
     that passes none starts a start seed at the oldest atom, inside the
     ceiling.
+
+    [librarian_front] names the Librarian's own position for the messages it
+    is handed: the atoms before it are in the keeper's memory, and its saved
+    working state is carried in their place. The latest of the three
+    positions wins, so this never widens a request either.
 
     [on_transmitted_model_input] fires once per attempt, after the capacity
     window has cut the history and before the prompt is built. Required rather

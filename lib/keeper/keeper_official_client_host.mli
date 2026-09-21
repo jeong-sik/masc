@@ -203,6 +203,15 @@ type carried_start_front =
   | Whole_history
       (** No seed held and the lane cut nothing, so the range starts at the
           oldest atom and the provider judges it. *)
+  | Librarian_snapshot of
+      { end_atom : int
+      ; boundary_line : int
+      }
+      (** The Librarian absorbed this history through [end_atom] and saved
+          what the keeper was in the middle of. The range starts there and
+          carries that working state in place of the atoms it summarises —
+          the front the Agent Core lane already takes
+          ([Keeper_carried_front.Librarian_snapshot]). *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -216,12 +225,21 @@ type carried_start =
   ; front : carried_start_front
   }
 
+val librarian_front_or_none
+  :  (Agent_core.Types.message list -> Librarian_continuity_snapshot.t option) option
+  -> Agent_core.Types.message list
+  -> Librarian_continuity_snapshot.t option
+(** A lane's optional reading as the total function {!carried_start_range}
+    takes: [None] becomes "no saved position for these messages". *)
+
 val carried_start_front_to_string : carried_start_front -> string
 
 val carried_start_range
   :  keeper_name:string
   -> runtime_id:string
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
+  -> librarian_front:
+       (Agent_core.Types.message list -> Librarian_continuity_snapshot.t option)
   -> own_first_atom:int
   -> Agent_core.Types.message list
   -> carried_start
@@ -238,6 +256,14 @@ val carried_start_range
     caller's seed is the whole answer. Without one the range is the whole
     history, which the provider then judges: the same two outcomes the Agent
     Core path has when no ledger answers.
+
+    [librarian_front] answers with the Librarian's saved position for exactly
+    the messages it is handed, or [None] when there is none or it does not
+    describe them; the caller owns that reading and its validation. Its
+    working state goes in front of the range as extra system context, and the
+    range starts at whichever of the three positions is latest, so a
+    Librarian that read less than the last request carried never widens the
+    request.
 
     [own_first_atom] is the front the lane already chose for its own reason
     (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).

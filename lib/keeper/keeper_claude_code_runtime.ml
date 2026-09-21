@@ -81,6 +81,7 @@ let model_input_projection_for_capacity
     ~observed_floor_capacity_bytes
     ?on_model_input_window_observation
     ?carried_front_seed
+    ?librarian_front
     ~keeper_name
     ~runtime_id
     source_projection
@@ -146,6 +147,7 @@ let model_input_projection_for_capacity
           ~keeper_name
           ~runtime_id
           ~carried_front_seed
+          ~librarian_front:(Host.librarian_front_or_none librarian_front)
           ~own_first_atom
           messages
       in
@@ -427,7 +429,7 @@ module For_testing = struct
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
 
-  let start_seed_projection ~capacity_bytes ?carried_front_seed
+  let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front
         ?on_model_input_window_observation ~keeper_name ~runtime_id messages
     =
     model_input_projection_for_capacity
@@ -436,6 +438,7 @@ module For_testing = struct
       ~observed_floor_capacity_bytes:(ref None)
       ?on_model_input_window_observation
       ?carried_front_seed
+      ?librarian_front
       ~keeper_name
       ~runtime_id
       None
@@ -1248,6 +1251,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?carried_front_seed
+    ?librarian_front
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
@@ -1339,6 +1343,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
                     ~observed_floor_capacity_bytes
                     ?on_model_input_window_observation
                     ?carried_front_seed
+                    ?librarian_front
                     ~keeper_name
                     ~runtime_id
                     model_input_projection))

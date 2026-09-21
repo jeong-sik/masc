@@ -256,6 +256,7 @@ type keeper_meta =
   ; microvm_memory : Keeper_microvm_guest_size.memory option
   ; microvm_cpus : Keeper_microvm_guest_size.cpus option
   ; mention_targets : string list
+  ; board_interests : string list
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string
@@ -395,6 +396,7 @@ let effective_meta_of_profile_defaults
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
+          board_interests = defaults.board_interests;
           max_context_override =
             apply_profile_default_opt defaults.max_context_override
               meta.max_context_override;

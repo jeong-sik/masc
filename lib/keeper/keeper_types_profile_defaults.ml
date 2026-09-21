@@ -4,6 +4,7 @@ type keeper_profile_defaults = {
   instructions : string option;
   activation_mode : Keeper_activation_mode.t option;
   mention_targets : string list;
+  board_interests : string list;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
@@ -62,6 +63,7 @@ let empty_keeper_profile_defaults =
     instructions = None;
     activation_mode = None;
     mention_targets = [];
+    board_interests = [];
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;

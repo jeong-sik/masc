@@ -25,6 +25,7 @@ let keeper_toml_fields =
   ; "instructions", Field_string
   ; "activation_mode", Field_string
   ; "mention_targets", Field_string_array
+  ; "board_interests", Field_string_array
   ; "sandbox_profile", Field_string
   ; "sandbox_image", Field_string
   ; "network_mode", Field_string
@@ -369,6 +370,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         instructions = str "instructions";
         activation_mode = Option.bind (str "activation_mode") Keeper_activation_mode.of_string;
         mention_targets = strs "mention_targets";
+        board_interests = normalize_board_interests (strs "board_interests");
         sandbox_profile =
           Option.bind (str "sandbox_profile") sandbox_profile_of_string;
         sandbox_image = str "sandbox_image";
@@ -423,6 +425,7 @@ let merge_keeper_profile_defaults
     activation_mode = prefer overlay.activation_mode base.activation_mode;
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;
+    board_interests = overlay.board_interests;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;

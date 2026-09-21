@@ -321,6 +321,7 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; microvm_cpus = profile_update_cpus
     ; network_mode = current.network_mode
     ; mention_targets = [ "profile-target" ]
+    ; board_interests = [ "MASC runtime" ]
     ; activation_mode = Masc.Keeper_activation_mode.Autonomous
     ; max_context_override = Some 32_000
     ; telemetry_feedback_enabled = Some true
@@ -345,6 +346,8 @@ let test_profile_update_preserves_owner_runtime_state () =
     current.runtime.usage.total_turns
     committed.runtime.usage.total_turns;
   check bool "profile update changes autoboot" true (Masc.Keeper_activation_mode.restore_owner committed.activation_mode);
+  check (list string) "profile Board interests reach owner projection"
+    update.board_interests committed.board_interests;
   check bool "profile update changes voice_always_allow" true (committed.voice_always_allow = Some false)
 ;;
 

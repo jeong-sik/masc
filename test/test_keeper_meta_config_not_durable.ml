@@ -33,6 +33,7 @@ let test_config_writes_are_dropped () =
     { meta with
       activation_mode = Masc.Keeper_activation_mode.Manual
     ; mention_targets = [ "someone" ]
+    ; board_interests = [ "MASC runtime" ]
     ; always_allow = Some true
     ; voice_always_allow = Some true
     ; max_context_override = Some 4242
@@ -44,6 +45,7 @@ let test_config_writes_are_dropped () =
   let decoded = round_trip written in
   Alcotest.(check bool) "autoboot_enabled is not durable" true (Masc.Keeper_activation_mode.restore_owner decoded.activation_mode);
   Alcotest.(check (list string)) "mention_targets is not durable" [] decoded.mention_targets;
+  Alcotest.(check (list string)) "board_interests is not durable" [] decoded.board_interests;
   Alcotest.(check bool) "always_allow is not durable" true (decoded.always_allow = None);
   Alcotest.(check bool) "voice_always_allow is not durable" true (decoded.voice_always_allow = None);
   Alcotest.(check bool)

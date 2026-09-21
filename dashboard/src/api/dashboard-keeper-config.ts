@@ -397,6 +397,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     runtime_trust: runtimeTrust,
     workspace: {
       mention_targets: normalizeStringList(workspace.mention_targets),
+      board_interests: normalizeStringList(workspace.board_interests),
       bound_workspace_ids: normalizeStringList(workspace.bound_workspace_ids),
     },
     sources: {
@@ -443,6 +444,7 @@ export type SandboxNetworkMode = 'none' | 'inherit'
 export type KeeperConfigUpdatePayload = {
   runtime_id?: string
   mention_targets?: string[]
+  board_interests?: string[]
   activation_mode?: KeeperActivationMode
   max_context_override?: number | null
   // Sandbox

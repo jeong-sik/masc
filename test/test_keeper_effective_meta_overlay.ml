@@ -837,6 +837,7 @@ let test_keeper_up_materializes_missing_profile_source () =
       ; "instructions", `String "durable direct instructions"
       ; "sandbox_profile", `String "docker"
       ; "mention_targets", `List [ `String "operator" ]
+      ; "board_interests", `List [ `String "MASC runtime" ]
       ; "activation_mode", `String "manual"
       ; "max_context_override", `Int 128_001
       ]
@@ -852,6 +853,7 @@ let test_keeper_up_materializes_missing_profile_source () =
       instructions = "durable direct instructions"
     ; sandbox_profile = Profile.Docker
     ; mention_targets = [ "operator" ]
+    ; board_interests = [ "MASC runtime" ]
     ; activation_mode = Masc.Keeper_activation_mode.Manual
     ; max_context_override = Some 128_001
     }
@@ -886,6 +888,10 @@ let test_keeper_up_materializes_missing_profile_source () =
       "context override persisted"
       (Some 128_001)
       defaults.max_context_override;
+    Alcotest.(check (list string))
+      "Board interests persisted"
+      [ "MASC runtime" ]
+      defaults.board_interests;
     ()
 
 let test_missing_profile_source_is_rejected () =

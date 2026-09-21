@@ -32,6 +32,7 @@ canonical Keeper name; `[keeper].name` is optional.
 activation_mode = "autonomous"
 sandbox_profile = "docker"
 mention_targets = ["operator"]
+board_interests = []
 ```
 
 Current `[keeper]` fields:
@@ -39,6 +40,7 @@ Current `[keeper]` fields:
 - `name`
 - `activation_mode`
 - `mention_targets`
+- `board_interests`
 - `sandbox_profile`
 - `sandbox_image`
 - `network_mode`
@@ -49,6 +51,13 @@ Current `[keeper]` fields:
 - `[keeper.agent_core_env]` scalar entries
 
 Any other TOML key fails closed as `unknown keeper TOML keys`.
+
+`mention_targets` are exact direct-address tokens. `board_interests` are
+semantic topics for targetless Board discovery; `[]` (and omission for a new
+declaration) disables that discovery. The two fields never inherit from or
+fall back to one another. Exact addressing, broadcast, and delivery to a
+Keeper already participating in a thread remain active when interests are
+empty.
 
 ## Runtime and tool context
 

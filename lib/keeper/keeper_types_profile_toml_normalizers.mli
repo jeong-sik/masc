@@ -56,6 +56,7 @@ type keeper_profile_defaults =
   instructions : string option;
   activation_mode : Keeper_activation_mode.t option;
   mention_targets : string list;
+  board_interests : string list;
   sandbox_profile :
     Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
@@ -79,6 +80,7 @@ type keeper_profile_defaults =
 val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
+val normalize_board_interests : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
 val first_some : 'a option -> 'a option -> 'a option

@@ -900,15 +900,15 @@ let test_comment_signal_preserves_comment_and_parent_identity () =
   match !seen with
   | Some { Board_dispatch.signal; _ } ->
     (match signal.kind with
-     | Board_dispatch.Board_comment_added ->
+     | Board_dispatch.Board_comment_added { comment_id; parent_id } ->
        Alcotest.(check (option string))
          "comment id comes from the accepted comment"
          (Some (Board.Comment_id.to_string reply.id))
-         signal.comment_id;
+         (Some (Board.Comment_id.to_string comment_id));
        Alcotest.(check (option string))
          "parent id comes from the accepted comment"
          (Some (Board.Comment_id.to_string parent.id))
-         signal.parent_id
+         (Option.map Board.Comment_id.to_string parent_id)
      | Board_dispatch.Board_post_created
      | Board_dispatch.Board_reaction_changed _
      | Board_dispatch.Board_vote_cast _ ->

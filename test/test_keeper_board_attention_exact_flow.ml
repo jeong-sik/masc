@@ -73,8 +73,6 @@ let prepare_exact ~net candidate =
 let signal post_id : Board_dispatch.board_signal =
   { kind = Board_dispatch.Board_post_created
   ; post_id
-  ; comment_id = None
-  ; parent_id = None
   ; author = "external-author"
   ; title = "Board update"
   ; content = "Persisted Board evidence"

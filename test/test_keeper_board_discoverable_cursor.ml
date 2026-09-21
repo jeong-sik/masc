@@ -91,8 +91,6 @@ let persist_discoverable signal =
 let signal ~post_id ~author ~title ~content : Board_dispatch.board_signal =
   { kind = Board_dispatch.Board_post_created
   ; post_id
-  ; comment_id = None
-  ; parent_id = None
   ; author
   ; title
   ; content

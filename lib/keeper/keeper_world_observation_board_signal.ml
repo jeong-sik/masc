@@ -11,6 +11,22 @@ type match_result =
   ; matched_targets : string list
   }
 
+type board_observation_kind =
+  | Observed_post_created
+  | Observed_comment_added
+  | Observed_reaction_changed of Board_dispatch.board_reaction_change
+  | Observed_vote_cast of Board_dispatch.board_vote_change
+
+type board_observation =
+  { kind : board_observation_kind
+  ; post_id : string
+  ; author : string
+  ; title : string
+  ; content : string
+  ; hearth : string option
+  ; updated_at : float option
+  }
+
 type board_read_operation =
   | Get_post
   | Get_comments
@@ -189,7 +205,7 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   { Keeper_event_queue.kind =
       (match signal.kind with
        | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-       | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
+       | Board_dispatch.Board_comment_added _ -> Keeper_event_queue.Comment_added
        | Board_dispatch.Board_reaction_changed reaction ->
          Keeper_event_queue.Reaction_changed
            (queue_reaction_change_of_board reaction)
@@ -203,27 +219,24 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   }
 ;;
 
-(* RFC-0020: board signals are carried as a typed [Keeper_event_queue.board_stimulus]
-   end-to-end. This total conversion rebuilds the [Board_dispatch.board_signal]
-   the downstream matchers expect from the typed payload, taking the board post
-   id from the enclosing stimulus. Replaces the prior JSON re-parse of a string
-   payload (which could fail and silently drop signals). *)
-let board_signal_of_board_stimulus
+(* The durable queue intentionally carries less identity than the live Board
+   signal. Keep that projection in its own type: reconstructing an exact
+   [Board_comment_added] without the accepted comment id would make a false
+   identity look valid. *)
+let board_observation_of_board_stimulus
       ~(post_id : string)
       (bs : Keeper_event_queue.board_stimulus)
-  : Board_dispatch.board_signal
+  : board_observation
   =
-  { Board_dispatch.kind =
+  { kind =
       (match bs.kind with
-       | Keeper_event_queue.Post_created -> Board_dispatch.Board_post_created
-       | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added
+       | Keeper_event_queue.Post_created -> Observed_post_created
+       | Keeper_event_queue.Comment_added -> Observed_comment_added
        | Keeper_event_queue.Reaction_changed reaction ->
-         Board_dispatch.Board_reaction_changed (board_reaction_change_of_queue reaction)
+         Observed_reaction_changed (board_reaction_change_of_queue reaction)
        | Keeper_event_queue.Vote_cast vote ->
-         Board_dispatch.Board_vote_cast (board_vote_change_of_queue vote))
+         Observed_vote_cast (board_vote_change_of_queue vote))
   ; post_id
-  ; comment_id = None
-  ; parent_id = None
   ; author = bs.author
   ; title = bs.title
   ; content = bs.content
@@ -273,30 +286,40 @@ let address_text (signal : Board_dispatch.board_signal) =
       (List.filter
          (fun part -> not (String.equal (String.trim part) ""))
          [ signal.title; signal.content ])
-  | Board_dispatch.Board_comment_added -> signal.content
+  | Board_dispatch.Board_comment_added _ -> signal.content
   | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ -> ""
 ;;
 
-let mention_ids_of_signal signal =
-  Board.direct_targets_of_text (address_text signal)
+let mention_ids_of_text text =
+  Board.direct_targets_of_text text
   |> List.filter_map (fun target ->
     Board.Agent_id.to_string target |> Keeper_identity.Keeper_id.of_string)
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 
-let match_signal
-      ~(meta : keeper_meta)
-      ~(signal : Board_dispatch.board_signal)
-  : match_result
-  =
+let mention_ids_of_signal signal = mention_ids_of_text (address_text signal)
+
+let address_text_of_observation observation =
+  match observation.kind with
+  | Observed_post_created ->
+    String.concat
+      "\n"
+      (List.filter
+         (fun part -> not (String.equal (String.trim part) ""))
+         [ observation.title; observation.content ])
+  | Observed_comment_added -> observation.content
+  | Observed_reaction_changed _ | Observed_vote_cast _ -> ""
+;;
+
+let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
   let self_ids = Message_scope.self_ids meta in
-  if Message_scope.is_self_author ~self_ids signal.author
+  if Message_scope.is_self_author ~self_ids author
   then { explicit_mention = false; matched_targets = [] }
   else (
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
-    let mentions = mention_ids_of_signal signal in
+    let mentions = mention_ids_of_text address_text in
     let matched_targets =
       targets
       |> List.filter (fun target ->
@@ -310,6 +333,21 @@ let match_signal
     if matched_targets <> []
     then { explicit_mention = true; matched_targets }
     else { explicit_mention = false; matched_targets = [] })
+;;
+
+let match_signal
+      ~(meta : keeper_meta)
+      ~(signal : Board_dispatch.board_signal)
+  : match_result
+  =
+  match_authored_text ~meta ~author:signal.author ~address_text:(address_text signal)
+;;
+
+let match_observation ~(meta : keeper_meta) ~(observation : board_observation) =
+  match_authored_text
+    ~meta
+    ~author:observation.author
+    ~address_text:(address_text_of_observation observation)
 ;;
 
 (** Check whether this keeper has commented on a post, and which comments
@@ -426,7 +464,7 @@ let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_sig
          | Available `Never -> Available false
          | Available (`No_new_external | `New_external _) -> Available true))
   | Board_dispatch.Board_post_created
-  | Board_dispatch.Board_comment_added
+  | Board_dispatch.Board_comment_added _
   | Board_dispatch.Board_vote_cast _ -> Available false
 ;;
 
@@ -463,7 +501,7 @@ let wake_reason
        | Available false -> Available None)
     | Board_dispatch.Board_vote_cast vote ->
       Available (vote_targets_self_writing ~self_ids vote)
-    | Board_dispatch.Board_comment_added ->
+    | Board_dispatch.Board_comment_added _ ->
       (* Authorship first, the same order [reaction_touches_self_activity] uses
          above. Without it [check_self_comment_status] answers [`Never] for the
          author of the post — it only looks for the keeper's own comments — so

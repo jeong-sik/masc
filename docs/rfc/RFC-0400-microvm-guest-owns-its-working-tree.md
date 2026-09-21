@@ -101,8 +101,9 @@ type transport =
   | Container_exec of container_exec  (* cli, guest name, uid:gid, shim path, shim config path *)
 ```
 
-`Keeper_remote_path` takes `~remote_root` instead of an `Exec_ssh_endpoint.t`
-it only read one field of. `Exec_ssh_protocol.shim_config_env_var` names the
+`Keeper_remote_path` takes the already resolved `~remote_workspace_root`
+instead of an endpoint root from which it would have to infer the Keeper
+layout. `Exec_ssh_protocol.shim_config_env_var` names the
 one environment entry the shim reads for itself, so the host and the shim
 cannot disagree on it. Error codes carry the lane prefix; the OpenSSH lane's
 strings are unchanged, which the existing four ssh suites prove.

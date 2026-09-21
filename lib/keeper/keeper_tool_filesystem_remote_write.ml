@@ -140,7 +140,7 @@ let handle_content_with_endpoint
            (match
               Keeper_remote_path.host_to_remote
                 ~base_path:config.base_path
-                ~remote_root:(Keeper_sandbox_remote.remote_root endpoint)
+                ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
                 ~keeper:meta.name
                 target
             with

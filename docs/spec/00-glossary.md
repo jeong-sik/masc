@@ -104,6 +104,10 @@ status: reference
   입력을 줄여 재실행할 수 없는 경우다. 현재 거절은 provider 호출 전에 일어나며 앞선
   provider attempt의 효과 자체와 구분한다. 상태 표시는 원인·runtime ID·recovery ID를
   기존 session에서 전달하며, 복구 승인이나 fence 해제를 수행하지 않는다.
+  Fleet는 일시정지되지 않은 `Failing` Keeper의 이 원인을 `recovering`과 구분해
+  `official_client_recovery_required_keeper_count/names`로 표시한다. 이는 운영자
+  조치가 필요한 fleet health 저하 사유이며, 다른 차단 사유가 없으면 `degraded`로
+  표시한다. 실행 fiber의 생존·실행 가능 여부를 바꾸거나 세션 복구를 승인하지 않는다.
 
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는

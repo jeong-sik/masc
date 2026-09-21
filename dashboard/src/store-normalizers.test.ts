@@ -315,6 +315,28 @@ describe('mergeMessages', () => {
 })
 
 describe('normalizeDashboardRuntimeResolution fleet safety', () => {
+  it('preserves session recovery names and counts without invalidating fleet health', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
+        status: 'degraded',
+        blocker: 'official_client_recovery_required',
+        operator_action_required: true,
+        recovering_keeper_fiber_count: 1,
+        official_client_recovery_required_keeper_count: 2,
+        official_client_recovery_required_keeper_names: ['session-effect', 'session-floor'],
+      },
+    }))
+    expect(result?.fleet_safety?.keeper_fleet_safety).toMatchObject({
+      status: 'degraded',
+      blocker: 'official_client_recovery_required',
+      operator_action_required: true,
+      recovering_keeper_fiber_count: 1,
+      official_client_recovery_required_keeper_count: 2,
+      official_client_recovery_required_keeper_names: ['session-effect', 'session-floor'],
+    })
+  })
+
   it('preserves binary and checkout identities as separate runtime facts', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw())
 

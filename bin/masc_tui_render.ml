@@ -4330,13 +4330,16 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
        | _ -> Some (color, label, String.concat ", " names))
     [ (not_running, "not running", (Theme.bad ()))
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
-    ; (* The one failing subset an operator must act on: turn configuration
+    ; (* Failing subsets that need operator action: turn configuration
          errors survive every retry, so the names are listed where the
          failing counter only counts them. Unscoped on purpose -- the
          configuration_blocked_* wire fields are autoboot-scoped and skip a
          blocked keeper booted on request. *)
       ( fleet.fs_turn_configuration_error_names
       , "config-blocked"
+      , (Theme.bad ()) )
+    ; ( fleet.fs_official_client_recovery_required_names
+      , "session recovery required"
       , (Theme.bad ()) )
     ]
 
@@ -4494,20 +4497,19 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* Failing is not a mystery bucket. Every failing keeper is either
-          retrying on its own -- a clean turn returns it to Running -- or
-          blocked on turn configuration, which no retry fixes. Both parts
-          come from the same phase snapshot, which sorts each failing keeper
-          into exactly one of the two, so they sum to the failing count and
-          print beside the whole instead of as a separate "recovering"
-          counter whose relationship to failing was invisible. *)
+       (* The phase snapshot partitions failing keepers into recovering,
+          configuration errors and explicit official-client session recovery.
+          Every failing Keeper belongs to exactly one class, so these three
+          counts sum to the displayed failing count. The latter two require
+          action beyond repeating the same turn. *)
        let failing_entry =
          if fleet.fs_failing_count = 0 then []
          else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d)"
+           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
                fleet.fs_failing_count
                fleet.fs_recovering_count
                fleet.fs_turn_configuration_error_count
+               fleet.fs_official_client_recovery_required_count
            ]
        in
        let counts =

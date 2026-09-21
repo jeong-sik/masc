@@ -746,6 +746,16 @@ if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
   echo
   echo "[test-suite] a PASS line above is that suite's own verdict, not dune's exit code:" \
        "dune exited ${rc} somewhere this log does not name."
+  # The workflow half of this (not in this PR -- the lane token has no
+  # workflow scope; tracked in #37529) is one step and one env var, and
+  # they must land together or this message lies:
+  #
+  #   - name: Upload dune log
+  #     if: always()
+  #     uses: actions/upload-artifact@v4
+  #     with: { name: test-suite-log, path: ${{ runner.temp }}/test-suite.log }
+  #   env:
+  #     MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
   if [ -n "${MASC_TEST_SUITE_LOG_ARTIFACT:-}" ]; then
     echo "[test-suite] the full dune log is uploaded as the ${MASC_TEST_SUITE_LOG_ARTIFACT} artifact."
   else

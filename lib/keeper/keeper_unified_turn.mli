@@ -210,6 +210,7 @@ val continuation_channel_of_wake :
 
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)
+  -> execution_path:Keeper_unified_metrics_decision.execution_path
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> config:Workspace.config
@@ -239,6 +240,8 @@ val run_keeper_cycle
     4. Returns updated keeper_meta
 
     @param config Workspace configuration
+    @param execution_path Required provenance supplied by the admitting lane;
+    adding a caller cannot inherit an autonomous default.
     @param meta Current keeper metadata
     @param observation World state snapshot
     @param wake What triggered this turn (#16, 38-bug campaign PR-5):

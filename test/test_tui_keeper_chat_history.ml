@@ -573,6 +573,26 @@ let test_a_runtime_reported_interrupt_is_not_a_host_shutdown () =
     (String.equal interrupted (line host_shutdown))
 ;;
 
+let test_local_claim_refusal_is_not_a_runtime_interruption () =
+  let error =
+    Keeper_internal_error.Official_client_recovery_required
+      { runtime_id = "synthetic-runtime"
+      ; recovery_id = "synthetic-recovery"
+      ; reason = Keeper_internal_error.Effect_fenced
+      }
+  in
+  (* Exercise the shared typed decoder even though the human summary can be
+     rendered directly. The stored reason names an earlier fenced attempt. *)
+  let diagnostic =
+    Agent_core.Error.to_string
+      (Keeper_internal_error.core_error_of_masc_internal_error error)
+  in
+  check (option (pair string bool)) "local refusal has no current interruption badge"
+    None (History.present_delivery_failure diagnostic);
+  check (option (pair string bool)) "public failure row invents no interruption"
+    None (History.present_delivery_failure (persisted_failure_row error))
+;;
+
 (* The envelope does not have to end the row. A producer that appends anything
    after it used to make the whole row unreadable, and there is no substring
    fallback left to catch that. *)
@@ -2042,6 +2062,8 @@ let () =
             test_an_unfenced_stop_is_marked_recovered_by_a_later_reply
         ; test_case "a runtime-reported interrupt is not a host shutdown" `Quick
             test_a_runtime_reported_interrupt_is_not_a_host_shutdown
+        ; test_case "local claim refusal is not a runtime interruption" `Quick
+            test_local_claim_refusal_is_not_a_runtime_interruption
         ; test_case "text after the envelope does not hide the cause" `Quick
             test_text_after_the_envelope_does_not_hide_the_cause
         ; test_case "a cause two fences down keeps the host-shutdown badge" `Quick

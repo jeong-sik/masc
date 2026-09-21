@@ -1,36 +1,34 @@
 open Alcotest
 open Masc
 
-let remote_root = "/srv/masc/playground"
+let remote_workspace_root = "/srv/masc/playground/keeper-a"
 let base_path = "/workspace"
 let host_file = "/workspace/.masc/playground/keeper-a/src/main.ml"
 let remote_file = "/srv/masc/playground/keeper-a/src/main.ml"
 
 let test_host_to_remote () =
   check (result string string) "absolute host path" (Ok remote_file)
-    (Keeper_remote_path.host_to_remote ~base_path ~remote_root ~keeper:"keeper-a"
+    (Keeper_remote_path.host_to_remote ~base_path ~remote_workspace_root ~keeper:"keeper-a"
        host_file);
   check (result string string) "relative logical path" (Ok remote_file)
-    (Keeper_remote_path.host_to_remote ~base_path ~remote_root ~keeper:"keeper-a"
+    (Keeper_remote_path.host_to_remote ~base_path ~remote_workspace_root ~keeper:"keeper-a"
        "src/main.ml")
 ;;
 
 let test_remote_to_logical () =
   check string "relative logical path" "src/main.ml"
-    (Keeper_remote_path.remote_to_logical ~remote_root ~keeper:"keeper-a"
-       remote_file);
+    (Keeper_remote_path.remote_to_logical ~remote_workspace_root remote_file);
   check string "root" "."
-    (Keeper_remote_path.remote_to_logical ~remote_root ~keeper:"keeper-a"
+    (Keeper_remote_path.remote_to_logical ~remote_workspace_root
        "/srv/masc/playground/keeper-a");
   check string "outside unchanged" "/etc/passwd"
-    (Keeper_remote_path.remote_to_logical ~remote_root ~keeper:"keeper-a"
-       "/etc/passwd")
+    (Keeper_remote_path.remote_to_logical ~remote_workspace_root "/etc/passwd")
 ;;
 
 let test_jail_and_endpoint_isolation () =
   let outside = "/workspace/.masc/playground/keeper-b/src/main.ml" in
   let outside_result =
-    Keeper_remote_path.host_to_remote ~base_path ~remote_root ~keeper:"keeper-a"
+    Keeper_remote_path.host_to_remote ~base_path ~remote_workspace_root ~keeper:"keeper-a"
       outside
   in
   (match outside_result with
@@ -40,20 +38,23 @@ let test_jail_and_endpoint_isolation () =
        (String.starts_with ~prefix:"remote_ssh_path_jail_violation:" error));
   check (result string string) "different endpoint root"
     (Ok "/srv/other/playground/keeper-a/src/main.ml")
-    (Keeper_remote_path.host_to_remote ~base_path ~remote_root:"/srv/other/playground"
+    (Keeper_remote_path.host_to_remote ~base_path
+       ~remote_workspace_root:"/srv/other/playground/keeper-a"
        ~keeper:"keeper-a" host_file)
 ;;
 
-(* A guest work volume is just another remote root: the translation does
+(* A guest work volume contains another resolved workspace root: the translation does
    not know which transport reaches it. *)
 let test_guest_volume_root () =
   check (result string string) "host bookkeeping path lands on the volume"
     (Ok "/masc-work/keeper-a/src/main.ml")
-    (Keeper_remote_path.host_to_remote ~base_path ~remote_root:"/masc-work"
+    (Keeper_remote_path.host_to_remote ~base_path
+       ~remote_workspace_root:"/masc-work/keeper-a"
        ~keeper:"keeper-a" host_file);
   check string "volume path maps back to the logical path" "src/main.ml"
-    (Keeper_remote_path.remote_to_logical ~remote_root:"/masc-work"
-       ~keeper:"keeper-a" "/masc-work/keeper-a/src/main.ml")
+    (Keeper_remote_path.remote_to_logical
+       ~remote_workspace_root:"/masc-work/keeper-a"
+       "/masc-work/keeper-a/src/main.ml")
 ;;
 
 (* The remote namespace must not be resolved against the host filesystem: a
@@ -73,28 +74,30 @@ let test_host_symlink_does_not_rewrite_remote_paths () =
       Unix.symlink
         (Filename.concat tmp "target")
         (Filename.concat tmp "link");
-      let linked_root = Filename.concat tmp "link/playground" in
+      let linked_workspace_root = Filename.concat tmp "link/playground/keeper-a" in
       check (result string string) "host symlink not substituted"
-        (Ok (linked_root ^ "/keeper-a/src/main.ml"))
-        (Keeper_remote_path.host_to_remote ~base_path ~remote_root:linked_root
+        (Ok (linked_workspace_root ^ "/src/main.ml"))
+        (Keeper_remote_path.host_to_remote ~base_path
+           ~remote_workspace_root:linked_workspace_root
            ~keeper:"keeper-a" host_file);
       check string "remote output maps back through the symlink form"
         "src/main.ml"
-        (Keeper_remote_path.remote_to_logical ~remote_root:linked_root
-           ~keeper:"keeper-a" (linked_root ^ "/keeper-a/src/main.ml")))
+        (Keeper_remote_path.remote_to_logical
+           ~remote_workspace_root:linked_workspace_root
+           (linked_workspace_root ^ "/src/main.ml")))
 ;;
 
 let test_relative_dot_segments () =
   check (result string string) "dot-segment cleanup stays lexical"
     (Ok remote_file)
-    (Keeper_remote_path.host_to_remote ~base_path ~remote_root ~keeper:"keeper-a"
+    (Keeper_remote_path.host_to_remote ~base_path ~remote_workspace_root ~keeper:"keeper-a"
        "./src/../src/main.ml");
   check (result string string) "bare dot is the keeper root"
     (Ok "/srv/masc/playground/keeper-a")
-    (Keeper_remote_path.host_to_remote ~base_path ~remote_root ~keeper:"keeper-a"
+    (Keeper_remote_path.host_to_remote ~base_path ~remote_workspace_root ~keeper:"keeper-a"
        ".");
   (match
-     Keeper_remote_path.host_to_remote ~base_path ~remote_root ~keeper:"keeper-a"
+     Keeper_remote_path.host_to_remote ~base_path ~remote_workspace_root ~keeper:"keeper-a"
        "src/../../escape"
    with
    | Ok path -> failf "escaping relative path translated to %s" path
@@ -106,15 +109,15 @@ let test_relative_dot_segments () =
 let test_rewrite_output_and_chunk_boundary () =
   let expected = "error: " ^ host_file ^ ":12\n" in
   check string "absolute remote output becomes host logical" expected
-    (Keeper_remote_path.rewrite_output ~base_path ~remote_root ~keeper:"keeper-a"
+    (Keeper_remote_path.rewrite_output ~base_path ~remote_workspace_root ~keeper:"keeper-a"
        ("error: " ^ remote_file ^ ":12\n"));
   check string "sibling prefix untouched"
     "/srv/masc/playground/keeper-a-copy/main.ml"
-    (Keeper_remote_path.rewrite_output ~base_path ~remote_root ~keeper:"keeper-a"
+    (Keeper_remote_path.rewrite_output ~base_path ~remote_workspace_root ~keeper:"keeper-a"
        "/srv/masc/playground/keeper-a-copy/main.ml");
   let out = Buffer.create 64 in
   let stream =
-    Keeper_remote_path.stream ~base_path ~remote_root ~keeper:"keeper-a"
+    Keeper_remote_path.stream ~base_path ~remote_workspace_root ~keeper:"keeper-a"
       ~emit:(Buffer.add_string out)
   in
   Keeper_remote_path.rewrite_stream_chunk stream "error: /srv/masc/play";
@@ -136,11 +139,12 @@ let test_large_chunk_allocates_linearly () =
   let line = "at " ^ remote_file ^ ":7 in keeper-a-copy/x.ml, then some prose\n" in
   let chunk = String.concat "" (List.init 2_000 (fun _ -> line)) in
   let expected =
-    Keeper_remote_path.rewrite_output ~base_path ~remote_root ~keeper:"keeper-a" chunk
+    Keeper_remote_path.rewrite_output ~base_path ~remote_workspace_root
+      ~keeper:"keeper-a" chunk
   in
   let out = Buffer.create (String.length chunk) in
   let stream =
-    Keeper_remote_path.stream ~base_path ~remote_root ~keeper:"keeper-a"
+    Keeper_remote_path.stream ~base_path ~remote_workspace_root ~keeper:"keeper-a"
       ~emit:(Buffer.add_string out)
   in
   let before = Gc.minor_words () in

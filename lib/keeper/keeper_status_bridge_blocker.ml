@@ -35,6 +35,9 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
   | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
     Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
+  (* Preserve the pre-existing Config-error policy: this local refusal is
+     observed through the registry, not a new durable supervisor blocker. *)
+  | Some (Keeper_turn_driver.Official_client_recovery_required _) -> None
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   (* RFC-0159 follow-up (task-194): typed [Internal_*] variants now map to
@@ -239,6 +242,11 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                code
                detail
          })
+  | Keeper_registry.Official_client_recovery_required recovery ->
+    Some
+      { blocker_class = "official_client_recovery_required"
+      ; summary = Keeper_internal_error.official_client_recovery_summary recovery
+      }
   | Keeper_registry.Turn_configuration_error { code; field; detail } ->
     Some
       { blocker_class = "turn_configuration_error"

@@ -73,9 +73,25 @@ val create_session : session_id:string -> base_dir:string -> session_context
 (** {1 JSONL persistence} *)
 
 (** Append [msg] to the keeper's history JSONL, choosing
-    [history.jsonl] / [history.internal.jsonl] from [source]. *)
+    [history.jsonl] / [history.internal.jsonl] from [source]. The line names
+    the turn that wrote it ([turn_ref]). *)
 val persist_message :
-  ?source:string -> session_context -> Agent_core.Types.message -> unit
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  ?source:string ->
+  session_context ->
+  Agent_core.Types.message ->
+  unit
+
+(** Append one tool observation (canonical name, outcome) for [turn_ref] to
+    [history.internal.jsonl]. *)
+val persist_tool_observation :
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  session_context ->
+  tool_name:string ->
+  outcome:Tool_result.tool_call_outcome ->
+  unit
 
 type 'persistence_error checkpoint_write_error =
   | Tool_history_invalid of Keeper_transcript_unit.structural_error

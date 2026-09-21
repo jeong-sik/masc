@@ -75,6 +75,23 @@ export interface KeeperMemoryHealthLibrarian {
   last_failure_kind: string | null
 }
 
+export interface ContextFrontier {
+  trace_id: string
+  end_atom: number
+  boundary_line: number
+}
+export interface ContextCycle {
+  saved: ContextFrontier | null
+  saved_read_error: 'snapshot_unreadable' | null
+  prepared: {
+    prepared_at: number
+    runtime_id: string
+    input: { kind: 'summarized'; frontier: ContextFrontier }
+      | { kind: 'uncompressed' | 'not_applied'; frontier: null }
+    request_bytes: number
+  } | null
+}
+
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
@@ -88,6 +105,7 @@ export interface KeeperMemoryHealthKeeperEntry {
   removed: number
   snapshot_present: boolean
   librarian: KeeperMemoryHealthLibrarian
+  context_cycle: ContextCycle
   librarian_failures: number
   vision_ingest_errors: number
   vision_ingest_error_reasons: KeeperMemoryHealthVisionErrorReason[]
@@ -102,7 +120,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v5'
+  schema: 'keeper.memory_os.current_health.v6'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -265,6 +283,44 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
   }
 }
 
+function decodeContextFrontier(raw: unknown): ContextFrontier | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['trace_id', 'end_atom', 'boundary_line'])) return null
+  const trace_id = nonEmptyString(raw.trace_id)
+  const end_atom = nonNegativeInteger(raw.end_atom)
+  const boundary_line = nonNegativeInteger(raw.boundary_line)
+  if (trace_id === null || end_atom === null || end_atom === 0
+    || boundary_line === null || boundary_line === 0) return null
+  return { trace_id, end_atom, boundary_line }
+}
+
+function decodeContextCycle(raw: unknown): ContextCycle | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['saved', 'saved_read_error', 'prepared'])) return null
+  const saved = raw.saved === null ? null : decodeContextFrontier(raw.saved)
+  if (raw.saved !== null && saved === null) return null
+  if (raw.saved_read_error !== null && raw.saved_read_error !== 'snapshot_unreadable') return null
+  if (saved !== null && raw.saved_read_error !== null) return null
+  const result: ContextCycle = { saved, saved_read_error: raw.saved_read_error, prepared: null }
+  if (raw.prepared === null) return result
+  const p = raw.prepared
+  if (!isRecord(p) || !exactKeys(p, ['prepared_at', 'runtime_id', 'input', 'request_bytes'])) return null
+  const prepared_at = finiteNumber(p.prepared_at)
+  const runtime_id = nonEmptyString(p.runtime_id)
+  const request_bytes = nonNegativeInteger(p.request_bytes)
+  if (prepared_at === null || prepared_at < 0 || runtime_id === null || request_bytes === null) return null
+  if (!isRecord(p.input) || !exactKeys(p.input, ['kind', 'frontier'])) return null
+  let input: NonNullable<ContextCycle['prepared']>['input']
+  if (p.input.kind === 'summarized') {
+    const frontier = decodeContextFrontier(p.input.frontier)
+    if (frontier === null) return null
+    input = { kind: 'summarized', frontier }
+  } else if ((p.input.kind === 'uncompressed' || p.input.kind === 'not_applied')
+    && p.input.frontier === null) {
+    input = { kind: p.input.kind, frontier: null }
+  } else return null
+  result.prepared = { prepared_at, runtime_id, input, request_bytes }
+  return result
+}
+
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
   if (!isRecord(raw) || !exactKeys(raw, [
     'keeper_id',
@@ -279,6 +335,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'removed',
     'snapshot_present',
     'librarian',
+    'context_cycle',
     'librarian_failures',
     'vision_ingest_errors',
     'vision_ingest_error_reasons',
@@ -304,6 +361,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const snapshot_present = typeof raw.snapshot_present === 'boolean'
     ? raw.snapshot_present
     : null
+  const context_cycle = decodeContextCycle(raw.context_cycle)
   const librarian = decodeKeeperMemoryHealthLibrarian(raw.librarian)
   const librarian_failures = nonNegativeInteger(raw.librarian_failures)
   const vision_ingest_errors = nonNegativeInteger(raw.vision_ingest_errors)
@@ -339,6 +397,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || (raw.updated_at !== null && updated_at === null)
     || (updated_at !== null && updated_at < 0)
     || (updated_at !== null) !== snapshot_present
+    || context_cycle === null
     || librarian === null
     || librarian_failures === null
     || vision_ingest_errors === null
@@ -372,6 +431,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     removed,
     snapshot_present,
     librarian,
+    context_cycle,
     librarian_failures,
     vision_ingest_errors,
     vision_ingest_error_reasons: visionReasons,
@@ -394,7 +454,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'totals',
     'alert_summary',
   ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v5') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v6') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

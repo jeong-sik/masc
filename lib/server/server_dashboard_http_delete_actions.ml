@@ -510,6 +510,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
      [request_cancel] only accepts a request from the lane's owner domain. *)
   let remove_artifacts () =
     Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
+    Keeper_continuity_observation.forget ~config ~keeper_name;
     let artifacts =
       Keeper_shutdown_types.dashboard_purge_artifact_plan
         ~keeper_name:keeper_name

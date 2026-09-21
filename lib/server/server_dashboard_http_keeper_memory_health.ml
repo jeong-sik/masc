@@ -23,6 +23,43 @@ type librarian_health =
           committed. *)
   }
 
+type context_cycle =
+  { saved : Keeper_continuity_observation.frontier option
+  ; saved_read_error : string option
+  ; prepared : Keeper_continuity_observation.t option
+  }
+
+let context_cycle ~config ~keeper_name =
+  let saved, saved_read_error =
+    match Keeper_librarian_continuity.read ~config ~keeper_name with
+    | Ok None -> None, None
+    | Ok (Some snapshot) ->
+      Some { Keeper_continuity_observation.trace_id = snapshot.trace_id;
+        end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }, None
+    | Error _ -> None, Some "snapshot_unreadable"
+  in
+  { saved; saved_read_error;
+    prepared = Keeper_continuity_observation.latest ~config ~keeper_name }
+;;
+
+let context_cycle_to_json cycle =
+  let frontier (value : Keeper_continuity_observation.frontier) =
+    `Assoc ["trace_id", `String value.trace_id; "end_atom", `Int value.end_atom;
+      "boundary_line", `Int value.boundary_line] in
+  let nullable encode = function None -> `Null | Some value -> encode value in
+  let prepared (value : Keeper_continuity_observation.t) =
+    let kind, saved_frontier = match value.input with
+      | Keeper_continuity_observation.Summarized value -> "summarized", Some value
+      | Uncompressed -> "uncompressed", None
+      | Not_applied -> "not_applied", None in
+    `Assoc ["prepared_at", `Float value.prepared_at; "runtime_id", `String value.runtime_id;
+      "request_bytes", `Int value.request_bytes;
+      "input", `Assoc ["kind", `String kind; "frontier", nullable frontier saved_frontier]] in
+  `Assoc ["saved", nullable frontier cycle.saved;
+    "saved_read_error", nullable (fun value -> `String value) cycle.saved_read_error;
+    "prepared", nullable prepared cycle.prepared]
+;;
+
 type keeper_health =
   { keeper_id : string
   ; revision : int
@@ -35,6 +72,7 @@ type keeper_health =
   ; added : int
   ; removed : int
   ; snapshot_present : bool
+  ; context_cycle : context_cycle
   ; librarian : librarian_health
   ; librarian_failures : int
   ; vision_ingest_errors : int
@@ -235,6 +273,7 @@ let source_health ~keepers_dir keeper_id =
 ;;
 let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
+  let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
   let librarian ~snapshot = librarian_health ~config ~keepers_dir keeper_id ~snapshot in
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
@@ -251,6 +290,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; added = 0
     ; removed = 0
     ; snapshot_present = false
+    ; context_cycle
     ; librarian = librarian ~snapshot:None
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
@@ -285,6 +325,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; added = List.length snapshot.change.added
     ; removed = List.length snapshot.change.removed
     ; snapshot_present = true
+    ; context_cycle
     ; librarian = librarian ~snapshot:(Some snapshot)
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
@@ -310,6 +351,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; added = 0
     ; removed = 0
     ; snapshot_present = false
+    ; context_cycle
     ; librarian = librarian ~snapshot:None
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
@@ -460,6 +502,7 @@ let keeper_health_entry_to_json (h : keeper_health) =
     ; "added", `Int h.added
     ; "removed", `Int h.removed
     ; "snapshot_present", `Bool h.snapshot_present
+    ; "context_cycle", context_cycle_to_json h.context_cycle
     ; ( "librarian"
       , `Assoc
           [ ( "state"
@@ -541,7 +584,7 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v5"
+    [ "schema", `String "keeper.memory_os.current_health.v6"
     ; "generated_at", `Float generated_at
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"

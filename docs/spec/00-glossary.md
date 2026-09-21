@@ -466,8 +466,10 @@ status: reference
   한 파일. 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
   Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
   저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
-  현재는 `masc-librarian-continuity capture/restore`의 저장·복원 검증에 사용한다.
-  운영 요청의 History 절단이나 모델 생성 설명의 정확성을 승인하지 않는다.
+  Agent Core는 저장본을 검증한 뒤, 완료된 원문 구간 대신 하던 일을 다음
+  요청에 전달한다. 원본 checkpoint는 보존한다. 저장 완료와 요청에 사용한
+  상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
+  `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 
 **Working Context**

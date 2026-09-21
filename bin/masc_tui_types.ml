@@ -8080,9 +8080,10 @@ let memory_overview_scrolled ?cursor (state : state) =
     match List.nth_opt keepers (max 0 (min cursor (count - 1))) with
     | None -> 0
     | Some keeper ->
-        (* Divider, snapshot, facts, source, Librarian and Vision, then the
+        (* Divider, snapshot, facts, source, Librarian, saved/prepared context
+           and Vision, then the
            selected keeper's read errors and server alerts. *)
-        6 + List.length keeper.mkh_alerts
+        9 + List.length keeper.mkh_alerts
         + (if Option.is_some keeper.mkh_read_error then 1 else 0)
         + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
   in

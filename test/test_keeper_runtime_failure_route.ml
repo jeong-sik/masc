@@ -617,10 +617,6 @@ let test_route_resumes_on_same_path_per_class () =
     ; "end turn", retry (empty_completion Agent_core.Types.EndTurn)
     ; "max tokens", retry (empty_completion Agent_core.Types.MaxTokens)
     ; "stop sequence", retry (empty_completion Agent_core.Types.StopSequence)
-    ; "refusal", retry (empty_completion Agent_core.Types.Refusal)
-    ; "content filter", retry (empty_completion Agent_core.Types.ContentFilter)
-    ; ( "repetition truncation"
-      , retry (empty_completion Agent_core.Types.RepetitionTruncation) )
     ; "", retry KFR.Server_error
     ; "", retry KFR.Network_transient
     ; "", retry KFR.Provider_timeout
@@ -629,6 +625,10 @@ let test_route_resumes_on_same_path_per_class () =
   List.iter
     (check_resumes false)
     [ "without a reset", retry KFR.Hard_quota
+    ; "refusal", retry (empty_completion Agent_core.Types.Refusal)
+    ; "content filter", retry (empty_completion Agent_core.Types.ContentFilter)
+    ; ( "repetition truncation"
+      , retry (empty_completion Agent_core.Types.RepetitionTruncation) )
     ; "tool use", retry (empty_completion Agent_core.Types.StopToolUse)
     ; "pause turn", retry (empty_completion Agent_core.Types.PauseTurn)
     ; "compaction", retry (empty_completion Agent_core.Types.Compaction)

@@ -542,9 +542,7 @@ let route_resumes_on_same_path = function
      | Empty_completion
          { stop_reason =
              ( Llm_provider.Types.EndTurn | Llm_provider.Types.MaxTokens
-             | Llm_provider.Types.StopSequence | Llm_provider.Types.Refusal
-             | Llm_provider.Types.ContentFilter
-             | Llm_provider.Types.RepetitionTruncation )
+             | Llm_provider.Types.StopSequence )
          }
      (* A direct operation that saved tool results resumes once from that
         checkpoint rather than discarding the work. If the empty answer
@@ -559,12 +557,17 @@ let route_resumes_on_same_path = function
        true
      | Empty_completion
          { stop_reason =
-             ( Llm_provider.Types.StopToolUse | Llm_provider.Types.PauseTurn
+             ( Llm_provider.Types.Refusal | Llm_provider.Types.ContentFilter
+             | Llm_provider.Types.RepetitionTruncation
+             | Llm_provider.Types.StopToolUse | Llm_provider.Types.PauseTurn
              | Llm_provider.Types.Compaction
              | Llm_provider.Types.ContextWindowExceeded
              | Llm_provider.Types.UnmatchedToolCalls | Llm_provider.Types.Unknown _ )
          } ->
-       (* [PauseTurn] and [Compaction] require replaying the provider's actual
+       (* Refusal, content filtering, and repetition truncation are
+          deterministic for the same input, matching
+          [Refusal_body_not_received] and [Generation_repeated] below.
+          [PauseTurn] and [Compaction] require replaying the provider's actual
           assistant response. An [EmptyCompletion] error carries no response
           content, so replaying the pre-response checkpoint is not that
           continuation. Context overflow and unknown reasons normally become

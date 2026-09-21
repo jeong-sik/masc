@@ -217,18 +217,20 @@ val route_resumes_on_same_path : route -> bool
     on that same path (RFC last-path-resumes-after-progress §3.3).
 
     [true]: [Rate_limited], [Capacity_backpressure], [Empty_completion] with
-    [EndTurn], [MaxTokens], [StopSequence], [Refusal], [ContentFilter], or
-    [RepetitionTruncation], [Server_error], [Network_transient],
-    [Provider_timeout], and [Hard_quota] with a usable reset hint (positive,
-    not NaN). The empty-completion reasons resume a direct operation once so
-    its saved tool results are not discarded; another resume still requires
-    a newly saved tool result.
+    [EndTurn], [MaxTokens], or [StopSequence], [Server_error],
+    [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
+    reset hint (positive, not NaN). The empty-completion reasons resume a
+    direct operation once so its saved tool results are not discarded; another
+    resume still requires a newly saved tool result.
 
-    [false]: [Empty_completion] with [StopToolUse], [PauseTurn], [Compaction],
-    [ContextWindowExceeded], [UnmatchedToolCalls], or [Unknown _],
-    [Hard_quota] without a reset, every rotation, and every terminal class.
-    [PauseTurn] and [Compaction] need the provider's assistant response to
-    continue; an empty completion error carries no such response, so replaying
-    its pre-response checkpoint is not a valid continuation. How long the path
-    rests is not read here: the chat lane's wait follows the rest recorded on
-    the path. *)
+    [false]: [Empty_completion] with [Refusal], [ContentFilter],
+    [RepetitionTruncation], [StopToolUse], [PauseTurn], [Compaction],
+    [ContextWindowExceeded], [UnmatchedToolCalls], or [Unknown _]. The first
+    three are deterministic for the same input, matching
+    [Refusal_body_not_received] and [Generation_repeated]. [PauseTurn] and
+    [Compaction] need the provider's assistant response to continue; an empty
+    completion error carries no such response, so replaying its pre-response
+    checkpoint is not a valid continuation. [Hard_quota] without a reset,
+    every rotation, and every terminal class are also [false]. How long the
+    path rests is not read here: the chat lane's wait follows the rest recorded
+    on the path. *)

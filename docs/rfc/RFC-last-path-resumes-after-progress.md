@@ -159,8 +159,8 @@ match 해, 도구를 실행한 stage 일 때만 새 관측값을 켠다. 이 관
 | `Retry_after_observed { Rate_limited; retry_after }` | 예 | 공급자가 시간이 지나면 푸는 제한. 주간 한도를 429 로 보내는 공급자도 있다(`provider-path-rest` §4). 그 경우 진전 없이 한 번 더 실패하고 끝난다 |
 | `Retry_after_observed { Capacity_backpressure; _ }` | 예 | 공급자나 masc 슬롯의 일시 과부하 |
 | `Retry_after_observed { Server_error; _ }` | 예 | 5xx, 공급자 일시 장애 |
-| `Retry_after_observed { Empty_completion { stop_reason }; _ }`에서 `EndTurn`, `MaxTokens`, `StopSequence`, `Refusal`, `ContentFilter`, `RepetitionTruncation` | 예 | 저장된 도구 결과를 버리지 않고 체크포인트에서 한 번 재개한다. 다시 빈 응답이 오면 새 도구 결과가 없으므로 다음 재개는 성립하지 않는다 |
-| `Retry_after_observed { Empty_completion { stop_reason }; _ }`에서 `StopToolUse`, `PauseTurn`, `Compaction`, `ContextWindowExceeded`, `UnmatchedToolCalls`, `Unknown _` | 아니오 | provider 응답을 이어 보내거나 context·tool protocol을 별도로 복구해야 한다. 빈 응답 오류에는 그 복구에 필요한 내용이 없다 |
+| `Retry_after_observed { Empty_completion { stop_reason }; _ }`에서 `EndTurn`, `MaxTokens`, `StopSequence` | 예 | 저장된 도구 결과를 버리지 않고 체크포인트에서 한 번 재개한다. 다시 빈 응답이 오면 새 도구 결과가 없으므로 다음 재개는 성립하지 않는다 |
+| `Retry_after_observed { Empty_completion { stop_reason }; _ }`에서 `Refusal`, `ContentFilter`, `RepetitionTruncation`, `StopToolUse`, `PauseTurn`, `Compaction`, `ContextWindowExceeded`, `UnmatchedToolCalls`, `Unknown _` | 아니오 | 앞의 세 사유는 같은 입력에서 같은 결과가 난다. 나머지는 provider 응답을 이어 보내거나 context·tool protocol을 별도로 복구해야 하며, 빈 응답 오류에는 그 복구에 필요한 내용이 없다 |
 | `Retry_after_observed { Network_transient; _ }` | 예 | 전송 계층 끊김 |
 | `Retry_after_observed { Provider_timeout; _ }` | 예 | 마감 초과 |
 | `Retry_after_observed { Hard_quota; retry_after = Some _ }` | 예 | 공급자가 리셋 시각을 말했다. `path_rest_sec` 과 `note_quota` 도 이 시각을 쓴다 |

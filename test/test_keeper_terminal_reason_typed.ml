@@ -171,6 +171,26 @@ let () =
     roundtrip_corpus
 ;;
 
+let authorization_wires =
+  [ "api_error_auth"
+  ; "api_error_authorization"
+  ; "provider_error_auth"
+  ; "provider_error_authorization"
+  ]
+;;
+
+let () =
+  List.iter
+    (fun wire ->
+       match Tr.of_wire wire with
+       | Tr.Authorization_refused carried ->
+         check
+           (Printf.sprintf "authorization priority: %S" wire)
+           (String.equal carried wire)
+       | _ -> check (Printf.sprintf "authorization priority: %S" wire) false)
+    authorization_wires
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 2. (disposition, reason) equivalence vs an independent strict-wire *)
 (*    oracle.                                                           *)

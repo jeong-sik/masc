@@ -1627,6 +1627,7 @@ let remove_retraction_plan_receipt ~keepers_dir ~keeper_id =
   match Sys.remove path with
   | () -> Ok ()
   | exception Sys_error _ when not (Sys.file_exists path) -> Ok ()
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Error
       (Printf.sprintf
@@ -2497,7 +2498,7 @@ let retract_facts
       ~expected_revision
       ~expected_snapshot_sha256
       ~now
-      ~source
+      ~(source : source)
       retractions
   =
   let rec validate index seen = function

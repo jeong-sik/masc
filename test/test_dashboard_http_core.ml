@@ -4818,6 +4818,17 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
+let test_config_patch_input_policy () =
+  let meta = shrink_base_meta () in
+  List.iter (fun wire ->
+    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", `String wire] with
+    | Ok () -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
+  List.iter (fun value ->
+    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", value] with
+    | Error _ -> () | Ok () -> Alcotest.fail "invalid config policy accepted")
+    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
+;;
+
 let test_config_patch_accepts_typed_skills () =
   let meta = shrink_base_meta () in
   let validate fields =
@@ -5937,7 +5948,7 @@ let test_tool_calls_select_keeper_before_limiting () =
       let append keeper index =
         Masc.Keeper_tool_call_log.log_call ~keeper_name:keeper
           ~tool_name:"keeper_lane_status" ~input:(`Assoc ["index", `Int index])
-          ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
+          ~output_text:(string_of_int index) ~wire_outcome:Tool_result.Ok ~duration_ms:1. () in
       for index = 1 to 100 do append "target" index done;
       for index = 1 to 1001 do append "busy-neighbor" index done;
       let entries = tool_call_entries_exn
@@ -6344,6 +6355,7 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
+          test_case "config patch input policy" `Quick test_config_patch_input_policy;
           test_case "config patch shape-checks remote_endpoint" `Quick
             test_config_patch_remote_endpoint_shape;
           test_case "config POST atomically restarts runtime" `Quick

@@ -6,7 +6,7 @@ import { ChatEditEvidence } from './edit-evidence'
 
 afterEach(cleanup)
 const receipt: ToolCallEntry = {
-  ts: 1, keeper: 'writer', tool: 'Edit', success: true, duration_ms: 3,
+  ts: 1, keeper: 'writer', tool: 'Edit', wire_outcome: 'ok', duration_ms: 3,
   input: { old_string: 'old\nparagraph', new_string: '<b>new</b>\nparagraph' },
   output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 2 }),
   route_evidence: { descriptor_id: 'agent.edit_file' },
@@ -58,7 +58,7 @@ describe('recorded chat edit', () => {
   })
   it.each([
     null,
-    { ...receipt, success: false },
+    { ...receipt, wire_outcome: 'error' },
     { ...receipt, route_evidence: undefined },
     { ...receipt, output: '{truncated' },
     { ...receipt, output: '{"ok":true,"approval_pending":true}' },

@@ -381,8 +381,9 @@ export type {
   ToolCallRuntimeContract,
   ToolCallActionRadius,
   ToolCallRouteEvidence,
+  ToolCallWireOutcome,
 } from './dashboard-keeper-tool-calls'
-export { fetchKeeperToolCalls } from './dashboard-keeper-tool-calls'
+export { fetchKeeperToolCalls, toolCallCompletion } from './dashboard-keeper-tool-calls'
 
 // ── Keeper turn records (RFC-0233 PR-4) ─────────────────
 

@@ -1633,7 +1633,7 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check bool) "starts in the work root" true
       (adjacent ~flag:"-w" ~value:M.work_volume_guest_root argv);
     Alcotest.(check string) "keeper root is on the work volume" "/masc-work/lane-smith"
-      (Masc.Keeper_sandbox_remote.remote_keeper_root endpoint);
+      (Masc.Keeper_sandbox_remote.workspace_root endpoint);
     Alcotest.(check string) "endpoint is named after the guest" container_name
       (Masc.Keeper_sandbox_remote.name endpoint);
     let injected = Masc.Keeper_sandbox_remote.injected_env endpoint in

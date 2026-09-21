@@ -121,7 +121,11 @@ let assignment_target (default : Runtime.t option) (keeper_name : string)
   =
   match Runtime.runtime_id_for_keeper keeper_name with
   | Some id when String.trim id <> "" -> "explicit", Some (String.trim id)
-  | Some _ | None -> "default", Option.map (fun (rt : Runtime.t) -> rt.id) default
+  | Some _ | None ->
+    (* The route the default names, which is what [resolve_assignment] is given
+       for a keeper with no assignment; [default] is only the runtime it enters
+       on. *)
+    "default", Option.map (fun (_ : Runtime.t) -> Runtime.get_default_route ()) default
 ;;
 
 let assignment_json (default : Runtime.t option) (keeper_name : string) : Yojson.Safe.t =
@@ -183,6 +187,13 @@ let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
         | Some rt -> runtime_resolution_json rt
         | None -> `Null )
     ; "runtimes", `List (List.map runtime_resolution_json (Runtime.get_runtimes ()))
+      (* [\[runtime\].media_failover] is a route, not a lane: no keeper turn
+         dispatches to it, and it has no table of its own. Keep both the active
+         fleet and the file's declaration so an operator can distinguish a
+         rejected entry without losing its position when rewriting the route. *)
+    ; "media_failover", Json_util.json_string_list (Runtime.media_failover ())
+    ; ( "media_failover_declared"
+      , Json_util.json_string_list (Runtime.declared_media_failover ()) )
     ; "lanes", `List (List.map lane_json (dispatchable_lanes ~config default))
     ; ( "assignments"
       , `List (List.map (assignment_json default) (all_keeper_names ~config)) )

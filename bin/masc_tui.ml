@@ -7458,7 +7458,8 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
   let written =
     match pick with
     | Masc_tui_types.Pick_exact_lane _ -> Masc_tui_types.Standalone_lanes_list
-    | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _ ->
+    | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _
+    | Masc_tui_types.Pick_media_failover | Masc_tui_types.Pick_route_default ->
         Masc_tui_types.Runtime_surface_list
   in
   if Masc_tui_types.runtime_lane_write_busy state then
@@ -7470,9 +7471,15 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     match pick, Masc_tui_types.runtime_lane_candidate_write_refusal state with
     | Masc_tui_types.Pick_conversation_lane _, Some notice ->
         state.runtime_lane_notice <- Some notice
+    | Masc_tui_types.Pick_route_default, _ ->
+        (* One entry, replaced rather than joined, so [existing] is not a list
+           this write extends and a stale reading of it cannot be undone. *)
+        launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
+          Masc_tui_http.set_runtime_default ~host ~port ~runtime_id:(Some runtime_id))
     | Masc_tui_types.Pick_conversation_lane _, None
-    | (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_new_lane _),
-      (None | Some _) ->
+    | ( ( Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_new_lane _
+        | Masc_tui_types.Pick_media_failover )
+      , (None | Some _) ) ->
         (* Exact lanes append one slot to the server's current order. A new
            lane sends only the pick. Neither operation rewrites a stale list;
            only the conversation-lane arm above sends [existing] in full. *)
@@ -7495,8 +7502,49 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
                 Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
             | Masc_tui_types.Pick_new_lane lane ->
                 Masc_tui_http.create_runtime_lane ~host ~port ~lane
-                  ~runtime_ids:[ runtime_id ])
+                  ~runtime_ids:[ runtime_id ]
+            | Masc_tui_types.Pick_media_failover ->
+                Masc_tui_http.set_media_failover ~host ~port
+                  ~runtime_ids:(existing @ [ runtime_id ])
+            | Masc_tui_types.Pick_route_default ->
+                (* Answered by its own arm above, which does not reach here. *)
+                Masc_tui_http.set_runtime_default ~host ~port
+                  ~runtime_id:(Some runtime_id))
 ;;
+
+(* Apply a slot-editor key. The plan decides; this only sends it. An exact
+   lane's edits name one slot and let the writer read the declared order under
+   its lock; the media_failover route has no per-entry action, so its whole
+   order is sent -- which the plan allows only while boot dropped none of it. *)
+let handle_slot_edit state ~mailbox edit =
+  match Masc_tui_types.plan_slot_edit state edit with
+  | Masc_tui_types.Refuse_slot_edit notice -> state.runtime_lane_notice <- Some notice
+  | Masc_tui_types.Send_slot_write { target; slot; request; cursor_after } ->
+      Masc_tui_types.dismiss_runtime_lane_notice state;
+      state.runtime_lane_cursor_after_write <- cursor_after;
+      let written =
+        match target with
+        | Masc_tui_types.Exact_lane_slots _ -> Masc_tui_types.Standalone_lanes_list
+        | Masc_tui_types.Media_failover_slots -> Masc_tui_types.Runtime_surface_list
+      in
+      launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
+        match request, target with
+        | Masc_tui_types.Drop_declared_slot, Masc_tui_types.Exact_lane_slots lane ->
+            Masc_tui_http.drop_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+        | Masc_tui_types.Move_declared_slot move, Masc_tui_types.Exact_lane_slots lane ->
+            Masc_tui_http.move_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+              ~move:
+                (match move with
+                 | Masc_tui_types.Move_up -> Masc_tui_http.Move_slot_up
+                 | Masc_tui_types.Move_down -> Masc_tui_http.Move_slot_down)
+        | Masc_tui_types.Write_route_order order, Masc_tui_types.Media_failover_slots ->
+            Masc_tui_http.set_media_failover ~host ~port ~runtime_ids:order
+        | ( (Masc_tui_types.Drop_declared_slot | Masc_tui_types.Move_declared_slot _)
+          , Masc_tui_types.Media_failover_slots )
+        | Masc_tui_types.Write_route_order _, Masc_tui_types.Exact_lane_slots _ ->
+            (* [plan_slot_edit] pairs each request with its target; this arm
+               is the pairing the plan does not produce. *)
+            Error "the slot editor built a write its target does not take")
 
 let launch_runtime_catalog_load state ~mailbox =
   let host = server_peer_host in
@@ -7524,8 +7572,12 @@ let launch_runtime_catalog_load state ~mailbox =
    in use is refused there, with the reason drawn on the refusal row. *)
 let handle_runtime_lane_edit state ~mailbox edit =
   match Masc_tui_types.plan_runtime_lane_edit state edit with
+  | Masc_tui_types.Open_lane_rename_field lane ->
+      state.runtime_lane_name_draft <-
+        Some (Masc_tui_types.Renaming_lane { lane; draft = lane });
+      Masc_tui_types.dismiss_runtime_lane_notice state
   | Masc_tui_types.Open_lane_name_field ->
-      state.runtime_lane_name_draft <- Some "";
+      state.runtime_lane_name_draft <- Some (Masc_tui_types.Naming_new_lane "");
       Masc_tui_types.dismiss_runtime_lane_notice state;
       launch_runtime_catalog_load state ~mailbox
   | Masc_tui_types.Arm_lane_removal lane ->
@@ -14526,7 +14578,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok () ->
            state.runtime_lane_pick <- None;
            state.runtime_lane_pick_cursor <- 0;
-           Option.iter (fun row -> state.runtime_cursor <- row) cursor_after;
+           Option.iter
+             (fun row ->
+                match written, state.slot_editor with
+                | Masc_tui_types.Standalone_lanes_list, Some editor ->
+                    (* The slot editor's own cursor. A conversation-lane write
+                       moves the Runtime cursor instead, and an append moves
+                       neither. *)
+                    state.slot_editor <-
+                      Some { editor with Masc_tui_types.se_cursor = row }
+                | Masc_tui_types.Standalone_lanes_list, None
+                | Masc_tui_types.Runtime_surface_list, _ ->
+                    state.runtime_cursor <- row)
+             cursor_after;
            (match written with
             | Masc_tui_types.Runtime_surface_list ->
                 launch_runtime_surface_load state ~mailbox ~force:true
@@ -17299,8 +17363,11 @@ and is loaded on demand through keeper_skill.
                     (Option.value state.preset_save_draft ~default:"" ^ text)
             | Some Text_runtime_lane_name ->
                 state.runtime_lane_name_draft <-
-                  Some
-                    (Option.value state.runtime_lane_name_draft ~default:"" ^ text)
+                  Option.map
+                    (fun entry ->
+                      Masc_tui_types.lane_name_entry_with_draft entry
+                        (Masc_tui_types.lane_name_entry_draft entry ^ text))
+                    state.runtime_lane_name_draft
             (* The first paste replaces the selected current value; later
                pastes append, matching typed input. *)
             | Some Text_runtime_param ->
@@ -17875,23 +17942,36 @@ and is loaded on demand through keeper_skill.
               = Some Text_runtime_lane_name ->
            (match state.runtime_lane_name_draft with
             | None -> ()
-            | Some draft ->
+            | Some entry ->
+              let draft = Masc_tui_types.lane_name_entry_draft entry in
+              let set text =
+                state.runtime_lane_name_draft <-
+                  Some (Masc_tui_types.lane_name_entry_with_draft entry text)
+              in
               (match k with
                | "esc" -> state.runtime_lane_name_draft <- None
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if not (String.equal name "") then begin
                    state.runtime_lane_name_draft <- None;
-                   state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
-                   state.runtime_lane_pick_cursor <- 0;
-                   Masc_tui_types.dismiss_runtime_lane_notice state
+                   Masc_tui_types.dismiss_runtime_lane_notice state;
+                   match entry with
+                   | Masc_tui_types.Naming_new_lane _ ->
+                     (* A lane is its candidates, so it comes to exist with
+                        one: the picker that opens here declares it. *)
+                     state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
+                     state.runtime_lane_pick_cursor <- 0
+                   | Masc_tui_types.Renaming_lane { lane; _ } ->
+                     (* The rename lands in one write, references and all, so
+                        there is nothing to pick and nothing to follow. *)
+                     launch_runtime_lane_write state ~mailbox:async_messages
+                       ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+                       Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
                  end
                | "\127" | "\b" | "backspace" ->
                  let length = String.length draft in
-                 if length > 0 then
-                   state.runtime_lane_name_draft <- Some (String.sub draft 0 (length - 1))
-               | s when String.length s = 1 && Char.code s.[0] >= 32 ->
-                 state.runtime_lane_name_draft <- Some (draft ^ s)
+                 if length > 0 then set (String.sub draft 0 (length - 1))
+               | s when String.length s = 1 && Char.code s.[0] >= 32 -> set (draft ^ s)
                | _ -> ()))
        | Some k
          when text_input_target state ~compact_viewport
@@ -19076,15 +19156,110 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick_cursor <- 0;
                      Masc_tui_types.dismiss_runtime_lane_notice state;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
+       (* The route editor holds the Runtime reading's own keys while it is
+          open: [a] adds to the route rather than naming a new lane, and
+          x/J/K act on the route's entry under its cursor. *)
+       | Some "f"
+         when state.view = Runtime
+              && state.runtime_mode = Masc_tui_types.Runtime_lanes
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick ->
+           (* [\[runtime\].default]: the runtime a keeper with no assignment
+              walks. One entry, so the picker replaces it. *)
+           state.runtime_lane_pick <- Some Masc_tui_types.Pick_route_default;
+           state.runtime_lane_pick_cursor <- 0;
+           Masc_tui_types.dismiss_runtime_lane_notice state;
+           launch_runtime_catalog_load state ~mailbox:async_messages
+       | Some "m"
+         when state.view = Runtime
+              && state.runtime_mode = Masc_tui_types.Runtime_lanes
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick ->
+           (* [\[runtime\].media_failover]: the vision fleet, in the order it
+              is called. Opened in the same editor an exact lane's slots use --
+              both are an ordered list of runtime ids, and neither is a lane. *)
+           (match state.slot_editor with
+            | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
+                state.slot_editor <- None
+            | Some _ | None ->
+                state.slot_editor <-
+                  Some
+                    { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots
+                    ; se_cursor = 0
+                    });
+           Masc_tui_types.dismiss_runtime_lane_notice state
+       | Some "a"
+         when state.view = Runtime
+              && Option.is_some state.slot_editor
+              && Option.is_none state.runtime_lane_pick ->
+           state.runtime_lane_pick <- Some Masc_tui_types.Pick_media_failover;
+           state.runtime_lane_pick_cursor <- 0;
+           Masc_tui_types.dismiss_runtime_lane_notice state;
+           launch_runtime_catalog_load state ~mailbox:async_messages
        | Some k
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
               && Option.is_none state.runtime_detail_target
               && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor
               && Option.is_some (Masc_tui_types.runtime_lane_edit_of_key k) ->
            Option.iter
              (handle_runtime_lane_edit state ~mailbox:async_messages)
              (Masc_tui_types.runtime_lane_edit_of_key k)
+       (* The slot editor takes its keys before the surface does, the way the
+          candidate picker does above: j/k walk the declared slots, x drops
+          one, J/K move it, and Esc closes. *)
+       | Some ("j" | "k" | "x" | "J" | "K" | "esc")
+         when (state.view = Lanes || state.view = Runtime)
+              && Option.is_some state.slot_editor
+              && Option.is_none state.runtime_lane_pick ->
+           (match state.slot_editor, key with
+            | None, _ -> ()
+            | Some _, Some "esc" ->
+                state.slot_editor <- None;
+                Masc_tui_types.dismiss_runtime_lane_notice state
+            | Some editor, Some "j" ->
+                let count =
+                  List.length (Masc_tui_types.slot_editor_rows state)
+                in
+                if editor.Masc_tui_types.se_cursor < count - 1 then
+                  state.slot_editor <-
+                    Some
+                      { editor with
+                        Masc_tui_types.se_cursor = editor.Masc_tui_types.se_cursor + 1
+                      };
+                Masc_tui_types.dismiss_runtime_lane_notice state
+            | Some editor, Some "k" ->
+                if editor.Masc_tui_types.se_cursor > 0 then
+                  state.slot_editor <-
+                    Some
+                      { editor with
+                        Masc_tui_types.se_cursor = editor.Masc_tui_types.se_cursor - 1
+                      };
+                Masc_tui_types.dismiss_runtime_lane_notice state
+            | Some _, Some k ->
+                Option.iter
+                  (handle_slot_edit state ~mailbox:async_messages)
+                  (Masc_tui_types.slot_edit_of_key k)
+            | Some _, None -> ())
+       | Some "s"
+         when state.view = Lanes
+              && state.lanes_mode = Lanes_overview
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor ->
+           (* Open the slot editor on the lane under the cursor. Its rows come
+              from the lane list, which is already loaded here. *)
+           (match Masc_tui_types.selected_standalone_lane state with
+            | None -> ()
+            | Some lane ->
+                state.slot_editor <-
+                  Some
+                    { Masc_tui_types.se_target =
+                        Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane_id
+                    ; se_cursor = 0
+                    };
+                Masc_tui_types.dismiss_runtime_lane_notice state;
+                state.lanes_action_error <- None)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview

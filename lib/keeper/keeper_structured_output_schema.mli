@@ -6,6 +6,10 @@
 val librarian_current_output_schema : Yojson.Safe.t
 (** JSON object the current-memory Librarian must return. *)
 
+val librarian_continuity_output_schema : Yojson.Safe.t
+(** Same Memory decision contract, with a required nonempty working state for
+    completed-conversation synthesis. Domain parsing also rejects whitespace. *)
+
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 

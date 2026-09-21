@@ -85,6 +85,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
       { admitted_slots = [ lane_id ^ "-primary" ]
       ; cli_slots = []
       ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
       ; admission_error = None
       }
   in
@@ -147,7 +148,7 @@ let test_board_lane_projects_credential_free_jev_readiness () =
   let http_lane =
     Projection.Configured
       { admitted_slots = [ "primary" ]; cli_slots = []; dropped_slots = []
-      ; admission_error = None }
+      ; declared_slots = [ "primary" ]; admission_error = None }
   in
   let snapshot ?(configuration = http_lane) jev_readiness =
     Projection.For_testing.snapshot_json_with
@@ -184,10 +185,10 @@ let test_board_lane_projects_credential_free_jev_readiness () =
        check string "readiness follows the resolved transport" expected actual)
     [ (Projection.Configured
          { admitted_slots = []; cli_slots = [ "cli" ]; dropped_slots = []
-         ; admission_error = None }, "cli_only")
+         ; declared_slots = []; admission_error = None }, "cli_only")
     ; (Projection.Configured
          { admitted_slots = []; cli_slots = []; dropped_slots = []
-         ; admission_error = None }, "lane_unavailable")
+         ; declared_slots = []; admission_error = None }, "lane_unavailable")
     ; Projection.Unconfigured "no lane", "lane_unavailable"
     ; Projection.Registry_unavailable "no registry", "lane_unavailable"
     ];
@@ -264,6 +265,12 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
           (if String.equal lane_id "librarian_exact"
            then [ "slot-typo" ]
            else [])
+      ; declared_slots =
+          (if String.equal lane_id "librarian_exact"
+           then [ "slot"; "slot-typo" ]
+           else if String.equal lane_id "hitl_auto_judge"
+           then []
+           else [ "slot" ])
       ; admission_error = None
       }
   in
@@ -359,6 +366,7 @@ let test_an_operator_routed_claim_is_not_a_lane_run () =
       { admitted_slots = [ lane_id ^ "-primary" ]
       ; cli_slots = []
       ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
       ; admission_error = None
       }
   in
@@ -420,6 +428,7 @@ let test_latest_terminal_uses_completion_time () =
           { admitted_slots = [ lane_id ^ "-primary" ]
       ; cli_slots = []
       ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
       ; admission_error = None
       })
       ~jev_readiness:Typesafeai.Off

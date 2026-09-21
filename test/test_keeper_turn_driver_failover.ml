@@ -2883,7 +2883,7 @@ let test_only_the_candidates_own_failures_are_evidence () =
                { message = "capacity"; phase = Some Llm_provider.Http_client.Capacity_backpressure })
         ; "provider overload is MASC-side capacity"
         , Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })
-        ; "a model the provider does not know rotates"
+        ; "a model the provider does not serve"
         , Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" })
         ; "a context overflow is the turn's input"
         , Agent_core.Error.Api

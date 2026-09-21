@@ -19,10 +19,10 @@ let relevance_choices =
     ~describe:(function
       | Judgment.Relevant ->
         Some
-          "The post directly mentions, requests, assigns tasks to, or concerns this keeper's instructions."
+          "The current signal itself directly addresses this keeper, requests or assigns the role described by its instructions, or contains a concrete request specific to that role; general topic or capability overlap alone is insufficient."
       | Judgment.Not_relevant ->
         Some
-          "The post is aimed at a different keeper, is general noise, or does not require this keeper to act.")
+          "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with the keeper's broad capabilities, or does not require this keeper to act.")
 ;;
 
 let relevance_question_id = "relevance"
@@ -31,7 +31,7 @@ let relevance_question ~choices candidate =
   Typesafeai_types.choice_of_set
     ~instructions:
       (Printf.sprintf
-         "Does the Board post in items[0] require attention, review, or action from keeper %S based on keeper_context?"
+         "Does the current Board signal in items[0] itself require attention, review, or action from keeper %S based only on keeper_role? General capability overlap is not sufficient."
          candidate.Keeper_board_attention_candidate.keeper_name)
     choices
 ;;
@@ -54,12 +54,11 @@ let rationale
     probabilities
 ;;
 
-let judge_candidate ?clock ~api_key ~candidate ~material () =
+let judge_candidate ?clock ~api_key ~candidate () =
   let* choices = relevance_choices in
-  let state =
+  let* state =
     Keeper_board_attention_candidate.singleton_judgment_request
       candidate
-      material
   in
   let* evaluated =
     Typesafeai_client.evaluate

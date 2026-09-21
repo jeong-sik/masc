@@ -546,6 +546,91 @@ let test_context_error_records_prior_tool_effect () =
        | Ok _ -> fail "context overflow after a tool effect was not reported")
 ;;
 
+let test_prompt_char_count () =
+  let count = Runtime_codex_app_server.prompt_char_count in
+  List.iter (fun (label, input, expected) ->
+    match count input with
+    | Ok actual -> check int label expected actual
+    | Error detail -> fail detail)
+    [ "empty", "", 0
+    ; "ASCII", "hello", 5
+    ; "Korean and astral are one scalar each", "한😀", 2
+    ; "combining sequence is two scalars", "e\xcc\x81", 2
+    ; "precomposed scalar is one", "é", 1
+    ; "literal JSON special characters", "\"\\\n", 3
+    ; "NUL remains one scalar", "\000", 1
+    ; "largest Unicode scalar", "\xf4\x8f\xbf\xbf", 1
+    ; "full submitted prompt includes suffix", "한\n\n{}", 5 ];
+  List.iter (fun malformed ->
+    match count malformed with
+    | Error _ -> ()
+    | Ok _ -> fail "malformed UTF-8 cannot supply a capacity measurement")
+    [ "\x80"; "\xc0\xaf"; "\xed\xa0\x80"; "\xf4\x90\x80\x80";
+      "\xe2\x82"; "valid prefix\xff" ];
+  let measured prompt = match count prompt with
+    | Ok count -> count | Error detail -> fail detail in
+  let server_limit = 2 in
+  check bool "equal to the server limit fits" true
+    (measured "한😀" <= server_limit);
+  check bool "one scalar beyond the server limit does not fit" false
+    (measured "한😀a" <= server_limit)
+;;
+
+let test_rpc_input_capacity_data () =
+  let module C = Runtime_codex_app_server in
+  let fields = ["input_error_code", `String "input_too_large";
+    "max_chars", `Int 17; "actual_chars", `Int 23] in
+  let cases =
+    [ "structured", Some (`Assoc fields), true
+    ; "absent", None, false
+    ; "null", Some `Null, false
+    ; "generic invalid params", Some (`Assoc ["reason", `String "invalid input"]), false
+    ; "string count", Some (`Assoc (("actual_chars", `String "23") :: List.remove_assoc "actual_chars" fields)), false
+    ; "negative limit", Some (`Assoc (("max_chars", `Int (-1)) :: List.remove_assoc "max_chars" fields)), false
+    ; "not exceeded", Some (`Assoc (("actual_chars", `Int 17) :: List.remove_assoc "actual_chars" fields)), false ] in
+  List.iter (fun (label, data, expected) ->
+    let message = "Input exceeds the maximum length of 1048576 characters." in
+    let error_fields = ["code", `Int (-32602); "message", `String message]
+      @ (match data with None -> [] | Some data -> ["data", data]) in
+    let wire = Yojson.Safe.to_string (`Assoc ["id", `Int 4; "error", `Assoc error_fields]) in
+    with_fixture [init_result; account_chatgpt; thread_result; wire] (fun path ->
+      match run_fixture path with
+      | Error (C.Rpc_error {method_; code; message = actual_message; data = actual_data} as error) ->
+        check string (label ^ " method") "turn/start" method_;
+        check (option int) (label ^ " code") (Some (-32602)) code;
+        check string (label ^ " message") message actual_message;
+        check (option string) (label ^ " data preserved")
+          (Option.map Yojson.Safe.to_string data) (Option.map Yojson.Safe.to_string actual_data);
+        check bool (label ^ " typed capacity") expected (Option.is_some (C.input_capacity_refusal error));
+        if expected then (
+          let capacity = Option.get (C.input_capacity_refusal error) in
+          check int "server actual count" 23 capacity.actual_chars;
+          check int "server limit, not a baked-in cap" 17 capacity.max_chars;
+          List.iter (fun (method_, code) ->
+            check bool "other RPC failures do not authorize narrowing" false
+              (Option.is_some (C.input_capacity_refusal
+                (C.Rpc_error {method_; code; message; data}))))
+            ["thread/start", Some (-32602); "turn/start", Some (-32603);
+             "turn/start", None])
+      | Error error -> fail (C.error_to_string error)
+      | Ok _ -> fail (label ^ " unexpectedly completed"))) cases;
+  let data = `Assoc (("input_error_code", `String "input_too_large") :: fields) in
+  let message = "Input exceeds the maximum length of 1048576 characters." in
+  check bool "duplicate discriminator cannot authorize narrowing" false
+    (Option.is_some (C.input_capacity_refusal
+      (C.Rpc_error {method_ = "turn/start"; code = Some (-32602); message;
+                    data = Some data})));
+  let wire = Yojson.Safe.to_string (`Assoc ["id", `Int 4; "error", `Assoc
+    ["code", `Int (-32602); "message", `String message; "data", data]]) in
+  with_fixture [init_result; account_chatgpt; thread_result; wire] (fun path ->
+    match run_fixture path with
+    | Error (C.Protocol_error _ as error) ->
+      check bool "duplicate wire keys are rejected before RPC classification" false
+        (Option.is_some (C.input_capacity_refusal error))
+    | Error error -> fail (C.error_to_string error)
+    | Ok _ -> fail "duplicate wire keys unexpectedly accepted")
+;;
+
 let test_developer_context_preserves_authority_and_history () =
   List.iter (fun (thread_mode, expected_roles) ->
     let capture_path = Filename.temp_file "masc-codex-context-" ".jsonl" in
@@ -2520,7 +2605,7 @@ candidates = ["projection.http", "codex.codex"]
                                 ; keeper_name = meta.name
                                 }
                               in
-                              Keeper_agent_run.run_turn
+                              (Keeper_agent_run.run_turn
                                 ~config
                                 ~meta
                                 ~publication_recovery
@@ -2546,7 +2631,7 @@ candidates = ["projection.http", "codex.codex"]
                                      ~detail:"test fixture has no Skill publication")
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
-                                ()))))))
+                                ()).Keeper_agent_run.result))))))
 ;;
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
@@ -2623,9 +2708,19 @@ supports_native_streaming = false
           ~user_message:"Continue the synthetic turn."
           ~cli_path ~model:"gpt-fixture" ~turn_instructions:None in
         (match result with
-         | Error (Agent_core.Error.Config (InvalidConfig {field; _})) when reject_codex ->
-           check string "B refuses its claim before projection"
-             "official_client_session.claim" field
+         | Error error when reject_codex ->
+           let expected =
+             match recovery with
+             | Some { phase = Keeper_official_client_session_store.Recovery_required held; _ } ->
+               Keeper_internal_error.Official_client_recovery_required
+                 { runtime_id = "codex.codex"
+                 ; recovery_id = held.recovery_id
+                 ; reason = Bootstrap_floor_exceeded
+                 }
+             | _ -> fail "fixture has no durable recovery binding"
+           in
+           check bool "B preserves the exact recovery cause before projection" true
+             (Keeper_internal_error.classify_masc_internal_error error = Some expected)
          | Ok _ when not reject_codex -> ()
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok _ -> fail "blocked Codex claim completed");
@@ -3577,6 +3672,15 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
            fail "dashboard recovery fixture was not recovery-required"
        in
+       Keeper_registry.set_failure_reason
+         ~base_path
+         keeper_name
+         (Some
+            (Keeper_registry.Official_client_recovery_required
+               { runtime_id = recovery.runtime_id
+               ; recovery_id
+               ; reason = Keeper_internal_error.Effect_fenced
+               }));
        let snapshot =
          Server_dashboard_official_client_session.snapshot ~base_path ~keeper_name
          |> Result.get_ok
@@ -3659,6 +3763,10 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          "dashboard resolution audit recorded"
          true
          (resolved |> member "audit" |> member "recorded" |> to_bool);
+       (match Keeper_registry.get ~base_path keeper_name with
+        | Some { last_failure_reason = None; _ } -> ()
+        | Some _ -> fail "resolution left the matching registry recovery cause"
+        | None -> fail "resolution lost the registered Keeper");
        let replayed =
          Server_dashboard_official_client_session.resolve_body
            ~config
@@ -4954,7 +5062,8 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "last projection"
+    [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
+    ; ( "last projection"
       , [ test_case "later claim refusal preserves the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:true)
         ; test_case "a later projection replaces the earlier projection" `Quick

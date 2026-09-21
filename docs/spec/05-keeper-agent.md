@@ -91,7 +91,10 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability boundary**: the flat Tool catalog plus the sandbox path
   boundary; external effects pass through the Gate.
-- **Scope**: `mention_targets`
+- **Direct address**: `mention_targets`
+- **Targetless Board discovery**: `board_interests`; empty disables semantic
+  candidate admission without disabling exact addresses, broadcast, or
+  structurally matched thread delivery.
 - **Activation**: `activation_mode` (`manual` | `on_demand` | `autonomous`)
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 

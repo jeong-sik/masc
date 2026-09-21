@@ -48,7 +48,9 @@ type profile_update =
   ; microvm_cpus : Keeper_microvm_guest_size.cpus option
   ; network_mode : Keeper_types_profile.network_mode
   ; mention_targets : string list
+  ; board_interests : string list
   ; max_context_override : int option
+  ; input_policy : Keeper_input_policy.t
   ; activation_mode : Keeper_activation_mode.t
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
@@ -448,8 +450,10 @@ let apply_existing (state : state) meta command =
          ; microvm_cpus = update.microvm_cpus
          ; network_mode = update.network_mode
          ; mention_targets = update.mention_targets
+         ; board_interests = update.board_interests
          ; max_context_override = update.max_context_override
          ; activation_mode = update.activation_mode
+         ; input_policy = update.input_policy
          ; telemetry_feedback_enabled = update.telemetry_feedback_enabled
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow

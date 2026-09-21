@@ -13,9 +13,8 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v4',
+    schema: 'keeper.memory_os.current_health.v7',
     generated_at: 1_700_000_000,
-    cadence_counter_entries: 2,
     keepers: [{
       keeper_id: 'healthy',
       revision: 7,
@@ -28,7 +27,16 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 1,
       removed: 2,
       snapshot_present: true,
-      librarian_lane_busy: 0,
+      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+      librarian: {
+        state: 'drained',
+        detail: null,
+        measured_at: 1_699_999_950,
+        unread_atom_turns: 0,
+        unread_official_turns: 0,
+        last_success_at: null,
+        last_failure_kind: null,
+      },
       librarian_failures: 0,
       vision_ingest_errors: 0,
       vision_ingest_error_reasons: [],
@@ -52,7 +60,16 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      librarian_lane_busy: 0,
+      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+      librarian: {
+        state: 'drained',
+        detail: null,
+        measured_at: 1_699_999_950,
+        unread_atom_turns: 0,
+        unread_official_turns: 0,
+        last_success_at: null,
+        last_failure_kind: null,
+      },
       librarian_failures: 0,
       vision_ingest_errors: 0,
       vision_ingest_error_reasons: [],
@@ -82,7 +99,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       source_facts: 1,
       source_invalidations: 0,
       source_snapshot_bytes: 128,
-      librarian_lane_busy: 0,
+      librarian_unread_turns: 0,
       librarian_failures: 0,
       vision_ingest_errors: 0,
       read_errors: 1,
@@ -95,7 +112,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       keepers_with_alerts: 1,
       snapshot_read_error_keepers: 1,
       source_snapshot_read_error_keepers: 0,
-      librarian_lane_busy_keepers: 0,
+      librarian_stopped_keepers: 0,
       librarian_starving_keepers: 0,
     },
   }
@@ -103,9 +120,8 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v4',
+    schema: 'keeper.memory_os.current_health.v7',
     generated_at: 1_700_000_000,
-    cadence_counter_entries: 1,
     keepers: [{
       keeper_id: 'starving',
       revision: 0,
@@ -118,7 +134,16 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      librarian_lane_busy: 0,
+      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+      librarian: {
+        state: 'drained',
+        detail: null,
+        measured_at: 1_699_999_950,
+        unread_atom_turns: 0,
+        unread_official_turns: 0,
+        last_success_at: null,
+        last_failure_kind: null,
+      },
       librarian_failures: 4,
       vision_ingest_errors: 0,
       vision_ingest_error_reasons: [],
@@ -148,7 +173,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       source_facts: 0,
       source_invalidations: 0,
       source_snapshot_bytes: 0,
-      librarian_lane_busy: 0,
+      librarian_unread_turns: 0,
       librarian_failures: 4,
       vision_ingest_errors: 0,
       read_errors: 0,
@@ -161,7 +186,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       keepers_with_alerts: 1,
       snapshot_read_error_keepers: 0,
       source_snapshot_read_error_keepers: 0,
-      librarian_lane_busy_keepers: 0,
+      librarian_stopped_keepers: 0,
       librarian_starving_keepers: 1,
     },
   }
@@ -172,12 +197,57 @@ afterEach(() => {
 })
 
 describe('fetchKeeperMemoryHealth', () => {
+  it('keeps saved and prepared frontiers separate without inventing provider success', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const saved = { trace_id: 'trace-a', end_atom: 12, boundary_line: 8 }
+    const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
+      input: { kind: 'summarized' as const, frontier: { ...saved, end_atom: 8, boundary_line: 6 } },
+      request_bytes: 4096 }
+    payload.keepers[0]!.context_cycle = { saved, saved_read_error: null, prepared, synthesis: null }
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle).toEqual({
+      saved, saved_read_error: null, prepared, synthesis: null,
+    })
+  })
+
+  it('keeps synthesis failure and atom range separate from an ordinary drained consumer', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const synthesis = { observed_at: 1, trace_id: 'trace-a', state: 'not_committed',
+      range: { start_atom: 4, end_atom: 6, completed_end_atom: 20 } }
+    Object.assign(payload.keepers[0]!.context_cycle, { synthesis })
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.synthesis).toEqual(synthesis)
+  })
+
+  it.each([
+    { observed_at: 1, trace_id: 'trace-a', state: 'drained', range: null },
+    { observed_at: 1, trace_id: 'trace-a', state: 'running', range: null },
+    { observed_at: 1, trace_id: null, state: 'running',
+      range: { start_atom: 4, end_atom: 6, completed_end_atom: 20 } },
+  ])('rejects synthesis without valid source evidence: %o', async synthesis => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.context_cycle, { synthesis })
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
+  it('rejects a summarized request without a frontier', async () => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!, { context_cycle: {
+      saved: null, saved_read_error: null, synthesis: null,
+      prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5,
+        input: { kind: 'summarized', frontier: null } },
+    } })
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
   it('decodes the exact current-snapshot health contract', async () => {
     getMock.mockResolvedValue(keeperMemoryHealthPayload())
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v4')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v7')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
@@ -267,7 +337,65 @@ describe('fetchKeeperMemoryHealth', () => {
 
   it('rejects an alert whose typed target disagrees with its code', async () => {
     const payload = keeperMemoryHealthPayload()
-    payload.keepers[1]!.alerts[0]!.target = 'librarian_lane_busy'
+    payload.keepers[1]!.alerts[0]!.target = 'librarian_stopped'
+    getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
+  it('keeps an unmeasured librarian as null rather than zero', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.totals.librarian_unread_turns = null
+    payload.keepers[0]!.librarian = {
+      state: null,
+      detail: null,
+      measured_at: null,
+      unread_atom_turns: null,
+      unread_official_turns: null,
+      last_success_at: null,
+      last_failure_kind: null,
+    }
+
+    getMock.mockResolvedValue(payload)
+    const response = await fetchKeeperMemoryHealth()
+
+    expect(response.keepers[0]?.librarian.unread_atom_turns).toBeNull()
+    expect(response.totals.librarian_unread_turns).toBeNull()
+  })
+
+  it('rejects a numeric fleet total when any keeper count is unknown', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers[0]!.librarian.unread_atom_turns = null
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
+  it('keeps the empty fleet unread total at zero', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers = []
+    for (const key of Object.keys(payload.totals) as (keyof typeof payload.totals)[]) payload.totals[key] = 0
+    for (const key of Object.keys(payload.alert_summary) as (keyof typeof payload.alert_summary)[]) payload.alert_summary[key] = 0
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).totals.librarian_unread_turns).toBe(0)
+  })
+
+  it('rejects a librarian state this build does not know', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const unknown = { ...payload.keepers[0]!.librarian, state: 'resting' }
+    payload.keepers[0]!.librarian =
+      unknown as KeeperMemoryHealthResponse['keepers'][number]['librarian']
+    getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
+  it('rejects a librarian count with no time it was taken at', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers[0]!.librarian.measured_at = null
     getMock.mockResolvedValue(payload)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(

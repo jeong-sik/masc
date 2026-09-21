@@ -4330,13 +4330,16 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
        | _ -> Some (color, label, String.concat ", " names))
     [ (not_running, "not running", (Theme.bad ()))
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
-    ; (* The one failing subset an operator must act on: turn configuration
+    ; (* Failing subsets that need operator action: turn configuration
          errors survive every retry, so the names are listed where the
          failing counter only counts them. Unscoped on purpose -- the
          configuration_blocked_* wire fields are autoboot-scoped and skip a
          blocked keeper booted on request. *)
       ( fleet.fs_turn_configuration_error_names
       , "config-blocked"
+      , (Theme.bad ()) )
+    ; ( fleet.fs_official_client_recovery_required_names
+      , "session recovery required"
       , (Theme.bad ()) )
     ]
 
@@ -4494,20 +4497,19 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* Failing is not a mystery bucket. Every failing keeper is either
-          retrying on its own -- a clean turn returns it to Running -- or
-          blocked on turn configuration, which no retry fixes. Both parts
-          come from the same phase snapshot, which sorts each failing keeper
-          into exactly one of the two, so they sum to the failing count and
-          print beside the whole instead of as a separate "recovering"
-          counter whose relationship to failing was invisible. *)
+       (* The phase snapshot partitions failing keepers into recovering,
+          configuration errors and explicit official-client session recovery.
+          Every failing Keeper belongs to exactly one class, so these three
+          counts sum to the displayed failing count. The latter two require
+          action beyond repeating the same turn. *)
        let failing_entry =
          if fleet.fs_failing_count = 0 then []
          else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d)"
+           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
                fleet.fs_failing_count
                fleet.fs_recovering_count
                fleet.fs_turn_configuration_error_count
+               fleet.fs_official_client_recovery_required_count
            ]
        in
        let counts =
@@ -5126,6 +5128,13 @@ let render_lanes_overview (state : state) =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
+         (* The slot editor's heading, its rows and its key line, counted here
+            so the lane detail below gives up the space rather than the
+            editor being drawn past the frame. *)
+         + (match state.slot_editor with
+            | None -> 0
+            | Some _ ->
+              2 + max 1 (List.length (Masc_tui_types.slot_editor_rows state)))
        in
        let available =
          max 0
@@ -5169,6 +5178,39 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
+  (* The slot editor the "s" key opens. Its rows are the lane's declared
+     order, which is what the lane walks; a slot publication rejected keeps
+     its place there and is marked rather than left out, because dropping it
+     from the drawing would put the numbers beside the other slots out of step
+     with the file. *)
+  (match state.slot_editor with
+   | None -> ()
+   | Some editor ->
+       box_line_styled buf cols ~style:(Theme.info ())
+         (Printf.sprintf "  slots of %s — the order it walks"
+            (Terminal_text.single_line
+               (Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target)));
+       let slot_rows = Masc_tui_types.slot_editor_rows state in
+       if slot_rows = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (this lane declares no slot; a slots array is what it walks)"
+       else
+         List.iteri
+           (fun index (row : Masc_tui_types.slot_editor_row) ->
+              let line =
+                Printf.sprintf "  %s %d  %s%s"
+                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                  (index + 1)
+                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
+                  (if row.Masc_tui_types.sr_admitted then ""
+                   else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
+              in
+              if index = editor.Masc_tui_types.se_cursor then
+                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+              else box_line buf cols line)
+           slot_rows;
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  j/k move · x drop · J/K reorder · Esc close");
   (* The failover-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
@@ -11244,6 +11286,62 @@ let render_runtime (state : state) =
   in
   c.push_styled ~style:authority_style authority_line;
   c.push_divider ();
+  (* The two routes that are not lanes. They hold runtime ids and nothing
+     dispatches a keeper turn to them, so they sit above the lane table rather
+     than among its rows, where the lane count and the lane-editing keys would
+     both be wrong about them. *)
+  (match state.runtime_mode with
+   | Masc_tui_types.Runtime_all -> ()
+   | Masc_tui_types.Runtime_lanes ->
+       let resolved =
+         Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)
+           state.runtime_surface
+       in
+       let default_text =
+         match resolved with
+         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | Some resolved ->
+             (match resolved.rrs_default_runtime_id with
+              | Some id -> Terminal_text.single_line id
+              | None -> Ansi.dim ^ "none — every keeper needs an assignment" ^ Ansi.reset)
+       in
+       let fleet_text =
+         match resolved with
+         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | Some resolved ->
+             let declared = resolved.rrs_media_failover_declared in
+             let admitted = resolved.rrs_media_failover in
+             let dropped =
+               List.filter
+                 (fun id -> not (List.exists (String.equal id) admitted))
+                 declared
+             in
+             (match declared, dropped with
+              | [], [] -> Ansi.dim ^ "none — no vision fleet" ^ Ansi.reset
+              | declared, dropped ->
+                  String.concat " → "
+                    (List.map Terminal_text.single_line declared)
+                  ^
+                  (match dropped with
+                   | [] -> ""
+                   | _ ->
+                     (Theme.warn ())
+                     ^ Printf.sprintf "  (%s unresolved at boot: %s)"
+                         (Message_layout.count_noun (List.length dropped) "entry")
+                         (String.concat ", " (List.map Terminal_text.single_line dropped))
+                     ^ Ansi.reset))
+       in
+       c.push_styled ~style:(Theme.recede ())
+         (Printf.sprintf "  %s %s   %s"
+            (runtime_column runtime_lane_width "[runtime].default")
+            (runtime_column runtime_candidate_width default_text)
+            (Ansi.dim ^ "f replaces it · the runtime an unassigned keeper walks" ^ Ansi.reset));
+       c.push_styled ~style:(Theme.recede ())
+         (Printf.sprintf "  %s %s   %s"
+            (runtime_column runtime_lane_width "media_failover")
+            (runtime_column runtime_candidate_width fleet_text)
+            (Ansi.dim ^ "m edits it · the vision fleet, in call order" ^ Ansi.reset));
+       c.push_divider ());
   c.push_styled ~style:(Theme.recede ())
     ("  "
      ^ runtime_column runtime_lane_width
@@ -11288,6 +11386,13 @@ let render_runtime (state : state) =
      above, so the footer keeps its row while the prompt is up. *)
   (match Masc_tui_types.runtime_lane_prompt state with
    | None -> ()
+   | Some (Masc_tui_types.Lane_rename_prompt (lane, draft)) ->
+       c.push_styled ~style:(Theme.info ())
+         (Printf.sprintf
+            "  rename lane %s to: %s_  — Enter renames it and every reference, Esc cancel"
+            (Terminal_text.single_line lane)
+            (Terminal_text.single_line draft));
+       c.push_divider ()
    | Some (Masc_tui_types.Lane_name_prompt draft) ->
        c.push_styled ~style:(Theme.info ())
          (Printf.sprintf "  new lane name: %s_  — Enter pick its first runtime, Esc cancel"
@@ -11297,6 +11402,30 @@ let render_runtime (state : state) =
        c.push_styled ~style:(Theme.warn ())
          (Printf.sprintf "  press D again to remove lane %s"
             (Terminal_text.single_line lane));
+       c.push_divider ());
+  (* The route editor, drawn here when it was opened on media_failover. The
+     Lanes surface draws the same editor for an exact lane's slots; both show
+     one ordered list of runtime ids and take the same keys. *)
+  (match state.slot_editor with
+   | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
+   | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
+       c.push_styled ~style:(Theme.info ())
+         "  [runtime].media_failover — the order the vision fleet is called in";
+       let entries = Masc_tui_types.slot_editor_rows state in
+       if entries = [] then
+         c.push_styled ~style:(Theme.recede ())
+           "  (empty — no vision fleet; a adds the first runtime)"
+       else
+         List.iteri
+           (fun index (row : Masc_tui_types.slot_editor_row) ->
+              c.push
+                (Printf.sprintf "  %s %d  %s"
+                   (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                   (index + 1)
+                   (Terminal_text.single_line row.Masc_tui_types.sr_slot)))
+           entries;
+       c.push_styled ~style:(Theme.recede ())
+         "  j/k move · a add · x drop · J/K reorder · Esc close";
        c.push_divider ());
   (match runtime_picker_projection state with
    | None -> ()
@@ -11308,7 +11437,13 @@ let render_runtime (state : state) =
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
               Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
-                (Terminal_text.single_line lane));
+                (Terminal_text.single_line lane)
+          | Masc_tui_types.Pick_media_failover ->
+              "  adding to the vision fleet [runtime].media_failover — j/k move, Enter append, e cancel"
+          | Masc_tui_types.Pick_route_default ->
+              (* Replaces rather than appends, and the row it replaces is
+                 marked "(already a candidate)" in the choices below. *)
+              "  the runtime an unassigned keeper walks — j/k move, Enter replace, e cancel");
        if picker.rlp_choices = [] then
          c.push_styled ~style:(Theme.recede ()) "  (runtime catalogue unread)"
        else
@@ -11737,15 +11872,15 @@ let render_keeper_calls (state : state) =
            @ labeled_rows ~call_index ~style:Ansi.dim ~label:"input" call.kc_input
          in
          let output_rows =
-           match
-             Option.bind call.kc_output (fun result ->
-               Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
-           with
+           (* This is the recorded-call inspector. A timeline digest drops
+              structured receipt fields and can hide an assessment behind a
+              later failure; preserve the stored output and let rows scroll. *)
+           match call.kc_output with
            | None -> []
-           | Some digest ->
+           | Some output ->
              labeled_rows ~call_index
                ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
-               ~label:"output" digest
+               ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)
     |> List.concat

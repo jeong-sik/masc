@@ -1169,10 +1169,14 @@ def fleet_safety_fixture() -> HttpResponse:
 
     Without it the poll fails and the TUI records a "fleet safety data
     unreliable" event, which is correct behaviour but adds a row to scenarios
-    that are counting the event list. Only "status" is required; the rest of
-    the section defaults.
+    that are counting the event list. The current session-recovery fields
+    are explicit: a missing observation must not become a zero count.
     """
-    return (200, {"keeper_fleet_safety": {"status": "ok"}})
+    return (200, {"keeper_fleet_safety": {
+        "status": "ok",
+        "official_client_recovery_required_keeper_count": 0,
+        "official_client_recovery_required_keeper_names": [],
+    }})
 
 
 def with_workspace_identity(
@@ -6611,9 +6615,8 @@ def memory_facts_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/dashboard/keeper-memory-health"] = (
         200,
         {
-            "schema": "keeper.memory_os.current_health.v4",
+            "schema": "keeper.memory_os.current_health.v7",
             "generated_at": 1787348000.0,
-            "cadence_counter_entries": 0,
             "keepers": [
                 {
                     "keeper_id": "alpha",
@@ -6627,7 +6630,21 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                     "removed": 0,
                     "snapshot_present": True,
                     "updated_at": 1700000000.0,
-                    "librarian_lane_busy": 0,
+                    "context_cycle": {
+                        "saved": None,
+                        "saved_read_error": None,
+                        "prepared": None,
+                        "synthesis": None,
+                    },
+                    "librarian": {
+                        "state": "drained",
+                        "detail": None,
+                        "measured_at": 1787347900.0,
+                        "unread_atom_turns": 0,
+                        "unread_official_turns": 0,
+                        "last_success_at": 1700000000.0,
+                        "last_failure_kind": None,
+                    },
                     "librarian_failures": 0,
                     "vision_ingest_errors": 0,
                     "vision_ingest_error_reasons": [],
@@ -6652,7 +6669,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                 "source_facts": 1,
                 "source_invalidations": 1,
                 "source_snapshot_bytes": 128,
-                "librarian_lane_busy": 0,
+                "librarian_unread_turns": 0,
                 "librarian_failures": 0,
                 "vision_ingest_errors": 0,
                 "read_errors": 0,
@@ -6665,7 +6682,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                 "keepers_with_alerts": 0,
                 "snapshot_read_error_keepers": 0,
                 "source_snapshot_read_error_keepers": 0,
-                "librarian_lane_busy_keepers": 0,
+                "librarian_stopped_keepers": 0,
                 "librarian_starving_keepers": 0,
             },
         },
@@ -10134,12 +10151,13 @@ def standalone_lane_fixture(
         "observation_only": True,
         "configured": True,
         "configuration_state": "ready",
+        "declared_slots": ["glm-coding.glm-5-turbo"],
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes three slot lists, not one: what the lane
-        # admitted, what it reaches over a CLI, and what its admission
-        # dropped. Omitting the last two fails the row decode, and the whole
-        # snapshot with it, so the observation matrix simply never draws --
-        # the surface has no per-row gap to show.
+        # The projection writes four slot lists, not one: what the lane
+        # declares, what admission kept, what it reaches over a CLI, and what
+        # admission dropped. Omitting any list fails the row decode, and the
+        # whole snapshot with it, so the observation matrix simply never
+        # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
         "dropped_slots": [],
         "admission_error": None,
@@ -11867,6 +11885,11 @@ def runtime_resolved_response() -> HttpResponse:
             "source": RUNTIME_RESOLVED_PATH,
             "config_path": "/workspace/config/runtime.toml",
             "default_runtime": runtime_a,
+            # The two routes that are not lanes. Both lists are required by
+            # the decoder; empty is a configuration (no vision fleet), and
+            # the declared list is what the editor writes back.
+            "media_failover": [],
+            "media_failover_declared": [],
             "runtimes": [
                 runtime_a,
                 runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),

@@ -13,6 +13,7 @@ type flags =
   ; microvm_backend : string option
   ; remote_endpoint : string option
   ; mention_targets : string list
+  ; board_interests : string list
   ; skills : string list option
   ; max_context_override : int option
   ; activation_mode : string option

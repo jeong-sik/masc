@@ -754,6 +754,13 @@ type runtime_resolved_snapshot = {
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
+  rrs_media_failover : string list;
+      (** [\[runtime\].media_failover] as boot admitted it, in order: the
+          fleet the vision tool and the image describer call. It is a route,
+          not a lane -- no keeper turn dispatches to it. *)
+  rrs_media_failover_declared : string list;
+      (** The same route in file order before admission. Entries absent from
+          {!rrs_media_failover} remain editable in their declared position. *)
   rrs_runtimes : runtime_option list;
   rrs_lanes : runtime_resolved_lane list;
 }
@@ -854,7 +861,7 @@ type repository_change_snapshot = {
 type memory_alert_code =
   | Snapshot_read_error
   | Source_snapshot_read_error
-  | Librarian_lane_busy
+  | Librarian_stopped
   | Librarian_failures
   | Librarian_starvation
   | Vision_ingest_errors
@@ -873,6 +880,42 @@ type memory_alert = {
   ma_message : string;
 }
 
+(* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
+   standing, and what its last pass and its journal say. [None] in a field is
+   "not measured", which the header prints as such; it is not zero. *)
+type memory_librarian_health = {
+  mlh_state : string option;
+  mlh_detail : string option;
+  mlh_measured_at : float option;
+  mlh_unread_atom_turns : int option;
+  mlh_unread_official_turns : int option;
+  mlh_last_success_at : float option;
+  mlh_last_failure_kind : string option;
+}
+
+type memory_context_frontier = {
+  mcf_trace_id : string;
+  mcf_end_atom : int;
+  mcf_boundary_line : int;
+}
+type memory_context_input =
+  | Context_summarized of memory_context_frontier
+  | Context_uncompressed
+  | Context_not_applied
+
+type memory_context_prepared = {
+  mcp_prepared_at : float;
+  mcp_runtime_id : string;
+  mcp_input : memory_context_input;
+  mcp_request_bytes : int;
+}
+type memory_context_cycle = {
+  mcc_saved : memory_context_frontier option;
+  mcc_saved_unreadable : bool;
+  mcc_prepared : memory_context_prepared option;
+  mcc_synthesis : Keeper_continuity_observation.synthesis option;
+}
+
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
@@ -885,7 +928,8 @@ type memory_keeper_health = {
   mkh_added : int;
   mkh_removed : int;
   mkh_snapshot_present : bool;
-  mkh_librarian_lane_busy : int;
+  mkh_context_cycle : memory_context_cycle;
+  mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;
   mkh_vision_ingest_errors : int;
   mkh_vision_ingest_error_reasons : (string * int) list;
@@ -911,6 +955,7 @@ type memory_health_snapshot = {
   mhs_total_source_invalidations : int;
   mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
+  mhs_total_librarian_unread_turns : int option;
   mhs_total_vision_ingest_errors : int;
   mhs_total_read_errors : int;
   mhs_total_source_read_errors : int;
@@ -1271,6 +1316,11 @@ type standalone_lane = {
       (** Slot ids the lane declared that publication could not admit — the
           per-lane answer to "configured single, or configured double with
           one silently dropped". *)
+  sl_declared_slots : string list;
+      (** [slots] in the order [runtime.exact_output_lanes.<id>] writes them,
+          admitted or not. The two lists above are an admission reading and
+          lose file order once a sibling was rejected; the slot editor moves
+          and drops by position, so it reads this one. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -1882,6 +1932,7 @@ type fleet_safety = {
   fs_failing_count : int;
   fs_recovering_count : int;
   fs_turn_configuration_error_count : int;
+  fs_official_client_recovery_required_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
@@ -1889,6 +1940,7 @@ type fleet_safety = {
   fs_running_names : string list;
   fs_executable_names : string list;
   fs_turn_configuration_error_names : string list;
+  fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }

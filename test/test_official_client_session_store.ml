@@ -1133,9 +1133,24 @@ let test_input_rejected_recovery_is_not_auto_superseded () =
      | Ok None | Ok (Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ })
      | Error _ ->
        fail "input-rejected recovery did not survive the durable round-trip");
-    (* Same runtime: the heartbeat replay path must be refused. *)
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "input rejection did not enter recovery"
+    in
+    (* Same runtime: the heartbeat replay path must retain its typed cause. *)
     (match plan_claim ~expected:(Some recovery) ~client_kind:Claude_code ~runtime_id:"claude_code.claude-sonnet-5" with
-     | Error _ -> ()
+     | Error (Input_recovery_required payload as error) ->
+       check string "typed refusal retains runtime" recovery.runtime_id payload.runtime_id;
+       check string "typed refusal retains recovery ID" recovery_id payload.recovery_id;
+       check bool "typed refusal retains effect fence" true (payload.reason = Effect_fenced);
+       (match Keeper_internal_error.classify_masc_internal_error
+                (core_error_of_claim_error error) with
+        | Some (Keeper_internal_error.Official_client_recovery_required carried) ->
+          check bool "core carrier preserves exact recovery payload" true (carried = payload)
+        | _ -> fail "input refusal became a generic core error")
+     | Error error -> fail (claim_error_to_string error)
      | Ok _ -> fail "same-runtime claim auto-superseded an input rejection");
     (* A different runtime is an operator-driven change and still starts fresh. *)
     (match
@@ -1145,7 +1160,7 @@ let test_input_rejected_recovery_is_not_auto_superseded () =
          ~runtime_id:"claude_code.claude-opus-5"
      with
      | Ok _ -> ()
-     | Error detail -> fail ("cross-runtime claim was refused: " ^ detail));
+     | Error detail -> fail ("cross-runtime claim was refused: " ^ claim_error_to_string detail));
     (* Contrast: a generic provider rejection keeps the automatic supersede. *)
     let other =
       claim_new
@@ -1173,14 +1188,8 @@ let test_input_rejected_recovery_is_not_auto_superseded () =
          ~runtime_id:"claude_code.claude-sonnet-5"
      with
      | Ok _ -> ()
-     | Error detail -> fail ("generic rejection lost its automatic supersede: " ^ detail));
+     | Error detail -> fail ("generic rejection lost its automatic supersede: " ^ claim_error_to_string detail));
     (* The only way back on the same runtime is the operator resolution. *)
-    let recovery_id =
-      match recovery.phase with
-      | Recovery_required required -> required.recovery_id
-      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-        fail "input rejection did not enter recovery"
-    in
     let restarted, application =
       resolve_recovery
         ~base_path
@@ -1200,7 +1209,40 @@ let test_input_rejected_recovery_is_not_auto_superseded () =
          ~runtime_id:"claude_code.claude-sonnet-5"
      with
      | Ok plan -> check int "resolved session claims ordinal one" 1 plan.turn_count
-     | Error detail -> fail ("resolved session was still fenced: " ^ detail)))
+     | Error detail -> fail ("resolved session was still fenced: " ^ claim_error_to_string detail)))
+;;
+
+let test_other_claim_refusals_remain_configuration_errors () =
+  with_workspace "masc-official-client-claim-categories-" (fun base_path ->
+    let claimed = claim_new ~base_path ~keeper_name:"claim-categories"
+        ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch ~at:1. in
+    let check_refusal expected result =
+      match result with
+      | Ok _ -> fail "invalid claim was accepted"
+      | Error error ->
+        check bool "exact typed refusal category" true (error = expected);
+        (match core_error_of_claim_error error with
+         | Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail }) ->
+           check string "existing claim field" "official_client_session.claim" field;
+           check string "canonical refusal detail" (claim_error_to_string error) detail
+         | _ -> fail "ordinary claim refusal became a recovery carrier") in
+    check_refusal Invalid_runtime_id
+      (plan_claim ~expected:None ~client_kind:Codex ~runtime_id:"  ");
+    List.iter (fun (expected, binding) ->
+        check_refusal expected
+          (plan_claim ~expected:(Some binding) ~client_kind:Codex
+             ~runtime_id:"codex.default"))
+      [ Start_incomplete, claimed
+      ; Active_unsettled,
+        { claimed with phase = Active
+            { owner_epoch; session_id = "session"; previous_settlement = None } }
+      ; Turn_already_inflight,
+        { claimed with phase = Turn_inflight
+            { owner_epoch; session_id = "session"; turn_id = Some "turn";
+              previous_settlement = None } }
+      ; Turn_count_exhausted,
+        { claimed with phase = Ready; turn_count = Int.max_int }
+      ])
 ;;
 
 let write_file path content =
@@ -1208,6 +1250,52 @@ let write_file path content =
   Fun.protect
     ~finally:(fun () -> close_out_noerr output)
     (fun () -> output_string output content)
+;;
+
+let test_input_rejection_codec_keeps_exact_wire_domain () =
+  with_workspace "masc-official-client-rejection-codec-" (fun base_path ->
+    let keeper_name = "rejection-codec" in
+    let runtime_id = "codex.default" in
+    let claimed = claim_new ~base_path ~keeper_name ~client_kind:Codex
+        ~runtime_id ~owner_epoch ~at:1. in
+    let recovery = require_recovery ~base_path ~keeper_name ~expected:claimed
+        ~failure:(Input_rejected Bootstrap_floor_exceeded)
+        ~detail:"fixture bootstrap floor rejection" ~required_at:2. |> Result.get_ok in
+    let recovery_id = match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let original = Yojson.Safe.from_file state_path in
+    let write_failure wire =
+      let json = match original with
+        | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+            if String.equal key "phase" then
+              match value with
+              | `Assoc phase -> key, `Assoc
+                  (("failure", `String wire) :: List.remove_assoc "failure" phase)
+              | _ -> fail "fixture phase is not an object"
+            else key, value) fields)
+        | _ -> fail "fixture store is not an object" in
+      write_file state_path (Yojson.Safe.to_string json) in
+    List.iter (fun reason ->
+        write_failure (recovery_failure_to_string (Input_rejected reason));
+        let loaded = load ~base_path ~keeper_name |> Result.get_ok in
+        match plan_claim ~expected:loaded ~client_kind:Codex ~runtime_id with
+        | Error (Input_recovery_required payload) ->
+          check string "wire retains runtime" runtime_id payload.runtime_id;
+          check string "wire retains recovery ID" recovery_id payload.recovery_id;
+          check bool "wire retains typed reason" true (payload.reason = reason)
+        | Error error -> fail (claim_error_to_string error)
+        | Ok _ -> fail "loaded input rejection was auto-superseded")
+      [Bootstrap_floor_exceeded; Effect_fenced];
+    List.iter (fun wire ->
+        write_failure wire;
+        match load ~base_path ~keeper_name with
+        | Error _ -> ()
+        | Ok _ -> fail "unknown input-rejection wire was accepted")
+      ["input_rejected"; "input_rejected_"; "input_rejected_other";
+       "input_rejected_effect_fenced_extra"])
+
 ;;
 
 let test_ambiguous_json_is_rejected () =
@@ -1501,6 +1589,10 @@ let () =
             "input-rejected recovery is not auto-superseded"
             `Quick
             test_input_rejected_recovery_is_not_auto_superseded
+        ; test_case "other claim refusals remain configuration errors" `Quick
+            test_other_claim_refusals_remain_configuration_errors
+        ; test_case "input rejection codec preserves exact wire domain" `Quick
+            test_input_rejection_codec_keeps_exact_wire_domain
         ; test_case "cooperative continuation preserves its thread after steering" `Quick
             test_cooperative_resume_preserves_thread_after_newer_steering
         ; test_case "a continuation is admitted only for the turn it left" `Quick

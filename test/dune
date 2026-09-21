@@ -1,3 +1,8 @@
+(include stanzas/test_librarian_working_state_evaluation.inc)
+(include stanzas/test_librarian_working_state_cli.inc)
+(include stanzas/test_librarian_continuity_snapshot_cli.inc)
+(include stanzas/test_librarian_continuity_snapshot.inc)
+
 (rule
  (alias runtest-test_dashboard_observation_quota)
  (deps test_dashboard_observation_quota.py ../bin/main_eio.exe
@@ -6612,3 +6617,9 @@
  (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
 
 (include stanzas/test_tui_librarian_context_review.inc)
+
+(include stanzas/test_keeper_continuity_request_view.inc)
+
+(include stanzas/test_keeper_librarian_continuity.inc)
+
+(include stanzas/test_keeper_continuity_dispatch.inc)

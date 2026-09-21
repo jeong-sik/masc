@@ -117,11 +117,11 @@ let answer_prompt ~question (context : answer_context) =
            ])
   }
 
-let judge_request ~endpoint ~model (case : case) ~question ~answer =
+let judge_request_for ~endpoint ~model ~question_id ~reference ~question ~answer =
   { endpoint
   ; model
-  ; question_id = case.id
-  ; reference = case.source.text
+  ; question_id
+  ; reference
   ; question
   ; answer
   ; instructions =
@@ -130,6 +130,10 @@ let judge_request ~endpoint ~model (case : case) ~question ~answer =
   ; true_criteria = "The answer provides the requested information accurately, consistent with the reference."
   ; false_criteria = "The requested information is missing, contradicted, invented, or the answer says it is unavailable."
   }
+
+let judge_request ~endpoint ~model (case : case) ~question ~answer =
+  judge_request_for ~endpoint ~model ~question_id:case.id ~reference:case.source.text
+    ~question ~answer
 
 let judge_state (request : judge_request) =
   `Assoc

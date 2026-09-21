@@ -6028,6 +6028,8 @@ let runtime_resolved_json =
     ; ("source", `String "/api/v1/runtime/resolved")
     ; ("config_path", `String "/workspace/config/runtime.toml")
     ; ("default_runtime", picker_default_runtime)
+    ; "media_failover", `List []
+    ; "media_failover_dropped", `List []
     ; ( "runtimes"
       , `List
           [ picker_default_runtime
@@ -6257,6 +6259,8 @@ let runtime_resolved_surface_json () =
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", `String "/workspace/config/runtime.toml"
     ; "default_runtime", runtime_a
+    ; "media_failover", `List []
+    ; "media_failover_dropped", `List []
     ; "runtimes", `List runtimes
     ; ( "lanes"
       , `List

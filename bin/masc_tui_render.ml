@@ -4985,10 +4985,10 @@ let render_lanes_overview (state : state) =
          (* The slot editor's heading, its rows and its key line, counted here
             so the lane detail below gives up the space rather than the
             editor being drawn past the frame. *)
-         + (match state.standalone_slot_editor with
+         + (match state.slot_editor with
             | None -> 0
             | Some _ ->
-              2 + max 1 (List.length (Masc_tui_types.standalone_slot_editor_rows state)))
+              2 + max 1 (List.length (Masc_tui_types.slot_editor_rows state)))
        in
        let available =
          max 0
@@ -5037,28 +5037,29 @@ let render_lanes_overview (state : state) =
      its place there and is marked rather than left out, because dropping it
      from the drawing would put the numbers beside the other slots out of step
      with the file. *)
-  (match state.standalone_slot_editor with
+  (match state.slot_editor with
    | None -> ()
    | Some editor ->
        box_line_styled buf cols ~style:(Theme.info ())
-         (Printf.sprintf "  slots of %s — the order this lane walks"
-            (Terminal_text.single_line editor.Masc_tui_types.sse_lane));
-       let slot_rows = Masc_tui_types.standalone_slot_editor_rows state in
+         (Printf.sprintf "  slots of %s — the order it walks"
+            (Terminal_text.single_line
+               (Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target)));
+       let slot_rows = Masc_tui_types.slot_editor_rows state in
        if slot_rows = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
            "  (this lane declares no slot; a slots array is what it walks)"
        else
          List.iteri
-           (fun index (row : Masc_tui_types.standalone_slot_row) ->
+           (fun index (row : Masc_tui_types.slot_editor_row) ->
               let line =
                 Printf.sprintf "  %s %d  %s%s"
-                  (if index = editor.Masc_tui_types.sse_cursor then ">" else " ")
+                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
                   (index + 1)
-                  (Terminal_text.single_line row.Masc_tui_types.ssr_slot)
-                  (if row.Masc_tui_types.ssr_admitted then ""
+                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
+                  (if row.Masc_tui_types.sr_admitted then ""
                    else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
               in
-              if index = editor.Masc_tui_types.sse_cursor then
+              if index = editor.Masc_tui_types.se_cursor then
                 box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
               else box_line buf cols line)
            slot_rows;
@@ -11131,6 +11132,55 @@ let render_runtime (state : state) =
   in
   c.push_styled ~style:authority_style authority_line;
   c.push_divider ();
+  (* The two routes that are not lanes. They hold runtime ids and nothing
+     dispatches a keeper turn to them, so they sit above the lane table rather
+     than among its rows, where the lane count and the lane-editing keys would
+     both be wrong about them. *)
+  (match state.runtime_mode with
+   | Masc_tui_types.Runtime_all -> ()
+   | Masc_tui_types.Runtime_lanes ->
+       let resolved =
+         Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)
+           state.runtime_surface
+       in
+       let default_text =
+         match resolved with
+         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | Some resolved ->
+             (match resolved.rrs_default_runtime_id with
+              | Some id -> Terminal_text.single_line id
+              | None -> Ansi.dim ^ "none — every keeper needs an assignment" ^ Ansi.reset)
+       in
+       let fleet_text =
+         match resolved with
+         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | Some resolved ->
+             (match resolved.rrs_media_failover, resolved.rrs_media_failover_dropped with
+              | [], [] -> Ansi.dim ^ "none — no vision fleet" ^ Ansi.reset
+              | admitted, dropped ->
+                  String.concat " â "
+                    (List.map Terminal_text.single_line admitted)
+                  ^
+                  (match dropped with
+                   | [] -> ""
+                   | _ ->
+                     (Theme.warn ())
+                     ^ Printf.sprintf "  (%s unresolved at boot: %s)"
+                         (Message_layout.count_noun (List.length dropped) "entry")
+                         (String.concat ", " (List.map Terminal_text.single_line dropped))
+                     ^ Ansi.reset))
+       in
+       c.push_styled ~style:(Theme.recede ())
+         (Printf.sprintf "  %s %s   %s"
+            (runtime_column runtime_lane_width "[runtime].default")
+            (runtime_column runtime_candidate_width default_text)
+            (Ansi.dim ^ "f replaces it · the runtime an unassigned keeper walks" ^ Ansi.reset));
+       c.push_styled ~style:(Theme.recede ())
+         (Printf.sprintf "  %s %s   %s"
+            (runtime_column runtime_lane_width "media_failover")
+            (runtime_column runtime_candidate_width fleet_text)
+            (Ansi.dim ^ "m edits it · the vision fleet, in call order" ^ Ansi.reset));
+       c.push_divider ());
   c.push_styled ~style:(Theme.recede ())
     ("  "
      ^ runtime_column runtime_lane_width
@@ -11185,6 +11235,30 @@ let render_runtime (state : state) =
          (Printf.sprintf "  press D again to remove lane %s"
             (Terminal_text.single_line lane));
        c.push_divider ());
+  (* The route editor, drawn here when it was opened on media_failover. The
+     Lanes surface draws the same editor for an exact lane's slots; both show
+     one ordered list of runtime ids and take the same keys. *)
+  (match state.slot_editor with
+   | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
+   | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
+       c.push_styled ~style:(Theme.info ())
+         "  [runtime].media_failover — the order the vision fleet is called in";
+       let entries = Masc_tui_types.slot_editor_rows state in
+       if entries = [] then
+         c.push_styled ~style:(Theme.recede ())
+           "  (empty — no vision fleet; a adds the first runtime)"
+       else
+         List.iteri
+           (fun index (row : Masc_tui_types.slot_editor_row) ->
+              c.push
+                (Printf.sprintf "  %s %d  %s"
+                   (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                   (index + 1)
+                   (Terminal_text.single_line row.Masc_tui_types.sr_slot)))
+           entries;
+       c.push_styled ~style:(Theme.recede ())
+         "  j/k move · a add · x drop · J/K reorder · Esc close";
+       c.push_divider ());
   (match runtime_picker_projection state with
    | None -> ()
    | Some picker ->
@@ -11195,7 +11269,13 @@ let render_runtime (state : state) =
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
               Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
-                (Terminal_text.single_line lane));
+                (Terminal_text.single_line lane)
+          | Masc_tui_types.Pick_media_failover ->
+              "  adding to the vision fleet [runtime].media_failover — j/k move, Enter append, e cancel"
+          | Masc_tui_types.Pick_route_default ->
+              (* Replaces rather than appends, and the row it replaces is
+                 marked "(already a candidate)" in the choices below. *)
+              "  the runtime an unassigned keeper walks — j/k move, Enter replace, e cancel");
        if picker.rlp_choices = [] then
          c.push_styled ~style:(Theme.recede ()) "  (runtime catalogue unread)"
        else

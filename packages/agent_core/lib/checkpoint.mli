@@ -125,6 +125,10 @@ val to_string : t -> string
     payloads. *)
 val message_to_json : Types.message -> Yojson.Safe.t
 
+val message_of_json : Yojson.Safe.t -> (Types.message, Error.t) result
+(** Decode one canonical checkpoint message under the current message contract.
+    Malformed JSON values return serialization errors. *)
+
 (** Encodings of the messages written by earlier saves of one checkpoint
     lineage. One memo serves one sequence of saves; it is not safe to use from
     two saves at once. *)

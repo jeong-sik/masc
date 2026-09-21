@@ -71,6 +71,7 @@ val run_best_effort
   :  ?trigger:trigger
   -> ?input_projection:input_projection
   -> ?write_scope:write_scope
+  -> ?continuity:Keeper_librarian_continuity.prepared
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
@@ -96,6 +97,11 @@ val run_best_effort
     without submitting the completed-turn range again. *)
 
 module For_testing : sig
+  val commit_continuity
+    : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)
+    -> observe:((Librarian_continuity_snapshot.t, string) result -> unit)
+    -> unit
+
   type classified_error
 
   val classified_error_detail : classified_error -> string

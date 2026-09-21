@@ -763,6 +763,15 @@ let test_durable_drain_publishes_scoped_health () =
       (match (observed ()).last_pass, (observed ()).unread with
        | Queue_refresh.Stopped Masc.Keeper_librarian_durable_consumer.Keeper_meta_absent, None -> ()
        | _ -> Alcotest.fail "missing metadata must replace the old observation");
+      (* Effective metadata requires both its runtime snapshot and declaration.
+         Create the real profile before asking the durable reader to use it. *)
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:root in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+        (fun oc -> Printf.fprintf oc
+          "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+          keeper_name "test durable health" "docker");
+      Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
       (match Masc.Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
        | Ok () -> () | Error detail -> Alcotest.fail detail);
       run ();

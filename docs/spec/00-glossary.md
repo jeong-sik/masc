@@ -461,6 +461,15 @@ status: reference
   같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
   Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
 
+**Continuity Snapshot (하던 일 저장본)**
+: 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
+  한 파일. 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
+  Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
+  저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
+  현재는 `masc-librarian-continuity capture/restore`의 저장·복원 검증에 사용한다.
+  운영 요청의 History 절단이나 모델 생성 설명의 정확성을 승인하지 않는다.
+  → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
+
 **Working Context**
 : Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
   operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
@@ -524,3 +533,10 @@ status: reference
   입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
   게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
   Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
+
+### 대화 작업 상태 (working_state)
+
+Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
+같은 파일에 저장된 정확한 대화 범위와 한 쌍이며, 큐 원본을 정리한
+`working_contexts`나 장기 Memory facts와 다릅니다. 모델의 출력만으로 범위가
+소비된 것은 아닙니다. pair 저장과 소비 시 이력 검증이 필요합니다.

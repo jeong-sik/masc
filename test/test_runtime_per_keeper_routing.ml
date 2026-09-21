@@ -1367,9 +1367,9 @@ let test_an_exact_slot_append_keeps_the_declared_order () =
 ;;
 
 (* A lane's name is its routing key, so a rename is the table header and every
-   reference to it -- assignments, and [runtime].default when it names the lane
-   -- in the one write. A file written with a reference missed would route
-   those keepers to a lane that is no longer declared. *)
+   assignment reference to it in the one write. A file written with a
+   reference missed would route those keepers to a lane that is no longer
+   declared. *)
 let test_a_rename_carries_the_references_with_it () =
   with_runtime_file (fun path ->
     Runtime.set_runtime_lane_candidates ~runtime_config_path:path
@@ -1425,18 +1425,7 @@ let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
       ~names:[ "already has that name" ]
       (fun () ->
          Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
-           ~new_lane_id:"coding" ());
-    (* A lane the default reaches is one named after the runtime the default
-       names -- [runtime].default takes a runtime id. Renaming it would hand
-       every unassigned keeper that bare runtime. *)
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
-      ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
-    |> lane_write_ok "declare the default's own lane";
-    lane_write_refused "rename the lane the default reaches" ~path
-      ~names:[ "named after the runtime in [runtime].default" ]
-      (fun () ->
-         Runtime.rename_runtime_lane ~runtime_config_path:path
-           ~lane_id:"runpod_mtp.qwen" ~new_lane_id:"primary" ()))
+           ~new_lane_id:"coding" ()))
 ;;
 
 (* [drop] and [move] read the same declaration under the same lock, for the

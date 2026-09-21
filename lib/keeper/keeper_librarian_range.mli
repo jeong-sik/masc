@@ -14,7 +14,9 @@
     the Keeper Owner runs one child turn at a time. *)
 
 type range =
-  { start_atom : int
+  { history_start_boundary_line : int
+      (** First boundary row in the selected history generation. *)
+  ; start_atom : int
   ; end_atom : int  (** Exclusive. Greater than [start_atom]. *)
   ; last_atom_digest : string
       (** Of atom [end_atom - 1], as the line that is the cut point states it
@@ -71,6 +73,21 @@ type selection =
       (** Row 1b. The read position belongs to another trace than the one
           asked about; the caller decides which trace to read. *)
   | Stop of stop
+
+val may_have_unread :
+  trace_id:string ->
+  lines:
+    (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
+  progress:Keeper_librarian_progress.t option ->
+  bool
+(** Cheap conservative check before loading the checkpoint. [trace_id] is the
+    current metadata trace; a cursor from another trace always returns [true]
+    so the full selector can report the mismatch. [false] proves
+    that the current restart segment contains no position beyond the durable
+    cursor. Segment selection is shared with {!select}; already-seen restarts
+    still exclude earlier histories. A changed whole-log row count, later
+    restart, or later current-segment atom position returns [true]; the full
+    selector still validates unreadable lines and checkpoint digests. *)
 
 (** [lines] is {!Keeper_turn_boundaries.read}'s answer. [messages] are the
     messages of the checkpoint of [trace_id], loaded after [lines] were read.

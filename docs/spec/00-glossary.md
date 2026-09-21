@@ -371,14 +371,16 @@ status: reference
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
   (`fresh`/`continued`)도 같이 적는다. Checkpoint 파일이 있었는지가 아니라 Atom이
   있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
-  줄이 파일에 쌓인 순서가 아니라 Atom 수로 줄을 세운다.
+  같은 재시작 구간 안의 줄을 Atom 수로 줄 세운다.
   같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터
   0에서 다시 시작한다"를 말하는 줄이고, History를 다시 시작하게 만든 쪽이 쓴다.
   `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. Atom이 없는 History에서
   시작하는 turn은, 저장된 History에 Atom이 없는 것을 알면 시작할 때 쓰고,
   Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
   보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
-  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
+  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다. 가장 최근의 이 두 종류
+  중 하나부터 현재 History의 끝 경계를 고른다. 그 앞의 줄은 같은 메시지가 반복되어
+  digest가 맞더라도 쓰지 않으며, `fresh` turn의 자기 끝 경계는 포함한다.
   이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
   cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
 
@@ -448,3 +450,6 @@ status: reference
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
   History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.
+  Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
+  읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
+  매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.

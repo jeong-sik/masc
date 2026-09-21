@@ -123,6 +123,32 @@ let test_another_sessions_record_is_another_history () =
     (fst (seed (Front.of_records ~trace_id:"trace-2" records)))
 ;;
 
+(* A turn that carried the whole history names no front: its opening atom is
+   the oldest one because nothing was skipped. The Codex lane hands its list
+   over whole every turn, so reading its record as a seed would send the next
+   official-client start back to the oldest atom, which is #37123 again
+   (#37350). The narrower front from the turn before it stands. *)
+let test_a_whole_history_record_does_not_unseat_a_carried_front () =
+  let records =
+    [ record ~turn:20 ~runtime:"claude_code" (Some (40, 1000))
+    ; record ~turn:21 ~runtime:"codex" (Some (1010, 1010))
+    ]
+  in
+  let first_atom, src = seed (of_records records) in
+  check int "the carried front of turn 20 stands" 960 first_atom;
+  check source "and names that turn" (Front.Turn_record { turn = 20 }) src
+;;
+
+(* Alone, such a record seeds nothing. Carrying its oldest atom and carrying
+   everything are the same range, so there is nothing for a seed to say. *)
+let test_a_whole_history_record_alone_seeds_nothing () =
+  check
+    bool
+    "a record that skipped no atom gives no seed"
+    true
+    (Option.is_none (of_records [ record ~turn:21 ~runtime:"codex" (Some (1010, 1010)) ]))
+;;
+
 (* A recorded response remains a fact after its runtime leaves the current
    catalog. A row without a response window still says nothing about a seed. *)
 let test_a_response_survives_its_runtime_leaving_the_catalog () =
@@ -581,6 +607,11 @@ let () =
     [ ( "of_records"
       , [ test_case "newest completed record on the trace" `Quick
             test_the_newest_completed_record_on_the_trace_seeds_the_front
+        ; test_case "a whole-history record does not unseat a carried front"
+            `Quick
+            test_a_whole_history_record_does_not_unseat_a_carried_front
+        ; test_case "a whole-history record alone seeds nothing" `Quick
+            test_a_whole_history_record_alone_seeds_nothing
         ; test_case "a response survives runtime removal" `Quick
             test_a_response_survives_its_runtime_leaving_the_catalog
         ; test_case "an unanswered record does not seed" `Quick

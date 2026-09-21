@@ -36,7 +36,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_librarian =
-      { Tui_decode.mlh_state = Some "drained"
+      { Decode.mlh_state = Some "drained"
       ; mlh_detail = None
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0

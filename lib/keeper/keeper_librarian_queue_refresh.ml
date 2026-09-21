@@ -126,6 +126,7 @@ let rec drain_durable_with_commit ~config ~keeper_name ~commit =
 ;;
 
 let run_durable_with_commit ~config ~keeper_name ~commit =
+  (* See For_testing: callers exercise effects; production projects the terminal state. *)
   ignore (drain_durable_with_commit ~config ~keeper_name ~commit)
 ;;
 

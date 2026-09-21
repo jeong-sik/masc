@@ -295,7 +295,9 @@ let test_unread_turns_counts_what_a_pass_has_left () =
      check int "two turns are behind" 2 atoms;
      check int "no official turn" 0 official
    | Error error -> fail (Consumer.error_to_string error));
-  (match consume config (fun ~expected_revision:_ ~range_id:_ _ -> true) with
+  (match
+     consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true)
+   with
    | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _

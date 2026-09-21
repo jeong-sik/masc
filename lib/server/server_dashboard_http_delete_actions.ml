@@ -626,6 +626,23 @@ let handle_dashboard_keeper_purge_completion config operation =
         | Error error ->
           Error (Schedule_store.store_error_to_string error)
         | Ok () ->
+          (* The Librarian lane is the server's and outlives the Keeper, so a
+             unit for this Keeper may still be running here. It is cancelled
+             and waited for before any file goes, or it could write the
+             progress file back after the purge deleted it (RFC
+             librarian-lifecycle section 8). [request_cancel] only accepts a
+             request from the lane's owner domain. *)
+          (match
+             Eio_context.run_on_owner_domain (fun () ->
+               Keeper_memory_lane.cancel_and_await_librarian
+                 ~base_path:config.Workspace.base_path
+                 ~keeper_name:operation.keeper_name)
+           with
+           | Error error ->
+             Error
+               ("Librarian lane could not be stopped before purge: "
+                ^ Keeper_memory_lane.purge_cancel_error_to_string error)
+           | Ok () ->
           (match purge_keeper_artifacts config ~keeper_name:operation.keeper_name ~remove_configuration:true context with
            | Error _ as error -> error
            | Ok () ->
@@ -643,7 +660,7 @@ let handle_dashboard_keeper_purge_completion config operation =
             "dashboard Keeper purge completion delivered: keeper=%s operation=%s"
             operation.keeper_name
             operation_id;
-          Ok ()))
+          Ok ())))
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
      | Supervisor_cleanup ->

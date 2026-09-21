@@ -1,6 +1,7 @@
 open Alcotest
 
 module Schedule = Masc_tui_render_schedule
+module Layout = Masc_tui_layout
 
 let ns_per_ms = 1_000_000L
 let ms value = Int64.mul (Int64.of_int value) ns_per_ms
@@ -142,11 +143,11 @@ let test_terminal_size_cache_refreshes_without_losing_last_valid () =
     = Schedule.Terminal_size_cache.Unchanged (24, 80))
 
 let test_render_widths_are_total () =
-  check int "negative width clamps to zero" 0 (Schedule.nonnegative_width (-1));
+  check int "negative width clamps to zero" 0 (Layout.nonnegative_width (-1));
   check int "tiny keeper panel has an empty context bar" 0
-    (Schedule.keeper_context_bar_width ~inner_width:0);
+    (Layout.keeper_context_bar_width ~inner_width:0);
   check int "context bar remains bounded" 30
-    (Schedule.keeper_context_bar_width ~inner_width:100)
+    (Layout.keeper_context_bar_width ~inner_width:100)
 
 let test_interrupted_input_wait_retries_until_deadline () =
   let now = ref 0L in
@@ -283,7 +284,7 @@ let test_overview_rows_share_one_viewport_budget () =
    of the allocation, so the frame ran one or two rows past the terminal and
    the footer landed on the composer's row. *)
 let board_read_frame_rows ~body_line_count ~comment_count
-    (allocation : Schedule.board_read_allocation) =
+    (allocation : Layout.board_read_allocation) =
   let position_rows =
     if
       body_line_count > allocation.body_rows
@@ -291,7 +292,7 @@ let board_read_frame_rows ~body_line_count ~comment_count
     then 1
     else 0
   in
-  Schedule.board_read_box_rows
+  Layout.board_read_box_rows
   + (if comment_count > 0 then 2 else 0)
   + 1
   + position_rows
@@ -353,7 +354,7 @@ let test_overview_blocks_grow_to_their_item_counts () =
 
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
-    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:10
+    Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:10
       ~comment_count:5
   in
   check int "14-row board keeps one body row" 1 crowded.body_rows;
@@ -361,20 +362,20 @@ let test_board_read_rows_reserve_comments_and_footer () =
   check int "14-row board frame is exact" 14
     (board_read_frame_rows ~body_line_count:10 ~comment_count:5 crowded);
   let comments_only =
-    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:0
+    Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:0
       ~comment_count:5
   in
   check int "empty body consumes no semantic row" 0 comments_only.body_rows;
   check int "empty body frees a third comment row" 3
     comments_only.comment_rows;
   let no_comments =
-    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:10
+    Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:10
       ~comment_count:0
   in
   check int "comment-free board uses the full body viewport" 5
     no_comments.body_rows;
   let full_comments =
-    Schedule.allocate_board_read ~terminal_rows:16 ~body_line_count:10
+    Layout.allocate_board_read ~terminal_rows:16 ~body_line_count:10
       ~comment_count:5
   in
   check int "16-row board widens the thread" 4 full_comments.comment_rows;
@@ -382,7 +383,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
      the same five rows on an eighty-row screen as on a twenty-row one. The
      share grows with the height, and the post still keeps the larger half. *)
   let tall =
-    Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:200
+    Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:200
       ~comment_count:40
   in
   check int "a tall pane gives comments a share, not a constant" 16
@@ -390,7 +391,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
   check bool "the post still keeps the larger part" true
     (tall.body_rows > tall.comment_rows);
   let few_comments =
-    Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:200
+    Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:200
       ~comment_count:3
   in
   check int "a short thread takes only what it has" 3
@@ -398,7 +399,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
   (* Rows the body cannot use are the comments'. This pane held twenty-four
      rows of filler under a ten-line post while the thread was cut at five. *)
   let short_post =
-    Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:10
+    Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:10
       ~comment_count:40
   in
   check int "a short post hands its unused rows to the thread" 40
@@ -408,7 +409,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
     for body_line_count = 0 to 10 do
       for comment_count = 0 to 10 do
         let allocation =
-          Schedule.allocate_board_read ~terminal_rows ~body_line_count
+          Layout.allocate_board_read ~terminal_rows ~body_line_count
             ~comment_count
         in
         let total =
@@ -424,7 +425,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
         let ceiling =
           let chrome = if comment_count > 0 then 2 else 0 in
           let available =
-            max 0 (terminal_rows - Schedule.board_read_box_rows - 1 - chrome)
+            max 0 (terminal_rows - Layout.board_read_box_rows - 1 - chrome)
           in
           max 5 (max (available - body_line_count) (available / 3))
         in
@@ -434,7 +435,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
         then
           failf "board-read comment allocation escaped its cap";
         let last =
-          Schedule.project_board_read_scroll ~body_line_count
+          Layout.project_board_read_scroll ~body_line_count
             ~body_rows:allocation.body_rows ~comment_count
             ~comment_rows:allocation.comment_rows max_int
         in
@@ -453,18 +454,18 @@ let test_board_read_rows_reserve_comments_and_footer () =
 
 let test_board_read_scroll_reaches_hidden_comments () =
   let allocation =
-    Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:1
+    Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:1
       ~comment_count:5
   in
   let first =
-    Schedule.project_board_read_scroll ~body_line_count:1
+    Layout.project_board_read_scroll ~body_line_count:1
       ~body_rows:allocation.body_rows ~comment_count:5
       ~comment_rows:allocation.comment_rows 0
   in
   check int "initial body offset" 0 first.body_offset;
   check int "initial comment offset" 0 first.comment_offset;
   let last =
-    Schedule.project_board_read_scroll ~body_line_count:1
+    Layout.project_board_read_scroll ~body_line_count:1
       ~body_rows:allocation.body_rows ~comment_count:5
       ~comment_rows:allocation.comment_rows 99
   in
@@ -473,18 +474,101 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "one-line body remains visible" 0 last.body_offset;
   check int "last comment becomes visible" 3 last.comment_offset;
   let long_body =
-    Schedule.project_board_read_scroll ~body_line_count:10 ~body_rows:1
+    Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
       ~comment_count:5 ~comment_rows:3 10
   in
   check int "body scroll is consumed first" 9 long_body.body_offset;
   check int "remaining scroll advances comments" 1
     long_body.comment_offset;
   let negative =
-    Schedule.project_board_read_scroll ~body_line_count:10 ~body_rows:1
+    Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
       ~comment_count:5 ~comment_rows:3 (-1)
   in
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
+
+(* Below the minimum the post column would be too narrow to read once the
+   comment column takes its fixed share, so the pane falls back to the
+   stacked layout instead of drawing an unreadable post. At and above it, the
+   two columns always add back up to the pane's own width -- nothing is
+   dropped between them, and nothing is drawn twice. *)
+let test_board_read_side_layout_falls_back_when_narrow () =
+  check bool "119 cols keeps the stacked layout" true
+    (Layout.board_read_side_layout ~cols:119 = None);
+  check bool "120 cols uses fixed side columns" true
+    (Layout.board_read_side_layout ~cols:120 = Some (78, 42));
+  for cols = Layout.board_read_side_minimum_cols to 220 do
+    match Layout.board_read_side_layout ~cols with
+    | None -> failf "cols=%d: expected a side layout at or above the minimum" cols
+    | Some (body_cols, comment_cols) ->
+        if body_cols + comment_cols <> cols then
+          failf "cols=%d: columns do not sum to the pane width (%d + %d)"
+            cols body_cols comment_cols;
+        if
+          comment_cols
+          <> Layout.board_read_side_comment_cols
+             + Layout.board_read_side_gutter_cols
+        then
+          failf "cols=%d: comment column changed width (%d)" cols comment_cols;
+        if body_cols < Layout.board_read_side_body_minimum_cols then
+          failf "cols=%d: post column is too narrow to read (%d)" cols
+            body_cols
+  done
+
+(* The heading is drawn from the comment column's own share, so a column with
+   any thread in it always has room for the heading and at least one line
+   under it -- never a heading alone. *)
+let test_board_read_side_allocation_reserves_the_heading () =
+  for terminal_rows = 9 to 40 do
+    for comment_count = 0 to 12 do
+      let allocation =
+        Layout.allocate_board_read_side ~terminal_rows ~body_line_count:20
+          ~comment_count
+      in
+      if comment_count > 0 && allocation.comment_rows > 0
+         && allocation.comment_rows < 2
+      then
+        failf
+          "rows=%d comments=%d: comment column has a heading with no room \
+           under it (%d rows)"
+          terminal_rows comment_count allocation.comment_rows;
+      if allocation.body_rows < 0 || allocation.comment_rows < 0 then
+        failf "rows=%d comments=%d: negative row allocation" terminal_rows
+          comment_count;
+      let available = max 0 (terminal_rows - 9) in
+      if max allocation.body_rows allocation.comment_rows <> available then
+        failf
+          "rows=%d comments=%d: side columns leave vertical space unused"
+          terminal_rows comment_count
+    done
+  done;
+  let no_comments =
+    Layout.allocate_board_read_side ~terminal_rows:30 ~body_line_count:20
+      ~comment_count:0
+  in
+  check int "no thread spends no row on a heading" 0 no_comments.comment_rows
+
+(* The side layout does not own a scroll of its own: it windows through
+   [project_board_read_scroll], the same function the stacked layout always
+   used, with the side allocation's rows in place of the stacked ones. So a
+   post beside its thread opens exactly like a post above its thread --
+   both columns at their head -- and a keyboard scenario that presses Enter
+   and expects the oldest comment waiting at the top, before anything has
+   scrolled, sees it either way. *)
+let test_board_read_side_layout_opens_head_first () =
+  let allocation =
+    Layout.allocate_board_read_side ~terminal_rows:16 ~body_line_count:20
+      ~comment_count:20
+  in
+  check bool "this allocation has room for a heading and a line under it"
+    true (allocation.comment_rows >= 2);
+  let comment_rows = allocation.comment_rows - 1 (* the heading's own row *) in
+  let opening =
+    Layout.project_board_read_scroll ~body_line_count:20
+      ~body_rows:allocation.body_rows ~comment_count:20 ~comment_rows 0
+  in
+  check int "post opens at its head" 0 opening.body_offset;
+  check int "thread opens at its head, not its tail" 0 opening.comment_offset
 
 let test_keeper_detail_scroll_normalizes_across_bounds () =
   let normalize = Schedule.normalize_keeper_detail_scroll in
@@ -1814,6 +1898,12 @@ let () =
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
             test_board_read_scroll_reaches_hidden_comments
+        ; test_case "board read side layout falls back when narrow" `Quick
+            test_board_read_side_layout_falls_back_when_narrow
+        ; test_case "board read side allocation reserves the heading" `Quick
+            test_board_read_side_allocation_reserves_the_heading
+        ; test_case "board read side layout opens head-first" `Quick
+            test_board_read_side_layout_opens_head_first
         ; test_case "keeper detail scroll follows current bounds" `Quick
             test_keeper_detail_scroll_normalizes_across_bounds
         ; test_case "overview events follow and preserve manual anchor" `Quick

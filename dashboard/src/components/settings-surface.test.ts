@@ -1384,11 +1384,18 @@ describe('SettingsSurface', () => {
       lanes: [
         {
           id: 'default',
+          declared: true,
           runtime_ids: ['rt-a', 'rt-b'],
         },
         {
           id: 'vision',
+          declared: true,
           runtime_ids: ['rt-c'],
+        },
+        {
+          id: 'assignment-only',
+          declared: false,
+          runtime_ids: ['rt-b'],
         },
       ],
     }))
@@ -1407,6 +1414,7 @@ describe('SettingsSurface', () => {
     expect(cands.map(c => c.querySelector('.rt-fo-id')?.textContent)).toEqual(['rt-a', 'rt-b'])
     expect(cands.map(c => c.classList.contains('head'))).toEqual([true, false])
     expect(cands[0]!.querySelector('.rt-fo-rank')?.textContent).toBe('1차')
+    expect(container.querySelector('[data-testid="runtime-lane-assignment-only"]')).toBeNull()
     // read-only: no candidate edit controls (the routing PATCH writer covers
     // default + media_failover only)
     expect(container.querySelector('[data-testid="runtime-lanes-section"]')?.querySelector('button, select, input'))

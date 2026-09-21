@@ -1525,6 +1525,8 @@ let update_locked_with_error
                      }))
              |> Result.map_error store_error
          in
+         (* schema-compat: Snapshot, journal and range-receipt codecs above are
+            unchanged; this adds a process-local observer to commit effects. *)
          (* Locks and preparation remain cancellable. Once replacement starts,
             retain its result and publish commit evidence before cancellation
             can interrupt the journal/receipt writes for this snapshot. *)

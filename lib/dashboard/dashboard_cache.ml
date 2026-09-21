@@ -466,8 +466,17 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
               ((), map)
           )
-        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn ->
+        (* [do_bg_compute] runs inside [Eio.Fiber.fork ~sw] on the process
+           root switch. Eio's [fork] hands anything escaping the body to
+           [Switch.fail sw], which cancels that switch, so propagating a
+           cancellation from here would take the server's root switch down
+           over a background cache refresh. The handler below is the fiber's
+           last act: a pure [Atomic] update returning the slot to [Ready],
+           with [is_internal_race_cancel] giving the loser of an inner
+           [Fiber.first] an immediate retry instead of a backoff. Nothing
+           runs after it, so absorbing the cancellation ends the fiber
+           rather than letting it work on past its own cancellation. *)
+        | exception exn -> (* cancel-guard-ok: fork body on the root switch; the handler is the fiber's last act and raising here fails that switch *)
           (match exn with
            | Compute_timeout _ -> ()
            | _ when Cancel_safe.is_internal_race_cancel exn ->

@@ -741,6 +741,12 @@ type runtime_option = {
 type runtime_resolved_lane = {
   rrl_id : string;
   rrl_runtime_ids : string list;  (** The lane as declared, head first. *)
+  rrl_declared : bool;
+      (** [true] when a [runtime.lanes.<id>] table declares this lane, so a
+          keeper assigned to it walks every candidate and the lane editor can
+          reorder or remove it. [false] is the one-candidate lane an assignment
+          naming a runtime resolves to: nothing declares it, it walks no
+          failover, and there is no table to remove. *)
 }
 
 type runtime_resolved_snapshot = {
@@ -756,6 +762,10 @@ type runtime_resolved_snapshot = {
     A missing probe is unobserved, never inferred unhealthy. *)
 type runtime_candidate_row = {
   rcr_lane_id : string;
+  rcr_lane_declared : bool;
+      (** [runtime_resolved_lane.rrl_declared] of the lane this row belongs to,
+          carried here because the rows, not the lanes, are what the Runtime
+          surface draws and what the lane editor acts on. *)
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;

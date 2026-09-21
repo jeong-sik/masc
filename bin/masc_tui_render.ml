@@ -11314,9 +11314,17 @@ let render_runtime (state : state) =
             else []
           in
           let lane_fact =
-            if candidate.rcr_candidate_count = 1 then [ "single candidate" ]
-            else if is_first then [ "head" ]
-            else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
+            (* [Lane_undeclared] reads like a one-candidate lane on the wire --
+               one candidate, first position -- so until this row said so there
+               was nothing on the surface telling them apart. It walks no
+               failover and [D] has no table to remove. *)
+            match Masc_tui_types.runtime_lane_fact_of_row candidate with
+            | Masc_tui_types.Lane_undeclared ->
+              [ (Theme.recede ()) ^ "runtime, not a declared lane" ^ Ansi.reset ]
+            | Masc_tui_types.Lane_single_candidate -> [ "single candidate" ]
+            | Masc_tui_types.Lane_head -> [ "head" ]
+            | Masc_tui_types.Lane_fallback position ->
+              [ Printf.sprintf "fallback #%d" position ]
           in
           let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
           (* The lane fact leads. This cell is what is left of the row after

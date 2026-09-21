@@ -8446,12 +8446,43 @@ let plan_runtime_lane_edit (state : state) = function
              write Write_lane_removal ~cursor_after:(Some (max 0 (first_row - 1)))
            | Some _ | None -> Arm_lane_removal lane)))
 
+(* What a Runtime row says about the position it holds in its lane. The
+   renderer spells and colours these; the reading itself is here because it is
+   the one fact that table exists to carry, and [Lane_undeclared] is not
+   derivable from the position alone. *)
+type runtime_lane_fact =
+  | Lane_undeclared
+      (* No [runtime.lanes.<id>] table declares this lane: it is the single
+         candidate an assignment naming a runtime rests on. It reads exactly
+         like [Lane_single_candidate] on the wire -- one candidate, first
+         position -- and walks no failover. *)
+  | Lane_single_candidate
+  | Lane_head
+  | Lane_fallback of int
+
+let runtime_lane_fact_of_row (row : Tui_decode.runtime_candidate_row) =
+  if not row.Tui_decode.rcr_lane_declared then Lane_undeclared
+  else if row.Tui_decode.rcr_candidate_count = 1 then Lane_single_candidate
+  else if row.Tui_decode.rcr_position = 1 then Lane_head
+  else Lane_fallback (row.Tui_decode.rcr_position - 1)
+;;
+
 type runtime_pick_item =
   | Pick_lane of Tui_decode.runtime_resolved_lane
   | Pick_model of Tui_decode.runtime_option
 
 let runtime_picker_items (state : state) : runtime_pick_item list =
-  let lanes = List.map (fun lane -> Pick_lane lane) state.runtime_lanes in
+  (* Only declared lanes are offered as lanes. A lane no
+     [runtime.lanes.<id>] table declares carries the id of the runtime it
+     rests on and that runtime as its only candidate, so picking it writes the
+     same assignment as the [MODEL] row of the same id further down this
+     list -- the picker showed both and called one of them a lane. *)
+  let lanes =
+    state.runtime_lanes
+    |> List.filter (fun (lane : Tui_decode.runtime_resolved_lane) ->
+         lane.Tui_decode.rrl_declared)
+    |> List.map (fun lane -> Pick_lane lane)
+  in
   let models =
     state.runtime_catalog
     |> List.map (fun model -> Pick_model model)

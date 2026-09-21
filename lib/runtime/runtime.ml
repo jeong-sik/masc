@@ -3289,28 +3289,24 @@ let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
     Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
-(* A lane shadows the runtime of the same id ([resolve_assignment] reads lanes
-   first), so a lane created under a runtime id would silently hand its
-   candidates to every keeper that names that runtime -- and to every keeper
-   without an assignment when it is the default. A runtime's own lane is
-   edited through [set_runtime_lane_candidates], which says what it does. *)
-let declares_runtime (config : Runtime_schema.config) id =
-  List.exists
-    (fun (binding : Runtime_schema.binding) -> String.equal (id_of_binding binding) id)
-    config.bindings
-;;
-
+(* A lane shadows the runtime of the same id: [resolve_assignment] reads lanes
+   first, so every keeper assigned to that runtime -- and, when it is
+   [\[runtime\].default], every keeper without an assignment -- walks the lane's
+   candidates instead of the bare runtime. That is what the shape is for, and
+   it is the shape the install path writes: [set_first_run_runtime] sets
+   [\[runtime\].default] to a runtime id and declares a lane of that same id
+   holding it and its fallbacks. This entry point used to refuse it, so the
+   one configuration setup produces was the one an operator could not
+   reproduce, while [set_runtime_lane_candidates] -- the [e]/[x]/[J]/[K]
+   writer -- created it without a word. The three agree now. The Runtime
+   surface marks which lanes a table declares so the shadowing is read
+   rather than guessed. *)
 let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
   let* lane_id = validated_lane_id lane_id in
   let* runtime_ids = validated_lane_candidates runtime_ids in
   edit_runtime_lanes ?runtime_config_path (fun ~content config ->
     if lane_is_declared config lane_id
     then Error (Printf.sprintf "lane %S already exists" lane_id)
-    else if declares_runtime config lane_id
-    then
-      Error
-        (Printf.sprintf
-           "%S is a runtime id; a new lane needs a name of its own" lane_id)
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 

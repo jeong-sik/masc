@@ -2060,6 +2060,12 @@ let run_autonomous_if_idle t run =
        escape into the keepalive fiber, and the registry recorded a crash
        and restarted the Keeper for an operator's message. *)
     Ok `Interrupted
+  | Ok (Autonomous_raised ((Eio.Cancel.Cancelled _ as exn), backtrace)) ->
+    (* Operator cancellation is handled above. Any other [Cancelled] is not a
+       translated autonomous outcome: it came from the turn body or the
+       owner's ambient switch, so preserve it exactly like the original
+       catch-all did. *)
+    Printexc.raise_with_backtrace exn backtrace
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
 ;;
@@ -2072,6 +2078,10 @@ let run_maintenance_if_idle t run =
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
   | Ok (Autonomous_raised (Stop_active_child, _)) -> Error Owner_stopping
+  | Ok (Autonomous_raised ((Eio.Cancel.Cancelled _ as exn), backtrace)) ->
+    (* Maintenance has no translated cancellation outcome; a cancellation is
+       ambient and must keep unwinding the requesting fiber. *)
+    Printexc.raise_with_backtrace exn backtrace
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
 ;;

@@ -616,7 +616,7 @@ let wakeup_relevant_keeper_for_board_signal
        let board_ym = Eio_guard.create_yield_meter () in
        List.iter
          (fun (entry : Keeper_registry.registry_entry) ->
-            (match read_meta config entry.name with
+            (match read_effective_meta config entry.name with
              | Error detail ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -688,7 +688,7 @@ let wakeup_relevant_keeper_for_board_signal
        List.iter
       (fun (entry : Keeper_registry.registry_entry) ->
          (try
-            match read_meta config entry.name with
+            match read_effective_meta config entry.name with
         | Error detail ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string KeepaliveSignalFailures)

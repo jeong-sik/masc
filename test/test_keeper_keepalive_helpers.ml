@@ -594,7 +594,19 @@ let test_closed_board_audience_routes_only_its_authority () =
      | Ok KBA.Broadcast -> true
      | Error _ | Ok _ -> false)
 
+let write_board_lane_config config (meta : Keeper_meta_contract.keeper_meta) =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_text (Filename.concat keepers_dir (meta.name ^ ".toml"))
+    (fun oc -> Printf.fprintf oc
+      "[keeper]\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") meta.board_interests)))
+;;
+
 let persist_and_register_board_lane config meta =
+  write_board_lane_config config meta;
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail ("write_meta failed: " ^ detail));
@@ -779,6 +791,7 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
        let meta = make_board_resume_meta "restartlane" in
+       write_board_lane_config config meta;
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("write_meta failed: " ^ detail));
@@ -1185,6 +1198,14 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
          }
        in
        persist_and_register_board_lane config bystander;
+       let bystander =
+         match Keeper_meta_store.read_effective_meta config bystander.name with
+         | Ok (Some meta) -> meta
+         | Ok None -> fail "configured bystander metadata missing"
+         | Error detail -> fail detail
+       in
+       check (list string) "bystander interests come from actual TOML"
+         [ "thread review" ] bystander.board_interests;
        let audience =
          match KBA.of_board_audience addressed.Board_dispatch.audience with
          | Ok audience -> audience

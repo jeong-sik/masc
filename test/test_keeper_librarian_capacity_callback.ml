@@ -3,9 +3,6 @@ module Runtime = Keeper_librarian_runtime
 module Fixture = Exact_output_fixture
 module Runs = Exact_lane_run_registry
 
-let overflow =
-  {|{"id":"capacity","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
-
 let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -22,7 +19,6 @@ let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_over
     ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all));
     incr posts;
     let body = match status with
-      | `OK -> overflow
       | `Request_entity_too_large -> {|{"error":{"message":"fixture body limit","type":"invalid_request_error"}}|}
       | `Too_many_requests -> {|{"error":{"message":"fixture quota","type":"rate_limit_error"}}|}
       | _ -> {|{"error":{"message":"fixture authorization","type":"authentication_error"}}|} in
@@ -91,6 +87,7 @@ let test_prefit_real_continuity ~base_path () =
   let keeper_id = "prefit-real-continuity" and trace_id = "prefit-source" in
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
   let queued_source : Context.source =
     {reference="pending-chat"; content=`String "Unrelated pending question."} in
   let pocket : Context.pocket =
@@ -313,7 +310,7 @@ let () =
     ["continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
        (test_prefit_real_continuity ~base_path)];
      "actual HTTP outcomes", [
-      case "capacity-final" false `OK 1;
+      case "capacity-final" false `Request_entity_too_large 1;
       case "quota-final" false `Too_many_requests 0;
       case "capacity-then-quota" true `Too_many_requests 0;
       case "capacity-then-auth" true `Unauthorized 0];

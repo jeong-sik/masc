@@ -136,37 +136,39 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
        ~keepers_dir:(Workspace.keepers_runtime_dir config)
        ~keeper_id:keeper_name)
     (fun lines ->
-       List.fold_left
-         (fun state (line, decoded) ->
-            match state, decoded with
-            | Error _ as error, _ -> error
-            | Ok _, Error error ->
-              Error
-                (Printf.sprintf
-                   "turn boundary line %d: %s"
-                   line
-                   (Keeper_turn_boundaries.read_error_to_string error))
-            | ( Ok (latest_turn, floor),
-                Ok
-                  { Keeper_turn_boundaries.event =
-                      Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
-                  ; _
-                  } )
-              when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
-              let turn = Ids.Turn_ref.absolute_turn turn_ref in
-              Ok (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn), floor)
-            | ( Ok (latest_turn, _),
-                Ok
-                  { Keeper_turn_boundaries.event =
-                      Keeper_turn_boundaries.History_restarted { trace_id = restarted }
-                  ; _
-                  } )
-              when String.equal restarted trace_id ->
-              Ok (latest_turn, latest_turn)
-            | Ok state, Ok _ -> Ok state)
-         (Ok (None, None))
-         lines
-       |> Result.map snd)
+       let rec loop latest_turn floor = function
+         | [] -> Ok floor
+         | (line, Error error) :: _ ->
+           Error
+             (Printf.sprintf
+                "turn boundary line %d: %s"
+                line
+                (Keeper_turn_boundaries.read_error_to_string error))
+         | ( _,
+             Ok
+               { Keeper_turn_boundaries.event =
+                   Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
+               ; _
+               } )
+           :: rest
+           when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
+           let turn = Ids.Turn_ref.absolute_turn turn_ref in
+           loop
+             (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
+             floor
+             rest
+         | ( _,
+             Ok
+               { Keeper_turn_boundaries.event =
+                   Keeper_turn_boundaries.History_restarted { trace_id = restarted }
+               ; _
+               } )
+           :: rest
+           when String.equal restarted trace_id ->
+           loop latest_turn latest_turn rest
+         | (_, Ok _) :: rest -> loop latest_turn floor rest
+       in
+       loop None None lines)
 ;;
 
 let read_seed ~config ~keeper_name ~trace_id =

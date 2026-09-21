@@ -1110,12 +1110,17 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
                  (* Retention snapshots names before reading them. A later
                     day or its month may disappear after a newer day's
                     callback yields. Other open failures stay observable. *)
+                 Log.Misc.debug
+                   "dated_jsonl: skipped day file removed during scan path=%s"
+                   path;
                  ()
                | descriptor ->
                  let input = Unix.in_channel_of_descr descriptor in
                  Fun.protect
                    ~finally:(fun () -> close_in_noerr input)
                    (fun () ->
+                      (* The callback stops the reverse scan; only its selected
+                         value is relevant, not the unit stop marker. *)
                       ignore
                         (find_latest_decoded_from_channel
                            input

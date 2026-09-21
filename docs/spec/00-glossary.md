@@ -141,8 +141,10 @@ status: reference
   합치지만, 아무도 구성하지 않은 lane과 registry를 읽지 못한 lane은 다른
   문제이고 다른 처방을 갖기에 여기서는 나눈다. `Lane_slotless`는 서버가
   "degraded"라 부르는 것 — 구성됐으나 catalog slot도 CLI slot도 admit되지
-  않은 상태다. lane id로는 `Board_attention`(Board lane)·`Hitl_auto_judge`·
-  `Librarian`·verifier exact lane 등이 있다.
+  않은 상태다. lane은 다섯이고 `server_standalone_lane_projection.ml`의
+  `lane_specs`가 전부다 — `Board_attention`(Board lane)·`Hitl_auto_judge`·
+  `Librarian`·`Workspace_curator`·verifier exact lane. 앞의 넷은
+  `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
 **Runtime execution**

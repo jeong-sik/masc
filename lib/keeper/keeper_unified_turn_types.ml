@@ -200,7 +200,9 @@ let registry_reason_of_internal_reason
     Keeper_meta_contract.Other_detail detail
 ;;
 
-let runtime_exhausted_failure_reason_of_internal_error ~detail = function
+let registry_failure_reason_of_internal_error ~detail = function
+  | Keeper_internal_error.Official_client_recovery_required recovery ->
+    Some (Keeper_registry.Official_client_recovery_required recovery)
   | Keeper_internal_error.Runtime_exhausted { reason; runtime_id } ->
     Some
       (Keeper_registry.Provider_runtime_error
@@ -242,10 +244,10 @@ let runtime_exhausted_failure_reason_of_internal_error ~detail = function
     None
 ;;
 
-let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
+let registry_failure_reason_of_raw_error ~detail raw_error =
   Option.bind
     (Keeper_internal_error.classify_masc_internal_error_of_string raw_error)
-    (runtime_exhausted_failure_reason_of_internal_error ~detail)
+    (registry_failure_reason_of_internal_error ~detail)
 ;;
 
 (* Exhaustive match on [Keeper_turn_disposition.t].
@@ -302,15 +304,15 @@ let registry_failure_reason_of_terminal_reason
   match configuration_failure with
   | Some _ as reason -> reason
   | None ->
-  let runtime_exhausted_failure =
+  let internal_failure =
     match core_error with
     | Some error ->
       Option.bind
         (Keeper_internal_error.classify_masc_internal_error error)
-        (runtime_exhausted_failure_reason_of_internal_error ~detail)
-    | None -> runtime_exhausted_failure_reason_of_raw_error ~detail raw_error
+        (registry_failure_reason_of_internal_error ~detail)
+    | None -> registry_failure_reason_of_raw_error ~detail raw_error
   in
-  match runtime_exhausted_failure with
+  match internal_failure with
   | Some _ as reason -> reason
   | None ->
   match terminal_reason.disposition with

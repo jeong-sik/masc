@@ -97,6 +97,14 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Official-client Session Recovery**
+: 공식 클라이언트 세션에 기록된 `Input_rejected` 때문에 같은 runtime의 새 실행
+  요청을 거절하는 상태. `bootstrap_floor_exceeded`는 줄일 수 있는 이력을 제거한
+  입력도 용량을 넘은 경우이고, `effect_fenced`는 앞선 응답이나 도구 실행이 관측되어
+  입력을 줄여 재실행할 수 없는 경우다. 현재 거절은 provider 호출 전에 일어나며 앞선
+  provider attempt의 효과 자체와 구분한다. 상태 표시는 원인·runtime ID·recovery ID를
+  기존 session에서 전달하며, 복구 승인이나 fence 해제를 수행하지 않는다.
+
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
   요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,

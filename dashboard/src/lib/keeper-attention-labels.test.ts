@@ -26,6 +26,15 @@ describe('keeper attention labels', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it('labels official-client recovery without exposing the raw token', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(attentionReasonLabel('official_client_recovery_required', false)).toBe(
+      '공식 클라이언트 세션 복구 필요',
+    )
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('labels typed next actions without warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

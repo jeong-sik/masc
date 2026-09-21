@@ -38,8 +38,9 @@ type wire_step =
 
 (** Why one node did not decode. Closed, so a new rejection has to name itself
     here before a decoder can make it. [Not_ascending] is produced only by the
-    snapshot codec in {!Keeper_memory_os_current}, [Not_a_turn_ref] only by
-    {!Keeper_turn_boundaries}, and [Not_positive] by both; they share this
+    snapshot codec in {!Keeper_memory_os_current}, [Not_a_turn_ref] by
+    {!Keeper_turn_boundaries} and {!Keeper_turn_fragments}, and [Not_positive]
+    by the snapshot codec and the position stores; they share this
     vocabulary rather than keeping a parallel one. *)
 type wire_reason =
   | Expected_object

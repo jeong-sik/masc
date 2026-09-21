@@ -7,12 +7,9 @@
 module Lane = Masc.Keeper_memory_lane
 module Keeper_lane = Masc.Keeper_lane
 module Librarian_runtime = Masc.Keeper_librarian_runtime
-module Memory_current = Masc.Keeper_memory_os_current
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
 module Queue_refresh = Masc.Keeper_librarian_queue_refresh
 module Queue_signal = Masc.Keeper_librarian_queue_signal
-
-let initial_eio_context = Eio_context.snapshot_state ()
 
 exception Test_boom
 exception Cancel_lane_test
@@ -56,15 +53,13 @@ let run_post_turn
     ~meta
     ~turn
     ~agent_core_turn_count:1
-    ~tool_observations:[]
-    ~librarian_messages:[]
     ~checkpoint_owner
     ~post_turn_t0:(Time_compat.now ())
     ~inference_telemetry:None
     ()
 ;;
 
-let test_checkpoint_owner_selects_one_librarian_producer () =
+let test_either_checkpoint_owner_wakes_the_durable_consumer () =
   Lane.For_testing.reset ();
   let root = temp_dir "test-post-turn-owner-" in
   let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
@@ -145,8 +140,8 @@ let test_checkpoint_owner_selects_one_librarian_producer () =
          ~turn:1;
        Unix.putenv env_key "false";
        Alcotest.(check bool)
-         "official client retains direct evidence"
-         true
+         "official client hands over no direct evidence"
+         false
          (Queue_refresh.For_testing.attempt_remembered
             ~base_path:config.base_path
             ~keeper_name:official_name
@@ -156,8 +151,8 @@ let test_checkpoint_owner_selects_one_librarian_producer () =
             ~sources_changed:false
             ~trigger:Librarian_runtime.Queue_changed);
        Alcotest.(check (list (pair string string)))
-         "official client does not emit a durable wake"
-         [ config.base_path, core_name ]
+         "official client emits one durable wake as well"
+         [ config.base_path, core_name; config.base_path, official_name ]
          (List.rev !wakes))
 ;;
 
@@ -950,9 +945,9 @@ let () =
             "remembered turn replacement and cancellation"
             `Quick test_remembered_turn_replacement_and_cancellation
         ; Alcotest.test_case
-            "checkpoint owner selects one Librarian producer"
+            "either checkpoint owner wakes the durable consumer"
             `Quick
-            test_checkpoint_owner_selects_one_librarian_producer
+            test_either_checkpoint_owner_wakes_the_durable_consumer
         ; Alcotest.test_case
             "inline when uninitialized"
             `Quick

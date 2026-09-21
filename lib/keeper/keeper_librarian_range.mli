@@ -122,3 +122,76 @@ val progress_after
     returns text the round never selected. The range carries the digest that
     tells the two apart and this function does not read it. *)
 val slice : Agent_core.Types.message list -> range -> Agent_core.Types.message list
+
+(** {1 Official-client turns (RFC §10-3)}
+
+    An end line whose position is [No_atom_history] marks an official-client
+    turn. It carries no cut point; what the turn said is read by its
+    [turn_ref] from the history files of its trace
+    ({!Keeper_turn_fragments}). The position among these lines is a line of
+    the log ({!Keeper_librarian_official_progress}), not an atom, and it is
+    independent of the atom position: neither waits for the other, and the
+    consumer orders what both select by line number. *)
+
+type official_line =
+  { line : int
+  ; turn_ref : Ids.Turn_ref.t
+  ; recorded_at : float
+  }
+
+type official_selection =
+  | Official_read of official_line list
+      (** In line order, never empty. The last one is the cursor after the
+          round commits. *)
+  | Nothing_official
+  | Official_stop of
+      { line : int
+      ; error : Keeper_turn_boundaries.read_error
+      }
+      (** Row 2c for these lines. A refused line beyond the cursor may be an
+          official turn's end line; passing it would skip that turn (I3). No
+          restart lifts it: a restart says where atoms begin again and
+          nothing about these lines. The remedy is a purge of the keeper. *)
+
+(** The [No_atom_history] end lines beyond [cursor], of every trace: a trace
+    that ended still has fragments in its own session directory.
+    [To_first_cut_point] takes the oldest one. *)
+val select_official
+  :  lines:
+       (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
+         list
+  -> cursor:Keeper_librarian_official_progress.t option
+  -> extent
+  -> official_selection
+
+(** Whether {!select_official} could return anything but [Nothing_official]:
+    a candidate or a refused line beyond the cursor. *)
+val may_have_unread_official
+  :  lines:
+       (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
+         list
+  -> cursor:Keeper_librarian_official_progress.t option
+  -> bool
+
+type atom_cut =
+  { cut_line : int
+  ; cut_end_atom : int
+  ; cut_recorded_at : float
+  ; cut_turn_ref : Ids.Turn_ref.t
+  }
+
+(** The cut points inside [range], in line order: every current-history line
+    of [trace_id] whose position matches [messages] and whose [end_atom] lies
+    in [(range.start_atom, range.end_atom]]. The consumer slices the range at
+    these so a round hands the Librarian the turns in the order they ended,
+    interleaved with official-client turns by line. [lines] and [messages]
+    must be the ones {!select} was given; the range's own end is then among
+    the cuts. *)
+val cut_lines
+  :  trace_id:string
+  -> lines:
+       (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
+         list
+  -> messages:Agent_core.Types.message list
+  -> range
+  -> atom_cut list

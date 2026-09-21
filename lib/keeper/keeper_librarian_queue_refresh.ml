@@ -84,19 +84,12 @@ let rec run_durable_with_commit ~config ~keeper_name ~commit =
      | Ok
          (Keeper_librarian_durable_consumer.Nothing_to_read
          | Memory_not_committed) -> ()
-     | Ok (Baseline_advanced _ | Progress_advanced _) ->
+     | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
        (* A stored advance can leave unread cuts, including after the first
           baseline or a successful small retry. Continue on that evidence;
           failures wait for another wake, and every pass rechecks the toggle. *)
        run_durable_with_commit ~config ~keeper_name ~commit
      | Error Keeper_librarian_durable_consumer.Keeper_meta_absent -> ()
-     | Error
-         (Keeper_librarian_durable_consumer.Checkpoint_unreadable
-            Keeper_checkpoint_store.Not_found) ->
-       (* Official-client turns have no Agent-Core checkpoint. Their direct
-          producer remains below until RFC librarian-lifecycle section 4.8 has
-          a durable source. *)
-       ()
      | Error error ->
        Log.Keeper.warn
          ~keeper_name

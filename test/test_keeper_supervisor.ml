@@ -395,17 +395,6 @@ let seed_durable_librarian_baseline
   | Ok () -> ()
   | Error error -> fail (Librarian_boundaries.append_error_to_string error)
 
-let check_durable_librarian_baseline config ~keeper_name =
-  match
-    Librarian_progress.read
-      ~keepers_dir:(Workspace.keepers_runtime_dir config)
-      ~keeper_id:keeper_name
-  with
-  | Ok (Some progress) ->
-    check int "durable baseline end" 1 progress.position.end_atom
-  | Ok None -> fail "durable Librarian callback did not write progress"
-  | Error error -> fail (Librarian_progress.read_error_to_string error)
-
 let with_librarian_enabled f =
   Masc_test_deps.with_process_env
     Env_config.KeeperMemoryOs.librarian_env_key
@@ -2474,7 +2463,7 @@ let register_restart ~base_path ~name ~meta token intake_token =
     meta
 ;;
 
-let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
+let test_launch_transaction_leaves_durable_catchup_to_the_server_loop () =
   with_librarian_enabled @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2508,8 +2497,8 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
              Ok offline)
            ~rollback:Launch_transaction.Retain_registered
            (fun _intake_token _token entry ->
-              check int "durable catch-up submitted before launch"
-                (submitted_before + 1)
+              check int "launch does not submit durable catch-up"
+                submitted_before
                 (memory_lane_submitted_total ());
               order := "launch" :: !order;
               entry)
@@ -2521,15 +2510,9 @@ let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
         | Error _ -> fail "ordered catch-up launch transaction failed");
        check (list string) "registration precedes launch" [ "register"; "launch" ]
          (List.rev !order);
-       (match
-          Memory_lane.drain_and_join_librarian
-            ~base_path:config.base_path
-            ~keeper_name:name
-        with
-        | Ok Memory_lane.Librarian_drained -> ()
-        | Ok Memory_lane.No_librarian_work -> fail "durable catch-up was not admitted"
-        | Error error -> fail (Memory_lane.librarian_drain_error_to_string error));
-       check_durable_librarian_baseline config ~keeper_name:name)
+       check int "launch leaves the queue submission count unchanged"
+         submitted_before
+         (memory_lane_submitted_total ()))
 ;;
 
 let test_launch_callback_failure_rolls_back_restart_transaction () =
@@ -2570,8 +2553,8 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
                { librarian_abort_error = None; rollback_error = None; _ }) -> ()
         | Error _ -> fail "launch exception produced the wrong transaction outcome"
         | Ok _ -> fail "launch exception unexpectedly committed");
-       check int "failed launch admitted durable catch-up"
-         (submitted_before + 1)
+       check int "failed launch did not submit durable catch-up"
+         submitted_before
          (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
@@ -2659,8 +2642,8 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        Eio.Cancel.cancel context (Failure "cancel injected launch callback");
        check bool "launch cancellation propagates after rollback" true
          (Eio.Promise.await cancelled);
-       check int "cancelled launch admitted durable catch-up"
-         (submitted_before + 1)
+       check int "cancelled launch did not submit durable catch-up"
+         submitted_before
          (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
@@ -3036,8 +3019,8 @@ let () =
         test_active_librarian_abort_defers_then_retries_restart;
       test_case "unexpected cleanup preserves reopened Librarian lifecycle" `Quick
         test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle;
-      test_case "durable catch-up follows lifecycle admission before launch" `Quick
-        test_durable_catchup_runs_between_lifecycle_open_and_launch;
+      test_case "launch leaves durable catch-up to the server loop" `Quick
+        test_launch_transaction_leaves_durable_catchup_to_the_server_loop;
       test_case "launch callback failure rolls back restart transaction" `Quick
         test_launch_callback_failure_rolls_back_restart_transaction;
       test_case "launch callback cancellation rolls back restart transaction" `Quick

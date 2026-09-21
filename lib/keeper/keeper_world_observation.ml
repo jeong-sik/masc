@@ -1237,6 +1237,8 @@ let collect_board_events_with_cursor_policy
               let signal : Board_dispatch.board_signal =
                 { kind = Board_dispatch.Board_post_created
                 ; post_id = Board.Post_id.to_string p.id
+                ; comment_id = None
+                ; parent_id = None
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
                 ; content = p.body
@@ -1300,6 +1302,8 @@ let collect_board_events_with_cursor_policy
            let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
              ; post_id
+             ; comment_id = None
+             ; parent_id = None
              ; author = Board.Agent_id.to_string p.author
              ; title = p.title
              ; content = p.body
@@ -1343,47 +1347,39 @@ let collect_board_events_with_cursor_policy
                  if not advance_cursor
                  then consume_posts (Some next_cursor) acc rest
                  else (
-                   match
+                   let candidate =
                      Keeper_board_attention_candidate.of_board_signal
                        ~meta
                        ~recorded_at:(Time_compat.now ())
                        signal
-                   with
-                   | Board_signal.Unavailable unavailable ->
-                     (match
-                        log_and_count_unavailable ~context:"candidate" unavailable
-                      with
-                      | Board_signal.Permanent ->
-                        consume_posts (Some next_cursor) acc rest
-                      | Board_signal.Transient -> List.rev acc, last_cursor)
-                   | Board_signal.Available candidate ->
-                     (match
-                        Keeper_board_attention_candidate.record_and_wake
-                          ~base_path
-                          candidate
-                      with
-                      | Ok acceptance ->
-                        let persistence =
-                          match acceptance.persistence with
-                          | Keeper_board_attention_candidate.Candidate_recorded ->
-                            "recorded"
-                          | Keeper_board_attention_candidate.Candidate_already_present ->
-                            "duplicate"
-                        in
-                        Otel_metric_store.inc_counter
-                          Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-                          ~labels:
-                            [ "keeper", meta.name
-                            ; "kind", "post_created"
-                            ; "audience", Board_audience.label audience
-                            ; "persistence", persistence
-                            ]
-                          ()
-                      | Error detail ->
-                        raise
-                          (Keeper_board_attention_candidate.Candidate_unavailable
-                             detail));
-                     consume_posts (Some next_cursor) acc rest)
+                   in
+                   (match
+                      Keeper_board_attention_candidate.record_and_wake
+                        ~base_path
+                        candidate
+                    with
+                    | Ok acceptance ->
+                      let persistence =
+                        match acceptance.persistence with
+                        | Keeper_board_attention_candidate.Candidate_recorded ->
+                          "recorded"
+                        | Keeper_board_attention_candidate.Candidate_already_present ->
+                          "duplicate"
+                      in
+                      Otel_metric_store.inc_counter
+                        Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+                        ~labels:
+                          [ "keeper", meta.name
+                          ; "kind", "post_created"
+                          ; "audience", Board_audience.label audience
+                          ; "persistence", persistence
+                          ]
+                        ()
+                    | Error detail ->
+                      raise
+                        (Keeper_board_attention_candidate.Candidate_unavailable
+                           detail));
+                   consume_posts (Some next_cursor) acc rest)
                | Board_signal.Available (Board_audience.Deliver _) ->
                  (* [explicit_mention] mirrors mention parsing only:
                     Broadcast-routed deliveries (e.g. [@@all]) record
@@ -1416,6 +1412,8 @@ let collect_board_events_with_cursor_policy
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
                ; post_id
+               ; comment_id = None
+               ; parent_id = None
                ; author = Board.Agent_id.to_string p.author
                ; title = p.title
                ; content = p.body

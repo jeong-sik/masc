@@ -68,22 +68,9 @@ type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-type judgment_material =
-  { post : Board.post
-  ; comments : Board.comment list
-  }
-(** The Board evidence retained by the current v6 pending-candidate schema.
-    Judgment requests deliberately do not send this thread snapshot: they
-    project only the candidate's current typed signal and the Keeper role.
-    Consuming a candidate drops the material, and that drop is what reaches
-    the store, so the cache and the file keep saying the same thing.
-    [keeper_context] is not here: it names the candidate's partition and
-    outlives the judgment. RFC-0424. *)
-
-type pending_state =
-  { last_delivery_failure : delivery_failure option
-  ; material : judgment_material
-  }
+type pending_state = { last_delivery_failure : delivery_failure option }
+(** v7 persists the current typed signal, not a historical Board thread
+    snapshot. The optional failure is delivery evidence, not judgment input. *)
 
 type judged_state =
   { judgment : judgment
@@ -169,7 +156,7 @@ type candidate =
   ; status : status
   }
 (** Every durable write is validated against the same current schema accepted
-    on load. All floats in the signal, retained Board evidence, and lifecycle
+    on load. All floats in the signal and lifecycle
     state must be finite. [Judged] and
     [Consumed] states additionally require a nonblank verdict rationale and
     nonblank judgment provenance. *)
@@ -232,36 +219,30 @@ val candidate_id_of_signal :
 (** Typed event identity of a Board signal for one keeper. [Board_post_created]
     hashes (keeper, kind, post_id) only — volatile post fields (updated_at,
     content) must not participate, or the backlog scanner's re-synthesized
-    signals mint a fresh candidate per post update (#28607). Exported so test
-    fixtures derive ids from this function instead of copying the formula. *)
+    signals mint a fresh candidate per post update (#28607).
+    [Board_comment_added] hashes (keeper, kind, post_id, comment_id), so equal
+    bodies on distinct comments remain distinct. Exported so test fixtures
+    derive ids from this function instead of copying the formula. *)
 
 val judgment_request : candidate -> (Yojson.Safe.t, string) result
 (** The judgment request as the run record carries it: the exact current
     [candidate_id] and [signal], plus a [keeper_role] projection containing
-    only the Keeper name and instructions. *)
+    only the Keeper name and normalized Board interests. *)
 
 val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
 (** Build the one-item exact-flow input from the current candidate signal and
     projected Keeper role. [candidate_id] and [signal] come from the candidate,
-    so they cannot disagree with durable identity. The persisted post, comments,
-    mention targets, and mention Keeper ids do not cross this boundary. *)
-
-val pending_judgment_material : status -> judgment_material option
-(** The material a status still carries: pending, or quarantined from pending
-    (its [prior_status] keeps it, so a requeue is judged from the same material).
-    Judged and consumed carry none. *)
-
-(* [of_board_evidence] is the inner step of [of_board_signal] below, which is
-   the door callers use: it reads the post and comments and hands them here.
-   Nothing outside supplies its own evidence. *)
+    so they cannot disagree with durable identity. Post/comment history,
+    instructions, runtime/task identity, and mention targets do not cross this
+    boundary. *)
 
 val of_board_signal :
   meta:Keeper_meta_contract.keeper_meta ->
   recorded_at:float ->
   Board_dispatch.board_signal ->
-  candidate Keeper_world_observation_board_signal.board_read
-(** Reads the complete persisted post and comment set. Board failures remain
-    typed [Unavailable] and no partial candidate is synthesized. *)
+  candidate
+(** Constructs a v7 candidate from the producer-owned current typed signal.
+    It does not re-read or retain mutable Board thread history. *)
 
 val candidate_to_json : candidate -> Yojson.Safe.t
 val candidate_of_json : Yojson.Safe.t -> (candidate, string) result

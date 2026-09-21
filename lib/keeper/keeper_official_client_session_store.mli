@@ -84,6 +84,10 @@ type recovery_resolution_application =
   | Applied
   | Replayed
 
+type recovery_commit =
+  | Committed
+  | Recovery_already_resolved
+
 type recovery_resolution_error =
   | Invalid_resolved_by
   | Invalid_resolved_at
@@ -198,15 +202,18 @@ val commit_if_input_recovery_current :
   keeper_name:string ->
   expected:Keeper_internal_error.official_client_recovery ->
   commit:(unit -> unit) ->
-  (bool, string) result
+  (recovery_commit, string) result
 (** Run [commit] under the durable session lock only while the same runtime,
-    recovery id, and typed input-rejection reason are still current. [false]
-    means recovery was resolved or replaced before the commit. The callback
-    must not suspend or re-enter this session store. It runs while the file
-    lock is held, so any lock it acquires establishes the order session-store
-    lock before callback lock; callers must not acquire these in reverse. The
-    callback stays inside the lock so recovery cannot change between the
-    current-state check and its publication. *)
+    recovery id, and typed input-rejection reason are still current.
+    [Recovery_already_resolved] means recovery was resolved or replaced before
+    the commit. The callback must not suspend or re-enter this session store.
+    It runs while the file lock is held. The registry-publication callback used
+    by [Keeper_unified_turn_failure] then acquires
+    [Keeper_lifecycle_reservation.with_key_lock], establishing the order
+    session-store lock before lifecycle-reservation lock. Callers must not hold
+    the lifecycle-reservation lock before entering this function. The callback
+    stays inside the lock so recovery cannot change between the current-state
+    check and its publication. *)
 
 val claim_error_to_string : claim_error -> string
 val core_error_of_claim_error : claim_error -> Agent_core.Error.t

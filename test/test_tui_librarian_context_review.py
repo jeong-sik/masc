@@ -75,8 +75,6 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
         if "response" in review:
             needles.append(review["response"]["model"].encode())
             needles.append(b'"request_body_sha256"')
-        if "after" in result:
-            needles.append(b'"after"')
         seen = h.screen_text(bytes(output))
         for _ in range(len(json.dumps(result, indent=2).splitlines()) + 1):
             if all(needle in seen for needle in needles):

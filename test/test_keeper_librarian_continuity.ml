@@ -362,7 +362,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
-    ~schema:Masc.Keeper_structured_output_schema.librarian_current_output_schema
+    ~schema:Masc.Keeper_structured_output_schema.librarian_continuity_output_schema
     ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
   let chars prompt = Codex.prompt_char_count prompt |> get in
   let max_chars = Masc.Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt |> chars in

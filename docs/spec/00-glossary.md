@@ -388,7 +388,10 @@ status: reference
 
 **Message**
 : History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content
-  조각(`Text`, `Thinking`, `ToolUse`, `ToolResult`, `Image`)의 목록으로 이뤄진다.
+  조각의 목록으로 이뤄진다. 조각은 아홉 가지다: `Text`, `Thinking`,
+  `ReasoningDetails`, `RedactedThinking`, `ToolUse`, `ToolResult`, `Image`,
+  `Document`, `Audio`. 정본은 `packages/agent_core/lib/llm_provider/types.mli`의
+  `content_block`이다.
 
 **Atom**
 : History를 자를 때 쓰는 가장 작은 단위. `User` message 하나, 또는 `Assistant`
@@ -472,13 +475,14 @@ status: reference
   SHA-256이다. 글자가 하나라도 다르면 다른 Fact다.
 
 **Origin**
-: Fact를 누가 적었나. `authored`는 Keeper가 `memory_write`로 직접 적은 것,
+: Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다.
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
-  `derived`는 근거가 된 다른 Fact의 Memory ID를 갖는다. 근거가 사라지면 `derived`
-  Fact도 무효가 된다.
+  `derived`는 유도(derivation)를 하나 이상 갖고, 유도마다 전제가 된 다른 Fact의
+  Memory ID를 갖는다. 전제가 모두 살아 있는 유도가 하나라도 남아 있으면 `derived`
+  Fact는 유지되고, 그런 유도가 하나도 없으면 무효가 된다.
 
 **Dropped / Supersedes / Absorbs**
 : Librarian이 기억을 바꾸는 세 가지 말. `dropped`는 이유를 적고 버린다.

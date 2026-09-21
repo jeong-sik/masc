@@ -18,6 +18,7 @@ export type ToolCallOutputBlob = {
 }
 
 export type ToolCallDisposition = 'completed' | 'deferred' | 'failed'
+export type ToolCallWireOutcome = 'ok' | 'error' | 'unknown'
 export type ToolCallCompositionExecution = 'inline' | 'async'
 
 // Recorded execution evidence — written per row by lib/keeper_tool_call_log.ml.
@@ -51,8 +52,8 @@ export type ToolCallRuntimeContract = {
 // action_radius_json), so every consumer reads the same value. target_kind is
 // "path" for a file target and "directory" for a cwd or repo_path — Execute
 // rows used to report their cwd as "path" and there was no way to tell the two
-// apart (masc#29013). tool_name / success / duration_ms duplicate the
-// top-level row and are not repeated here.
+// apart (masc#29013). tool_name / duration_ms duplicate the top-level row and
+// are not repeated here; success is derived from typed outcome fields.
 export type ToolCallActionRadius = {
   action_key?: string
   target_kind?: string
@@ -81,7 +82,7 @@ export type ToolCallEntry = {
   tool: string
   input: unknown
   output: string | ToolCallOutputBlob
-  success: boolean
+  wire_outcome: ToolCallWireOutcome
   duration_ms: number | null
   // Which sandbox the call actually ran in, as the call itself recorded it.
   // The keeper's current profile cannot answer for a past call: a keeper moved
@@ -147,6 +148,15 @@ export type ToolCallEntry = {
   // the projection existed. Absent means the tool is a built-in that ships no
   // file — distinct from a file the reader failed to find.
   definition_source?: string
+}
+
+export function toolCallCompletion(entry: ToolCallEntry): boolean | undefined {
+  if (entry.disposition === 'completed') return true
+  if (entry.disposition === 'failed') return false
+  if (entry.disposition === 'deferred') return undefined
+  if (entry.wire_outcome === 'ok') return true
+  if (entry.wire_outcome === 'error') return false
+  return undefined
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -252,13 +262,17 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
   const keeper = asString(raw.keeper)
   const tool = asString(raw.tool)
   if (!keeper || !tool) return null
+  const wireOutcome: ToolCallWireOutcome =
+    raw.wire_outcome === 'ok' || raw.wire_outcome === 'error'
+      ? raw.wire_outcome
+      : 'unknown'
   return {
     ts: asNumber(raw.ts, 0),
     keeper,
     tool,
     input: raw.input,
     output: decodeToolCallOutput(raw.output),
-    success: asBoolean(raw.success, false),
+    wire_outcome: wireOutcome,
     sandbox_profile: asString(raw.sandbox_profile),
     duration_ms: asNumber(raw.duration_ms) ?? null,
     model: asString(raw.model),

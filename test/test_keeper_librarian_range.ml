@@ -455,6 +455,111 @@ let test_progress_moves_only_when_something_was_read () =
   | Some _ -> fail "nothing was read and the progress moved"
 ;;
 
+(* {1 How far behind (RFC §4.9)} *)
+
+let unread ?progress ~lines messages =
+  Range.unread_turns ~trace_id:trace ~lines ~progress ~messages
+;;
+
+let test_unread_counts_the_turns_beyond_the_position () =
+  let saved = history 6 in
+  let lines =
+    numbered
+      [ restarted ()
+      ; turn_ended ~fresh:true ~turn:1 (history 2)
+      ; turn_ended ~fresh:false ~turn:2 (history 4)
+      ; turn_ended ~fresh:false ~turn:3 saved
+      ]
+  in
+  check (option int) "two turns after the first" (Some 2)
+    (unread ~progress:(progress_at ~seen:4 saved 2) ~lines saved);
+  check (option int) "nothing after the last" (Some 0)
+    (unread ~progress:(progress_at ~seen:4 saved 6) ~lines saved)
+;;
+
+(* The baseline takes the smallest cut point and reads nothing before it, so
+   that turn is not behind (§4.4 row 3, third case). *)
+let test_unread_without_a_position_leaves_out_the_baseline () =
+  let saved = history 6 in
+  let lines =
+    numbered
+      [ turn_ended ~fresh:false ~turn:1 (history 2)
+      ; turn_ended ~fresh:false ~turn:2 (history 4)
+      ; turn_ended ~fresh:false ~turn:3 saved
+      ]
+  in
+  check (option int) "the two turns after the baseline" (Some 2) (unread ~lines saved)
+;;
+
+(* A restart sends the next round back to atom zero, so every turn of the
+   restarted history is behind again. *)
+let test_unread_after_a_restart_counts_the_whole_history () =
+  let saved = history 4 in
+  let lines =
+    numbered
+      [ turn_ended ~fresh:false ~turn:1 (history 2)
+      ; restarted ()
+      ; turn_ended ~fresh:true ~turn:2 (history 2)
+      ; turn_ended ~fresh:false ~turn:3 saved
+      ]
+  in
+  check (option int) "both turns of the restarted history" (Some 2)
+    (unread ~progress:(progress_at ~seen:1 saved 4) ~lines saved)
+;;
+
+(* A refused line stops the round; how far behind it is standing is still
+   the number the operator needs (§4.10). *)
+let test_unread_counts_past_a_refused_line () =
+  let saved = history 4 in
+  let lines =
+    [ 1, Ok (restarted ())
+    ; 2, Ok (turn_ended ~fresh:true ~turn:1 (history 2))
+    ; 3, Error (Boundaries.Not_json "torn")
+    ; 4, Ok (turn_ended ~fresh:false ~turn:2 saved)
+    ]
+  in
+  check string "the round is stopped"
+    "stop: line 3 unreadable"
+    (select ~progress:(progress_at ~seen:2 saved 2) ~lines saved);
+  check (option int) "and one turn is behind it" (Some 1)
+    (unread ~progress:(progress_at ~seen:2 saved 2) ~lines saved)
+;;
+
+(* A position that names no atom of this checkpoint has no count: every line
+   would look unread, which says the history is behind when what is wrong is
+   the position (§4.4 row 5). *)
+let test_unread_is_unknown_when_the_position_is_not_a_place_here () =
+  let saved = history 4 in
+  let other = history ~tag:"other" 4 in
+  let lines = numbered [ turn_ended ~fresh:false ~turn:1 saved ] in
+  check (option int) "no count" None
+    (unread ~progress:(progress_at ~seen:1 other 4) ~lines saved)
+;;
+
+let test_unread_official_counts_the_lines_beyond_the_cursor () =
+  let official turn : Boundaries.record =
+    { Boundaries.recorded_at = 100.0
+    ; event =
+        Boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
+          ; history_at_start = Boundaries.Continued_history
+          ; position = Boundaries.No_atom_history
+          }
+    }
+  in
+  let lines =
+    numbered [ official 1; turn_ended ~fresh:false ~turn:2 (history 2); official 3 ]
+  in
+  let cursor boundary_line =
+    Some { Masc.Keeper_librarian_official_progress.boundary_line }
+  in
+  check int "both official lines" 2 (Range.unread_official_turns ~lines ~cursor:None);
+  check int "one after the cursor" 1
+    (Range.unread_official_turns ~lines ~cursor:(cursor 1));
+  check int "none after the last" 0
+    (Range.unread_official_turns ~lines ~cursor:(cursor 3))
+;;
+
 let test_slice_returns_the_atoms_of_the_range () =
   let tool : Types.message = message ~role:Types.Tool "result" in
   let saved =
@@ -549,6 +654,20 @@ let () =
             test_model_a_fresh_turn_that_saves_and_dies
         ; test_case "an unread turn that replaces the history and dies" `Quick
             test_model_an_unread_turn_that_replaces_the_history_and_dies
+        ] )
+    ; ( "how far behind"
+      , [ test_case "counts the turns beyond the position" `Quick
+            test_unread_counts_the_turns_beyond_the_position
+        ; test_case "without a position the baseline is not behind" `Quick
+            test_unread_without_a_position_leaves_out_the_baseline
+        ; test_case "after a restart the whole history is behind" `Quick
+            test_unread_after_a_restart_counts_the_whole_history
+        ; test_case "a refused line does not hide the count" `Quick
+            test_unread_counts_past_a_refused_line
+        ; test_case "a position that is not a place here has no count" `Quick
+            test_unread_is_unknown_when_the_position_is_not_a_place_here
+        ; test_case "official lines beyond the cursor" `Quick
+            test_unread_official_counts_the_lines_beyond_the_cursor
         ] )
     ; ( "progress and slice"
       , [ test_case "progress moves only when something was read" `Quick

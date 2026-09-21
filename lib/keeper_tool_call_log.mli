@@ -196,13 +196,13 @@ val committed_revision : keeper_name:string -> int
 type record_kind =
   | Tool_call
   | Composition_run
+  | Lifecycle_event
 
 val log_call :
   keeper_name:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   output_text:string ->
-  success:bool ->
   duration_ms:float ->
   ?record_kind:record_kind ->
   ?model:string ->
@@ -249,9 +249,11 @@ val log_call :
 (** [log_call ...] persists a single tool call record with full I/O.
     [record_kind] defaults to [Tool_call]; [Composition_run] is the explicit
     terminal aggregate for a composition and must not be interpreted as a
-    second physical invocation. [skill_reference], when present, is the exact
-    published Skill revision that produced the run; clients must not infer it
-    from the mutable composition tool name.
+    second physical invocation. [Lifecycle_event] is an opening or progress
+    marker, not an invocation outcome, and quality aggregators exclude it.
+    [skill_reference], when present, is the exact published Skill revision
+    that produced the run; clients must not infer it from the mutable
+    composition tool name.
     [execution_id] is the RFC-0233 canonical join key minted once at the
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the
@@ -266,6 +268,8 @@ val log_call :
     the row records [Tool_result.Unknown] rather than omitting the field. A
     completed or deferred execution may therefore
     have [wire_outcome=error] when result delivery fails afterwards.
+    No parallel [success] boolean is accepted or persisted: readers consume
+    [disposition] for execution truth and [wire_outcome] for response truth.
     [typed_result] serializes the producer-owned disposition when it is
     available. Any canonical normalized artifact references in its typed data
     are also persisted as actual JSON under [artifact_refs], keeping the

@@ -540,6 +540,9 @@ let test_memory_surface_keeps_the_starvation_axes () =
          > 0))
     [ "mkh_vision_ingest_errors"
     ; "mkh_vision_ingest_error_reasons"
+    ; (* RFC librarian-lifecycle §4.9: the header says how far behind the
+         keeper's Librarian is standing. *)
+      "mkh_librarian"
     ; "mkh_observed_facts"
     ; "mkh_derived_facts"
     ; "mkh_support_invalidations"

@@ -25,7 +25,21 @@ val set_system_prompt : working_context -> system_prompt:string -> working_conte
 val append : working_context -> Agent_core.Types.message -> working_context
 
 val create_session : session_id:string -> base_dir:string -> session_context
-val persist_message : ?source:string -> session_context -> Agent_core.Types.message -> unit
+val persist_message :
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  ?source:string ->
+  session_context ->
+  Agent_core.Types.message ->
+  unit
+
+val persist_tool_observation :
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  session_context ->
+  tool_name:string ->
+  outcome:Tool_result.tool_call_outcome ->
+  unit
 
 (** {1 Keeper Context Lifecycle} *)
 

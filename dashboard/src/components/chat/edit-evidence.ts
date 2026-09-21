@@ -3,6 +3,7 @@ import { fetchVerifiedToolBlobText } from '../../api/verified-tool-blob'
 import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
 import { html } from 'htm/preact'
 import type { ToolCallEntry } from '../../api/dashboard'
+import { toolCallCompletion } from '../../api/dashboard-keeper-tool-calls'
 import { parseEditSnapshots } from '../../api/edit-snapshots'
 import { EditSnapshotView } from './edit-snapshot-view'
 import { currentStoredTokenRevision } from '../../api/core'
@@ -38,7 +39,9 @@ function decodedEditResult(text: string, manifest: boolean): Record<string, unkn
 // transcript arguments cannot identify an applied filesystem operation.
 export function ChatEditEvidence({ output }: { output: ToolCallEntry | null }) {
   const authRevision = storedTokenRevision.value
-  const eligible = output?.success === true && output.route_evidence?.descriptor_id === 'agent.edit_file'
+  const eligible = output !== null
+    && toolCallCompletion(output) === true
+    && output.route_evidence?.descriptor_id === 'agent.edit_file'
   const blob = eligible && typeof output?.output === 'object' ? output.output._blob : null
   const key = blob ? JSON.stringify([authRevision, blob.sha256, blob.bytes, blob.mime]) : null
   const [manifest, setManifest] = useState<ManifestState | null>(null)

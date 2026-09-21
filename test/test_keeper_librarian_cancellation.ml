@@ -18,7 +18,7 @@ let check_json label expected actual =
   Alcotest.(check string) label
     (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
 
-let test_cancel ~base_path ~registry stage () =
+let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
@@ -32,6 +32,7 @@ let test_cancel ~base_path ~registry stage () =
     | After_commit -> "cancel-after-commit"
     | After_completion -> "cancel-after-completion"
     | After_failed_completion -> "cancel-after-failed-completion" in
+  let keeper_id = if observer_checks then keeper_id else keeper_id ^ "-deferred" in
   let commits_memory = stage = After_commit || stage = After_completion in
   let expected_status = match stage with
     | After_completion -> "succeeded"
@@ -121,7 +122,7 @@ let test_cancel ~base_path ~registry stage () =
       | Some run ->
         completed_before_cancellation := Runs.get registry ~run_id:run.run_id;
         Eio.Cancel.cancel (Eio.Promise.await cancel_context) Operator_cancelled;
-        Eio.Fiber.check ());
+        if observer_checks then Eio.Fiber.check ());
   Fun.protect ~finally:(fun () ->
     (* Restore the global first: a raising unsubscribe must not leave this
        fixture's observer installed for the rest of the binary, and a raising
@@ -286,4 +287,8 @@ let () =
         ; Alcotest.test_case "late notification cancellation preserves completed evidence" `Quick
             (test_cancel ~base_path ~registry After_completion)
         ; Alcotest.test_case "failed completion keeps its cancellation journal" `Quick
-            (test_cancel ~base_path ~registry After_failed_completion) ] ])
+            (test_cancel ~base_path ~registry After_failed_completion)
+        ; Alcotest.test_case "completion observer requests cancellation without checking" `Quick
+            (test_cancel ~observer_checks:false ~base_path ~registry After_completion)
+        ; Alcotest.test_case "failed completion observer requests cancellation without checking" `Quick
+            (test_cancel ~observer_checks:false ~base_path ~registry After_failed_completion) ] ])

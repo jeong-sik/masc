@@ -62,6 +62,10 @@ val keeper_raw_trace_turn_path : Workspace.config -> string -> string
 (** Per-trace session directory under [.masc/traces/<trace_id>]. *)
 val keeper_session_dir : Workspace.config -> string -> string
 
+(** The two history files under a trace's session directory. *)
+val history_file_name : string
+val internal_history_file_name : string
+
 val keeper_history_path : Workspace.config -> string -> string
 val keeper_internal_history_path : Workspace.config -> string -> string
 

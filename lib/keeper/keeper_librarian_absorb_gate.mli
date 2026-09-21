@@ -131,14 +131,14 @@ val judge
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { endpoint : string
-  ; model : string
+  { destinations : Typesafeai_client.destination_id list
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
-(** [endpoint] is already an observation URL without userinfo, query or
-    fragment. It is not the credential-bearing outbound destination. *)
+(** [destinations] are the armed destinations the request could be walked
+    through, in order and without their keys; [result] names the one that
+    answered and the ones passed over. *)
 
 type run_result =
   | Skipped of

@@ -6,6 +6,11 @@ type destination =
   ; api_key : string
   }
 
+type destination_id =
+  { destination_uri : string
+  ; model : string
+  }
+
 type refusal =
   | Transport_failure of string
   | Http_response_failure of
@@ -43,6 +48,16 @@ let endpoint_for_observation endpoint =
   |> fun uri -> Uri.with_query uri []
   |> fun uri -> Uri.with_fragment uri None
   |> Uri.to_string
+;;
+
+let identify (destination : destination) : destination_id =
+  { destination_uri = endpoint_for_observation destination.endpoint
+  ; model = destination.model
+  }
+;;
+
+let destination_id_to_yojson ({ destination_uri; model } : destination_id) =
+  `Assoc [ "destination_uri", `String destination_uri; "model", `String model ]
 ;;
 
 let redact_credentials ~endpoint ~api_key detail =

@@ -16,6 +16,17 @@ type destination =
   ; api_key : string  (** the bearer key this server takes *)
   }
 
+type destination_id =
+  { destination_uri : string
+  ; model : string
+  }
+(** A destination without its key, for records and projections.
+    [destination_uri] is the observation URL: userinfo, query and fragment
+    removed. *)
+
+val identify : destination -> destination_id
+val destination_id_to_yojson : destination_id -> Yojson.Safe.t
+
 type refusal =
   | Transport_failure of string
   | Http_response_failure of

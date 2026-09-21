@@ -64,10 +64,14 @@ type t = {
   runtime_fallback_applied : bool;
   runtime_outcome : runtime_outcome;
   agent_core_internal_runtime_allowed : bool;
-  degraded_retry_applied : bool;
-  degraded_retry_runtime : string option;
-  fallback_reason :
-    Keeper_error_classify.degraded_retry_reason option;
+  degraded_retry_applied : Keeper_error_classify.degraded_retry option;
+      (** The lane an earlier turn deferred to and that this turn dispatched
+          on. Empty when no lane was deferred, when this turn started
+          somewhere else, or when it never reached a provider. *)
+  degraded_retry_deferred : Keeper_error_classify.degraded_retry option;
+      (** The lane this turn leaves for a later turn. Independent of the
+          field above: a turn can take up a deferred lane, fail there, and
+          defer again, and both facts belong on its receipt. *)
   stop_reason : Runtime_agent.stop_reason option;
   error_kind : error_kind option;
   error_message : string option;
@@ -88,3 +92,8 @@ val sandbox_kind_of_meta :
   Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val list_json : 'a list -> [> `List of [> `String of 'a ] list ]
 val string_opt_json : 'a option -> [> `Null | `String of 'a ]
+
+(** One object per deferred lane -- [{"runtime": _, "reason": _}] -- so a
+    reader cannot take a runtime without the reason it was deferred for. *)
+val degraded_retry_json :
+  Keeper_error_classify.degraded_retry option -> Yojson.Safe.t

@@ -331,18 +331,18 @@ let report_verifier_exact_lane_admission () =
       detail
   | Ok (lane : Runtime.verifier_exact_lane_slots) ->
     List.iter
-      (fun (rejection : Runtime.verifier_cli_slot_rejection) ->
+      (fun (rejection : Runtime.verifier_slot_rejection) ->
          Log.Server.warn
            "exact_output: lane %S %s; the lane runs its remaining slots without it"
            Runtime.verifier_exact_lane_id
-           (Runtime.verifier_cli_slot_rejection_to_string rejection))
-      lane.Runtime.cli_slot_rejections;
-    (match lane.Runtime.catalog_slot_ids, lane.Runtime.admitted_cli_slot_ids with
+           (Runtime.verifier_slot_rejection_to_string rejection))
+      lane.Runtime.slot_rejections;
+    (match lane.Runtime.admitted_catalog_slot_ids, lane.Runtime.admitted_cli_slot_ids with
      | [], [] ->
        Log.Server.error
-         "exact_output: lane %S can judge through none of its %d declared cli slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
+         "exact_output: lane %S can judge through none of its %d declared slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
          Runtime.verifier_exact_lane_id
-         (List.length lane.Runtime.cli_slot_rejections)
+         (List.length lane.Runtime.slot_rejections)
      | [], _ :: _ | _ :: _, _ -> ())
 ;;
 
@@ -1574,7 +1574,7 @@ let resume_model_configuration () =
                     (String.concat
                        "; "
                        (List.map
-                          Runtime.verifier_cli_slot_rejection_to_string
+                          Runtime.verifier_slot_rejection_to_string
                           rejections));
                   true
                 | Error detail ->

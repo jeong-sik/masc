@@ -14,6 +14,41 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_keeper_librarian_absorb_gate)
+ (modules test_keeper_librarian_absorb_gate)
+ (deps fixtures/librarian_statements_golden.json)
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+
+; The reference cut (scripts/librarian/statements.py, the scorer of issue
+; #37079) must still write the golden the OCaml test above reads.
+(rule
+ (alias runtest-librarian-statements-golden)
+ (deps ../scripts/librarian/statements.py fixtures/librarian_statements_golden.json)
+ (action
+  (run python3 %{dep:../scripts/librarian/statements.py} --check
+   %{dep:fixtures/librarian_statements_golden.json})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-librarian-statements-golden)))
+
+(test
+ (name test_librarian_continuity_report)
+ (modules test_librarian_continuity_report)
+ (libraries alcotest masc yojson digestif))
+
+(rule
+ (alias runtest-test_librarian_continuity_cli)
+ (deps test_librarian_continuity_cli.py ../bin/masc_librarian_continuity.exe
+  ../scripts/fixtures/release-evidence/runtime.toml)
+ (action (run python3 %{dep:test_librarian_continuity_cli.py}
+  --binary %{dep:../bin/masc_librarian_continuity.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_librarian_continuity_cli)))
+
+(test
  (name test_keeper_peer_artifact)
  (modules test_keeper_peer_artifact)
  (libraries masc_test_deps))
@@ -4169,6 +4204,15 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
 
+(rule
+ (alias runtest-test_tui_fixture_shutdown)
+ (deps test_tui_fixture_shutdown.py test_tui_keyboard_input.py)
+ (action (run python3 %{dep:test_tui_fixture_shutdown.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_fixture_shutdown)))
+
 ; The harness decides what runs from --list, --scenario and the family name
 ; before a terminal opens, and no rule here passes either flag. This suite
 ; drives that choice with a stand-in binary, and holds the harness's family
@@ -5010,7 +5054,9 @@
 (test
  (name test_tui_footer_status_items)
  (modules test_tui_footer_status_items)
- (libraries alcotest str masc_tui_footer masc_tui_message_layout))
+ (libraries alcotest str unix
+  masc_tui_footer masc_tui_message_layout
+  masc_tui_keys masc_tui_render_prim masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_answering)
@@ -5233,8 +5279,10 @@
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
+(include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
+(include stanzas/test_tui_lane_run_paging.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)
 
@@ -6520,3 +6568,12 @@
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
+
+(rule
+ (alias runtest-test_tui_jev_readiness)
+ (deps test_tui_jev_readiness.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_jev_readiness.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_jev_readiness)))

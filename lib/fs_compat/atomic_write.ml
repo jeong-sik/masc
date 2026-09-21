@@ -2911,7 +2911,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
   in
   let close_descriptor report path fd =
     try Unix.close fd; report with
-    | exn -> record_exn report ~operation:Close_cleanup_descriptor ~path exn
+    | exn -> record_exn report ~operation:Close_cleanup_descriptor ~path exn (* cancel-guard-ok: Unix.close performs no Eio operation, so Cancelled cannot originate in this body. *)
   in
   let sync_verified_path report ~operation ~path ~expected ~kind =
     let opened =
@@ -2922,7 +2922,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
              [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ]
              0)
       with
-      | exn -> Error exn
+      | exn -> Error exn (* cancel-guard-ok: Unix.openfile performs no Eio operation, so Cancelled cannot originate in this body. *)
     in
     match opened with
     | Error exn -> None, record_exn report ~operation ~path exn
@@ -2941,7 +2941,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
            Unix.fsync fd;
            finish report (Some ()))
        with
-       | exn ->
+       | exn -> (* cancel-guard-ok: Unix.fstat and Unix.fsync perform no Eio operation, so Cancelled cannot originate in this body. *)
          let report = record_exn report ~operation ~path exn in
          finish report None)
   in
@@ -3175,7 +3175,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
                     in
                     { report with preserved = report.preserved + 1 }
                   with
-                  | exn ->
+                  | exn -> (* cancel-guard-ok: this body is Unix stat and unlink calls only, no Eio operation, so Cancelled cannot originate in this body. *)
                     record_exn
                       report
                       ~operation:Delete_preserved_source
@@ -3233,7 +3233,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
         in
         { report with deleted = report.deleted + 1 }
       with
-      | exn -> record_exn report ~operation:Delete_empty_orphan ~path exn
+      | exn -> record_exn report ~operation:Delete_empty_orphan ~path exn (* cancel-guard-ok: this body is Unix stat and unlink calls only, no Eio operation, so Cancelled cannot originate in this body. *)
   in
   (* TEL-OK: this leaf returns every cleanup decision/failure in the typed
      [report]; the schema owner records that report to its metric namespace. *)
@@ -3256,7 +3256,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
   let fold_directory report ~base_stat ~source ~dir ~dir_stat ~on_entry =
     let opened =
       try Ok (Unix.opendir dir) with
-      | exn -> Error exn
+      | exn -> Error exn (* cancel-guard-ok: Unix.opendir performs no Eio operation, so Cancelled cannot originate in this body. *)
     in
     match opened with
     | Error exn ->
@@ -3265,7 +3265,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
       let close_after_exception exn =
         let backtrace = Printexc.get_raw_backtrace () in
         (try Unix.closedir handle with
-         | close_exn ->
+         | close_exn -> (* cancel-guard-ok: Unix.closedir performs no Eio operation, so Cancelled cannot originate in this body. *)
            Stdlib.Printf.eprintf
              "[atomic_write] close after cleanup exception failed path=%s primary=%s close=%s\n%!"
              dir
@@ -3283,15 +3283,15 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
           in
           loop report
         | exception End_of_file -> report
-        | exception exn ->
+        | exception exn -> (* cancel-guard-ok: Unix.readdir and the entry handler are Unix calls only, no Eio operation, so Cancelled cannot originate in this body. *)
           record_exn report ~operation:Read_cleanup_directory ~path:dir exn
       in
       let report =
         try loop report with
-        | exn -> close_after_exception exn
+        | exn -> close_after_exception exn (* cancel-guard-ok: the directory fold it runs is Unix calls only, no Eio operation, so Cancelled cannot originate in this body. *)
       in
       (try Unix.closedir handle; report with
-       | exn ->
+       | exn -> (* cancel-guard-ok: Unix.closedir performs no Eio operation, so Cancelled cannot originate in this body. *)
          record_exn report ~operation:Close_cleanup_descriptor ~path:dir exn)
   in
   let scan_orphans report ~base_stat ~source ~dir ~dir_stat =

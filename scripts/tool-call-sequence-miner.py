@@ -209,6 +209,9 @@ def _rollup_outcomes(outcomes: set[CallOutcome]) -> CallOutcome:
 def _call_outcome(
     row: dict[str, Any], success: bool | None, gaps: set[str]
 ) -> CallOutcome:
+    # The typed ledger disposition is authoritative, matching the OCaml
+    # dashboard reader. Legacy success only cross-checks rows that still carry
+    # both fields; current rows deliberately omit that retired shadow.
     if "disposition" not in row:
         gaps.add("missing_disposition")
         return CallOutcome.LEGACY_UNKNOWN

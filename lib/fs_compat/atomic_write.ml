@@ -2667,10 +2667,16 @@ let write_file_atomic_with_parent_sync
             the failure arm below removes it -- otherwise a cancelled replace
             is the one exit that leaves an orphan behind. Sys.remove performs
             no Eio operation, so it completes while unwinding; past a
-            successful rename tmp is already gone and Sys_error absorbs it. *)
+            successful rename tmp is already gone and Sys_error absorbs it.
+
+            The backtrace is taken before the removal, the same way the arm
+            below takes it. Sys_error being raised and caught in between
+            replaces the trace the runtime holds, so a bare re-raise after
+            the cleanup would hand on that one instead of the origin. *)
+         let backtrace = Printexc.get_raw_backtrace () in
          (try Stdlib.Sys.remove tmp with
           | Sys_error _ -> ());
-         raise exn
+         Printexc.raise_with_backtrace exn backtrace
        | exception_ ->
          let backtrace = Printexc.get_raw_backtrace () in
          (try Stdlib.Sys.remove tmp with

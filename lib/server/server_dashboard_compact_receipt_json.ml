@@ -41,9 +41,74 @@ let compact_receipt_error_json receipt =
   | _ -> `Null
 ;;
 
+(* Which generation of the receipt the row in hand belongs to.
+
+   The store has no version partition and [Keeper_execution_receipt.latest_json]
+   hands back the newest row whatever its shape, so every keeper that has not
+   taken a turn since the deploy is read through here.
+
+   The question is answered once for the receipt, not per field. Before the
+   split there was one bool named [degraded_retry_applied], always written, and
+   no [degraded_retry_deferred] at all — and [json_member] answers `Null for a
+   key that is not there. Reading the two fields independently would therefore
+   mark the first unreadable and report the second as "this turn deferred no
+   lane", which is a claim the old row cannot support. So the bool decides for
+   both.
+
+   The matches below name every tag rather than ending in a wildcard, so a
+   shape nobody thought about cannot fall into "absent". [Yojson.Safe.t] has
+   eight of them (yojson/safe.mli):
+
+     `Null | `Bool | `Int | `Intlit | `Float | `String | `Assoc | `List
+
+   `Tuple and `Variant are [Yojson.t], the extended tree, and are not
+   reachable here. *)
+type receipt_lane_shape =
+  | Lanes_split
+  | Lanes_predate_the_split
+
+let degraded_retry_shape runtime =
+  match json_member "degraded_retry_applied" runtime with
+  | `Assoc _ | `Null -> Lanes_split
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Lanes_predate_the_split
+;;
+
+let unreadable_lane_json =
+  `Assoc [ "runtime", `Null; "reason", `Null; "unreadable", `Bool true ]
+;;
+
+(* A deferred lane travels as one object so the runtime and the reason it was
+   deferred for cannot be split apart on the way to the dashboard. Absent stays
+   absent: a receipt that took up no lane says so with `Null, not with an
+   object holding empty strings.
+
+   Nothing here interprets an older row — that would be the compatibility
+   reader the hard cut exists to avoid — but it must not read as "no retry"
+   either, so it says [unreadable] and the dashboard prints that instead of
+   nothing. *)
+let compact_degraded_retry_json shape lane =
+  match shape with
+  | Lanes_predate_the_split -> unreadable_lane_json
+  | Lanes_split ->
+    (match lane with
+     | `Assoc _ ->
+       `Assoc
+         [ "runtime", Json_util.string_opt_to_json (json_string "runtime" lane)
+         ; "reason", Json_util.string_opt_to_json (json_string "reason" lane)
+         ; "unreadable", `Bool false
+         ]
+     | `Null -> `Null
+     (* The row is this generation's and this field still is not a lane. Not
+        absence, so not `Null. *)
+     | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+       unreadable_lane_json)
+;;
+
 let compact_receipt_runtime_json receipt =
   match json_member "runtime" receipt with
   | `Assoc _ as runtime ->
+    let shape = degraded_retry_shape runtime in
     `Assoc
       [ "name", Json_util.string_opt_to_json (json_string "name" runtime)
       ; "selected_model", `Null
@@ -54,11 +119,9 @@ let compact_receipt_runtime_json receipt =
         , Json_util.bool_opt_to_json (json_bool "fallback_applied" runtime) )
       ; "outcome", Json_util.string_opt_to_json (json_string "outcome" runtime)
       ; ( "degraded_retry_applied"
-        , Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" runtime) )
-      ; ( "degraded_retry_runtime"
-        , Json_util.string_opt_to_json (json_string "degraded_retry_runtime" runtime) )
-      ; ( "fallback_reason"
-        , Json_util.string_opt_to_json (json_string "fallback_reason" runtime) )
+        , compact_degraded_retry_json shape (json_member "degraded_retry_applied" runtime) )
+      ; ( "degraded_retry_deferred"
+        , compact_degraded_retry_json shape (json_member "degraded_retry_deferred" runtime) )
       ]
   | _ -> `Null
 ;;

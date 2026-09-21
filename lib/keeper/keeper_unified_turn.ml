@@ -1,10 +1,11 @@
-(** Keeper_unified_turn — Single entry point for keeper cycles via Agent_core.Agent.run().
+(** MASC orchestration of a Keeper turn.
 
-    Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
-    observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
-    The model decides what to do; code only enforces safety and observes results.
+    Observes current state, prepares the turn prompt and calls
+    [Keeper_agent_run.run_turn] through [Keeper_unified_turn_execution].
+    [Keeper_turn_driver] dispatches each runtime attempt to AGENT_CORE or an
+    official client according to [Runtime_execution.t].
 
-    @since Unified Keeper Loop *)
+    Error classification predicates are in [Keeper_error_classify]. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -1029,7 +1030,7 @@ let run_keeper_cycle
            observation. *)
                  let cleanup () =
                    (try Eio.Cancel.protect unsubscribe_event_bus with
-                    | e ->
+                    | e -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it; see the cleanup comment above for why a raise here must not escape. *)
                       Log.Keeper.warn
                         ~keeper_name:meta.name
                         "%s: unsubscribe_event_bus in turn cleanup raised: %s"
@@ -1045,7 +1046,7 @@ let run_keeper_cycle
                          ~base_path:config.base_path
                          meta.name)
                    with
-                   | e ->
+                   | e -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it; see the cleanup comment above for why a raise here must not escape. *)
                      Log.Keeper.warn
                        ~keeper_name:meta.name
                        "%s: mark_turn_finished in turn cleanup raised: %s"
@@ -1148,22 +1149,16 @@ let run_keeper_cycle
                    Keeper_runtime_manifest.Event_bus_correlated
                in
                let degraded_retry_info = turn_state.degraded_retry_info in
-               (* [degraded_retry_info] is seeded at [initial_turn_state] from the
+               (* These three feed the decision record below, and nothing else:
+                  the execution receipt now reports the two lanes on its own,
+                  in [Keeper_agent_run_receipt].
+
+                  [degraded_retry_info] is seeded at [initial_turn_state] from the
                   [deferred_runtime_lane] argument -- a hint a *previous* turn left
                   behind -- and no path in this turn writes it. Its presence says a
-                  deferred lane is pending, not that a retry ran.
-
-                  Applied means this turn actually ran on the runtime the hint
-                  named. Presence alone reported "applied" on every turn carrying a
-                  hint, which is why fsm-hub.ts could never render its "retry
-                  queued" branch, and why an operator reading a receipt saw a retry
-                  that had not happened -- carrying a [fallback_reason] computed
-                  from the earlier turn's failure rather than this turn's. Observed
-                  2026-08-27 on a live receipt whose own error was an invalid
-                  request while the reason read rate_limit.
-
-                  The comparison lives in [Keeper_unified_turn_types] so it can be
-                  exercised without standing up a keeper cycle. *)
+                  deferred lane is pending, not that a retry ran, which is why the
+                  comparison in [Keeper_unified_turn_types] stands between it and
+                  the label. *)
                let degraded_retry_applied =
                  degraded_retry_applied_for_turn
                    ~degraded_retry_info

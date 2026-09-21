@@ -1238,6 +1238,12 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev =
+  | Jev_off
+  | Jev_configured of { model : string }
+  | Jev_cli_only
+  | Jev_lane_unavailable
+
 type standalone_lane = {
   sl_lane_id : string;
   sl_label : string;
@@ -1247,6 +1253,7 @@ type standalone_lane = {
   sl_required : bool;
   sl_status : standalone_lane_status;
   sl_configuration_state : standalone_lane_configuration;
+  sl_jev : standalone_lane_jev option;
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
@@ -2608,6 +2615,15 @@ type file_change_kind =
       line : int;
       text : string;
     }
+  | Fc_materialized of {
+      sha256 : string;
+      bytes : int;
+    }
+      (** A blob's bytes written into a file by [keeper_artifact_transfer]'s
+          [materialize] action. The call's input names the blob by its
+          [sha256] and byte count, so the reader has the blob's identity and
+          size and no body text. The same handler's [export] action reads a
+          file into the blob store and is not a file change. *)
 
 type file_change = {
   fc_at : float;

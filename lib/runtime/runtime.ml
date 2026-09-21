@@ -1606,7 +1606,10 @@ let default_runtime_id_or_fail () =
      hands this to [resolve_assignment] for every keeper without an
      assignment, and a lane name must survive that round trip. *)
   match state.default_runtime with
-  | Some rt -> Option.value state.default_route_id ~default:rt.id
+  | Some rt ->
+    (match state.default_route_id with
+     | Some route_id -> route_id
+     | None -> rt.id)
   | None when Runtime_startup_state.requires_setup () ->
     let message = match Runtime_startup_state.get () with
       | Setup_required reason -> Runtime_startup_state.message reason

@@ -1,7 +1,8 @@
 # masc Roadmap
 
 > Current package version: v0.35.22
-> Latest changelog entry: v0.35.22 (2026-09-23, provisional — set to the tag commit's UTC date before publishing)
+> Latest changelog entry: v0.35.22 (2026-09-23)
+> Release date status: provisional — set it to the tag commit's UTC date before publishing
 > Latest published GitHub release: v0.35.20 (2026-09-17)
 > Updated: 2026-09-21
 

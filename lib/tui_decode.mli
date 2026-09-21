@@ -854,7 +854,7 @@ type repository_change_snapshot = {
 type memory_alert_code =
   | Snapshot_read_error
   | Source_snapshot_read_error
-  | Librarian_lane_busy
+  | Librarian_stopped
   | Librarian_failures
   | Librarian_starvation
   | Vision_ingest_errors
@@ -873,6 +873,19 @@ type memory_alert = {
   ma_message : string;
 }
 
+(* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
+   standing, and what its last pass and its journal say. [None] in a field is
+   "not measured", which the header prints as such; it is not zero. *)
+type memory_librarian_health = {
+  mlh_state : string option;
+  mlh_detail : string option;
+  mlh_measured_at : float option;
+  mlh_unread_atom_turns : int option;
+  mlh_unread_official_turns : int option;
+  mlh_last_success_at : float option;
+  mlh_last_failure_kind : string option;
+}
+
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
@@ -885,7 +898,7 @@ type memory_keeper_health = {
   mkh_added : int;
   mkh_removed : int;
   mkh_snapshot_present : bool;
-  mkh_librarian_lane_busy : int;
+  mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;
   mkh_vision_ingest_errors : int;
   mkh_vision_ingest_error_reasons : (string * int) list;
@@ -911,6 +924,7 @@ type memory_health_snapshot = {
   mhs_total_source_invalidations : int;
   mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
+  mhs_total_librarian_unread_turns : int;
   mhs_total_vision_ingest_errors : int;
   mhs_total_read_errors : int;
   mhs_total_source_read_errors : int;

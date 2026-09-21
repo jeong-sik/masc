@@ -3377,7 +3377,16 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
       ; ("updated_at", if present then `Float 1700000000. else `Null)
-      ; ("librarian_lane_busy", `Int 0)
+      ; ( "librarian"
+        , `Assoc
+            [ ("state", `String "drained")
+            ; ("detail", `Null)
+            ; ("measured_at", `Float 1_775_000_000.0)
+            ; ("unread_atom_turns", `Int 0)
+            ; ("unread_official_turns", `Int 0)
+            ; ("last_success_at", `Null)
+            ; ("last_failure_kind", `Null)
+            ] )
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
       ; ( "vision_ingest_error_reasons"
@@ -3413,9 +3422,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v4")
+      [ ("schema", `String "keeper.memory_os.current_health.v5")
       ; ("generated_at", `Float 1_775_000_000.0)
-      ; ("cadence_counter_entries", `Int 0)
       ; ( "keepers"
         , `List
             [ keeper "source-only" false 4 true
@@ -3433,7 +3441,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("source_facts", `Int 2)
             ; ("source_invalidations", `Int 1)
             ; ("source_snapshot_bytes", `Int 1024)
-            ; ("librarian_lane_busy", `Int 0)
+            ; ("librarian_unread_turns", `Int 0)
             ; ("librarian_failures", `Int 4)
             ; ("vision_ingest_errors", `Int 3)
             ; ("read_errors", `Int 0)
@@ -3447,7 +3455,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("keepers_with_alerts", `Int 1)
             ; ("snapshot_read_error_keepers", `Int 0)
             ; ("source_snapshot_read_error_keepers", `Int 0)
-            ; ("librarian_lane_busy_keepers", `Int 0)
+            ; ("librarian_stopped_keepers", `Int 0)
             ; ("librarian_starving_keepers", `Int 1)
             ] )
       ]
@@ -3473,7 +3481,38 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            fields)
     | json -> json
   in
-  let negative_counter = replace_field "cadence_counter_entries" (`Int (-1)) json in
+  let negative_unread =
+    map_keeper
+      0
+      (replace_field
+         "librarian"
+         (`Assoc
+            [ ("state", `String "drained")
+            ; ("detail", `Null)
+            ; ("measured_at", `Float 1_775_000_000.0)
+            ; ("unread_atom_turns", `Int (-1))
+            ; ("unread_official_turns", `Int 0)
+            ; ("last_success_at", `Null)
+            ; ("last_failure_kind", `Null)
+            ]))
+      json
+  in
+  let unknown_librarian_state =
+    map_keeper
+      0
+      (replace_field
+         "librarian"
+         (`Assoc
+            [ ("state", `String "resting")
+            ; ("detail", `Null)
+            ; ("measured_at", `Float 1_775_000_000.0)
+            ; ("unread_atom_turns", `Int 0)
+            ; ("unread_official_turns", `Int 0)
+            ; ("last_success_at", `Null)
+            ; ("last_failure_kind", `Null)
+            ]))
+      json
+  in
   let unknown_field =
     match json with
     | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
@@ -3545,7 +3584,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
        Alcotest.(check bool) label true
          (Result.is_error (Tui_decode.decode_memory_health_snapshot invalid)))
     [ "fleet total mismatch rejects", mismatched_totals
-    ; "negative observation counter rejects", negative_counter
+    ; "negative unread turn count rejects", negative_unread
+    ; "unknown librarian state rejects", unknown_librarian_state
     ; "unknown root field rejects", unknown_field
     ; "duplicate keeper identity rejects", duplicate_keeper
     ; "alert target mismatch rejects", wrong_alert_target
@@ -3628,9 +3668,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v4")
+    [ ("schema", `String "keeper.memory_os.current_health.v5")
     ; ("generated_at", `Float 1_775_000_000.0)
-    ; ("cadence_counter_entries", `Int 0)
     ; ( "keepers"
       , `List
           [ `Assoc
@@ -3645,7 +3684,16 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("removed", `Int 0)
               ; ("snapshot_present", `Bool false)
               ; ("updated_at", `Null)
-              ; ("librarian_lane_busy", `Int 0)
+              ; ( "librarian"
+                , `Assoc
+                    [ ("state", `String "drained")
+                    ; ("detail", `Null)
+                    ; ("measured_at", `Float 1_775_000_000.0)
+                    ; ("unread_atom_turns", `Int 0)
+                    ; ("unread_official_turns", `Int 0)
+                    ; ("last_success_at", `Null)
+                    ; ("last_failure_kind", `Null)
+                    ] )
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)
               ; ("vision_ingest_error_reasons", `List [])
@@ -3681,7 +3729,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
           ; ("source_facts", `Int 0)
           ; ("source_invalidations", `Int 0)
           ; ("source_snapshot_bytes", `Int 0)
-          ; ("librarian_lane_busy", `Int 0)
+          ; ("librarian_unread_turns", `Int 0)
           ; ("librarian_failures", `Int 4)
           ; ("vision_ingest_errors", `Int 0)
           ; ("read_errors", `Int 0)
@@ -3695,7 +3743,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
           ; ("keepers_with_alerts", `Int 1)
           ; ("snapshot_read_error_keepers", `Int 0)
           ; ("source_snapshot_read_error_keepers", `Int 0)
-          ; ("librarian_lane_busy_keepers", `Int 0)
+          ; ("librarian_stopped_keepers", `Int 0)
           ; ("librarian_starving_keepers", `Int 1)
           ] )
     ]
@@ -3729,7 +3777,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
        ~target:"librarian_starvation");
   rejected "a target that disagrees with the code is refused"
     (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
-       ~target:"librarian_lane_busy");
+       ~target:"librarian_stopped");
   rejected "legacy threshold field is rejected by exact fields"
     (memory_alert_snapshot_with_extra [ ("threshold", `Float 0.0) ]
        ~code:"librarian_starvation" ~severity:"error"

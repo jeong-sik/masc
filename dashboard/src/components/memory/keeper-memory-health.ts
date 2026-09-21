@@ -2,8 +2,8 @@
 //
 // Read-only diagnostic surface for Lab > 키퍼 메모리 상태.
 // Shows ordinary and source-bound current snapshots, exact latest delta, read
-// failures, and Librarian lane pressure. There is no legacy event/fact-store or
-// GC view.
+// failures, and how far behind each keeper's Librarian is standing (RFC
+// librarian-lifecycle §4.9). There is no legacy event/fact-store or GC view.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -18,7 +18,7 @@ import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefre
 
 const SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'snapshot_read_error'
 const SOURCE_SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'source_snapshot_read_error'
-const LIBRARIAN_LANE_BUSY_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_lane_busy'
+const LIBRARIAN_STOPPED_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_stopped'
 const LIBRARIAN_FAILURES_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_failures'
 const LIBRARIAN_STARVATION_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_starvation'
 
@@ -50,7 +50,11 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const warn = alerts.length > 0
   const readErrorWarn = hasTargetAlert(alerts, SNAPSHOT_READ_ERROR_TARGET)
   const sourceReadErrorWarn = hasTargetAlert(alerts, SOURCE_SNAPSHOT_READ_ERROR_TARGET)
-  const laneBusyWarn = hasTargetAlert(alerts, LIBRARIAN_LANE_BUSY_TARGET)
+  const librarianStopped = hasTargetAlert(alerts, LIBRARIAN_STOPPED_TARGET)
+  const unread = entry.librarian.unread_atom_turns === null
+    || entry.librarian.unread_official_turns === null
+    ? null
+    : entry.librarian.unread_atom_turns + entry.librarian.unread_official_turns
   const starving = hasTargetAlert(alerts, LIBRARIAN_STARVATION_TARGET)
   const librarianFailing = starving || hasTargetAlert(alerts, LIBRARIAN_FAILURES_TARGET)
   const visionReasons = entry.vision_ingest_error_reasons
@@ -71,10 +75,12 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>${formatBytes(entry.snapshot_bytes)}</td>
       <td><span class="kmh-badge kmh-badge--ok">+${entry.added}</span></td>
       <td><span class="kmh-badge kmh-badge--ok">−${entry.removed}</span></td>
-      <td>
-        ${laneBusyWarn
-          ? html`<span class="kmh-badge kmh-badge--warn">${entry.librarian_lane_busy}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">${entry.librarian_lane_busy}</span>`}
+      <td title=${entry.librarian.detail ?? entry.librarian.state ?? '아직 측정 전'}>
+        ${unread === null
+          ? html`<span class="kmh-badge kmh-badge--muted">?</span>`
+          : librarianStopped || unread > 0
+            ? html`<span class="kmh-badge kmh-badge--warn">${unread}</span>`
+            : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
       </td>
       <td>
         ${starving
@@ -182,7 +188,7 @@ export function KeeperMemoryHealth() {
   const errorAlerts = data.alert_summary.error_alerts
   const readErrorWarn = data.alert_summary.snapshot_read_error_keepers > 0
   const sourceReadErrorWarn = data.alert_summary.source_snapshot_read_error_keepers > 0
-  const laneBusyWarn = data.alert_summary.librarian_lane_busy_keepers > 0
+  const librarianStoppedKeepers = data.alert_summary.librarian_stopped_keepers
   const starvingKeepers = data.alert_summary.librarian_starving_keepers
   const librarianFailureClass = starvingKeepers > 0
     ? ' kmh-stat-value--error'
@@ -260,10 +266,16 @@ export function KeeperMemoryHealth() {
               ${data.totals.vision_ingest_errors}
             </span>
           </div>
-          <div class="kmh-stat" data-stat-key="librarian-lane-busy">
-            <span class="kmh-stat-label">Librarian lane busy</span>
-            <span class=${`kmh-stat-value${laneBusyWarn ? ' kmh-stat-value--warn' : ''}`}>
-              ${data.totals.librarian_lane_busy}
+          <div class="kmh-stat" data-stat-key="librarian-unread-turns">
+            <span class="kmh-stat-label">안 읽은 턴</span>
+            <span class=${`kmh-stat-value${data.totals.librarian_unread_turns > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.librarian_unread_turns}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="librarian-stopped-keepers">
+            <span class="kmh-stat-label">멈춘 Librarian</span>
+            <span class=${`kmh-stat-value${librarianStoppedKeepers > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${librarianStoppedKeepers}
             </span>
           </div>
           <div class="kmh-stat" data-stat-key="librarian-failures">
@@ -283,10 +295,6 @@ export function KeeperMemoryHealth() {
             <span class=${`kmh-stat-value${alertClass}`}>
               ${totalAlerts}
             </span>
-          </div>
-          <div class="kmh-stat" data-stat-key="cadence-counter">
-            <span class="kmh-stat-label">케이던스 카운터</span>
-            <span class="kmh-stat-value">${data.cadence_counter_entries}</span>
           </div>
           <div class="kmh-stat" data-stat-key="keeper-count">
             <span class="kmh-stat-label">키퍼 수</span>
@@ -313,7 +321,7 @@ export function KeeperMemoryHealth() {
                   <th>bytes</th>
                   <th>추가</th>
                   <th>제거</th>
-                  <th>lane busy</th>
+                  <th>안 읽은 턴</th>
                   <th>실패</th>
                   <th>snapshot</th>
                   <th>source snapshot</th>

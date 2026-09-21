@@ -35,6 +35,12 @@ type pass_end =
 type measurement =
   { measured_at : float
   ; last_pass : pass_end
+  ; unread : Keeper_librarian_durable_consumer.unread option
+      (** How far behind the keeper stood when the pass ended (RFC §4.9,
+          invariant I4). [None] when the Librarian is off, when the keeper
+          has no metadata, or when the count could not be taken -- the
+          position is elsewhere, or a file it needs is unreadable. The pass
+          is not failed by a count that could not be taken. *)
   }
 
 (** Record the server switch and become the target of

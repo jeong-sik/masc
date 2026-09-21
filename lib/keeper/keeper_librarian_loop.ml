@@ -17,6 +17,7 @@ type pass_end =
 type measurement =
   { measured_at : float
   ; last_pass : pass_end
+  ; unread : Consumer.unread option
   }
 
 (* Raised into a loop's own switch by [retire]; the daemon ends on it. *)
@@ -102,15 +103,15 @@ let start_daemon ~sw ~key ~pass owner =
         Eio.Promise.await promise;
         drain ()
       | `Run ->
-        let last_pass =
+        let last_pass, unread =
           try pass () with
           | (Eio.Cancel.Cancelled _ | Retired) as exn -> raise exn
           | exn ->
             Log.Keeper.error "librarian loop %s: pass raised: %s" key (Printexc.to_string exn);
-            Raised (Printexc.to_string exn)
+            Raised (Printexc.to_string exn), None
         in
         Stdlib.Mutex.protect owner.mutex (fun () ->
-          owner.last <- Some { measured_at = Time_compat.now (); last_pass });
+          owner.last <- Some { measured_at = Time_compat.now (); last_pass; unread });
         drain ()
     in
     let outcome =
@@ -316,9 +317,27 @@ let rec drain_with_commit ~config ~keeper_name ~commit =
        Stopped error)
 ;;
 
+(* RFC §4.9: how far behind the keeper stands, counted once a pass has taken
+   it as far as it goes. A count that cannot be taken is [None] and the
+   surfaces say so; it does not fail the pass, which has already done its
+   work. *)
+let measure_unread ~config ~keeper_name =
+  match Consumer.unread_turns ~config ~keeper_name with
+  | Ok unread -> Some unread
+  | Error error ->
+    Log.Keeper.warn
+      ~keeper_name
+      "librarian lag not counted: %s"
+      (Consumer.error_to_string error);
+    None
+;;
+
 let production_pass ~config ~keeper_name () =
   match Env_config.KeeperMemoryOs.librarian_config_state () with
-  | Disabled | Invalid -> Off
+  | Disabled | Invalid ->
+    (* Off is not lag: a keeper whose Librarian is off keeps appending lines
+       and reads them all when it is turned back on. *)
+    Off, None
   | Enabled ->
     if not (lane_available ())
     then (
@@ -326,7 +345,7 @@ let production_pass ~config ~keeper_name () =
         ~keeper_name
         "librarian loop: exact lane %s is not configured; the wake is dropped"
         lane_id;
-      Lane_unconfigured)
+      Lane_unconfigured, measure_unread ~config ~keeper_name)
     else (
       let base_path = config.Workspace.base_path in
       let memory_keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -344,7 +363,11 @@ let production_pass ~config ~keeper_name () =
        | Off | Stopped Consumer.Keeper_meta_absent -> ()
        | Lane_unconfigured | Drained | Not_committed | Stopped _ | Raised _ ->
          queue_round ~config ~keeper_name ~memory_keepers_dir);
-      ended)
+      ( ended
+      , match ended with
+        | Off | Stopped Consumer.Keeper_meta_absent -> None
+        | Lane_unconfigured | Drained | Not_committed | Stopped _ | Raised _ ->
+          measure_unread ~config ~keeper_name ))
 ;;
 
 (* {1 The public surface} *)
@@ -400,7 +423,7 @@ let last_measurement ~config ~keeper_name =
 ;;
 
 module For_testing = struct
-  let start_with ~sw ~key ~pass = start ~sw ~key ~pass
+  let start_with ~sw ~key ~pass = start ~sw ~key ~pass:(fun () -> pass (), None)
   let drain = drain_with_commit
 
   let wake_key key =

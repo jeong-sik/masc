@@ -88,7 +88,10 @@ let test_a_stopped_pass_waits_for_a_wake () =
        check int "one pass" 1 !passes;
        check bool "parked after the stop" true (Loop.For_testing.is_parked key);
        (match Loop.For_testing.measurement_key key with
-        | Some { Loop.last_pass = Loop.Stopped Consumer.Keeper_meta_absent; _ } -> ()
+        | Some { Loop.last_pass = Loop.Stopped Consumer.Keeper_meta_absent; unread; _ } ->
+          (* A fake pass counts nothing; the production pass is what takes the
+             number, and the consumer's own test pins it. *)
+          check bool "a fake pass leaves no count" true (Option.is_none unread)
         | Some _ -> fail "the measurement does not say how the pass ended"
         | None -> fail "no measurement after a pass");
        Loop.For_testing.wake_key key;

@@ -6611,9 +6611,8 @@ def memory_facts_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/dashboard/keeper-memory-health"] = (
         200,
         {
-            "schema": "keeper.memory_os.current_health.v4",
+            "schema": "keeper.memory_os.current_health.v5",
             "generated_at": 1787348000.0,
-            "cadence_counter_entries": 0,
             "keepers": [
                 {
                     "keeper_id": "alpha",
@@ -6627,7 +6626,15 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                     "removed": 0,
                     "snapshot_present": True,
                     "updated_at": 1700000000.0,
-                    "librarian_lane_busy": 0,
+                    "librarian": {
+                        "state": "drained",
+                        "detail": None,
+                        "measured_at": 1787347900.0,
+                        "unread_atom_turns": 0,
+                        "unread_official_turns": 0,
+                        "last_success_at": 1700000000.0,
+                        "last_failure_kind": None,
+                    },
                     "librarian_failures": 0,
                     "vision_ingest_errors": 0,
                     "vision_ingest_error_reasons": [],
@@ -6652,7 +6659,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                 "source_facts": 1,
                 "source_invalidations": 1,
                 "source_snapshot_bytes": 128,
-                "librarian_lane_busy": 0,
+                "librarian_unread_turns": 0,
                 "librarian_failures": 0,
                 "vision_ingest_errors": 0,
                 "read_errors": 0,
@@ -6665,7 +6672,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                 "keepers_with_alerts": 0,
                 "snapshot_read_error_keepers": 0,
                 "source_snapshot_read_error_keepers": 0,
-                "librarian_lane_busy_keepers": 0,
+                "librarian_stopped_keepers": 0,
                 "librarian_starving_keepers": 0,
             },
         },

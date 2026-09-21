@@ -264,6 +264,47 @@ let select ~trace_id ~lines ~progress ~messages extent =
                   }))))
 ;;
 
+(* RFC §4.9. The count the operator sees, over the same lines [select] reads.
+   It is not [select]: a round stopped by a refused line still has turns
+   behind it, and the number is what says how far behind. *)
+let unread_turns ~trace_id ~lines ~progress ~messages =
+  let own = lines_of_trace ~trace_id lines in
+  let _labelled, atom_count = Window.annotate messages in
+  let digest_at = Window.atom_opening_digest messages in
+  let cuts =
+    current_history_lines own
+    |> List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written)
+  in
+  let seen_before =
+    match progress with
+    | Some { P.position = _; boundary_lines_seen } -> boundary_lines_seen
+    | None -> 0
+  in
+  let restarted =
+    List.exists (fun (line, written) -> line > seen_before && is_restart written) own
+  in
+  if restarted
+  then Some (List.length cuts)
+  else (
+    match progress with
+    | None ->
+      (* No position: the smallest cut becomes the baseline and nothing
+         before it is read (row 3, third case), so it is not unread. *)
+      Some (max 0 (List.length cuts - 1))
+    | Some { P.position; boundary_lines_seen = _ } ->
+      if String.equal position.P.trace_id trace_id
+         && matches_checkpoint
+              ~digest_at
+              ~atom_count
+              ~end_atom:position.P.end_atom
+              ~digest:position.P.last_atom_digest
+      then
+        Some
+          (List.length
+             (List.filter (fun (end_atom, _) -> end_atom > position.P.end_atom) cuts))
+      else None)
+;;
+
 let progress_after ~trace_id = function
   | Read { range; boundary_lines_seen } ->
     Some
@@ -337,6 +378,15 @@ let select_official ~lines ~cursor extent =
        (match extent with
         | To_first_cut_point -> Official_read [ first ]
         | All_unread -> Official_read (first :: rest)))
+;;
+
+(* RFC §4.9: official-client turns beyond the cursor. A refused line does
+   not hide the candidates around it; the round's stop says it is stopped. *)
+let unread_official_turns ~lines ~cursor =
+  let after = cursor_line cursor in
+  List.filter (fun (line, _) -> line > after) lines
+  |> List.filter_map official_candidate
+  |> List.length
 ;;
 
 let may_have_unread_official ~lines ~cursor =

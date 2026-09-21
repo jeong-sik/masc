@@ -35,6 +35,10 @@ type error =
   | Progress_unreadable of Keeper_librarian_progress.read_error
   | Checkpoint_unreadable of Keeper_checkpoint_store.checkpoint_load_error
   | Position_in_other_trace of Keeper_librarian_progress.position
+  | Position_not_in_history of Keeper_librarian_progress.position
+      (** The position names no atom of the current checkpoint and no restart
+          line explains it (RFC §4.4 row 5). Only {!unread_turns} answers
+          with this; a pass reports the same state as [Range_stopped]. *)
   | Range_stopped of Keeper_librarian_range.stop
   | Range_end_boundary_missing of Keeper_librarian_range.range
   | Progress_boundary_missing of Keeper_librarian_progress.position
@@ -69,6 +73,24 @@ type error =
       (** A refused history line after the first that names a turn. *)
 
 val error_to_string : error -> string
+
+(** How far behind the keeper's Librarian is standing (RFC §4.9, invariant
+    I4): finished turns beyond each read position, counted over the boundary
+    log, the two positions and the current checkpoint. Read-only, and
+    separate from a pass so that an operator surface can ask without moving
+    anything.
+
+    A refused line or a failed commit does not hide the count -- how far
+    behind is exactly what an operator needs while a round is stopped. What
+    is not counted: restart lines, lines of a history that has been
+    renumbered (§4.4 row 2a), and turns that failed before writing an end
+    line. *)
+type unread =
+  { atoms : int
+  ; official : int
+  }
+
+val unread_turns : config:Workspace.config -> keeper_name:string -> (unread, error) result
 
 val consume_one
   :  config:Workspace.config

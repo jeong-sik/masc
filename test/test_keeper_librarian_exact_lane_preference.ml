@@ -365,7 +365,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
      fail (Runtime.extraction_error_to_string error));
   with_temp_base "librarian-preflight-execution" @@ fun base_path ->
   (match
-     Runtime.For_testing.execute_exact_output_classified
+     Runtime.For_testing.execute_exact_output_classified ~continuity:None
        ~clock
        ~net
        ~base_path

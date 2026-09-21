@@ -597,7 +597,7 @@ let with_cli_failure prior_error = function
 ;;
 
 let execute_exact_output_classified
-      ?continuity
+      ~continuity
       ?cli_runner
       ~clock
       ~net
@@ -995,7 +995,7 @@ let run_best_effort
              in
              let* (selection, exact_output), selected_slot =
                execute_exact_output_classified
-                 ?continuity
+                 ~continuity
                  ?cli_runner
                  ~clock
                  ~net

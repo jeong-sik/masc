@@ -198,7 +198,7 @@ let test_prefit_real_continuity ~base_path () =
   let ordinary_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
     check_working_state_schema ~continuity:false output_schema;
     Ok (Yojson.Safe.to_string null_state) in
-  (match Runtime.For_testing.execute_exact_output_classified
+  (match Runtime.For_testing.execute_exact_output_classified ~continuity:None
      ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
      ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
    | Ok ((selection, _), _) ->
@@ -215,7 +215,7 @@ let test_prefit_real_continuity ~base_path () =
     (Fixture.resolver_snapshot ~source:"continuity-api-validation"
       [{Fixture.id="missing-state";base_url=invalid_api.base_url};
        {Fixture.id="valid-state";base_url=valid_api.base_url}]));
-  (match Runtime.For_testing.execute_exact_output_classified ~continuity:half
+  (match Runtime.For_testing.execute_exact_output_classified ~continuity:(Some half)
      ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
      ~messages:[Agent_core.Types.user_msg "synthesize completed source"] () with
    | Ok ((selection, _), slot) ->

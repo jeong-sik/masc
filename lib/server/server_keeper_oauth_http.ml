@@ -101,7 +101,8 @@ let handle_providers request reqd =
           [ ( "providers"
             , Server_keeper_oauth.declarations_json
                 ~base_path:
-                  (Mcp_server.workspace_config state).Workspace.base_path )
+                  (Mcp_server.workspace_config state).Workspace.base_path
+                ~now:(Unix.gettimeofday ()) )
           ])
         reqd)
     request reqd

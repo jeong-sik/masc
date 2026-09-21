@@ -16,7 +16,7 @@ val callback_path : string
     them: which login a callback belongs to is the state it echoes, and a
     state is unguessable and redeemable once. *)
 
-val declarations_json : base_path:string -> Yojson.Safe.t
+val declarations_json : base_path:string -> now:float -> Yojson.Safe.t
 (** Every provider declared under [config/identity/], as a screen would list
     them: [{id, label}] for one that reads, [{id, problem}] for one that does
     not. A declaration nobody can read is listed with what is wrong with it,

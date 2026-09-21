@@ -4899,9 +4899,11 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
       wrap (Theme.recede ()) "JEV unavailable: Board lane is CLI-only"
     | Some Tui_decode.Jev_lane_unavailable ->
       wrap (Theme.warn ()) "JEV unavailable: Board lane is not ready"
-    | Some (Tui_decode.Jev_configured { model }) ->
+    | Some (Tui_decode.Jev_configured { models }) ->
       wrap Ansi.reset
-        (Printf.sprintf "JEV CONFIGURED \xc2\xb7 %s" (Terminal_text.single_line model))
+        (Printf.sprintf
+           "JEV CONFIGURED \xc2\xb7 %s"
+           (Terminal_text.single_line (String.concat ", " models)))
   in
   let run_stats =
     let total = lane.sl_retained_run_count in

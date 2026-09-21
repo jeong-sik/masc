@@ -63,9 +63,12 @@ describe('standalone lane snapshot decoder', () => {
 
   it('keeps typed JEV readiness and rejects unknown states', () => {
     const enabled = snapshot()
-    enabled.lanes[0] = { ...enabled.lanes[0], jev: { state: 'configured', model: '  jev-next  ' } }
+    enabled.lanes[0] = {
+      ...enabled.lanes[0],
+      jev: { state: 'configured', models: ['  jev-next  ', '~typesafe/jev-latest'] },
+    }
     expect(parseStandaloneLanesSnapshot(enabled).lanes[0]?.jev)
-      .toEqual({ state: 'configured', model: 'jev-next' })
+      .toEqual({ state: 'configured', models: ['jev-next', '~typesafe/jev-latest'] })
 
     for (const state of ['cli_only', 'lane_unavailable']) {
       const unavailable = snapshot()
@@ -75,12 +78,16 @@ describe('standalone lane snapshot decoder', () => {
 
     for (const state of ['warming', 'on']) {
       const malformed = snapshot()
-      malformed.lanes[0] = { ...malformed.lanes[0], jev: { state, model: 'jev-next' } }
+      malformed.lanes[0] = { ...malformed.lanes[0], jev: { state, models: ['jev-next'] } }
       expect(() => parseStandaloneLanesSnapshot(malformed)).toThrow(/jev\.state is unknown/)
     }
 
     const blankModel = snapshot()
-    blankModel.lanes[0] = { ...blankModel.lanes[0], jev: { state: 'configured', model: ' \t ' } }
-    expect(() => parseStandaloneLanesSnapshot(blankModel)).toThrow(/model must be a non-empty string/)
+    blankModel.lanes[0] = { ...blankModel.lanes[0], jev: { state: 'configured', models: [' \t '] } }
+    expect(() => parseStandaloneLanesSnapshot(blankModel)).toThrow(/models\[0\] must be a non-empty string/)
+
+    const noModels = snapshot()
+    noModels.lanes[0] = { ...noModels.lanes[0], jev: { state: 'configured', models: [] } }
+    expect(() => parseStandaloneLanesSnapshot(noModels)).toThrow(/models must be a non-empty array/)
   })
 })

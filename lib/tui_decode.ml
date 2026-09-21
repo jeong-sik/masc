@@ -154,7 +154,7 @@ type standalone_lane_slot_count = {
 
 type standalone_lane_jev =
   | Jev_off
-  | Jev_configured of { model : string }
+  | Jev_configured of { models : string list }
   | Jev_cli_only
   | Jev_lane_unavailable
 
@@ -6076,11 +6076,11 @@ let decode_standalone_lane_jev json =
   | "cli_only" -> Ok Jev_cli_only
   | "lane_unavailable" -> Ok Jev_lane_unavailable
   | "configured" ->
-    let* model = required_string_field json "model" in
-    let model = String.trim model in
-    if String.equal model ""
-    then Error "standalone lane JEV model must be a non-empty string"
-    else Ok (Jev_configured { model })
+    let* models = require_string_list json "models" in
+    let models = List.map String.trim models in
+    if models = [] || List.exists (String.equal "") models
+    then Error "standalone lane JEV models must be a non-empty list of non-empty strings"
+    else Ok (Jev_configured { models })
   | other -> Error ("standalone lane JEV state: unknown value " ^ other)
 
 let decode_standalone_lane json =

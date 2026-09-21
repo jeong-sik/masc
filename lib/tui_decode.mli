@@ -1296,7 +1296,7 @@ type standalone_lane_slot_count = {
 
 type standalone_lane_jev =
   | Jev_off
-  | Jev_configured of { model : string }
+  | Jev_configured of { models : string list }
   | Jev_cli_only
   | Jev_lane_unavailable
 

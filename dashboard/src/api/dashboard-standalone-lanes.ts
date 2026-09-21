@@ -28,7 +28,7 @@ export interface StandaloneLaneSlotCount {
 
 export type StandaloneLaneJev =
   | { state: 'off' }
-  | { state: 'configured'; model: string }
+  | { state: 'configured'; models: string[] }
   | { state: 'cli_only' }
   | { state: 'lane_unavailable' }
 
@@ -119,7 +119,13 @@ function parseJev(value: unknown, context: string): StandaloneLaneJev {
   if (state === 'off') return { state: 'off' }
   if (state === 'cli_only') return { state: 'cli_only' }
   if (state === 'lane_unavailable') return { state: 'lane_unavailable' }
-  if (state === 'configured') return { state: 'configured', model: string(value.model, `${context}.model`).trim() }
+  if (state === 'configured') {
+    if (!Array.isArray(value.models) || value.models.length === 0) fail(`${context}.models must be a non-empty array`)
+    return {
+      state: 'configured',
+      models: value.models.map((model, index) => string(model, `${context}.models[${index}]`).trim()),
+    }
+  }
   fail(`${context}.state is unknown`)
 }
 

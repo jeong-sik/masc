@@ -285,6 +285,61 @@ let check_resolved_recovery_is_not_restored () =
              (R.failure_reason_to_string reason)
          | None -> Alcotest.fail "registry entry disappeared"))
 
+let check_unreadable_store_preserves_recovery_cause () =
+  let base_path = Filename.temp_dir "official-claim-unreadable-store-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let keeper_name = "unreadable-recovery-store" in
+    let expected : I.official_client_recovery =
+      { runtime_id = "synthetic-runtime"
+      ; recovery_id = "synthetic-recovery"
+      ; reason = I.Effect_fenced
+      }
+    in
+    let path = S.path ~base_path ~keeper_name |> ok in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    write_file path "not-json\n";
+    let error =
+      I.core_error_of_masc_internal_error
+        (I.Official_client_recovery_required expected)
+    in
+    let raw_error = Agent_core.Error.to_string error in
+    let terminal = Keeper_turn_terminal.of_failure ~raw_error error in
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "unreadable-store"
+          ])
+      |> ok
+    in
+    let _entry = R.For_testing.register ~base_path keeper_name meta in
+    Fun.protect
+      ~finally:(fun () -> R.For_testing.unregister ~base_path keeper_name)
+      (fun () ->
+        Keeper_unified_turn_failure.record_failure_observation
+          ~config:(Workspace.default_config base_path)
+          ~meta
+          ~terminal_reason:terminal
+          ~err:error
+          ~error_text:raw_error;
+        match R.get ~base_path keeper_name with
+        | Some
+            { last_failure_reason =
+                Some (R.Official_client_recovery_required actual)
+            ; _
+            } ->
+          Alcotest.(check bool)
+            "unreadable store keeps the actionable recovery"
+            true
+            (actual = expected)
+        | Some { last_failure_reason = Some reason; _ } ->
+          Alcotest.failf
+            "unreadable store replaced the recovery cause: %s"
+            (R.failure_reason_to_string reason)
+        | Some { last_failure_reason = None; _ } ->
+          Alcotest.fail "unreadable store dropped the recovery cause"
+        | None -> Alcotest.fail "registry entry disappeared"))
+
 let check_remote_fence () =
   let cause = I.Provider_attempt_effect_fenced
       { runtime_id = "synthetic-runtime"
@@ -305,7 +360,11 @@ let () =
                         ; Alcotest.test_case
                             "resolved recovery is not restored by a stale turn"
                             `Quick
-                            check_resolved_recovery_is_not_restored ]
+                            check_resolved_recovery_is_not_restored
+                        ; Alcotest.test_case
+                            "unreadable store preserves the recovery cause"
+                            `Quick
+                            check_unreadable_store_preserves_recovery_cause ]
     ; "actual adapters",
       List.concat_map (fun (client_kind, label) ->
         List.map (fun (reason, suffix) ->

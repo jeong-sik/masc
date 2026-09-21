@@ -1278,14 +1278,20 @@ base_url = "https://voice.fixture.invalid/v1"
             (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
             runtime = config / 'runtime.toml'
             existing = runtime.read_text()
-            voice_sections = [line.strip() for line in existing.splitlines()
-                              if line.strip().startswith(('[voice.tts', '[voice.stt'))]
-            if voice and voice_sections:
-                raise AssertionError(
-                    'release-evidence runtime fixture already declares a voice section; '
-                    'update test/test_install_runtime_setup.py together with '
-                    'scripts/fixtures/release-evidence/runtime.toml.'
-                )
+            if voice:
+                # Match table headers only. An inline table such as
+                # [voice] followed by tts = { ... } is outside this guard.
+                voice_sections = [
+                    line.strip()
+                    for line in existing.splitlines()
+                    if line.strip().startswith(('[voice.tts', '[voice.stt'))
+                ]
+                if voice_sections:
+                    raise AssertionError(
+                        'release-evidence runtime fixture already declares '
+                        f'{voice_sections}; update test/test_install_runtime_setup.py '
+                        'together with scripts/fixtures/release-evidence/runtime.toml.'
+                    )
             runtime.write_text(existing + voice)
             yield base, runtime
 

@@ -47,6 +47,7 @@ status: reference
   Memory OS와 Working Context는 cluster가 아니라 Keeper 이름에 귀속되므로 cluster
   간에 공유된다.
   → [masc_root_dir_from](../../lib/workspace/workspace_utils_paths_backend.mli),
+  [backend_config_for](../../lib/workspace/workspace_utils_backend_setup.mli),
   [cluster_name](../../lib/config/env_config_core.mli)
 
 **Workspace Heartbeat**

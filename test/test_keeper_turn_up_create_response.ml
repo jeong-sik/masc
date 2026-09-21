@@ -8,6 +8,7 @@ let envelope ?(sandbox_profile = Keeper_types_profile.Micro_vm)
     ~trace_id:"trace-1"
     ~instructions:"manage open PRs on github.com"
     ~activation_mode:Keeper_activation_mode.Autonomous
+    ~input_policy:Keeper_input_policy.Small
     ~max_context_override:None
     ~sandbox_profile
     ~network_mode
@@ -59,6 +60,8 @@ let test_envelope_keeps_its_existing_fields () =
   check string "trace_id" "trace-1" (string_field "trace_id" json);
   check string "instructions" "manage open PRs on github.com"
     (string_field "instructions" json);
+  check bool "input policy reports default small" true
+    (field "input_policy" json = Some (`String "small"));
   check bool "activation_mode present" true
     (Option.is_some (field "activation_mode" json));
   check bool "max_context_override present" true

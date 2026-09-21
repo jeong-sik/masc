@@ -12,7 +12,7 @@ import {
 import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
-import type { KeeperConfig, KeeperHookSlot } from '../types'
+import type { KeeperConfig, KeeperHookSlot, KeeperInputPolicy } from '../types'
 import { SANDBOX_PROFILE_OPTIONS, UNKNOWN_SANDBOX_PROFILE, isGuestSandboxProfile, toSandboxProfile } from '../types'
 import { formatTokens } from '../lib/format-number'
 import {
@@ -321,6 +321,7 @@ export function parseMaxContextOverrideDraft(raw: string): MaxContextOverrideDra
 export type RuntimeDraft = {
   runtime_id: string
   activation_mode: KeeperActivationMode
+  input_policy: KeeperInputPolicy
   max_context_override: string
   sandbox_profile: SandboxProfile | null
   mention_targets_text: string
@@ -449,6 +450,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
     activation_mode: activationConfigValue(c),
+    input_policy: c.input_policy,
     max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: toSandboxProfile(c.sandbox_profile),
     mention_targets_text: c.workspace.mention_targets.join('\n'),
@@ -478,6 +480,7 @@ export function rebaseRuntimeDraftOnFreshConfig(
   if (draft.activation_mode !== base.activation_mode) {
     rebased.activation_mode = draft.activation_mode
   }
+  if (draft.input_policy !== base.input_policy) rebased.input_policy = draft.input_policy
   if (draft.max_context_override !== base.max_context_override) {
     rebased.max_context_override = draft.max_context_override
   }
@@ -736,6 +739,16 @@ export function keeperConfigControlInventory(
         keeperRuntimeControlItem(
           c,
           tab,
+          'kcf-runtime-input-policy',
+          'Context policy',
+          `${configApiSource} input_policy`,
+          'PATCH /api/v1/keepers/:name/config input_policy',
+          'input_policy',
+          ['input_policy'],
+        ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
           'kcf-runtime-context-override',
           'Context override',
           `${configApiSource} max_context_override`,
@@ -977,6 +990,7 @@ export function buildRuntimePayloadResult(
   const newBoardInterests = listTextToStrings(draft.board_interests_text).sort()
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.activation_mode !== activationConfigValue(orig)) payload.activation_mode = draft.activation_mode
+  if (draft.input_policy !== orig.input_policy) payload.input_policy = draft.input_policy
   if (maxContextOverride.ok && maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
   }
@@ -1123,6 +1137,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
   return {
     runtime_id: 'runtime_id' in payload,
     activation_mode: 'activation_mode' in payload,
+    input_policy: 'input_policy' in payload,
     // An unparseable draft ('abc') cannot reach the payload at all, so its
     // marker falls back to comparing the raw text.
     max_context_override:
@@ -1593,6 +1608,7 @@ export function InlineSelectRow({
   label,
   value,
   options,
+  optionLabel,
   placeholder,
   onChange,
   dirty = false,
@@ -1601,6 +1617,7 @@ export function InlineSelectRow({
   label: string
   value: string
   options: readonly string[]
+  optionLabel?: (value: string) => string
   placeholder?: string
   onChange: (v: string) => void
   dirty?: boolean
@@ -1623,7 +1640,7 @@ export function InlineSelectRow({
         ${valueIsListed
           ? null
           : html`<option value=${value} disabled>${placeholder ?? '(고르지 않음)'}</option>`}
-        ${options.map(option => html`<option value=${option}>${option}</option>`)}
+        ${options.map(option => html`<option value=${option}>${optionLabel ? optionLabel(option) : option}</option>`)}
       </select>
     </div>
   `
@@ -2272,6 +2289,20 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${KcfFacts} rows=${[
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
       ]} />
+      ${rd && runtimeCanEdit ? html`
+        <${InlineSelectRow}
+          label="컨텍스트 정책"
+          value=${rd.input_policy}
+          options=${['small', 'wide']}
+          optionLabel=${(value: string) => value === 'small' ? '작은 컨텍스트' : '넓은 컨텍스트'}
+          onChange=${(value: string) => {
+            if (value === 'small' || value === 'wide') updateRuntimeDraft('input_policy', value)
+          }}
+          dirty=${dirtyFlags.input_policy} />
+      ` : html`
+        <${ConfigRow} label="컨텍스트 정책" value=${c.input_policy === 'small' ? '작은 컨텍스트' : '넓은 컨텍스트'} />
+      `}
+      <p class="kcf-sec-desc">Agent Core에 적용됩니다. 작은 모드는 완료된 도구 결과를 필요할 때 읽고, 넓은 모드는 원문을 함께 보냅니다. 공식 클라이언트는 자체 문맥을 관리합니다.</p>
       ${rd && runtimeCanEdit ? html`
         <${InlineContextOverrideRow}
           value=${rd.max_context_override}

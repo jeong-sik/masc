@@ -229,6 +229,7 @@ let created_body =
               ~trace_id:"trace-fixture"
               ~instructions:"Search the web."
               ~activation_mode:Masc.Keeper_activation_mode.On_demand
+              ~input_policy:Masc.Keeper_input_policy.Small
               ~max_context_override:None
               ~sandbox_profile:Keeper_types_profile_sandbox.Docker
               ~network_mode:Keeper_types_profile_sandbox.Network_inherit

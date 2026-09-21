@@ -321,6 +321,7 @@ let profile_update_command (meta : keeper_meta) =
     ; board_interests = meta.board_interests
     ; max_context_override = meta.max_context_override
     ; activation_mode = meta.activation_mode
+    ; input_policy = meta.input_policy
     ; telemetry_feedback_enabled = meta.telemetry_feedback_enabled
     ; telemetry_feedback_window_hours = meta.telemetry_feedback_window_hours
     ; always_allow = meta.always_allow
@@ -439,6 +440,9 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
   with
   | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok network_mode ->
+  let input_policy = match p.input_policy_opt, p.profile_defaults.input_policy with
+    | Some policy, _ | None, Some policy -> policy
+    | None, None -> old.input_policy in
   let activation_mode =
     match p.activation_mode_opt, p.profile_defaults.activation_mode with
     | Some value, _ -> value
@@ -483,6 +487,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     microvm_memory = p.profile_defaults.microvm_memory;
     microvm_cpus = p.profile_defaults.microvm_cpus;
     activation_mode;
+    input_policy;
     paused = old.paused;
     latched_reason = source_meta.latched_reason;
     runtime = source_meta.runtime;

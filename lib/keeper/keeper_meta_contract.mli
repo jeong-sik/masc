@@ -220,6 +220,7 @@ type keeper_meta = {
       (** Typed companion to [paused]. Explicit operator pause and
           transcript-corruption reset-required paths may write it. [None] while paused is a fail-closed unclassified state
           requiring operator action. *)
+  input_policy : Keeper_input_policy.t;
   activation_mode : Keeper_activation_mode.t;
   current_task_id : Keeper_id.Task_id.t option;
       (** Currently claimed task ID for cost attribution.  Set

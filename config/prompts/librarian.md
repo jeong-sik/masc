@@ -55,6 +55,12 @@ template_variables: [continuity, working_context, current_memory, conversation_h
   적습니다. `STALE`·`RESOLVED` 같은 표식을 붙여 낡은 사실을 남기지 마세요.
   복합 사실 중 일부만 여전히 유용하면 그 부분만 새 claim으로 남깁니다.
   삭제한 사실을 표현만 바꿔 다시 추가하지 마세요.
+- 흡수는 삭제 요청을 따로 쓰는 작업이 아닙니다. 여전히 유효한 `m1`, `m2`를
+  한 claim으로 묶으면 그 claim에 `absorbs: ["m1", "m2"]`,
+  `supersedes: null`을 쓰고, 두 ID는 `dropped`에 쓰지 않습니다.
+  반대로 `m3`의 잘못된 내용을 교정하면 새 claim에 `supersedes: "m3"`,
+  `absorbs: []`를 쓰고 `dropped`에도 `m3`와 교정 이유를 적습니다.
+  새 claim 없이 없앨 기억만 `dropped`에 단독으로 적습니다.
 - 규칙의 범위를 넓히거나 좁히지 마세요. “X일 때 Y하라”를 “X일 때만 Y하라”로,
   특정 업무 제외를 주변 업무 전체의 금지로 바꾸면 안 됩니다.
 - 에이전트가 **스스로 만든** 영구적인 업무 제외·대기·참여 제한은 저장하지

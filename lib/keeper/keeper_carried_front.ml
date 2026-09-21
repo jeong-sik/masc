@@ -15,6 +15,7 @@ type seed =
 type origin =
   | Carried of source
   | Whole_history
+  | Capacity_bounded
 
 let of_ledger (ledger : Keeper_model_input_ledger.t) =
   match ledger.last.ends with
@@ -193,6 +194,7 @@ let seed_to_json (seed : seed) =
 let origin_to_string = function
   | Carried source -> source_to_string source
   | Whole_history -> "whole_history"
+  | Capacity_bounded -> "capacity_bounded"
 ;;
 
 let origin_to_json = function
@@ -204,4 +206,5 @@ let origin_to_json = function
   | Carried (Evicted_after_refusal { retry }) ->
     `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
   | Whole_history -> `Assoc [ "kind", `String "whole_history" ]
+  | Capacity_bounded -> `Assoc [ "kind", `String "capacity_bounded" ]
 ;;

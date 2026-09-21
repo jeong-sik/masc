@@ -625,17 +625,33 @@ let handle_dashboard_keeper_purge_completion config operation =
        let operation_id =
          Keeper_shutdown_types.Operation_id.to_string operation.operation_id
        in
-       (match
-          Server_schedule_consumers.cancel_keeper_schedules
-            config
-            ~keeper_name:operation.keeper_name
-        with
-        | Error error ->
-          Error (Schedule_store.store_error_to_string error)
+       (* The keeper's Librarian loop is retired first and released last:
+          a pass running while the files below are removed would write a
+          read position back for a keeper that no longer exists, and a wake
+          during the removal would start a loop that reads the same files
+          (RFC librarian-lifecycle §4.6). *)
+       let release =
+         Keeper_librarian_loop.retire ~config ~keeper_name:operation.keeper_name
+       in
+       let result =
+         match
+           Server_schedule_consumers.cancel_keeper_schedules
+             config
+             ~keeper_name:operation.keeper_name
+         with
+         | Error error ->
+           Error (Schedule_store.store_error_to_string error)
+         | Ok () ->
+           purge_keeper_artifacts
+             config
+             ~keeper_name:operation.keeper_name
+             ~remove_configuration:true
+             context
+       in
+       release ();
+       (match result with
+        | Error _ as error -> error
         | Ok () ->
-          (match purge_keeper_artifacts config ~keeper_name:operation.keeper_name ~remove_configuration:true context with
-           | Error _ as error -> error
-           | Ok () ->
           Keeper_supervisor_publish_lifecycle.publish_lifecycle
             ~event:
               (Keeper_lifecycle_events.Custom_event
@@ -650,7 +666,7 @@ let handle_dashboard_keeper_purge_completion config operation =
             "dashboard Keeper purge completion delivered: keeper=%s operation=%s"
             operation.keeper_name
             operation_id;
-          Ok ()))
+          Ok ())
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
      | Supervisor_cleanup ->

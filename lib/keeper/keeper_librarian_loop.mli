@@ -73,6 +73,19 @@ module For_testing : sig
     -> pass:(unit -> pass_end)
     -> unit
 
+  (** The reading half of the production pass with the Memory commit
+      injected: drains while each pass advances, stops at the first that does
+      not, rechecks the toggle before each. *)
+  val drain
+    :  config:Workspace.config
+    -> keeper_name:string
+    -> commit:
+         (expected_revision:int option
+          -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> Keeper_librarian.input
+          -> bool)
+    -> pass_end
+
   val wake_key : string -> unit
   val retire_key : string -> (unit -> 'a) -> 'a
   val measurement_key : string -> measurement option

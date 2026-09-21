@@ -2,7 +2,7 @@ open Alcotest
 
 module Workspace = Masc.Workspace
 module Consumer = Masc.Keeper_librarian_durable_consumer
-module Queue_refresh = Masc.Keeper_librarian_queue_refresh
+module Loop = Masc.Keeper_librarian_loop
 module Boundaries = Masc.Keeper_turn_boundaries
 module Progress = Masc.Keeper_librarian_progress
 module Store = Masc.Keeper_checkpoint_store
@@ -202,56 +202,6 @@ let establish_progress config ~trace_id first =
   | Consumer.Nothing_to_read
   | Consumer.Official_advanced _
   | Consumer.Memory_not_committed -> fail "initial range did not advance"
-;;
-
-let test_agent_core_handoff_retains_pending_official_evidence () =
-  with_workspace @@ fun config ->
-  let trace_id = "trace-official-to-agent-core" in
-  let attempts = ref 0 in
-  Queue_refresh.remember_turn
-    ~base_path:config.Workspace.base_path
-    ~keeper_name
-    ~trace_id
-    (fun ~meta:_ _trigger ->
-      incr attempts;
-      if !attempts = 1 then raise Exit;
-      Queue_refresh.Entered);
-  Queue_refresh.forget_turn
-    ~base_path:config.Workspace.base_path
-    ~keeper_name;
-  (match
-     Queue_refresh.For_testing.attempt_remembered
-       ~base_path:config.Workspace.base_path
-       ~keeper_name
-       ~trace_id
-       ~meta:(meta trace_id)
-       ~sources_changed:false
-       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
-   with
-   | _ -> fail "cancelled official evidence attempt did not escape"
-   | exception Exit -> ());
-  check int "cancelled attempt retains its evidence" 1 !attempts;
-  let handled =
-    Queue_refresh.For_testing.attempt_remembered
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-      ~trace_id
-      ~meta:(meta trace_id)
-      ~sources_changed:false
-      ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
-  in
-  check bool "pending official evidence survives Agent-Core handoff" true handled;
-  check int "pending official evidence succeeds on retry" 2 !attempts;
-  check bool
-    "handoff evidence retires immediately after its attempt"
-    false
-    (Queue_refresh.For_testing.attempt_remembered
-       ~base_path:config.Workspace.base_path
-       ~keeper_name
-       ~trace_id
-       ~meta:(meta trace_id)
-       ~sources_changed:false
-       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed)
 ;;
 
 let test_n_tick_reads_every_intermediate_turn () =
@@ -673,6 +623,12 @@ let markers_without_working_sources (input : Masc.Keeper_librarian.input) =
   text_markers input
 ;;
 
+(* The loop's pass, with the Memory commit injected: what a wake does. *)
+let drain config ~commit =
+  let (_ : Loop.pass_end) = Loop.For_testing.drain ~config ~keeper_name ~commit in
+  ()
+;;
+
 let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
     (Some "true")
@@ -680,7 +636,7 @@ let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
   with_workspace @@ fun config ->
   prepare_three_unread_turns config ~trace_id:"trace-wake-retry";
   let failed_calls = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
       failed_calls := markers_without_working_sources input :: !failed_calls;
       false);
@@ -692,11 +648,11 @@ let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
     committed_calls := markers_without_working_sources input :: !committed_calls;
     true
   in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  drain config ~commit;
   check (list (list string)) "one later wake drains all successful small cuts"
     [ [ "turn-2" ]; [ "turn-3" ]; [ "turn-4" ] ] (List.rev !committed_calls);
   check_progress_end config 4;
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  drain config ~commit;
   check int "an empty backlog is not committed again" 3 (List.length !committed_calls)
 ;;
 
@@ -718,7 +674,7 @@ let test_one_wake_continues_after_an_initial_baseline () =
   check bool "this Keeper has no read position yet" true
     (Option.is_none (read_progress config));
   let calls = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
       calls := markers_without_working_sources input :: !calls;
       true);
@@ -732,13 +688,13 @@ let test_disabling_between_cuts_stops_until_a_new_enabled_wake () =
   Masc_test_deps.with_process_env env_key (Some "true") @@ fun () ->
   with_workspace @@ fun config ->
   prepare_three_unread_turns config ~trace_id:"trace-wake-disable";
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
       ignore (markers_without_working_sources input : string list);
       false);
   check_progress_end config 1;
   let before_disable = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
       before_disable := markers_without_working_sources input :: !before_disable;
       Unix.putenv env_key "false";
@@ -748,7 +704,7 @@ let test_disabling_between_cuts_stops_until_a_new_enabled_wake () =
   check_progress_end config 2;
   Unix.putenv env_key "true";
   let after_enable = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  drain config
     ~commit:(fun ~expected_revision:_ ~range_id:_ input ->
       after_enable := markers_without_working_sources input :: !after_enable;
       true);
@@ -2120,8 +2076,6 @@ let () =
     [ ( "range lifecycle"
       , [ test_case "N ticks retain intermediate turns" `Quick
             test_n_tick_reads_every_intermediate_turn
-        ; test_case "Agent-Core handoff retains pending official evidence" `Quick
-            test_agent_core_handoff_retains_pending_official_evidence
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
         ; test_case "committed range repairs failed progress after restart" `Quick

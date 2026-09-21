@@ -295,6 +295,27 @@ let queue_round ~config ~keeper_name ~memory_keepers_dir =
           input)
 ;;
 
+(* Read every unread turn while each pass advances; the first pass that does
+   not ends the drain. Every pass rechecks the toggle: an ON -> OFF change
+   while a backlog drains stops the drain there. *)
+let rec drain_with_commit ~config ~keeper_name ~commit =
+  match Env_config.KeeperMemoryOs.librarian_config_state () with
+  | Disabled | Invalid -> Off
+  | Enabled ->
+    (match Consumer.consume_one ~config ~keeper_name ~commit with
+     | Ok (Consumer.Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+       drain_with_commit ~config ~keeper_name ~commit
+     | Ok Consumer.Nothing_to_read -> Drained
+     | Ok Consumer.Memory_not_committed -> Not_committed
+     | Error Consumer.Keeper_meta_absent -> Stopped Consumer.Keeper_meta_absent
+     | Error error ->
+       Log.Keeper.warn
+         ~keeper_name
+         "durable Librarian range not consumed: %s"
+         (Consumer.error_to_string error);
+       Stopped error)
+;;
+
 let production_pass ~config ~keeper_name () =
   match Env_config.KeeperMemoryOs.librarian_config_state () with
   | Disabled | Invalid -> Off
@@ -315,26 +336,7 @@ let production_pass ~config ~keeper_name () =
           ~keepers_dir:memory_keepers_dir
           ~keeper_id:keeper_name
       in
-      (* Every pass rechecks the toggle: an ON -> OFF change while a backlog
-         drains stops the drain there. *)
-      let rec drain () =
-        match Env_config.KeeperMemoryOs.librarian_config_state () with
-        | Disabled | Invalid -> Off
-        | Enabled ->
-          (match Consumer.consume_one ~config ~keeper_name ~commit with
-           | Ok (Consumer.Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
-             drain ()
-           | Ok Consumer.Nothing_to_read -> Drained
-           | Ok Consumer.Memory_not_committed -> Not_committed
-           | Error Consumer.Keeper_meta_absent -> Stopped Consumer.Keeper_meta_absent
-           | Error error ->
-             Log.Keeper.warn
-               ~keeper_name
-               "durable Librarian range not consumed: %s"
-               (Consumer.error_to_string error);
-             Stopped error)
-      in
-      let ended = drain () in
+      let ended = drain_with_commit ~config ~keeper_name ~commit in
       (* Reading and organising are two jobs; a failed read does not starve
          the organising (§4.3). A keeper with no metadata has nothing to
          organise, and a toggle that turned off ends the pass. *)
@@ -399,6 +401,7 @@ let last_measurement ~config ~keeper_name =
 
 module For_testing = struct
   let start_with ~sw ~key ~pass = start ~sw ~key ~pass
+  let drain = drain_with_commit
 
   let wake_key key =
     match find key with

@@ -42,8 +42,14 @@ let record_failure_observation
           ~expected:recovery
           ~commit:publish_reason
       with
-      | Ok true -> ()
-      | Ok false ->
+      | Ok Keeper_official_client_session_store.Committed ->
+        Log.Keeper.warn
+          ~keeper_name:meta.name
+          "official-client recovery committed: runtime=%s recovery_id=%s reason=%s; Keeper claims remain blocked until recovery is resolved"
+          recovery.runtime_id
+          recovery.recovery_id
+          (Keeper_internal_error.official_client_input_rejection_to_string recovery.reason)
+      | Ok Keeper_official_client_session_store.Recovery_already_resolved ->
         Log.Keeper.info
           ~keeper_name:meta.name
           "turn failure retained a resolved or replaced official-client recovery"

@@ -91,6 +91,10 @@ type recovery_resolution_application =
   | Applied
   | Replayed
 
+type recovery_commit =
+  | Committed
+  | Recovery_already_resolved
+
 type recovery_resolution_error =
   | Invalid_resolved_by
   | Invalid_resolved_at
@@ -900,8 +904,8 @@ let commit_if_input_recovery_current
            && String.equal recovery_id expected.recovery_id
            && reason = expected.reason ->
       commit ();
-      Ok true
-    | Some _ | None -> Ok false)
+      Ok Committed
+    | Some _ | None -> Ok Recovery_already_resolved)
 ;;
 
 let transition ~base_path ~keeper_name ~expected next =

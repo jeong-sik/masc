@@ -288,6 +288,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       in
       let observed_trace_ref = ref None in
       let transmitted_inputs = ref [] in
+      let response_observed_model_inputs = ref [] in
       let input_window_observations = ref [] in
       let record_transmitted ~runtime_id:_ ~tools:_ ~transmitted =
         transmitted_inputs := transmitted :: !transmitted_inputs
@@ -386,6 +387,9 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~agent_core_tools:[ tool ]
                       ~initial_messages:large_history
                       ~on_request_attribution:record_transmitted
+                      ~on_response_observed_model_input:(fun observed ->
+                        response_observed_model_inputs :=
+                          observed :: !response_observed_model_inputs)
                       ~on_model_input_window_observation:
                         (fun ~measurement:_ reading ->
                            input_window_observations :=
@@ -512,6 +516,9 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~agent_core_tools:[ tool ]
                         ~initial_messages:large_history
                         ~on_request_attribution:record_transmitted
+                        ~on_response_observed_model_input:(fun observed ->
+                          response_observed_model_inputs :=
+                            observed :: !response_observed_model_inputs)
                         ~on_model_input_window_observation:
                           (fun ~measurement:_ reading ->
                              input_window_observations :=
@@ -561,6 +568,16 @@ let test_keeper_projects_mcp_tool_and_settles () =
          check bool "fresh transmission contains prepared history" true
            (List.length messages > 0)
        | _ -> fail "successful start/resume did not each report their exact input mode");
+      check int "only the fresh transmission certifies its offered range" 1
+        (List.length !response_observed_model_inputs);
+      List.iter
+        (fun (observed : Turn_record.response_observed_model_input) ->
+           check string "the response names the official runtime"
+             "antigravity.gemini"
+             observed.runtime_profile;
+           check bool "the official-client range has durable shape" true
+             (observed.window.measurement = Turn_record.Durable_shape))
+        !response_observed_model_inputs;
       check int
         "only the fresh input reports a history window"
         1

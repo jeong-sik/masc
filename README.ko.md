@@ -76,13 +76,13 @@ masc setup --base-path "$HOME/masc-workspace"
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.19)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.21)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.35.19 (check tag availability on GitHub Releases).
+> Installation target: v0.35.21 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.35.19
+TAG=v0.35.21
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"

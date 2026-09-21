@@ -1116,6 +1116,24 @@ let check_retained_history_match ~checkpoint_texts ~current_texts ~previous_text
     [] (search "absent-query")
 ;;
 
+let test_history_complete_query_outranks_retained_fragments () =
+  let exact = "alpha tuesday exact decision" in
+  let fragments =
+    List.init 30 (fun index ->
+      Printf.sprintf "alpha deployment note %d for tuesday" index)
+  in
+  (* [exact] is written first, so it sits behind every fragment in the
+     newest-first retained scan. The complete-query tier must still reach it
+     before [limit] is allowed to admit a fragment. *)
+  with_history_search ~checkpoint_texts:[] ~previous_texts:[]
+    ~current_texts:(exact :: fragments)
+  @@ fun search ->
+  Alcotest.(check (list string))
+    "a retained complete-query match outranks newer fragment matches"
+    [ exact ]
+    (search ~limit:1 "alpha tuesday")
+;;
+
 let test_history_search_limits_distinct_matches () =
   with_history_search ~checkpoint_texts:[] ~previous_texts:[]
     ~current_texts:
@@ -1700,21 +1718,29 @@ let test_absorbed_facts_are_searchable () =
          (json_field "into_current" matched = `Bool true))
     absorbed;
   Alcotest.(check (list string))
-    "all returns the current facts, then the absorbed ones"
-    [ "current_memory_snapshot"
-    ; "current_memory_snapshot"
-    ; "absorbed_memory"
-    ; "absorbed_memory"
-    ]
+    "all leaves out the rows whose claim answers too"
+    [ "current_memory_snapshot"; "current_memory_snapshot" ]
     (List.filter_map
        (function
          | `Assoc fields -> Option.map Yojson.Safe.Util.to_string (List.assoc_opt "store" fields)
          | _ -> None)
        (matches (search "all")));
   Alcotest.(check (list string))
-    "memory still returns only current facts"
+    "the default search answers with the merged claim, not the rows it absorbed"
     [ "gamma deploys on friday"; "alpha and beta deploy on tuesday" ]
     (List.map (string_field "text") (matches (search "memory")));
+  let search_for query source =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String query; "source", `String source; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check (list string))
+    "a row whose claim does not answer is the only way to what it says and stays"
+    [ "gamma deploys on friday"; "beta deploys on tuesday"; "alpha deploys on tuesday" ]
+    (List.map (string_field "text") (matches (search_for "deploys" "memory")));
   let channel =
     open_out_gen
       [ Open_wronly; Open_append ]
@@ -1731,10 +1757,266 @@ let test_absorbed_facts_are_searchable () =
      = `Assoc [ "count", `Int 1; "first", `Int 5; "last", `Int 5 ])
 ;;
 
-(* The absorbed store is one of three that source=all reads. When it cannot be
-   read at all, source=absorbed fails as a store that did not answer, and
-   source=all still answers from the current facts and names the store it went
-   without. *)
+(* A keeper asks in several words, and a claim rarely holds them as one run of
+   text. A claim answers when it holds the whole query or every word of it, in
+   any order. The whole-query answers come first, so a search the substring
+   rule answered is still answered the same way at its head. The absorbed
+   store follows the same rule, so there too the kind of match comes before
+   the order the rows were written in. *)
+let test_a_query_of_several_words_is_answered () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "several-words" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let apart = fact "the alpha service deploys every tuesday" in
+  let together = fact "alpha tuesday checklist lives in the wiki" in
+  let other = fact "beta ships on tuesday" in
+  let retired = fact "tuesday was chosen for alpha after the outage" in
+  let retired_later = fact "the alpha tuesday window moved once" in
+  (* Absorbed rows are written in the order of the snapshot they leave, so
+     [retired] is written before [retired_later]. *)
+  replace_current_facts
+    ~keepers_dir
+    ~keeper_id:meta.name
+    [ apart; together; other; retired; retired_later ];
+  let merged = fact "alpha deploys on a fixed weekday" in
+  (match
+     Current.apply_disposition
+       ~keepers_dir
+       ~keeper_id:meta.name
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+       ~absorbed:
+         [ { Masc.Keeper_memory_os_types.absorbed = id retired; into = id merged }
+         ; { Masc.Keeper_memory_os_types.absorbed = id retired_later; into = id merged }
+         ]
+       ~new_claims:[ merged ]
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let search ?(limit = 10) ~source query =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc [ "query", `String query; "source", `String source; "limit", `Int limit ])
+    |> Yojson.Safe.from_string
+  in
+  let texts response =
+    match json_field "matches" response with
+    | `List items -> List.map (string_field "text") items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list string))
+    "the claims holding the whole query, current then absorbed, then the ones \
+     holding its words apart in the same store order"
+    [ "alpha tuesday checklist lives in the wiki"
+    ; "the alpha tuesday window moved once"
+    ; "the alpha service deploys every tuesday"
+    ; "tuesday was chosen for alpha after the outage"
+    ]
+    (texts (search ~source:"memory" "alpha tuesday"));
+  Alcotest.(check (list string))
+    "what the substring rule alone returned is the head of the result"
+    [ "alpha tuesday checklist lives in the wiki" ]
+    (texts (search ~limit:1 ~source:"memory" "alpha tuesday"));
+  Alcotest.(check (list string))
+    "word order does not matter, and each store keeps its own order"
+    [ "the alpha service deploys every tuesday"
+    ; "alpha tuesday checklist lives in the wiki"
+    ; "tuesday was chosen for alpha after the outage"
+    ; "the alpha tuesday window moved once"
+    ]
+    (texts (search ~source:"memory" "tuesday alpha"));
+  Alcotest.(check (list string))
+    "the absorbed store answers by the same rule: the row holding the whole \
+     query comes before the row written earlier that holds only its words"
+    [ "the alpha tuesday window moved once"; "tuesday was chosen for alpha after the outage" ]
+    (texts (search ~source:"absorbed" "alpha tuesday"));
+  Alcotest.(check (list string))
+    "and it is the row holding only the words that the limit cuts"
+    [ "the alpha tuesday window moved once" ]
+    (texts (search ~limit:1 ~source:"absorbed" "alpha tuesday"));
+  let unanswered = search ~source:"memory" "alpha gamma" in
+  Alcotest.(check (list string))
+    "a word no claim holds leaves the query unanswered"
+    []
+    (texts unanswered);
+  Alcotest.(check bool) "and the answer says so" true
+    (json_field "no_match" unanswered = `Bool true)
+;;
+
+(* [source=all] applies the match tier before the store order. A weaker current
+   fact must not consume [limit] before an exact absorbed or history result.
+   Once the tier is equal, the documented current/source-bound/absorbed/history
+   order remains deterministic. The default search does the same over its two
+   stores, without the history. *)
+let test_all_ranks_complete_queries_before_fragments_across_stores () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "all-match-tiers" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let ordinary_fragment = fact "ordinary alpha deploys each tuesday" in
+  let absorbed_exact = fact "absorbed alpha tuesday exact" in
+  replace_current_facts
+    ~keepers_dir
+    ~keeper_id:meta.name
+    [ ordinary_fragment; absorbed_exact ];
+  let merged = fact "merged weekday decision" in
+  (match
+     Current.apply_disposition
+       ~keepers_dir
+       ~keeper_id:meta.name
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "all-tier-pass" }
+       ~absorbed:
+         [ { Masc.Keeper_memory_os_types.absorbed =
+               Masc.Keeper_memory_os_types.memory_id absorbed_exact
+           ; into = Masc.Keeper_memory_os_types.memory_id merged
+           }
+         ]
+       ~new_claims:[ merged ]
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let source_path = "facts/source.txt" in
+  Fs_compat.mkdir_p (Filename.dirname (Filename.concat sandbox_root source_path));
+  (match
+     Fs_compat.save_file_atomic
+       (Filename.concat sandbox_root source_path)
+       "source truth\n"
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Masc.Keeper_memory_source_current.upsert_file_fact
+       ~config
+       ~meta
+       ~keepers_dir
+       ~now:(Time_compat.now ())
+       ~claim:"source alpha deploys each tuesday"
+       ~source_path
+       ()
+   with
+   | Ok _ -> ()
+   | Error error ->
+     let detail =
+       match error with
+       | Masc.Keeper_memory_source_current.Source_read_failed failure ->
+         Masc.Keeper_memory_source_current.source_read_failure_to_string failure
+       | Masc.Keeper_memory_source_current.Store_write_failed detail -> detail
+     in
+     Alcotest.fail detail);
+  let ctx_work =
+    Masc.Keeper_context_runtime.append
+      (empty_ctx ())
+      (Agent_core.Types.user_msg "history alpha tuesday exact")
+  in
+  let search ?(source = "all") limit =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work
+      ~args:
+        (`Assoc
+           [ "query", `String "alpha tuesday"
+           ; "source", `String source
+           ; "limit", `Int limit
+           ])
+    |> Yojson.Safe.from_string
+    |> match_texts
+  in
+  Alcotest.(check (list string))
+    "limit one keeps the first complete-query result"
+    [ "absorbed alpha tuesday exact" ]
+    (search 1);
+  Alcotest.(check (list string))
+    "limit two keeps complete-query results from later stores"
+    [ "absorbed alpha tuesday exact"; "history alpha tuesday exact" ]
+    (search 2);
+  Alcotest.(check (list string))
+    "fragment matches follow every complete-query result in store order"
+    [ "absorbed alpha tuesday exact"
+    ; "history alpha tuesday exact"
+    ; "ordinary alpha deploys each tuesday"
+    ; "source alpha deploys each tuesday"
+    ]
+    (search 4);
+  Alcotest.(check (list string))
+    "the default search keeps the absorbed complete-query result at limit one"
+    [ "absorbed alpha tuesday exact" ]
+    (search ~source:"memory" 1);
+  Alcotest.(check (list string))
+    "and puts its fragment matches after it, without the history"
+    [ "absorbed alpha tuesday exact"
+    ; "ordinary alpha deploys each tuesday"
+    ; "source alpha deploys each tuesday"
+    ]
+    (search ~source:"memory" 4)
+;;
+
+let test_fragment_contract_is_whitespace_split_substring_matching () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "fragment-contract" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  replace_current_facts
+    ~keepers_dir
+    ~keeper_id:meta.name
+    [ fact "concatenate task-10 safely"; fact "alpha deploys tuesday" ];
+  let search query =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String query; "source", `String "memory" ])
+    |> Yojson.Safe.from_string
+    |> match_texts
+  in
+  Alcotest.(check (list string))
+    "ASCII fragments are substrings rather than lexical words"
+    [ "concatenate task-10 safely" ]
+    (search "cat task-1");
+  Alcotest.(check (list string))
+    "punctuation stays in a whitespace-delimited fragment"
+    []
+    (search "alpha, tuesday");
+  let history_empty =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:
+        (Masc.Keeper_context_runtime.append
+           (empty_ctx ())
+           (Agent_core.Types.user_msg "history row"))
+      ~args:(`Assoc [ "query", `String ""; "source", `String "history" ])
+    |> Yojson.Safe.from_string
+    |> match_texts
+  in
+  Alcotest.(check (list string))
+    "history requires a non-empty query"
+    []
+    history_empty
+;;
+
+(* The absorbed store is one of the two the default search reads and one of
+   the three source=all reads. When it cannot be read at all, source=absorbed
+   fails as a store that did not answer, and the default search and source=all
+   still answer from the current facts and name the store they went without. *)
 let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
   with_temp_dir
   @@ fun base_path ->
@@ -1760,9 +2042,21 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
     "absorbed_read_failed"
     (string_field "error_kind"
        (Yojson.Safe.from_string absorbed.Masc.Keeper_tool_execution.raw_output));
-  let all =
-    (search "all").Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  let answered source =
+    (search source).Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
+  let default_search = answered "memory" in
+  (match json_field "matches" default_search with
+   | `List [ matched ] ->
+     Alcotest.(check string) "the default search still answers its current fact"
+       "gamma deploys on friday" (string_field "text" matched)
+   | _ -> Alcotest.fail "expected the one current fact from the default search");
+  (match json_field "unavailable_stores" default_search with
+   | `List [ store ] ->
+     Alcotest.(check string) "and names the store it went without" "absorbed_memory"
+       (string_field "store" store)
+   | _ -> Alcotest.fail "expected the default search to name the absorbed store unavailable");
+  let all = answered "all" in
   (match json_field "matches" all with
    | `List [ matched ] ->
      Alcotest.(check string) "the current fact is still answered"
@@ -2197,6 +2491,10 @@ let () =
         ; Alcotest.test_case "history search reaches all working-context messages" `Quick
             (check_retained_history_match ~current_texts:[] ~previous_texts:[]
                ~checkpoint_texts:("Migration prerequisite: amber database" :: history_search_noise 100))
+        ; Alcotest.test_case
+            "history complete query outranks retained fragments"
+            `Quick
+            test_history_complete_query_outranks_retained_fragments
         ; Alcotest.test_case "history search limits distinct matches" `Quick
             test_history_search_limits_distinct_matches
         ; Alcotest.test_case "history search orders selected messages" `Quick
@@ -2251,6 +2549,18 @@ let () =
             "absorbed facts are searchable"
             `Quick
             test_absorbed_facts_are_searchable
+        ; Alcotest.test_case
+            "a query of several words is answered"
+            `Quick
+            test_a_query_of_several_words_is_answered
+        ; Alcotest.test_case
+            "all ranks complete queries across stores"
+            `Quick
+            test_all_ranks_complete_queries_before_fragments_across_stores
+        ; Alcotest.test_case
+            "fragment matching contract is explicit"
+            `Quick
+            test_fragment_contract_is_whitespace_split_substring_matching
         ; Alcotest.test_case
             "an unreadable absorbed store leaves all its current facts"
             `Quick

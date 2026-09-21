@@ -217,15 +217,18 @@ let terminal_reason_code_of_core_error = function
 let agent_core_timeout_observation :
       Agent_core.Error.t -> Keeper_turn_terminal_code.agent_core_timeout option
   = function
+  | Agent_core.Error.Api (Timeout { phase; _ }) ->
+    Some { Keeper_turn_terminal_code.source = Agent_core_api; phase }
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout { timeout_phase; _ }) ->
-    Some { Keeper_turn_terminal_code.phase = timeout_phase }
+    Some
+      { Keeper_turn_terminal_code.source = Agent_core_provider; phase = timeout_phase }
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ }) ->
-    Some { Keeper_turn_terminal_code.phase = Some phase }
+    Some { Keeper_turn_terminal_code.source = Agent_core_provider; phase = Some phase }
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError
          { kind = Llm_provider.Http_client.Timeout; timeout_phase = None; _ }) ->
-    Some { Keeper_turn_terminal_code.phase = None }
+    Some { Keeper_turn_terminal_code.source = Agent_core_provider; phase = None }
   | _ -> None
 ;;
 
@@ -236,7 +239,7 @@ let terminal_reason_code_of_core_error_typed err =
 ;;
 
 let api_error_terminal_reason_code_typed err =
-  Keeper_turn_terminal_code.of_core_error_wire (api_error_terminal_reason_code err)
+  terminal_reason_code_of_core_error_typed (Agent_core.Error.Api err)
 ;;
 
 let receipt_outcome_kind_of_core_error err =

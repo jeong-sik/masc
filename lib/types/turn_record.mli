@@ -118,6 +118,16 @@ type model_input_window =
     present or all null. A record without the [front_atom_digest] key does not
     decode. *)
 
+type response_observed_model_input =
+  { runtime_profile : string
+  ; window : model_input_window
+  }
+(** The exact request range for which a typed provider response reached the
+    [AfterTurn] boundary. This is separate from [model_input_window], which is
+    the latest range attempted and may belong to a later request that never
+    received a response. The runtime and window travel together so failover
+    cannot certify one candidate's range with another candidate's response. *)
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -134,6 +144,16 @@ type raw_trace_run_ref =
   ; session_id : string
     (* Matches [t.trace_id] and the selected raw rows. *)
   }
+
+type raw_trace_reachability_root =
+  { keeper : string
+  ; trace_id : string
+  ; raw_trace_run_ref : raw_trace_run_ref option
+  }
+(** The stable subset of a TurnRecord that owns raw-trace retention. This is a
+    projection, not a historical TurnRecord decoder: unrelated current-schema
+    fields do not participate, while these fields and the run reference retain
+    their current typed invariants. *)
 
 type t =
   { execution_ids : Ids.Execution_id.t list (* tool calls in this turn *)
@@ -225,9 +245,15 @@ type t =
        not_recorded until a provider reports it natively. *)
   ; request_wire_observation : request_wire_observation option
   ; model_input_window : model_input_window option
-    (* [None] is an explicit observation that no model-input projection ran for
-       this turn — a runtime that assembles its own input, or a turn that ended
-       before any cut was selected. It is not a zero-length history. *)
+    (* Last model-input window observed during this turn. A later candidate
+       that reports no window leaves that observation intact. [None] means no
+       window was observed, including a projection with no history atom to
+       name its front. It is not a zero-length history. *)
+  ; response_observed_model_input : response_observed_model_input option
+    (* [None] means no request range was joined to a typed provider response.
+       The JSON key is required and nullable; older rows without the fact do
+       not decode and therefore cannot promote an attempted range after a
+       restart. *)
   ; raw_trace_run_ref : raw_trace_run_ref option
     (* Exact AGENT_CORE run selected by this turn's completed provider dispatch.
        [None] is an explicit observation that the raw-trace sink degraded or
@@ -277,6 +303,13 @@ val of_json : Yojson.Safe.t -> (t, string) result
     duplicate fields, prompt blocks, or input-component ids, negative byte
     counts, partial request-runtime/request-bytes pairs, and a [turn_ref]
     inconsistent with the row identity are rejected. *)
+
+val raw_trace_reachability_root_of_json :
+  Yojson.Safe.t -> (raw_trace_reachability_root, string) result
+(** Decode only the fields that determine raw-trace reachability. Each selected
+    field must occur exactly once. The run reference uses the same exact decoder
+    and session/trace identity check as {!of_json}; malformed roots fail rather
+    than guessing from unrelated TurnRecord fields. *)
 
 (** Result of diffing two consecutive records by [(block, digest)]. *)
 type block_diff =

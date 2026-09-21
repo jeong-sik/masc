@@ -198,3 +198,5 @@ val admit_candidate_request
 
 val plan_provenance : ready_plan -> plan_provenance
 val plan_fingerprint : ready_plan -> string
+val connect_timeout_s : ready_plan -> float option
+val body_timeout_s : ready_plan -> float option

@@ -31,6 +31,7 @@ function entry(overrides: Record<string, unknown> = {}) {
       request_runtime_profile: null,
       request_body_bytes: null,
       usage_scope: 'per_request',
+      response_observed_model_input: null,
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -72,14 +73,13 @@ function payload(...entries: { record: Record<string, unknown>; diff_vs_prev: nu
   }
 }
 
-// Unmodified rows emitted by Keeper_turn_record_writer.write on c861d8fe,
+// Unmodified rows emitted by Keeper_turn_record_writer.write on eefb26c6,
 // then read from its temporary Dated_jsonl store. Synthetic fixture only:
 // the marker is not evidence that a tool blob was stored or retrieved.
 const writerRows: Record<string, unknown>[] = readFileSync(
-  resolve(__dirname, 'fixtures/turn-record-writer-main.jsonl'),
+  resolve(__dirname, 'fixtures/turn-record-writer.jsonl'),
   'utf8',
 ).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
-
 afterEach(() => {
   getMock.mockReset()
 })
@@ -112,7 +112,65 @@ describe('keeper turn record cache token counts', () => {
       usage_scope: record.usage_scope,
     })
     expect(response.entries[0]?.record.tool_surface_ref).toBe(record.tool_surface_ref)
+    expect(response.entries[0]?.record.response_observed_model_input)
+      .toEqual(record.response_observed_model_input)
     expect(response.entries[0]?.record).not.toHaveProperty('generation')
+  })
+
+  it('keeps the observed runtime and range separate from the serving runtime and last projection', async () => {
+    const observed = writerRows[0]?.response_observed_model_input
+    getMock.mockResolvedValue(payload(entry({
+      runtime_profile: 'codex.default',
+      transmitted_atoms: 1,
+      total_atoms: 2,
+      response_observed_model_input: observed,
+    })))
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record.response_observed_model_input).toEqual(observed)
+    expect(response.entries[0]?.record.transmitted_atoms).toBe(1)
+  })
+
+  it.each([
+    { value: undefined }, { value: 1 }, { value: 'observed' }, { value: [] },
+  ])('rejects a missing or non-object response observation $value', async ({ value }) => {
+    const row = entry({ response_observed_model_input: value })
+    if (value === undefined) delete (row.record as Record<string, unknown>).response_observed_model_input
+    getMock.mockResolvedValue(payload(row))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+  })
+
+  it('preserves an observed empty range', async () => {
+    const observed = {
+      ...writerRows[0]?.response_observed_model_input as Record<string, unknown>,
+      transmitted_atoms: 0,
+      total_atoms: 0,
+    }
+    getMock.mockResolvedValue(payload(entry({ response_observed_model_input: observed })))
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record.response_observed_model_input).toEqual(observed)
+  })
+
+  it.each([
+    'runtime_profile', 'transmitted_atoms', 'total_atoms', 'model_input_measurement', 'front_atom_digest',
+  ])('rejects a response observation missing %s', async field => {
+    const observed = { ...writerRows[0]?.response_observed_model_input as Record<string, unknown> }
+    delete observed[field]
+    getMock.mockResolvedValue(payload(entry({ response_observed_model_input: observed })))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+  })
+
+  it.each([
+    ['runtime_profile', ''], ['runtime_profile', ' '], ['runtime_profile', 1],
+    ['transmitted_atoms', -1], ['transmitted_atoms', 1.5], ['transmitted_atoms', 7701],
+    ['total_atoms', -1], ['total_atoms', Number.MAX_SAFE_INTEGER + 1],
+    ['model_input_measurement', 'unknown'], ['model_input_measurement', null],
+    ['front_atom_digest', 'a'.repeat(63)], ['front_atom_digest', 'A'.repeat(64)],
+    ['front_atom_digest', 'g'.repeat(64)], ['front_atom_digest', null],
+    ['unexpected_observation_field', true],
+  ])('rejects an invalid response observation field %s=%s', async (field, value) => {
+    const observed = { ...writerRows[0]?.response_observed_model_input as Record<string, unknown>, [String(field)]: value }
+    getMock.mockResolvedValue(payload(entry({ response_observed_model_input: observed })))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
   })
 
   it.each([undefined, null, 'unknown', 1])('rejects a missing or invalid usage scope %s', async usage_scope => {

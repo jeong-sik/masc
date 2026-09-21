@@ -11,6 +11,7 @@ import asyncio
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from harbor.agents.installed.base import BaseInstalledAgent
@@ -27,7 +28,12 @@ from render_configs import (  # noqa: E402
     effective_runtime_id,
     render_arm,
 )
-from masc_dist import container_binaries  # noqa: E402
+from masc_dist import (  # noqa: E402
+    DistIdentity,
+    container_distribution,
+    identity_metadata,
+    require_fetched_release,
+)
 from masc_task_skills import (  # noqa: E402
     preflight_task_skill_catalog,
     task_skills_snapshot,
@@ -58,14 +64,17 @@ class MascAgent(BaseInstalledAgent):
             self.runtime_id = f"{provider}.{model}"
         else:
             raise ValueError("model_name 'provider/model' 또는 runtime_id kwarg 필요")
+        self._dist_identity: DistIdentity | None = None
 
     @staticmethod
     def name() -> str:
         return "masc"
 
     def version(self) -> str:
-        version_file = BENCH_ROOT / "dist" / ".version"
-        return version_file.read_text().strip() if version_file.exists() else "unknown"
+        try:
+            return require_fetched_release(BENCH_ROOT)["release_version"]
+        except (OSError, RuntimeError):
+            return "unknown"
 
     def _container_env(self) -> dict[str, str]:
         provider = self.runtime_id.split(".", 1)[0]
@@ -100,16 +109,19 @@ class MascAgent(BaseInstalledAgent):
     async def install(self, environment: BaseEnvironment) -> None:
         container_env = self._container_env()
         async with task_skills_snapshot(self, environment) as (task_skills_dir, task_skills):
-            binaries = await container_binaries(
-                self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
-            # A lane may read provider limits over the network while rendering;
-            # harbor installs every trial in one event loop.
-            config_dir = await asyncio.to_thread(
-                render_arm, self.arm, self.runtime_id, self.effort,
-                task_skills_dir=task_skills_dir)
-            await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
-            for binary in binaries:
-                await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
+            with tempfile.TemporaryDirectory(prefix="masc-bench-dist-") as snapshot:
+                distribution = await container_distribution(
+                    self, environment, BENCH_ROOT, Path(snapshot),
+                    with_gh="GH_TOKEN" in container_env)
+                self._dist_identity = distribution.identity
+                # A lane may read provider limits over the network while rendering;
+                # harbor installs every trial in one event loop.
+                config_dir = await asyncio.to_thread(
+                    render_arm, self.arm, self.runtime_id, self.effort,
+                    task_skills_dir=task_skills_dir)
+                await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
+                for binary in distribution.binaries:
+                    await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
             await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
             try:
                 await environment.upload_dir(config_dir, f"{REMOTE}/config")
@@ -226,6 +238,8 @@ class MascAgent(BaseInstalledAgent):
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = Path(self.logs_dir) / "result.json"
         if not result_path.exists():
+            context.metadata = {
+                **(context.metadata or {}), **identity_metadata(self._dist_identity)}
             return
         try:
             data = json.loads(result_path.read_text())
@@ -234,7 +248,8 @@ class MascAgent(BaseInstalledAgent):
             # lose it.
             context.metadata = {**(context.metadata or {}),
                                 "masc_state": f"result_unreadable: {exc}",
-                                "arm": self.arm, "runtime_id": self.runtime_id}
+                                "arm": self.arm, "runtime_id": self.runtime_id,
+                                **identity_metadata(self._dist_identity)}
             return
         final = data.get("final") or {}
         fallback = final.get("usage") or {}
@@ -264,4 +279,5 @@ class MascAgent(BaseInstalledAgent):
             "endpoint_env_left_out": data.get("endpoint_env_left_out"),
             "arm": self.arm,
             "runtime_id": self.runtime_id,
+            **identity_metadata(self._dist_identity),
         }

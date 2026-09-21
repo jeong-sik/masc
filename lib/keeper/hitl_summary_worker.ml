@@ -1506,60 +1506,28 @@ let execute_prepared_flow_with_queue_ops_current
         success.transport_success
         success.accepted;
       Executed
-    | Error
-        (Exact_output.Flow_execution_terminal
-           { cause = (Exact_output.Flow_candidates_exhausted _ as cause); _ }) ->
-      (match !bound_candidate with
-       | Some candidate ->
-         (match
-            try_cli_slots
-              ~queue_ops
-              ~cli_runner
-              ~bound:(Some (exact_identity_of_candidate candidate))
-              prepared
-              ~on_summary
-          with
-          | Cli_summary | Cli_settled -> ()
-          | Cli_no_slots | Cli_fell_back ->
-            record_outcome Domain_invalid_output;
-            quarantine_candidate
-              ~queue_ops
-              prepared.entry
-              candidate
-              Exact_domain_invalid_output)
-       | None ->
-         (match
-            try_cli_slots ~queue_ops ~cli_runner ~bound:None prepared ~on_summary
-          with
-          | Cli_summary | Cli_settled -> ()
-          | Cli_no_slots | Cli_fell_back ->
-            handle_flow_error ~queue_ops prepared cause));
-      Executed
-    | Error
-        (Exact_output.Flow_execution_terminal
-           { cause =
-               Exact_output.Flow_exact_execution_failed { candidate; _ } as cause
-           ; _
-           }) ->
-      (* The last candidate failed post-dispatch with no successor left —
-         provider exhaustion in a different coat (a single-slot lane lands
-         here, never in Flow_candidates_exhausted). Infrastructure causes
-         (callback/measurement failures) stay below: a cli slot answers for
-         missing providers, not for a broken flow. *)
-      (match
-         try_cli_slots
-           ~queue_ops
-           ~cli_runner
-           ~bound:(Some (exact_identity_of_candidate candidate))
-           prepared
-           ~on_summary
-       with
-       | Cli_summary | Cli_settled -> ()
-       | Cli_no_slots | Cli_fell_back ->
-         handle_flow_error ~queue_ops prepared cause);
-      Executed
     | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-      handle_flow_error ~queue_ops prepared cause;
+      (match Exact_output.flow_execution_terminal_kind cause with
+       | Exact_output.Non_advanceable_terminal ->
+         handle_flow_error ~queue_ops prepared cause
+       | Exact_output.Advanceable_candidates_exhausted ->
+         (* [flow_execution_terminal_kind] admits only [Flow_candidates_exhausted]
+            and [Flow_exact_execution_failed]; both matches below rely on that pair. *)
+         let bound =
+           match cause with
+           | Exact_output.Flow_exact_execution_failed { candidate; _ } ->
+             Some (exact_identity_of_candidate candidate)
+           | _ -> Option.map exact_identity_of_candidate !bound_candidate
+         in
+         (match try_cli_slots ~queue_ops ~cli_runner ~bound prepared ~on_summary with
+          | Cli_summary | Cli_settled -> ()
+          | Cli_no_slots | Cli_fell_back ->
+            (match cause, !bound_candidate with
+             | Exact_output.Flow_candidates_exhausted _, Some candidate ->
+               record_outcome Domain_invalid_output;
+               quarantine_candidate ~queue_ops prepared.entry candidate
+                 Exact_domain_invalid_output
+             | _ -> handle_flow_error ~queue_ops prepared cause)));
       Executed
     | Error
         (Exact_output.Flow_semantic_candidates_exhausted

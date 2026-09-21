@@ -594,6 +594,7 @@ let commit_staged_reaction_unlocked store staged =
 let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
   : (reaction_toggle_result, board_error) Result.t
   =
+  let* () = require_persisted_snapshot_readable store.reactions_load_result in
   maybe_sweep store;
   match Agent_id.of_string user_id, normalize_reaction_emoji emoji with
   | Error e, _ -> Error e
@@ -689,6 +690,7 @@ let create_sub_board
       ()
   : (sub_board, board_error) Result.t
   =
+  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
   let slug = String.lowercase_ascii (String.trim slug) in
   if
     String.length slug < 1
@@ -777,6 +779,7 @@ let update_sub_board
       ()
   : (sub_board, board_error) Result.t
   =
+  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
   let result =
     with_lock store (fun () ->
       let sb_opt =
@@ -847,6 +850,7 @@ let list_sub_boards store : sub_board list =
 ;;
 
 let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
+  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
   let snapshot =
     with_lock store (fun () ->
     let resolved_opt =

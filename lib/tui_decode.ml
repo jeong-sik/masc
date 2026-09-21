@@ -8982,6 +8982,10 @@ type file_change_kind =
       line : int;
       text : string;
     }
+  | Fc_materialized of {
+      sha256 : string;
+      bytes : int;
+    }
 
 type file_change = {
   fc_at : float;
@@ -9064,6 +9068,10 @@ let decode_file_change_kind json =
       let* line = required_int_field json "line" in
       let* text = required_string_field json "text" in
       Ok (Fc_inserted { line; text })
+  | "materialize" ->
+      let* sha256 = required_string_field json "sha256" in
+      let* bytes = required_int_field json "bytes" in
+      Ok (Fc_materialized { sha256; bytes })
   | other -> Error (Printf.sprintf "unknown file change kind %S" other)
 
 let validate_line_evidence_contract
@@ -9097,12 +9105,15 @@ let validate_line_evidence_contract
   | Fc_edited _, Some (Keeper_file_change_evidence.Edited _) -> Ok ()
   | Fc_inserted _, Some (Keeper_file_change_evidence.Edited _) -> Ok ()
   | Fc_written _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
+  | Fc_materialized _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
   | Fc_inserted _, Some (Keeper_file_change_evidence.Written _) ->
     Error "insert change carries Write line_evidence"
   | Fc_edited _, Some (Keeper_file_change_evidence.Written _) ->
     Error "Edit change carries Write line_evidence"
   | Fc_written _, Some (Keeper_file_change_evidence.Edited _) ->
     Error "Write change carries Edit line_evidence"
+  | Fc_materialized _, Some (Keeper_file_change_evidence.Edited _) ->
+    Error "materialize change carries Edit line_evidence"
 
 let decode_file_change json =
   let* fc_at = require_float_field json "at" in

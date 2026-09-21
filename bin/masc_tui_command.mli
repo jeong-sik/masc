@@ -100,6 +100,8 @@ type t =
           the pane is parked on, in the text it was last given. The arg-less
           form continues rather than resets, which is what [/thinking] with no
           argument already means here. *)
+  | Open_measurement of string
+  | Measurement_missing_sha
   | Inspect_context
       (** [/context] — inspect the last provider input observed for this
           Keeper, including exact prompt-block text where it was captured. *)

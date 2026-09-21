@@ -91,6 +91,7 @@ let roundtrip_corpus =
     "runtime_exhausted"
   ; Keeper_internal_error.capacity_backpressure_kind
   ; Keeper_internal_error.incomplete_tool_transcript_kind
+  ; Keeper_internal_error.official_client_recovery_required_kind
   ; Keeper_internal_error.provider_attempt_effect_fenced_kind
   ; Keeper_internal_error.tool_correction_lost_kind
     (* The rest of what [kind_of_masc_internal_error] emits. The corpus used
@@ -239,6 +240,12 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
   then R.Disp_unknown, R.Reason_transcript_corruption
+  else if
+    String.equal
+      terminal_reason
+      Keeper_internal_error.official_client_recovery_required_kind
+  then
+    R.Disp_operator_action_required, R.Reason_official_client_recovery_required
   else if
     String.equal
       terminal_reason
@@ -395,6 +402,7 @@ let () =
     | Tr.Capacity_backpressure _
     | Tr.Provider_runtime_failure _
     | Tr.Transcript_corruption _
+    | Tr.Official_client_recovery_required _
     | Tr.Provider_attempt_effect_fenced _
     | Tr.Tool_correction_lost _
     | Tr.Accept_rejected _
@@ -435,6 +443,35 @@ let () =
   check
     "transcript corruption emits operator broadcast"
     (R.needs_operator_broadcast (fst transcript_corruption));
+  let official_client_recovery =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code =
+          Keeper_internal_error.official_client_recovery_required_kind
+      ; runtime_outcome = R.Runtime_not_dispatched
+      }
+  in
+  check
+    "official-client recovery requires operator action without a runtime claim"
+    (official_client_recovery
+     = ( R.Disp_operator_action_required
+       , R.Reason_official_client_recovery_required ));
+  check
+    "official-client recovery emits an operator broadcast"
+    (R.needs_operator_broadcast (fst official_client_recovery));
+  check
+    "official-client recovery reason keeps the canonical producer wire"
+    (String.equal
+       (R.operator_disposition_reason_to_string (snd official_client_recovery))
+       Keeper_internal_error.official_client_recovery_required_kind);
+  check
+    "official-client recovery wire decodes to its closed terminal variant"
+    (match
+       Tr.of_wire Keeper_internal_error.official_client_recovery_required_kind
+     with
+     | Tr.Official_client_recovery_required wire ->
+       String.equal wire Keeper_internal_error.official_client_recovery_required_kind
+     | _ -> false);
   let fenced_error =
     Keeper_internal_error.Provider_attempt_effect_fenced
       { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
@@ -1507,6 +1544,79 @@ max-concurrent = 1
        check
          "successful terminal turn clears turn consecutive failures"
          (entry_after_success.turn_consecutive_failures = 0);
+       (* A resolved native session can complete without a Keeper restart.
+          Exercise the real store transitions and Completed success owner;
+          the completed provider result is synthetic, not a provider call. *)
+       let module Session = Masc.Keeper_official_client_session_store in
+       let runtime_id = "synthetic-native-recovery" in
+       let started =
+         Session.claim ~base_path:config.base_path ~keeper_name ~expected:None
+           ~client_kind:Session.Codex ~runtime_id
+           ~owner_epoch:(Session.process_epoch ())
+           ~tool_surface_sha256:(Session.tool_surface_sha256
+             ~native_posture:Runtime_native_tools.Native_read []) ~updated_at:1.
+         |> Result.get_ok
+       in
+       let held =
+         Session.require_recovery ~base_path:config.base_path ~keeper_name
+           ~expected:started ~failure:(Session.Input_rejected Session.Effect_fenced)
+           ~detail:"synthetic observed tool activity" ~required_at:2.
+         |> Result.get_ok
+       in
+       let claim_error, recovery_id =
+         match Session.plan_claim ~expected:(Some held)
+                 ~client_kind:Session.Codex ~runtime_id with
+         | Error (Session.Input_recovery_required recovery as error) ->
+           error, recovery.recovery_id
+         | Error error -> failwith (Session.claim_error_to_string error)
+         | Ok _ -> failwith "unresolved native recovery unexpectedly admitted a claim"
+       in
+       let core_error = Session.core_error_of_claim_error claim_error in
+       let raw_error = Agent_core.Error.to_string core_error in
+       let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
+       let reason =
+         Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+           ~core_error terminal ~raw_error
+       in
+       Masc.Keeper_registry.set_failure_reason ~base_path:config.base_path
+         keeper_name reason;
+       check "native refusal increments failure debt"
+         (Masc.Keeper_turn_failure_streak.increment
+            ~base_path:config.base_path ~keeper_name = 1);
+       let public_before_recovery =
+         Option.bind (registered_entry ()).last_failure_reason
+           Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+         |> Option.map (fun surface -> surface.Masc.Keeper_status_bridge.blocker_class)
+       in
+       check "native refusal appears on the public status before recovery"
+         (public_before_recovery = Some "official_client_recovery_required");
+       let reopened, application =
+         Session.resolve_recovery ~base_path:config.base_path ~keeper_name
+           ~expected:held ~recovery_id ~resolution:Session.Restart_fresh
+           ~resolved_by:"synthetic-operator" ~resolved_at:3.
+         |> Result.get_ok
+       in
+       check "synthetic recovery resolution applied" (application = Session.Applied);
+       check "resolved native session admits the next same-runtime claim"
+         (Result.is_ok (Session.plan_claim ~expected:(Some reopened)
+            ~client_kind:Session.Codex ~runtime_id));
+       UTS.reset_turn_failures_for_stop_reason ~config ~updated_meta:meta (run_result ());
+       let entry_after_recovery = registered_entry () in
+       check "completed turn after recovery clears current failure"
+         (entry_after_recovery.last_failure_reason = None);
+       check "completed turn after recovery clears failure count"
+         (entry_after_recovery.turn_consecutive_failures = 0);
+       Masc.Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+         ~registry_entry:entry_after_recovery
+         ~turn_fail_count:entry_after_recovery.turn_consecutive_failures;
+       check "post-turn heartbeat refresh keeps the successful recovery clear"
+         ((registered_entry ()).last_failure_reason = None);
+       let public_after_recovery =
+         Masc.Keeper_status_bridge.runtime_blocker_fields_json config meta
+       in
+       check "public current blocker is absent after recovery and completion"
+         (List.assoc_opt "runtime_blocker_class" public_after_recovery = Some `Null
+          && List.assoc_opt "runtime_blocker_summary" public_after_recovery = Some `Null);
        let check_repeated_yield_preserves_failure_state label stop_reason =
          Masc.Keeper_registry.For_testing.clear ();
          ignore

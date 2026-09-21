@@ -321,3 +321,34 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain('재개하기')
   })
 })
+
+
+describe('local claim refusal with earlier success', () => {
+  it.each(['provider_runtime_error', 'official_client_recovery_required'])(
+    'hides stale success for current %s and restores it when cleared', (blockerClass) => {
+      const summary = 'Local claim refused; recovery synthetic-recovery (effect_fenced).'
+      const row = {
+        name: 'synthetic-claim', status: 'active', keepalive_running: true,
+        runtime_blocker_class: blockerClass, runtime_blocker_summary: summary,
+        trust: {
+          latest_terminal_reason: { code: 'success', summary: 'earlier successful turn' },
+          execution_summary: { runtime_outcome: 'completed', provider_attempt_count: 1 },
+        },
+      }
+      const failed = normalizeKeepers([row])[0]
+      expect(failed?.stop_cause?.code).toBe(blockerClass)
+      if (!failed) throw new Error('normalized keeper missing')
+      const { container, rerender } = render(h(KeeperRuntimeAlertStrip, { keeper: failed }))
+      expect(container.textContent).toContain('synthetic-recovery')
+      expect(container.textContent).not.toContain('종료 코드')
+      expect(container.textContent).not.toContain('마지막 시도')
+      const cleared = normalizeKeepers([{ ...row,
+        runtime_blocker_class: null, runtime_blocker_summary: null }])[0]
+      if (!cleared) throw new Error('cleared keeper missing')
+      rerender(h(KeeperRuntimeAlertStrip, { keeper: cleared }))
+      expect(container.textContent).not.toContain('synthetic-recovery')
+      expect(container.textContent).toContain('completed')
+      expect(container.textContent).toContain('마지막 시도')
+    },
+  )
+})

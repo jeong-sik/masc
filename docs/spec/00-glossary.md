@@ -79,6 +79,25 @@ status: reference
   ([`Runtime_execution.t`](../../lib/runtime/runtime_execution.mli)). MASC는 해당 레인의 결과를
   조율·기록한다.
 
+**Terminal Reason**
+: 끝난 Keeper turn의 이유를 담은 영수증 필드(`terminal_reason_code`).
+  `Keeper_terminal_reason.of_wire`가 이 wire 문자열을 닫힌 합타입으로 한 번 파싱하고,
+  `to_wire (of_wire s) = s`가 바이트 단위로 성립한다. 분류는 canonical producer
+  바이트만 받고, 나머지는 `Unknown` escape로 간다.
+  → [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
+
+**Operator Disposition**
+: 끝난 turn을 운영자 관점에서 분류한 (kind, reason) 쌍. `Keeper_execution_receipt.operator_disposition`이
+  영수증 필드에서 파생한다. kind(`Disp_pass`, `Disp_operator_action_required`, `Disp_retry_later` 등)와
+  reason 모두 닫힌 집합이다. `Disp_operator_action_required`는 운영자만 고칠 수 있는 알려진 원인을
+  가리키며 런타임 연속·폴백을 주장하지 않는다. 그 원인은 둘로 갈린다 — `Reason_config_invalid`는
+  런타임이 provider dispatch 전에 설정값을 거부한 경우(`Keeper_terminal_reason.Config_invalid`)로
+  운영자가 runtime toml을 고치고, `Reason_authorization_refused`는 provider가 권한 사유로 요청을
+  거절한 경우(`Keeper_terminal_reason.Authorization_refused`)로 wire에 주간·5시간 사용량 한도가 실려
+  운영자가 슬롯을 옮긴다.
+  → [Keeper_execution_receipt](../../lib/keeper/keeper_execution_receipt.mli),
+  [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
+
 **Keeper Chat Operation**
 : Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
   `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을

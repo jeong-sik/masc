@@ -135,6 +135,10 @@ type wake_reason =
     relatedness is intentionally absent: it must enter through an LLM/Judge
     attention boundary, not through board-publish keyword matching. *)
 
+val board_signal_stimulus :
+  arrived_at:float -> reason:wake_reason -> Board_dispatch.board_signal -> Keeper_event_queue.stimulus
+(** Shared live/catchup stimulus construction; identity and urgency remain identical. *)
+
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)
 

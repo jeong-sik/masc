@@ -359,6 +359,12 @@ let stimulus_identity_equal a b =
   && a.urgency = b.urgency
   &&
   match a.payload, b.payload with
+  | Board_signal {kind=Post_created; _}, Board_signal {kind=Post_created; _} -> true
+  | Board_signal {kind=Comment_added left; _}, Board_signal {kind=Comment_added right; _} ->
+    String.equal left.comment_id right.comment_id
+  | Board_attention {candidate_id=left_id; signal={kind=Comment_added left; _}},
+    Board_attention {candidate_id=right_id; signal={kind=Comment_added right; _}} ->
+    String.equal left_id right_id && String.equal left.comment_id right.comment_id
   | Board_signal {kind=Post_updated left; _}, Board_signal {kind=Post_updated right; _} ->
     Float.equal left.content_updated_at right.content_updated_at
   | Board_attention {candidate_id=left_id; signal={kind=Post_updated left; _}},

@@ -1,4 +1,4 @@
-(* Board routing, the Owner-internal turn and durable ACK use production code.
+(* Board catchup, the Owner-internal turn and durable ACK use production code.
    The fixture seeds the runtime registry, injects one transient Board read and
    supplies a loopback model response to a short Board preview. It calls the
    cycle directly, so the outer heartbeat scheduler and its admission checks
@@ -154,13 +154,21 @@ data: [DONE]
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
-  Board_dispatch.set_board_signal_hook
-    (Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config);
+  (* Initialize at an existing head, then deliberately miss the live hook. *)
+  ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"cursor baseline"
+    ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+  Board_dispatch.set_board_signal_hook (fun _ -> ());
   let content = "@" ^ keeper_name ^ " Atlas staging uses PostgreSQL 15." in
   let post = Board_dispatch.create_post ~author:"synthetic-user" ~content
     ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error in
   let post_id = Board.Post_id.to_string post.id in
-  require (queue_count config keeper_name = 1) "direct mention did not enqueue exactly once";
+  require (queue_count config keeper_name = 0) "disabled live hook unexpectedly delivered";
+  let caught_up, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
+  require (caught_up = []) "catchup returned an ephemeral addressed event";
+  require (queue_count config keeper_name = 1) "missed live mention was not durably caught up";
+  Board_dispatch.set_board_signal_hook
+    (Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config);
   require (queue_count config other_name = 0) "direct mention reached the unaddressed Keeper";
   let pending = Keeper_event_queue.to_list (queue config keeper_name) in
   let stimulus_id = match pending with
@@ -181,6 +189,12 @@ data: [DONE]
   require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
     "transient read changed the durable pending source";
   require (not (evidence config stimulus_id).event_queue_ack_seen) "transient read persisted ACK evidence";
+  let reloaded = Keeper_event_queue_persistence.load_result ~base_path ~keeper_name |> get Fun.id in
+  require (Keeper_event_queue.to_list reloaded = pending)
+    "durable reload lost caught-up source after failed intake";
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:first.meta);
+  require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
+    "advanced catchup cursor lost or duplicated the still-pending source";
   let second = cycle first.meta in
   require (second.stimuli_acked) "actual completed turn did not ACK its source";
   require (queue_count config keeper_name = 0) "source remains queued after completion";
@@ -294,5 +308,5 @@ let test_board_source_is_acked_after_completed_turn () =
 let () =
   Alcotest.run "keeper_board_turn_ack"
     [ "continuity",
-      [ Alcotest.test_case "completed Keeper turn ACKs its Board source once"
+      [ Alcotest.test_case "missed live Board source survives catchup and failure until real turn ACK"
           `Quick test_board_source_is_acked_after_completed_turn ] ]

@@ -382,31 +382,8 @@ let wakeup_keeper ?base_path ?stimulus name =
    here it only picks urgency (explicit targets and broadcasts are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
-let board_signal_stimulus
-      ~(reason : Board_wake.wake_reason)
-      (signal : Board_dispatch.board_signal)
-  =
-  let payload : Keeper_event_queue.stimulus_payload =
-    Keeper_event_queue.Board_signal
-      (Board_wake.board_stimulus_of_board_signal signal)
-  in
-  { Keeper_event_queue.post_id = signal.post_id
-  ; urgency =
-      (match reason with
-       | Board_wake.Explicit_mention | Board_wake.Broadcast ->
-         Keeper_event_queue.Immediate
-       (* A comment on the keeper's own post is a thread event, so it keeps
-          the thread priority. This change's subject is that it wakes at all;
-          raising it to Immediate would be a separate queue decision. *)
-       | Board_wake.Comment_on_self_post
-       | Board_wake.Reply_to_self_comment
-       | Board_wake.Reaction_after_self_activity
-       | Board_wake.Vote_on_self_post
-       | Board_wake.Vote_on_self_comment ->
-         Keeper_event_queue.Normal)
-  ; arrived_at = Time_compat.now ()
-  ; payload
-  }
+let board_signal_stimulus ~reason signal =
+  Board_wake.board_signal_stimulus ~arrived_at:(Time_compat.now ()) ~reason signal
 ;;
 
 let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry) =

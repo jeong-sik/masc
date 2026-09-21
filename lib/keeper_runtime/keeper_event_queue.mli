@@ -381,7 +381,10 @@ val enqueue : t -> stimulus -> t
 val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
-    not create an unbounded backlog of otherwise identical stimuli. For a
+    not create an unbounded backlog of otherwise identical stimuli. Board
+    creation uses post identity, comments use comment identity, and edits use
+    the content update time; changed display fields do not redeliver one event.
+    Urgency remains part of the queue identity. For a
     [Fusion_completed] event, [channel] is also excluded: the first committed
     row owns recipient authority, and a replay sources the channel from the
     durable delivery obligation, so an [Unrouted] first commit followed by a

@@ -237,6 +237,36 @@ let test_initialized_cursor_receives_each_discoverable_edit () =
     (queue_length config meta.name)
 ;;
 
+let test_live_comment_and_catchup_share_identity_after_title_edit () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let meta = keeper_meta config "commentreader" in
+  register config meta;
+  let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"body"
+      ~title:"original title" ~body:"body" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
+  ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+  Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+  let post_id = Board.Post_id.to_string post.id in
+  let comment = get (Board_dispatch.add_comment ~post_id ~author:"external"
+      ~content:"@commentreader reply" ()) in
+  check int "live comment is queued" 1 (queue_length config meta.name);
+  ignore (get (Board_dispatch.update_post ~post_id ~editor:"editor"
+      ~title:"changed title" ~body:"body" ~content:"body" ()));
+  ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+  let queue = match Keeper_registry_event_queue.snapshot_result ~base_path:config.base_path meta.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "changed inherited title does not duplicate the same comment" 1
+    (Keeper_event_queue.length queue);
+  match Keeper_event_queue.to_list queue with
+  | [{ payload = Keeper_event_queue.Board_signal
+         {kind = Keeper_event_queue.Comment_added identity; title; _}; _ }] ->
+    check string "producer comment identity remains" (Board.Comment_id.to_string comment.id)
+      identity.comment_id;
+    check string "first accepted payload remains unchanged" "original title" title
+  | _ -> fail "expected the original queued comment"
+;;
+
 let test_queued_edits_keep_their_captured_content () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
@@ -274,7 +304,9 @@ let () =
   run
     "keeper Board discoverable cursor"
     [ ( "producer and owner boundary"
-      , [ test_case "initialized cursor receives each discoverable edit" `Quick
+      , [ test_case "live comment and catchup share identity after title edit" `Quick
+            test_live_comment_and_catchup_share_identity_after_title_edit
+        ; test_case "initialized cursor receives each discoverable edit" `Quick
             test_initialized_cursor_receives_each_discoverable_edit
         ; test_case "queued edits preserve captured content before consumption" `Quick
             test_queued_edits_keep_their_captured_content

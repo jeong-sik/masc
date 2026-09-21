@@ -448,6 +448,34 @@ let wake_reason_label = function
   | Vote_on_self_comment -> "vote_on_self_comment"
 ;;
 
+let board_signal_stimulus
+      ~arrived_at
+      ~(reason : wake_reason)
+      (signal : Board_dispatch.board_signal)
+  =
+  let payload : Keeper_event_queue.stimulus_payload =
+    Keeper_event_queue.Board_signal
+      (board_stimulus_of_board_signal signal)
+  in
+  { Keeper_event_queue.post_id = signal.post_id
+  ; urgency =
+      (match reason with
+       | Explicit_mention | Broadcast ->
+         Keeper_event_queue.Immediate
+       (* A comment on the keeper's own post is a thread event, so it keeps
+          the thread priority. This change's subject is that it wakes at all;
+          raising it to Immediate would be a separate queue decision. *)
+       | Comment_on_self_post
+       | Reply_to_self_comment
+       | Reaction_after_self_activity
+       | Vote_on_self_post
+       | Vote_on_self_comment ->
+         Keeper_event_queue.Normal)
+  ; arrived_at
+  ; payload
+  }
+;;
+
 let self_authored_post ~self_ids ~(post_id : string) =
   match Board_dispatch.get_post ~post_id with
   | Error error -> Unavailable { operation = Get_post; post_id; error }

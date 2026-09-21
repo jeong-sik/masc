@@ -34,6 +34,7 @@ import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
+import { toolCallCompletion } from '../../api/dashboard-keeper-tool-calls'
 import { fetchBoardPost } from '../../api/board'
 import { lookupToolCallOutput, toolCallOutputsByIdentity } from '../../tool-call-output-store'
 import type { ToolCallOutputHydrationContract } from '../../tool-call-output-store'
@@ -3282,6 +3283,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   // Only the exact endpoint establishes a unique result for this execution.
   const lookup = useToolOutputLookup(entry.executionId)
   const outputEntry = lookup.output
+  const outputCompletion = outputEntry ? toolCallCompletion(outputEntry) : undefined
   const outputView = outputEntry ? toolOutputDisplay(outputEntry.output) : null
   const hasOutput = outputView !== null && outputView.text.trim() !== ''
 
@@ -3334,10 +3336,10 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
         <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]">입력</span>
         ${outputEntry
           ? html`<span
-              class=${`text-xs font-semibold ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
-              title=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
-              aria-label=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
-            >${outputEntry.success ? '✓' : '✗'}</span>`
+              class=${`text-xs font-semibold ${outputCompletion === true ? 'text-[var(--color-ok-fg)]' : outputCompletion === false ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}`}
+              title=${outputCompletion === true ? 'tool succeeded' : outputCompletion === false ? 'tool failed' : 'tool outcome unknown'}
+              aria-label=${outputCompletion === true ? 'tool succeeded' : outputCompletion === false ? 'tool failed' : 'tool outcome unknown'}
+            >${outputCompletion === true ? '✓' : outputCompletion === false ? '✗' : '?'}</span>`
           : null}
         ${timestamp
           ? html`<span class="ml-auto text-xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
@@ -3501,7 +3503,8 @@ function ToolTraceStep({
     : toolTraceSourceBadge(entry, traceStep)
   let status: ToolTraceDisplayStatus
   if (output !== null) {
-    status = output.success === false ? 'bad' : 'ok'
+    const completion = toolCallCompletion(output)
+    status = completion === false ? 'bad' : completion === true ? 'ok' : 'pending'
   } else if (traceOnly && traceStep?.status === 'err') {
     status = 'bad'
   } else if (traceOnly && traceStep?.status === 'ok') {
@@ -3831,7 +3834,7 @@ function ToolTraceCard({
   const progressN = traceSteps.filter((step) => step.kind === 'progress').length
   const failN = orderedToolSteps.filter(
     (s) =>
-      (s.output !== null && s.output.success === false)
+      (s.output !== null && toolCallCompletion(s.output) === false)
       || (s.kind === 'tool' && s.step.status === 'err'),
   ).length
   // Surface unjoined outputs as "missing" only once the turn and output
@@ -4637,7 +4640,7 @@ export function ChatTranscript({
         .map((entry) => {
           const output = lookupToolCallOutput(keeperName, entry.executionId)
           return output
-            ? `${entry.id}:${output.success}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
+            ? `${entry.id}:${output.disposition ?? output.wire_outcome}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
             : `${entry.id}:pending:${coverageSig}`
         })
         .join('|')

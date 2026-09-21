@@ -338,7 +338,7 @@ let discover_and_inspect
     ()
   =
   let root =
-    match Keeper_sandbox_remote_lane.remote_keeper_root ~config ~meta with
+    match Keeper_sandbox_remote_lane.workspace_root ~config ~meta with
     | Ok r -> r
     | Error _ -> "."
   in
@@ -355,7 +355,7 @@ let discover_and_inspect
        | None ->
          Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
     | Ok endpoint ->
-      let root = Keeper_sandbox_remote.remote_keeper_root endpoint in
+      let root = Keeper_sandbox_remote.workspace_root endpoint in
       let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
       let catalog_arg = catalog_to_json_arg catalog in
       (* The probe takes both budgets from here so the endpoint walk and the

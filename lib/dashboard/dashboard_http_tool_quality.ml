@@ -64,26 +64,44 @@ let thinking_mode_of_record record =
      | _ -> "<missing thinking_enabled field>")
   | _ -> "<non-object record envelope>"
 
-let bool_field_opt record field =
+type tool_record_outcome =
+  | Settled of bool
+  | Deferred
+  | Unsettled
+  | Lifecycle_event
+  | Malformed_outcome
+
+(* Lifecycle markers are not invocation outcomes and never enter the quality
+   denominator. For invocation rows, read the closed typed disposition first.
+   An absent disposition is valid for runtime-MCP rows, whose wire outcome is
+   the available boundary. [unknown] and an absent wire outcome mean not yet
+   settled; an unrecognized token or wrong JSON type is producer/consumer
+   schema drift and stays malformed. *)
+let tool_outcome_of_record record =
   match record with
   | `Assoc fields ->
-    (match List.assoc_opt field fields with
-     | Some (`Bool value) -> Some value
-     | _ -> None)
-  | _ -> None
+    (match List.assoc_opt "record_kind" fields with
+     | Some (`String "lifecycle_event") -> Lifecycle_event
+     | Some (`String ("tool_call" | "composition_run")) | None ->
+       (match List.assoc_opt "disposition" fields with
+        | Some (`String "completed") -> Settled true
+        | Some (`String "failed") -> Settled false
+        | Some (`String "deferred") -> Deferred
+        | Some _ -> Malformed_outcome
+        | None ->
+          (match List.assoc_opt "wire_outcome" fields with
+           | Some (`String "ok") -> Settled true
+           | Some (`String "error") -> Settled false
+           | Some (`String "unknown") | None -> Unsettled
+           | Some _ -> Malformed_outcome))
+     | Some _ -> Malformed_outcome)
+  | _ -> Malformed_outcome
 
-let tool_success_of_record record =
-  match bool_field_opt record "success" with
-  | Some value -> value
-  | None -> false
-
-let tool_record_is_deferred record =
-  Safe_ops.json_string_opt "disposition" record = Some "deferred"
-
-(* Every producer writes [result_bytes] (the [log_call] callers in
-   keeper_hooks_agent_core, keeper_tool_composition_surface and
-   mcp_server_eio_call_tool all pass it).  A row without it is malformed:
-   it is dropped from every aggregate and counted in [malformed]. *)
+(* Every invocation-result producer writes [result_bytes] (the [log_call]
+   callers in keeper_hooks_agent_core, keeper_tool_composition_surface and
+   mcp_server_eio_call_tool all pass it). A result row without it is malformed:
+   it is dropped from every aggregate and counted in [malformed]. Lifecycle
+   markers are classified and excluded before this requirement is applied. *)
 let result_bytes_of_record record =
   match record with
   | `Assoc fields ->
@@ -148,7 +166,7 @@ let source_metadata_fields () =
   Dashboard_tool_source_freshness.keeper_tool_call_io_fields
     ~dashboard_surface ()
 
-let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
+let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malformed =
   `Assoc
     (source_metadata_fields ()
     @ [ ("generated_at", `String (Masc_domain.now_iso ()))
@@ -165,6 +183,7 @@ let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
     ; ("success", `Int 0)
     ; ("failure", `Int 0)
     ; ("deferred", `Int deferred)
+    ; ("unsettled", `Int unsettled)
     ; ("malformed", `Int malformed)
     ; ("success_rate", `Float 0.0)
     ; ("by_tool", `List [])
@@ -180,19 +199,22 @@ let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
 
 (* The payload over already-read [records]; the read is [aggregate]'s. *)
 let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
-  let deferred_records, records = List.partition tool_record_is_deferred records in
-  let deferred = List.length deferred_records in
-  let malformed, records =
+  let deferred, unsettled, malformed, records =
     List.fold_left
-      (fun (malformed, acc) record ->
-        match result_bytes_of_record record with
-        | Some result_bytes -> (malformed, (record, result_bytes) :: acc)
-        | None -> (malformed + 1, acc))
-      (0, []) records
+      (fun (deferred, unsettled, malformed, acc) record ->
+        match tool_outcome_of_record record, result_bytes_of_record record with
+        | Lifecycle_event, _ -> deferred, unsettled, malformed, acc
+        | _, None -> deferred, unsettled, malformed + 1, acc
+        | Settled success, Some result_bytes ->
+          deferred, unsettled, malformed, (record, result_bytes, success) :: acc
+        | Deferred, Some _ -> deferred + 1, unsettled, malformed, acc
+        | Unsettled, Some _ -> deferred, unsettled + 1, malformed, acc
+        | Malformed_outcome, Some _ -> deferred, unsettled, malformed + 1, acc)
+      (0, 0, 0, []) records
   in
   let records = List.rev records in
   if records = [] then
-    empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed
+    empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malformed
   else
   let total = ref 0 in
   let success = ref 0 in
@@ -224,7 +246,7 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
   in
   (* error category -> count *)
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
-  List.iter (fun (record, output_chars) ->
+  List.iter (fun (record, output_chars, ok) ->
     incr total;
     (* [tool] and [keeper] become bucket keys in the dashboard
        histogram.  A bare "unknown" bucket appears in the same column
@@ -241,7 +263,6 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
       Safe_ops.json_string_opt "keeper" record
       |> Option.value ~default:"<missing keeper field>"
     in
-    let ok = tool_success_of_record record in
     let dur = match record with
       | `Assoc fields ->
         (match List.assoc_opt "duration_ms" fields with
@@ -402,6 +423,7 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
     ("success", `Int success_n);
     ("failure", `Int (total_n - success_n));
     ("deferred", `Int deferred);
+    ("unsettled", `Int unsettled);
     ("malformed", `Int malformed);
     ("success_rate", `Float (Float.round (rate *. 100.0) /. 100.0));
     ("by_tool", `List by_tool);

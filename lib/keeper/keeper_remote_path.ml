@@ -22,9 +22,9 @@
     Every current call site belongs to one of those categories. New remote I/O
     must use this module instead of adding another prefix rewrite.
 
-    The endpoint is named by its [remote_root] alone: the OpenSSH registry
-    entry and an Apple [container] guest's work volume both project to
-    [<remote_root>/<keeper>], and nothing here depends on the transport. *)
+    The caller supplies the already resolved remote workspace root. This
+    module maps only between that endpoint namespace and the Keeper's host
+    bookkeeping namespace; it does not infer a workspace layout. *)
 
 let normalize_host path =
   Keeper_alerting_path.normalize_path_for_check path
@@ -66,10 +66,6 @@ let host_root ~base_path ~keeper =
   |> normalize_host
 ;;
 
-let keeper_remote_root ~remote_root ~keeper =
-  Filename.concat remote_root (safe_keeper keeper) |> normalize_remote
-;;
-
 let at_or_below ~root path =
   String.equal root path
   || String.starts_with ~prefix:(root ^ Filename.dir_sep) path
@@ -83,9 +79,9 @@ let suffix_below ~root path =
       (String.length path - String.length root - 1)
 ;;
 
-let host_to_remote ~base_path ~remote_root ~keeper path =
+let host_to_remote ~base_path ~remote_workspace_root ~keeper path =
   let hroot = host_root ~base_path ~keeper in
-  let rroot = keeper_remote_root ~remote_root ~keeper in
+  let rroot = normalize_remote remote_workspace_root in
   if Filename.is_relative path
   then
     let logical = normalize_logical path in
@@ -118,8 +114,8 @@ let host_to_remote ~base_path ~remote_root ~keeper path =
              path hroot)
 ;;
 
-let remote_to_logical ~remote_root ~keeper path =
-  let rroot = keeper_remote_root ~remote_root ~keeper in
+let remote_to_logical ~remote_workspace_root path =
+  let rroot = normalize_remote remote_workspace_root in
   let normalized = normalize_remote path in
   if String.equal normalized rroot
   then "."
@@ -156,9 +152,9 @@ let replace_root ~remote ~host text =
   Buffer.contents out
 ;;
 
-let rewrite_output ~base_path ~remote_root ~keeper text =
+let rewrite_output ~base_path ~remote_workspace_root ~keeper text =
   replace_root
-    ~remote:(keeper_remote_root ~remote_root ~keeper)
+    ~remote:(normalize_remote remote_workspace_root)
     ~host:(host_root ~base_path ~keeper)
     text
 ;;
@@ -172,8 +168,8 @@ type stream =
   ; mutable previous : char option
   }
 
-let stream ~base_path ~remote_root ~keeper ~emit =
-  let remote = keeper_remote_root ~remote_root ~keeper in
+let stream ~base_path ~remote_workspace_root ~keeper ~emit =
+  let remote = normalize_remote remote_workspace_root in
   { remote
   ; host = host_root ~base_path ~keeper
   ; emit

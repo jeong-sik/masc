@@ -190,6 +190,7 @@ type t =
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
   | TurnBoundaryFailures
+  | HistoryFragmentFailures
 
 val to_string : t -> string
 

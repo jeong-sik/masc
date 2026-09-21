@@ -466,6 +466,7 @@ let test_response_observed_per_class () =
     ; rotate KFR.Runtime_exhausted
     ; terminal KFR.Deterministic_request
     ; terminal KFR.Context_overflow
+    ; terminal KFR.Session_claim_refused
     ; terminal KFR.Protocol_error
     ; terminal KFR.Config_mismatch
     ; terminal KFR.Provider_integration
@@ -653,6 +654,7 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", rotate KFR.Attempt_rejected
     ; "", terminal KFR.Deterministic_request
     ; "", terminal KFR.Context_overflow
+    ; "", terminal KFR.Session_claim_refused
     ; "", terminal KFR.Contract_violation
     ; "", terminal KFR.Protocol_error
     ; "", terminal KFR.Config_mismatch

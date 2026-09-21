@@ -1,3 +1,23 @@
+type pass_end =
+  | Off
+  | Lane_unconfigured
+  | Drained
+  | Not_committed
+  | Stopped of Keeper_librarian_durable_consumer.error
+  | Raised of string
+
+type measurement =
+  { measured_at : float
+  ; last_pass : pass_end
+  ; unread : Keeper_librarian_durable_consumer.unread option
+  }
+
+val last_measurement : config:Workspace.config -> keeper_name:string -> measurement option
+(** Latest completed durable drain observation in this process, scoped to the
+    runtime Keeper directory. [None] means no observation; this is never used
+    for admission or scheduling. An unread count unavailable at that pass is
+    [None], not the prior pass's count. *)
+
 type runtime_entry = Not_entered | Entered
 (** Whether the post-turn callback reached Librarian runtime. Input preparation
     and live-config refusal return [Not_entered]; [Entered] is not commit success. *)
@@ -36,7 +56,8 @@ module For_testing : sig
     -> keeper_name:string
     -> commit:
          (expected_revision:int option
-          -> range_id:Keeper_memory_os_current.durable_range_id
+          -> range_id:Keeper_memory_os_current.durable_range_id option
+          -> official_range_id:Keeper_memory_os_current.official_range_id option
           -> Keeper_librarian.input
           -> bool)
     -> unit

@@ -316,7 +316,12 @@ let finalize
           ("terminal_reason_code", `String terminal_reason_code);
         ])
     Keeper_runtime_manifest.Turn_finished;
-  final_result
+  (* The two lanes travel out beside the result, on either outcome. They are
+     already on the receipt; the decision record reads them from here instead
+     of computing its own answer, which is how the two surfaces came to
+     disagree (#37376). *)
+  ({ result = final_result; degraded_retry_applied; degraded_retry_deferred }
+   : Keeper_agent_result.turn_settlement)
 ;;
 
 module For_testing = struct

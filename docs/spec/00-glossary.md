@@ -97,6 +97,18 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Official-client Session Recovery**
+: 공식 클라이언트 세션에 기록된 `Input_rejected` 때문에 같은 runtime의 새 실행
+  요청을 거절하는 상태. `bootstrap_floor_exceeded`는 줄일 수 있는 이력을 제거한
+  입력도 용량을 넘은 경우이고, `effect_fenced`는 앞선 응답이나 도구 실행이 관측되어
+  입력을 줄여 재실행할 수 없는 경우다. 현재 거절은 provider 호출 전에 일어나며 앞선
+  provider attempt의 효과 자체와 구분한다. 상태 표시는 원인·runtime ID·recovery ID를
+  기존 session에서 전달하며, 복구 승인이나 fence 해제를 수행하지 않는다.
+  Fleet는 일시정지되지 않은 `Failing` Keeper의 이 원인을 `recovering`과 구분해
+  `official_client_recovery_required_keeper_count/names`로 표시한다. 이는 운영자
+  조치가 필요한 fleet health 저하 사유이며, 다른 차단 사유가 없으면 `degraded`로
+  표시한다. 실행 fiber의 생존·실행 가능 여부를 바꾸거나 세션 복구를 승인하지 않는다.
+
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
   요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
@@ -324,6 +336,19 @@ status: reference
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.
 
 ## Continuity
+
+**Autoboot Exclusion Reason (자동 부팅 제외 이유)**
+: 설정상 부팅 가능한데도 `bootable_keeper_names`에서 의도적으로 빠진 Keeper의
+  닫힌 이유. `Paused`·`Declarative_autoboot_disabled`·`Autoboot_disabled`·
+  `Shutdown_admission_fence` 넷이다. 앞의 셋은 Keeper 설정에서 유도되지만
+  `Shutdown_admission_fence`는 아니다 — durable shutdown operation이 아직 그
+  Keeper의 admission을 소유하고 있어, autoboot 호출자가 boot-scan shutdown
+  inventory(`blocked_keeper_names`)를 들고 표시한다. boot recovery가 회수
+  가능한 operation을 같은 bootstrap에서 정산하면 supervisor의 주기 pass가 그
+  Keeper를 등록한다. 배제된 Keeper는 excluded list에 찍는다 — 2026-07-21
+  wedge에서는 한 Keeper가 boot set과 excluded list 양쪽에서 조용히 빠져
+  장애가 autoboot 보고에서 보이지 않았다.
+  → [keeper_runtime.mli](../../lib/keeper/keeper_runtime.mli)
 
 **Checkpoint**
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나

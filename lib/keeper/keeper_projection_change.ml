@@ -99,48 +99,134 @@ end
 
 module Message_digest_memo = Hashtbl.Make (Message_wire_value)
 
-type digest_memo = message_digest Message_digest_memo.t
-type fresh_digest = Agent_core.Types.message * message_digest
+(* [Agent_core.Tool.schema_to_json] reads only [tool.schema]: strings, a
+   parameter list with no JSON in it, a [bool option] and an optional raw JSON
+   [input_schema]. Only that last field can carry a float, so it is the only
+   one compared with float bits preserved; the rest is plain structural
+   equality. The handler is deliberately not part of the key -- two tools with
+   one schema and different handlers serialize to the same provider bytes. *)
+module Tool_schema_value = struct
+  type t = Agent_core.Types.tool_schema
 
-let create_digest_memo () = Message_digest_memo.create 128
-let snapshot_digest_memo memo = Message_digest_memo.copy memo
+  let equal (left : t) (right : t) =
+    String.equal left.name right.name
+    && String.equal left.description right.description
+    && left.parameters = right.parameters
+    && Option.equal Bool.equal left.strict right.strict
+    && Option.equal json_wire_equal left.input_schema right.input_schema
+  ;;
+
+  let hash (schema : t) = Hashtbl.hash (schema.name, schema.description, schema.strict)
+end
+
+module Tool_digest_memo = Hashtbl.Make (Tool_schema_value)
+
+type digest_memo =
+  { message_memo : message_digest Message_digest_memo.t
+  ; tool_memo : string Tool_digest_memo.t
+  }
+
+type fresh_digest =
+  | Fresh_message of Agent_core.Types.message * message_digest
+  | Fresh_tool of Agent_core.Types.tool_schema * string
+
+let create_digest_memo () =
+  { message_memo = Message_digest_memo.create 128
+  ; tool_memo = Tool_digest_memo.create 16
+  }
+;;
+
+let snapshot_digest_memo memo =
+  { message_memo = Message_digest_memo.copy memo.message_memo
+  ; tool_memo = Tool_digest_memo.copy memo.tool_memo
+  }
+;;
 
 let remember_digests memo fresh =
   List.iter
-    (fun (message, digest) -> Message_digest_memo.replace memo message digest)
+    (function
+      | Fresh_message (message, digest) ->
+        Message_digest_memo.replace memo.message_memo message digest
+      | Fresh_tool (schema, sha256) ->
+        Tool_digest_memo.replace memo.tool_memo schema sha256)
     fresh
 ;;
 
-let message_digest memo fresh message =
-  match Message_digest_memo.find_opt memo message with
-  | Some digest -> digest
-  | None ->
-    let payload = Keeper_provider_input_snapshot.message_payload message in
-    let digest =
-      { role = message.Agent_core.Types.role
-      ; bytes = String.length payload.Keeper_provider_input_snapshot.payload_bytes
-      ; sha256 = payload.Keeper_provider_input_snapshot.payload_sha256
-      }
-    in
-    Message_digest_memo.add memo message digest;
-    fresh := (message, digest) :: !fresh;
-    digest
-;;
+(* Whole-turn cost, for a turn of R requests whose message list grows to M and
+   whose tool list holds T schemas.
 
+   Serialization and SHA-256 -- the expensive part -- happen once per distinct
+   message and once per distinct tool schema across the whole turn, because
+   both are memoized: O(M + T) hashing per turn, not per request.
+
+   What remains per request is linear in the request: one memo lookup per
+   message and per tool, and the caller's {!snapshot_digest_memo} copy, which
+   is O(M + T) pointer copies and no hashing. Summed over the turn that is
+   O(R * (M + T)) lookups, which for an append-one-message turn is O(R^2).
+   The comparison in {!compare_requests} is likewise linear per pair of
+   requests and O(R * M) over the turn. Neither the lookups nor the copy
+   re-encode or re-hash anything. The digesting is not made incremental across
+   requests: a job cancelled mid-await must leave no shared state half-written,
+   and a per-job snapshot is what buys that. *)
 let digest_request ~seen ~tools ~messages =
-  let local = Message_digest_memo.copy seen in
+  (* Job-local tables hold only what this request computes. [seen] is read and
+     never written, so the caller's snapshot stays a snapshot; the tables start
+     empty rather than as a copy of [seen], which is what keeps this function
+     free of a second O(M) copy per request. *)
+  let local_messages = Message_digest_memo.create 16 in
+  let local_tools = Tool_digest_memo.create 4 in
   let fresh = ref [] in
+  let message_digest message =
+    match Message_digest_memo.find_opt seen.message_memo message with
+    | Some digest -> digest
+    | None ->
+      (match Message_digest_memo.find_opt local_messages message with
+       | Some digest -> digest
+       | None ->
+         let payload = Keeper_provider_input_snapshot.message_payload message in
+         let digest =
+           { role = message.Agent_core.Types.role
+           ; bytes =
+               String.length payload.Keeper_provider_input_snapshot.payload_bytes
+           ; sha256 = payload.Keeper_provider_input_snapshot.payload_sha256
+           }
+         in
+         Message_digest_memo.add local_messages message digest;
+         fresh := Fresh_message (message, digest) :: !fresh;
+         digest)
+  in
+  let tool_sha256 (tool : Agent_core.Tool.t) =
+    let schema = tool.schema in
+    match Tool_digest_memo.find_opt seen.tool_memo schema with
+    | Some sha256 -> sha256
+    | None ->
+      (match Tool_digest_memo.find_opt local_tools schema with
+       | Some sha256 -> sha256
+       | None ->
+         let sha256 =
+           (Keeper_provider_input_snapshot.tool_schema_payload tool)
+             .Keeper_provider_input_snapshot.payload_sha256
+         in
+         Tool_digest_memo.add local_tools schema sha256;
+         fresh := Fresh_tool (schema, sha256) :: !fresh;
+         sha256)
+  in
   let digests =
-    { tool_schema_sha256s =
-        List.map
-          (fun tool ->
-             (Keeper_provider_input_snapshot.tool_schema_payload tool)
-               .Keeper_provider_input_snapshot.payload_sha256)
-          tools
-    ; messages = Array.of_list (List.map (message_digest local fresh) messages)
+    { tool_schema_sha256s = List.map tool_sha256 tools
+    ; messages = Array.of_list (List.map message_digest messages)
     }
   in
   digests, List.rev !fresh
+;;
+
+let fresh_message_count fresh =
+  List.length
+    (List.filter (function Fresh_message _ -> true | Fresh_tool _ -> false) fresh)
+;;
+
+let fresh_tool_count fresh =
+  List.length
+    (List.filter (function Fresh_tool _ -> true | Fresh_message _ -> false) fresh)
 ;;
 
 let message_count digests = Array.length digests.messages

@@ -102,6 +102,75 @@ let test_digest_memo_commit_is_explicit () =
     (List.length cached_fresh)
 ;;
 
+(* The operation count the review asked for. An append-one-message turn of R
+   requests must serialize and hash each message once and each tool schema
+   once across the whole turn: the fresh list is exactly the set of values a
+   job hashed, so its size per request is the hashing count. What this pins
+   is the O(M + T) hashing term; the O(R * M) lookup term is documented, not
+   bounded here, because it is made of memo hits and no encoding. *)
+let test_append_only_turn_hashes_each_value_once () =
+  let requests = 64 in
+  let memo = Change.create_digest_memo () in
+  let hashed_messages = ref 0 in
+  let hashed_tools = ref 0 in
+  let history = ref [] in
+  for index = 1 to requests do
+    history := !history @ [ user (Printf.sprintf "turn-%d" index) ];
+    let seen = Change.snapshot_digest_memo memo in
+    let _digests, fresh =
+      Change.digest_request ~seen ~tools:fixture_tools ~messages:!history
+    in
+    let messages_now = Change.fresh_message_count fresh in
+    let tools_now = Change.fresh_tool_count fresh in
+    check int
+      (Printf.sprintf "request %d hashed only the appended message" index)
+      1 messages_now;
+    check int
+      (Printf.sprintf "request %d hashed the tool schema only the first time" index)
+      (if index = 1 then List.length fixture_tools else 0)
+      tools_now;
+    hashed_messages := !hashed_messages + messages_now;
+    hashed_tools := !hashed_tools + tools_now;
+    Change.remember_digests memo fresh
+  done;
+  check int "each message was hashed exactly once over the turn" requests
+    !hashed_messages;
+  check int "each tool schema was hashed exactly once over the turn"
+    (List.length fixture_tools) !hashed_tools
+;;
+
+(* The tool memo keys on the schema, not the tool value: a rebuilt tool list
+   with equal schemas hits, and a schema that differs in any field misses. *)
+let test_tool_schema_memo_keys_on_schema_value () =
+  let memo = Change.create_digest_memo () in
+  let messages = [ user "same messages every time" ] in
+  let seen = Change.snapshot_digest_memo memo in
+  let _first, first_fresh =
+    Change.digest_request ~seen ~tools:[ tool "masc_status" ] ~messages
+  in
+  check int "first request hashes the schema" 1 (Change.fresh_tool_count first_fresh);
+  Change.remember_digests memo first_fresh;
+  let seen = Change.snapshot_digest_memo memo in
+  let _rebuilt, rebuilt_fresh =
+    Change.digest_request ~seen ~tools:[ tool "masc_status" ] ~messages
+  in
+  check int "a rebuilt tool with an equal schema hits the memo" 0
+    (Change.fresh_tool_count rebuilt_fresh);
+  let _renamed, renamed_fresh =
+    Change.digest_request ~seen ~tools:[ tool "masc_status_v2" ] ~messages
+  in
+  check int "a schema differing in name misses" 1
+    (Change.fresh_tool_count renamed_fresh);
+  let _twice, twice_fresh =
+    Change.digest_request
+      ~seen
+      ~tools:[ tool "masc_status_v2"; tool "masc_status_v2" ]
+      ~messages
+  in
+  check int "an equal schema repeated within one request shares a job-local digest"
+    1 (Change.fresh_tool_count twice_fresh)
+;;
+
 let test_appended () =
   let history = [ user "a"; assistant "b" ] in
   check_messages
@@ -350,6 +419,10 @@ let () =
             test_previous_request_not_digested
         ; test_case "digest memo commit is explicit" `Quick
             test_digest_memo_commit_is_explicit
+        ; test_case "append-only turn hashes each value once" `Quick
+            test_append_only_turn_hashes_each_value_once
+        ; test_case "tool schema memo keys on schema value" `Quick
+            test_tool_schema_memo_keys_on_schema_value
         ] )
     ; ( "message change"
       , [ test_case "appended" `Quick test_appended

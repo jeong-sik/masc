@@ -10,7 +10,12 @@
     {!Keeper_provider_input_snapshot} stores them, so there is one encoding of
     each; no digest leaves this module.
 
-    The comparison is pure and linear in the two message counts.
+    {!compare_requests} is pure and linear in the two message counts of the
+    pair it compares. Over a whole turn of R requests whose history grows to
+    M messages, the comparisons and the per-request memo lookups sum to
+    O(R * M); serialization and SHA-256 do not, because {!digest_memo} makes
+    them happen once per distinct message and once per distinct tool schema
+    per turn. {!digest_request} states the full accounting.
 
     This is ongoing opt-in telemetry, not a temporary migration aid and not a
     runtime decision input. [Appended] and [Tail_removed] isolate cache misses
@@ -25,10 +30,12 @@ type request_digests
 (** The digests of one request. *)
 
 type digest_memo
-(** The message digests already computed in one keeper turn, keyed by message
-    value and by the exact floating-point bits in its raw JSON fields. This
-    distinguishes [0.0] from [-0.0], whose provider encodings differ even
-    though [Stdlib.compare] considers them equal. *)
+(** The message and tool-schema digests already computed in one keeper turn.
+    Messages are keyed by value and by the exact floating-point bits in their
+    raw JSON fields; tool schemas by name, description, parameters, strictness
+    and the same bit-exact comparison of their raw [input_schema]. Both
+    distinguish [0.0] from [-0.0], whose provider encodings differ even though
+    [Stdlib.compare] considers them equal. *)
 
 val create_digest_memo : unit -> digest_memo
 (** One memo per keeper turn. A message's encoding does not depend on the
@@ -37,8 +44,17 @@ val create_digest_memo : unit -> digest_memo
     time. *)
 
 type fresh_digest
-(** One message digest computed after a memo snapshot. Its representation is
-    private so only {!remember_digests} can merge it into the turn memo. *)
+(** One message or tool-schema digest computed after a memo snapshot. Its
+    representation is private so only {!remember_digests} can merge it into
+    the turn memo. *)
+
+val fresh_message_count : fresh_digest list -> int
+(** How many of these entries are message digests: the number of messages a
+    job serialized and hashed rather than found in [seen]. *)
+
+val fresh_tool_count : fresh_digest list -> int
+(** How many of these entries are tool-schema digests: the number of tool
+    schemas a job serialized and hashed rather than found in [seen]. *)
 
 val snapshot_digest_memo : digest_memo -> digest_memo
 (** Copy the turn memo on its owner fiber before submitting CPU work. The copy
@@ -54,11 +70,21 @@ val digest_request :
   tools:Agent_core.Tool.t list ->
   messages:Agent_core.Types.message list ->
   request_digests * fresh_digest list
-(** Serializes and hashes every tool schema, and every message [seen] has not
-    seen, in order; a message equal in value to one an earlier request of the
-    turn carried takes that digest. The returned fresh entries are local CPU
+(** Serializes and hashes every tool schema and every message [seen] has not
+    seen, in order; one equal in value to one an earlier request of the turn
+    carried takes that digest. The returned fresh entries are local CPU
     results: this function never mutates [seen] or the owner's turn memo.
-    Repeated equal messages within one request share a job-local digest. *)
+    Repeated equal messages or schemas within one request share a job-local
+    digest.
+
+    Cost, for a turn of R requests with history growing to M messages over T
+    tool schemas: hashing is O(M + T) for the whole turn, once per distinct
+    value. Per request the work is one memo lookup per message and per tool
+    plus the caller's snapshot copy, so the turn sums to O(R * (M + T))
+    lookups and pointer copies -- O(R^2) for an append-one-message turn --
+    with no re-encoding in that term. The digesting is not incremental across
+    requests because a job cancelled mid-await must leave no shared state
+    half-written, which is what the per-job snapshot guarantees. *)
 
 val message_count : request_digests -> int
 

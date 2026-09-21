@@ -112,7 +112,7 @@ def run_side_by_side(executable: str) -> None:
             # test's width model or the pane reservation is wrong.
             raise AssertionError(
                 f"the comment starts at column {at}, not in the right-hand column: " + repr(beside)
-                + "\nscreen:\n" + h.screen_text(bytes(output)))
+                + "\nscreen:\n" + h.screen_text(bytes(output)).decode("utf-8", "replace"))
         if beside[:at].count("│".encode()) < 2:
             raise AssertionError(
                 f"at {SIDE_COLUMNS} columns the comment has no separate body/comment columns: " + repr(beside))

@@ -459,8 +459,12 @@ let capacity_refused_by_flow = function
 
 let extraction_capacity_refused = function
   | Exact_execution_failed error -> error.capacity_refused
+  | Cli_slots_exhausted { failures; _ } ->
+    (match List.rev failures with
+     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity_refused final
+     | [] -> false)
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
-  | Cli_slots_exhausted _ | Cli_prompt_unavailable _ | No_transport_declared
+  | Cli_prompt_unavailable _ | No_transport_declared
   | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> false
 ;;
 

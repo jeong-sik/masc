@@ -23,7 +23,7 @@ type failure =
           the walk reports it per slot and advances. *)
   | Execution_failed of
       { runtime_id : string
-      ; detail : string
+      ; cause : Fusion_official_client.failure
       }
       (** The client failed to produce an answer: admission, spawn, timeout,
           bridge, or an empty response. *)
@@ -45,9 +45,9 @@ type runner =
   -> system_prompt:string
   -> output_schema:Yojson.Safe.t
   -> prompt:string
-  -> (string, string) result
+  -> (string, Fusion_official_client.failure) result
 (** The effectful edge, injectable for tests. The default wraps
-    {!Fusion_official_client.run_panelist}.
+    {!Fusion_official_client.run_with_images} and preserves its typed failures.
 
     [output_schema] is the caller's own domain schema, handed to whatever
     channel the transport has so the client holds its own answer to the shape
@@ -94,3 +94,7 @@ val walk
     slot's failure in walk order when all of them failed; an empty
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
     from "declared and exhausted" by the list it passed in. *)
+
+val input_capacity_refused : failure -> bool
+(** Whether the official client structurally rejected the input size. Diagnostic
+    prose and generic invalid-parameter errors are not capacity evidence. *)

@@ -52,7 +52,8 @@ let endpoint_remote_root = "/srv/masc/playground"
 
 (* Pinned rather than read back off the endpoint value: this string is the
    contract the endpoint bootstrap installs and the preflight checks. *)
-let expected_gh_dir = "/srv/masc/playground/gh-lane-keeper/.config/gh"
+let expected_keeper_root = "/srv/masc/playground/gh-lane-keeper"
+let expected_gh_dir = expected_keeper_root ^ "/.config/gh"
 let device_code_line = "! First copy your one-time code: C3ED-117C\n"
 let probe_login = "octocat"
 let frame_path ~dir tag = Filename.concat dir ("frame-" ^ tag)
@@ -62,9 +63,21 @@ let observed_path ~dir = Filename.concat dir "device-code-observed"
    which contract broke instead of "exit 1". *)
 let exit_code_never_streamed = 7
 let exit_code_unexpected_argv = 64
+let exit_code_preflight_order = 65
 
 let stub_main () =
   let dir = Sys.argv.(2) in
+  if Array.exists (String.equal "masc-exec-shim --probe") Sys.argv
+  then (
+    save (Filename.concat dir "endpoint-probed") "ok";
+    write_all Unix.stdout
+      (Exec_ssh_protocol.render_probe
+         { name = "masc-exec-shim"
+         ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+         ; capabilities = []
+         ; release = None
+         });
+    exit 0);
   let header = read_exact Unix.stdin 8 in
   let body_len = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
   let frame = header ^ read_exact Unix.stdin body_len in
@@ -113,9 +126,46 @@ let stub_main () =
        record "probe";
        write_all Unix.stdout (probe_login ^ "\n");
        write_all Unix.stderr (trailer 0)
-     | "mkdir" :: _ ->
-       record "mkdir";
+     | [ "test"; "-d"; path ] when String.equal path endpoint_remote_root ->
+       record "preflight-endpoint-root";
        write_all Unix.stderr (trailer 0)
+     | [ "test"; "-d"; path ]
+       when String.equal path expected_keeper_root ->
+       record "preflight-keeper-root";
+       let root_was_bootstrapped = Sys.file_exists (frame_path ~dir "mkdir-root") in
+       write_all Unix.stderr (trailer (if root_was_bootstrapped then 0 else 70))
+     | [ "git"; "--version" ] ->
+       record "preflight-git";
+       let forced_failure = Sys.file_exists (Filename.concat dir "fail-preflight-git") in
+       if not forced_failure then write_all Unix.stdout "git version 2.51.0\n";
+       write_all Unix.stderr (trailer (if forced_failure then 72 else 0))
+     | [ "rg"; "--version" ] ->
+       record "preflight-rg";
+       write_all Unix.stdout "ripgrep 14.1.1\n";
+       write_all Unix.stderr (trailer 0)
+     | [ "df"; "-Pk"; _ ] ->
+       record "preflight-df";
+       write_all Unix.stdout
+         "Filesystem 1024-blocks Used Available Capacity Mounted on\n\
+          /dev/test 100000000 1 99999999 1% /srv/masc/playground\n";
+       write_all Unix.stderr (trailer 0)
+     | [ "test"; "-s"; path ] when String.equal path (expected_gh_dir ^ "/hosts.yml") ->
+       record "preflight-identity-file";
+       let login_ran = Sys.file_exists (frame_path ~dir "login") in
+       write_all Unix.stderr (trailer (if login_ran then 0 else 1))
+     | [ "env"; gh_config; "gh"; "auth"; "status" ]
+       when String.equal gh_config ("GH_CONFIG_DIR=" ^ expected_gh_dir) ->
+       record "preflight-identity";
+       write_all Unix.stderr (trailer 0)
+     | [ "mkdir"; "-p"; path ] ->
+       record (if String.equal path expected_gh_dir then "mkdir" else "mkdir-root");
+       let endpoint_ready =
+         String.equal path expected_gh_dir
+         || (Sys.file_exists (Filename.concat dir "endpoint-probed")
+            && Sys.file_exists (frame_path ~dir "preflight-endpoint-root"))
+       in
+       write_all Unix.stderr
+         (trailer (if endpoint_ready then 0 else exit_code_preflight_order))
      | "chmod" :: mode :: _ ->
        record ("chmod-" ^ mode);
        write_all Unix.stderr (trailer 0)
@@ -299,6 +349,10 @@ let test_profile_picks_the_lane () =
 let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with_eio
   @@ fun () ->
+  Masc_test_deps.with_process_env
+    "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC"
+    (Some "60")
+  @@ fun () ->
   let base_path = temp_dir () in
   let dir = temp_dir () in
   write_runtime_toml ~base_path;
@@ -314,11 +368,52 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
   with
   | Error error -> failf "remote lane was not built: %s" error
   | Ok lane ->
+    check bool "the endpoint was probed before bootstrap" true
+      (Sys.file_exists (Filename.concat dir "endpoint-probed"));
+    let endpoint_check = decoded_request (frame_path ~dir "preflight-endpoint-root") in
+    check string "endpoint preflight request root" endpoint_remote_root
+      endpoint_check.remote_root;
+    let root = decoded_request (frame_path ~dir "mkdir-root") in
+    check
+      (list string)
+      "the endpoint bootstrap creates only the Keeper workspace"
+      [ "mkdir"; "-p"; expected_keeper_root ]
+      root.argv;
+    check string "bootstrap request root" endpoint_remote_root root.remote_root;
+    let keeper_check = decoded_request (frame_path ~dir "preflight-keeper-root") in
+    check
+      (list string)
+      "the Keeper root is checked only after bootstrap"
+      [ "test"; "-d"; expected_keeper_root ]
+      keeper_check.argv;
+    check bool "login setup does not run payload tool preflight" false
+      (Sys.file_exists (frame_path ~dir "preflight-git"));
+    let endpoint =
+      match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name with
+      | Error error -> failf "remote endpoint did not resolve: %s" error
+      | Ok endpoint ->
+        (match Keeper_sandbox_ssh.create ~base_path ~keeper_name ~endpoint () with
+         | Error error -> failf "remote endpoint was not built: %s" error
+         | Ok endpoint -> endpoint)
+    in
+    Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+    let preflight_failure = Filename.concat dir "fail-preflight-git" in
+    save preflight_failure "fail";
+    (match Keeper_sandbox_remote.check_preflight endpoint with
+     | Ok () -> fail "the forced preflight failure unexpectedly passed"
+     | Error error ->
+       check bool "the pre-login failure is cached" true
+         (contains "remote_git_unavailable:" error));
+    Sys.remove preflight_failure;
     check
       (list string)
       "the lane creates the endpoint's gh directory before logging in"
       [ "mkdir"; "-p"; expected_gh_dir ]
       (decoded_request (frame_path ~dir "mkdir")).argv;
+    let mkdir = decoded_request (frame_path ~dir "mkdir") in
+    check string "ordinary request root" expected_keeper_root
+      mkdir.remote_root;
+    check string "ordinary cwd" mkdir.remote_root mkdir.cwd;
     let streamed = Buffer.create 128 in
     let status, _stdout, _stderr =
       lane.Keeper_github_identity.run_login
@@ -381,6 +476,7 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
          ; "+"
          ]
          (decoded_request (frame_path ~dir "find-chmod")).argv);
+    save preflight_failure "fail";
     (match lane.Keeper_github_identity.observe_after_login () with
      | Error error -> failf "observing the endpoint identity failed: %s" error
      | Ok observation ->
@@ -408,9 +504,21 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
          string
          "the probe is explicitly endpoint-scoped"
          "endpoint_process_only"
-         (match observation.Keeper_github_identity.effective_probe_scope with
+       (match observation.Keeper_github_identity.effective_probe_scope with
           | `Host_process_credential_only -> "host_process_credential_only"
-          | `Endpoint_process_only -> "endpoint_process_only"))
+          | `Endpoint_process_only -> "endpoint_process_only"));
+    Sys.remove preflight_failure;
+    (match Keeper_sandbox_remote.check_preflight endpoint with
+     | Ok () -> ()
+     | Error error -> failf "stale preflight survived successful login: %s" error);
+    let git_check = decoded_request (frame_path ~dir "preflight-git") in
+    check string "the next payload pays for tool preflight"
+      expected_keeper_root
+      git_check.remote_root;
+    let identity_check = decoded_request (frame_path ~dir "preflight-identity") in
+    check string "the next payload refreshes identity preflight"
+      expected_keeper_root
+      identity_check.remote_root
 ;;
 
 let () =

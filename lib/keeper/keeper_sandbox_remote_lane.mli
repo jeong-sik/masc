@@ -43,19 +43,20 @@ val attached_guest_endpoint :
     Use {!endpoint} from inside a turn: a turn owns the guest's lifecycle and
     is entitled to start it, which a write to a stopped guest requires. *)
 
-val remote_root :
+val endpoint_root :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   (string, string) result
-(** The endpoint's root for path translation, without reaching the endpoint:
-    the registry entry's [remote_root] for Remote_ssh, the work volume's guest
-    mount for Micro_vm. *)
+(** The endpoint-wide root, without reaching the endpoint: the registry
+    entry's [remote_root] for Remote_ssh, the work volume's guest mount for
+    Micro_vm. *)
 
-val remote_keeper_root :
+val workspace_root :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   (string, string) result
-(** [<remote_root>/<sanitized keeper name>]. *)
+(** The resolved workspace used for path translation:
+    [<endpoint_root>/<sanitized keeper name>]. *)
 
 val is_guest_booted :
   config:Workspace.config ->

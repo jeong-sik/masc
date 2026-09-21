@@ -1523,9 +1523,12 @@ let init_default_strict ~config_path =
 (* Prepare one immutable runtime publication. Boot and config edits share the
    same catalog exclusion so a save cannot reactivate an unavailable route. *)
 let prepare_degraded_loaded ~config_path
-    ( ((runtimes, _, _, declared_media_failover, _, _, _) as loaded)
-    , exact_output_lane_decls )
-  =
+    (((runtimes, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+  (* [\[runtime\].media_failover] as the file declares it, read before the
+     catalog exclusion below drops what it could not resolve. The surface
+     needs both: the admitted list it draws, and what was dropped, which is
+     what stops the route being written back from a list missing them. *)
+  let _, _, _, declared_media_failover, _, _, _ = loaded in
   let* loaded, startup_degradation =
     match missing_runtime_model_capabilities ~config_path runtimes with
     | None -> Ok (loaded, None)

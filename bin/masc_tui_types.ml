@@ -1844,6 +1844,7 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_failing_count: int;
   fs_recovering_count: int;
   fs_turn_configuration_error_count: int;
+  fs_official_client_recovery_required_count: int;
   fs_paused_count: int;
   fs_target_reaction_capacity: int;
   fs_reaction_capacity_shortfall: int;
@@ -1851,6 +1852,7 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_running_names: string list;
   fs_executable_names: string list;
   fs_turn_configuration_error_names: string list;
+  fs_official_client_recovery_required_names: string list;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
 }
@@ -8527,11 +8529,11 @@ let plan_runtime_lane_edit (state : state) = function
                   (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
-        | Rename_lane, _ when not row.Tui_decode.rcr_lane_declared ->
+        | Remove_lane, _ when not row.Tui_decode.rcr_lane_declared ->
           Refuse_lane_edit
             (Lane_write_refused
                (Printf.sprintf
-                  "%s is a runtime, not a declared lane; there is no table to rename"
+                  "%s is a runtime, not a declared lane; there is no table to remove"
                   lane))
         | Rename_lane, _ ->
           (* The name is the routing key, so the writer changes the table and
@@ -8539,12 +8541,6 @@ let plan_runtime_lane_edit (state : state) = function
              a lane under the cursor: the file decides whether the lane is
              declared as its own table and whether the new name is free. *)
           Open_lane_rename_field lane
-        | Remove_lane, _ when not row.Tui_decode.rcr_lane_declared ->
-          Refuse_lane_edit
-            (Lane_write_refused
-               (Printf.sprintf
-                  "%s is a runtime, not a declared lane; there is no table to remove"
-                  lane))
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->

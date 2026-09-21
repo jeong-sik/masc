@@ -187,9 +187,16 @@ val invoke_turn_completion_hooks :
     provider-emitted terminal before their durable session is settled. *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
-(** Bytes one message contributes to the start-turn seed budget, in the
-    canonical MASC encoding. At or above what any adapter's own rendering
-    sends, so a budget checked with this cannot be exceeded downstream. *)
+(** Bytes one message occupies in the canonical MASC encoding
+    ({!encode_history_message}), which is what the range this module composes
+    is reported in.
+
+    This is not a ceiling for a lane's own window. Antigravity charges a role
+    label and a separator on top of this per message and charges its preamble
+    whether or not one is inserted, so a range that measures inside a
+    declared max-prompt-bytes here can still be refused there. A lane that has
+    a byte ceiling enforces it with its own measure, at the point the refusal
+    is raised. *)
 
 (** Who named the front of a start seed. *)
 type carried_start_front =
@@ -273,13 +280,15 @@ val carried_start_range
 
     [librarian_front] answers with the Librarian's saved position for exactly
     the messages it is handed; the caller owns that reading and its
-    validation. On {!Absorbed} the working state goes in front of the range
-    as extra system context and the range starts at whichever of the three
-    positions is latest, so a Librarian that read less than the last request
-    carried never moves the range back. The request itself can still grow:
-    the working state is bytes the range did not carry before, and it is
-    pinned, so a lane with a byte ceiling of its own has to be ready for a
-    composition that does not fit it.
+    validation. The range starts at whichever of the three positions is
+    latest, so a Librarian that read less than the last request carried never
+    moves the range back. The working state goes in front of the range, as
+    extra system context, exactly when that Librarian position is the one
+    that wins: a position the seed or the lane cut already passed stands for
+    atoms the range is carrying anyway, and summarising those would say twice
+    what the request already says. When it does win, the request grows by
+    those bytes, and they are pinned, so a lane with a byte ceiling of its
+    own has to be ready for a composition that does not fit it.
 
     [own_first_atom] is the front the lane already chose for its own reason
     (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).

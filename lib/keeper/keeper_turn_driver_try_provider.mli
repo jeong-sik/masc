@@ -63,10 +63,10 @@ type try_provider_ctx =
             turn, before its first composition (RFC
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
-  ; continuity : continuity option
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
         (** The durable seed, read only when neither the pair's ledger nor a
             refusal in this turn supplies the front. *)
+  ; continuity : continuity option
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate
             of this turn. A valid later front takes precedence over the

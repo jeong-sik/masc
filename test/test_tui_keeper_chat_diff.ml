@@ -33,6 +33,12 @@ let change_json ?(keeper = "alpha") ?(execution_id = Some "exec-edit-1")
           ]
     | `Write content ->
         `Assoc [ "kind", `String "write"; "content", `String content ]
+    | `Materialize (sha256, bytes) ->
+        `Assoc
+          [ "kind", `String "materialize"
+          ; "sha256", `String sha256
+          ; "bytes", `Int bytes
+          ]
   in
   `Assoc
     ([ "at", `Float 1.0
@@ -538,6 +544,23 @@ let test_write_states_unknown_previous_content () =
     (contains ~needle:"first\nsecond" body)
 ;;
 
+let test_materialize_names_the_blob_not_a_body () =
+  let sha256 = String.make 64 'a' in
+  let rows =
+    projected_rows Transcript.Full
+      (index [ change_json ~kind:(`Materialize (sha256, 4096)) () ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let body = body rows in
+  check bool "the blob's short sha is named" true
+    (contains ~needle:"materialized blob aaaaaaaaaaaa" body);
+  check bool "the byte count is the summary" true
+    (contains ~needle:"(4096 bytes materialized)" body);
+  check bool "no body is invented" false (contains ~needle:"```diff" body);
+  check bool "the log's limit is stated" true
+    (contains ~needle:"not its bytes" body)
+;;
+
 let test_failed_write_is_labelled_as_an_attempt () =
   let rows =
     projected_rows Transcript.Full
@@ -738,6 +761,8 @@ let () =
             test_typed_activity_details_follow_their_tool_row
         ; test_case "write states unknown before" `Quick
             test_write_states_unknown_previous_content
+        ; test_case "materialize names the blob, not a body" `Quick
+            test_materialize_names_the_blob_not_a_body
         ; test_case "failed write is an attempt" `Quick
             test_failed_write_is_labelled_as_an_attempt
         ; test_case "replace-all states unknown count" `Quick

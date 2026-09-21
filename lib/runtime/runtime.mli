@@ -945,6 +945,23 @@ val create_runtime_lane :
     output beyond an operator's reach. The Runtime surface marks which lanes a
     table declares. *)
 
+val rename_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  new_lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Rename [\[runtime.lanes."<lane_id>"\]] to [new_lane_id] and rewrite every
+    [\[runtime.assignments\]] entry that names it in the same validated write.
+    A lane's name is its routing key ({!resolve_assignment} reads a lane before
+    a runtime of the same id), so a file written with an assignment missed
+    would route that keeper to a lane that is no longer declared -- which is
+    also why this is not a remove followed by a create.
+
+    Refused when the file does not declare [lane_id], when it already declares
+    [new_lane_id] (as a lane or as a header the line editor can see), and when
+    the lane is not written as its own table. *)
+
 val remove_runtime_lane :
   ?runtime_config_path:string ->
   lane_id:string ->

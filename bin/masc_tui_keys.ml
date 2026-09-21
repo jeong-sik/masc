@@ -125,6 +125,12 @@ let runtime_keys =
          ~help:"edit [runtime].media_failover in the slot editor; refused while \
                 boot dropped one of its entries")
   ; Keeper_lanes_only
+      (b Act "R" "rename lane"
+         ~help:"give the lane under the cursor another name; the assignments \
+                that route to it are rewritten in the same write. Refused when \
+                [runtime].default names it; move the default first. The field \
+                opens on the name it has now")
+  ; Keeper_lanes_only
       (b Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
                 assigned to it")

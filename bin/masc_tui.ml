@@ -7572,8 +7572,12 @@ let launch_runtime_catalog_load state ~mailbox =
    in use is refused there, with the reason drawn on the refusal row. *)
 let handle_runtime_lane_edit state ~mailbox edit =
   match Masc_tui_types.plan_runtime_lane_edit state edit with
+  | Masc_tui_types.Open_lane_rename_field lane ->
+      state.runtime_lane_name_draft <-
+        Some (Masc_tui_types.Renaming_lane { lane; draft = lane });
+      Masc_tui_types.dismiss_runtime_lane_notice state
   | Masc_tui_types.Open_lane_name_field ->
-      state.runtime_lane_name_draft <- Some "";
+      state.runtime_lane_name_draft <- Some (Masc_tui_types.Naming_new_lane "");
       Masc_tui_types.dismiss_runtime_lane_notice state;
       launch_runtime_catalog_load state ~mailbox
   | Masc_tui_types.Arm_lane_removal lane ->
@@ -17359,8 +17363,11 @@ and is loaded on demand through keeper_skill.
                     (Option.value state.preset_save_draft ~default:"" ^ text)
             | Some Text_runtime_lane_name ->
                 state.runtime_lane_name_draft <-
-                  Some
-                    (Option.value state.runtime_lane_name_draft ~default:"" ^ text)
+                  Option.map
+                    (fun entry ->
+                      Masc_tui_types.lane_name_entry_with_draft entry
+                        (Masc_tui_types.lane_name_entry_draft entry ^ text))
+                    state.runtime_lane_name_draft
             (* The first paste replaces the selected current value; later
                pastes append, matching typed input. *)
             | Some Text_runtime_param ->
@@ -17935,23 +17942,36 @@ and is loaded on demand through keeper_skill.
               = Some Text_runtime_lane_name ->
            (match state.runtime_lane_name_draft with
             | None -> ()
-            | Some draft ->
+            | Some entry ->
+              let draft = Masc_tui_types.lane_name_entry_draft entry in
+              let set text =
+                state.runtime_lane_name_draft <-
+                  Some (Masc_tui_types.lane_name_entry_with_draft entry text)
+              in
               (match k with
                | "esc" -> state.runtime_lane_name_draft <- None
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if not (String.equal name "") then begin
                    state.runtime_lane_name_draft <- None;
-                   state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
-                   state.runtime_lane_pick_cursor <- 0;
-                   Masc_tui_types.dismiss_runtime_lane_notice state
+                   Masc_tui_types.dismiss_runtime_lane_notice state;
+                   match entry with
+                   | Masc_tui_types.Naming_new_lane _ ->
+                     (* A lane is its candidates, so it comes to exist with
+                        one: the picker that opens here declares it. *)
+                     state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
+                     state.runtime_lane_pick_cursor <- 0
+                   | Masc_tui_types.Renaming_lane { lane; _ } ->
+                     (* The rename lands in one write, references and all, so
+                        there is nothing to pick and nothing to follow. *)
+                     launch_runtime_lane_write state ~mailbox:async_messages
+                       ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+                       Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
                  end
                | "\127" | "\b" | "backspace" ->
                  let length = String.length draft in
-                 if length > 0 then
-                   state.runtime_lane_name_draft <- Some (String.sub draft 0 (length - 1))
-               | s when String.length s = 1 && Char.code s.[0] >= 32 ->
-                 state.runtime_lane_name_draft <- Some (draft ^ s)
+                 if length > 0 then set (String.sub draft 0 (length - 1))
+               | s when String.length s = 1 && Char.code s.[0] >= 32 -> set (draft ^ s)
                | _ -> ()))
        | Some k
          when text_input_target state ~compact_viewport

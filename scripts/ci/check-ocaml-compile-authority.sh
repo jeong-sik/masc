@@ -17,7 +17,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-dune_root="${repo_root}/dune"
 
 fail() {
   echo "OCaml compile authority drift: $*" >&2
@@ -25,62 +24,48 @@ fail() {
 }
 
 
-# The root dune carries the tree-wide warning mask in two (flags (:standard …))
-# lists, dev and release. This used to be checked by matching the whole list as
-# one literal string, which pinned the guard to a single exact spelling: adding
-# -w +32 to that same list satisfied the check's stated intent and broke the
-# check. Assert one flag at a time against the flag lists so another flag can be
-# added without editing this script, while dropping one still fails.
+# The root dune carries the tree-wide warning mask in dev and release. Inspect
+# Dune's effective flags rather than the source layout: whitespace, line breaks,
+# or another flag in the stanza must not change this policy check.
 #
 # -w +32 (unused value declaration) is load-bearing here, not cosmetic. It was
 # previously decided per library -- 84 of the 121 stanzas under lib/ opted in,
 # 37 did not -- and an unreachable value in one of those 37 produced no signal
 # at all. Removing it from the root returns the tree to that state silently.
-#
-# Read only the top-level env stanza. Nested subdir env stanzas may intentionally
-# override warnings for external sources and do not own the repository-wide
-# compile policy asserted here. Within that stanza, key on "(:standard -" rather
-# than on a required flag so a missing flag still reaches the diagnostic below.
-flag_lines="$(
-  awk '
-    /^\(env$/ { in_root_env = 1; next }
-    in_root_env && /^\(/ { exit }
-    in_root_env && index($0, "(:standard -") { print }
-  ' "${dune_root}"
-)"
-flag_line_count="$(grep -c . <<<"${flag_lines}" || true)"
-[ "${flag_line_count}" -eq 2 ] \
-  || fail "root dune env must have exactly 2 (:standard …) flag lists (dev, release), found ${flag_line_count}"
-for required_flag in '-w +32' '+69' '-warn-error +a'; do
-  present="$(grep -Fc -- "${required_flag}" <<<"${flag_lines}" || true)"
-  [ "${present}" -eq 2 ] \
-    || fail "root dune env must set ${required_flag} in dev and release, found it in ${present} of 2"
-done
+assert_strict_root_flags() {
+  local profile="$1"
+  local flags="$2"
+  local previous=""
+  local has_warning_32=0
+  local has_warning_69=0
+  local has_warn_error_all=0
+  local token
 
-vendor_warning_override_is_valid() {
-  local lines="$1"
-  local line_count correct_count bare_count
-  line_count="$(grep -c . <<<"${lines}" || true)"
-  correct_count="$(grep -Fc -- '(:standard -w -69)' <<<"${lines}" || true)"
-  bare_count="$(grep -Fc -- '(:standard -69)' <<<"${lines}" || true)"
-  [ "${line_count}" -eq 2 ] \
-    && [ "${correct_count}" -eq 2 ] \
-    && [ "${bare_count}" -eq 0 ]
+  while IFS= read -r token; do
+    case "${previous}" in
+      -w)
+        [[ "${token}" == *32* ]] && has_warning_32=1
+        [[ "${token}" == *69* ]] && has_warning_69=1
+        ;;
+      -warn-error)
+        [[ "${token}" == *+a* ]] && has_warn_error_all=1
+        ;;
+    esac
+    previous="${token}"
+  done < <(tr '()' '  ' <<<"${flags}" | tr -s '[:space:]' '\n')
+
+  [ "${has_warning_32}" -eq 1 ] \
+    || fail "${profile} root flags lost warning 32: ${flags}"
+  [ "${has_warning_69}" -eq 1 ] \
+    || fail "${profile} root flags lost warning 69: ${flags}"
+  [ "${has_warn_error_all}" -eq 1 ] \
+    || fail "${profile} root flags lost -warn-error +a: ${flags}"
 }
 
-vendor_flag_lines="$(
-  awk '
-    /^\(subdir vendor$/ { in_vendor = 1; next }
-    in_vendor && /^\(/ { exit }
-    in_vendor && index($0, "(flags ") { print }
-  ' "${dune_root}"
-)"
-vendor_warning_override_is_valid "${vendor_flag_lines}" \
-  || fail "vendor dev and release must append (:standard -w -69)"
+cd "${repo_root}"
+for profile in dev release; do
+  root_flags="$(dune printenv --profile "${profile}" . --field flags)"
+  assert_strict_root_flags "${profile}" "${root_flags}"
+done
 
-bare_warning_fixture=$'  (dev (flags (:standard -69)))\n  (release (flags (:standard -69)))'
-if vendor_warning_override_is_valid "${bare_warning_fixture}"; then
-  fail "self-test accepted bare -69 without the -w warning selector"
-fi
-
-echo "OCaml compile authority: PASS (root warnings are strict; vendor disables warning 69 through -w)"
+echo "OCaml compile authority: PASS (effective dev and release root warnings are strict)"

@@ -745,8 +745,9 @@ type runtime_resolved_lane = {
       (** [true] when a [runtime.lanes.<id>] table declares this lane, so a
           keeper assigned to it walks every candidate and the lane editor can
           reorder or remove it. [false] is the one-candidate lane an assignment
-          naming a runtime resolves to: nothing declares it, it walks no
-          failover, and there is no table to remove. *)
+          naming a runtime resolves to: nothing declares it. A declared lane
+          of one candidate walks no failover either; what separates this one
+          is that there is no table to remove. *)
 }
 
 type runtime_resolved_snapshot = {

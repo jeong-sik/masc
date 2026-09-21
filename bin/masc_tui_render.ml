@@ -11316,8 +11316,9 @@ let render_runtime (state : state) =
           let lane_fact =
             (* [Lane_undeclared] reads like a one-candidate lane on the wire --
                one candidate, first position -- so until this row said so there
-               was nothing on the surface telling them apart. It walks no
-               failover and [D] has no table to remove. *)
+               was nothing on the surface telling them apart. A declared lane
+               of one candidate walks no failover either; what separates this
+               one is that [D] has no table to remove. *)
             match Masc_tui_types.runtime_lane_fact_of_row candidate with
             | Masc_tui_types.Lane_undeclared ->
               [ (Theme.recede ()) ^ "runtime, not a declared lane" ^ Ansi.reset ]

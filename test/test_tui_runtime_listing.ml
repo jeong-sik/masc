@@ -460,13 +460,16 @@ let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
   (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
    | Ok snapshot -> state.runtime_surface <- Some snapshot
    | Error detail -> Alcotest.fail detail);
-  match state.runtime_surface with
-  | None -> Alcotest.fail "the surface did not join"
-  | Some snapshot ->
-    Alcotest.(check (list string)) "one fact per row"
-      ["single candidate"; "runtime, not a declared lane"; "head"; "fallback #1"]
-      (List.map (fun row -> fact_text (runtime_lane_fact_of_row row))
-         snapshot.Masc.Tui_decode.rss_candidates)
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "the surface did not join"
+   | Some snapshot ->
+     Alcotest.(check (list string)) "one fact per row"
+       ["single candidate"; "runtime, not a declared lane"; "head"; "fallback #1"]
+       (List.map (fun row -> fact_text (runtime_lane_fact_of_row row))
+          snapshot.Masc.Tui_decode.rss_candidates));
+  state.runtime_cursor <- 1;
+  expect_plan "D refuses the runtime row before arming" state remove
+    "refuse: b is a runtime, not a declared lane; there is no table to remove"
 
 (* An undeclared lane carries the id of the runtime it rests on, so offering
    it as a lane put the same assignment in the picker twice -- once labelled a

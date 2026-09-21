@@ -8437,6 +8437,12 @@ let plan_runtime_lane_edit (state : state) = function
                   (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
+        | Remove_lane, _ when not row.Tui_decode.rcr_lane_declared ->
+          Refuse_lane_edit
+            (Lane_write_refused
+               (Printf.sprintf
+                  "%s is a runtime, not a declared lane; there is no table to remove"
+                  lane))
         | Remove_lane, _ ->
           (match state.runtime_lane_remove_armed with
            | Some armed when String.equal armed lane ->
@@ -8455,7 +8461,8 @@ type runtime_lane_fact =
       (* No [runtime.lanes.<id>] table declares this lane: it is the single
          candidate an assignment naming a runtime rests on. It reads exactly
          like [Lane_single_candidate] on the wire -- one candidate, first
-         position -- and walks no failover. *)
+         position. A declared lane of one candidate walks no failover either;
+         what separates this one is that [D] has no table to remove. *)
   | Lane_single_candidate
   | Lane_head
   | Lane_fallback of int

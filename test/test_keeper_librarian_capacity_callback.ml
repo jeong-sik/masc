@@ -135,7 +135,7 @@ let test_prefit_real_continuity ~base_path () =
     |> Result.map_error B.append_error_to_string |> get;
   let resolver = Fixture.resolver_snapshot ~source:"prefit-cli-only" [] in
   ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
-    ~cli_slot_ids:[Fixture.cli_primary_runtime] resolver);
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
   let prepare () = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
   let input prepared : Keeper_librarian.input =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
@@ -163,18 +163,58 @@ let test_prefit_real_continuity ~base_path () =
   let capacity : Keeper_lane_cli_oneshot.input_capacity =
     {runtime_id=Fixture.cli_primary_runtime;
      capacity={actual_chars=chars (rendered full (input full));max_chars}} in
+  let missing_state = `Assoc ["new_claims", `List []; "dropped", `List [];
+    "working_contexts", `List []] in
+  let null_state = match missing_state with
+    | `Assoc fields -> `Assoc (("working_state", `Null) :: fields)
+    | _ -> Alcotest.fail "expected fixture object" in
+  let invalid_calls = ref [] in
+  let invalid_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    invalid_calls := !invalid_calls @ [runtime_id];
+    Ok (Yojson.Safe.to_string
+      (if runtime_id = Fixture.cli_primary_runtime then null_state else missing_state)) in
+  let invalid_committed = ref false in
+  Runtime.run_best_effort ~trigger:Runtime.Durable_range
+    ~input_projection:Runtime.Already_selected_range ~continuity:half
+    ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id half |> get)
+    ~cli_runner:invalid_runner ~on_memory_committed:(fun () -> invalid_committed := true)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input half);
+  Alcotest.(check (list string)) "missing working states advance through declared slots once"
+    [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !invalid_calls;
+  Alcotest.(check bool) "missing working state never publishes Memory" false !invalid_committed;
+  Alcotest.(check bool) "missing working state leaves no Memory snapshot" true
+    (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get |> Option.is_none);
+  Alcotest.(check bool) "missing working state leaves no range receipt" false
+    (P.memory_committed ~config ~keeper_name:keeper_id half |> get);
+  Alcotest.(check bool) "missing working state leaves no continuity frontier" true
+    (P.read ~config ~keeper_name:keeper_id |> get |> Option.is_none);
+  (match Runtime.For_testing.execute_exact_output_classified
+     ~cli_runner:invalid_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
+     ~selected_input:(input half) ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
+   | Ok ((selection, _), _) ->
+     Alcotest.(check bool) "ordinary Memory still accepts null working state" true
+       (Option.is_none selection.Keeper_librarian.working_state)
+   | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
   let calls = ref [] in
   let execute prepared state =
     let input = input prepared in
     let expected = rendered prepared input in
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
       calls := prompt :: !calls;
       Alcotest.(check string) "prefit and dispatch use identical full text" expected prompt;
       Alcotest.(check bool) "no oversized CLI probe after learning the bound" true
         (chars prompt <= max_chars);
+      if List.length !calls = 1 then (
+        Alcotest.(check string) "null response belongs to first declared candidate"
+          Fixture.cli_primary_runtime runtime_id;
+        Ok (Yojson.Safe.to_string null_state))
+      else (
+      if List.length !calls = 2 then
+        Alcotest.(check string) "valid successor handles the same source"
+          Fixture.cli_secondary_runtime runtime_id;
       Ok (Yojson.Safe.to_string (`Assoc [
         "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
-        "working_state", `String state])) in
+        "working_state", `String state]))) in
     let committed = ref false and memory_committed = ref false in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     Runtime.run_best_effort ~trigger:Runtime.Durable_range
@@ -212,7 +252,7 @@ let test_prefit_real_continuity ~base_path () =
   let last = fit (prepare ()) in
   Alcotest.(check int) "final selected group reaches the completed boundary" 4 (P.end_atom last);
   execute last "Completed history is saved; publication still requires explicit approval.";
-  Alcotest.(check int) "only the three fitted groups were dispatched" 3 (List.length !calls);
+  Alcotest.(check int) "three fitted groups plus one rejected candidate were dispatched" 4 (List.length !calls);
   Alcotest.(check bool) "no completed work remains; unfinished work is not selected" true
     (P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> Option.is_none);
   let snapshot = P.read ~config ~keeper_name:keeper_id |> get |> some in

@@ -1619,7 +1619,7 @@ let test_dashboard_aggregate_separates_unsettled_from_malformed () =
         ~base_dir:(Filename.concat dir ".masc/tool_calls")
         ()
     in
-    let row fields =
+    let row tool_use_id fields =
       `Assoc
         ([ ("ts", `Float (Unix.gettimeofday ()))
          ; ("keeper", `String "k")
@@ -1641,6 +1641,42 @@ let test_dashboard_aggregate_separates_unsettled_from_malformed () =
       (Safe_ops.json_int ~default:(-1) "malformed" summary);
     Alcotest.(check int) "unsettled rows stay out of settled total" 0
       (Safe_ops.json_int ~default:(-1) "total" summary))
+
+let test_dashboard_aggregate_folds_lifecycle_rows_by_tool_use_id () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let row fields =
+      `Assoc
+        ([ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "pending")
+         ; ("result_bytes", `Int 7)
+         ; ("duration_ms", `Float 2.0)
+         ; ("tool_use_id", `String tool_use_id)
+         ]
+         @ fields)
+    in
+    Dated_jsonl.append store (row "call-1" [ "wire_outcome", `String "unknown" ]);
+    Dated_jsonl.append store (row "call-1" [ "wire_outcome", `String "ok" ]);
+    Dated_jsonl.append store (row "call-2" [ "wire_outcome", `String "unknown" ]);
+    Dated_jsonl.append store (row "call-2" [ "wire_outcome", `String "unknown" ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "one provider call" 1
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int) "terminal result wins" 1
+      (Safe_ops.json_int ~default:(-1) "success" summary);
+    Alcotest.(check int) "two dispatch rows are one unsettled call" 1
+      (Safe_ops.json_int ~default:(-1) "unsettled" summary);
+    let by_tool = Yojson.Safe.Util.member "by_tool" summary in
+    let bucket = find_bucket "masc_status" by_tool in
+    Alcotest.(check int) "tool histogram is call-level" 1
+      (Safe_ops.json_int ~default:(-1) "calls" bucket))
 
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
@@ -2710,6 +2746,8 @@ let () =
             test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
         ; eio_test "dashboard aggregate separates unsettled and malformed"
             test_dashboard_aggregate_separates_unsettled_from_malformed
+        ; eio_test "dashboard aggregate folds lifecycle rows by tool use id"
+            test_dashboard_aggregate_folds_lifecycle_rows_by_tool_use_id
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"

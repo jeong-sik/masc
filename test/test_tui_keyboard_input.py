@@ -7488,6 +7488,12 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
                         "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        # These two keys are a pair. Turn_record.of_json
+                        # defaults a missing usage_scope to
+                        # Usage_scope_unavailable, and /context then omits
+                        # the token count instead of failing loudly (task-1635:
+                        # deleting only usage_scope reproduced "Context
+                        # composition omitted 50.0k / 200.0k tokens").
                         "response_observed_model_input": None,
                         "usage_scope": "per_request",
                         "raw_trace_run_ref": None,

@@ -1035,7 +1035,10 @@ let run_best_effort
                snapshot.revision
                (List.length snapshot.facts)
                (List.length snapshot.change.added)
-               (List.length snapshot.change.removed)
+               (List.length snapshot.change.removed);
+             (* A completion observer may request cancellation and return
+                normally. Propagate it here even when no later I/O yields. *)
+             Eio.Fiber.check ()
            | Error error ->
              let detail = extraction_error_to_string error in
              complete
@@ -1076,7 +1079,8 @@ let run_best_effort
                     "memory os librarian failed lane=%s: %s"
                     exact_lane_id
                     detail)
-               ~cadence_deferred:true
+               ~cadence_deferred:true;
+             Eio.Fiber.check ()
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
             journal — the record of what the librarian did on this keeper —

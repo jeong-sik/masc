@@ -69,7 +69,14 @@ val request_to_yojson :
   Yojson.Safe.t
 
 val answer_of_yojson : Yojson.Safe.t -> (answer, string) result
+(** Rejects non-finite values in every numeric answer field, including
+    confidence and probability maps, before they can enter durable JSON. *)
+
+val answer_to_yojson : answer -> Yojson.Safe.t
 val eval_response_of_yojson : Yojson.Safe.t -> (eval_response, string) result
+(** Usage is known only when both token counts are non-negative integers.
+    Absent or malformed usage stays [None] without rejecting valid answers;
+    it is never fabricated as a measured zero. *)
 
 (** The closed option set of one [Choice] question. The request's criteria and
     the decoding of its answer are both built from this one value, so they

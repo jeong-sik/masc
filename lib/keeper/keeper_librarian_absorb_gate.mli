@@ -67,13 +67,18 @@ type outcome =
       { reason : string
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
+      ; conveyed : source_verdict list
+      ; unjudged : Keeper_memory_os_types.absorbed_statement list
       ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
       }
       (** the model stopped answering. What the gate had decided by then
           stays decided: [unjudgeable] (too large to ask,
           {!request_bytes_limit}) and [left] (a completed answer showed a
           statement not conveyed) stay current; [absorbed] is the answer's
-          list without them, applied as answered. [reason] is for the log. *)
+          list without them, applied as answered. [conveyed] retains completed
+          positive verdicts separately from fail-open absorptions. [unjudged]
+          includes every source or claim classified as absent before requests,
+          including groups not visited after the failure. *)
   | Judged of judged
 
 val conveyed_boundary : float
@@ -123,6 +128,44 @@ val judge
 
 (** {1 Entry point} *)
 
+type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
+
+type evaluation =
+  { endpoint : string
+  ; model : string
+  ; state : Yojson.Safe.t
+  ; questions : (string * Typesafeai_types.question) list
+  ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
+  }
+(** [endpoint] is already an observation URL without userinfo, query or
+    fragment. It is not the credential-bearing outbound destination. *)
+
+type run_result =
+  | Skipped of
+      { reason : skip_reason
+      ; absorbed : Keeper_memory_os_types.absorbed_statement list
+      }
+  | Evaluated of
+      { outcome : outcome
+      ; evaluations : evaluation list
+      }
+
+val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
+val run_result_to_yojson : run_result -> Yojson.Safe.t
+(** Observed gate outcome and the actual evaluation responses, for the
+    Librarian run's existing output payload. Valid Noul values are preserved
+    without rounding and the applied [conveyed_boundary] is recorded;
+    rejected answers retain their decoder diagnostic.
+    Endpoint and model are captured once per run; a request failure has no
+    fabricated response model or request receipt. Endpoint observations remove
+    userinfo, query and fragment before constructing [evaluation]. HTTP failures
+    retain response bytes except configured credentials; invalid UTF-8 uses
+    the existing base64 representation. Invalid JSON and rejected typed
+    responses remain inspectable.
+    State, question wording and raw responses are private run evidence, like
+    the existing [actual_input]. The existing exact-run HTTP detail requires
+    CanAdmin; this payload is not a public or secret-free projection. *)
+
 val run
   :  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
@@ -130,8 +173,8 @@ val run
   -> new_claims:Keeper_memory_os_types.fact list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> unit
-  -> Keeper_memory_os_types.absorbed_statement list
-(** The absorptions to apply. Reads {!Typesafeai_config}: without a key, or
-    with the lane turned off, returns [absorbed] unchanged and says nothing.
-    Otherwise judges with {!Typesafeai_client.evaluate} and writes one keeper
-    log line with the counts, or the reason the gate stayed open. *)
+  -> run_result
+(** Reads {!Typesafeai_config} and judges with {!Typesafeai_client.evaluate}
+    when enabled. {!absorbed_of_run} is the unchanged application decision;
+    the result also retains skipped reasons and actual request observations
+    for the existing durable Librarian run detail. *)

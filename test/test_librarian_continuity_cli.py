@@ -327,6 +327,10 @@ def main() -> None:
             0.0,
         ]
         assert generation_count == 9 and judge_count == 5
+        failed_judgment = samples[2]["progress"][1]["failure"]["error"]
+        assert "503" in failed_judgment
+        assert f"http://127.0.0.1:{port}/judge" in failed_judgment
+        assert "synthetic judge unavailable" in failed_judgment
         generations = [r for r in requests if r["path"] == "/v1/chat/completions"]
         absent_messages = generations[3]["body"]["messages"]
         assert "ORCHID-731" not in json.dumps(absent_messages), absent_messages

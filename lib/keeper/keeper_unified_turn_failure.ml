@@ -51,7 +51,12 @@ let record_failure_observation
         Log.Keeper.warn
           ~keeper_name:meta.name
           "turn failure could not verify current official-client recovery: %s"
-          detail)
+          detail;
+        (* The store could not prove that the recovery was resolved. Keep the
+           actionable cause: dropping it makes fleet health misclassify the
+           Keeper as retrying without operator help. A later successful turn
+           or confirmed recovery resolution still clears the observation. *)
+        publish_reason ())
    | Keeper_registry.Turn_consecutive_failures _
    | Keeper_registry.Heartbeat_consecutive_failures _
    | Keeper_registry.Stale_termination_storm _

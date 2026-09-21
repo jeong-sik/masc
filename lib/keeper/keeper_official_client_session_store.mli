@@ -202,7 +202,11 @@ val commit_if_input_recovery_current :
 (** Run [commit] under the durable session lock only while the same runtime,
     recovery id, and typed input-rejection reason are still current. [false]
     means recovery was resolved or replaced before the commit. The callback
-    must not suspend. *)
+    must not suspend or re-enter this session store. It runs while the file
+    lock is held, so any lock it acquires establishes the order session-store
+    lock before callback lock; callers must not acquire these in reverse. The
+    callback stays inside the lock so recovery cannot change between the
+    current-state check and its publication. *)
 
 val claim_error_to_string : claim_error -> string
 val core_error_of_claim_error : claim_error -> Agent_core.Error.t

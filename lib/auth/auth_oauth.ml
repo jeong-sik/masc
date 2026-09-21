@@ -970,7 +970,7 @@ let rotate_refresh_token
         in
         (match remove_file_if_exists old_access_path with
          | () -> ()
-         | exception exn ->
+         | exception exn -> (* cancel-guard-ok: remove_file_if_exists is Sys.remove and performs no Eio operation. *)
            Log.Auth.warn
              "oauth: superseded access record cleanup failed error=%s"
              (Printexc.to_string exn));

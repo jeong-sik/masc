@@ -7471,12 +7471,6 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     match pick, Masc_tui_types.runtime_lane_candidate_write_refusal state with
     | Masc_tui_types.Pick_conversation_lane _, Some notice ->
         state.runtime_lane_notice <- Some notice
-    | Masc_tui_types.Pick_media_failover, _
-      when Option.is_some (Masc_tui_types.media_failover_write_refusal state) ->
-        (* The route is written as a whole list, and the list on screen is
-           missing whatever boot dropped from it. *)
-        state.runtime_lane_notice <-
-          Masc_tui_types.media_failover_write_refusal state
     | Masc_tui_types.Pick_route_default, _ ->
         (* One entry, replaced rather than joined, so [existing] is not a list
            this write extends and a stale reading of it cannot be undone. *)

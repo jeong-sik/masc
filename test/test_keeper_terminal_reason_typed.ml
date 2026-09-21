@@ -1180,11 +1180,20 @@ max-concurrent = 1
             ; call "tool_read_file" Tool_result.Ok
             ; call "tool_write_file" Tool_result.Error ] }
       in
+      let settlement : Masc.Keeper_agent_run.turn_settlement =
+        { result = Ok result
+        ; degraded_retry_applied = Some applied_lane
+        ; degraded_retry_deferred = None
+        }
+      in
       let observation = Masc.Keeper_world_observation.observe
         ~pending_board_events:(Some []) ~config ~meta in
       Masc.Keeper_unified_metrics_decision.append_decision_record
         ~config ~meta ~observation ~latency_ms:3 ~outcome:"success"
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+        ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+        ~degraded_retry_applied:settlement.degraded_retry_applied
+        ~degraded_retry_deferred:settlement.degraded_retry_deferred
         ~result:(Some result) ();
       let log_path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
       let row = Fs_compat.load_file log_path |> String.split_on_char '\n'
@@ -1196,6 +1205,14 @@ max-concurrent = 1
         (Yojson.Safe.Util.member "tools_used" row =
          `List [ `String "tool_read_file"; `String "tool_read_file";
                  `String "tool_write_file" ]);
+      check "decision carries the settlement's applied retry unchanged"
+        (Yojson.Safe.Util.member "degraded_retry_applied" row
+         = Masc.Keeper_execution_receipt.degraded_retry_json
+             settlement.degraded_retry_applied);
+      check "decision carries the settlement's absent deferred retry unchanged"
+        (Yojson.Safe.Util.member "degraded_retry_deferred" row
+         = Masc.Keeper_execution_receipt.degraded_retry_json
+             settlement.degraded_retry_deferred);
       let aggregate = Model_inference_metrics.compute ~base_path:workspace_dir
         ~window_minutes:60 in
       let total_calls = List.fold_left

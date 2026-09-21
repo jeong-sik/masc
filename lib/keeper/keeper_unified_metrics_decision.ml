@@ -12,6 +12,15 @@ open Keeper_context_runtime
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
+type execution_path =
+  | Direct_turn
+  | Autonomous_cycle
+
+let execution_path_to_string = function
+  | Direct_turn -> "direct_turn"
+  | Autonomous_cycle -> "autonomous_cycle"
+;;
+
 let append_decision_record
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -20,9 +29,9 @@ let append_decision_record
     ~(latency_ms : int)
     ~(outcome : string)
     ?channel
-    ?(degraded_retry_applied = false)
-    ?degraded_retry_runtime
-    ?fallback_reason
+    ~(execution_path : execution_path)
+    ~(degraded_retry_applied : Keeper_error_classify.degraded_retry option)
+    ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
     ?turn_mode
     ?(result : Keeper_agent_run.run_result option = None)
     ?(usage_resolution : Keeper_usage_resolution.t option = None)
@@ -149,10 +158,17 @@ let append_decision_record
             (Keeper_world_observation.channel_to_string
                channel) );
         ("outcome", `String outcome);
-        ("degraded_retry_applied", `Bool degraded_retry_applied);
-        ( "degraded_retry_runtime",
-          Json_util.string_opt_to_json degraded_retry_runtime );
-        ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
+        (* Which path wrote the row. Without it the two are indistinguishable
+           once [fallback_reason] is gone, and a cross-path disagreement cannot
+           be measured from the log at all. *)
+        ("execution_path", `String (execution_path_to_string execution_path));
+        (* One object per lane, the same shape the receipt writes. Three flat
+           fields with an optional bool defaulting to false is what let the two
+           surfaces disagree about the same turn (#37376). *)
+        ( "degraded_retry_applied",
+          Keeper_execution_receipt.degraded_retry_json degraded_retry_applied );
+        ( "degraded_retry_deferred",
+          Keeper_execution_receipt.degraded_retry_json degraded_retry_deferred );
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
         ("duration_ms", `Int latency_ms);

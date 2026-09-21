@@ -1,0 +1,14 @@
+task: task-1629
+head: f173e89
+pr: https://github.com/jeong-sik/masc/pull/37468
+
+verification:
+- python3 scripts/ci/check-deleted-symbol-references.py --self-test: exit 0
+- python3 scripts/ci/check-deleted-symbol-references.py origin/main: exit 0
+  output: deleted top-level names: 0; added identifiers compared: 0; no deleted-name references found
+- python3 -m py_compile scripts/ci/check-deleted-symbol-references.py: exit 0
+- git diff --check: exit 0
+
+scope:
+- scripts/ci/check-deleted-symbol-references.py
+- scripts/ci/run-lint-suite.sh

@@ -113,7 +113,9 @@ attribute_failures() {
 }
 
 # The ledger of suites that left output in the log, in the order dune ran
-# them: the command line dune printed, then the suite's first output line.
+# them: a test/*.exe or test/*.py command line, then its first output line.
+# Other Dune actions (generators, compilers, linkers) terminate the preceding
+# entry but never become a suite entry themselves.
 # Dune holds a suite's output until the suite exits, so a log ends with the
 # last suite that finished -- and when dune exits nonzero without printing
 # a failure header, no header reader has anything to resolve and this
@@ -126,10 +128,18 @@ attribute_failures() {
 # line here and stays the header reader's business.
 suite_output_ledger() {
   awk '
+    function is_suite_command(line) {
+      if (line !~ /^\(cd _build\/[^ ]*\/test(\/[^ ]*)? && /) return 0
+      return line ~ /&& ([^ ]*\/)?test_[^ )]+\.exe([ )]|$)/ \
+          || line ~ /&& ([^ ]*\/)?python[0-9.]* +\.\/test_[^ )]+\.py([ )]|$)/
+    }
     /^\(cd _build\// {
       if (cmd != "") printf "%s\t%s\n", cmd, (first == "" ? "(no output before the log ends)" : first)
-      cmd = $0; sub(/^\(cd /, "", cmd); sub(/\)$/, "", cmd)
+      cmd = ""
       first = ""
+      if (is_suite_command($0)) {
+        cmd = $0; sub(/^\(cd /, "", cmd); sub(/\)$/, "", cmd)
+      }
       next
     }
     cmd != "" && first == "" && $0 !~ /^-+$/ { first = $0 }
@@ -481,6 +491,10 @@ EOF
   cat > "$ledger_log" <<'EOF'
 (cd _build/default/test && /usr/bin/python3 ./test_tui_keeper_current_failure_pty.py ../bin/masc_tui.exe)
 keeper current failure: PASS
+(cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+generated sse_event.ml
+(cd _build/default/test && ./test_keeper_projection_change.exe)
+keeper projection change: PASS
 (cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe)
 tui keyboard PTY regression: PASS
 ----------------------------------------
@@ -490,11 +504,11 @@ BrokenPipeError: [Errno 32] Broken pipe
 (cd _build/default/test && /usr/bin/python3 ./test_tui_lane_pagination.py ../bin/masc_tui.exe)
 EOF
   ledger="$(suite_output_ledger "$ledger_log" | paste -sd ';' - | tr '\t' '|')"
-  [ "$ledger" = "_build/default/test && /usr/bin/python3 ./test_tui_keeper_current_failure_pty.py ../bin/masc_tui.exe|keeper current failure: PASS;_build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe|tui keyboard PTY regression: PASS;_build/default/test && /usr/bin/python3 ./test_tui_lane_pagination.py ../bin/masc_tui.exe|(no output before the log ends)" ] \
+  [ "$ledger" = "_build/default/test && /usr/bin/python3 ./test_tui_keeper_current_failure_pty.py ../bin/masc_tui.exe|keeper current failure: PASS;_build/default/test && ./test_keeper_projection_change.exe|keeper projection change: PASS;_build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe|tui keyboard PTY regression: PASS;_build/default/test && /usr/bin/python3 ./test_tui_lane_pagination.py ../bin/masc_tui.exe|(no output before the log ends)" ] \
     || { echo "[test-suite] self-test FAIL - the output ledger misread the run: $ledger" >&2
          rm -f "$ledger_log"; exit 1; }
   rm -f "$ledger_log"
-  echo "[test-suite] self-test OK - the output ledger names every suite that spoke, in run order"
+  echo "[test-suite] self-test OK - the output ledger names test suites, not build actions"
 
   ledger_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-empty-ledger.XXXXXX")"
   printf '%s\n' 'dune exited before printing a suite command' > "$ledger_log"
@@ -726,7 +740,7 @@ if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
   if [ -n "$ledger" ]; then
     printf '%s\n' "$ledger" | sed 's/^/  /'
   else
-    echo "  (none: no (cd _build/...) line in the log — either no suite printed"
+    echo "  (none: no test-suite command in the log — either no suite printed"
     echo "  anything, or dune's command format changed)"
   fi
   echo

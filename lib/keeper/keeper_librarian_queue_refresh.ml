@@ -97,6 +97,11 @@ let last_measurement ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt measurements key)
 ;;
 
+let forget_measurement ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove measurements key)
+;;
+
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
   let key = measurement_key ~config ~keeper_name in
   let measurement = { measured_at = Time_compat.now (); last_pass; unread } in

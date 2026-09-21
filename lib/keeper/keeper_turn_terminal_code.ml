@@ -3,12 +3,18 @@
    See [.mli] for the public contract. This file holds the type
    definition and the wire-format serialisation. *)
 
+type timeout_source =
+  | Agent_core_api
+  | Agent_core_provider
+
 (* Typed observation derived where the original agent-core error is still
    in hand, carried alongside the verbatim wire (RFC-0371 §6.1(3)). [None]
    on values rehydrated from persisted wire strings — their consumers keep
    the string parse as the persistence-boundary fallback. *)
 type agent_core_timeout =
-  { phase : Llm_provider.Http_client.timeout_phase option }
+  { source : timeout_source
+  ; phase : Llm_provider.Http_client.timeout_phase option
+  }
 
 type t =
   | Healthy

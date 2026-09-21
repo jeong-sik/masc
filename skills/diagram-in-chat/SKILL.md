@@ -9,15 +9,17 @@ description: "Draws a flow, pipeline, state machine, message exchange or set of 
 라이브러리로 그리고, TUI 는 자기 렌더러(`bin/masc_tui_mermaid.ml`)로 상자와 선을 그린다.
 운영자가 어느 쪽으로 읽을지 모르니 TUI 가 그릴 수 있는 범위 안에서 쓴다.
 
-TUI 가 그리는 것은 두 종류다. `graph`/`flowchart` 와 `sequenceDiagram`. 나머지
-(`classDiagram`, `erDiagram`, `stateDiagram`, `gantt`, `pie` …)는 그리지 않고, 소스를 그대로
+TUI 가 그리는 것은 세 종류다. `graph`/`flowchart`, `sequenceDiagram`, 그리고 `stateDiagram`/`stateDiagram-v2`. 나머지
+(`classDiagram`, `erDiagram`, `gantt`, `pie` …)는 그리지 않고, 소스를 그대로
 보여주면서 그 위에 이렇게 한 줄 적는다.
 
 ```
 mermaid: classDiagram is not drawn here; the source follows
 ```
 
-상태 머신도 `stateDiagram` 대신 `graph TD` 로 쓴다.
+상태 머신은 `stateDiagram-v2` 로 쓰거나 `graph TD` 로 쓴다. `[*]` 는 시작/종료 상태로 그려진다.
+전이 화살표는 `-->` 하나다. `note` 는 읽기만 하고 TUI 에 그려지지 않으니, 꼭 보여야 하는 말은
+전이 라벨이나 상태 설명(`상태 : 설명`)에 넣는다.
 
 ## 폭이 제일 자주 문제다
 
@@ -38,14 +40,16 @@ mermaid: the drawing needs 150 cells and this pane has 81 (as TD it fits); the s
 
 | 쓰는 법 | 나오는 것 |
 |---|---|
-| `A[사각]` · `A[[사각]]` | 각진 상자 |
-| `A(둥금)` · `A((원))` · `A([둥금])` | 모서리 둥근 상자 (모두 같다) |
-| `A{판단}` · `A{{판단}}` | `⟨판단⟩` 을 담은 상자 |
+| `A[사각]` · `A>깃발]` | 각진 상자 (`┌───┐`) |
+| `A[[서브루틴]]` | 이중선 상자 (`╔═══╗`, 서브루틴/프로세스) |
+| `A[(데이터베이스)]` | 원통/실린더 상자 (`╓───╖`, 데이터베이스) |
+| `A(둥금)` · `A([스타디움])` · `A((원))` | 둥근 상자 (`╭───╮`) |
+| `A{판단}` · `A{{판단}}` | `⟨판단⟩` 을 담은 마름모/판단 상자 |
 | `A --> B` | 화살표 |
 | `A --- B` | 머리 없는 선 |
 | `A -.-> B` | 점선 |
 | `A ==> B` | 굵은 선 |
-| `A -->\|라벨\| B` · `A -- 라벨 --> B` | 선 옆에 글자 |
+| `A -->|라벨| B` · `A -- 라벨 --> B` | 선 옆에 글자 |
 | `A & B --> C` | 두 노드에서 한 노드로 |
 
 `<br/>` 은 공백이 된다. 상자는 한 줄짜리다. `%%` 로 시작하는 줄은 주석으로 건너뛴다.

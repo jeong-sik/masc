@@ -15,6 +15,7 @@ val run :
   agent_core_turn_count:int ->
   tool_observations:Keeper_librarian.tool_observation list ->
   librarian_messages:Agent_core.Types.message list ->
+  checkpoint_owner:Runtime_execution.checkpoint_owner ->
   post_turn_t0:float ->
   inference_telemetry:Agent_core.Types.inference_telemetry option ->
   unit ->
@@ -29,13 +30,10 @@ val run :
     [inference_telemetry] is [result.response.telemetry] from the AGENT_CORE
     result; it is optional because some providers do not emit telemetry.
 
-    The post-turn entrypoint owns Librarian admission and its execution fence.
-    Disabled or invalid configuration does not submit a Librarian unit or read
-    its snapshot. An admitted asynchronous unit re-checks the live setting
-    before snapshot I/O so disabling it while queued remains effective. When
-    enabled, every completed conversation turn is eligible for Librarian
-    extraction; the Librarian owns semantic selection rather than a scheduler-
-    side external-effect heuristic. *)
+    Agent-Core turns wake the durable consumer after the checkpoint boundary
+    is stored and discard any remembered direct closure. Official-client turns
+    retain the direct input path until they have a durable history source.
+    Disabled or invalid configuration submits neither path. *)
 
 module For_testing : sig
   val goal_context_for_task :

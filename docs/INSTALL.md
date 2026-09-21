@@ -143,7 +143,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.35.19
+TAG=v0.35.21
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -223,8 +223,26 @@ change existing Keeper configurations in bulk.
 | `<prefix>/masc-deployment-preflight-helper` | Helper binary for the execution-environment preflight |
 | `<prefix>/masc-check-runtime-deployment-preflight` | Script that runs the preflight |
 | `<prefix>/.masc-releases/<receipt-hash>/` | Dashboard from the same commit as the server, the server executable, and the verification receipt |
-| `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
+| `<base-path>/.masc/config/` | Runtime configuration and the default configuration seed. The model catalog, tools, and prompts used in operation come from embedded assets; `AGENT_CORE_MODEL_CATALOG` can explicitly replace the whole model catalog (see below) |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
+
+### Replacing the model catalog
+
+`AGENT_CORE_MODEL_CATALOG` points at a file that replaces the embedded catalog
+whole. A replacement is not a patch: nothing from the embedded catalog is kept,
+and nothing is derived from `runtime.toml` to fill a gap.
+
+That second half is the one that stops a boot. With the embedded catalog the
+server builds one exact-output target per runtime binding it finds in
+`runtime.toml`; with a replacement file it builds none, and the lanes named in
+`[runtime.exact_output_lanes.*]` resolve to nothing. The mandatory lanes then
+fail to publish and the server exits with `exact-output resolver-and-lane
+registry`.
+
+A replacement file therefore has to declare its own `[[targets]]` rows, one per
+slot any lane names. `packages/agent_core/models.toml` in the source tree has
+none -- it is the provider and model half of the catalog -- so a copy of it is
+not a working replacement on its own.
 
 The **installed binary** provisions one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
@@ -552,7 +570,7 @@ bash /tmp/masc-install.sh --version "$TAG" \
 
 From 0.34.0, `--force` updates the binaries and preserves the existing
 runtime configuration, model choice, and Keeper files. In a workspace that
-already has the runtime and model overlay, it only adds new embedded skills
+already has the required runtime configuration, it only adds new embedded skills
 and leaves the existing configuration and any optional configuration files
 the user deleted as they are. In a new install or a workspace without the
 required configuration, it seeds the defaults. Add `--reset-config` only when

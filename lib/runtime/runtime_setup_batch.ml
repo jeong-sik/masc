@@ -68,34 +68,33 @@ let safe_id value = value <> "" && String.trim value = value
 let unique values = List.fold_left (fun acc v -> if List.mem v acc then acc else acc @ [v]) [] values
 let paths base =
   let config = Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config" in
-  config, Filename.concat config Config_dir_resolver.runtime_toml_filename, Filename.concat config "agent-core-models-overlay.toml"
+  config, Filename.concat config Config_dir_resolver.runtime_toml_filename
 let read root path =
   match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root path with
   | Ok value -> Ok value | Error _ -> Error Configuration_unavailable
 let snapshot base =
-  let root,runtime,overlay = paths base in
+  let root,runtime = paths base in
   let* first = read root runtime in
-  let* second = read root overlay in
-  match first with None -> Error Configuration_unavailable | Some _ -> Ok (first,second)
+  match first with None -> Error Configuration_unavailable | Some _ -> Ok first
 let content = function None -> "" | Some (file:Fs_compat.owned_regular_file_contents) -> file.content
-let revision (first,second) =
+let revision first =
   let item = function None -> `Null | Some (file:Fs_compat.owned_regular_file_contents) -> `String file.content in
-  Revision (Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (`List [item first;item second])))))
+  Revision (Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (`List [item first])))))
 let same_file a b = match a,b with
   | None,None -> true
   | Some (a:Fs_compat.owned_regular_file_contents),Some (b:Fs_compat.owned_regular_file_contents) -> a.content=b.content
     && Fs_compat.equal_owned_regular_file_snapshot a.snapshot b.snapshot
   | _ -> false
-let same (a,b) (c,d) = same_file a c && same_file b d
+let same a c = same_file a c
 let io action = try action () with Unix.Unix_error _ | Sys_error _ -> Error Configuration_unavailable
 let observe_inventory ~base_path = io (fun () ->
   let base=Unix.realpath base_path in
   let* files=snapshot base in
-  let _,path,_=paths base in
-  Ok (revision files,Runtime.config_observation ~path (content (fst files))))
+  let _,path=paths base in
+  Ok (revision files,Runtime.config_observation ~path (content files)))
 let observe ~base_path = observe_inventory ~base_path |> Result.map fst
 let stage_env base =
-  let config,_,_ = paths base in
+  let config,_ = paths base in
   let replaced = ["MASC_BASE_PATH";"MASC_CONFIG_DIR"] in
   let kept = Unix.environment () |> Array.to_list |> List.filter (fun value ->
     let key = match String.index_opt value '=' with None -> value | Some n -> String.sub value 0 n in
@@ -182,7 +181,7 @@ let publish_using ~(write:string -> int -> string -> (unit,Fs_compat.atomic_repl
 let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~specs ~selected ~verify =
   let* original = snapshot base in
   if revision original <> expected_revision then Error Changed_configuration else
-  let first,second = original in
+  let first = original in
   let* parsed = match Runtime_toml.parse_string (content first) with
     | Ok value -> Ok value | Error _ -> Error Invalid_configuration in
   let existing = List.map Runtime.id_of_binding parsed.Runtime_schema.bindings in
@@ -193,15 +192,12 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
   let available = existing @ List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_id) additions in
   if not (List.for_all (fun id -> List.mem id available) selected) then Error Invalid_selection else
   let added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_toml) additions) in
-  let overlay_added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.model_overlay_toml) additions) in
   let runtime_text = content first ^ (if added="" then "" else "\n" ^ added) in
-  let overlay_text = content second ^ overlay_added in
   let* validated = with_stage (fun stage ->
-    let _,runtime,overlay = paths stage in
+    let _,runtime = paths stage in
     let stage_write path text = match write path 0o600 text with
       | Ok () -> Ok () | Error _ -> Error Configuration_unavailable in
     let* () = stage_write runtime runtime_text in
-    let* () = stage_write overlay overlay_text in
     match selected with
     | [] -> Error Invalid_selection
     | primary::fallbacks ->
@@ -210,11 +206,11 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
       let* () = validate ~binary ~base:stage args in
       let rec probes = function [] -> Ok () | id::tail -> let* () = verification ~binary ~base:stage id in probes tail in
       let* () = if verify then probes selected else Ok () in
-      let* files = snapshot stage in Ok (content (fst files))) in
+      let* files = snapshot stage in Ok (content files)) in
   let* current = snapshot base in
   if not (same original current) then Error Changed_configuration else
-  let _,runtime,overlay = paths base in
-  let changes = (if overlay_added="" then [] else [overlay,second,overlay_text]) @ [runtime,first,validated] in
+  let _,runtime = paths base in
+  let changes = [runtime,first,validated] in
   let* () = Eio.Cancel.protect (fun () ->
     let* () = publish_using ~write changes in
     List.iter Runtime_setup_credentials.retain pending_credentials;
@@ -228,7 +224,7 @@ let configure ?(pending_credentials=[]) ~binary ~base_path ~expected_revision ~s
      || not (List.mem default_runtime_id runtime_ids) then Error Invalid_selection else
   io (fun () ->
     let base = Unix.realpath base_path and binary = Unix.realpath binary in
-    let _,runtime,_ = paths base in
+    let _,runtime = paths base in
     let selected = default_runtime_id :: List.filter ((<>) default_runtime_id) (unique runtime_ids) in
     (* Keep typed operation failures separate from the lock's string diagnostics. *)
     match Runtime.with_config_lock ~runtime_config_path:runtime (fun () ->

@@ -365,7 +365,6 @@ let assemble_hooks
       ~(shared_context : Agent_core.Context.t)
       ~(start_turn_count : int)
       ~(runtime_id_string : string)
-      ~is_retry:(_ : bool)
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(trajectory_acc : Trajectory.accumulator option)

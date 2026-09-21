@@ -248,8 +248,19 @@ let test_explicit_provider_id_selects_catalog_capabilities () =
       caps.supports_reasoning)
 ;;
 
-let test_capabilities_for_provider_config_honors_override () =
+(* A model no catalog row names is the deployment's own, and its capability
+   declaration is the only statement about it. The three tool-choice flags stay
+   separate there: a wire can take an advisory choice and refuse a forced one,
+   which is what DeepSeek's thinking mode does. *)
+let test_capabilities_for_provider_config_take_the_declared_capabilities () =
   with_provider_catalog catalog_json (fun () ->
+    let declared =
+      { Llm_provider.Capabilities.default_capabilities with
+        supports_tool_choice = true
+      ; supports_required_tool_choice = false
+      ; supports_named_tool_choice = false
+      }
+    in
     let cfg =
       Llm_provider.Provider_config.make
         ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -257,17 +268,17 @@ let test_capabilities_for_provider_config_honors_override () =
         ~model_id:"unlisted-local-model"
         ~base_url:"https://deliberately-different.example/v9"
         ~request_path:"/not-the-catalog-path"
-        ~supports_tool_choice_override:false
+        ~model_capabilities_override:declared
         ()
     in
     let caps = Provider_runtime_binding.capabilities_for_provider_config cfg in
-    Alcotest.(check bool) "override disables tool choice" false caps.supports_tool_choice;
+    Alcotest.(check bool) "an advisory choice is taken" true caps.supports_tool_choice;
     Alcotest.(check bool)
-      "override disables required tool choice"
+      "a forced choice is refused"
       false
       caps.supports_required_tool_choice;
     Alcotest.(check bool)
-      "override disables named tool choice"
+      "a named choice is refused"
       false
       caps.supports_named_tool_choice)
 ;;
@@ -916,9 +927,9 @@ let () =
             `Quick
             test_explicit_provider_id_selects_catalog_capabilities
         ; Alcotest.test_case
-            "capabilities honor tool_choice override"
+            "an uncatalogued model keeps its three tool-choice flags apart"
             `Quick
-            test_capabilities_for_provider_config_honors_override
+            test_capabilities_for_provider_config_take_the_declared_capabilities
         ; Alcotest.test_case
             "shared endpoint is disambiguated by provider id"
             `Quick

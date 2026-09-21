@@ -171,13 +171,8 @@ def run(args):
             command("init", "--base-path", str(base))
             config = base / ".masc/config"
             shutil.copyfile(config_source, config / "runtime.toml")
-            if args.models_overlay:
-                shutil.copyfile(Path(args.models_overlay).resolve(strict=True),
-                                config / "agent-core-models-overlay.toml")
-            for provider_config in (config / "runtime.toml", config / "agent-core-models-overlay.toml"):
+            for provider_config in (config / "runtime.toml",):
                 env.update(provider_environment(provider_config))
-            receipt["models_overlay_sha256"] = hashlib.sha256(
-                (config / "agent-core-models-overlay.toml").read_bytes()).hexdigest()
             installed = base / ".masc/skills/evidence-review/SKILL.md"
             if not installed.is_file():
                 raise AcceptanceError("binary did not install evidence-review")
@@ -278,7 +273,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True)
     parser.add_argument("--runtime-config", required=True)
-    parser.add_argument("--models-overlay")
     parser.add_argument("--output-dir", required=True, help="New evidence directory; must not already exist")
     parser.add_argument("--timeout", type=float, default=300, help="Probe timeout per case, in seconds")
     raise SystemExit(run(parser.parse_args()))

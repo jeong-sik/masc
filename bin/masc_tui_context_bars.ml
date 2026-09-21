@@ -146,8 +146,6 @@ let reach_bar ~width ~transmitted ~total ~sent_style =
   ^ repeat bar_light (max 0 (width - sent))
   ^ Sgr.reset ^ Sgr.bold ^ sent_style ^ repeat bar_full sent ^ Sgr.reset
 
-let sent_pointer_label = "sent this turn"
-
 let reach_pointer ~label:pointer_label ~width ~transmitted ~total =
   let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in
   let cut = max 0 (width - sent) in

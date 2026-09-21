@@ -57,6 +57,7 @@ module For_testing : sig
   val snapshot_json_with
     :  now:float
     -> resolve_lane:(string -> lane_configuration)
+    -> jev_readiness:Typesafeai_config.readiness
     -> exact_runs_total:int
     -> exact_runs:Exact_lane_run_registry.run list
     -> verification_runs:Verification_run_registry.run list

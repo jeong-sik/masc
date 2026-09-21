@@ -947,7 +947,7 @@
  (name masc_tui_planning_detail)
  (wrapped false)
  (modules masc_tui_planning_detail)
- (libraries masc masc_tui_message_layout))
+ (libraries masc masc.masc_goal masc_tui_message_layout masc_tui_fetched yojson))
 
 (library
  (name masc_tui_planning_selection)
@@ -1127,7 +1127,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries mtime.clock.os masc_tui_esc_interrupt
+ (libraries mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
   masc_tui_answering
@@ -1762,3 +1762,27 @@
  (wrapped false)
  (modules masc_tui_queue_inspection)
  (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity masc_tui_message_layout unix yojson))
+
+;; Offline replay of the Librarian read rules over a live workspace (RFC
+;; librarian-lifecycle §9). Reads the turn-boundary logs and the checkpoints
+;; they name, runs Keeper_librarian_range.select/slice round after round, and
+;; prints how many rounds a backlog takes, how many atoms each carries and
+;; whether any atom is carried twice. Counts only -- the input is every Keeper
+;; conversation on the machine, so message text never reaches the output.
+;; Writes nothing: no progress file, no boundary line, no checkpoint.
+
+(executable
+ (name masc_librarian_replay)
+ (modules masc_librarian_replay)
+ (public_name masc-librarian-replay)
+ (package masc)
+ (libraries masc masc_core masc.config_dir_resolver masc.agent_core masc.masc_types masc.keeper_registry yojson unix))
+
+(executable
+ (name masc_librarian_continuity)
+ (modules masc_librarian_continuity)
+ (public_name masc-librarian-continuity)
+ (package masc)
+ (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
+  masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
+  masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat digestif eio eio_main yojson))

@@ -54,8 +54,6 @@ def main():
     config.mkdir(parents=True)
     (config / 'runtime.toml').write_text(module.toml_document(selected))
     (config / 'runtime.toml').chmod(0o600)
-    shutil.copyfile(args.source_config / 'agent-core-models-overlay.toml', config / 'agent-core-models-overlay.toml')
-    (config / 'agent-core-models-overlay.toml').chmod(0o600)
     binary = args.base / 'masc-observed.exe'
     shutil.copyfile(args.binary, binary)
     binary.chmod(0o700)

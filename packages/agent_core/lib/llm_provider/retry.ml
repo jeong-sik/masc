@@ -47,6 +47,16 @@ type api_error =
       ; phase : Http_client.timeout_phase option
       }
 
+type server_status_class =
+  | Overloaded_status
+  | Server_error_status
+
+let server_status_class_of_code = function
+  | 529 -> Some Overloaded_status
+  | status when status >= 500 && status <= 599 -> Some Server_error_status
+  | _ -> None
+;;
+
 let network_error_kind_label = function
   | Http_client.Connection_refused -> "connection_refused"
   | Http_client.Dns_failure -> "dns_failure"
@@ -303,7 +313,7 @@ let parse_body_retry_after (body : string) : float option =
   try
     let json = Yojson.Safe.from_string body in
     let open Yojson.Safe.Util in
-    json |> member "error" |> member "retry_after" |> to_float |> usable_retry_after
+    json |> member "error" |> member "retry_after" |> to_number |> usable_retry_after
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Yojson.Safe.Util.Undefined _ ->
     None
@@ -344,11 +354,11 @@ let classify_error ~retry_after_header ~status ~body : api_error =
     let retry_after = resolve_retry_after ~body ~header:retry_after_header in
     RateLimited { retry_after; message }
   | 404 -> NotFound { message }
-  | 529 -> Overloaded { message }
-  | s when s >= 500 -> ServerError { status = s; message }
-  | unhandled_status ->
-    let (_ : int) = unhandled_status in
-    InvalidRequest { message; reason = Unknown_invalid_request }
+  | status ->
+    (match server_status_class_of_code status with
+     | Some Overloaded_status -> Overloaded { message }
+     | Some Server_error_status -> ServerError { status; message }
+     | None -> InvalidRequest { message; reason = Unknown_invalid_request })
 ;;
 
 (* The refusal a transport reports, classified. A body that arrived is

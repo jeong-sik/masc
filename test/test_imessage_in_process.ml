@@ -243,6 +243,71 @@ let test_cursor_codec () =
     ]
 ;;
 
+let with_cursor_file f =
+  let path = Filename.temp_file "imessage-cursor-" ".json" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Masc_test_deps.with_process_env
+        (Env_setting.String_opt_knob.env_name Imessage_cursor_path)
+        (Some path) (fun () -> f path))
+;;
+
+let with_cursor_fs fs f () =
+  let previous = Fs_compat.get_fs_opt () in
+  let install = function
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  install fs;
+  Fun.protect ~finally:(fun () -> install previous) f
+;;
+
+let test_cursor_file_states () =
+  with_cursor_file @@ fun path ->
+  Sys.remove path;
+  check (result int string) "missing cursor starts at zero" (Ok 0)
+    (Gw.For_testing.read_cursor ());
+  Fs_compat.save_file path (Gw.For_testing.cursor_to_json 4242);
+  check (result int string) "valid cursor retains the delivered row" (Ok 4242)
+    (Gw.For_testing.read_cursor ());
+  Fs_compat.save_file path "{ invalid cursor\n";
+  check bool "malformed cursor is a startup error" true
+    (Result.is_error (Gw.For_testing.read_cursor ()))
+;;
+
+let test_cursor_leaf_permission_error () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_cursor_file @@ fun path ->
+  Fs_compat.save_file path (Gw.For_testing.cursor_to_json 4242);
+  let mode = (Unix.stat path).Unix.st_perm in
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path mode) (fun () ->
+    (match Unix.access path [ Unix.R_OK ] with
+     | exception Unix.Unix_error (Unix.EACCES, _, _) -> ()
+     | _ -> fail "fixture must deny reading the cursor leaf");
+    check bool "unreadable cursor returns Error to startup" true
+      (Result.is_error (Gw.For_testing.read_cursor ())));
+  check (result int string) "denied read did not reset the cursor" (Ok 4242)
+    (Gw.For_testing.read_cursor ())
+;;
+
+let test_cursor_cancellation () =
+  with_cursor_file @@ fun path ->
+  Fs_compat.save_file path (Gw.For_testing.cursor_to_json 4242);
+  let propagated =
+    try
+      Eio.Cancel.sub (fun context ->
+        Eio.Cancel.cancel context Exit;
+        let (_ : (int, string) result) = Gw.For_testing.read_cursor () in
+        ());
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "cancellation remains cancellation" true propagated
+;;
+
 let sample_row : Db.inbound_row =
   { rowid = 77
   ; text = "ping"
@@ -341,6 +406,14 @@ let test_poll_interval_is_bounded () =
 ;;
 
 let () =
+  Eio_main.run @@ fun env ->
+  let cursor_cases fs =
+    [ test_case "fresh, valid and malformed cursor" `Quick
+        (with_cursor_fs fs test_cursor_file_states)
+    ; test_case "leaf permission failure is a startup error" `Quick
+        (with_cursor_fs fs test_cursor_leaf_permission_error)
+    ]
+  in
   run "imessage_in_process"
     [ ( "chat.db"
       , [ test_case "apple epoch conversion" `Quick test_apple_epoch_conversion
@@ -362,6 +435,11 @@ let () =
         ; test_case "an empty chat guid refuses to send" `Quick
             test_empty_chat_guid_refuses_to_send
         ] )
+    ; "cursor fallback", cursor_cases None
+    ; "cursor Eio", cursor_cases (Some (Eio.Stdenv.fs env))
+    ; ( "cursor cancellation"
+      , [ test_case "cancellation propagates" `Quick
+            (with_cursor_fs (Some (Eio.Stdenv.fs env)) test_cursor_cancellation) ] )
     ; ( "gateway"
       , [ test_case "cursor codec" `Quick test_cursor_codec
         ; test_case "inbound projection" `Quick test_inbound_projection

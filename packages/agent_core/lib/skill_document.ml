@@ -399,8 +399,7 @@ let metadata fields =
       ] )
 ;;
 
-let runtime_name ~directory_name declared =
-  let directory, _directory_violations = analyze_name ~trim:false directory_name in
+let runtime_name ?directory_name declared =
   match declared with
   | Some declared_name ->
     let declared, declared_violations = analyze_name declared_name in
@@ -409,12 +408,13 @@ let runtime_name ~directory_name declared =
        | [] -> []
        | violations -> [ Invalid_name { name = declared_name; violations } ])
       @
-      if String.equal declared directory
-      then []
-      else
-        [ Name_mismatch
-            { declared = declared_name; directory = directory_name }
-        ]
+      match directory_name with
+      | None -> []
+      | Some directory_name ->
+        let directory, _directory_violations = analyze_name ~trim:false directory_name in
+        if String.equal declared directory
+        then []
+        else [ Name_mismatch { declared = declared_name; directory = directory_name } ]
     in
     (match diagnostics with
      | [] -> Ok (declared, [])
@@ -424,7 +424,7 @@ let runtime_name ~directory_name declared =
 
 let utf8_byte_order_mark = "\xEF\xBB\xBF"
 
-let decode_stripped ~directory_name contents =
+let decode_stripped ?directory_name contents =
   match split_frontmatter contents with
   | Error diagnostic -> Unloadable [ diagnostic ]
   | Ok (yaml, body) ->
@@ -440,7 +440,7 @@ let decode_stripped ~directory_name contents =
          let name_result =
            match declared_name_result with
            | Error diagnostic -> Error [ diagnostic ]
-           | Ok declared_name -> runtime_name ~directory_name declared_name
+           | Ok declared_name -> runtime_name ?directory_name declared_name
          in
          let license_result = optional_string fields License "license" in
          let compatibility_result =
@@ -528,7 +528,7 @@ let decode_stripped ~directory_name contents =
    never named the mark. It carries no content: parse without it and keep the
    deviation observable as a diagnostic. Content revisions elsewhere still
    hash the raw bytes, mark included. *)
-let decode ~directory_name contents =
+let decode_with_directory ?directory_name contents =
   let bom_stripped =
     String.length contents >= String.length utf8_byte_order_mark
     && String.equal
@@ -544,11 +544,14 @@ let decode ~directory_name contents =
         (String.length contents - String.length utf8_byte_order_mark)
     else contents
   in
-  match decode_stripped ~directory_name contents, bom_stripped with
+  match decode_stripped ?directory_name contents, bom_stripped with
   | result, false -> result
   | Unloadable diagnostics, true -> Unloadable (Byte_order_mark :: diagnostics)
   | Loaded _, true -> Unloadable [ Byte_order_mark ]
 ;;
+
+let decode ~directory_name contents = decode_with_directory ~directory_name contents
+let decode_authored contents = decode_with_directory contents
 
 let diagnostics = function
   | Loaded _ -> []

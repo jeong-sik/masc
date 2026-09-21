@@ -16,10 +16,11 @@
     next. On a provider refusal, the walk runs at once regardless of the
     total, and without marks it takes exactly one block.
 
-    The caller applies an [Evicted] step to the ledger with
-    {!Keeper_model_input_ledger.move_front} before deciding again: a refused
-    request reports no usage, so without that the next decision would walk
-    the same blocks from the same front. Which blocks are eligible (the
+    {!apply_turn_boundary} applies a turn-boundary step to a ledger. A caller
+    handling a provider refusal applies an [Evicted] step with
+    {!Keeper_model_input_ledger.move_front} before deciding again: the refused
+    request reports no usage, so without that the next decision would walk the
+    same blocks from the same front. Which blocks are eligible (the
     librarian's reading) and a pinned head are later steps of RFC §11 and are
     not modelled here: the walk starts at the oldest carried block. *)
 
@@ -52,7 +53,16 @@ val at_turn_boundary
   -> Keeper_model_input_ledger.t
   -> step
 (** Evict from the front while the projected total is above the low-water
-    mark, only when the measured total passed the high-water mark. *)
+    mark, only when the measured total passed the high-water mark. A request
+    with [No_atom_carried] has no named front to advance and is unchanged. *)
+
+val apply_turn_boundary
+  :  marks:Runtime_schema.context_marks
+  -> Keeper_model_input_ledger.t
+  -> Keeper_model_input_ledger.t * step
+(** Apply {!at_turn_boundary} to the ledger. An [Evicted] step always advances
+    to the block that the same calculation selected; failure to advance is an
+    internal contract violation rather than an unchanged projection. *)
 
 val after_overflow
   :  marks:Runtime_schema.context_marks option

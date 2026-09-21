@@ -39,7 +39,6 @@ module Attr_key = struct
   let keeper_trace_id = "keeper.trace_id"
   let keeper_max_context = "keeper.max_context"
   let keeper_channel = "keeper.channel"
-  let keeper_is_retry = "keeper.is_retry"
   let keeper_current_task_id = "keeper.current_task_id"
 end
 
@@ -93,7 +92,6 @@ let keeper_turn_attrs
       ~trace_id
       ~max_context
       ~channel
-      ~is_retry
       ~current_task_id
   =
   let runtime_id = runtime_id in
@@ -107,7 +105,6 @@ let keeper_turn_attrs
   ; Attr_key.keeper_trace_id, `String trace_id
   ; Attr_key.keeper_max_context, `Int max_context
   ; Attr_key.keeper_channel, `String channel
-  ; Attr_key.keeper_is_retry, `Bool is_retry
   ; Attr_key.gen_ai_operation_name, `String "invoke_agent"
   ; Attr_key.gen_ai_provider_name, `String "masc"
   ; Attr_key.gen_ai_agent_name, `String keeper_name
@@ -133,7 +130,6 @@ let with_keeper_turn_span
       ~trace_id
       ~max_context
       ~channel
-      ~is_retry
       ~current_task_id
       f
   =
@@ -148,7 +144,6 @@ let with_keeper_turn_span
         ~trace_id
         ~max_context
         ~channel
-        ~is_retry
         ~current_task_id
     in
     Otel_spans.with_span

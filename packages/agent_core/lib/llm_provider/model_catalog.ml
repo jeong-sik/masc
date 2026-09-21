@@ -7,7 +7,7 @@ end
 open Result_syntax
 
 type model_entry =
-  { id_prefix : string
+  { id_prefix : Model_identifiers.Id_prefix.t
   ; base_label : string option
   ; provider_name : string option
   ; max_context_tokens : int option
@@ -72,6 +72,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
+  ; supports_parallel_tool_suppression : bool
   }
 
 type t =
@@ -380,129 +381,128 @@ let parse_entry entry_toml =
     | Error _ -> Error "model entry field \"id_prefix\" expected string"
     | Ok None -> Error "model entry missing required \"id_prefix\" field"
     | Ok (Some raw) ->
-      let trimmed = String.trim raw in
-      if trimmed = ""
-      then Error "model entry field \"id_prefix\" must not be empty"
-      else if raw <> trimmed
-      then
-        Error
-          "model entry field \"id_prefix\" must not have leading or trailing whitespace"
-      else Ok raw
+      let* id_prefix = Model_identifiers.Id_prefix.of_string raw in
+      let* () =
+        reject_unknown_entry_keys
+          ~entry_id:(Model_identifiers.Id_prefix.to_string id_prefix)
+          entry_toml
+      in
+      Ok id_prefix
   in
-  let* () = reject_unknown_entry_keys ~entry_id:id_prefix entry_toml in
+  let entry_id = Model_identifiers.Id_prefix.to_string id_prefix in
   let* base_label =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "base"
       ~allowed:Capability_vocab.base_label_values
       entry_toml
   in
   let* provider_name =
-    non_empty_string_field ~entry_id:id_prefix "provider_name" entry_toml
+    non_empty_string_field ~entry_id "provider_name" entry_toml
   in
   let* max_context_tokens =
-    int_field ~entry_id:id_prefix "max_context_tokens" entry_toml
+    int_field ~entry_id "max_context_tokens" entry_toml
   in
   let* serving_constraint =
-    Serving_constraint_catalog.parse ~entry_id:id_prefix entry_toml
+    Serving_constraint_catalog.parse ~entry_id entry_toml
   in
-  let* max_output_tokens = int_field ~entry_id:id_prefix "max_output_tokens" entry_toml in
-  let* supports_tools = bool_field ~entry_id:id_prefix "supports_tools" entry_toml in
+  let* max_output_tokens = int_field ~entry_id "max_output_tokens" entry_toml in
+  let* supports_tools = bool_field ~entry_id "supports_tools" entry_toml in
   let* supports_tool_choice =
-    bool_field ~entry_id:id_prefix "supports_tool_choice" entry_toml
+    bool_field ~entry_id "supports_tool_choice" entry_toml
   in
   let* supports_required_tool_choice =
-    bool_field ~entry_id:id_prefix "supports_required_tool_choice" entry_toml
+    bool_field ~entry_id "supports_required_tool_choice" entry_toml
   in
   let* supports_named_tool_choice =
-    bool_field ~entry_id:id_prefix "supports_named_tool_choice" entry_toml
+    bool_field ~entry_id "supports_named_tool_choice" entry_toml
   in
   let* supports_parallel_tool_calls =
-    bool_field ~entry_id:id_prefix "supports_parallel_tool_calls" entry_toml
+    bool_field ~entry_id "supports_parallel_tool_calls" entry_toml
   in
   let* assistant_tool_content_format =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "assistant_tool_content_format"
       ~allowed:Capability_vocab.assistant_tool_content_format_values
       entry_toml
   in
   let* chat_output_budget_field =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "chat_output_budget_field"
       ~allowed:Capability_vocab.chat_output_budget_field_values
       entry_toml
   in
   let* tool_schema_conformance =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "tool_schema_conformance"
       ~allowed:Capability_vocab.tool_schema_conformance_values
       entry_toml
   in
   let* supports_reasoning =
-    bool_field ~entry_id:id_prefix "supports_reasoning" entry_toml
+    bool_field ~entry_id "supports_reasoning" entry_toml
   in
   let* accepted_reasoning_efforts =
     canonical_string_list_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "accepted_reasoning_efforts"
       ~allowed:Reasoning_effort.all_wire_values
       entry_toml
   in
   let* supports_response_format_json =
-    bool_field ~entry_id:id_prefix "supports_response_format_json" entry_toml
+    bool_field ~entry_id "supports_response_format_json" entry_toml
   in
   let* supports_structured_output =
-    bool_field ~entry_id:id_prefix "supports_structured_output" entry_toml
+    bool_field ~entry_id "supports_structured_output" entry_toml
   in
   let* supports_multimodal_inputs =
-    bool_field ~entry_id:id_prefix "supports_multimodal_inputs" entry_toml
+    bool_field ~entry_id "supports_multimodal_inputs" entry_toml
   in
   let* supports_image_input =
-    bool_field ~entry_id:id_prefix "supports_image_input" entry_toml
+    bool_field ~entry_id "supports_image_input" entry_toml
   in
   let* supports_audio_input =
-    bool_field ~entry_id:id_prefix "supports_audio_input" entry_toml
+    bool_field ~entry_id "supports_audio_input" entry_toml
   in
   let* supports_video_input =
-    bool_field ~entry_id:id_prefix "supports_video_input" entry_toml
+    bool_field ~entry_id "supports_video_input" entry_toml
   in
   let* supports_document_input =
-    bool_field ~entry_id:id_prefix "supports_document_input" entry_toml
+    bool_field ~entry_id "supports_document_input" entry_toml
   in
   let* modality_priority =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "modality_priority"
       ~allowed:Capability_vocab.modality_priority_values
       entry_toml
   in
-  let* task = task_opt ~entry_id:id_prefix "task" entry_toml in
+  let* task = task_opt ~entry_id "task" entry_toml in
   let* supported_models =
-    exact_non_empty_string_list_opt ~entry_id:id_prefix "supported_models" entry_toml
+    exact_non_empty_string_list_opt ~entry_id "supported_models" entry_toml
   in
   let* supports_native_streaming =
-    bool_field ~entry_id:id_prefix "supports_native_streaming" entry_toml
+    bool_field ~entry_id "supports_native_streaming" entry_toml
   in
   let* supports_system_prompt =
-    bool_field ~entry_id:id_prefix "supports_system_prompt" entry_toml
+    bool_field ~entry_id "supports_system_prompt" entry_toml
   in
   let* supports_prompt_caching =
-    bool_field ~entry_id:id_prefix "supports_prompt_caching" entry_toml
+    bool_field ~entry_id "supports_prompt_caching" entry_toml
   in
-  let* supports_top_k = bool_field ~entry_id:id_prefix "supports_top_k" entry_toml in
-  let* supports_min_p = bool_field ~entry_id:id_prefix "supports_min_p" entry_toml in
-  let* supports_seed = bool_field ~entry_id:id_prefix "supports_seed" entry_toml in
+  let* supports_top_k = bool_field ~entry_id "supports_top_k" entry_toml in
+  let* supports_min_p = bool_field ~entry_id "supports_min_p" entry_toml in
+  let* supports_seed = bool_field ~entry_id "supports_seed" entry_toml in
   let* ignored_sampling_parameters =
-    sampling_parameters_opt ~entry_id:id_prefix "ignored_sampling_parameters" entry_toml
+    sampling_parameters_opt ~entry_id "ignored_sampling_parameters" entry_toml
   in
   let* thinking_control_format_raw =
-    find_string_field ~entry_id:id_prefix "thinking_control_format" entry_toml
+    find_string_field ~entry_id "thinking_control_format" entry_toml
   in
   let* thinking_control_token =
-    find_string_field ~entry_id:id_prefix "thinking_control_token" entry_toml
+    find_string_field ~entry_id "thinking_control_token" entry_toml
   in
   let* thinking_control_format =
     Capability_vocab.decode_optional_thinking_control_format
@@ -511,60 +511,60 @@ let parse_entry entry_toml =
     |> Result.map_error (fun error ->
       Printf.sprintf
         "model entry %S %s"
-        id_prefix
+        (Model_identifiers.Id_prefix.to_string id_prefix)
         (Capability_vocab.thinking_control_format_codec_error_to_string error))
   in
   let* anthropic_thinking_control =
     anthropic_thinking_control_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "anthropic_thinking_control"
       entry_toml
   in
   let* preserve_thinking_control_format =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "preserve_thinking_control_format"
       ~allowed:Capability_vocab.preserve_thinking_control_format_values
       entry_toml
   in
   let* content_inline_reasoning =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "content_inline_reasoning"
       ~allowed:Capability_vocab.content_inline_reasoning_values
       entry_toml
   in
   let* reasoning_output_format =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "reasoning_output_format"
       ~allowed:Capability_vocab.reasoning_output_format_values
       entry_toml
   in
   let* reasoning_streaming_format =
     reasoning_streaming_format_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "reasoning_streaming_format"
       entry_toml
   in
   let* reasoning_replay =
     canonical_string_opt
-      ~entry_id:id_prefix
+      ~entry_id
       "reasoning_replay"
       ~allowed:Capability_vocab.reasoning_replay_values
       entry_toml
   in
   let* input_per_million =
-    float_field ~entry_id:id_prefix "input_per_million" entry_toml
+    float_field ~entry_id "input_per_million" entry_toml
   in
   let* output_per_million =
-    float_field ~entry_id:id_prefix "output_per_million" entry_toml
+    float_field ~entry_id "output_per_million" entry_toml
   in
   let* cache_write_multiplier =
-    float_field ~entry_id:id_prefix "cache_write_multiplier" entry_toml
+    float_field ~entry_id "cache_write_multiplier" entry_toml
   in
   let* cache_read_multiplier =
-    float_field ~entry_id:id_prefix "cache_read_multiplier" entry_toml
+    float_field ~entry_id "cache_read_multiplier" entry_toml
   in
   Ok
     { id_prefix
@@ -761,64 +761,29 @@ let parse_table_array toml key parse =
            results)
 ;;
 
-(* A catalog row excluded by the lenient loaders; see [parse_table_array_lenient]. *)
-type skipped_entry =
-  { entry_label : string
-  ; skip_reason : string
-  }
-
-let skipped_entry_label ~kind ~id_key position item =
-  match
-    (try Otoml.find_opt item Otoml.get_string [ id_key ] with
-     | Otoml.Type_error _ -> None)
-  with
-  | Some raw when String.trim raw <> "" -> String.trim raw
-  | Some _ | None -> Printf.sprintf "<%s entry #%d>" kind position
-;;
-
-(* Lenient variant of [parse_table_array]: a row that fails [parse] is
-   excluded and reported instead of failing the whole load. Deployment
-   overlays are hand-written and outlive the binary that wrote them; a stale
-   field introduced by a newer release (or removed by an older one) must not
-   block every other row. Whole-file failures stay fail-closed — see
-   [catalog_of_toml_lenient]. *)
-let parse_table_array_lenient ~kind ~id_key toml key parse =
-  match Otoml.find_opt toml (Otoml.get_array Fun.id) [ key ] with
-  | None -> [], []
-  | Some items ->
-    let entries, skipped =
-      List.fold_left
-        (fun (entries, skipped) (position, item) ->
-           match parse item with
-           | Ok entry -> entry :: entries, skipped
-           | Error reason ->
-             ( entries
-             , { entry_label = skipped_entry_label ~kind ~id_key position item
-               ; skip_reason = reason
-               }
-               :: skipped ))
-        ([], [])
-        (List.mapi (fun index item -> index + 1, item) items)
-    in
-    List.rev entries, List.rev skipped
-;;
-
 let normalize_label value = String.lowercase_ascii (String.trim value)
 
 let model_row_key (entry : model_entry) =
-  Option.map normalize_label entry.provider_name, normalize_label entry.id_prefix
+  Option.map normalize_label entry.provider_name,
+  normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)
 ;;
 
 let provider_entry_key (entry : provider_entry) = normalize_label entry.id
 
-(* Two rows under one key make the winner a property of declaration order,
-   which is what [merge]'s "order-independent" note says lookups are not. An
-   overlay is a file somebody writes by hand, so the two can differ by a
-   factor of 900 in price and nothing says which one is charging. *)
+(* Two rows under one key make the winner a property of declaration order.
+   They can disagree on any capability or price, so the catalog rejects the
+   contradiction instead of silently choosing one. *)
 let duplicate_model_label (entry : model_entry) =
   match entry.provider_name with
-  | None -> Printf.sprintf "model row %S" entry.id_prefix
-  | Some provider -> Printf.sprintf "model row %S for provider %S" entry.id_prefix provider
+  | None ->
+    Printf.sprintf
+      "model row %S"
+      (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+  | Some provider ->
+    Printf.sprintf
+      "model row %S for provider %S"
+      (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+      provider
 ;;
 
 let reject_duplicate_rows models providers =
@@ -856,24 +821,7 @@ let catalog_of_toml toml =
         | Ok () -> Ok { models; providers }))
 ;;
 
-let catalog_of_toml_lenient toml =
-  let models, model_skipped =
-    parse_table_array_lenient ~kind:"model" ~id_key:"id_prefix" toml "models" parse_entry
-  in
-  let providers, provider_skipped =
-    parse_table_array_lenient
-      ~kind:"provider"
-      ~id_key:"id"
-      toml
-      "providers"
-      Model_provider_catalog.parse_entry
-  in
-  match reject_duplicate_rows models providers with
-  | Error _ as e -> e
-  | Ok () -> Ok ({ models; providers }, model_skipped @ provider_skipped)
-;;
-
-let parse_catalog_with ~source parse catalog_of =
+let parse_catalog ~source parse =
   let parse_res =
     try Ok (parse ()) with
     | Sys_error msg ->
@@ -885,10 +833,8 @@ let parse_catalog_with ~source parse catalog_of =
   in
   match parse_res with
   | Error _ as e -> e
-  | Ok toml -> catalog_of toml
+  | Ok toml -> catalog_of_toml toml
 ;;
-
-let parse_catalog ~source parse = parse_catalog_with ~source parse catalog_of_toml
 
 let of_toml_string ~source contents =
   parse_catalog ~source (fun () -> Otoml.Parser.from_string contents)
@@ -896,113 +842,31 @@ let of_toml_string ~source contents =
 
 let load_file path = parse_catalog ~source:path (fun () -> Otoml.Parser.from_file path)
 
-let of_toml_string_lenient ~source contents =
-  parse_catalog_with
-    ~source
-    (fun () -> Otoml.Parser.from_string contents)
-    catalog_of_toml_lenient
-;;
-
-let load_file_lenient path =
-  parse_catalog_with ~source:path (fun () -> Otoml.Parser.from_file path) catalog_of_toml_lenient
-;;
-
 let load_default () =
   of_toml_string ~source:"embedded default model catalog" Model_catalog_embedded.contents
 ;;
 
-let lookup_entries entries model_id =
-  let sorted_t =
-    List.fast_sort
-      (fun a b -> compare (String.length b.id_prefix) (String.length a.id_prefix))
-      entries
-  in
-  let model_id = String.lowercase_ascii (String.trim model_id) in
-  List.find_opt
-    (fun entry ->
-       let prefix = String.lowercase_ascii entry.id_prefix in
-       String.starts_with ~prefix model_id)
-    sorted_t
+let lookup_entries entries raw_model_id =
+  match Model_identifiers.Model_id.of_string raw_model_id with
+  | Error _ -> None
+  | Ok model_id ->
+    let sorted_t =
+      List.fast_sort
+        (fun a b ->
+           compare
+             (String.length (Model_identifiers.Id_prefix.to_string b.id_prefix))
+             (String.length (Model_identifiers.Id_prefix.to_string a.id_prefix)))
+        entries
+    in
+    List.find_opt
+      (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
+      sorted_t
 ;;
 
 let lookup t model_id =
   t.models
   |> List.filter (fun entry -> Option.is_none entry.provider_name)
   |> fun entries -> lookup_entries entries model_id
-;;
-
-let%test "of_toml_string_lenient keeps valid rows and skips the poisoned one" =
-  match
-    of_toml_string_lenient
-      ~source:"fixture"
-      "[[models]]\n\
-       id_prefix = \"good-model\"\n\
-       supports_tools = true\n\
-       [[models]]\n\
-       id_prefix = \"stale-model\"\n\
-       supports_extended_thinking = true\n"
-  with
-  | Ok (catalog, [ { entry_label = "stale-model"; skip_reason } ]) ->
-    String.equal
-      skip_reason
-      "model entry \"stale-model\" contains unknown field(s): supports_extended_thinking"
-    && Option.is_some (lookup catalog "good-model")
-    && Option.is_none (lookup catalog "stale-model")
-  | Ok _ | Error _ -> false
-;;
-
-let%test "of_toml_string_lenient skips every poisoned row without failing the load" =
-  match
-    of_toml_string_lenient
-      ~source:"fixture"
-      "[[models]]\n\
-       id_prefix = \"stale-a\"\n\
-       supports_extended_thinking = true\n\
-       [[models]]\n\
-       id_prefix = \"stale-b\"\n\
-       supports_reasoning_budget = 1024\n"
-  with
-  | Ok (catalog, [ a; b ]) ->
-    String.equal a.entry_label "stale-a"
-    && String.equal b.entry_label "stale-b"
-    && Option.is_none (lookup catalog "stale-a")
-    && Option.is_none (lookup catalog "stale-b")
-  | Ok _ | Error _ -> false
-;;
-
-let%test "of_toml_string_lenient keeps whole-file TOML breakage fail-closed" =
-  match of_toml_string_lenient ~source:"fixture" "not toml" with
-  | Error _ -> true
-  | Ok _ -> false
-;;
-
-let%test "of_toml_string_lenient keeps duplicate surviving rows fail-closed" =
-  (* Skipping poisoned rows must not turn a contradiction into a silent
-     winner: two surviving rows with one identity still decide pricing, so
-     the load fails rather than picks one. *)
-  match
-    of_toml_string_lenient
-      ~source:"fixture"
-      "[[models]]\n\
-       id_prefix = \"dup-model\"\n\
-       [[models]]\n\
-       id_prefix = \"dup-model\"\n"
-  with
-  | Error _ -> true
-  | Ok _ -> false
-;;
-
-let%test "of_toml_string_lenient labels a row with no readable id by position" =
-  match
-    of_toml_string_lenient
-      ~source:"fixture"
-      "[[models]]\n\
-       id_prefix = \"good-model\"\n\
-       [[models]]\n\
-       supports_tools = true\n"
-  with
-  | Ok (_, [ { entry_label = "<model entry #2>"; _ } ]) -> true
-  | Ok _ | Error _ -> false
 ;;
 
 (* Wire-kind labels ("openai_compat", "gemini", ...) are what
@@ -1051,35 +915,6 @@ let provider_entry_for_label t provider_name =
       t.providers
 ;;
 
-let%test "of_toml_string_lenient skips poisoned provider rows after model skips" =
-  match
-    of_toml_string_lenient
-      ~source:"fixture"
-      "[[models]]\n\
-       id_prefix = \"stale-model\"\n\
-       supports_extended_thinking = true\n\
-       [[providers]]\n\
-       id = \"good-provider-id\"\n\
-       kind = \"openai_compat\"\n\
-       base_url = \"https://api.example.com\"\n\
-       request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"EXAMPLE_API_KEY\"\n\
-       [[providers]]\n\
-       id = \"stale-provider\"\n\
-       kind = \"openai_compat\"\n\
-       base_url = \"https://api.example.com\"\n\
-       request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"EXAMPLE_API_KEY\"\n\
-       supports_extended_thinking = true\n"
-  with
-  | Ok (catalog, [ model_skip; provider_skip ]) ->
-    String.equal model_skip.entry_label "stale-model"
-    && String.equal provider_skip.entry_label "stale-provider"
-    && Option.is_some (provider_entry_for_label catalog "good-provider-id")
-    && Option.is_none (provider_entry_for_label catalog "stale-provider")
-  | Ok _ | Error _ -> false
-;;
-
 let lookup_for_provider t ~provider_name ~model_id =
   let model_id = normalize_label model_id in
   let find_exact label =
@@ -1089,7 +924,9 @@ let lookup_for_provider t ~provider_name ~model_id =
          | None -> false
          | Some declared ->
            String.equal label (normalize_label declared)
-           && String.equal model_id (normalize_label entry.id_prefix))
+           && String.equal
+                model_id
+                (normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)))
       t.models
   in
   let requested = normalize_label provider_name in
@@ -1098,37 +935,6 @@ let lookup_for_provider t ~provider_name ~model_id =
   | None ->
     let canonical = canonical_provider_name t requested in
     if String.equal canonical requested then None else find_exact canonical
-;;
-
-(* Row-level catalog merge (Agent Core contract). Identity is what lookup keys on:
-   [(provider_name, id_prefix)] for model rows — a bare row and a
-   provider-scoped row with the same [id_prefix] are distinct rows — and [id]
-   for provider entries, all compared with lookup's normalization. Overlay
-   rows replace same-identity base rows; everything else is kept from both
-   sides. This is the deployment-delta alternative to forking the whole
-   catalog through [set_global]. *)
-let merge ~base ~overlay =
-  let overlay_model_keys = List.map model_row_key overlay.models in
-  let overlay_provider_keys = List.map provider_entry_key overlay.providers in
-  let kept_models =
-    List.filter
-      (fun entry -> not (List.mem (model_row_key entry) overlay_model_keys))
-      base.models
-  in
-  let kept_providers =
-    List.filter
-      (fun entry -> not (List.mem (provider_entry_key entry) overlay_provider_keys))
-      base.providers
-  in
-  (* Overlay rows come first: provider-entry consumers such as
-     [provider_label_for_base_url]/[provider_label_for_endpoint] scan in
-     declaration order, so a deployment entry whose endpoint identity is also
-     covered by an embedded entry must win. Model-row lookups are
-     order-independent (exact key or longest-prefix), so the same ordering is
-     applied there purely for consistency. *)
-  { models = overlay.models @ kept_models
-  ; providers = overlay.providers @ kept_providers
-  }
 ;;
 
 let provider_label_for_base_url ?getenv t ~kind ~base_url =
@@ -1174,30 +980,10 @@ let load_embedded_once () =
 
 let runtime_override : t option Atomic.t = Atomic.make None
 
-(* Deployment overlay merged onto the embedded catalog by [global]. Kept
-   separate from [runtime_override] so a full replacement (tests, explicit
-   AGENT_CORE_MODEL_CATALOG-style callers) still wins outright, and so the merged
-   result can be cached and invalidated independently. *)
-let overlay_catalog : t option Atomic.t = Atomic.make None
-
-(* The cache pairs the merged result with the exact overlay value it was
-   derived from. Readers accept a hit only when the cached overlay is
-   physically the current one, so a racing writer that publishes a merge of a
-   just-replaced overlay can never pin stale capabilities: the identity check
-   fails and the next call recomputes from the fresh overlay. The worst case
-   under contention is a redundant pure merge, never a stale read. *)
-let merged_cache : (t * t) option Atomic.t = Atomic.make None
 let set_global t = Atomic.set runtime_override (Some t)
-
-let set_global_overlay t =
-  Atomic.set overlay_catalog (Some t);
-  Atomic.set merged_cache None
-;;
 
 let clear_global () =
   Atomic.set runtime_override None;
-  Atomic.set overlay_catalog None;
-  Atomic.set merged_cache None;
   Atomic.set embedded_catalog Unloaded
 ;;
 
@@ -1206,16 +992,9 @@ let global () =
   | Some _ as o -> o
   | None ->
     let embedded_value = load_embedded_once () in
+    (* Re-read: [set_global] may have landed while the embedded catalog loaded,
+       and a full replacement wins over the embedded rows. *)
     (match Atomic.get runtime_override with
      | Some _ as o -> o
-     | None ->
-       (match Atomic.get overlay_catalog with
-        | None -> Some embedded_value
-        | Some overlay ->
-          (match Atomic.get merged_cache with
-           | Some (cached_overlay, merged) when cached_overlay == overlay -> Some merged
-           | Some _ | None ->
-             let merged = merge ~base:embedded_value ~overlay in
-             Atomic.set merged_cache (Some (overlay, merged));
-             Some merged)))
+     | None -> Some embedded_value)
 ;;

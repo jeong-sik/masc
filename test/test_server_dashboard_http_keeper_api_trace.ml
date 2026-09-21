@@ -750,6 +750,101 @@ let test_checkpoint_inventory_projects_missing_current () =
    The records are immutable, so each edge rebinds its entry; two edges in the
    same turn must still land in one group with the count advanced and the
    observed-at window spanning both. *)
+(* RFC librarian-lifecycle §10-2 through the dashboard action. The preview
+   says why an apply would be refused; the apply refuses while an atom is
+   unread and writes nothing; an apply at the end installs the checkpoint and
+   moves the position after it, leaving [boundary_lines_seen] alone. The
+   keeper's Librarian loop is retired around the writes; here it has none,
+   so the retire returns at once and the wake after it finds no server
+   switch and starts nothing. *)
+let test_purge_moves_the_librarian_position_with_the_checkpoint () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  with_temp_dir @@ fun dir ->
+  Eio_main.run @@ fun _env ->
+  let module Store = Keeper_checkpoint_store in
+  let module Progress = Keeper_librarian_progress in
+  let module Purge = Keeper_checkpoint_purge in
+  let state = Mcp_server.For_testing.create_state ~base_path:dir in
+  let config = Mcp_server.workspace_config state in
+  let keeper_name = "checkpoint-purge" in
+  let trace_id = Keeper_identity.generate_trace_id ~now:1.0 () in
+  Keeper_meta_store.replace_snapshot config
+    (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  (* Four identical wakes ahead of the protected tail: the fixed policy drops
+     the two middle ones and keeps the twenty most recent messages. *)
+  let wake = Agent_core.Types.user_msg "(autonomous wake)" in
+  let messages =
+    [ wake; Agent_core.Types.user_msg "reply-a"; wake; Agent_core.Types.user_msg "reply-b"
+    ; wake; wake ]
+    @ List.init Purge.default_config.keep_recent_messages (fun i ->
+        Agent_core.Types.user_msg (Printf.sprintf "recent %d" i))
+  in
+  let checkpoint =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:3 ~created_at:3.0) with
+      Agent_core.Checkpoint.messages }
+  in
+  (match Store.save_agent_core_classified ~session_dir ~history_retained:2 checkpoint with
+   | Ok (Store.Saved _) -> ()
+   | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
+   | Error detail -> fail detail);
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let atoms messages = snd (Runtime_model_input_tail_window.annotate messages) in
+  let boundary_lines_seen = 7 in
+  let write_position ~end_atom =
+    let last_atom_digest =
+      match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
+      | Some digest -> digest
+      | None -> failf "fixture history has no atom %d" (end_atom - 1)
+    in
+    match
+      Progress.write ~keepers_dir ~keeper_id:keeper_name
+        { position = { trace_id; end_atom; last_atom_digest }; boundary_lines_seen }
+    with
+    | Ok () -> ()
+    | Error error -> fail (Progress.write_error_to_string error)
+  in
+  let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let count = atoms messages in
+  write_position ~end_atom:(count - 1);
+  let original = Fs_compat.load_file canonical in
+  (match Checkpoints.purge_current config ~keeper_name ~apply:false with
+   | Ok preview ->
+     check bool "preview: apply is not allowed" false preview.apply_allowed;
+     check int "preview: the refusal is the one warning" 1 (List.length preview.warnings)
+   | Error error -> fail (Checkpoints.purge_error_to_string error));
+  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
+   | Error
+       (Checkpoints.Purge_librarian_rebase_refused
+          (Purge.Unread_atoms_present { end_atom; atom_count })) ->
+     check int "refused at the position" (count - 1) end_atom;
+     check int "against the history's atoms" count atom_count
+   | Error error -> fail (Checkpoints.purge_error_to_string error)
+   | Ok _ -> fail "an apply over an unread atom was allowed");
+  check string "a refused apply leaves the checkpoint" original (Fs_compat.load_file canonical);
+  write_position ~end_atom:count;
+  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
+   | Ok result -> check bool "applied" true result.applied
+   | Error error -> fail (Checkpoints.purge_error_to_string error));
+  let purged =
+    match Store.load_agent_core ~session_dir ~session_id:trace_id with
+    | Ok purged -> purged
+    | Error _ -> fail "the installed checkpoint is not readable"
+  in
+  check int "the two middle wakes are gone" (List.length messages - 2)
+    (List.length purged.messages);
+  match Progress.read ~keepers_dir ~keeper_id:keeper_name with
+  | Ok (Some progress) ->
+    check int "the position moved to the rewritten end" (atoms purged.messages)
+      progress.position.end_atom;
+    check int "boundary_lines_seen is untouched" boundary_lines_seen
+      progress.boundary_lines_seen
+  | Ok None -> fail "the position is gone"
+  | Error error -> fail (Progress.read_error_to_string error)
+;;
+
 let test_clock_groups_accumulate_edges_per_turn () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
@@ -888,6 +983,12 @@ let () =
             "projects missing current without failing inventory"
             `Quick
             test_checkpoint_inventory_projects_missing_current
+        ] )
+    ; ( "checkpoint_purge"
+      , [ test_case
+            "purge moves the Librarian position with the checkpoint"
+            `Quick
+            test_purge_moves_the_librarian_position_with_the_checkpoint
         ] )
     ]
 ;;

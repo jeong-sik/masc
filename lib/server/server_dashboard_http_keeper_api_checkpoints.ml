@@ -597,14 +597,12 @@ let purge_current config ~keeper_name ~apply =
       ~base_path:config.Workspace.base_path
       ~keeper_name
       (fun () ->
-         (* The keeper's Librarian loop is retired first so that no round
-            reads the position or the checkpoint while either is replaced,
-            and woken after so that the keeper has a loop again (RFC
-            librarian-lifecycle §4.6). The release only drops the tombstone
-            and raises nothing, so [finally] masks no exception. *)
-         let release = Keeper_librarian_loop.retire ~config ~keeper_name in
+         (* The keeper's Librarian loop is retired for the two writes so that
+            no round reads the position or the checkpoint while either is
+            replaced, and woken after so that the keeper has a loop again
+            (RFC librarian-lifecycle §4.6). *)
          let result =
-           Fun.protect ~finally:release (fun () ->
+           Keeper_librarian_loop.retire ~config ~keeper_name (fun () ->
              purge_current_unlocked config ~keeper_name ~apply:true)
          in
          Keeper_librarian_loop.wake ~base_path:config.Workspace.base_path ~keeper_name;

@@ -240,6 +240,12 @@ blocking_lints() {
   run_lint "SSOT spawn drift" bash scripts/ci/check-ssot-spawn-drift.sh
   run_lint "Silent failure patterns" \
     bash scripts/ci/check-silent-failure-patterns.sh
+  # G1+G2 of #37396: the turn-record decoder's own require/known lists are
+  # the SSOT; this checks every dashboard/src/api/fixtures/*.jsonl line
+  # against them so a fixture a producer forgot to update fails the pull
+  # request that added the field, not the next one that happens to touch it.
+  run_lint "Fixture decoder contract" \
+    python3 scripts/ci/check-fixture-decoder-contract.py
   run_lint "Spec Mirrors: references resolve" bash scripts/check-spec-truth.sh
   run_lint "docs/spec names files that exist" \
     python3 scripts/ci/check-spec-file-refs.py

@@ -216,7 +216,10 @@ describe('normalizeTaskStatus', () => {
     const source = readFileSync(resolve(__dirname, '../../lib/types/types_core.ml'), 'utf8')
     const fn = source.match(/let verification_intent_to_string = function([\s\S]*?);;/)
     expect(fn, 'verification_intent_to_string is in lib/types/types_core.ml').not.toBeNull()
-    const backend = [...fn![1].matchAll(/->\s*"([^"]+)"/g)].map((m) => m[1]).sort()
+    const backend = [...(fn?.[1] ?? '').matchAll(/->\s*"([^"]+)"/g)]
+      .map((m) => m[1])
+      .filter((intent): intent is string => typeof intent === 'string')
+      .sort()
     expect(backend).toEqual(['cancel', 'complete'])
     for (const intent of backend) {
       expect(normalizeTask({ id: 'task-6', title: 'Task', intent }))

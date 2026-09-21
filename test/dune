@@ -1,4 +1,3 @@
-(include stanzas/test_deployment_store_directories.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
 (include stanzas/test_librarian_working_state_cli.inc)
 (include stanzas/test_librarian_continuity_snapshot_cli.inc)
@@ -6633,3 +6632,5 @@
 (include stanzas/test_keeper_continuity_dispatch.inc)
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
+
+(include stanzas/test_deployment_store_directories.inc)

@@ -11386,6 +11386,13 @@ let render_runtime (state : state) =
      above, so the footer keeps its row while the prompt is up. *)
   (match Masc_tui_types.runtime_lane_prompt state with
    | None -> ()
+   | Some (Masc_tui_types.Lane_rename_prompt (lane, draft)) ->
+       c.push_styled ~style:(Theme.info ())
+         (Printf.sprintf
+            "  rename lane %s to: %s_  — Enter renames it and every reference, Esc cancel"
+            (Terminal_text.single_line lane)
+            (Terminal_text.single_line draft));
+       c.push_divider ()
    | Some (Masc_tui_types.Lane_name_prompt draft) ->
        c.push_styled ~style:(Theme.info ())
          (Printf.sprintf "  new lane name: %s_  — Enter pick its first runtime, Esc cancel"

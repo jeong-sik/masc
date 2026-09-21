@@ -116,6 +116,11 @@ let test_lookup_folds_case_and_rejects_padding () =
       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix);
   Alcotest.(check bool) "padded query is rejected" true
     (Option.is_none (Model_catalog.lookup catalog "  gpt-5.6-sol\t"));
+  (match Model_catalog.lookup_result catalog "  gpt-5.6-sol\t" with
+   | Error (Model_catalog.Malformed_model_id _) -> ()
+   | Error Model_catalog.No_such_row ->
+     Alcotest.fail "padded query must not become a valid catalog miss"
+   | Ok _ -> Alcotest.fail "padded query must not resolve");
   (match
      Model_catalog.lookup_for_provider
        catalog
@@ -131,7 +136,17 @@ let test_lookup_folds_case_and_rejects_padding () =
        (Model_catalog.lookup_for_provider
           catalog
           ~provider_name:"openai-responses"
-          ~model_id:"  GPT-5.6-TERRA\t"))
+          ~model_id:"  GPT-5.6-TERRA\t"));
+  match
+    Model_catalog.lookup_for_provider_result
+      catalog
+      ~provider_name:"openai-responses"
+      ~model_id:"  GPT-5.6-TERRA\t"
+  with
+  | Error (Model_catalog.Malformed_model_id _) -> ()
+  | Error Model_catalog.No_such_row ->
+    Alcotest.fail "provider-scoped padded query must not become a valid catalog miss"
+  | Ok _ -> Alcotest.fail "provider-scoped padded query must not resolve"
 ;;
 
 let test_lookup_misses_stay_misses () =
@@ -141,8 +156,18 @@ let test_lookup_misses_stay_misses () =
   in
   Alcotest.(check bool) "query no row prefixes" true
     (Option.is_none (Model_catalog.lookup catalog "xclaude-opus-5"));
+  (match Model_catalog.lookup_result catalog "xclaude-opus-5" with
+   | Error Model_catalog.No_such_row -> ()
+   | Error (Model_catalog.Malformed_model_id detail) ->
+     Alcotest.failf "valid miss was called malformed: %s" detail
+   | Ok _ -> Alcotest.fail "valid miss unexpectedly resolved");
   Alcotest.(check bool) "empty query matches nothing" true
-    (Option.is_none (Model_catalog.lookup catalog ""))
+    (Option.is_none (Model_catalog.lookup catalog ""));
+  match Model_catalog.lookup_result catalog "" with
+  | Error (Model_catalog.Malformed_model_id _) -> ()
+  | Error Model_catalog.No_such_row ->
+    Alcotest.fail "empty query must not become a valid catalog miss"
+  | Ok _ -> Alcotest.fail "empty query unexpectedly resolved"
 ;;
 
 let () =

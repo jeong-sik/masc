@@ -120,9 +120,18 @@ val load_file : string -> (t, string) result
     silently. *)
 val load_default : unit -> (t, string) result
 
-(** Longest-prefix lookup across provider-independent rows using the catalog's
-    exact declared [id_prefix] syntax. Provider-scoped rows are excluded.
-    Empty or whitespace-padded model ids do not match. *)
+(** Why a typed model lookup did not return a row. *)
+type lookup_failure =
+  | Malformed_model_id of string
+  | No_such_row
+
+(** Typed longest-prefix lookup across provider-independent rows using the
+    catalog's exact declared [id_prefix] syntax. Provider-scoped rows are
+    excluded. Malformed ids and valid misses remain distinct. *)
+val lookup_result : t -> string -> (model_entry, lookup_failure) result
+
+(** Compatibility option projection of {!lookup_result}. A malformed id is
+    logged before it becomes [None]; decision code should use the typed API. *)
 val lookup : t -> string -> model_entry option
 
 (** Exact normalized lookup across provider-scoped rows. [provider_name] is
@@ -145,7 +154,17 @@ val lookup : t -> string -> model_entry option
     synthesize, and an alias claiming one would capture every anonymous
     config of that wire kind.
 
-    Provider-independent family matching remains exclusively in {!lookup}. *)
+    Provider-independent family matching remains exclusively in
+    {!lookup_result}. *)
+val lookup_for_provider_result
+  :  t
+  -> provider_name:string
+  -> model_id:string
+  -> (model_entry, lookup_failure) result
+
+(** Compatibility option projection of {!lookup_for_provider_result}. A
+    malformed id is logged before it becomes [None]; decision code should use
+    the typed API. *)
 val lookup_for_provider
   :  t
   -> provider_name:string

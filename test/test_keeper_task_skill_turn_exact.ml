@@ -856,10 +856,11 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     [ "model", `String "fixture-jev"
     ; "answers", `Assoc [ "applicability", `Assoc
         [ "type", `String "choice"; "choice", `String decision
-        ; "confidence", `Float 0.8
+        ; "confidence", `Float 1.0
         ; "probabilities", `Assoc
-            [ "applicable", `Float 0.2; "not_applicable", `Float 0.7
-            ; "insufficient_context", `Float 0.1 ] ] ] ]) in
+            (List.map
+               (fun option -> option, `Float (if String.equal option decision then 1.0 else 0.0))
+               [ "applicable"; "not_applicable"; "insufficient_context" ]) ] ] ]) in
   let server = Exact_output_fixture.start_server ~sw ~net ~clock
       (Exact_output_fixture.Replies
         [ response "not_applicable"; response "applicable"; response "insufficient_context"

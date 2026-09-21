@@ -13,7 +13,7 @@ type match_result =
 
 type board_observation_kind =
   | Observed_post_created
-  | Observed_comment_added
+  | Observed_comment_added of { comment_id : string; parent_id : string option }
   | Observed_reaction_changed of Board_dispatch.board_reaction_change
   | Observed_vote_cast of Board_dispatch.board_vote_change
 
@@ -205,7 +205,11 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   { Keeper_event_queue.kind =
       (match signal.kind with
        | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-       | Board_dispatch.Board_comment_added _ -> Keeper_event_queue.Comment_added
+       | Board_dispatch.Board_comment_added comment ->
+         Keeper_event_queue.Comment_added
+           { comment_id = Board.Comment_id.to_string comment.comment_id
+           ; parent_id = Option.map Board.Comment_id.to_string comment.parent_id
+           }
        | Board_dispatch.Board_reaction_changed reaction ->
          Keeper_event_queue.Reaction_changed
            (queue_reaction_change_of_board reaction)
@@ -219,10 +223,8 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   }
 ;;
 
-(* The durable queue intentionally carries less identity than the live Board
-   signal. Keep that projection in its own type: reconstructing an exact
-   [Board_comment_added] without the accepted comment id would make a false
-   identity look valid. *)
+(* Queue identities retain their wire representation here for validation by
+   the Board id parser when a consumer reads the identified comment. *)
 let board_observation_of_board_stimulus
       ~(post_id : string)
       (bs : Keeper_event_queue.board_stimulus)
@@ -231,7 +233,8 @@ let board_observation_of_board_stimulus
   { kind =
       (match bs.kind with
        | Keeper_event_queue.Post_created -> Observed_post_created
-       | Keeper_event_queue.Comment_added -> Observed_comment_added
+       | Keeper_event_queue.Comment_added { comment_id; parent_id } ->
+         Observed_comment_added { comment_id; parent_id }
        | Keeper_event_queue.Reaction_changed reaction ->
          Observed_reaction_changed (board_reaction_change_of_queue reaction)
        | Keeper_event_queue.Vote_cast vote ->
@@ -307,7 +310,7 @@ let address_text_of_observation observation =
       (List.filter
          (fun part -> not (String.equal (String.trim part) ""))
          [ observation.title; observation.content ])
-  | Observed_comment_added -> observation.content
+  | Observed_comment_added _ -> observation.content
   | Observed_reaction_changed _ | Observed_vote_cast _ -> ""
 ;;
 

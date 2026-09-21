@@ -30,8 +30,8 @@ let fail fmt =
 
 (* ── Golden pins ────────────────────────────────────────────────── *)
 
-let golden_event_queue_state_schema = "keeper.event_queue.state.v18"
-let golden_event_queue_wal_schema = "masc.keeper_event_queue.transition.v8"
+let golden_event_queue_state_schema = "keeper.event_queue.state.v19"
+let golden_event_queue_wal_schema = "masc.keeper_event_queue.transition.v9"
 let golden_event_queue_snapshot_filename = "event-queue-v19.json"
 let golden_fleet_summary_schema = "masc.keeper_event_queue.fleet_summary.v5"
 let golden_fleet_health_summary_schema = "masc.keeper_event_queue.fleet_summary.v7"
@@ -86,12 +86,12 @@ let test_event_queue_wal_row_schema_marker_is_pinned () =
 
 let test_event_queue_snapshot_filename_pins_store_generation () =
   (* Same textual pin: the snapshot filename generation rides on the
-     registry constant (v18 data / v19 filename), not on an inline
+     registry constant (v19 data / v19 filename), not on an inline
      literal that can drift from the payload marker. *)
   let source = read_source "lib/keeper_runtime/keeper_event_queue_persistence.ml" in
   assert
     (contains "let snapshot_filename = Keeper_event_queue_schema.snapshot_filename" source);
-  (* F3: the WAL file generation rides on the row marker (transition.v8)
+  (* F3: the WAL file generation rides on the row marker (transition.v9)
      too — the filename constant lives in the registry, and the writer
      references it by name. A marker-only bump otherwise leaves the
      filename pointing at the old generation: silent miss. *)
@@ -181,22 +181,22 @@ let test_registry_is_the_single_source_of_truth () =
   let state = read_source "lib/keeper_runtime/keeper_event_queue_state.ml" in
   let schema_module = read_source "lib/keeper_runtime/keeper_event_queue_schema.ml" in
   (* Only the registry carries the literal; the writers carry the name. *)
-  if contains "\"keeper.event_queue.state.v18\"" state then
+  if contains "\"keeper.event_queue.state.v19\"" state then
     fail "keeper_event_queue_state.ml embeds the state schema literal";
-  if contains "\"masc.keeper_event_queue.transition.v8\"" persistence then
+  if contains "\"masc.keeper_event_queue.transition.v9\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the WAL schema literal";
   if contains "\"event-queue-v19.json\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the snapshot filename literal";
   if contains "\"masc.keeper_event_queue.fleet_summary.v5\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the fleet summary literal";
-  if contains "\"event-queue-transitions-v8.jsonl\"" persistence then
+  if contains "\"event-queue-transitions-v9.jsonl\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the WAL filename literal";
   if
     not
-      (contains "\"keeper.event_queue.state.v18\"" schema_module
-      && contains "\"masc.keeper_event_queue.transition.v8\"" schema_module
+      (contains "\"keeper.event_queue.state.v19\"" schema_module
+      && contains "\"masc.keeper_event_queue.transition.v9\"" schema_module
       && contains "\"event-queue-v19.json\"" schema_module
-      && contains "\"event-queue-transitions-v8.jsonl\"" schema_module)
+      && contains "\"event-queue-transitions-v9.jsonl\"" schema_module)
   then fail "registry must carry every generation constant"
 
 let () =

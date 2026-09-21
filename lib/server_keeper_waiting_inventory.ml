@@ -194,7 +194,7 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
 let board_signal_what (signal : Keeper_event_queue.board_stimulus) =
   match signal.kind with
   | Post_created -> Printf.sprintf "%s의 새 글" signal.author
-  | Comment_added -> Printf.sprintf "%s의 댓글" signal.author
+  | Comment_added _ -> Printf.sprintf "%s의 댓글" signal.author
   | Reaction_changed change ->
     Printf.sprintf
       "%s의 반응 %s"

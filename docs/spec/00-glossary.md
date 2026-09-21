@@ -536,6 +536,23 @@ status: reference
   붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
   강화 정도를 뜻하지 않는다.
 
+**Library**
+: `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.
+  자동 수집 경로는 없고 Keeper에게는 검색·읽기 샤드만 있으므로, 설치에 문서가
+  하나도 없는 상태도 정상이다. 알려진 문서가 있을 때만 검색한다.
+  문서는 `MASC_BASE_PATH/docs/library`(없으면 호스트 런타임 루트) 아래 저장되고,
+  각 문서는 YAML frontmatter
+  (`title`·`source`·`author`·`created`·`updated`·`tags`)를 갖는다. 한 층의 평평한
+  디렉터리라 문서는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌 합타입
+  (`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
+  `source_to_string`이 컴파일 오류로 강제된다. 네 도구가 이걸 쓴다 —
+  `masc_library_list`·`masc_library_read`·`masc_library_add`·`masc_library_search`.
+  Keeper 쪽에는 read-only인 `keeper_library_search`·`keeper_library_read` 샤드
+  투영만 있다.
+  Librarian(기억 정리자)과 이름이 비슷하지만 다른 것이다 — Librarian은 Keeper의
+  Memory OS를 정리하고, Library는 명시적으로 추가된 문서만 담는다.
+  → [Tool_library](../../lib/tool_library.mli)
+
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은

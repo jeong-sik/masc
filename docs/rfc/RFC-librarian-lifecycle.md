@@ -538,8 +538,12 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
     restart·prefix 변경·손상된 파일은 거절한다. 마지막 atom까지 보존했으면
     과거 atom은 남기지 않으며 pinned context는 유지한다.
     이는 Agent Core checkpoint를 사용하는 offline 저장·조립 검증이다.
-    후보 설명의 의미 보존, 공식 클라이언트의 fragment 경계, 운영 창 연결은
-    별도 검증이 필요하다. semantic score나 운영 read position을 생성하지 않는다.
+    후보 설명의 의미 보존과 공식 클라이언트 fragment 경계는 별도 검증이 필요하다.
+    하네스가 semantic score나 운영 read position을 생성하지는 않는다.
+    Agent Core 운영 입력은 별도의 `librarian-continuity.json` 쌍을 dispatch마다
+    검증해 고정하고, 덮은 prefix 대신 하던 일을 전달한다. 미처리 suffix는
+    원문 그대로 유지한다. 저장본 없는 경로와 공식 client는 적용 대상이 아니다.
+    연결의 구현과 배포 후 연속 턴 검증은 구분한다(`docs/librarian-continuity-snapshot.md`).
 - **(마) 일을 셋으로 나눈다.** 턴 읽기(facts 전부를 싣지 않는다), 기억 접기(facts 만 본다), 받은 일 정리(지금의 `working_contexts`). 일마다 프롬프트 키, 스키마, 디코더를 따로 둔다. 회차 시간과 실패율(§2.6 의 p90 583초, 실패 15%)을 줄이는 것이 목적이다. 나눌지와 나누는 모양은 하네스가 잰 값으로 정한다. 그때 같이 풀어야 하는 것이 셋 있다. 접기 회차의 커밋이 자기를 다시 깨우지 않아야 한다(`apply_disposition` 은 바뀐 것이 없어도 revision 을 올리고 알림을 낸다). `supersedes` 와 "대체할 말 없이 틀렸다고 밝혀진 사실"을 뺄 자리가 남아야 한다(턴 읽기는 facts 를 못 보고 접기는 대화를 못 본다). 일의 종류를 registry 행에 남기려면 그 행의 엄격한 디코드와 lane 단위 보존을 같이 봐야 한다.
 
 ## 8. 이행
@@ -650,3 +654,39 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
    **입력 구성 바이트는 도구 본문의 소실량이 아니다.** `Turn_record.input_components`는 Keeper 턴에서 관측한 마지막 요청의 구성 비용이다(`lib/types/turn_record.mli`). `keeper_agent_run.ml`이 넘긴 `input_messages` 전체에서 `Keeper_agent_prompt_metrics.build_ctx_segments`가 도구 호출·결과 바이트를 합하므로, 같은 이력을 다음 요청에 다시 실으면 다시 세어진다. 호출 id·도구 이름·인자도 포함하며, 새 결과량·중복을 제거한 본문량·삭제량을 구분해서 측정하는 값이 아니다.
 
    Claude Code와 Codex는 재개할 때도 MASC의 canonical snapshot을 설정으로 다시 보내고 그 메시지를 `Whole_input_transmitted`로 보고한다. 이 측정에는 클라이언트가 따로 보유한 native 대화·도구 이력이 포함되지 않는다. 따라서 이 합계로 D6의 발생률이나 실행 방식별 소실량을 비교할 수 없다. source로 확인되는 D6의 경계는 `keeper_librarian.ml`의 `text_of_content`가 도구 호출·결과 본문을 생략하고, checkpoint가 없는 턴의 `librarian_messages`가 assistant 메시지만 받는다는 것이다. 실제 본문이 어디에 보관되고 무엇이 빠지는지는 이 프롬프트 입력 계약과 별도로 확인해야 한다(§6).
+
+### 저장된 대화 상태의 생산
+
+`Keeper_librarian_continuity`는 Memory 읽기 위치와 별도로, 현재 Keeper trace의
+완료된 대화 범위를 읽습니다. 경계 로그를 먼저 읽고 정확한 checkpoint를 잠금
+안에서 읽습니다. 저장된 상태가 그 이력과 일치하면 이전 상태와 새 완료 구간만
+모델에 주고, 일치하지 않으면 restart로 증명된 완료 prefix 전체를 줍니다.
+아직 진행 중인 끝부분은 이 입력과 새 frontier에 포함하지 않습니다.
+
+기존 Librarian 호출의 `working_state` 출력은 대화의 작업 상태입니다. 큐 원본의
+`working_contexts`와 장기 Memory 판정은 별도 입력과 출력입니다. 상태와 정확한
+대화 범위는 runtime Keeper 디렉터리의 `librarian-continuity.json`에 한 번에
+저장하며, 이전 pair가 바뀌었으면 오래된 작성자의 결과를 덮어쓰지 않습니다.
+출력이 null이거나 저장에 실패하면 frontier도 전진하지 않습니다. Memory commit
+성공 여부와 읽기 위치는 기존 의미를 유지합니다. 과거 trace의 Memory를 처리하는
+중에도 새 대화 상태의 생산 대상은 현재 Keeper metadata의 trace입니다.
+
+Memory가 이미 읽은 구간이라도 이어갈 상태가 없으면 기존 queue 변경 호출의
+Context-only 경로에서 생산할 수 있습니다. 별도 daemon이나 타이머를 만들지
+않으며, remembered-turn 처리가 있다는 이유로 이 생산을 생략하지 않습니다.
+이 생산 단계 자체는 provider 전송을 자르지 않습니다. 실제 전송 제외는 후속
+소비자가 저장된 pair를 원본 이력에 대조한 뒤 적용해야 합니다.
+
+대화 상태 pair의 publication은 Memory disposition 저장 성공 뒤에 합니다.
+같은 trace·history 시작·끝 경계 줄·atom·digest에 대한 Memory WAL 증거가
+있어야 하며, 좁혀 재시도한 Memory 범위보다 앞선 준비 입력은 게시하지 않습니다.
+WAL은 scope별 마지막 atom 범위만 보존하므로 이 검사는 끝점 일치를 확인하며,
+전체 prefix의 commit 이력을 독립적으로 증명하지는 않습니다. 운영의 atom receipt는
+직렬 durable consumer가 생산합니다. 이 consumer가 Memory commit 또는 그 WAL
+복구 뒤에만 선택 구간의 위치를 전진시키는 불변식과, 준비 입력이 atom 0부터의
+목격된 history 시작을 요구하는 조건을 함께 사용합니다. 목격된 시작이 없는
+baseline은 continuity를 만들지 못합니다. 마지막 receipt의 시작이 0보다 큰
+경우 앞선 범위의 coverage는 이 생산 경로의 불변식에 의존합니다.
+Context-only bootstrap도 같은 끝점 증거와 생산 조건을 사용합니다. executor에 넘긴 실제 파일
+저장과 결과 기록이 끝날 때까지 호출자의 취소를 보호하고, 그 뒤 취소를 다시
+전파합니다. 따라서 종료·purge가 아직 실행 중인 저장 작업을 추월하지 않습니다.

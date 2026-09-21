@@ -37,6 +37,24 @@ type checkpoint_progress =
   | Checkpoint_stage_reached
   | Tool_results_saved
 
+type continuity
+(** A snapshot verified against the dispatch's original checkpoint. *)
+
+val uncompressed_history : continuity
+(** A fresh history cannot use an older snapshot or an older eviction front. *)
+
+val prepare_continuity :
+  trace_id:string ->
+  lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
+  messages:Agent_core.Types.message list ->
+  Librarian_continuity_snapshot.t ->
+  (continuity, Librarian_continuity_snapshot.error) result
+
+val validate_continuity :
+  messages:Agent_core.Types.message list -> continuity -> (unit, Agent_core.Error.t) result
+(** Check immutable covered messages again before each request. No source bytes
+    are reserialized; a changed prefix refuses the request. *)
+
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
@@ -48,6 +66,7 @@ type try_provider_ctx =
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
         (** The durable seed, read only when neither the pair's ledger nor a
             refusal in this turn supplies the front. *)
+  ; continuity : continuity option
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate
             of this turn. A valid later front takes precedence over the
@@ -473,6 +492,7 @@ module For_testing : sig
   val message_measurement_hash : Agent_core.Types.message -> int
 
   val compose_carried_model_input :
+    ?continuity:continuity ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
     history_digest_at:(int -> string option) ->
@@ -483,6 +503,7 @@ module For_testing : sig
     composed
 
   val request_view :
+    ?continuity:continuity ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->

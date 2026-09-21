@@ -150,7 +150,7 @@ let test_prefit_real_continuity ~base_path () =
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
       Prompt_names.librarian variables |> get in
     let requirement = Agent_core.Exact_output.make_output_requirement
-      ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+      ~schema:Keeper_structured_output_schema.librarian_continuity_output_schema
       ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
     Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt in
   let chars text = Runtime_codex_app_server.prompt_char_count text |> get in
@@ -165,8 +165,18 @@ let test_prefit_real_continuity ~base_path () =
   let null_state = match missing_state with
     | `Assoc fields -> `Assoc (("working_state", `Null) :: fields)
     | _ -> Alcotest.fail "expected fixture object" in
+  let check_working_state_schema ~continuity output_schema =
+    let open Yojson.Safe.Util in
+    let state = output_schema |> member "properties" |> member "working_state" in
+    let expected = if continuity then `String "string"
+      else `List [`String "string"; `String "null"] in
+    Alcotest.(check string) "CLI schema matches this pass's working-state obligation"
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (member "type" state));
+    if continuity then Alcotest.(check int) "continuity requires nonempty text" 1
+      (state |> member "minLength" |> to_int) in
   let invalid_calls = ref [] in
-  let invalid_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let invalid_runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt:_ =
+    check_working_state_schema ~continuity:true output_schema;
     invalid_calls := !invalid_calls @ [runtime_id];
     Ok (Yojson.Safe.to_string
       (if runtime_id = Fixture.cli_primary_runtime then null_state else missing_state)) in
@@ -185,8 +195,11 @@ let test_prefit_real_continuity ~base_path () =
     (P.memory_committed ~config ~keeper_name:keeper_id half |> get);
   Alcotest.(check bool) "missing working state leaves no continuity frontier" true
     (P.read ~config ~keeper_name:keeper_id |> get |> Option.is_none);
+  let ordinary_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+    check_working_state_schema ~continuity:false output_schema;
+    Ok (Yojson.Safe.to_string null_state) in
   (match Runtime.For_testing.execute_exact_output_classified ~continuity:None
-     ~cli_runner:invalid_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
+     ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
      ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
    | Ok ((selection, _), _) ->
      Alcotest.(check bool) "ordinary Memory still accepts null working state" true
@@ -218,7 +231,8 @@ let test_prefit_real_continuity ~base_path () =
   let execute prepared state =
     let input = input prepared in
     let expected = rendered prepared input in
-    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+    let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+      check_working_state_schema ~continuity:true output_schema;
       calls := prompt :: !calls;
       Alcotest.(check string) "prefit and dispatch use identical full text" expected prompt;
       Alcotest.(check bool) "no oversized CLI probe after learning the bound" true

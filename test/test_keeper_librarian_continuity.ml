@@ -362,7 +362,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
-    ~schema:Masc.Keeper_structured_output_schema.librarian_current_output_schema
+    ~schema:Masc.Keeper_structured_output_schema.librarian_continuity_output_schema
     ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
   let chars prompt = Codex.prompt_char_count prompt |> get in
   let max_chars = Masc.Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt |> chars in
@@ -396,17 +396,55 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let observation () = O.latest_synthesis ~config ~keeper_name |> some in
   check bool "no further source is not labelled drained" true
     ((observation ()).state = O.No_source);
-  let extended = source @ [message "A newly completed source."] in
+  let next_turn = List.init 4 (fun index ->
+    message (String.make 1000 (Char.chr (Char.code 'e' + index)))) in
+  let extended = source @ next_turn in
   save extended; boundary ~fresh:false 2 extended;
-  let rejected ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let rejected_calls = ref 0 in
+  let rejected ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr rejected_calls;
     check bool "actual runtime dispatch is visibly running" true
       ((observation ()).state = O.Running);
-    Error (Masc.Fusion_official_client.Setup_failure (Provider_error "fixture refusal")) in
+    check bool "new drain fits the learned character ceiling before dispatch" true
+      (chars prompt <= max_chars);
+    Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|} in
   Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
     ~cli_runner:rejected ~base_path ~keeper_name ();
+  check int "domain refusal advances through both declared slots" 2 !rejected_calls;
   check bool "failed generation replaces running state" true
     ((observation ()).state = O.Not_committed);
   check int "refused range keeps committed frontier" 4
+    (P.read ~config ~keeper_name |> get |> some).end_atom;
+  let resumed_calls = ref 0 in
+  let resumed ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr resumed_calls;
+    check bool "domain refusal did not erase the next drain's measured ceiling" true
+      (chars prompt <= max_chars);
+    Ok answer in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:resumed ~base_path ~keeper_name ();
+  check bool "resumed drain really dispatched" true (!resumed_calls > 0);
+  check int "resumed drain commits the remaining completed atoms" 8
+    (P.read ~config ~keeper_name |> get |> some).end_atom;
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  let canonical = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
+    | Ok snapshot -> C.exact_snapshot_messages snapshot
+    | Error _ -> fail "source checkpoint disappeared" in
+  check bool "prefitting and failed generation preserve the original source" true
+    (List.equal Agent_core.Types.Message_value.equal extended canonical);
+  let after_forget = extended @ next_turn in
+  save after_forget; boundary ~fresh:false 3 after_forget;
+  Masc.Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
+  let forgotten_calls = ref 0 in
+  let forgotten ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr forgotten_calls;
+    check bool "forget removes the learned ceiling instead of retaining stale knowledge" true
+      (chars prompt > max_chars);
+    Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|} in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:forgotten ~base_path ~keeper_name ();
+  check int "after forget the unfit source still reaches declared alternatives" 2 !forgotten_calls;
+  check int "failed request after forget does not advance coverage" 8
     (P.read ~config ~keeper_name |> get |> some).end_atom;
   (try Eio.Cancel.sub (fun cancellation ->
      let cancelled ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =

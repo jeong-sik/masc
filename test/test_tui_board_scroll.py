@@ -59,24 +59,32 @@ def run(executable: str) -> None:
                             interact=interact, http_fixtures=fixtures)
 
 
-# From 110 columns the Board read screen keeps the 34-column roster pane on
-# the left (Masc_tui_roster_pane.threshold_cols, pane_cols), so the read pane
-# is the terminal minus 34, and the side layout needs 120 of those
-# (Masc_tui_layout.board_read_side_minimum_cols): a terminal of at least 154.
-# At 180 the read pane is 146 and the fixed 40-column comment text plus its
-# 2-column gutter put the comment column at 34 + 146 - 42 = 138. In the
-# stacked layout a comment starts at the row's left edge, so a comment found
-# this far right can only be beside the post.
-SIDE_COLUMNS = 180
-SIDE_COMMENT_COLUMN_LEAST = 120
+# The Board read pane gets what is left after two panes that stand beside it:
+# the acting pane on the right (Masc_tui_acting_pane.pane_cols = 56, shown from
+# threshold_cols = 132; render reserves it through get_terminal_size) and the
+# roster pane on the left (Masc_tui_roster_pane.pane_cols = 34). The side layout
+# needs 120 read-pane columns (Masc_tui_layout.board_read_side_minimum_cols),
+# so the terminal must be at least 56 + 34 + 120 = 210. At 180 the read pane is
+# only 90 and the comments stay below the post (CI run 35555076683 drew the
+# acting pane in columns 124-179 of the 180-column screen).
+ACTING_PANE_COLUMNS = 56
+ROSTER_PANE_COLUMNS = 34
+SIDE_READ_PANE_LEAST = 120
+SIDE_COLUMNS = ACTING_PANE_COLUMNS + ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST
+# In the stacked layout a comment starts near the read pane's left edge
+# (column 40 at 34 + 6). Beside the post it sits in the fixed 40-column comment
+# column plus its 2-column gutter, at 34 + 120 - 42 = 112. Anything in the
+# right half of the read pane can only be beside the post. Columns are screen
+# cells, not bytes: a box-drawing rule is one cell and three UTF-8 bytes.
+SIDE_COMMENT_COLUMN_LEAST = ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST // 2
 
 
 def run_side_by_side(executable: str) -> None:
     """From 120 read-pane columns the comments stand beside the post, in a
     fixed-width column on the right; narrower, they stay below it. The PTY
-    starts at 100 columns (no roster pane, stacked) and is resized to 180
-    (roster pane and a 146-column read pane, side by side), so both layouts
-    are drawn in one run."""
+    starts at 100 columns (no roster pane, stacked) and is resized to 210
+    (roster pane, a 120-column read pane and the acting pane, side by side),
+    so both layouts are drawn in one run."""
     fixtures = h.overview_event_http_fixtures()
     body = "\n".join(f"Side body line {i:02d}" for i in range(12))
     post = h.board_selection_post("side", "Side by side", body)
@@ -105,7 +113,7 @@ def run_side_by_side(executable: str) -> None:
                           needle=b"Comment 000", controls=(h.FULL_REDRAW,))
         h.read_available(fd, output)
         _, beside = comment_row(output)
-        at = beside.index(b"Comment 000")
+        at = beside.decode("utf-8", "replace").index("Comment 000")
         if at < SIDE_COMMENT_COLUMN_LEAST:
             # The whole screen, not just this row: whether the columns right of
             # the read pane hold the acting pane or nothing decides whether the

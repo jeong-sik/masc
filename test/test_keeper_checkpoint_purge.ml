@@ -439,31 +439,91 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_core.Checkpoint.turn_count
 
-let test_librarian_coordinates_block_endpoint_rewrite () =
+module Gate = Masc.Keeper_librarian_purge_gate
+module Progress = Masc.Keeper_librarian_progress
+
+let endpoint messages =
+  match Masc.Keeper_turn_boundaries.position_of_messages messages with
+  | Ok (Masc.Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
+    end_atom, last_atom_digest
+  | Ok _ -> Alcotest.fail "fixture history holds no atom"
+  | Error detail -> Alcotest.fail detail
+;;
+
+(* RFC librarian-lifecycle section 10, second decision, as
+   [specs/bug-models/LibrarianRead.tla] settles it: the rewrite is allowed
+   only when the read position is the end of the history, the end then moves
+   to the rewritten end, and the counted lines stay as they were. *)
+let test_purge_gate_follows_the_read_position () =
+  let trace_id = "trace-gate" in
   let before = (checkpoint_fixture ()).Agent_core.Checkpoint.messages in
-  let after = [ text_message Types.User "retained" ] in
-  let invalidates coordinates_present rewritten =
-    match
-      Purge.rewrite_invalidates_librarian_coordinates
-        ~coordinates_present
-        ~before
-        ~after:rewritten
-    with
-    | Ok invalidates -> invalidates
+  let after =
+    match Purge.purge ~config:no_tail_config (checkpoint_fixture ()) with
+    | Ok (purged, _) -> purged.Agent_core.Checkpoint.messages
+    | Error _ -> Alcotest.fail "checkpoint purge failed"
+  in
+  let atom_count, digest = endpoint before in
+  let after_count, after_digest = endpoint after in
+  Alcotest.(check bool) "the rewrite renumbers" true (after_count < atom_count);
+  let at ?(trace_id = trace_id) end_atom last_atom_digest : Progress.t =
+    { position = { trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 7 }
+  in
+  let decide ?(boundary_lines_present = true) ?(after = after) progress =
+    match Gate.decide ~trace_id ~boundary_lines_present ~progress ~before ~after with
+    | Ok decision -> decision
     | Error detail -> Alcotest.fail detail
   in
-  Alcotest.(check bool)
-    "tracked endpoint rewrite is refused"
-    true
-    (invalidates true after);
-  Alcotest.(check bool)
-    "untracked rewrite remains available"
-    false
-    (invalidates false after);
-  Alcotest.(check bool)
-    "tracked stable endpoint remains available"
-    false
-    (invalidates true before)
+  (match decide ~boundary_lines_present:false None with
+   | Gate.Allowed None -> ()
+   | Gate.Allowed (Some _) | Gate.Refused _ ->
+     Alcotest.fail "no coordinates at all: nothing to protect");
+  (match decide None with
+   | Gate.Refused (Gate.Not_read_yet { atom_count = unread }) ->
+     Alcotest.(check int) "every atom is unread" atom_count unread
+   | Gate.Allowed _ | Gate.Refused _ ->
+     Alcotest.fail "boundary lines without a position: refused");
+  (match decide (Some (at ~trace_id:"another-trace" atom_count digest)) with
+   | Gate.Refused (Gate.Not_read_yet _) -> ()
+   | Gate.Allowed _ | Gate.Refused _ ->
+     Alcotest.fail "a position for another trace says nothing about this one");
+  (match decide (Some (at 1 digest)) with
+   | Gate.Refused (Gate.Unread_atoms { end_atom; atom_count = total }) ->
+     Alcotest.(check int) "read up to atom 1" 1 end_atom;
+     Alcotest.(check int) "of the whole history" atom_count total
+   | Gate.Allowed _ | Gate.Refused _ ->
+     Alcotest.fail "a position before the end: refused with the unread span");
+  (match decide (Some (at atom_count "another-digest")) with
+   | Gate.Refused (Gate.Position_off_history _) -> ()
+   | Gate.Allowed _ | Gate.Refused _ ->
+     Alcotest.fail "the end with another digest is not this history's end");
+  (match decide (Some (at (atom_count + 1) digest)) with
+   | Gate.Refused (Gate.Position_off_history _) -> ()
+   | Gate.Allowed _ | Gate.Refused _ ->
+     Alcotest.fail "a position beyond the end is not this history's");
+  (match decide (Some (at atom_count digest)) with
+   | Gate.Allowed (Some rebased) ->
+     Alcotest.(check int)
+       "the end moves to the rewritten end"
+       after_count
+       rebased.Progress.position.Progress.end_atom;
+     Alcotest.(check string)
+       "the digest is the rewritten last atom's"
+       after_digest
+       rebased.Progress.position.Progress.last_atom_digest;
+     Alcotest.(check string)
+       "the trace is unchanged"
+       trace_id
+       rebased.Progress.position.Progress.trace_id;
+     Alcotest.(check int)
+       "the counted lines are untouched"
+       7
+       rebased.Progress.boundary_lines_seen
+   | Gate.Allowed None | Gate.Refused _ ->
+     Alcotest.fail "a position at the end: allowed, with the position moved");
+  (match decide ~after:[] (Some (at atom_count digest)) with
+   | Gate.Refused Gate.Rewrite_empties_history -> ()
+   | Gate.Allowed _ | Gate.Refused _ ->
+     Alcotest.fail "a rewrite that leaves no atom: refused")
 ;;
 
 
@@ -652,9 +712,9 @@ let () =
             `Quick
             test_checkpoint_fields_pass_through
         ; Alcotest.test_case
-            "Librarian coordinates block endpoint rewrite"
+            "purge gate follows the Librarian read position"
             `Quick
-            test_librarian_coordinates_block_endpoint_rewrite
+            test_purge_gate_follows_the_read_position
         ] )
     ; ( "cli"
       , [ Alcotest.test_case "default cluster: workspace dry-run and apply" `Quick

@@ -14,6 +14,23 @@ type attempt_state =
 
 type runtime_entry = Not_entered | Entered
 
+module Consumer = Keeper_librarian_durable_consumer
+module Runs = Exact_lane_run_registry
+
+type pass_end =
+  | Off
+  | Lane_unconfigured
+  | Drained
+  | Not_committed
+  | Stopped of Consumer.error
+  | Raised of string
+
+type measurement =
+  { measured_at : float
+  ; last_pass : pass_end
+  ; unread : Consumer.unread option
+  }
+
 type remembered =
   { trace_id : string
   ; identity : unit ref
@@ -22,8 +39,22 @@ type remembered =
   }
 
 let remembered : (string * remembered) list Atomic.t = Atomic.make []
+let measurements : (string * measurement) list Atomic.t = Atomic.make []
 (* Registry mutations never yield; provider work runs outside this mutex. *)
 let mu = Stdlib.Mutex.create ()
+
+let record_measurement ~config ~keeper_name measurement =
+  let key = Keeper_registry_types.registry_key ~base_path:config.Workspace.base_path keeper_name in
+  Stdlib.Mutex.protect mu (fun () ->
+    Atomic.set
+      measurements
+      ((key, measurement) :: List.remove_assoc key (Atomic.get measurements)))
+;;
+
+let last_measurement ~config ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path:config.Workspace.base_path keeper_name in
+  List.assoc_opt key (Atomic.get measurements)
+;;
 let remember_turn ~base_path ~keeper_name ~trace_id process =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   Stdlib.Mutex.protect mu (fun () ->
@@ -71,48 +102,99 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
     true
   | Some _ | None -> false
 
-let rec run_durable_with_commit ~config ~keeper_name ~commit =
+let rec drain_durable_with_commit ~config ~keeper_name ~commit =
   match Env_config.KeeperMemoryOs.librarian_config_state () with
-  | Disabled | Invalid -> ()
+  | Disabled | Invalid -> Off
   | Enabled ->
     (match
-       Keeper_librarian_durable_consumer.consume_one
-         ~config
-         ~keeper_name
-         ~commit
+       Consumer.consume_one ~config ~keeper_name ~commit
      with
-     | Ok
-         (Keeper_librarian_durable_consumer.Nothing_to_read
-         | Memory_not_committed) -> ()
-     | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+     | Ok Consumer.Nothing_to_read -> Drained
+     | Ok Consumer.Memory_not_committed -> Not_committed
+     | Ok (Consumer.Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
        (* A stored advance can leave unread cuts, including after the first
           baseline or a successful small retry. Continue on that evidence;
           failures wait for another wake, and every pass rechecks the toggle. *)
-       run_durable_with_commit ~config ~keeper_name ~commit
-     | Error Keeper_librarian_durable_consumer.Keeper_meta_absent -> ()
+       drain_durable_with_commit ~config ~keeper_name ~commit
+     | Error Consumer.Keeper_meta_absent -> Stopped Consumer.Keeper_meta_absent
      | Error error ->
        Log.Keeper.warn
          ~keeper_name
          "durable Librarian range not consumed: %s"
-         (Keeper_librarian_durable_consumer.error_to_string error))
+         (Consumer.error_to_string error);
+       Stopped error)
+;;
+
+let run_durable_with_commit ~config ~keeper_name ~commit =
+  ignore (drain_durable_with_commit ~config ~keeper_name ~commit)
+;;
+
+let lane_id = Runs.lane_key Runs.Librarian
+
+let lane_available () =
+  match Runtime_exact_output_registry.current () with
+  | Error _ -> false
+  | Ok registry ->
+    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+     | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
+     | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true)
+;;
+
+let measure_unread ~config ~keeper_name =
+  match Consumer.unread_turns ~config ~keeper_name with
+  | Ok unread -> Some unread
+  | Error error ->
+    Log.Keeper.warn
+      ~keeper_name
+      "librarian lag not counted: %s"
+      (Consumer.error_to_string error);
+    None
+;;
+
+let finish_measurement ~config ~keeper_name last_pass =
+  let unread =
+    match last_pass with
+    | Off | Stopped Consumer.Keeper_meta_absent -> None
+    | Lane_unconfigured | Drained | Not_committed | Stopped _ | Raised _ ->
+      measure_unread ~config ~keeper_name
+  in
+  record_measurement
+    ~config
+    ~keeper_name
+    { measured_at = Time_compat.now (); last_pass; unread }
 ;;
 
 let run_durable ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
   match Env_config.KeeperMemoryOs.librarian_config_state () with
-  | Disabled | Invalid -> ()
+  | Disabled | Invalid -> finish_measurement ~config ~keeper_name Off
   | Enabled ->
-    let config = Workspace.default_config base_path in
-    let memory_keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path ~base_path
-    in
-    run_durable_with_commit
-      ~config
-      ~keeper_name
-      ~commit:
-        (Keeper_librarian_durable_consumer.commit_with_runtime
-           ~base_path
-           ~keepers_dir:memory_keepers_dir
-           ~keeper_id:keeper_name)
+    if not (lane_available ())
+    then (
+      Log.Keeper.warn
+        ~keeper_name
+        "librarian queue: exact lane %s is not configured; the wake is dropped"
+        lane_id;
+      finish_measurement ~config ~keeper_name Lane_unconfigured)
+    else
+      let memory_keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path
+      in
+      let last_pass =
+        try
+          drain_durable_with_commit
+            ~config
+            ~keeper_name
+            ~commit:
+              (Consumer.commit_with_runtime
+                 ~base_path
+                 ~keepers_dir:memory_keepers_dir
+                 ~keeper_id:keeper_name)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Raised (Printexc.to_string exn)
+      in
+      finish_measurement ~config ~keeper_name last_pass
 ;;
 
 let run ~trigger ~base_path ~keeper_name =

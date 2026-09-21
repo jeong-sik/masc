@@ -1,5 +1,27 @@
 (** Read-only fleet health for the current Memory OS snapshot. *)
 
+(* RFC librarian-lifecycle §4.9. What the server-owned Librarian lane
+   measured when its last durable catch-up ended, plus the last thing its journal says.
+   The counters this used to carry were totals since the server booted, which
+   answered "has anything ever gone wrong" and never "is this keeper behind
+   now". *)
+type librarian_health =
+  { state : Keeper_librarian_queue_refresh.pass_end option
+      (** [None] until this process has finished a catch-up for the keeper. *)
+  ; measured_at : float option
+  ; unread_atom_turns : int option
+  ; unread_official_turns : int option
+      (** [None] when the loop could not take the count; [state] says what
+          the pass ran into. *)
+  ; last_success_at : float option
+      (** [updated_at] of the current snapshot when the Librarian is what
+          wrote it. An explicit write is not a Librarian success. *)
+  ; last_failure_kind : string option
+      (** The kind on the journal's last line when that line is a failure. A
+          failure older than the last success is not shown: the pass after it
+          committed. *)
+  }
+
 type keeper_health =
   { keeper_id : string
   ; revision : int
@@ -12,7 +34,7 @@ type keeper_health =
   ; added : int
   ; removed : int
   ; snapshot_present : bool
-  ; librarian_lane_busy : int
+  ; librarian : librarian_health
   ; librarian_failures : int
   ; vision_ingest_errors : int
   ; vision_ingest_error_reasons : (string * int) list
@@ -33,10 +55,6 @@ type source_health =
   ; snapshot_present : bool
   ; read_error : string option
   }
-
-let librarian_lane_busy_metric =
-  Keeper_metrics.(to_string MemoryLaneCoalesced)
-;;
 
 let librarian_failures_metric =
   Keeper_metrics.(to_string MemoryOsLibrarianFailures)
@@ -67,12 +85,60 @@ let rendered_source_bytes ~facts ~invalidations =
       invalidations
 ;;
 
-let librarian_lane_busy_for_keeper keeper_id =
-  Otel_metric_store.metric_value_or_zero
-    librarian_lane_busy_metric
-    ~labels:[ "keeper", keeper_id; "lane", "librarian" ]
-    ()
-  |> int_of_float
+(* The server-owned lane is in this process, so the measurement is read from memory: the
+   health request counts nothing itself and moves no position. *)
+let librarian_health ~config ~keepers_dir keeper_id ~snapshot =
+  let measurement =
+    Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id
+  in
+  let last_success_at =
+    match (snapshot : Keeper_memory_os_current.t option) with
+    | Some { updated_at; source = { kind = Keeper_memory_os_current.Librarian; _ }; _ } ->
+      Some updated_at
+    | Some { source = { kind = Explicit_write | Explicit_retract; _ }; _ } | None -> None
+  in
+  let last_failure_kind =
+    match
+      Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1
+    with
+    | [ Ok (Keeper_memory_os_current.Journal_failed { recorded_at; kind; _ }) ]
+      when Option.fold ~none:true ~some:(fun success -> recorded_at > success) last_success_at
+      -> Some (Keeper_memory_os_current.librarian_failure_kind_to_string kind)
+    | [] | [ Ok _ ] | [ Error _ ] | _ :: _ :: _ -> None
+  in
+  { state =
+      Option.map
+        (fun (m : Keeper_librarian_queue_refresh.measurement) -> m.last_pass)
+        measurement
+  ; measured_at =
+      Option.map
+        (fun (m : Keeper_librarian_queue_refresh.measurement) -> m.measured_at)
+        measurement
+  ; unread_atom_turns =
+      Option.bind measurement (fun (m : Keeper_librarian_queue_refresh.measurement) ->
+        Option.map (fun (u : Keeper_librarian_durable_consumer.unread) -> u.atoms) m.unread)
+  ; unread_official_turns =
+      Option.bind measurement (fun (m : Keeper_librarian_queue_refresh.measurement) ->
+        Option.map (fun (u : Keeper_librarian_durable_consumer.unread) -> u.official) m.unread)
+  ; last_success_at
+  ; last_failure_kind
+  }
+;;
+
+let librarian_state_to_string = function
+  | Keeper_librarian_queue_refresh.Off -> "off"
+  | Lane_unconfigured -> "lane_unconfigured"
+  | Drained -> "drained"
+  | Not_committed -> "not_committed"
+  | Stopped _ -> "stopped"
+  | Raised _ -> "raised"
+;;
+
+let librarian_state_detail = function
+  | Keeper_librarian_queue_refresh.Stopped error ->
+    Some (Keeper_librarian_durable_consumer.error_to_string error)
+  | Raised detail -> Some detail
+  | Off | Lane_unconfigured | Drained | Not_committed -> None
 ;;
 
 (* Labels mirror the counter increments in [Keeper_librarian_runtime] and the
@@ -173,8 +239,9 @@ let source_health ~keepers_dir keeper_id =
     ; read_error = Some message
     }
 ;;
-let keeper_health ~keepers_dir keeper_id =
+let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
+  let librarian ~snapshot = librarian_health ~config ~keepers_dir keeper_id ~snapshot in
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
   with
@@ -190,7 +257,7 @@ let keeper_health ~keepers_dir keeper_id =
     ; added = 0
     ; removed = 0
     ; snapshot_present = false
-    ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; librarian = librarian ~snapshot:None
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
@@ -224,7 +291,7 @@ let keeper_health ~keepers_dir keeper_id =
     ; added = List.length snapshot.change.added
     ; removed = List.length snapshot.change.removed
     ; snapshot_present = true
-    ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; librarian = librarian ~snapshot:(Some snapshot)
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
@@ -249,7 +316,7 @@ let keeper_health ~keepers_dir keeper_id =
     ; added = 0
     ; removed = 0
     ; snapshot_present = false
-    ; librarian_lane_busy = librarian_lane_busy_for_keeper keeper_id
+    ; librarian = librarian ~snapshot:None
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
@@ -299,17 +366,32 @@ let alerts (h : keeper_health) =
           ~message
       ]
   in
-  let lane_busy_alert =
-    if h.librarian_lane_busy <= 0
-    then []
-    else
+  (* RFC §4.9: a keeper standing behind is the thing to see, and the state
+     says whether it is standing because something failed or because the
+     Librarian is off. Off is not an alert. *)
+  let stopped_alert =
+    match h.librarian.state with
+    | None | Some (Keeper_librarian_queue_refresh.Off | Drained) -> []
+    | Some ((Lane_unconfigured | Not_committed | Stopped _ | Raised _) as state) ->
+      let behind =
+        match h.librarian.unread_atom_turns, h.librarian.unread_official_turns with
+        | Some atoms, Some official ->
+          Printf.sprintf " %d turns are unread." (atoms + official)
+        | Some _, None | None, Some _ | None, None -> ""
+      in
       [ alert_json
-          ~code:"librarian_lane_busy"
+          ~code:"librarian_stopped"
           ~severity:"warn"
-          ~target:"librarian_lane_busy"
+          ~target:"librarian_stopped"
           ~label:"Librarian"
           ~message:
-            "The Librarian memory lane was busy; current-memory selection was deferred."
+            (Printf.sprintf
+               "The keeper's Librarian pass ended as %s and waits for the next wake.%s%s"
+               (librarian_state_to_string state)
+               behind
+               (match librarian_state_detail state with
+                | Some detail -> " " ^ detail
+                | None -> ""))
       ]
   in
   let failure_alert =
@@ -359,7 +441,7 @@ let alerts (h : keeper_health) =
                      h.vision_ingest_error_reasons)))
       ]
   in
-  read_error_alert @ source_read_error_alert @ lane_busy_alert @ failure_alert
+  read_error_alert @ source_read_error_alert @ stopped_alert @ failure_alert
   @ vision_ingest_alert
 ;;
 
@@ -384,7 +466,37 @@ let keeper_health_entry_to_json (h : keeper_health) =
     ; "added", `Int h.added
     ; "removed", `Int h.removed
     ; "snapshot_present", `Bool h.snapshot_present
-    ; "librarian_lane_busy", `Int h.librarian_lane_busy
+    ; ( "librarian"
+      , `Assoc
+          [ ( "state"
+            , match h.librarian.state with
+              | Some state -> `String (librarian_state_to_string state)
+              | None -> `Null )
+          ; ( "detail"
+            , match Option.bind h.librarian.state librarian_state_detail with
+              | Some detail -> `String detail
+              | None -> `Null )
+          ; ( "measured_at"
+            , match h.librarian.measured_at with
+              | Some ts -> `Float ts
+              | None -> `Null )
+          ; ( "unread_atom_turns"
+            , match h.librarian.unread_atom_turns with
+              | Some count -> `Int count
+              | None -> `Null )
+          ; ( "unread_official_turns"
+            , match h.librarian.unread_official_turns with
+              | Some count -> `Int count
+              | None -> `Null )
+          ; ( "last_success_at"
+            , match h.librarian.last_success_at with
+              | Some ts -> `Float ts
+              | None -> `Null )
+          ; ( "last_failure_kind"
+            , match h.librarian.last_failure_kind with
+              | Some kind -> `String kind
+              | None -> `Null )
+          ] )
     ; "librarian_failures", `Int h.librarian_failures
     ; "vision_ingest_errors", `Int h.vision_ingest_errors
     ; ( "vision_ingest_error_reasons"
@@ -412,12 +524,13 @@ let keeper_health_entry_to_json (h : keeper_health) =
 
 let keeper_memory_health_http_json ~base_path =
   let generated_at = Time_compat.now () in
+  let config = Workspace.default_config base_path in
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path
   in
   let entries =
     health_keeper_ids ~keepers_dir
-    |> List.map (keeper_health ~keepers_dir)
+    |> List.map (keeper_health ~config ~keepers_dir)
     |> List.sort (fun (left : keeper_health) (right : keeper_health) ->
       compare
         (right.snapshot_bytes + right.source_snapshot_bytes)
@@ -425,6 +538,14 @@ let keeper_memory_health_http_json ~base_path =
   in
   let sum field =
     List.fold_left (fun total entry -> total + field entry) 0 entries
+  in
+  let librarian_unread_total entry =
+    match
+      entry.librarian.unread_atom_turns,
+      entry.librarian.unread_official_turns
+    with
+    | Some atoms, Some official -> atoms + official
+    | Some _, None | None, Some _ | None, None -> 0
   in
   let all_alerts = List.concat_map alerts entries in
   let count_severity severity =
@@ -434,10 +555,8 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v4"
+    [ "schema", `String "keeper.memory_os.current_health.v5"
     ; "generated_at", `Float generated_at
-    ; ( "cadence_counter_entries"
-      , `Int (Keeper_librarian_runtime.cadence_counter_entries ()) )
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc
@@ -454,8 +573,8 @@ let keeper_memory_health_http_json ~base_path =
             , `Int (sum (fun entry -> entry.source_invalidations)) )
           ; ( "source_snapshot_bytes"
             , `Int (sum (fun entry -> entry.source_snapshot_bytes)) )
-          ; ( "librarian_lane_busy"
-            , `Int (sum (fun entry -> entry.librarian_lane_busy)) )
+          ; ( "librarian_unread_turns"
+            , `Int (sum librarian_unread_total) )
           ; ( "librarian_failures"
             , `Int (sum (fun entry -> entry.librarian_failures)) )
           ; ( "vision_ingest_errors"
@@ -494,10 +613,12 @@ let keeper_memory_health_http_json ~base_path =
                    match entry.source_read_error with
                    | Some _ -> 1
                    | None -> 0)) )
-          ; ( "librarian_lane_busy_keepers"
+          ; ( "librarian_stopped_keepers"
             , `Int
                 (sum (fun entry ->
-                   if entry.librarian_lane_busy > 0 then 1 else 0)) )
+                   match entry.librarian.state with
+                   | Some (Lane_unconfigured | Not_committed | Stopped _ | Raised _) -> 1
+                   | Some (Off | Drained) | None -> 0)) )
           ; ( "librarian_starving_keepers"
             , `Int
                 (sum (fun entry ->

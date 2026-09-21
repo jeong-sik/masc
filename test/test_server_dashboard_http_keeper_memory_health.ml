@@ -112,6 +112,25 @@ let list_field name json =
   | _ -> Alcotest.failf "expected list field %S" name
 ;;
 
+let member name json =
+  match assoc_field name json with
+  | Some value -> value
+  | None -> Alcotest.failf "expected field %S" name
+;;
+
+let is_null = function
+  | `Null -> true
+  | _ -> false
+;;
+
+let float_option_field name json =
+  match assoc_field name json with
+  | Some `Null -> None
+  | Some (`Float f) -> Some f
+  | Some (`Int n) -> Some (float_of_int n)
+  | _ -> Alcotest.failf "expected float-or-null field %S" name
+;;
+
 let totals json =
   match assoc_field "totals" json with
   | Some value -> value
@@ -190,7 +209,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v4"
+    "keeper.memory_os.current_health.v5"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -319,28 +338,57 @@ let test_corrupt_source_snapshot_is_visible () =
     (int_field "source_snapshot_read_error_keepers" (alert_summary json))
 ;;
 
-let test_reports_librarian_lane_busy_alert () =
-  let base = fresh_dir "masc-memory-health-lane" in
+(* RFC librarian-lifecycle §4.9. No server-owned catch-up runs in this test process, so the
+   keeper has no measurement: the row says "not measured" rather than zero,
+   and the counts are absent rather than a number nothing took. The journal
+   and the snapshot's own source still say when the Librarian last succeeded
+   and what it last failed with. *)
+let test_reports_the_librarian_position_without_a_loop () =
+  let base = fresh_dir "masc-memory-health-librarian" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
-  let keeper_id = "lane-" ^ Filename.basename base in
-  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "lane fact" ]);
-  Metrics.inc_counter
-    KeeperMetrics.(to_string MemoryLaneCoalesced)
-    ~labels:[ "keeper", keeper_id; "lane", "librarian" ]
-    ~delta:3.0
-    ();
+  let keeper_id = "librarian-" ^ Filename.basename base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "librarian fact" ]);
   let json = Health.keeper_memory_health_http_json ~base_path:base in
   let keeper = keeper_obj keeper_id json in
-  Alcotest.(check int) "busy count" 3 (int_field "librarian_lane_busy" keeper);
-  let alerts = list_field "alerts" keeper in
-  Alcotest.(check (list string))
-    "alert code"
-    [ "librarian_lane_busy" ]
-    (List.map (string_field "code") alerts);
+  let librarian = member "librarian" keeper in
+  Alcotest.(check bool) "state is not measured" true (is_null (member "state" librarian));
+  Alcotest.(check bool)
+    "atoms are not counted"
+    true
+    (is_null (member "unread_atom_turns" librarian));
+  Alcotest.(check bool)
+    "official turns are not counted"
+    true
+    (is_null (member "unread_official_turns" librarian));
+  Alcotest.(check (option (float 1e-9)))
+    "the snapshot the Librarian wrote is its last success"
+    (Some test_now)
+    (float_option_field "last_success_at" librarian);
+  Alcotest.(check bool)
+    "no failure is newer than that success"
+    true
+    (is_null (member "last_failure_kind" librarian));
+  Alcotest.(check int) "nothing is counted as unread" 0
+    (int_field "librarian_unread_turns" (totals json));
   Alcotest.(check int)
-    "summary busy keepers"
-    1
-    (int_field "librarian_lane_busy_keepers" (alert_summary json))
+    "a keeper with no measurement is not a stopped one"
+    0
+    (int_field "librarian_stopped_keepers" (alert_summary json));
+  Alcotest.(check (list string)) "no alert" [] (List.map (string_field "code") (list_field "alerts" keeper));
+  Current.append_librarian_failure
+    ~keepers_dir
+    ~keeper_id
+    ~now:(test_now +. 60.)
+    ~trace_id:"health-test"
+    ~kind:Current.Exact_execution_failure
+    ~detail:"the lane refused"
+    ~snapshot_present:true
+    ~cadence_deferred:false;
+  let after_failure = Health.keeper_memory_health_http_json ~base_path:base in
+  Alcotest.(check string)
+    "the journal's last line names the failure"
+    "exact_execution_failure"
+    (string_field "last_failure_kind" (member "librarian" (keeper_obj keeper_id after_failure)))
 ;;
 
 let test_corrupt_snapshot_is_visible_as_read_error () =
@@ -678,8 +726,8 @@ let () =
             test_reports_revision_snapshot_bytes_and_latest_delta
         ; Alcotest.test_case "derived facts and support invalidations" `Quick
             test_reports_derived_facts_and_support_invalidations
-        ; Alcotest.test_case "librarian lane busy alert" `Quick
-            test_reports_librarian_lane_busy_alert
+        ; Alcotest.test_case "librarian position without a loop" `Quick
+            test_reports_the_librarian_position_without_a_loop
         ; Alcotest.test_case "corrupt snapshot visible" `Quick
             test_corrupt_snapshot_is_visible_as_read_error
         ; Alcotest.test_case "sort and empty store" `Quick

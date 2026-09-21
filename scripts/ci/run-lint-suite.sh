@@ -90,6 +90,13 @@ blocking_lints() {
   # file-name mappings (RFC-0428), 54s with them.
   run_lint "Edited-tests selector self-test" \
     bash scripts/ci/run-edited-tests.sh --self-test
+  run_self_test_when_changed "Deleted symbol references self-test" \
+    scripts/ci/check-deleted-symbol-references.py \
+    python3 scripts/ci/check-deleted-symbol-references.py --self-test
+  if [[ -n "${base_sha}" ]]; then
+    run_lint "Deleted symbol references" \
+      python3 scripts/ci/check-deleted-symbol-references.py "${base_sha}"
+  fi
   run_self_test_when_changed "Prompt source words self-test" \
     scripts/lint/prompt-source-words-agree.sh \
     bash scripts/lint/prompt-source-words-agree.sh --self-test

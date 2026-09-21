@@ -891,7 +891,7 @@ let test_comment_signal_preserves_comment_and_parent_identity () =
         ~post_id
         ~author:"second-responder"
         ~content:"child comment"
-        ~parent_id:parent.id
+        ~parent_id:(Board.Comment_id.to_string parent.id)
         ()
     with
     | Error error -> Alcotest.fail (Board.show_board_error error)

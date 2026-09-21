@@ -31,15 +31,31 @@ let with_temp_workspace f =
        f config)
 ;;
 
-let keeper_meta name =
-  match
-    Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-          [ "name", `String name
-          ; "trace_id", `String ("trace-" ^ name)
-          ])
-  with
-  | Ok meta -> meta
+let keeper_meta ?(board_interests = []) config name =
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String name; "trace_id", `String ("trace-" ^ name) ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_text (Filename.concat keepers_dir (name ^ ".toml"))
+    (fun oc -> Printf.fprintf oc
+      "[keeper]\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") board_interests)));
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  match Keeper_meta_store.read_effective_meta config name with
+  | Ok (Some resolved) ->
+    check (list string) "declared interests survive configuration read" board_interests
+      resolved.Keeper_meta_contract.board_interests;
+    resolved
+  | Ok None -> fail "configured Keeper metadata missing"
   | Error detail -> fail detail
 ;;
 
@@ -104,7 +120,7 @@ let signal ~post_id ~author ~title ~content : Board_dispatch.board_signal =
 let test_initialized_lane_uses_owner_cursor () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
-  let meta = keeper_meta "discoverablelane" in
+  let meta = keeper_meta ~board_interests:[ "research" ] config "discoverablelane" in
   register config meta;
   ignore
     (persist_discoverable
@@ -142,7 +158,7 @@ let test_initialized_lane_uses_owner_cursor () =
 let test_zero_cursor_lane_keeps_producer_fallback () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
-  let meta = keeper_meta "firstcursorlane" in
+  let meta = keeper_meta ~board_interests:[ "research" ] config "firstcursorlane" in
   register config meta;
   let addressed =
     persist_discoverable
@@ -165,6 +181,32 @@ let test_zero_cursor_lane_keeps_producer_fallback () =
   check int "preserved fallback candidate" 1 (attention_count config meta.name)
 ;;
 
+let test_no_interests_skips_producer_and_owner_judgment () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let meta = keeper_meta config "uninterestedlane" in
+  register config meta;
+  let publish post_id =
+    let addressed =
+      persist_discoverable
+        (signal ~post_id ~author:"external-author" ~title:"research"
+           ~content:"new evidence without an explicit recipient")
+    in
+    KKS.wakeup_relevant_keeper_for_board_signal ~config addressed;
+    check int "producer does not judge without interests" 0
+      (attention_count config meta.name);
+    let events, _, _ =
+      Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta
+    in
+    check int "owner does not deliver without interests" 0 (List.length events);
+    check int "owner does not judge without interests" 0
+      (attention_count config meta.name);
+    check int "no direct queue delivery" 0 (queue_length config meta.name)
+  in
+  publish "before-first-cursor";
+  publish "after-first-cursor"
+;;
+
 let () =
   run
     "keeper Board discoverable cursor"
@@ -177,6 +219,10 @@ let () =
             "zero cursor lane keeps durable producer fallback"
             `Quick
             test_zero_cursor_lane_keeps_producer_fallback
+        ; test_case
+            "no interests skips producer and owner judgment"
+            `Quick
+            test_no_interests_skips_producer_and_owner_judgment
         ] )
     ]
 ;;

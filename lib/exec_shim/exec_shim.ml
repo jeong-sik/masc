@@ -780,7 +780,10 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
             ("masc-exec-shim: " ^ Printexc.to_string exn ^ "\n");
           flush stderr
         with
-       | _ -> ()); (* cancel-guard-ok: exec_shim does not link eio, so nothing in it can perform an Eio operation; its only production linker is bin/masc_exec_shim, a standalone process that runs no Eio scheduler. *)
+        (* output_string and flush raise Sys_error; this is not a catch-all, so
+           anything else -- including an exception this library cannot name --
+           leaves untouched. *)
+        | Sys_error _ -> ());
        exit 127)
   | pid ->
     let prepared = ref false in
@@ -1240,7 +1243,12 @@ let run () =
                    ~is_executable:is_executable_file (List.hd argv)
                in
                try spawn ~before_exec ?observe_sock ~program ~argv ~env ~cwd () with
-               | exn -> (* cancel-guard-ok: exec_shim does not link eio, so nothing in it can perform an Eio operation; its only production linker is bin/masc_exec_shim, a standalone process that runs no Eio scheduler. *)
+               (* In the parent, spawn runs Unix.pipe, Unix.fork and fd closes;
+                  before_exec is invoked in the child after the fork. So Unix_error
+                  is what this body raises, and enumerating it rather than catching
+                  everything is what lets an exception this library cannot name --
+                  exec_shim links no eio -- leave untouched. *)
+               | Unix.Unix_error _ as exn ->
                  (match observe_sock with
                   | Some (child_end, parent_end) ->
                     (try Unix.close child_end with

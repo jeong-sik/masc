@@ -273,6 +273,8 @@ let keeper_meta_overlay_drift_categories
         (current.activation_mode <> target.activation_mode);
       drift_if "mention_targets"
         (current.mention_targets <> target.mention_targets);
+      drift_if "board_interests"
+        (current.board_interests <> target.board_interests);
       drift_if "sandbox_profile"
         (current.sandbox_profile <> target.sandbox_profile);
       drift_if "sandbox_image" (current.sandbox_image <> target.sandbox_image);
@@ -328,6 +330,7 @@ let ensure_keeper_meta_with_cause config name =
       apply_default defaults.activation_mode meta.activation_mode in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
+    let target_board_interests = defaults.board_interests in
     (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
        declared. The behaviour before #32078 fell through to a default that
        named host execution, so an operator who forgot the key got no
@@ -383,6 +386,7 @@ let ensure_keeper_meta_with_cause config name =
         instructions = target_instructions;
         activation_mode = target_activation_mode;
         mention_targets = target_mention_targets;
+        board_interests = target_board_interests;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
@@ -433,6 +437,7 @@ let ensure_keeper_meta_with_cause config name =
              ; microvm_cpus = persisted_updated.microvm_cpus
              ; network_mode = persisted_updated.network_mode
              ; mention_targets = persisted_updated.mention_targets
+             ; board_interests = persisted_updated.board_interests
              ; max_context_override = persisted_updated.max_context_override
              ; activation_mode = persisted_updated.activation_mode
              ; telemetry_feedback_enabled = persisted_updated.telemetry_feedback_enabled

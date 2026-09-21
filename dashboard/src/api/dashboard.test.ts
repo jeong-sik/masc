@@ -3427,6 +3427,7 @@ describe('fetchKeeperConfig', () => {
       },
       workspace: {
         mention_targets: 'sangsu',
+        board_interests: [],
         bound_workspace_ids: 'default',
       },
       sources: {
@@ -3475,6 +3476,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
+    expect(result.workspace.board_interests).toEqual([])
     expect(result.skills.names).toEqual(['ocaml-coding', 'proof-harness'])
     expect(result.hooks?.scope).toBe('keeper_runtime_composite')
     expect(result.hooks?.slots.pre_tool_use?.features).toEqual(['tool_start_timing'])

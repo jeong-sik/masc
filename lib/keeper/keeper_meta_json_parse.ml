@@ -456,6 +456,7 @@ let decode_current_meta fields =
       ; microvm_memory = None
       ; microvm_cpus = None
       ; mention_targets = []
+      ; board_interests = []
       ; always_allow = None
       ; voice_always_allow = None
       ; created_at

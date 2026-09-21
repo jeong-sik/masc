@@ -115,6 +115,11 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                 ~fallback_targets:p.profile_defaults.mention_targets
                 ~name:p.name
             in
+            let board_interests =
+              resolve_board_interests
+                ~board_interests_opt:p.board_interests_opt
+                ~fallback_interests:p.profile_defaults.board_interests
+            in
               let instructions = Option.value ~default:"" p.instructions_opt in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
@@ -146,6 +151,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         microvm_memory = p.profile_defaults.microvm_memory;
         microvm_cpus = p.profile_defaults.microvm_cpus;
         mention_targets;
+        board_interests;
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;

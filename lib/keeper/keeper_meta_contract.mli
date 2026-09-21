@@ -208,6 +208,7 @@ type keeper_meta = {
   microvm_memory : Keeper_microvm_guest_size.memory option;
   microvm_cpus : Keeper_microvm_guest_size.cpus option;
   mention_targets : string list;
+  board_interests : string list;
   (* Lifecycle *)
   created_at : string;
   updated_at : string;

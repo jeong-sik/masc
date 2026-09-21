@@ -126,6 +126,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     },
     workspace: {
       mention_targets: ['sangsu'],
+      board_interests: [],
       bound_workspace_ids: ['default'],
     },
     sources: {
@@ -592,6 +593,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
       mention_targets: [],
+      board_interests: [],
       bound_workspace_ids: [],
     },
     sources: {} as KeeperConfig['sources'],
@@ -709,6 +711,7 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
   const seen = makeKeeperConfigForSandbox({
     workspace: {
       mention_targets: ['old-target'],
+      board_interests: [],
       bound_workspace_ids: [],
     },
   })
@@ -716,6 +719,7 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
     // The other writer changed this field; the user never touched it.
     workspace: {
       mention_targets: ['remote-writer-change'],
+      board_interests: [],
       bound_workspace_ids: [],
     },
   })
@@ -756,7 +760,7 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
     const freshSsh = makeKeeperConfigForSandbox({
       sandbox_profile: 'remote_ssh',
       remote_endpoint: 'builder',
-      workspace: { mention_targets: ['remote-writer-change'], bound_workspace_ids: [] },
+      workspace: { mention_targets: ['remote-writer-change'], board_interests: [], bound_workspace_ids: [] },
     })
     const draft = { ...initRuntimeDraftFromConfig(seenSsh), remote_endpoint: 'gondolin' }
     const rebased = rebaseRuntimeDraftOnFreshConfig(draft, seenSsh, freshSsh)
@@ -934,6 +938,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const c = makeKeeperConfigForSandbox({
       workspace: {
         mention_targets: ['sangsu'],
+        board_interests: [],
         bound_workspace_ids: [],
       },
     })
@@ -948,6 +953,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const c = makeKeeperConfigForSandbox({
       workspace: {
         mention_targets: ['sangsu'],
+        board_interests: [],
         bound_workspace_ids: [],
       },
     })
@@ -956,6 +962,23 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     }), c)
 
     expect(payload.mention_targets).toEqual([])
+  })
+
+  it('sorts Board interests and emits an explicit clear', () => {
+    const c = makeKeeperConfigForSandbox({
+      workspace: {
+        mention_targets: [],
+        board_interests: ['MASC runtime'],
+        bound_workspace_ids: [],
+      },
+    })
+    const changed = buildRuntimePayload(draftFrom(c, {
+      board_interests_text: 'Keeper lifecycle\nMASC runtime\n',
+    }), c)
+    expect(changed.board_interests).toEqual(['Keeper lifecycle', 'MASC runtime'])
+
+    const cleared = buildRuntimePayload(draftFrom(c, { board_interests_text: '' }), c)
+    expect(cleared.board_interests).toEqual([])
   })
 
   it('emits autoboot and max_context_override edits', () => {

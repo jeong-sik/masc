@@ -30,6 +30,16 @@ Exact direct-mention tokens that can wake the keeper in workspace traffic \
 (for example ['alpha'])."""
 
 [[params]]
+name = "board_interests"
+type = "array"
+items = { type = "string" }
+description = """
+Semantic topics this keeper may discover on targetless Board posts and on \
+comments in threads it has not joined. Omit to retain the current declaration; \
+pass [] to turn targetless discovery off. These are not mention aliases, task \
+assignments, or authorization."""
+
+[[params]]
 name = "sandbox_image"
 type = "string"
 description = "Keeper sandbox container image tag or digest. Omit to retain the current setting. The config API accepts null to clear the override. Applies through the idle lane restart boundary, never replaces a running turn's sandbox."

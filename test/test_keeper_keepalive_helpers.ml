@@ -452,8 +452,12 @@ let route ~audience ~meta signal =
 ;;
 
 let test_closed_board_audience_routes_only_its_authority () =
-  let alpha = make_board_resume_meta "alpha" in
-  let beta = make_board_resume_meta "beta" in
+  let alpha =
+    { (make_board_resume_meta "alpha") with board_interests = [ "research" ] }
+  in
+  let beta =
+    { (make_board_resume_meta "beta") with board_interests = [ "research" ] }
+  in
   let targeted = audience_signal ~author:"external-author" "@alpha inspect" in
   let targeted_audience = classified targeted in
   check bool "explicit address classifies as Targets" true
@@ -498,6 +502,15 @@ let test_closed_board_audience_routes_only_its_authority () =
     (match route ~audience:discoverable_audience ~meta:alpha discoverable with
      | KBA.Judge_discoverable -> true
      | KBA.Deliver _ | KBA.Ignore -> false);
+  let no_interests = { alpha with board_interests = [] } in
+  check bool "empty interests do not disable exact delivery" true
+    (match route ~audience:targeted_audience ~meta:no_interests targeted with
+     | KBA.Deliver KWOBS.Explicit_mention -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  check bool "empty interests turn targetless discovery off" true
+    (match route ~audience:discoverable_audience ~meta:no_interests discoverable with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false);
   let hearth_only = { discoverable with hearth = Some "@alpha" } in
   check bool "Board category cannot become recipient authority" true
     (match classified hearth_only with KBA.Discoverable -> true | _ -> false);
@@ -1154,7 +1167,11 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
       Keeper_registry.For_testing.clear ())
     (fun () ->
        let meta, addressed = create_thread_fixture config ~keeper_name:"threadlane" in
-       let bystander = make_board_resume_meta "bystanderlane" in
+       let bystander =
+         { (make_board_resume_meta "bystanderlane") with
+           board_interests = [ "thread review" ]
+         }
+       in
        persist_and_register_board_lane config bystander;
        let audience =
          match KBA.of_board_audience addressed.Board_dispatch.audience with
@@ -1169,6 +1186,15 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
          (match route ~audience ~meta:bystander addressed.Board_dispatch.signal with
           | KBA.Judge_discoverable -> true
           | KBA.Deliver _ | KBA.Ignore -> false);
+       check bool "empty-interest bystander is not judged" true
+         (match
+            route
+              ~audience
+              ~meta:{ bystander with board_interests = [] }
+              addressed.Board_dispatch.signal
+          with
+          | KBA.Ignore -> true
+          | KBA.Deliver _ | KBA.Judge_discoverable -> false);
        KKS.wakeup_relevant_keeper_for_board_signal ~config addressed;
        check int "participant lane still wakes directly" 1
          (board_queue_length config meta.Keeper_meta_contract.name);

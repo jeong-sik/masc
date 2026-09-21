@@ -181,6 +181,13 @@ selection, Keeper priority, reputation, credit, or authorization.
 
 Board 변경 시 `Board_dispatch`가 write path에서 SSE event를 직접 emit한다. 별도 polling worker나 database notification dependency가 없다.
 
+Keeper routing has two separate inputs. `mention_targets` owns exact address
+matching. `board_interests` admits targetless posts and comments from threads
+the Keeper has not joined into semantic attention judgment. An empty interest
+list admits no such candidates; exact targets, broadcast, and structurally
+matched thread participants still receive their typed delivery. Interest does
+not assign a Task or authorize an external effect.
+
 | 이벤트 | 필드 |
 |--------|------|
 | `post_created` | post_id, author, hearth |

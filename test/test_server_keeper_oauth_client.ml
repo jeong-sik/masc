@@ -117,28 +117,31 @@ let test_the_listing_says_whether_an_app_is_on_file () =
         rows
     | _ -> Alcotest.fail "the listing is not a list"
   in
+  let client_state_kind id json =
+    Option.bind (client_state id json) (fun state ->
+      match state with
+      | `Assoc fields ->
+        (match List.assoc_opt "kind" fields with
+         | Some (`String kind) -> Some kind
+         | Some _ | None -> None)
+      | _ -> None)
+  in
   check (Alcotest.option Alcotest.string) "nothing on file to begin with"
     (Some "none")
-    (Option.bind
-       (client_state
-          "slack"
-          (Oauth.declarations_json ~base_path:listing_base ~now:0.0))
-       Yojson.Safe.Util.to_string_option);
+    (client_state_kind
+       "slack"
+       (Oauth.declarations_json ~base_path:listing_base ~now:0.0));
   let _ = set listing_base ~client_secret:None in
   check (Alcotest.option Alcotest.string) "and it says so once there is"
     (Some "on_file")
-    (Option.bind
-       (client_state
-          "slack"
-          (Oauth.declarations_json ~base_path:listing_base ~now:0.0))
-       Yojson.Safe.Util.to_string_option);
+    (client_state_kind
+       "slack"
+       (Oauth.declarations_json ~base_path:listing_base ~now:0.0));
   check (Alcotest.option Alcotest.string) "without claiming it for another provider"
     (Some "none")
-    (Option.bind
-       (client_state
-          "figma"
-          (Oauth.declarations_json ~base_path:listing_base ~now:0.0))
-       Yojson.Safe.Util.to_string_option);
+    (client_state_kind
+       "figma"
+       (Oauth.declarations_json ~base_path:listing_base ~now:0.0));
   let unreadable_base = base_path () in
   let provider = provider_or_fail "slack" in
   let masc_dir = Filename.concat unreadable_base ".masc" in
@@ -152,7 +155,11 @@ let test_the_listing_says_whether_an_app_is_on_file () =
     (match
        client_state "slack" (Oauth.declarations_json ~base_path:unreadable_base ~now:0.0)
      with
-     | Some (`Assoc [ "problem", `String problem ]) -> String.trim problem <> ""
+     | Some (`Assoc fields) ->
+       List.assoc_opt "kind" fields = Some (`String "problem")
+       && (match List.assoc_opt "problem" fields with
+           | Some (`String problem) -> String.trim problem <> ""
+           | Some _ | None -> false)
      | _ -> false)
 
 let test_a_lapsed_registration_is_named_as_lapsed () =
@@ -173,9 +180,12 @@ let test_a_lapsed_registration_is_named_as_lapsed () =
           | `Assoc pairs ->
             if List.assoc_opt "id" pairs = Some (`String "slack")
             then
-              Option.bind
-                (List.assoc_opt "client_state" pairs)
-                Yojson.Safe.Util.to_string_option
+              (match List.assoc_opt "client_state" pairs with
+               | Some (`Assoc fields) ->
+                 (match List.assoc_opt "kind" fields with
+                  | Some (`String kind) -> Some kind
+                  | Some _ | None -> None)
+               | Some _ | None -> None)
             else None
           | _ -> None)
         rows

@@ -69,13 +69,27 @@ let identity_dir ~base_path =
    app to reuse, and an unreadable store must not invite an operator to write
    over credentials that may still be there. An app the operator typed in is
    written with an expiry of zero, so it remains [on_file]. *)
-let client_state_json ~base_path ~provider ~now =
+type client_state =
+  | Client_on_file
+  | Client_lapsed
+  | Client_none
+  | Client_problem of string
+
+let client_state ~base_path ~provider ~now =
   match Store.load ~dir:(identity_dir ~base_path) ~provider with
   | Ok (Some credentials) when Store.secret_expired credentials ~now ->
-    `String "lapsed"
-  | Ok (Some _) -> `String "on_file"
-  | Ok None -> `String "none"
-  | Error problem -> `Assoc [ "problem", `String problem ]
+    Client_lapsed
+  | Ok (Some _) -> Client_on_file
+  | Ok None -> Client_none
+  | Error problem -> Client_problem problem
+;;
+
+let client_state_to_json = function
+  | Client_on_file -> `Assoc [ "kind", `String "on_file" ]
+  | Client_lapsed -> `Assoc [ "kind", `String "lapsed" ]
+  | Client_none -> `Assoc [ "kind", `String "none" ]
+  | Client_problem problem ->
+    `Assoc [ "kind", `String "problem"; "problem", `String problem ]
 ;;
 
 let declarations_json ~base_path ~now =
@@ -86,7 +100,8 @@ let declarations_json ~base_path ~now =
            `Assoc
              [ "id", `String provider.Provider.id
              ; "label", `String provider.Provider.label
-             ; "client_state", client_state_json ~base_path ~provider ~now
+             ; ( "client_state"
+               , client_state ~base_path ~provider ~now |> client_state_to_json )
              ]
          | Declarations.Unreadable { id; problem } ->
            `Assoc [ "id", `String id; "problem", `String problem ])

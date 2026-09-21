@@ -283,6 +283,7 @@ let spawn_lock_for cs lang_id =
 let stop_send_writer cs =
   try Eio.Fiber.fork ~sw:cs.sw (fun () -> Eio.Stream.add cs.send_queue Stop_client_writer)
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Server.warn
       "LSP WebSocket writer stop signal failed: %s"
@@ -296,6 +297,7 @@ let stop_dispatch_workers cs =
         Eio.Stream.add cs.dispatch_queue Stop_dispatch_worker
       done)
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Server.warn
       "LSP dispatch worker stop signal failed: %s"

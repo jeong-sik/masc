@@ -1731,23 +1731,23 @@ let runtime_declared_model_capabilities_json
     `Assoc
       [ "source", `String runtime_inventory_source
       ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
-      ; "supports_tool_choice", `Bool caps.supports_tool_choice
-      ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
-      ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
-      ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
+      ; "supports_tool_choice", Json_util.bool_opt_to_json caps.supports_tool_choice
+      ; "supports_required_tool_choice", Json_util.bool_opt_to_json caps.supports_required_tool_choice
+      ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
+      ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
       ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
-      ; "supports_image_input", `Bool caps.supports_image_input
-      ; "supports_audio_input", `Bool caps.supports_audio_input
-      ; "supports_video_input", `Bool caps.supports_video_input
-      ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
-      ; "supports_response_format_json", `Bool caps.supports_response_format_json
-      ; "supports_structured_output", `Bool caps.supports_structured_output
-      ; "supports_system_prompt", `Bool caps.supports_system_prompt
-      ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-      ; "supports_top_k", `Bool caps.supports_top_k
-      ; "supports_min_p", `Bool caps.supports_min_p
-      ; "supports_seed", `Bool caps.supports_seed
-      ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+      ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+      ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
+      ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
+      ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
+      ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
+      ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
+      ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+      ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
+      ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
+      ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p
+      ; "supports_seed", Json_util.bool_opt_to_json caps.supports_seed
+      ; "emits_usage_tokens", Json_util.bool_opt_to_json caps.emits_usage_tokens
       ]
 ;;
 
@@ -1953,7 +1953,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
       ( false
       , Runtime_schema.model_capabilities_default
         (* DET-OK: absent [models.<id>.capabilities] is exposed below as
-           [capabilities_declared=false]; the all-false record only keeps this
+           [capabilities_declared=false]; the all-[None] record only keeps this
            read-only dashboard projection total, it is not a policy default. *) )
   in
   `Assoc
@@ -1987,28 +1987,30 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "top_k", Json_util.int_opt_to_json rt.model.top_k
     ; "min_p", Json_util.float_opt_to_json rt.model.min_p
       (* Additive capability projection for dashboard runtime snapshot cards.
-         These mirrors are declared model capabilities from runtime.toml only;
-         [capabilities_declared=false] below keeps the all-false fallback from
-         being mistaken for provider/model inference. *)
+         These mirrors are declared model capabilities from runtime.toml only.
+         Each key is [null] when the operator wrote nothing for it, and
+         [capabilities_declared] below says whether the block existed at
+         all — an absent block and a block that states one key are different
+         facts (#37435). *)
     ; "capabilities_declared", `Bool capabilities_declared
     ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
-    ; "supports_tool_choice", `Bool caps.supports_tool_choice
-    ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
-    ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
-    ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
-    ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
-    ; "supports_image_input", `Bool caps.supports_image_input
-    ; "supports_audio_input", `Bool caps.supports_audio_input
-    ; "supports_video_input", `Bool caps.supports_video_input
+    ; "supports_tool_choice", Json_util.bool_opt_to_json caps.supports_tool_choice
+    ; "supports_required_tool_choice", Json_util.bool_opt_to_json caps.supports_required_tool_choice
+    ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
+    ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
+    ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
+    ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+    ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
+    ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
-    ; "supports_response_format_json", `Bool caps.supports_response_format_json
-    ; "supports_structured_output", `Bool caps.supports_structured_output
-    ; "supports_system_prompt", `Bool caps.supports_system_prompt
-    ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-    ; "supports_top_k", `Bool caps.supports_top_k
-    ; "supports_min_p", `Bool caps.supports_min_p
-    ; "supports_seed", `Bool caps.supports_seed
-    ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+    ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
+    ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
+    ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+    ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
+    ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
+    ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p
+    ; "supports_seed", Json_util.bool_opt_to_json caps.supports_seed
+    ; "emits_usage_tokens", Json_util.bool_opt_to_json caps.emits_usage_tokens
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt

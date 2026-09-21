@@ -88,7 +88,7 @@ let rec remove_path_strict_blocking path =
      | Unix.S_DIR ->
        let entries =
          try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
-         | exn -> Error (path_error "readdir" path exn)
+         | exn -> Error (path_error "readdir" path exn) (* cancel-guard-ok: Sys.readdir performs no Eio operation. *)
        in
        (match entries with
         | Error _ as error -> error

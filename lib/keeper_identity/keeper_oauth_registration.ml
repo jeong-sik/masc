@@ -17,6 +17,7 @@ let error_to_string = function
 type registered = {
   client_id : string;
   client_secret : string option;
+  secret_expires_at : float option;
   issued_at : float;
 }
 
@@ -80,7 +81,20 @@ let register
             | Some (`String value) when String.trim value <> "" -> Some value
             | Some _ | None -> None
           in
-          Ok { client_id; client_secret; issued_at }
+          (* RFC 7591 section 3.2.1 requires this beside an issued secret and
+             gives 0 the meaning "will not expire". Reading it is what lets a
+             later login notice that the pair on disk has lapsed instead of
+             presenting an id the server has since forgotten. A server that
+             issues a secret and omits the field leaves the deadline unknown,
+             which the store records as [None] and treats as lapsed. *)
+          let secret_expires_at =
+            match client_secret, List.assoc_opt "client_secret_expires_at" pairs with
+            | None, _ -> None
+            | Some _, Some (`Int seconds) -> Some (float_of_int seconds)
+            | Some _, Some (`Float seconds) -> Some seconds
+            | Some _, (Some _ | None) -> None
+          in
+          Ok { client_id; client_secret; secret_expires_at; issued_at }
         | Some _ | None ->
           Error (Malformed "the answer carries no non-empty client_id"))
      | _ -> Error (Malformed "the answer is not an object"))

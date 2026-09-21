@@ -225,6 +225,10 @@ jobs:
           # lines reach the step output. The targeted path appends to the
           # same file, so the upload step serves both.
           CI_TEST_LOG_FILE: ${{ runner.temp }}/ci-run-tests.log
+          # scripts/ci-run-test-suite.sh writes the untruncated inner Dune
+          # output here. The always-run upload step below uses this exact
+          # name; the runner self-test refuses either half on its own.
+          MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
           # The targeted path, from the dispatch inputs; both are empty on
           # the schedule and on a dispatch that names no suite.
           TARGET_SUITES: ${{ inputs.suite }}
@@ -455,6 +459,16 @@ jobs:
             esac
           done
           exit "${status}"
+
+      - name: Upload the full Dune suite log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-suite-log
+          overwrite: ${{ inputs.candidate_verification == true }}
+          path: ${{ runner.temp }}/test-suite.log
+          if-no-files-found: warn
+          retention-days: 14
 
       # The step output carries the heartbeat and the last 120 lines of the
       # runner log; every per-suite verdict lives only in the file. The

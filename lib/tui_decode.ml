@@ -2520,6 +2520,7 @@ type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
   mcc_prepared : memory_context_prepared option;
+  mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
 
 type memory_keeper_health = {
@@ -4814,7 +4815,7 @@ let decode_memory_alert json =
 let decode_memory_context_cycle keeper_json =
   let* json = required_member keeper_json "context_cycle" in
   let* () = require_exact_object_fields "context cycle"
-    ["saved"; "saved_read_error"; "prepared"] json in
+    ["saved"; "saved_read_error"; "prepared"; "synthesis"] json in
   let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
   let frontier json =
     let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
@@ -4855,7 +4856,9 @@ let decode_memory_context_cycle keeper_json =
     | _ -> Error "context saved frontier disagrees with read error" in
   let* value = required_member json "prepared" in
   let* mcc_prepared = nullable prepared value in
-  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared}
+  let* value = required_member json "synthesis" in
+  let* mcc_synthesis = nullable Keeper_continuity_observation.synthesis_of_json value in
+  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared; mcc_synthesis}
 
 let decode_memory_keeper_health json =
   let* () =
@@ -5036,7 +5039,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v6"
+    if String.equal schema "keeper.memory_os.current_health.v7"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in

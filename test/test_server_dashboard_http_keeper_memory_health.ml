@@ -209,7 +209,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v6"
+    "keeper.memory_os.current_health.v7"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -737,7 +737,17 @@ let test_context_cycle_separates_saved_and_prepared () =
   O.record ~config ~keeper_name
     {prepared_at = test_now; runtime_id = "fixture-runtime";
      input = O.Summarized {trace_id = "previous-trace"; end_atom = 4; boundary_line = 7}; request_bytes = 2048};
+  O.record_synthesis ~config ~keeper_name
+    {observed_at=test_now; trace_id=Some trace_id; state=O.Running;
+     range=Some {start_atom=1;end_atom=2;completed_end_atom=8}};
   let observed = cycle () in
+  Alcotest.(check string) "synthesis is independent of ordinary drain" "running"
+    (string_field "state" (member "synthesis" observed));
+  O.record_synthesis ~config ~keeper_name
+    {observed_at=test_now; trace_id=Some trace_id; state=O.Cancelled;
+     range=Some {start_atom=1;end_atom=2;completed_end_atom=8}};
+  Alcotest.(check string) "cancellation replaces running observation" "cancelled"
+    (string_field "state" (member "synthesis" (cycle ())));
   Alcotest.(check string) "saved identity comes from disk" trace_id
     (string_field "trace_id" (member "saved" observed));
   let prepared = member "prepared" observed in

@@ -485,6 +485,13 @@ status: reference
   `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 
+**Continuity Synthesis Observation (대화 요약 진행 관측)**
+: 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
+  완료 경계, 실행·저장·중단 상태. `context_cycle.synthesis`와 TUI Memory 화면에
+  표시한다. 일반 Memory 소비자의 `drained`와 별개이며 다음 실행을 통제하지 않는다.
+  `no_source`는 새로 읽을 완료 구간을 얻지 못했다는 뜻으로, 전체 요약 완료를
+  증명하지 않는다. 구간이 없거나 관측 전이면 알 수 없음으로 표시한다.
+
 **Input Policy (입력 구성 방식)**
 : Keeper의 `input_policy` 설정. `small`은 Agent Core에 보내는 완료된 과거 도구 결과를
   조회 가능한 원문 참조로 바꾸고, `wide`는 그 본문을 함께 보낸다. 둘 다 검증된

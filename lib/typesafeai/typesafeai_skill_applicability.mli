@@ -17,5 +17,6 @@ val assess :
 
 val to_yojson : t -> Yojson.Safe.t
 val model_advice : t -> string option
-(** [None] for a policy-disabled review. Otherwise a short advisory result,
-    including unavailable/invalid results, without turning advice into a gate. *)
+(** [None] when policy disables review or required input/question material is
+    unavailable before a request. Returned judgments and HTTP/response failures
+    produce short advice without turning the assessment into a gate. *)

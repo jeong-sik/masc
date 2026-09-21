@@ -2480,7 +2480,7 @@ let validate_ollama_only_binding_fields
 (* --- [typesafeai] --- *)
 
 let typesafeai_keys =
-  [ "enabled"; "endpoint"; "model"; "board_attention"; "absorb_gate"; "skill_applicability"; "excluded_keepers" ]
+  [ "enabled"; "endpoint"; "model"; "board_attention"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
 ;;
 
 let unknown_table_keys ~(path : string) ~(expected : string list) (entries : (string * Otoml.t) list) =
@@ -2561,17 +2561,21 @@ let parse_typesafeai (toml : Otoml.t)
     let absorb_gate =
       typed_find_or "a boolean" path tbl "absorb_gate" Otoml.get_boolean ~default:d.absorb_gate
     in
+    let context_review =
+      typed_find_or "a boolean" path tbl "context_review" Otoml.get_boolean ~default:d.context_review
+    in
     let skill_applicability =
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
-    (match unknown, enabled, endpoint, model, board_attention, absorb_gate, skill_applicability, excluded_keepers with
+    (match unknown, enabled, endpoint, model, board_attention, absorb_gate, context_review, skill_applicability, excluded_keepers with
      | ( []
        , Ok lane_enabled
        , Ok lane_endpoint
        , Ok lane_model
        , Ok board_attention
        , Ok absorb_gate
+       , Ok context_review
        , Ok skill_applicability
        , Ok excluded_keepers ) ->
        Ok
@@ -2580,6 +2584,7 @@ let parse_typesafeai (toml : Otoml.t)
          ; lane_model
          ; board_attention
          ; absorb_gate
+         ; context_review
          ; skill_applicability
          ; excluded_keepers
          }
@@ -2591,6 +2596,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors model
           @ result_errors board_attention
           @ result_errors absorb_gate
+          @ result_errors context_review
           @ result_errors skill_applicability
           @ result_errors excluded_keepers))
   | Some _ -> Error (error path "[typesafeai] must be a TOML table")

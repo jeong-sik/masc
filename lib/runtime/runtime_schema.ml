@@ -396,7 +396,7 @@ type exact_output_lane_decl =
     key. Two gates ask the vendor: [board_attention] (the Board attention
     judgment, {!Keeper_board_attention_exact_flow}, which sends the post and
     the keeper's context) and [absorb_gate] (the librarian absorb gate,
-    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Skill applicability review is opt-in too.
+    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context preservation and Skill applicability review are opt-in too.
     All reach the same endpoint, so one [excluded_keepers] applies to every review: a keeper
     named there is never asked about, whichever gate asks. *)
 type typesafeai =
@@ -405,6 +405,7 @@ type typesafeai =
   ; lane_model : string
   ; board_attention : bool
   ; absorb_gate : bool
+  ; context_review : bool
   ; skill_applicability : bool
   ; excluded_keepers : string list
   }
@@ -420,6 +421,7 @@ let default_typesafeai =
   ; lane_model = "jev-latest"
   ; board_attention = true
   ; absorb_gate = false
+  ; context_review = false
   ; skill_applicability = false
   ; excluded_keepers = []
   }

@@ -97,6 +97,7 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # model = "jev-latest"
 # board_attention = true
 # absorb_gate = false
+# context_review = false       # source Context + proposed summary preservation review
 # skill_applicability = false  # current request + authorized Skill body advice
 # excluded_keepers = []
 

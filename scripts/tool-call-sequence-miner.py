@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, assert_never
 
 
 SCHEMA_VERSION = "masc.tool-call-sequence-miner/v1"
@@ -43,6 +43,16 @@ class Source:
 
     def json(self) -> dict[str, Any]:
         return {"file": self.file, "line": self.line}
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionSchedule:
+    turn: int | None
+    planned_index: int | None
+    batch_index: int | None
+    batch_size: int | None
+    execution_mode: str | None
+    directed_order_unproven: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,14 +156,12 @@ def _optional_nonnegative_int(row: dict[str, Any], name: str) -> int | None:
     return value
 
 
-def _execution_schedule(
-    row: dict[str, Any], gaps: set[str]
-) -> tuple[int | None, int | None, int | None, int | None, str | None, bool]:
+def _execution_schedule(row: dict[str, Any], gaps: set[str]) -> ExecutionSchedule:
     names = ("turn", "planned_index", "batch_index", "batch_size", "execution_mode")
     present = tuple(name in row and row[name] is not None for name in names)
     if not any(present):
         gaps.add("missing_execution_schedule")
-        return None, None, None, None, None, True
+        return ExecutionSchedule(None, None, None, None, None, True)
     if not all(present):
         gaps.add("partial_execution_schedule")
 
@@ -166,14 +174,36 @@ def _execution_schedule(
         raise RowError("batch_size must be positive")
     if execution_mode is not None and execution_mode not in VALID_EXECUTION_MODES:
         raise RowError("execution_mode must be serial or concurrent")
-    return (
-        turn,
-        planned_index,
-        batch_index,
-        batch_size,
-        execution_mode,
-        not all(present) or execution_mode != "serial",
+    return ExecutionSchedule(
+        turn=turn,
+        planned_index=planned_index,
+        batch_index=batch_index,
+        batch_size=batch_size,
+        execution_mode=execution_mode,
+        directed_order_unproven=(not all(present) or execution_mode != "serial"),
     )
+
+
+def _outcome_priority(outcome: CallOutcome) -> int:
+    match outcome:
+        case CallOutcome.CONFLICT:
+            return 0
+        case CallOutcome.FAILED:
+            return 1
+        case CallOutcome.DEFERRED:
+            return 2
+        case CallOutcome.LEGACY_UNKNOWN:
+            return 3
+        case CallOutcome.COMPLETED:
+            return 4
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _rollup_outcomes(outcomes: set[CallOutcome]) -> CallOutcome:
+    if not outcomes:
+        raise AssertionError("an occurrence always carries at least one outcome")
+    return min(outcomes, key=_outcome_priority)
 
 
 def _call_outcome(row: dict[str, Any], success: bool, gaps: set[str]) -> CallOutcome:
@@ -345,14 +375,7 @@ def _call_from_row(row: dict[str, Any], source: Source) -> Call | None:
         gaps.add("missing_tool_use_id")
 
     descriptor_id = _descriptor(row, gaps)
-    (
-        turn,
-        planned_index,
-        batch_index,
-        batch_size,
-        execution_mode,
-        directed_order_unproven,
-    ) = _execution_schedule(row, gaps)
+    schedule = _execution_schedule(row, gaps)
     return Call(
         source=source,
         ts=ts,
@@ -364,12 +387,12 @@ def _call_from_row(row: dict[str, Any], source: Source) -> Call | None:
         keeper_turn_id=keeper_turn_id,
         execution_id=execution_id,
         tool_use_id=tool_use_id,
-        planned_index=planned_index,
-        batch_index=batch_index,
-        batch_size=batch_size,
-        execution_mode=execution_mode,
-        turn=turn,
-        directed_order_unproven=directed_order_unproven,
+        planned_index=schedule.planned_index,
+        batch_index=schedule.batch_index,
+        batch_size=schedule.batch_size,
+        execution_mode=schedule.execution_mode,
+        turn=schedule.turn,
+        directed_order_unproven=schedule.directed_order_unproven,
         descriptor_id=descriptor_id,
         runtime_profile=_optional_string(row, "runtime_profile"),
         result_bytes=result_bytes,
@@ -420,14 +443,10 @@ def _ngram_report(
             aggregate.occurrence_count += 1
             aggregate.keepers.add(turn_key[0])
             outcomes = {call.outcome for call in occurrence}
-            if CallOutcome.FAILED in outcomes:
-                aggregate.outcome_counts[CallOutcome.FAILED] += 1
-            elif CallOutcome.DEFERRED in outcomes:
-                aggregate.outcome_counts[CallOutcome.DEFERRED] += 1
-            elif CallOutcome.LEGACY_UNKNOWN in outcomes:
-                aggregate.outcome_counts[CallOutcome.LEGACY_UNKNOWN] += 1
-            else:
-                aggregate.outcome_counts[CallOutcome.COMPLETED] += 1
+            rolled_up = _rollup_outcomes(outcomes)
+            if rolled_up is CallOutcome.CONFLICT:
+                raise AssertionError("conflicting outcome entered a directed segment")
+            aggregate.outcome_counts[rolled_up] += 1
             if aggregate.occurrences is not None:
                 full_occurrence = tuple(
                     call for call in occurrence if isinstance(call, Call)

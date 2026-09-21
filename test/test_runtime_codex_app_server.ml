@@ -557,8 +557,7 @@ let test_rpc_input_capacity_data () =
     ; "generic invalid params", Some (`Assoc ["reason", `String "invalid input"]), false
     ; "string count", Some (`Assoc (("actual_chars", `String "23") :: List.remove_assoc "actual_chars" fields)), false
     ; "negative limit", Some (`Assoc (("max_chars", `Int (-1)) :: List.remove_assoc "max_chars" fields)), false
-    ; "not exceeded", Some (`Assoc (("actual_chars", `Int 17) :: List.remove_assoc "actual_chars" fields)), false
-    ; "duplicate discriminator", Some (`Assoc (("input_error_code", `String "input_too_large") :: fields)), false ] in
+    ; "not exceeded", Some (`Assoc (("actual_chars", `Int 17) :: List.remove_assoc "actual_chars" fields)), false ] in
   List.iter (fun (label, data, expected) ->
     let message = "Input exceeds the maximum length of 1048576 characters." in
     let error_fields = ["code", `Int (-32602); "message", `String message]
@@ -584,7 +583,22 @@ let test_rpc_input_capacity_data () =
             ["thread/start", Some (-32602); "turn/start", Some (-32603);
              "turn/start", None])
       | Error error -> fail (C.error_to_string error)
-      | Ok _ -> fail (label ^ " unexpectedly completed"))) cases
+      | Ok _ -> fail (label ^ " unexpectedly completed"))) cases;
+  let data = `Assoc (("input_error_code", `String "input_too_large") :: fields) in
+  let message = "Input exceeds the maximum length of 1048576 characters." in
+  check bool "duplicate discriminator cannot authorize narrowing" false
+    (Option.is_some (C.input_capacity_refusal
+      (C.Rpc_error {method_ = "turn/start"; code = Some (-32602); message;
+                    data = Some data})));
+  let wire = Yojson.Safe.to_string (`Assoc ["id", `Int 4; "error", `Assoc
+    ["code", `Int (-32602); "message", `String message; "data", data]]) in
+  with_fixture [init_result; account_chatgpt; thread_result; wire] (fun path ->
+    match run_fixture path with
+    | Error (C.Protocol_error _ as error) ->
+      check bool "duplicate wire keys are rejected before RPC classification" false
+        (Option.is_some (C.input_capacity_refusal error))
+    | Error error -> fail (C.error_to_string error)
+    | Ok _ -> fail "duplicate wire keys unexpectedly accepted")
 ;;
 
 let test_developer_context_preserves_authority_and_history () =

@@ -2895,7 +2895,7 @@ let test_cli_quota_order_keeps_durable_dispatch_identity () =
              let scope = match Runtime.quota_scope_of_runtime_id runtime_id with
                | Some scope -> scope | None -> fail "missing fixture scope" in
              Runtime_quota_window.note_observed_exhausted ~scope;
-             Error (Masc.Fusion_official_client.Setup_failure (Masc.Fusion_types.Provider_error "typed adapter quota already recorded")))
+             Error (Masc.Fusion_official_client.Setup_failure (Provider_error "typed adapter quota already recorded")))
            else if String.equal runtime_id separate then
              Ok (Yojson.Safe.to_string (judgment_json "require_human"))
            else fail "same-account sibling must follow the separate candidate"
@@ -2934,7 +2934,7 @@ let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
          ~source:"hitl-cli-exhausted" ();
        let entry = pending_entry ~base_path () in
        let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-         Error (Masc.Fusion_official_client.Setup_failure (Masc.Fusion_types.Provider_error "subscription window exhausted"))
+         Error (Masc.Fusion_official_client.Setup_failure (Provider_error "subscription window exhausted"))
        in
        Worker.For_testing.execute_prepared_flow_with_queue_ops
          ~queue_ops:(exact_queue_ops ())

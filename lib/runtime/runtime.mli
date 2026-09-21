@@ -945,23 +945,15 @@ val rename_runtime_lane :
   unit ->
   (config_commit_receipt, string) result
 (** Rename [\[runtime.lanes."<lane_id>"\]] to [new_lane_id] and rewrite every
-    reference to it in the same validated write: the [\[runtime.assignments\]]
-    entries that name it, and [\[runtime\].default] when it does. A lane's name
-    is its routing key ({!resolve_assignment} reads a lane before a runtime of
-    the same id), so a file written with a reference missed would route those
-    keepers to a lane that is no longer declared -- which is also why this is
-    not a remove followed by a create.
+    [\[runtime.assignments\]] entry that names it in the same validated write.
+    A lane's name is its routing key ({!resolve_assignment} reads a lane before
+    a runtime of the same id), so a file written with an assignment missed
+    would route that keeper to a lane that is no longer declared -- which is
+    also why this is not a remove followed by a create.
 
     Refused when the file does not declare [lane_id], when it already declares
     [new_lane_id] (as a lane or as a header the line editor can see), and when
-    the lane is not written as its own table.
-
-    Also refused while [\[runtime\].default] reaches the lane. That entry takes
-    a runtime id ({!set_runtime_default} refuses a lane name), so a lane it
-    reaches is one named after that runtime -- what {!set_first_run_runtime}
-    writes. Renaming it would leave the default naming the bare runtime and
-    every unassigned keeper walking it alone, with nothing in the file saying
-    the lane had stopped applying to them. *)
+    the lane is not written as its own table. *)
 
 val remove_runtime_lane :
   ?runtime_config_path:string ->

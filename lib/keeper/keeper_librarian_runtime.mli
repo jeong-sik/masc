@@ -69,6 +69,7 @@ val run_best_effort
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
+  -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
        (** Injectable effect edge for the cli lane-slot fallback walked after
            catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
@@ -84,7 +85,7 @@ val run_best_effort
     consumer passes [Already_selected_range], because applying the retired
     recent-message window again would drop the front of the selected range.
     [on_memory_committed] runs only after the current Memory OS snapshot write
-    succeeds. [durable_range_id] is committed through the Memory store's WAL
+    succeeds. [durable_range_id] and [official_range_id] are committed through the Memory store's WAL
     sidecar, so a durable consumer can recover a later progress-file failure
     without submitting the completed-turn range again. *)
 

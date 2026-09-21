@@ -496,6 +496,14 @@ EOF
   rm -f "$ledger_log"
   echo "[test-suite] self-test OK - the output ledger names every suite that spoke, in run order"
 
+  ledger_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-empty-ledger.XXXXXX")"
+  printf '%s\n' 'dune exited before printing a suite command' > "$ledger_log"
+  [ -z "$(suite_output_ledger "$ledger_log")" ] \
+    || { echo "[test-suite] self-test FAIL - a log without a suite command produced a ledger" >&2
+         rm -f "$ledger_log"; exit 1; }
+  rm -f "$ledger_log"
+  echo "[test-suite] self-test OK - a log without a suite command has an explicit empty ledger"
+
   # What the deadline snapshot reads from process rows: a dune-run suite, a
   # python rule and a server binary a suite spawned; not a shell.
   running="$(printf '%s\n' \
@@ -714,12 +722,22 @@ if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
   echo "[test-suite] FAIL - dune exited ${rc} and printed no failure header"
   echo
   echo "[test-suite] suites that left output in the log (command, first output line; in run order):"
-  suite_output_ledger "$log" | sed 's/^/  /'
+  ledger="$(suite_output_ledger "$log")"
+  if [ -n "$ledger" ]; then
+    printf '%s\n' "$ledger" | sed 's/^/  /'
+  else
+    echo "  (none: no (cd _build/...) line in the log — either no suite printed"
+    echo "  anything, or dune's command format changed)"
+  fi
   echo
   echo "[test-suite] a PASS line above is that suite's own verdict, not dune's exit code:" \
        "dune exited ${rc} somewhere this log does not name."
-  echo "[test-suite] the full dune log is uploaded as the test-suite-dune-log artifact" \
-       "when the workflow runs this script."
+  if [ -n "${MASC_TEST_SUITE_LOG_ARTIFACT:-}" ]; then
+    echo "[test-suite] the full dune log is uploaded as the ${MASC_TEST_SUITE_LOG_ARTIFACT} artifact."
+  else
+    echo "[test-suite] the full dune log is at ${log} on the runner;" \
+         "no workflow step uploads it yet."
+  fi
   echo
   tail -60 "$log"
   exit 2

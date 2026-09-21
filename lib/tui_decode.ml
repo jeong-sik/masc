@@ -545,6 +545,7 @@ type fleet_safety = {
   fs_failing_count : int;
   fs_recovering_count : int;
   fs_turn_configuration_error_count : int;
+  fs_official_client_recovery_required_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
@@ -552,6 +553,7 @@ type fleet_safety = {
   fs_running_names : string list;
   fs_executable_names : string list;
   fs_turn_configuration_error_names : string list;
+  fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -8764,6 +8766,12 @@ let decode_fleet_safety json =
   let* fs_turn_configuration_error_count =
     int_field_or section "turn_configuration_error_keeper_count" ~default:0
   in
+  let* fs_official_client_recovery_required_count =
+    required_int_field section "official_client_recovery_required_keeper_count"
+  in
+  let* fs_official_client_recovery_required_names =
+    require_string_list section "official_client_recovery_required_keeper_names"
+  in
   let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
   let* fs_target_reaction_capacity =
     int_field_or section "target_reaction_capacity_count" ~default:0
@@ -8795,6 +8803,8 @@ let decode_fleet_safety json =
     ; fs_failing_count
     ; fs_recovering_count
     ; fs_turn_configuration_error_count
+    ; fs_official_client_recovery_required_count
+    ; fs_official_client_recovery_required_names
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall

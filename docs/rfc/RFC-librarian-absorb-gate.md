@@ -164,3 +164,11 @@ RFC 에서는 그 답으로 원문을 남긴다. 그 목록을 Librarian 에게 
 요약을 검토 서비스에 보낸다. API 키만 추가해도 새 데이터가 전송되지는 않는다.
 검토는 레인 스위치와 `excluded_keepers`를 따른다. 설정과 실제 Context 검토
 소비자는 같은 변경에서 제공된다.
+
+### Instruction Skill 적용 가능성 검토의 설정
+
+`[typesafeai] skill_applicability`는 기본값이 `false`다. 해당 턴에 캡처된
+요청·Context·이전 도구 입력과 이미 읽기 허용된 Skill 본문을 검토 서비스에
+보낸다. API 키만 추가해도 새 데이터가 전송되지는 않는다. 검토는 레인 스위치와
+`excluded_keepers`를 따르며, 결과는 기존 Skill 참조·실행 권한이나 읽기/실행
+성공의 증거를 대체하지 않는다.

@@ -170,6 +170,7 @@ let rec interruption_cause_of_internal_error
      | Keeper_internal_error.Fenced_masc error ->
        interruption_cause_of_internal_error error
      | Keeper_internal_error.Fenced_core _ -> None)
+  | Keeper_internal_error.Official_client_recovery_required _
   | Keeper_internal_error.Runtime_exhausted _
   | Keeper_internal_error.Capacity_backpressure _
   | Keeper_internal_error.Resumable_cli_session _
@@ -199,6 +200,7 @@ let effect_attempted_of_internal_error
      | Keeper_provider_attempt_effect_core.Observation_unavailable -> false)
   | Keeper_internal_error.Host_stopped_turn _
   | Keeper_internal_error.Runtime_connection_closed _
+  | Keeper_internal_error.Official_client_recovery_required _
   | Keeper_internal_error.Runtime_exhausted _
   | Keeper_internal_error.Capacity_backpressure _
   | Keeper_internal_error.Resumable_cli_session _

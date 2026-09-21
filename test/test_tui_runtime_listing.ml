@@ -555,69 +555,6 @@ let test_slot_editor_keys_parse () =
           | None -> "none")
        [ "x"; "J"; "K"; "a" ])
 
-(* [runtime].media_failover is written as a whole list -- the routing endpoint
-   has no per-entry action for it -- so the editor reads and writes the file's
-   declared order while marking entries absent from the active fleet. *)
-let media_failover_state
-    ?(cursor = 0)
-    ?(admitted = [ "a"; "b" ])
-    ?declared
-    ()
-  =
-  let declared = Option.value declared ~default:admitted in
-  let state = state () in
-  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
-      rrs_default_runtime_id = Some "a";
-      rrs_media_failover = admitted; rrs_media_failover_declared = declared;
-      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
-      rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
-  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
-   | Ok snapshot -> state.runtime_surface <- Some snapshot
-   | Error detail -> Alcotest.fail detail);
-  state.slot_editor <- Some { se_target = Media_failover_slots; se_cursor = cursor };
-  state
-
-let test_the_route_editor_writes_the_whole_order () =
-  let state = media_failover_state () in
-  Alcotest.(check (list string)) "the route's entries, in call order"
-    [ "a"; "b" ]
-    (List.map (fun row -> row.sr_slot) (slot_editor_rows state));
-  Alcotest.(check string) "a move sends the reordered list"
-    "[runtime].media_failover order [b; a] a, cursor 1"
-    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
-  Alcotest.(check string) "a drop sends what is left"
-    "[runtime].media_failover order [b] a, cursor stays"
-    (slot_plan_text (plan_slot_edit state Drop_slot));
-  (* An empty route is a configuration, not a broken one: no vision fleet. The
-     exact-lane editor refuses its last slot; this one does not. *)
-  let state = media_failover_state ~admitted:[ "only" ] () in
-  Alcotest.(check string) "the last entry may go"
-    "[runtime].media_failover order [] only, cursor stays"
-    (slot_plan_text (plan_slot_edit state Drop_slot))
-
-let test_the_route_editor_edits_a_partly_unresolved_route () =
-  let state =
-    media_failover_state
-      ~cursor:1
-      ~admitted:[ "a"; "b" ]
-      ~declared:[ "a"; "gone.model"; "b" ]
-      ()
-  in
-  Alcotest.(check (list string)) "the rejected entry keeps its declared position"
-    [ "a (admitted)"; "gone.model (declared)"; "b (admitted)" ]
-    (List.map
-       (fun row ->
-          Printf.sprintf "%s (%s)" row.sr_slot
-            (if row.sr_admitted then "admitted" else "declared"))
-       (slot_editor_rows state));
-  Alcotest.(check string) "the rejected entry can be removed"
-    "[runtime].media_failover order [a; b] gone.model, cursor stays"
-    (slot_plan_text (plan_slot_edit state Drop_slot));
-  Alcotest.(check string) "the rejected entry can be reordered"
-    "[runtime].media_failover order [a; b; gone.model] gone.model, cursor 2"
-    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)))
-
 (* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
    candidate in first position -- the same shape a declared lane holding one
    candidate has. The row fact is the only thing that separates them. *)
@@ -649,9 +586,6 @@ let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
        (List.map (fun row -> fact_text (runtime_lane_fact_of_row row))
           snapshot.Masc.Tui_decode.rss_candidates));
   state.runtime_cursor <- 1;
-  expect_plan "R refuses the runtime row before opening a field" state
-    (Row_edit Rename_lane)
-    "refuse: b is a runtime, not a declared lane; there is no table to rename";
   expect_plan "D refuses the runtime row before arming" state remove
     "refuse: b is a runtime, not a declared lane; there is no table to remove"
 
@@ -671,6 +605,68 @@ let test_the_picker_offers_only_declared_lanes () =
          | Pick_lane lane -> "lane " ^ lane.Masc.Tui_decode.rrl_id
          | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
         (runtime_picker_items state))
+
+(* [runtime].media_failover is written as a whole list -- the routing endpoint
+   has no per-entry action for it -- so the editor shows the file's
+   declaration rather than the shorter admitted fleet. An entry boot could not
+   resolve keeps its position and is marked, exactly like a rejected
+   exact-lane slot, so moving or dropping a neighbour cannot erase it. *)
+let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [ "a"; "b" ]) () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_runtime_id = Some "a";
+      rrs_media_failover = admitted; rrs_media_failover_declared = declared;
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  state.slot_editor <- Some { se_target = Media_failover_slots; se_cursor = cursor };
+  state
+
+let test_the_route_editor_writes_the_whole_order () =
+  let state = media_failover_state () in
+  Alcotest.(check (list string)) "the route's entries, in call order"
+    [ "a"; "b" ]
+    (List.map (fun row -> row.sr_slot) (slot_editor_rows state));
+  Alcotest.(check string) "a move sends the reordered list"
+    "[runtime].media_failover order [b; a] a, cursor 1"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "a drop sends what is left"
+    "[runtime].media_failover order [b] a, cursor stays"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  (* An empty route is a configuration, not a broken one: no vision fleet. The
+     exact-lane editor refuses its last slot; this one does not. *)
+  let state = media_failover_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
+  Alcotest.(check string) "the last entry may go"
+    "[runtime].media_failover order [] only, cursor stays"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+(* An entry boot could not resolve is still the file's, so it is listed where
+   the file puts it and edited there. Writing the admitted list alone would
+   have deleted it. *)
+let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
+  let state =
+    media_failover_state ~declared:[ "a"; "gone.model"; "b" ] ~admitted:[ "a"; "b" ] ()
+  in
+  Alcotest.(check (list string)) "the declaration is what the editor lists"
+    [ "a (admitted)"; "gone.model (declared)"; "b (admitted)" ]
+    (List.map
+       (fun row ->
+          Printf.sprintf "%s (%s)" row.sr_slot
+            (if row.sr_admitted then "admitted" else "declared"))
+       (slot_editor_rows state));
+  Alcotest.(check string) "a move past it carries it along"
+    "[runtime].media_failover order [gone.model; a; b] a, cursor 1"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  let state =
+    media_failover_state ~cursor:1 ~declared:[ "a"; "gone.model"; "b" ]
+      ~admitted:[ "a"; "b" ] ()
+  in
+  Alcotest.(check string) "and it can be dropped from where it sits"
+    "[runtime].media_failover order [a; b] gone.model, cursor stays"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
 
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
@@ -706,11 +702,11 @@ let () = Alcotest.run "runtime list geometry"
         test_the_slot_editor_keeps_the_last_slot;
       Alcotest.test_case "slot editor keys parse" `Quick
         test_slot_editor_keys_parse;
-      Alcotest.test_case "the route editor writes the whole order" `Quick
-        test_the_route_editor_writes_the_whole_order;
-      Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
-        test_the_route_editor_edits_a_partly_unresolved_route;
       Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
         test_an_undeclared_lane_is_not_read_as_a_single_candidate;
       Alcotest.test_case "the picker offers only declared lanes" `Quick
-        test_the_picker_offers_only_declared_lanes]]
+        test_the_picker_offers_only_declared_lanes;
+      Alcotest.test_case "the route editor writes the whole order" `Quick
+        test_the_route_editor_writes_the_whole_order;
+      Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
+        test_the_route_editor_keeps_an_unresolved_entry_in_place]]

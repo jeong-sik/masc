@@ -236,6 +236,7 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Official_client_recovery_required _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       (* Neither is a provider-runtime timeout: the host stopped the turn, or

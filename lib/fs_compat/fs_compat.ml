@@ -16,7 +16,6 @@
 open Fs_compat_internal
 
 module Atomic_orphan_size_class = Atomic_orphan_size_class
-module Capability_exact_read = Capability_exact_read
 
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
     Using Atomic.t is required for OCaml 5 multi-domain safety:
@@ -913,7 +912,7 @@ let load_owned_regular_file_blocking_with
         | Ok fd ->
           let result =
             match Unix.fstat fd with
-            | exception cause ->
+            | exception cause -> (* cancel-guard-ok: Unix.fstat performs no Eio operation. *)
               owned_file_operation_error ~path Inspect_descriptor cause
             | descriptor
               when descriptor.st_kind <> Unix.S_REG
@@ -938,7 +937,7 @@ let load_owned_regular_file_blocking_with
                             (Filesystem_identity_changed { path }))
                      | _ ->
                        owned_file_error (Filesystem_identity_changed { path })
-                     | exception cause ->
+                     | exception cause -> (* cancel-guard-ok: Unix.fstat performs no Eio operation. *)
                        owned_file_operation_error
                          ~path
                          Inspect_descriptor

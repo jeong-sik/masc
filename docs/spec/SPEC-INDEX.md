@@ -96,19 +96,28 @@ graph TB
 
 ### Invariant Naming
 
-`INV-{SUBSYSTEM}-{NNN}` 형식을 사용한다.
+이 `docs/spec/` 목록은 `INV-{SUBSYSTEM}-{NNN}` 형식을 사용한다. 접두어는 각 spec 파일이 실제로 쓰는
+것을 따르며, 아래 표가 그 목록이다.
 
-| Prefix | Subsystem |
-|--------|-----------|
-| `INV-WORKSPACE` | Workspace lifecycle |
-| `INV-TASK` | Task state machine |
-| `INV-KPR` | Keeper engine |
-| `INV-SRV` | Server/transport |
-| `INV-DASH` | Dashboard |
-| `INV-BRD` | Board |
-| `INV-CSC` | Runtime |
-| `INV-MEM` | Memory |
-| `INV-agent core` | agent core Integration |
+| Prefix | Subsystem | Declared in |
+|--------|-----------|-------------|
+| `INV-SYS` | System overview | `01-system-overview.md` |
+| `INV-TYPE` | Types and invariants | `02-types-and-invariants.md` |
+| `INV-WORKSPACE` | Workspace lifecycle | `03-workspace-state.md` |
+| `INV-TURN` | Turn lifecycle | `04-turn-lifecycle.md` |
+| `INV-KEEPER` | Keeper engine | `05-keeper-agent.md` |
+| `INV-SERVER` | Server and transport | `09-server-transport.md` |
+| `INV-DASH` | Dashboard | `10-dashboard.md` |
+| `INV-CONFIG` | Configuration | `14-configuration.md` |
+
+`15-testing.md`는 테스트 스위트 불변식에 짧은 형식(`INV-T1`–`INV-T5`)을 쓴다.
+`11-board.md`, `12-memory-systems.md`, `13-agent-core.md`는 아직 `INV-` 불변식을
+선언하지 않는다. 새 접두어는 해당 spec 파일이 실제로 불변식을 선언할 때 이 표에
+더한다.
+
+`docs/design/`의 RFC는 자신의 식별자를 자체 소유한다. 예를 들어
+`checkpoint-truth-and-replay-rfc.md`는 `INV-AC-CHK-001`–`005`를 선언한다. 이 표는
+`docs/spec/`의 접두어만 다루며, 설계 문서의 식별자는 해당 문서에서 찾는다.
 
 ### Cross-Reference Format
 

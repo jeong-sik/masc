@@ -327,6 +327,7 @@ let entry_turn_of_line ~(trace_id : string) (line : string) : int option =
         "Failed to parse trajectory JSON during next_round (trace_id=%s): %s"
         trace_id msg;
       None
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
       Log.Keeper.warn
         "Unexpected error reading trajectory line (trace_id=%s): %s" trace_id

@@ -23,4 +23,7 @@
  (modules webmcp_bridge webmcp_bridge_source)
  (flags
   (:standard -w +4 -w +33 -w +37))
- (libraries masc_process yojson unix threads))
+ ; eio is already linked transitively through masc_process; naming it here is what
+ ; lets this library reference Eio.Cancel.Cancelled, which #37372 requires of any
+ ; catch-all around an Eio call -- and Process_eio.run_argv is one.
+ (libraries masc_process yojson unix threads eio))

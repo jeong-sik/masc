@@ -117,7 +117,7 @@ end = struct
         let dec = Pbrt.Decoder.of_string body in
         let r =
           try Ok (f dec) with
-          | e ->
+          | e -> (* cancel-guard-ok: Pbrt protobuf decoding is pure and performs no Eio operation. *)
             let bt = Printexc.get_backtrace () in
             Error
               (`Failure (spf "decoding failed with:\n%s\n%s" (Printexc.to_string e) bt))
@@ -130,7 +130,7 @@ end = struct
           let status = Status.decode_pb_status dec in
           Error (`Status (code, status))
         with
-        | e ->
+        | e -> (* cancel-guard-ok: Pbrt protobuf decoding is pure and performs no Eio operation. *)
           let bt = Printexc.get_backtrace () in
           Error
             (`Failure
@@ -237,6 +237,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
 
     let[@inline] guard_exn_ where f =
       try f () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | e ->
         let bt = Printexc.get_backtrace () in
         Log.Telemetry.warn
@@ -290,6 +291,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       List.iter
         (fun f ->
            try f () with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
            | e -> Log.Telemetry.warn "opentelemetry: on tick callback raised: %s" (Printexc.to_string e))
         (AList.get @@ Atomic.get on_tick_cbs_)
     ;;
@@ -304,9 +306,11 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       if Config.Env.get_debug ()
       then Log.Telemetry.debug "opentelemetry: tick (from domain %d)" (Domain.self () :> int);
       (try run_tick_callbacks () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Telemetry.warn "opentelemetry: run_tick_callbacks failed: %s" (Printexc.to_string exn));
       try emit_all ~force:false with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Telemetry.warn "opentelemetry: emit_all failed: %s" (Printexc.to_string exn)
     ;;

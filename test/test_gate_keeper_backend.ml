@@ -3625,8 +3625,8 @@ let test_runtime_multimodal_gate_model_caps_fail_closed () =
   let provider_caps = multimodal_caps ~image:true ~multimodal:true () in
   let model_caps =
     { Runtime_schema.model_capabilities_default with
-      supports_image_input = false;
-      supports_multimodal_inputs = false;
+      supports_image_input = Some false;
+      supports_multimodal_inputs = Some false;
     }
   in
   let effective =

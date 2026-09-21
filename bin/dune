@@ -1127,7 +1127,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
   masc_tui_answering
@@ -1439,6 +1439,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  digestif
+  masc.string_util
   masc.keeper_runtime
   masc.voice_wizard
   masc.voice_setup

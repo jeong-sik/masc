@@ -97,6 +97,7 @@ val request :
   t ->
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_seconds:float ->
+  ?max_body_bytes:int ->
   method_:http_method ->
   url:string ->
   ?headers:(string * string) list ->
@@ -108,6 +109,12 @@ val request :
     [max_idle_per_host]), issues the request, releases the connection
     back to the pool for keep-alive reuse, and returns the typed
     response.
+
+    [max_body_bytes] optionally bounds received response bytes. An oversized
+    fixed length is refused before reading; other bodies are checked before
+    each chunk is appended. Refusal names the HTTP status and closes the
+    partially read connection, without returning a partial body.
+    Omission leaves response size unrestricted; a negative limit is invalid.
 
     Failure modes (all return [Error]):
     - DNS / TCP / TLS failure during connect

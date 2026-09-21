@@ -45,7 +45,7 @@ let walk_value : walk = function
   | Some value ->
     (match Obj.reachable_words value with
      | words -> Words words
-     | exception exn -> Failed (Printexc.to_string exn))
+     | exception exn -> Failed (Printexc.to_string exn)) (* cancel-guard-ok: Obj.reachable_words is a pure runtime query and performs no Eio operation. *)
 ;;
 
 let measure_one ~now root =
@@ -53,6 +53,7 @@ let measure_one ~now root =
   let measurement =
     match root.hold walk_value with
     | measurement -> measurement
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Failed (Printexc.to_string exn)
   in
   { name = root.root_name

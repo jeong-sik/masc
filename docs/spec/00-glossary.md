@@ -42,6 +42,18 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
+**Cluster**
+: `.masc/` 상태 디렉터리 레이아웃을 가르는 이름 범위(`MASC_CLUSTER_NAME`). 기본값은
+  `default`이며 그때 경로는 `<base>/.masc/`다. 다른 이름은
+  `<base>/.masc/clusters/<sanitized>/`를 쓴다. TUI 개요의 `Cluster:` 행이 이 값을
+  보여준다. Turn Boundary와 Read Position 같은 runtime 좌표는 선택한 cluster의
+  디렉터리에만 의미가 있고, 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
+  Memory OS와 Working Context는 cluster가 아니라 Keeper 이름에 귀속되므로 cluster
+  간에 공유된다.
+  → [masc_root_dir_from](../../lib/workspace/workspace_utils_paths_backend.mli),
+  [backend_config_for](../../lib/workspace/workspace_utils_backend_setup.mli),
+  [cluster_name](../../lib/config/env_config_core.mli)
+
 **Workspace Heartbeat**
 : `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
   `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
@@ -147,13 +159,28 @@ status: reference
 **Board**
 : 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
 
+**Broadcast**
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) 워크스페이스 broadcast: `Workspace.broadcast
+  ~audience:Workspace_broadcast.Fleet_conversation`으로 모든 Keeper의 대화창에 닿는
+  발화. 입구는 Keeper 도구 `keeper_broadcast`, MCP 도구 `masc_broadcast`, 운영자
+  제어(`lib/operator/operator_control.ml`), dashboard HTTP
+  (`lib/server/server_routes_http_dashboard_handlers.ml`),
+  gRPC(`lib/server/masc_grpc_service.ml`)다. (2) SSE broadcast: 서버가 연결된 client
+  전부의 stream에 event를 밀어 넣는 전송 동작(`09-server-transport.md`).
+  (3) Board `audience`의 `Broadcast`: 글을 특정 대상 없이 모두에게 라우팅하는 값
+  (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
+  (`lib/masc_log/log.ml`).
+
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
   Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
   `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
   판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
-  구간의 소유자다.
+  구간의 소유자다. `AwaitingVerification`은 `Held_pending_verdict`로 claim에
+  응답하므로 Keeper가 다시 맡을 수 없다. 완료·취소 verdict는 Keeper action이
+  아니라 system LLM 또는 인증된 운영자의 authority 경계에서만 적용된다.
 
 **Evidence**
 : 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
@@ -164,7 +191,10 @@ status: reference
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
   `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
-  `Completed`가 된다(`lib/goal/goal_phase.mli`).
+  `Completed`가 된다(`lib/goal/goal_phase.mli`). `Verifying` 중에도 연결된
+  Task는 계속 진행할 수 있다. 완료 verdict는 verifier가 기록하고, 사람의
+  확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
+  `admits_self_directed_progress`가 이 경계를 정의한다.
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와
@@ -320,7 +350,8 @@ status: reference
   원문 줄 수를 제한하지 않는다. 읽지 못한 파일·행은 `history_read_errors`로 알리며,
   불완전한 빈 검색 결과를 `no_match`로 표시하지 않는다.
   운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
-  진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
+  함께 남아 있던 official-client session binding도 지워 다음 provider turn을 새 session으로
+  시작한다. 진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
 
 **Message**
 : History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content
@@ -441,3 +472,22 @@ status: reference
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
+**JEV / Noul**
+: JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
+  참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
+  통과율이 아니다. Board의 Choice 판정과도 구분한다.
+  Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
+  Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
+  `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
+  `open`은 검사 실패 후 기존 처리 규칙에 따라 반환한 결과이고, `judged`는 검사를 마친 결과다.
+  취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
+  반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면
+  `output.after`에 저장된 snapshot과 revision을 남긴다. 저장 전 취소는 이 기록이 없다.
+  이미 저장된 실행 완료 결과는 이후 화면 갱신 알림의 취소로 덮어쓰지 않는다.
+
+**Continuity Measurement (의미 보존 측정)**
+: 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
+  비교해 그 답을 평가하는 관측. `masc-librarian-continuity`는 명시한 합성
+  입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
+  게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
+  Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.

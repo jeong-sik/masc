@@ -164,25 +164,27 @@ let test_the_overview_row_counts_every_approval_list () =
     "no confirm-queue count of its own in the Overview summary" 0
     (reads ~binding_name:"render_overview"
        ~fields:[ "aps_visible_count"; "aps_total_count" ]);
-  (* Both spellings: the file reaches this function qualified in some places
-     and bare in others, and which one a call site uses is not the fact under
-     test. Asking for only one of them is how this guard passed review while
-     counting zero. *)
-  Alcotest.(check int) "the row walks the list the badge walks" 1
+  (* The row and the ring must use the same population. The helper owns
+     the approval rows plus open questions, so the overview must call it
+     rather than rebuilding only one source. *)
+  Alcotest.(check int) "the row walks the shared pending helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"render_overview" ~callee:"approval_items"
+       ~binding_name:"render_overview"
+       ~callee:"approvals_surface_pending"
      + Ast_grep.count_calls_in_value_binding ~module_path:render
          ~binding_name:"render_overview"
-         ~callee:"Masc_tui_types.approval_items");
+         ~callee:"Masc_tui_types.approvals_surface_pending");
   (* Every list the walk can come up short or long on has to be able to mark
      the count unreliable. The gate poll was the one left out: a failed fetch
      fills gate_error and leaves the previous rows standing, so the row drew a
      bare number over a list the server no longer holds. *)
-  Alcotest.(check int) "every approval source can mark the count unreliable" 4
+  Alcotest.(check int) "every approval source can mark the count unreliable" 6
     (reads ~binding_name:"render_overview"
        ~fields:
          [ "approvals_error"
          ; "keeper_tool_approvals_error"
+         ; "asks_snapshot"
+         ; "asks_error"
          ; "gate_error"
          ; "gate_queue_unavailable"
          ])

@@ -1,21 +1,10 @@
 name = "keeper_memory_write"
 description = """
-Record a durable claim that later turns read back. Your context resets \
-between turns, so a conclusion you leave only in this turn's reasoning is \
-gone. An ordinary-current memory_id identifies the exact claim bytes, not a copy. \
-Writing identical content refreshes that one fact; the receipt names inserted or \
-reobserved. The same content keeps the same id even if retracted and later written \
-again. A repeated id is not evidence of duplicate storage and requires no cleanup. \
-Task sequencing and operating constraints belong to their typed domain \
-stores, not memory prose. The runtime records explicit typed provenance and \
-returns validation or persistence failures directly. When source_path is set, \
-the claim is recalled only while the exact source bytes still match. To record \
-a conclusion rather than an observation, provide both rule_id and premise_ids; \
-the conclusion remains current only while one complete support set remains current. \
-When the claim was read from a Board post, pass board_post_id (and board_comment_id \
-for a comment) so the record names its source; a Board reference cannot be combined \
-with source_path or with a derivation.\
-"""
+Record a durable claim for later turns.
+
+memory_id identifies exact claim bytes: identical writes reuse its ID, even after retraction. A repeated ID is not a duplicate and needs no cleanup. Receipts distinguish inserted/reobserved.
+
+Keep task sequencing and operating constraints in typed stores, not memory prose. Writes carry typed provenance and report failures. source_path binds recall to unchanged source bytes. For a derived conclusion, pass rule_id and premise_ids; one complete support set must remain current. For Board evidence, pass board_post_id and optional board_comment_id. Board evidence cannot combine with source_path or derivation."""
 additional_properties = false
 
 [[params]]

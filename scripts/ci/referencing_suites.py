@@ -25,8 +25,11 @@ tracked file has that name. A shared name does not say which file a suite
 means -- 79 suites contain "dune" -- and a suite that names one exact path is
 already found by the quoted-path mapping.
 
-exactpath: for each changed file that is not under test/, the suites whose
-text contains its exact path, in either quote style. The file rule above
+exactpath: for each changed file that is not OCaml source and not under
+test/, the suites whose text contains its exact path, in either quote
+style. OCaml source is left to the module rule above, which already names
+its suites; an exact-path match on lib/runtime/runtime.ml would select
+every suite that mentions the file. The file rule above
 skips a shared basename because the name alone does not say which file a
 suite means, and the quoted-literal mapping in run-edited-tests.sh matches
 only double-quoted OCaml literals -- so a Python suite that opens

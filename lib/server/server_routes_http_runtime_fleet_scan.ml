@@ -1249,12 +1249,13 @@ let keeper_fleet_safety_health_json
     | Some snapshot -> snapshot.recovering_names
     | None -> []
   in
+  let is_autoboot_target name =
+    List.exists (String.equal name) autoboot_scan.autoboot_names
+  in
   let configuration_blocked_names =
     match phase_snapshot with
     | Some snapshot ->
-      List.filter
-        (fun name -> List.exists (String.equal name) autoboot_scan.autoboot_names)
-        snapshot.configuration_blocked_names
+      List.filter is_autoboot_target snapshot.configuration_blocked_names
     | None -> []
   in
   let configuration_blocked_count = List.length configuration_blocked_names in
@@ -1280,8 +1281,25 @@ let keeper_fleet_safety_health_json
   let official_client_recovery_required_count =
     List.length official_client_recovery_required_names
   in
+  let target_official_client_recovery_required_names =
+    List.filter is_autoboot_target official_client_recovery_required_names
+  in
   let all_target_keepers_configuration_blocked =
     target_count > 0 && configuration_blocked_count >= target_count
+  in
+  (* The public recovery count is deliberately unscoped so that it partitions
+     [phase_counts.failing] with the other two failure classes and also reports
+     manual Keepers. Fleet admission is an autoboot question, however. Use the
+     target-scoped subset here and combine both non-retryable causes: a fleet
+     split between configuration errors and held session recovery is just as
+     blocked as a fleet whose targets all share either one cause. *)
+  let operator_blocked_target_count =
+    sorted_unique_strings
+      (configuration_blocked_names @ target_official_client_recovery_required_names)
+    |> List.length
+  in
+  let all_target_keepers_operator_blocked =
+    target_count > 0 && operator_blocked_target_count >= target_count
   in
   let active_task_owner_scan =
     match current_server_state_opt () with
@@ -1347,7 +1365,7 @@ let keeper_fleet_safety_health_json
   in
   let status =
     if no_executable_keeper_fibers then "blocked"
-    else if all_target_keepers_configuration_blocked then "blocked"
+    else if all_target_keepers_operator_blocked then "blocked"
     else if configuration_blocked_count > 0 then "degraded"
     else if official_client_recovery_required_count > 0 then "degraded"
     else if reaction_capacity_below_target then "degraded"

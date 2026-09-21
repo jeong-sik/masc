@@ -3246,6 +3246,57 @@ let test_health_json_blocks_terminal_configuration_failures () =
   Alcotest.(check bool) "partial config failure still needs operator" true
     (partial |> member "operator_action_required" |> to_bool)
 
+let test_health_json_blocks_all_target_operator_recovery () =
+  let health ~configuration_names ~recovery_names =
+    let target_names = configuration_names @ recovery_names in
+    let failing = List.length target_names in
+    let phase_counts : Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+      { running = 0; failing; recovering = 0 }
+    in
+    let phase_snapshot :
+        Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+      { counts = phase_counts
+      ; running_names = []
+      ; recovering_names = []
+      ; configuration_blocked_names = configuration_names
+      ; official_client_recovery_required_names = recovery_names
+      ; phase_values =
+          List.map
+            (fun name -> name, Keeper_state_machine.Failing)
+            target_names
+      ; phase_details = []
+      }
+    in
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      ~bootable_names:target_names
+      ~autoboot_scan:{ autoboot_names = target_names; read_errors = [] }
+      ~phase_snapshot
+      ~execution_snapshot:{ owners = []; executable_names = target_names }
+      ~phase_counts
+      ~paused_keepers_json:(`Assoc [ "count", `Int 0 ])
+      ()
+  in
+  let open Yojson.Safe.Util in
+  let all_recovery =
+    health ~configuration_names:[] ~recovery_names:[ "session-a"; "session-b" ]
+  in
+  Alcotest.(check bool) "recovery-only fleet is not configuration-blocked" false
+    (all_recovery |> member "all_target_keepers_configuration_blocked" |> to_bool);
+  Alcotest.(check string) "recovery-only target fleet is blocked" "blocked"
+    (all_recovery |> member "status" |> to_string);
+  Alcotest.(check string) "recovery-only fleet names its blocker"
+    "official_client_recovery_required"
+    (all_recovery |> member "blocker" |> to_string);
+  let mixed =
+    health ~configuration_names:[ "config" ] ~recovery_names:[ "session" ]
+  in
+  Alcotest.(check bool) "mixed fleet is not wholly configuration-blocked" false
+    (mixed |> member "all_target_keepers_configuration_blocked" |> to_bool);
+  Alcotest.(check string) "mixed non-retryable target fleet is blocked" "blocked"
+    (mixed |> member "status" |> to_string);
+  Alcotest.(check string) "mixed fleet retains the first actionable blocker"
+    "turn_configuration_error" (mixed |> member "blocker" |> to_string)
+
 (* A configuration-blocked keeper outside the autoboot set: manual
    activation, booted on request. The autoboot-scoped configuration_blocked_*
    fields must not name it -- they answer "would the auto-booted fleet come
@@ -5894,6 +5945,9 @@ let () =
           Alcotest.test_case
             "health json blocks terminal configuration failures"
             `Quick test_health_json_blocks_terminal_configuration_failures;
+          Alcotest.test_case
+            "health json blocks target fleets on non-retryable causes"
+            `Quick test_health_json_blocks_all_target_operator_recovery;
           Alcotest.test_case
             "health json counts configuration blocker outside autoboot"
             `Quick

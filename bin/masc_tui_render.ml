@@ -4355,7 +4355,9 @@ let render_keeper_list (state : state) =
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
        (* The phase snapshot partitions failing keepers into recovering,
           configuration errors and explicit official-client session recovery.
-          The latter two require action beyond repeating the same turn. *)
+          Every failing Keeper belongs to exactly one class, so these three
+          counts sum to the displayed failing count. The latter two require
+          action beyond repeating the same turn. *)
        let failing_entry =
          if fleet.fs_failing_count = 0 then []
          else

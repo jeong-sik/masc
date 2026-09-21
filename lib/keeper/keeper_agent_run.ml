@@ -1089,7 +1089,16 @@ let run_turn
   in
   (* Section 2: prepare runtime tools and hooks. *)
   match setup with
-  | Error e -> Error e
+  (* Tool/hook setup failed, so nothing dispatched and
+     [Keeper_agent_run_receipt.finalize] never ran: no receipt, and neither
+     degraded-retry lane settled. This arm is checked before the one below and
+     so fixes the match's type -- which is why an inferred return type let the
+     compiler blame the block's last expression a thousand lines down. *)
+  | Error e ->
+    ({ result = Error e
+     ; degraded_retry_applied = None
+     ; degraded_retry_deferred = None }
+     : Keeper_agent_result.turn_settlement)
   | Ok s ->
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in

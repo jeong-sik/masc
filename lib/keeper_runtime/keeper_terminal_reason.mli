@@ -64,16 +64,28 @@ type t =
           {!Keeper_internal_error.capacity_backpressure_kind}.  This is a
           typed provider/infrastructure retry observation, not an opaque
           internal failure.  Payload preserves the original bytes. *)
-  | Config_or_auth of string
-  (** Canonical configuration/authentication wires emitted by the typed agent core
-          error encoder. Arbitrary strings containing ["config"] or ["auth"]
-          are not classified here. Payload is the original string. *)
+  | Config_invalid of string
+  (** Exact wire ["config_error"] or
+          [String.starts_with ~prefix:"provider_error_invalid_config:"]. A
+          setting the runtime rejected before dispatch. Arbitrary strings
+          containing ["config"] are not classified here. Payload is the
+          original string. *)
+  | Authorization_refused of string
+  (** Exact wires ["api_error_auth"], ["api_error_authorization"],
+          ["provider_error_auth"], ["provider_error_authorization"]. The
+          provider refused the request under authorization. The wire does not
+          say why, and measurement shows it carries usage limits far more
+          often than credential rejection (852 September turns: 838 weekly
+          limit, 14 five-hour limit), so the name stops at what the wire
+          states. Arbitrary strings containing ["auth"] are not classified
+          here. Payload is the original string. *)
   | Provider_runtime_failure of string
   (** Wire [String.starts_with ~prefix:"api_error_"], exact
           ["provider_error"], or
-          [String.starts_with ~prefix:"provider_error_"]. Config/auth-like
-          provider codes still land in [Config_or_auth] because that bucket
-          is ranked earlier. Payload is the original string. *)
+          [String.starts_with ~prefix:"provider_error_"]. Config and
+          authorization codes still land in [Config_invalid] /
+          [Authorization_refused] because those buckets are ranked earlier.
+          Payload is the original string. *)
   | Transcript_corruption of string
   (** Exact canonical wire
       {!Keeper_internal_error.incomplete_tool_transcript_kind}. Provider

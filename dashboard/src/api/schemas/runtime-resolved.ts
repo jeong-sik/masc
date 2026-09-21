@@ -46,6 +46,7 @@ const RuntimeResolutionSchema = object({
 
 const RuntimeLaneSchema = object({
   id: string(),
+  declared: boolean(),
   // The lane as declared, head first: the order a fresh cycle walks.
   runtime_ids: array(string()),
 })

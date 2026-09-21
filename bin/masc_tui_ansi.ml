@@ -705,7 +705,7 @@ let ctx_color ratio =
 
 (** Format context ratio as a visual bar *)
 let ctx_bar ratio width =
-  let width = Masc_tui_render_schedule.nonnegative_width width in
+  let width = Masc_tui_layout.nonnegative_width width in
   let visible_ratio =
     Float.of_int (Masc_tui_observation_layout.percentage_tenths ratio) /. 1000.0
   in

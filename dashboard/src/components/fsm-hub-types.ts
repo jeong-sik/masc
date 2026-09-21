@@ -354,7 +354,8 @@ export function operatorDispositionLabel(value: string | null | undefined): stri
 const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   healthy: '정상',
   runtime_exhausted: '런타임 후보 소진',
-  preflight_config_error: '실행 전 설정 오류',
+  config_invalid: '실행 전 설정 오류 - toml 을 고쳐야 함',
+  authorization_refused: '제공자가 거절함 - 대개 사용량 한도, 슬롯을 옮겨야 함',
   degraded_retry: '저하 상태 재시도',
   runtime_fallback: '런타임 폴백',
   transient_runtime_retry: '일시적 런타임 재시도',

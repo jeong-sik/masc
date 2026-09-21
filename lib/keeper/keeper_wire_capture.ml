@@ -80,11 +80,13 @@ type write_failure_site =
   | Request_capture
   | Response_capture
   | Rejected_reasoning_capture
+  | Request_projection_change_capture
 
 let write_failure_site_label = function
   | Request_capture -> "request"
   | Response_capture -> "response"
   | Rejected_reasoning_capture -> "rejected_reasoning"
+  | Request_projection_change_capture -> "request_projection_change"
 ;;
 
 let record_skip ~store ~keeper_name ~turn_label reason detail =
@@ -269,6 +271,55 @@ let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_tur
           ]
       in
       write_payload ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) payload)
+
+(* The [request] row above is taken before model-input projection, so it
+   cannot say what the provider received. This row is taken at the pre-dispatch
+   serialization boundary, once per provider request, from the messages of that
+   request after projection, without the extra-system-context carrier AGENT_CORE
+   appends last. It holds positions, roles, byte counts and digest comparisons,
+   and no message or schema text, so it is written without the secret redaction
+   the text rows need. *)
+let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
+    ~agent_core_turn ~trace_id ~runtime_profile ~memo ~previous ~tools ~messages =
+  if not (enabled ()) then Keeper_projection_change.Request_not_digested
+  else
+    let turn_label = string_of_int turn_id in
+    let seen = Keeper_projection_change.snapshot_digest_memo memo in
+    match
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let current, fresh =
+          Keeper_projection_change.digest_request ~seen ~tools ~messages
+        in
+        current, fresh, Keeper_projection_change.compare_requests ~previous ~current)
+    with
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      Log.Keeper.warn ~keeper_name ~turn_id
+        "keeper_wire_capture: request projection digest failed \
+         agent_core_turn=%d runtime=%s: %s"
+        agent_core_turn runtime_profile (Printexc.to_string exn);
+      Keeper_projection_change.Request_not_digested
+    | current, fresh, change ->
+      Keeper_projection_change.remember_digests memo fresh;
+      best_effort ~site:Request_projection_change_capture ~masc_root ~keeper_name
+        ~turn_label (fun () ->
+          let payload : Yojson.Safe.t =
+            `Assoc
+              [ ("ts", `String (Masc_domain.now_iso ()))
+              ; ("kind", `String "request_projection_change")
+              ; ("keeper", `String keeper_name)
+              ; ("turn_id", `Int turn_id)
+              ; ("trace_id", `String (Keeper_id.Trace_id.to_string trace_id))
+              ; ("agent_core_turn", `Int agent_core_turn)
+              ; ("runtime_profile", `String runtime_profile)
+              ; ( "message_count"
+                , `Int (Keeper_projection_change.message_count current) )
+              ; ("tool_count", `Int (List.length tools))
+              ; ("change", Keeper_projection_change.change_to_json change)
+              ]
+          in
+          write_payload ~masc_root ~keeper_name ~turn_label payload);
+      Keeper_projection_change.Request_digested current
 
 (* The stream guard ends a reasoning block whose newest 64 KiB is one unit
    written verbatim over and over. A thinking-only response that still reached

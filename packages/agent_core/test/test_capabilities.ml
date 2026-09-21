@@ -1838,6 +1838,15 @@ let test_manifest_unknown_model_still_none () =
     (Capabilities.for_model_id_with_manifest m "totally-unknown-xyz" = None)
 ;;
 
+let test_malformed_model_id_does_not_fallback_to_manifest () =
+  let m = make_manifest "claude-opus-5" in
+  check
+    bool
+    "malformed id is refused before manifest fallback"
+    true
+    (Capabilities.for_model_id_with_manifest m " claude-opus-5 " = None)
+;;
+
 let test_manifest_base_label_openai_chat () =
   let m =
     make_manifest
@@ -2036,12 +2045,21 @@ thinking_control_token = "<|provider|>"
               Capabilities.for_provider_model_id
                 ~wire:None
                 ~allow_bare_fallback:false
-                ~provider_label:" ACME "
-                ~model_id:" EXACT-MODEL "
+                ~provider_label:"acme"
+                ~model_id:"EXACT-MODEL"
             with
             | Some caps ->
-              check bool "exact normalized pair resolves" true caps.supports_tools
-            | None -> fail "exact normalized provider/model pair must resolve");
+              check bool "normalized provider and case-folded model resolve" true caps.supports_tools
+            | None -> fail "normalized provider and case-folded model must resolve");
+           check
+             (option reject)
+             "provider-scoped padded model id is rejected"
+             None
+             (Capabilities.for_provider_model_id
+                ~wire:None
+                ~allow_bare_fallback:false
+                ~provider_label:" ACME "
+                ~model_id:" EXACT-MODEL ");
            check
              (option reject)
              "provider-scoped model prefix extension is absent"
@@ -3332,6 +3350,10 @@ let () =
             `Quick
             test_explicit_manifest_lookup_falls_back_to_catalog
         ; test_case "unknown model → None" `Quick test_manifest_unknown_model_still_none
+        ; test_case
+            "malformed model id does not fall back to manifest"
+            `Quick
+            test_malformed_model_id_does_not_fallback_to_manifest
         ; test_case "base openai_chat" `Quick test_manifest_base_label_openai_chat
         ; test_case "base anthropic" `Quick test_manifest_base_label_anthropic
         ; test_case "base absent = default" `Quick test_manifest_base_absent_uses_default

@@ -42,6 +42,7 @@ let dos_eject = schema_of_name "masc_dos_eject"
 let dos_screen = schema_of_name "masc_dos_screen"
 let dos_step = schema_of_name "masc_dos_step"
 let dos_press = schema_of_name "masc_dos_press"
+let dos_click = schema_of_name "masc_dos_click"
 let dos_type = schema_of_name "masc_dos_type"
 let dos_peek = schema_of_name "masc_dos_peek"
 

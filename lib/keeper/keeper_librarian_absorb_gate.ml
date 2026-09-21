@@ -569,7 +569,7 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
   match absorbed with
   | [] -> complete (Skipped { reason = No_absorptions; absorbed })
   | _ :: _ ->
-    (match Typesafeai_config.absorb_gate_api_key () with
+    (match Typesafeai_config.absorb_gate_api_key ~keeper_id with
      | Error reason ->
        Log.Keeper.info
          ~keeper_name:keeper_id

@@ -741,6 +741,13 @@ type runtime_option = {
 type runtime_resolved_lane = {
   rrl_id : string;
   rrl_runtime_ids : string list;  (** The lane as declared, head first. *)
+  rrl_declared : bool;
+      (** [true] when a [runtime.lanes.<id>] table declares this lane, so a
+          keeper assigned to it walks every candidate and the lane editor can
+          reorder or remove it. [false] is the one-candidate lane an assignment
+          naming a runtime resolves to: nothing declares it. A declared lane
+          of one candidate walks no failover either; what separates this one
+          is that there is no table to remove. *)
 }
 
 type runtime_resolved_snapshot = {
@@ -751,10 +758,9 @@ type runtime_resolved_snapshot = {
       (** [\[runtime\].media_failover] as boot admitted it, in order: the
           fleet the vision tool and the image describer call. It is a route,
           not a lane -- no keeper turn dispatches to it. *)
-  rrs_media_failover_dropped : string list;
-      (** Entries of that list boot could not resolve. While this is
-          non-empty the route cannot be written from here: the list above is
-          missing them, and a write of it would delete them from the file. *)
+  rrs_media_failover_declared : string list;
+      (** The same route in file order before admission. Entries absent from
+          {!rrs_media_failover} remain editable in their declared position. *)
   rrs_runtimes : runtime_option list;
   rrs_lanes : runtime_resolved_lane list;
 }
@@ -764,6 +770,10 @@ type runtime_resolved_snapshot = {
     A missing probe is unobserved, never inferred unhealthy. *)
 type runtime_candidate_row = {
   rcr_lane_id : string;
+  rcr_lane_declared : bool;
+      (** [runtime_resolved_lane.rrl_declared] of the lane this row belongs to,
+          carried here because the rows, not the lanes, are what the Runtime
+          surface draws and what the lane editor acts on. *)
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;

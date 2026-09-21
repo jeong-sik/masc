@@ -72,11 +72,11 @@ let lane_state () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
-      rrs_media_failover = []; rrs_media_failover_dropped = [];
+      rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
-        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]};
-         {rrl_id = "solo"; rrl_runtime_ids = ["c"]}] } in
+        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+         {rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
   (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
    | Ok snapshot -> state.runtime_surface <- Some snapshot
    | Error detail -> Alcotest.fail detail);
@@ -311,10 +311,10 @@ let test_search_follows_the_runtime_mode () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "assigned";
-      rrs_media_failover = []; rrs_media_failover_dropped = [];
+      rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
       rrs_lanes =
-        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]}] } in
+        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
   let snapshot = match Masc.Tui_decode.join_runtime_surface
       ~probe:None ~probe_error:None ~resolved with
     | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
@@ -556,17 +556,22 @@ let test_slot_editor_keys_parse () =
        [ "x"; "J"; "K"; "a" ])
 
 (* [runtime].media_failover is written as a whole list -- the routing endpoint
-   has no per-entry action for it -- and the list on screen holds only what
-   boot admitted. While boot dropped an entry, writing what is on screen would
-   delete it from the file, so the editor refuses instead. *)
-let media_failover_state ?(cursor = 0) ?(admitted = [ "a"; "b" ]) ?(dropped = []) () =
+   has no per-entry action for it -- so the editor reads and writes the file's
+   declared order while marking entries absent from the active fleet. *)
+let media_failover_state
+    ?(cursor = 0)
+    ?(admitted = [ "a"; "b" ])
+    ?declared
+    ()
+  =
+  let declared = Option.value declared ~default:admitted in
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
-      rrs_media_failover = admitted; rrs_media_failover_dropped = dropped;
+      rrs_media_failover = admitted; rrs_media_failover_declared = declared;
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
-      rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]}] } in
+      rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
   (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
    | Ok snapshot -> state.runtime_surface <- Some snapshot
    | Error detail -> Alcotest.fail detail);
@@ -591,14 +596,81 @@ let test_the_route_editor_writes_the_whole_order () =
     "[runtime].media_failover order [] only, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
-let test_the_route_editor_refuses_a_partly_unresolved_route () =
-  let state = media_failover_state ~dropped:[ "gone.model" ] () in
-  Alcotest.(check string) "the write that would delete it is refused"
-    "refuse: boot could not resolve gone.model in [runtime].media_failover; edit the file until it does, or this write would delete it from it"
+let test_the_route_editor_edits_a_partly_unresolved_route () =
+  let state =
+    media_failover_state
+      ~cursor:1
+      ~admitted:[ "a"; "b" ]
+      ~declared:[ "a"; "gone.model"; "b" ]
+      ()
+  in
+  Alcotest.(check (list string)) "the rejected entry keeps its declared position"
+    [ "a (admitted)"; "gone.model (declared)"; "b (admitted)" ]
+    (List.map
+       (fun row ->
+          Printf.sprintf "%s (%s)" row.sr_slot
+            (if row.sr_admitted then "admitted" else "declared"))
+       (slot_editor_rows state));
+  Alcotest.(check string) "the rejected entry can be removed"
+    "[runtime].media_failover order [a; b] gone.model, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot));
-  Alcotest.(check string) "a reorder is refused for the same reason"
-    "refuse: boot could not resolve gone.model in [runtime].media_failover; edit the file until it does, or this write would delete it from it"
+  Alcotest.(check string) "the rejected entry can be reordered"
+    "[runtime].media_failover order [a; b; gone.model] gone.model, cursor 2"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_down)))
+
+(* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
+   candidate in first position -- the same shape a declared lane holding one
+   candidate has. The row fact is the only thing that separates them. *)
+let fact_text = function
+  | Lane_undeclared -> "runtime, not a declared lane"
+  | Lane_single_candidate -> "single candidate"
+  | Lane_head -> "head"
+  | Lane_fallback position -> Printf.sprintf "fallback #%d" position
+
+let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_runtime_id = Some "a";
+      rrs_media_failover = []; rrs_media_failover_declared = [];
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes =
+        [{rrl_id = "solo"; rrl_runtime_ids = ["a"]; rrl_declared = true};
+         {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false};
+         {rrl_id = "pair"; rrl_runtime_ids = ["c"; "a"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "the surface did not join"
+   | Some snapshot ->
+     Alcotest.(check (list string)) "one fact per row"
+       ["single candidate"; "runtime, not a declared lane"; "head"; "fallback #1"]
+       (List.map (fun row -> fact_text (runtime_lane_fact_of_row row))
+          snapshot.Masc.Tui_decode.rss_candidates));
+  state.runtime_cursor <- 1;
+  expect_plan "R refuses the runtime row before opening a field" state
+    (Row_edit Rename_lane)
+    "refuse: b is a runtime, not a declared lane; there is no table to rename";
+  expect_plan "D refuses the runtime row before arming" state remove
+    "refuse: b is a runtime, not a declared lane; there is no table to remove"
+
+(* An undeclared lane carries the id of the runtime it rests on, so offering
+   it as a lane put the same assignment in the picker twice -- once labelled a
+   lane that walks, once the runtime it actually is. *)
+let test_the_picker_offers_only_declared_lanes () =
+  let state = state () in
+  state.runtime_lanes <-
+    [{rrl_id = "coding"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+     {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false}];
+  state.runtime_catalog <- [runtime "a"; runtime "b"];
+  Alcotest.(check (list string)) "what the picker offers"
+    ["lane coding"; "model a"; "model b"]
+    (List.map
+       (function
+         | Pick_lane lane -> "lane " ^ lane.Masc.Tui_decode.rrl_id
+         | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
+        (runtime_picker_items state))
 
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
@@ -636,5 +708,9 @@ let () = Alcotest.run "runtime list geometry"
         test_slot_editor_keys_parse;
       Alcotest.test_case "the route editor writes the whole order" `Quick
         test_the_route_editor_writes_the_whole_order;
-      Alcotest.test_case "the route editor refuses a partly unresolved route" `Quick
-        test_the_route_editor_refuses_a_partly_unresolved_route]]
+      Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
+        test_the_route_editor_edits_a_partly_unresolved_route;
+      Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
+        test_an_undeclared_lane_is_not_read_as_a_single_candidate;
+      Alcotest.test_case "the picker offers only declared lanes" `Quick
+        test_the_picker_offers_only_declared_lanes]]

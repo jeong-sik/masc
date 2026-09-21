@@ -17,7 +17,7 @@ What to write instead:
     two-way choice     if guard then a else b         (a [when] decided it)
     kept for effect    ignore (f a : t)               (the ignore lint asks why)
 
-Detection is textual, like scripts/lint-cancel-guard.sh: a line ending in
+Detection is textual, like scripts/ci/check-cancel-guard.py: a line ending in
 [match ... with] followed by arms that all start with a bare [_]. It reads
 comments as code, so prose that spells a whole match out across lines can
 trip it; write such an example inline or mark the line wildcard-match-ok.

@@ -337,6 +337,13 @@ status: reference
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
   checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다.
+  `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
+  평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
+  참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
+  `insufficient_evidence`는 검증 통과가 아니며 기존 저장 검사를 유지한다.
+  실행 상세의 `context_review`는 판정, `context_write`는 정리 저장 결과다.
+  `outcome_unconfirmed`는 저장 도중 중단되어 저장 여부를 확인하지 못한 상태다.
+  원본 요청 처리·Memory 변경·Checkpoint 저장 결과와 구분한다.
   → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 
 **History**
@@ -472,7 +479,6 @@ status: reference
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
-
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
   참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
@@ -482,6 +488,9 @@ status: reference
   `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
   `open`은 검사 실패 후 기존 처리 규칙에 따라 반환한 결과이고, `judged`는 검사를 마친 결과다.
   취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
+  반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면
+  `output.after`에 저장된 snapshot과 revision을 남긴다. 저장 전 취소는 이 기록이 없다.
+  이미 저장된 실행 완료 결과는 이후 화면 갱신 알림의 취소로 덮어쓰지 않는다.
 
 **Continuity Measurement (의미 보존 측정)**
 : 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과

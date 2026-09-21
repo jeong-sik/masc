@@ -10,24 +10,41 @@ own section to the top of the body; the generated list still follows it.
 Failing loudly is the point: a tag whose version has no section would publish a
 page that says nothing about the release, so this exits non-zero instead.
 """
+
 import pathlib
 import sys
 
 
 def main() -> int:
     if len(sys.argv) != 4:
-        print("usage: changelog-section.py <version> <changelog> <out>", file=sys.stderr)
+        print(
+            "usage: changelog-section.py <version> <changelog> <out>", file=sys.stderr
+        )
         return 2
     version, changelog, out = sys.argv[1], sys.argv[2], sys.argv[3]
     lines = pathlib.Path(changelog).read_text(encoding="utf-8").splitlines()
     header = f"## [{version}]"
-    start = next((i for i, line in enumerate(lines) if line.startswith(header)), None)
-    if start is None:
-        print(f"{changelog} has no {header} section; refusing to publish a "
-              f"release body that does not describe {version}", file=sys.stderr)
+    starts = [i for i, line in enumerate(lines) if line.startswith(header)]
+    if not starts:
+        print(
+            f"{changelog} has no {header} section; refusing to publish a "
+            f"release body that does not describe {version}",
+            file=sys.stderr,
+        )
         return 1
-    end = next((i for i in range(start + 1, len(lines))
-                if lines[i].startswith("## [")), len(lines))
+    if len(starts) > 1:
+        line_numbers = ", ".join(str(i + 1) for i in starts)
+        print(
+            f"{changelog} has {len(starts)} {header} sections at lines "
+            f"{line_numbers}; refusing to publish only the first",
+            file=sys.stderr,
+        )
+        return 1
+    start = starts[0]
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")),
+        len(lines),
+    )
     body = "\n".join(lines[start:end]).strip() + "\n"
     pathlib.Path(out).write_text(body, encoding="utf-8")
     return 0

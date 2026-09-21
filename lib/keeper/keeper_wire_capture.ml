@@ -284,12 +284,13 @@ let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
   if not (enabled ()) then Keeper_projection_change.Request_not_digested
   else
     let turn_label = string_of_int turn_id in
+    let seen = Keeper_projection_change.snapshot_digest_memo memo in
     match
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        let current =
-          Keeper_projection_change.digest_request ~memo ~tools ~messages
+        let current, fresh =
+          Keeper_projection_change.digest_request ~seen ~tools ~messages
         in
-        current, Keeper_projection_change.compare_requests ~previous ~current)
+        current, fresh, Keeper_projection_change.compare_requests ~previous ~current)
     with
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
@@ -298,7 +299,8 @@ let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
          agent_core_turn=%d runtime=%s: %s"
         agent_core_turn runtime_profile (Printexc.to_string exn);
       Keeper_projection_change.Request_not_digested
-    | current, change ->
+    | current, fresh, change ->
+      Keeper_projection_change.remember_digests memo fresh;
       best_effort ~site:Request_projection_change_capture ~masc_root ~keeper_name
         ~turn_label (fun () ->
           let payload : Yojson.Safe.t =

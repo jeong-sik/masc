@@ -36,17 +36,29 @@ val create_digest_memo : unit -> digest_memo
     safe to share between keepers or between turns that run at the same
     time. *)
 
+type fresh_digest
+(** One message digest computed after a memo snapshot. Its representation is
+    private so only {!remember_digests} can merge it into the turn memo. *)
+
+val snapshot_digest_memo : digest_memo -> digest_memo
+(** Copy the turn memo on its owner fiber before submitting CPU work. The copy
+    is private to that job, so a cancelled await cannot leave a worker reading
+    shared mutable state while the next request advances. *)
+
+val remember_digests : digest_memo -> fresh_digest list -> unit
+(** Merge completed CPU work into the turn memo. Call only on the owner fiber,
+    after the submitted job returned successfully. *)
+
 val digest_request :
-  memo:digest_memo ->
+  seen:digest_memo ->
   tools:Agent_core.Tool.t list ->
   messages:Agent_core.Types.message list ->
-  request_digests
-(** Serializes and hashes every tool schema, and every message [memo] has not
+  request_digests * fresh_digest list
+(** Serializes and hashes every tool schema, and every message [seen] has not
     seen, in order; a message equal in value to one an earlier request of the
-    turn carried takes that digest. The encoding and SHA-256 are therefore paid
-    for the messages that are new or rewritten since, and each message still
-    costs one memo lookup. CPU-bound; writes only [memo], so one caller at a
-    time may use a memo, on any domain. *)
+    turn carried takes that digest. The returned fresh entries are local CPU
+    results: this function never mutates [seen] or the owner's turn memo.
+    Repeated equal messages within one request share a job-local digest. *)
 
 val message_count : request_digests -> int
 

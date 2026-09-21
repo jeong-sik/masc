@@ -18,7 +18,10 @@ let tool name =
 let fixture_tools = [ tool "masc_status" ]
 
 let digest ?(tools = fixture_tools) ?(memo = Change.create_digest_memo ()) messages =
-  Change.digest_request ~memo ~tools ~messages
+  let seen = Change.snapshot_digest_memo memo in
+  let digests, fresh = Change.digest_request ~seen ~tools ~messages in
+  Change.remember_digests memo fresh;
+  digests
 ;;
 
 let numbered label count =
@@ -68,6 +71,35 @@ let test_previous_request_not_digested () =
     "an undigested request is not skipped over"
     (render Change.Previous_request_not_digested)
     (render change)
+;;
+
+let test_digest_memo_commit_is_explicit () =
+  let memo = Change.create_digest_memo () in
+  let message = user "computed once the owner accepts it" in
+  let seen = Change.snapshot_digest_memo memo in
+  let _first, first_fresh =
+    Change.digest_request ~seen ~tools:fixture_tools ~messages:[ message ]
+  in
+  check int "first job computed one digest" 1 (List.length first_fresh);
+  let seen_before_commit = Change.snapshot_digest_memo memo in
+  let _again, repeated_fresh =
+    Change.digest_request
+      ~seen:seen_before_commit
+      ~tools:fixture_tools
+      ~messages:[ message ]
+  in
+  check int "an uncommitted job changed no shared memo" 1
+    (List.length repeated_fresh);
+  Change.remember_digests memo first_fresh;
+  let seen_after_commit = Change.snapshot_digest_memo memo in
+  let _cached, cached_fresh =
+    Change.digest_request
+      ~seen:seen_after_commit
+      ~tools:fixture_tools
+      ~messages:[ message ]
+  in
+  check int "the owner commit makes the digest reusable" 0
+    (List.length cached_fresh)
 ;;
 
 let test_appended () =
@@ -316,6 +348,8 @@ let () =
             "a request without digests is not compared across"
             `Quick
             test_previous_request_not_digested
+        ; test_case "digest memo commit is explicit" `Quick
+            test_digest_memo_commit_is_explicit
         ] )
     ; ( "message change"
       , [ test_case "appended" `Quick test_appended

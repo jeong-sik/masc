@@ -138,7 +138,9 @@ val capture_request_projection_change :
     its tool schemas, and its messages after projection without the
     extra-system-context carrier AGENT_CORE appends last, so [message_count]
     is one less than the provider received when a carrier was sent.
-    Digests [tools] and [messages] on the CPU domain pool, compares them with
+    Snapshots [memo] on the caller fiber, digests [tools] and [messages] on the
+    CPU domain pool without shared mutation, then merges fresh digests on the
+    caller fiber only after the await succeeds. It compares the result with
     [previous] through {!Keeper_projection_change.compare_requests}, and
     appends one [kind:"request_projection_change"] row. Returns the state the
     next request of the same keeper turn compares against: [Request_digested]

@@ -100,10 +100,18 @@ end
 module Message_digest_memo = Hashtbl.Make (Message_wire_value)
 
 type digest_memo = message_digest Message_digest_memo.t
+type fresh_digest = Agent_core.Types.message * message_digest
 
 let create_digest_memo () = Message_digest_memo.create 128
+let snapshot_digest_memo memo = Message_digest_memo.copy memo
 
-let message_digest memo message =
+let remember_digests memo fresh =
+  List.iter
+    (fun (message, digest) -> Message_digest_memo.replace memo message digest)
+    fresh
+;;
+
+let message_digest memo fresh message =
   match Message_digest_memo.find_opt memo message with
   | Some digest -> digest
   | None ->
@@ -115,18 +123,24 @@ let message_digest memo message =
       }
     in
     Message_digest_memo.add memo message digest;
+    fresh := (message, digest) :: !fresh;
     digest
 ;;
 
-let digest_request ~memo ~tools ~messages =
-  { tool_schema_sha256s =
-      List.map
-        (fun tool ->
-           (Keeper_provider_input_snapshot.tool_schema_payload tool)
-             .Keeper_provider_input_snapshot.payload_sha256)
-        tools
-  ; messages = Array.of_list (List.map (message_digest memo) messages)
-  }
+let digest_request ~seen ~tools ~messages =
+  let local = Message_digest_memo.copy seen in
+  let fresh = ref [] in
+  let digests =
+    { tool_schema_sha256s =
+        List.map
+          (fun tool ->
+             (Keeper_provider_input_snapshot.tool_schema_payload tool)
+               .Keeper_provider_input_snapshot.payload_sha256)
+          tools
+    ; messages = Array.of_list (List.map (message_digest local fresh) messages)
+    }
+  in
+  digests, List.rev !fresh
 ;;
 
 let message_count digests = Array.length digests.messages

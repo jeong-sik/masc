@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Reject new references to top-level names deleted on the PR base."""
+"""Reject new references to top-level names deleted on the PR base.
+
+Indented declarations inside modules are intentionally outside this lexical
+guard; compilation remains authoritative for those names.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,7 @@ import subprocess
 import sys
 
 NAME = r"[A-Za-z_][A-Za-z0-9_']*"
-DECLARATION = re.compile(rf"^\s*\+\s*(?:let|and|val)\s+({NAME})\b")
+DECLARATION = re.compile(rf"^\+(?:let(?:\s+rec)?|and|val)\s+({NAME})\b")
 REFERENCE = re.compile(rf"\b({NAME})\b")
 ALLOW = re.compile(r"symbol-guard: allow (" + NAME + r")")
 
@@ -50,8 +54,13 @@ def added_references(head: str, branch_point: str) -> tuple[dict[str, str], set[
 
 def deletion_commit(name: str, file_name: str, base: str, branch_point: str) -> str:
     commits = git(
-        "log", "--format=%H", "-S", f"let {name}", f"{branch_point}..{base}",
-        "--", file_name,
+        "log",
+        "--format=%H",
+        "-S",
+        f"let {name}",
+        f"{branch_point}..{base}",
+        "--",
+        file_name,
     ).splitlines()
     return commits[-1] if commits else base
 
@@ -84,6 +93,21 @@ def run(base: str, head: str = "HEAD") -> int:
 
 
 def self_test() -> int:
+    declarations = {
+        match.group(1)
+        for line in (
+            "+let rec recursive_name = recursive_name",
+            "+and peer_name = recursive_name",
+            "+val signature_name : unit",
+            "+  let local_name = recursive_name",
+        )
+        if (match := DECLARATION.match(line)) is not None
+    }
+    expected = {"recursive_name", "peer_name", "signature_name"}
+    if declarations != expected:
+        raise AssertionError(
+            f"top-level declaration fixture mismatch: {sorted(declarations)}"
+        )
     deleted = {"old_name"}
     added = set(REFERENCE.findall("let new_name = old_name"))
     if deleted & added != {"old_name"}:
@@ -96,5 +120,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
         raise SystemExit(self_test())
     if len(sys.argv) not in (2, 3):
-        raise SystemExit("usage: check-deleted-symbol-references.py BASE_SHA [HEAD_SHA]")
+        raise SystemExit(
+            "usage: check-deleted-symbol-references.py BASE_SHA [HEAD_SHA]"
+        )
     raise SystemExit(run(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else "HEAD"))

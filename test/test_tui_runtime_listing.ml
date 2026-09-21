@@ -560,7 +560,7 @@ let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
       rrs_default_runtime_id = Some "a";
-      rrs_media_failover = []; rrs_media_failover_dropped = [];
+      rrs_media_failover = []; rrs_media_failover_declared = [];
       rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
       rrs_lanes =
         [{rrl_id = "solo"; rrl_runtime_ids = ["a"]; rrl_declared = true};
@@ -598,15 +598,11 @@ let test_the_picker_offers_only_declared_lanes () =
         (runtime_picker_items state))
 
 (* [runtime].media_failover is written as a whole list -- the routing endpoint
-   has no per-entry action for it -- so the editor reads and writes the file's
-   declared order while marking entries absent from the active fleet. *)
-let media_failover_state
-    ?(cursor = 0)
-    ?(admitted = [ "a"; "b" ])
-    ?declared
-    ()
-  =
-  let declared = Option.value declared ~default:admitted in
+   has no per-entry action for it -- so the editor shows the file's
+   declaration rather than the shorter admitted fleet. An entry boot could not
+   resolve keeps its position and is marked, exactly like a rejected
+   exact-lane slot, so moving or dropping a neighbour cannot erase it. *)
+let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [ "a"; "b" ]) () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
     { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
@@ -633,32 +629,35 @@ let test_the_route_editor_writes_the_whole_order () =
     (slot_plan_text (plan_slot_edit state Drop_slot));
   (* An empty route is a configuration, not a broken one: no vision fleet. The
      exact-lane editor refuses its last slot; this one does not. *)
-  let state = media_failover_state ~admitted:[ "only" ] () in
+  let state = media_failover_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
   Alcotest.(check string) "the last entry may go"
     "[runtime].media_failover order [] only, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
-let test_the_route_editor_edits_a_partly_unresolved_route () =
+(* An entry boot could not resolve is still the file's, so it is listed where
+   the file puts it and edited there. Writing the admitted list alone would
+   have deleted it. *)
+let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
   let state =
-    media_failover_state
-      ~cursor:1
-      ~admitted:[ "a"; "b" ]
-      ~declared:[ "a"; "gone.model"; "b" ]
-      ()
+    media_failover_state ~declared:[ "a"; "gone.model"; "b" ] ~admitted:[ "a"; "b" ] ()
   in
-  Alcotest.(check (list string)) "the rejected entry keeps its declared position"
+  Alcotest.(check (list string)) "the declaration is what the editor lists"
     [ "a (admitted)"; "gone.model (declared)"; "b (admitted)" ]
     (List.map
        (fun row ->
           Printf.sprintf "%s (%s)" row.sr_slot
             (if row.sr_admitted then "admitted" else "declared"))
        (slot_editor_rows state));
-  Alcotest.(check string) "the rejected entry can be removed"
+  Alcotest.(check string) "a move past it carries it along"
+    "[runtime].media_failover order [gone.model; a; b] a, cursor 1"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  let state =
+    media_failover_state ~cursor:1 ~declared:[ "a"; "gone.model"; "b" ]
+      ~admitted:[ "a"; "b" ] ()
+  in
+  Alcotest.(check string) "and it can be dropped from where it sits"
     "[runtime].media_failover order [a; b] gone.model, cursor stays"
-    (slot_plan_text (plan_slot_edit state Drop_slot));
-  Alcotest.(check string) "the rejected entry can be reordered"
-    "[runtime].media_failover order [a; b; gone.model] gone.model, cursor 2"
-    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)))
+    (slot_plan_text (plan_slot_edit state Drop_slot))
 
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
@@ -699,4 +698,4 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "the route editor writes the whole order" `Quick
         test_the_route_editor_writes_the_whole_order;
       Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
-        test_the_route_editor_edits_a_partly_unresolved_route]]
+        test_the_route_editor_keeps_an_unresolved_entry_in_place]]

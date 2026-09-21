@@ -467,7 +467,9 @@ let keeper_phase_snapshot ?base_path () =
              separately through the shared closed owner-execution ADT. A
              configuration or session recovery cause is failing but not
              recovering: another turn with the same configuration/session
-             cannot resolve that cause. *)
+             cannot resolve that cause. A failing entry with no reason falls
+             through to recovering, so producers must not drop an actionable
+             cause when its backing store is unreadable. *)
           let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing

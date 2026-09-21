@@ -297,8 +297,6 @@ let test_openssh_probe_stays_one_word () =
   match Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a" ~endpoint () with
   | Error error -> fail error
   | Ok state ->
-    check string "endpoint root" "/srv/masc/playground"
-      (Keeper_sandbox_remote.endpoint_root state);
     check string "workspace root" "/srv/masc/playground/keeper-a"
       (Keeper_sandbox_remote.workspace_root state);
     check string "Keeper control root" "/srv/masc/playground/keeper-a"

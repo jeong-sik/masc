@@ -386,10 +386,8 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
       "the Keeper root is checked only after bootstrap"
       [ "test"; "-d"; expected_keeper_root ]
       keeper_check.argv;
-    let git_check = decoded_request (frame_path ~dir "preflight-git") in
-    check string "workspace preflight request root"
-      expected_keeper_root
-      git_check.remote_root;
+    check bool "login setup does not run payload tool preflight" false
+      (Sys.file_exists (frame_path ~dir "preflight-git"));
     let endpoint =
       match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name with
       | Error error -> failf "remote endpoint did not resolve: %s" error
@@ -478,6 +476,7 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
          ; "+"
          ]
          (decoded_request (frame_path ~dir "find-chmod")).argv);
+    save preflight_failure "fail";
     (match lane.Keeper_github_identity.observe_after_login () with
      | Error error -> failf "observing the endpoint identity failed: %s" error
      | Ok observation ->
@@ -508,13 +507,18 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
        (match observation.Keeper_github_identity.effective_probe_scope with
           | `Host_process_credential_only -> "host_process_credential_only"
           | `Endpoint_process_only -> "endpoint_process_only"));
-    let identity_check = decoded_request (frame_path ~dir "preflight-identity") in
-    check string "successful login refreshes the full preflight"
-      "/srv/masc/playground/gh-lane-keeper"
-      identity_check.remote_root;
+    Sys.remove preflight_failure;
     (match Keeper_sandbox_remote.check_preflight endpoint with
      | Ok () -> ()
-     | Error error -> failf "stale preflight survived successful login: %s" error)
+     | Error error -> failf "stale preflight survived successful login: %s" error);
+    let git_check = decoded_request (frame_path ~dir "preflight-git") in
+    check string "the next payload pays for tool preflight"
+      expected_keeper_root
+      git_check.remote_root;
+    let identity_check = decoded_request (frame_path ~dir "preflight-identity") in
+    check string "the next payload refreshes identity preflight"
+      expected_keeper_root
+      identity_check.remote_root
 ;;
 
 let () =

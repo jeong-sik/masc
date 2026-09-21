@@ -515,7 +515,7 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
     Alcotest.(check string)
       "reads land on the guest work volume, not the host playground"
       Keeper_sandbox_microvm.work_volume_guest_root
-      (Keeper_sandbox_remote.endpoint_root endpoint)
+      (Keeper_sandbox_remote.workspace_root endpoint)
 
 (* The reachable half of the same guard: attaching is reached by routing, and
    routing must not send a Docker keeper there. Its tree is a shared mount, so

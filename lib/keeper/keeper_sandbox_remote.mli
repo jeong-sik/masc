@@ -75,10 +75,6 @@ val name : t -> string
 (** Endpoint name for logs and error codes: the registry key for OpenSSH,
     the container name for a guest. *)
 
-val endpoint_root : t -> string
-(** The configured endpoint-wide root for OpenSSH/a microVM; Docker already
-    receives its resolved workdir in the same field. *)
-
 val workspace_root : t -> string
 (** The exact request jail/default cwd used by ordinary payloads. *)
 
@@ -121,10 +117,9 @@ val check_endpoint_preflight : t -> (unit, string) result
     this before its one fixed Keeper-workspace bootstrap. *)
 
 val check_workspace_preflight : t -> (unit, string) result
-(** Uncached Keeper-workspace structure half of the OpenSSH preflight. Call
-    only after the workspace exists. It deliberately stops before the GitHub
-    identity check so a login can repair an absent or invalid identity;
-    ordinary payloads use the full cached {!check_preflight}. *)
+(** Uncached Keeper-workspace structure check. It verifies only that the
+    request root exists, so GitHub login is not blocked by payload tool or disk
+    readiness. Ordinary payloads use the full cached {!check_preflight}. *)
 
 val invalidate_preflight : t -> unit
 (** Forget this endpoint and Keeper's cached preflight after bootstrap or

@@ -188,13 +188,11 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
             ; checked_at_unix = Time_compat.now ()
             }
           in
-          if result.Keeper_github_identity.authenticated
-          then (
-            let* () = Keeper_sandbox_remote.check_preflight ~force:true endpoint in
-            Ok observation)
-          else (
-            Keeper_sandbox_remote.invalidate_preflight endpoint;
-            Ok observation))
+          (* Login changes identity state, so the next payload pays for the
+             complete tool/disk/identity preflight. Its unrelated readiness
+             must not discard this successful identity observation. *)
+          Keeper_sandbox_remote.invalidate_preflight endpoint;
+          Ok observation)
     }
   in
   Ok lane

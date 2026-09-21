@@ -150,7 +150,6 @@ type t =
   }
 
 let name t = t.name
-let endpoint_root t = t.remote_root
 let transport t = t.transport
 
 let keeper_root ~remote_root ~keeper_name =
@@ -1099,6 +1098,10 @@ let perform_workspace_preflight t =
     run_endpoint_preflight_command t ~error_code:(code t "keeper_root_missing")
       [ "test"; "-d"; workspace_root t ]
   in
+  Ok ()
+;;
+
+let perform_payload_tool_preflight t =
   let* _ =
     run_preflight_command t ~error_code:"remote_git_unavailable"
       [ "git"; "--version" ]
@@ -1160,6 +1163,7 @@ let perform_identity_preflight t =
 let perform_preflight t =
   let* () = perform_endpoint_preflight t in
   let* () = perform_workspace_preflight t in
+  let* () = perform_payload_tool_preflight t in
   perform_identity_preflight t
 ;;
 

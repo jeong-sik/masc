@@ -314,6 +314,8 @@ let profile_update_command (meta : keeper_meta) =
     ; sandbox_profile = meta.sandbox_profile
     ; sandbox_image = meta.sandbox_image
     ; microvm_backend = meta.microvm_backend
+    ; microvm_memory = meta.microvm_memory
+    ; microvm_cpus = meta.microvm_cpus
     ; network_mode = meta.network_mode
     ; mention_targets = meta.mention_targets
     ; max_context_override = meta.max_context_override
@@ -473,6 +475,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
            | None -> old.sandbox_image));
     network_mode;
     microvm_backend = p.profile_defaults.microvm_backend;
+    microvm_memory = p.profile_defaults.microvm_memory;
+    microvm_cpus = p.profile_defaults.microvm_cpus;
     activation_mode;
     paused = old.paused;
     latched_reason = source_meta.latched_reason;

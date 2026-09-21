@@ -14,7 +14,6 @@ let _load_resolver_snapshot_contract
 
 let _catalog_input_contract : EO.resolver_catalog_input -> unit = function
   | EO.Embedded_default
-  | EO.Embedded_with_overlay _
   | EO.Embedded_with_targets _
   | EO.Full_replacement _
   | EO.Full_replacement_file _ -> ()
@@ -137,7 +136,7 @@ let snapshot ?(getenv = fun _ -> Ok None) contents =
   let overlay : EO.catalog_document =
     { source = "resolver snapshot fixture"; contents }
   in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Ok snapshot -> snapshot
   | Error _ -> fail "snapshot should load"
 ;;
@@ -343,7 +342,7 @@ let test_target_enable_thinking_is_typed_frozen_functional_identity () =
     ; contents = target_catalog () ^ "enable_thinking = \"true\"\n"
     }
   in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Target_catalog_invalid { detail; _ }) ->
     check
       bool
@@ -698,7 +697,7 @@ let test_unbound_target_policy_is_explicit_and_observable () =
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
   let catalog : EO.resolver_catalog_input =
-    EO.Embedded_with_overlay
+    EO.Full_replacement
       { source = "unbound target policy fixture"; contents }
   in
   (match EO.load_resolver_snapshot ~io ~catalog () with
@@ -980,7 +979,7 @@ let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
 let expect_endpoint_error label expected_cause contents =
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
   let overlay : EO.catalog_document = { source = label; contents } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Target_endpoint_invalid { cause; _ }) ->
     check bool (label ^ " exact typed cause") true (cause = expected_cause)
   | Error _ -> fail (label ^ " returned the wrong resolver error class")
@@ -1043,7 +1042,7 @@ let test_caller_headers_fail_closed () =
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
   let overlay : EO.catalog_document = { source = "caller header"; contents } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Target_catalog_invalid { detail; _ }) ->
     check
       bool
@@ -1057,7 +1056,7 @@ let test_caller_headers_fail_closed () =
 let expect_collision_error label expected contents =
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
   let overlay : EO.catalog_document = { source = label; contents } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Catalog_collision collision) ->
     check bool (label ^ " exact collision") true (collision = expected)
   | Error _ -> fail (label ^ " returned the wrong resolver error class")
@@ -1065,10 +1064,6 @@ let expect_collision_error label expected contents =
 ;;
 
 let test_collision_and_input_hardening () =
-  expect_collision_error
-    "alias shadow"
-    EO.Provider_alias_shadow
-    (target_catalog ~provider:"attacker" ~aliases:[ "ollama_cloud" ] ());
   let duplicate_target =
     target_catalog ~provider:"case-provider" ~model:"case-model" ~target:"case-target" ()
     ^ "\n\

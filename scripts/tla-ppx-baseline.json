@@ -2,9 +2,9 @@
   "_comment": "TLA+ PPX adoption baseline. Regenerate with scripts/tla-ppx-ratchet.sh --regenerate.",
   "_metrics": "See scripts/tla-ppx-ratchet.sh STRICT_METRICS / DESCRIPTIVE_METRICS arrays.",
   "_audit": "docs/audit/TLA-PPX-ADOPTION-AUDIT-2026-04.md",
-  "ppx_deriving_tla_modules": 11,
-  "ppx_fsm_guard_files": 6,
-  "ppx_deriving_tla_attributes": 16,
-  "ppx_fsm_guard_attributes": 20,
+  "ppx_deriving_tla_modules": 9,
+  "ppx_fsm_guard_files": 2,
+  "ppx_deriving_tla_attributes": 13,
+  "ppx_fsm_guard_attributes": 8,
   "lib_subdirs_with_ppx": 9
 }

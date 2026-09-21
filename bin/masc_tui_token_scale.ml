@@ -3,6 +3,7 @@
 type own_ratio_refusal =
   | No_body
   | No_count
+  | Turn_total_count
   | Cumulative_count
   | Unknown_scope
 
@@ -35,6 +36,7 @@ let fleet = fleet_scale None
    scope might, so neither divides. *)
 let wire_ratio_of_record (turn : Turn_record.t) =
   match turn.usage.scope with
+  | Runtime_usage_scope.Turn_total -> Error Turn_total_count
   | Runtime_usage_scope.Conversation_cumulative -> Error Cumulative_count
   | Runtime_usage_scope.Usage_scope_unavailable -> Error Unknown_scope
   | Runtime_usage_scope.Per_request -> (
@@ -65,7 +67,7 @@ let of_turn ~(rows : Turn_record.t list) (turn : Turn_record.t) =
           (fun row ->
             match wire_ratio_of_record row with
             | Ok (wire_bytes, tokens) -> Some (float tokens /. float wire_bytes)
-            | Error (No_body | No_count | Cumulative_count | Unknown_scope) -> None)
+            | Error (No_body | No_count | Turn_total_count | Cumulative_count | Unknown_scope) -> None)
           rows
         |> List.sort compare
       in
@@ -85,6 +87,8 @@ let format_estimate scale bytes =
 let own_sentence = function
   | No_body -> "this turn carried no serialized body"
   | No_count -> "this turn reported no input count"
+  | Turn_total_count ->
+      "this count is the client turn's total over requests, so it is not divided"
   | Cumulative_count ->
       "this turn's count covers the whole conversation, which one request's \
        bytes cannot divide"

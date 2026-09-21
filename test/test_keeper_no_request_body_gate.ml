@@ -45,10 +45,23 @@ let test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane () =
      | None -> Llm_provider.Model_catalog.clear_global ()
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     remove base_path);
-  let server = Exact_output_fixture.start_server
-    ~sw ~net:env#net ~clock:env#clock
-    (Exact_output_fixture.Reply
-      (Exact_output_fixture.openai_response (`Assoc ["answer", `String "accepted"]))) in
+  let response_without_usage =
+    match
+      Exact_output_fixture.openai_response
+        (`Assoc [ "answer", `String "accepted" ])
+      |> Yojson.Safe.from_string
+    with
+    | `Assoc fields ->
+      `Assoc (List.remove_assoc "usage" fields) |> Yojson.Safe.to_string
+    | _ -> fail "fixture response is not an object"
+  in
+  let server =
+    Exact_output_fixture.start_server
+      ~sw
+      ~net:env#net
+      ~clock:env#clock
+      (Exact_output_fixture.Reply response_without_usage)
+  in
   (* An exact, long model ID keeps the final wire envelope larger than the
      short message's internal projection. The explicit-cap case therefore
      reaches final serialization instead of failing the history window. *)
@@ -90,6 +103,7 @@ streaming = false
    | Error detail -> fail detail);
   let observations = ref [] in
   let model_input_windows = ref 0 in
+  let response_observed_model_inputs = ref [] in
   let attempt_errors = ref [] in
   let run ?(runtime_id = "fixture.sample") goal =
     Keeper_turn_driver.run_named
@@ -100,6 +114,9 @@ streaming = false
         attempt_errors := (runtime_id, error) :: !attempt_errors)
       ~on_model_input_window_observation:(fun ~measurement:_ _ ->
         incr model_input_windows)
+      ~on_response_observed_model_input:(fun observed ->
+        response_observed_model_inputs :=
+          observed :: !response_observed_model_inputs)
       ~on_request_wire_observation:(fun ~runtime_id:_ ~body_bytes ~serialized ->
         observations := (body_bytes, Option.is_some serialized) :: !observations)
       ()
@@ -118,8 +135,12 @@ streaming = false
   check (option (pair int bool)) "the exact wire observation is the sent body"
     (Some (String.length large_body, true)) (List.nth_opt !observations 0);
   check int "the composition observed its window once" 1 !model_input_windows;
+  check int "the response certifies that exact window once" 1
+    (List.length !response_observed_model_inputs);
   succeed "short";
   check int "a short request reaches the peer too" 2 (Exact_output_fixture.post_count server);
+  check int "the second response certifies its window" 2
+    (List.length !response_observed_model_inputs);
   let refused_url, refused_requests = start_context_refusal_server ~sw ~net:env#net in
   let recovery_config = config_text ^ Printf.sprintf {|
 [providers.overflow]
@@ -139,7 +160,15 @@ candidates = ["overflow.sample", "fixture.sample"]
   check int "the peer's context refusal is attempted once, without an invented shrink seed" 1
     (Atomic.get refused_requests);
   check int "the next candidate completes the same lane turn" 3
-    (Exact_output_fixture.post_count server)
+    (Exact_output_fixture.post_count server);
+  check int "the typed refusal did not certify its attempted window" 3
+    (List.length !response_observed_model_inputs);
+  match !response_observed_model_inputs with
+  | latest :: _ ->
+    check string "the fallback response names its own runtime"
+      "fixture.sample"
+      latest.Turn_record.runtime_profile
+  | [] -> fail "the fallback response observation is missing"
 
 let test_the_runtime_demotes_historical_tool_results () =
   Eio_main.run @@ fun env ->

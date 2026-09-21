@@ -282,16 +282,6 @@ val of_binding : config -> binding -> (t, drop_reason) result
     validation can report a dropped target's materialize failure instead of a
     bare "not found among N runtimes" that points at a non-existent typo. *)
 
-val decide_capability_gate :
-  config_path:string -> (string * bool) list -> (unit, string) result
-(** Pure capability-gate decision applied at startup by [init_default_strict]
-    (not by [load_list], which keeps only RFC-0206 routing validation so unit
-    tests stay catalog-independent), exposed for testing. [entries] is
-    [(label, known_to_agent_core_catalog)] per runtime binding. Returns [Error] when any
-    configured model is unknown to the AGENT_CORE capability catalog: an unknown model
-    resolves to [provider_default] and silently drops thinking/sampling control
-    required by the binding. Empty entries are allowed for focused config
-    probes. *)
 
 type missing_catalog_model =
   { runtime_id : string
@@ -374,8 +364,8 @@ val load_list :
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→lane-name-or-runtime-id list; [media_failover] is the RFC-0265 ordered reroute
-    list; [lanes] is the ordered failover candidate lists. *)
+    keeper→lane-name-or-runtime-id list; [media_failover] is the vision read fleet;
+    [lanes] is the ordered failover candidate lists. *)
 
 
 (** {1 Lazy default runtime singleton}
@@ -400,10 +390,11 @@ val publish_exact_output_registry :
     validation happens before the global publication changes. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
-(** Fail-closed startup entry point: {!init_default} PLUS the AGENT_CORE
-    capability-catalog gate ({!decide_capability_gate}). Rejects ([Error]) a
-    runtime whose model is absent from the catalog before boot. Used by strict
-    validation callers such as fusion run. *)
+(** Fail-closed startup entry point: {!init_default} plus the capability check
+    on the materialized runtime list. Rejects ([Error]) a binding whose model
+    the AGENT_CORE catalog does not carry and whose runtime block declares no
+    capabilities of its own. Used by strict validation callers such as fusion
+    run. *)
 
 val init_default_strict_report :
   config_path:string -> (unit, strict_init_error) result
@@ -509,43 +500,96 @@ val verifier_exact_lane_id : string
     lane id (RFC-0361 D7(a)). *)
 
 val verifier_runtime_admission : t -> (unit, string) result
-(** Actual verifier candidates must expose mediated tools without native reads.
-    Agent Core and Claude Code meet this boundary; other official clients do not. *)
+(** The one answer to "can this runtime judge a completion review?", used by
+    lane resolution, readiness, dispatch and the runtime-file writer.
+
+    A verifier candidate must expose mediated tools without native reads, which
+    Agent Core and Claude Code meet and other official clients do not. An Agent
+    Core binding must additionally take inline tools and a system prompt,
+    because the review is dispatched with required tools and the managed
+    verification.system prompt: without either, the dispatch is refused one
+    attempt later by [Keeper_required_tools] or by AGENT_CORE's
+    [Unsupported_system_prompt] (#37382). *)
 
 val verifier_cli_slot_admission : runtime_id:string -> (unit, string) result
 (** Admit the exact official-client binding with required tool support, without
     expanding any same-named Keeper lane. Lane-only IDs, Agent Core runtimes,
     and clients without native-tool suppression are refused. *)
 
-val verifier_exact_lane_slot_ids : unit -> (string list, string) result
-(** Admitted API slot ids followed by declared official-client slot ids from the
-    published exact-output registry — the single provider-selection SSOT for
-    completion-authority judgement calls. [Error] names why the lane cannot
-    judge (registry not published, lane unconfigured, or no admitted slots);
-    there is no fallback to another route. Declared official-client ids are
-    carried as declared; {!verifier_exact_lane_readiness} is what asks the
-    runtime table whether they resolve. *)
+val verifier_cli_slot_admission_in
+  :  runtimes:t list
+  -> lane_ids:string list
+  -> runtime_id:string
+  -> (unit, string) result
+(** {!verifier_cli_slot_admission} over an explicit runtime table, for the
+    runtime-file writer, which judges the table it just parsed rather than the
+    loaded one. Both entry points must reach the same verdict: a slot one
+    spelling admits and another refuses is what #37179 was. *)
 
-val verifier_exact_lane_readiness : unit -> (unit, string) result
+type verifier_slot_rejection =
+  { position : int
+  ; slot_id : string
+  ; detail : string
+  }
+(** One declared [verifier_exact] slot the lane cannot judge through.
+    [position] counts from 1 across the whole lane declaration, catalog slots
+    first, so it names the same line of runtime.toml as the registry's own
+    rejected-slot report. *)
+
+type verifier_exact_lane_slots =
+  { admitted_catalog_slot_ids : string list
+  ; admitted_cli_slot_ids : string list
+  ; slot_rejections : verifier_slot_rejection list
+  }
+
+val verifier_slot_rejection_to_string : verifier_slot_rejection -> string
+
+val verifier_catalog_slot_admission : runtime_id:string -> (unit, string) result
+(** {!verifier_runtime_admission} for an id written in [verifier_exact.slots].
+    Judgement dispatches that id alone, so it must name a configured runtime;
+    whether the same id is also an exact-output target is the registry's
+    question, not this one. *)
+
+val verifier_exact_lane_admission
+  :  declared:Runtime_schema.exact_output_lane_decl
+  -> registry_admitted_catalog_slots:string list
+  -> verifier_exact_lane_slots
+(** Split one declared lane into the ids that can judge and the ones that
+    cannot, numbering positions from the declaration so a rejected sibling does
+    not shift them. A catalog slot absent from
+    [registry_admitted_catalog_slots] is skipped rather than rejected again:
+    publication already reports it, with a cause this module cannot see. *)
+
+val verifier_exact_lane_resolution : unit -> (verifier_exact_lane_slots, string) result
+(** {!verifier_exact_lane_admission} applied to the published lane. The
+    registry carries the ids verbatim because only this module holds the
+    runtime table that answers admission. *)
+
+val verifier_exact_lane_slot_ids : unit -> (string list, string) result
+(** The slot ids this lane can judge through, catalog first then official
+    clients, in declaration order — the single provider-selection SSOT for
+    completion-authority judgement calls. [Error] names why the lane cannot
+    judge (registry not published, lane unconfigured, or every declared slot
+    rejected); there is no fallback to another route. *)
+
+val verifier_exact_lane_readiness : unit -> (verifier_slot_rejection list, string) result
 (** Whether the [verifier_exact] lane has a slot that can be dispatched now,
     for a caller that reports authority readiness rather than walking the lane.
-    [Ok ()] needs one admitted API route with a materialized candidate that
-    takes both the verdict tool and a system prompt, or one cli slot naming a materialized official-client runtime
-    that can supply the verdict tool with native tools disabled.
-    [Error] names incompatible slots, which
-    {!verifier_exact_lane_slot_ids} cannot: it carries declared
-    ids verbatim, so a typo there reads as a configured judge until the review
-    reaches dispatch. *)
+    [Ok] carries the declared slots the lane cannot judge through, so a short
+    lane says why it is short; [Error] names every rejection. This answers from
+    the same admission as {!verifier_exact_lane_slot_ids}: the two used to
+    apply different predicates to catalog slots, and that disagreement let the
+    authority start on a lane that refused every review (#37382). *)
 
 val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
 (** Validate one configured direct slot. A declared CLI slot retains its
     execution-kind constraint; a replacing registry cannot grant admission. *)
 
 val media_failover : unit -> string list
-(** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
-    turn's input modality exceeds the assigned runtime's declared capabilities;
-    the turn reroutes to the first that admits it. [[]] = derive capable runtimes
-    from declared [\[models.*.capabilities\]] in declaration order. Every entry is
+(** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids the
+    vision tool calls, including the image readings made for a runtime that
+    cannot take the image. A keeper turn never dispatches to them; its image
+    reroute stays inside its lane. [[]] = no vision fleet. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
 val lanes : unit -> Runtime_lane.t list
@@ -564,9 +608,8 @@ val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
 (** Resolve a keeper assignment to a lane. The id names a declared lane or a
     runtime, and a lane of that name is taken first; an id naming a bare runtime
-    gets a lane of its own, because the lane is what carries failover and quota
-    demotion. Every lane ends
-    at [\[runtime\].default], so a walk always has a next candidate.
+    resolves to a lane holding that runtime alone. A lane walks exactly the
+    candidates it declares.
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects
     the default in place of the requested runtime. *)
@@ -874,23 +917,70 @@ val set_runtime_lane_candidates :
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. The list order is the failover order. Creates
     the lane table when the id has none — a runtime whose lane was synthesized
-    ([self, default]) becomes a declared lane the first time an operator adds a
+    ([self]) becomes a declared lane the first time an operator adds a
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. *)
 
+val create_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Declare a new [\[runtime.lanes."<lane_id>"\]] with [runtime_ids] as its
+    candidates, through the same validated write as
+    {!set_runtime_lane_candidates}. Both refusals read the file under the
+    write lock:
+    - the file already declares that lane: a create that landed on it would
+      replace its candidates without the operator having seen them;
+    - [lane_id] is a declared runtime id: the lane would shadow that runtime
+      for every keeper that names it, and for every unassigned keeper when it
+      is the default. A runtime's own lane is edited with
+      {!set_runtime_lane_candidates}. *)
+
+val remove_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
+    SSOT writer. Refused while a keeper still routes through the lane id,
+    naming each way it does: an entry of [\[runtime.assignments\]], or
+    [\[runtime\].default], which every unassigned keeper walks. A keeper's
+    route is read as a lane before a runtime ({!resolve_assignment}), so
+    removing the lane would either fail the load or silently hand those
+    keepers the runtime of the same id. Refused when the file does not declare
+    the lane as its own table. *)
+
 val set_exact_output_lane_slots :
   ?runtime_config_path:string ->
-  lane_name:string ->
+  lane:exact_lane ->
   slots:string list ->
   unit ->
   (config_commit_receipt, string) result
-(** Persist [\[runtime.exact_output_lanes."<lane_name>"\]].slots the same way
+(** Persist [\[runtime.exact_output_lanes.<id>\]].slots the same way
     {!set_runtime_lane_candidates} persists conversation-lane candidates: the
     SSOT writer, full validation, atomic write, cache refresh. The list order
-    is the walk order of the lane. Creates the lane table when the name has
-    none. An empty [slots] is rejected — mandatory exact lanes fail the boot
-    fail-closed without one, so a lane that resolves to nothing is not the
-    edit an operator is making. *)
+    is the walk order of the lane. An empty [slots] is rejected — mandatory
+    exact lanes fail the boot fail-closed without one, so a lane that resolves
+    to nothing is not the edit an operator is making. A lane the file does not
+    declare yet gets its table; [lane] is one of the lanes the server runs, so
+    that table is read. A lane the file declares other than as its own table
+    (inline, or through dotted keys) is refused rather than declared twice, and
+    so is a slot the lane already declares as a CLI slot. *)
+
+val append_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Add [slot] to the end of [\[runtime.exact_output_lanes.<id>\]].slots as
+    the file declares them, read under the runtime.toml write lock, and commit
+    the result like {!set_exact_output_lane_slots}. Declared slots the
+    exact-output registry did not admit stay in place. Refused, by name, when
+    the lane already declares [slot] as a slot or as a CLI slot. Tables are
+    created and refused as {!set_exact_output_lane_slots} says. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

@@ -331,28 +331,27 @@ let require_expected_revision reference actual =
   else Error (Revision_conflict { actual })
 ;;
 
-let max_source_bytes = 1_048_576
+let validate_source ~directory source_text =
+  Keeper_skill_catalog.validate_authored_source ~directory source_text
+  |> Result.map_error (function
+    | Keeper_skill_catalog.Source_too_large { bytes; max_bytes } ->
+      Source_too_large { bytes; max_bytes }
+    | Invalid_document error ->
+      Validation_failed (Keeper_skill_catalog.error_to_string error))
+;;
 
 let validate_candidate target reference source_text =
-  if String.length source_text > max_source_bytes
-  then
-    Error
-      (Source_too_large
-         { bytes = String.length source_text; max_bytes = max_source_bytes })
-  else
-  match Keeper_skill_catalog.parse_skill ~directory:target.entry.directory source_text with
-  | Error error -> Error (Validation_failed (Keeper_skill_catalog.error_to_string error))
-  | Ok skill ->
-    let candidate_reference =
-      Skill_reference.make
-        ~identity:reference.Skill_reference.identity
-        ~content_revision:(Skill_reference.content_revision_of_source_text source_text)
-    in
-    Ok
-      { profile =
-          Keeper_skill_observability.of_skill_with_reference candidate_reference skill
-      ; diagnostics = []
-      }
+  let* skill = validate_source ~directory:target.entry.directory source_text in
+  let candidate_reference =
+    Skill_reference.make
+      ~identity:reference.Skill_reference.identity
+      ~content_revision:(Skill_reference.content_revision_of_source_text source_text)
+  in
+  Ok
+    { profile =
+        Keeper_skill_observability.of_skill_with_reference candidate_reference skill
+    ; diagnostics = []
+    }
 ;;
 
 let load ~base_path reference =
@@ -483,44 +482,28 @@ let find_writable_source snapshot source_id =
        Ok source_root)
 ;;
 
-let package_id_error_to_string = function
-  | Skill_reference.Empty_package_id -> "must not be empty"
-  | Current_directory_package_id -> "must not be ."
-  | Parent_directory_package_id -> "must not be .."
-  | Package_id_contains_separator -> "must be one directory name"
-  | Package_id_contains_nul -> "must not contain NUL"
-;;
-
 let preview_new ~source_id ~package_id source_text =
-  if String.length source_text > max_source_bytes
-  then
-    Error
-      (Source_too_large
-         { bytes = String.length source_text; max_bytes = max_source_bytes })
-  else
-    let* parsed_package_id =
-      Skill_reference.package_id_of_directory package_id
-      |> Result.map_error (fun error ->
-        Invalid_package_id (package_id_error_to_string error))
-    in
-    match Keeper_skill_catalog.parse_skill ~directory:package_id source_text with
-    | Error error -> Error (Validation_failed (Keeper_skill_catalog.error_to_string error))
-    | Ok skill ->
-      let identity =
-        Skill_reference.make_identity
-          ~source_id
-          ~package_id:parsed_package_id
-          ~name:skill.name
-      in
-      let reference =
-        Skill_reference.make
-          ~identity
-          ~content_revision:(Skill_reference.content_revision_of_source_text source_text)
-      in
-      Ok
-        { profile = Keeper_skill_observability.of_skill_with_reference reference skill
-        ; diagnostics = []
-        }
+  let* parsed_package_id =
+    Skill_reference.package_id_of_directory package_id
+    |> Result.map_error (fun error ->
+      Invalid_package_id (Skill_reference.package_id_error_to_string error))
+  in
+  let* skill = validate_source ~directory:package_id source_text in
+  let identity =
+    Skill_reference.make_identity
+      ~source_id
+      ~package_id:parsed_package_id
+      ~name:skill.name
+  in
+  let reference =
+    Skill_reference.make
+      ~identity
+      ~content_revision:(Skill_reference.content_revision_of_source_text source_text)
+  in
+  Ok
+    { profile = Keeper_skill_observability.of_skill_with_reference reference skill
+    ; diagnostics = []
+    }
 ;;
 
 let create ~base_path ~source_id ~package_id ~source_text ~refresh =

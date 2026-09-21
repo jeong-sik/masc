@@ -102,11 +102,20 @@ val save_agent_core_checkpoint :
     checkpoint write boundary (Store_only); required so every write path is
     compiler-forced to name the runtime it persists for (N-of-M closure). *)
 
-
-(** Build and conditionally publish the same canonical checkpoint payload as
-    {!save_agent_core_checkpoint_classified}, but only while the durable source still
-    has [expected_source_ref]. Equal-turn content changes are rejected by the
-    checkpoint store's exact byte-identity CAS. *)
+(** {!save_agent_core_checkpoint} with the store's verdict kept: [Saved] when
+    this checkpoint became the canonical one, [Stale_noop] when a newer writer
+    already owns it and nothing was written. {!save_agent_core_checkpoint}
+    answers [Ok] for both, so a caller that reports what it stored uses this
+    one. *)
+val save_agent_core_checkpoint_classified :
+  runtime_id:string ->
+  keeper_name:string ->
+  session:session_context ->
+  agent_name:string ->
+  ctx:working_context ->
+  ( Agent_core.Checkpoint.t * Keeper_checkpoint_store.save_agent_core_outcome
+  , string checkpoint_write_error )
+  result
 
 (** {1 AGENT_CORE checkpoint inspection} *)
 
@@ -116,9 +125,25 @@ val save_agent_core_checkpoint :
 val context_of_agent_core_checkpoint :
   Agent_core.Checkpoint.t -> working_context
 
-(** Load the canonical AGENT_CORE checkpoint for a given
-    [trace_id]. Returns the session plus the recovered
-    working_context (or [None] when nothing was found). *)
+(** What a checkpoint load found. *)
+type checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent  (** No checkpoint is saved for the trace. *)
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
+      (** The load failed for any other reason: a superseded version, a parse,
+          store, I/O or agent-core error. The saved history was not seen and
+          may still hold what it held. *)
+
+(** Load the canonical AGENT_CORE checkpoint of [trace_id] and say which of the
+    three it was. Every failure is logged and counted here. *)
+val load_context_from_checkpoint_classified :
+  trace_id:string ->
+  base_dir:string ->
+  session_context * checkpoint_load
+
+(** Optional projection for callers acting only on a loaded context. [None]
+    covers absence and a diagnosed failure; it cannot authorize a fresh turn.
+    Turn execution uses {!load_context_from_checkpoint_classified}. *)
 val load_context_from_checkpoint :
   trace_id:string ->
   base_dir:string ->

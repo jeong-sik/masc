@@ -99,9 +99,6 @@ let read_file path =
 
 let repo_runtime_toml = "# repo runtime seed\n"
 let local_runtime_toml = "# local runtime seed\n"
-let repo_model_catalog_overlay_toml =
-  "[[models]]\nid_prefix = \"repo-runtime\"\nprovider_name = \"repo-provider\"\n"
-
 let test_grpc_tool_arguments_fail_closed_before_dispatch () =
   let dispatch_calls = ref 0 in
   let dispatch _arguments =
@@ -245,9 +242,6 @@ let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  write_file
-    (Filename.concat config "agent-core-models-overlay.toml")
-    repo_model_catalog_overlay_toml;
   write_file (Filename.concat root "agent-core-models.toml") "legacy full catalog must be ignored";
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.md") "prompt";
@@ -260,9 +254,6 @@ let make_base_path_config_root root =
   in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  write_file
-    (Filename.concat config "agent-core-models-overlay.toml")
-    repo_model_catalog_overlay_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.md") "prompt";
   write_example_keeper config;
@@ -319,78 +310,12 @@ let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
   Alcotest.(check int) "legacy catalog not loaded" 0 !load_calls;
   Alcotest.(check int) "legacy catalog not installed" 0 !set_calls
 
-let test_model_catalog_overlay_installs_config_root_overlay () =
-  with_temp_dir "model-catalog-overlay-install" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file overlay "[[models]]\nid_prefix = \"deployment-delta\"\n";
-    let load_calls = ref [] in
-    let set_overlay_calls = ref 0 in
-    let result =
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~load_catalog:(fun path ->
-          load_calls := path :: !load_calls;
-          Ok (Llm_provider.Model_catalog.empty, []))
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected config-root overlay resolution"
-     | Some path ->
-       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
-    Alcotest.(check (list string)) "load overlay" [ overlay ] (List.rev !load_calls);
-    Alcotest.(check int) "set overlay" 1 !set_overlay_calls)
-
-let test_model_catalog_overlay_absent_is_noop () =
-  with_temp_dir "model-catalog-overlay-absent" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    mkdir_p config_root;
-    let load_calls = ref [] in
-    let set_overlay_calls = ref 0 in
-    let result =
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~load_catalog:(fun path ->
-          load_calls := path :: !load_calls;
-          Ok (Llm_provider.Model_catalog.empty, []))
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    in
-    Alcotest.(check bool) "no overlay resolved" true (Option.is_none result);
-    Alcotest.(check (list string)) "no load" [] !load_calls;
-    Alcotest.(check int) "no install" 0 !set_overlay_calls)
-
-let test_model_catalog_overlay_invalid_fails_loud () =
-  with_temp_dir "model-catalog-overlay-invalid" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file overlay "not toml";
-    let set_overlay_calls = ref 0 in
-    match
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~load_catalog:(fun (_ : string) -> Error "parse failed")
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    with
-    | (_ : string option) ->
-      Alcotest.fail "expected Config_error for invalid overlay"
-    | exception Env_config_core.Config_error message ->
-      Alcotest.(check bool)
-        "error names overlay path"
-        true
-        (String_util.contains_substring message "agent-core-models-overlay.toml");
-      Alcotest.(check int) "no install" 0 !set_overlay_calls)
-
 let test_config_load_failure_diagnostic_attributes_to_config () =
   let output =
     Server_runtime_bootstrap.config_load_failure_diagnostic
       ~detail:
-        "catalog overlay /ws/.masc/config/agent-core-models-overlay.toml: model entry \
-         \"m\" contains unknown field(s): supports_extended_thinking"
+        "/ws/.masc/config/runtime.toml: model entry \"m\" contains unknown \
+         field(s): supports_extended_thinking"
   in
   Alcotest.(check bool)
     "names the configuration class, not a connection problem"
@@ -399,7 +324,7 @@ let test_config_load_failure_diagnostic_attributes_to_config () =
   Alcotest.(check bool)
     "carries the config file path verbatim"
     true
-    (String_util.contains_substring output "agent-core-models-overlay.toml");
+    (String_util.contains_substring output "runtime.toml");
   Alcotest.(check bool)
     "names the next action"
     true
@@ -408,117 +333,6 @@ let test_config_load_failure_diagnostic_attributes_to_config () =
     "never claims a model connection failure"
     false
     (String_util.contains_substring output "Model connection failed")
-let test_model_catalog_overlay_skips_poisoned_entries () =
-  with_temp_dir "model-catalog-overlay-lenient" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file
-      overlay
-      "[[models]]\n\
-       id_prefix = \"lenient-good-model\"\n\
-       supports_tools = true\n\
-       [[models]]\n\
-       id_prefix = \"lenient-stale-model\"\n\
-       supports_extended_thinking = true\n";
-    let installed = ref None in
-    let result =
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~set_overlay:(fun catalog -> installed := Some catalog)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected config-root overlay resolution"
-     | Some path ->
-       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
-    match !installed with
-    | None -> Alcotest.fail "expected the surviving overlay rows to install"
-    | Some catalog ->
-      Alcotest.(check bool)
-        "valid row survives"
-        true
-        (Option.is_some (Llm_provider.Model_catalog.lookup catalog "lenient-good-model"));
-      Alcotest.(check bool)
-        "poisoned row skipped"
-        true
-        (Option.is_none (Llm_provider.Model_catalog.lookup catalog "lenient-stale-model")))
-
-let test_model_catalog_overlay_broken_toml_still_fails_loud () =
-  with_temp_dir "model-catalog-overlay-broken-toml" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file overlay "not toml";
-    let set_overlay_calls = ref 0 in
-    match
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    with
-    | (_ : string option) ->
-      Alcotest.fail "expected Config_error for broken-TOML overlay"
-    | exception Env_config_core.Config_error message ->
-      Alcotest.(check bool)
-        "error names overlay path"
-        true
-        (String_util.contains_substring message "agent-core-models-overlay.toml");
-      Alcotest.(check int) "no install" 0 !set_overlay_calls)
-
-let test_explicit_model_catalog_replacement_precedes_overlay () =
-  with_temp_dir "model-catalog-explicit-precedence" (fun config_root ->
-    let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
-    write_file overlay_path "overlay fixture";
-    let parse source toml =
-      match Llm_provider.Model_catalog.of_toml_string ~source toml with
-      | Ok catalog -> catalog
-      | Error detail -> Alcotest.failf "%s catalog fixture invalid: %s" source detail
-    in
-    let explicit =
-      parse
-        "explicit"
-        "[[models]]\nid_prefix = \"explicit-model\"\nbase = \"openai_chat\"\n"
-    in
-    let overlay =
-      parse
-        "overlay"
-        "[[models]]\nid_prefix = \"overlay-model\"\nbase = \"openai_chat\"\n"
-    in
-    let previous = Llm_provider.Model_catalog.global () in
-    Fun.protect
-      ~finally:(fun () ->
-        match previous with
-        | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-        | None -> Llm_provider.Model_catalog.clear_global ())
-      (fun () ->
-        Llm_provider.Model_catalog.clear_global ();
-        ignore
-          (Server_runtime_bootstrap.configure_agent_core_model_catalog_env
-             ~env:(function
-               | "AGENT_CORE_MODEL_CATALOG" -> Some "/explicit/catalog.toml"
-               | _ -> None)
-             ~load_catalog:(fun _ -> Ok explicit)
-             ());
-        ignore
-          (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-             ~config_root
-             ~load_catalog:(fun _ -> Ok (overlay, []))
-             ());
-        match Llm_provider.Model_catalog.global () with
-        | None -> Alcotest.fail "expected explicit global catalog"
-        | Some effective ->
-          Alcotest.(check bool)
-            "explicit row remains"
-            true
-            (Option.is_some
-               (Llm_provider.Model_catalog.lookup effective "explicit-model"));
-          Alcotest.(check bool)
-            "overlay row does not override explicit full replacement"
-            true
-            (Option.is_none
-               (Llm_provider.Model_catalog.lookup effective "overlay-model"))))
-
 let test_model_catalog_configuration_delegates_to_agent_core_ambient () =
   let env _ = None in
   let result =
@@ -1033,10 +847,6 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
         (read_file (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check string)
-        "model catalog overlay copied"
-        repo_model_catalog_overlay_toml
-        (read_file (Filename.concat config_root "agent-core-models-overlay.toml"));
       Alcotest.(check bool)
         "legacy full model catalog not copied"
         false
@@ -1075,7 +885,7 @@ let test_created_root_populated_before_lock_is_not_fresh_seeded () =
     Alcotest.(check bool) "populated root does not receive a fresh default roster" false
       (Sys.file_exists (Filename.concat config_root "keepers/default-imp.toml")))
 
-let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay () =
+let test_bootstrap_base_path_config_root_backfills_missing_prompts () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -1100,10 +910,6 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay (
            (Filename.concat config_root "prompts/keeper.md"));
       Alcotest.(check string) "backfilled prompt content" "prompt"
         (read_file (Filename.concat config_root "prompts/keeper.md"));
-      Alcotest.(check string)
-        "model catalog overlay backfilled"
-        repo_model_catalog_overlay_toml
-        (read_file (Filename.concat config_root "agent-core-models-overlay.toml"));
       Alcotest.(check bool)
         "legacy full model catalog not backfilled"
         false
@@ -3941,6 +3747,255 @@ let test_keeper_lifecycle_refresh_invalidates_projection_snapshot () =
     Alcotest.(check int) "purge invalidates snapshot" 2 refreshed_revision;
     Alcotest.(check int) "compute after lifecycle" 2 !compute_count)
 
+(* The lifecycle listener's batch, fed by the real publisher through a
+   subscription shaped like the listener's. [refresh] and [invalidate_all]
+   record what the batch asks for instead of touching dashboard caches.
+
+   [Event_bus_slots.set_masc] is process-wide with no unset, so after these
+   cases the slot holds this bus, unsubscribed, instead of [None]. Every case
+   that publishes below runs inside this helper, and no case in this binary
+   asserts the empty slot. Reaching for an unset would mean adding a
+   test-only backdoor to a production module. *)
+let with_lifecycle_subscription ~capacity f =
+  Eio_main.run @@ fun _env ->
+  let bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_masc bus;
+  let subscription =
+    Runtime_event_bus.subscribe
+      ~capacity
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+      ~purpose:"lifecycle_listener_test"
+      ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle")
+      bus
+  in
+  Fun.protect
+    ~finally:(fun () -> Runtime_event_bus.unsubscribe bus subscription)
+    (fun () -> f subscription)
+
+let publish_keeper_started keeper_name =
+  Keeper_event_publisher.publish_keeper_lifecycle
+    ~event:
+      (Keeper_lifecycle_events.Custom_event
+         { verb = Keeper_lifecycle_events.Started; phase = None })
+    ~keeper_name
+    ~detail:"lifecycle listener test"
+    ()
+
+let test_keeper_lifecycle_batch_refreshes_past_a_raising_event () =
+  with_lifecycle_subscription ~capacity:8 (fun subscription ->
+    List.iter publish_keeper_started [ "keeper-a"; "keeper-b"; "keeper-c" ];
+    let refreshed = ref [] in
+    let invalidations = ref 0 in
+    let results =
+      Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+        ~refresh:(fun ~keeper_name _event ->
+          if String.equal keeper_name "keeper-b"
+          then
+            invalid_arg
+              "dashboard execution cache: unknown current keeper status \"bogus\"";
+          refreshed := keeper_name :: !refreshed)
+        ~invalidate_all:(fun () -> incr invalidations)
+        (Runtime_event_bus.drain_reporting_drops subscription)
+    in
+    Alcotest.(check (list string))
+      "events after the raising one are still refreshed"
+      [ "keeper-a"; "keeper-c" ]
+      (List.rev !refreshed);
+    (match results with
+     | [ Server_bootstrap_loops.Lifecycle_refreshed
+       ; Server_bootstrap_loops.Lifecycle_refresh_failed
+           { keeper_name = "keeper-b"; error = Invalid_argument _; _ }
+       ; Server_bootstrap_loops.Lifecycle_refreshed
+       ] -> ()
+     | _ -> Alcotest.fail "expected keeper-b failed between two refreshed events");
+    Alcotest.(check int)
+      "a failed refresh invalidates every keeper cache once"
+      1
+      !invalidations)
+
+let test_keeper_lifecycle_overflow_invalidates_every_keeper_cache () =
+  with_lifecycle_subscription ~capacity:2 (fun subscription ->
+    let refreshed = ref [] in
+    let invalidations = ref 0 in
+    let handle drained =
+      let (_ : Server_bootstrap_loops.keeper_lifecycle_refresh list) =
+        Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+          ~refresh:(fun ~keeper_name _event ->
+            refreshed := keeper_name :: !refreshed)
+          ~invalidate_all:(fun () -> incr invalidations)
+          drained
+      in
+      ()
+    in
+    List.iter publish_keeper_started [ "keeper-a"; "keeper-b"; "keeper-c" ];
+    let drained = Runtime_event_bus.drain_reporting_drops subscription in
+    (match drained.Runtime_event_bus.overflow_loss with
+     | Runtime_event_bus.Dropped 1 -> ()
+     | Runtime_event_bus.Dropped count ->
+       Alcotest.failf "expected one dropped event, got %d" count
+     | Runtime_event_bus.Nothing_dropped ->
+       Alcotest.fail "the overflow drop was not reported");
+    handle drained;
+    Alcotest.(check (list string))
+      "the events that survived are refreshed"
+      [ "keeper-b"; "keeper-c" ]
+      (List.rev !refreshed);
+    Alcotest.(check int) "a drop invalidates every keeper cache" 1 !invalidations;
+    publish_keeper_started "keeper-d";
+    let drained = Runtime_event_bus.drain_reporting_drops subscription in
+    (match drained.Runtime_event_bus.overflow_loss with
+     | Runtime_event_bus.Nothing_dropped -> ()
+     | Runtime_event_bus.Dropped count ->
+       Alcotest.failf "the earlier drop was reported again (%d)" count);
+    handle drained;
+    Alcotest.(check int)
+      "a batch with no drop and no failure does not invalidate"
+      1
+      !invalidations)
+
+let test_keeper_lifecycle_undecodable_invalidates_every_keeper_cache () =
+  let malformed_lifecycle =
+    Agent_core.Event_bus.mk_event
+      (Agent_core.Event_bus.Custom
+         ( "masc.keeper.lifecycle"
+         , `Assoc [ "keeper_name", `String "keeper-a" ] ))
+  in
+  let unrelated =
+    Agent_core.Event_bus.mk_event
+      (Agent_core.Event_bus.Custom ("unrelated", `Assoc []))
+  in
+  let invalidations = ref 0 in
+  let results =
+    Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+      ~refresh:(fun ~keeper_name:_ _event ->
+        Alcotest.fail "an undecodable or unrelated event must not refresh a keeper")
+      ~invalidate_all:(fun () -> incr invalidations)
+      { Runtime_event_bus.events = [ malformed_lifecycle; unrelated ]
+      ; overflow_loss = Runtime_event_bus.Nothing_dropped
+      }
+  in
+  (match results with
+   | [ Server_bootstrap_loops.Lifecycle_undecodable
+     ; Server_bootstrap_loops.Lifecycle_ignored
+     ] -> ()
+   | _ -> Alcotest.fail "expected one undecodable and one ignored event");
+  Alcotest.(check int)
+    "an undecodable lifecycle event invalidates every keeper cache once"
+    1
+    !invalidations
+
+let test_keeper_lifecycle_cancellation_is_not_a_refresh_failure () =
+  with_lifecycle_subscription ~capacity:4 (fun subscription ->
+    publish_keeper_started "keeper-a";
+    let invalidations = ref 0 in
+    match
+      Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+        ~refresh:(fun ~keeper_name:_ _event ->
+          raise (Eio.Cancel.Cancelled (Failure "listener cancelled")))
+        ~invalidate_all:(fun () -> incr invalidations)
+        (Runtime_event_bus.drain_reporting_drops subscription)
+    with
+    | (_ : Server_bootstrap_loops.keeper_lifecycle_refresh list) ->
+      Alcotest.fail "cancellation must leave the batch, not become a result"
+    | exception Eio.Cancel.Cancelled _ ->
+      Alcotest.(check int)
+        "a cancelled batch invalidates nothing"
+        0
+        !invalidations)
+
+let test_keeper_lifecycle_drop_and_failure_invalidate_once () =
+  with_lifecycle_subscription ~capacity:2 (fun subscription ->
+    List.iter publish_keeper_started [ "keeper-a"; "keeper-b"; "keeper-c" ];
+    let refreshed = ref [] in
+    let invalidations = ref 0 in
+    let results =
+      Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+        ~refresh:(fun ~keeper_name _event ->
+          if String.equal keeper_name "keeper-b" then failwith "refresh failed";
+          refreshed := keeper_name :: !refreshed)
+        ~invalidate_all:(fun () -> incr invalidations)
+        (Runtime_event_bus.drain_reporting_drops subscription)
+    in
+    Alcotest.(check (list string))
+      "the event after the failing one is still refreshed"
+      [ "keeper-c" ]
+      (List.rev !refreshed);
+    (match results with
+     | [ Server_bootstrap_loops.Lifecycle_refresh_failed { keeper_name = "keeper-b"; _ }
+       ; Server_bootstrap_loops.Lifecycle_refreshed
+       ] -> ()
+     | _ -> Alcotest.fail "expected keeper-b failed, then keeper-c refreshed");
+    Alcotest.(check int)
+      "a dropped event and a failed refresh invalidate once, not twice"
+      1
+      !invalidations)
+
+(* A refresh that came back naming caches it could not drop is a failed
+   refresh, not a success: the row it was meant to change is still in a cache
+   somewhere, so the batch drops every keeper-dependent cache. *)
+let test_keeper_lifecycle_partial_refresh_invalidates_every_keeper_cache () =
+  with_lifecycle_subscription ~capacity:4 (fun subscription ->
+    publish_keeper_started "keeper-a";
+    let invalidations = ref 0 in
+    let results =
+      Server_bootstrap_loops.For_testing.handle_keeper_lifecycle_batch
+        ~refresh:(fun ~keeper_name:_ _event ->
+          Server_bootstrap_loops.For_testing.raise_if_surfaces_partly_dropped
+            (Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_partly_dropped
+               [ "execution dashboard" ]))
+        ~invalidate_all:(fun () -> incr invalidations)
+        (Runtime_event_bus.drain_reporting_drops subscription)
+    in
+    (match results with
+     | [ Server_bootstrap_loops.Lifecycle_refresh_failed
+           { keeper_name = "keeper-a"
+           ; error =
+               Server_bootstrap_loops.Keeper_lifecycle_surfaces_partly_dropped
+                 [ "execution dashboard" ]
+           ; _
+           }
+       ] -> ()
+     | _ ->
+       Alcotest.fail "expected keeper-a to fail with the undropped cache prefix");
+    Alcotest.(check int)
+      "a partial refresh invalidates every keeper cache once"
+      1
+      !invalidations;
+    Server_bootstrap_loops.For_testing.raise_if_surfaces_partly_dropped
+      Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_refreshed)
+
+(* The listener fiber's own turn: drain, refresh, broadcast. The fiber body
+   is this call plus the sleep, so a turn that stops draining or stops
+   broadcasting fails here. *)
+let test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts () =
+  with_lifecycle_subscription ~capacity:4 (fun subscription ->
+    let refreshed = ref [] in
+    let invalidations = ref 0 in
+    let broadcasts = ref 0 in
+    let turn () =
+      Server_bootstrap_loops.For_testing.refresh_keeper_lifecycle_once
+        ~subscription
+        ~refresh:(fun ~keeper_name _event -> refreshed := keeper_name :: !refreshed)
+        ~invalidate_all:(fun () -> incr invalidations)
+        ~broadcast:(fun () -> incr broadcasts)
+    in
+    (match turn () with
+     | [] -> ()
+     | _ :: _ -> Alcotest.fail "an idle subscription has no events to refresh");
+    Alcotest.(check int) "an idle turn broadcasts nothing" 0 !broadcasts;
+    List.iter publish_keeper_started [ "keeper-a"; "keeper-b" ];
+    (match turn () with
+     | [ Server_bootstrap_loops.Lifecycle_refreshed
+       ; Server_bootstrap_loops.Lifecycle_refreshed
+       ] -> ()
+     | _ -> Alcotest.fail "expected both published events refreshed");
+    Alcotest.(check (list string))
+      "both keepers refreshed, in the order they were published"
+      [ "keeper-a"; "keeper-b" ]
+      (List.rev !refreshed);
+    Alcotest.(check int) "a turn that carried events broadcasts once" 1 !broadcasts;
+    Alcotest.(check int) "a turn that lost nothing invalidates nothing" 0 !invalidations)
+
 let test_startup_state_json () =
   Server_startup_state.reset ();
   Server_startup_state.mark_state_ready ()
@@ -5447,26 +5502,8 @@ let () =
             "model catalog ignores legacy discovery inputs"
             `Quick test_model_catalog_configuration_ignores_legacy_discovery_inputs;
           Alcotest.test_case
-            "model catalog overlay installs config-root overlay"
-            `Quick test_model_catalog_overlay_installs_config_root_overlay;
-          Alcotest.test_case
-            "model catalog overlay absent is a no-op"
-            `Quick test_model_catalog_overlay_absent_is_noop;
-          Alcotest.test_case
-            "model catalog overlay invalid fails loud"
-            `Quick test_model_catalog_overlay_invalid_fails_loud;
-          Alcotest.test_case
             "config load failure diagnostic attributes to config"
             `Quick test_config_load_failure_diagnostic_attributes_to_config;
-          Alcotest.test_case
-            "model catalog overlay skips poisoned entries"
-            `Quick test_model_catalog_overlay_skips_poisoned_entries;
-          Alcotest.test_case
-            "model catalog overlay broken TOML still fails loud"
-            `Quick test_model_catalog_overlay_broken_toml_still_fails_loud;
-          Alcotest.test_case
-            "explicit model catalog replacement precedes overlay"
-            `Quick test_explicit_model_catalog_replacement_precedes_overlay;
           Alcotest.test_case
             "model catalog configuration delegates to agent_core ambient catalog"
             `Quick
@@ -5476,9 +5513,9 @@ let () =
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config backfills prompts and catalog overlay"
+            "bootstrap base-path config backfills prompts"
             `Quick
-            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay;
+            test_bootstrap_base_path_config_root_backfills_missing_prompts;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick
@@ -5521,6 +5558,34 @@ let () =
             "keeper lifecycle refresh invalidates projection snapshot"
             `Quick
             test_keeper_lifecycle_refresh_invalidates_projection_snapshot;
+          Alcotest.test_case
+            "keeper lifecycle batch refreshes past a raising event"
+            `Quick
+            test_keeper_lifecycle_batch_refreshes_past_a_raising_event;
+          Alcotest.test_case
+            "keeper lifecycle overflow invalidates every keeper cache"
+            `Quick
+            test_keeper_lifecycle_overflow_invalidates_every_keeper_cache;
+          Alcotest.test_case
+            "keeper lifecycle cancellation is not a refresh failure"
+            `Quick
+            test_keeper_lifecycle_cancellation_is_not_a_refresh_failure;
+          Alcotest.test_case
+            "keeper lifecycle drop and failure invalidate once"
+            `Quick
+            test_keeper_lifecycle_drop_and_failure_invalidate_once;
+          Alcotest.test_case
+            "keeper lifecycle partial refresh invalidates every keeper cache"
+            `Quick
+            test_keeper_lifecycle_partial_refresh_invalidates_every_keeper_cache;
+          Alcotest.test_case
+            "keeper lifecycle listener turn refreshes and broadcasts"
+            `Quick
+            test_keeper_lifecycle_listener_turn_refreshes_and_broadcasts;
+          Alcotest.test_case
+            "keeper lifecycle undecodable invalidates every keeper cache"
+            `Quick
+            test_keeper_lifecycle_undecodable_invalidates_every_keeper_cache;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case

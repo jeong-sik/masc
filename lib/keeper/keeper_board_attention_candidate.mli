@@ -20,6 +20,15 @@ type delivery_failure =
   ; failed_at : float
   }
 
+type system_one_provenance =
+  { destination_uri : string
+  ; answering_model_id : string
+  ; request_body_sha256 : string
+  }
+(** Identity of one completed System One request: the configured destination,
+    the model named by the response, and the SHA-256 of the exact serialized
+    request body sent there. *)
+
 type judgment_source =
   | Exact_attempt of
       { call_id : string
@@ -34,6 +43,11 @@ type judgment_source =
           catalog slot was exhausted (RFC cli-runtimes-as-lane-slots). No
           AGENT_CORE attempt was allocated, so no receipt exists to name and
           none is invented: the slot id is the whole provenance. *)
+  | Vendor_system_one of system_one_provenance
+      (** TypeSafe AI System One answered before any catalog slot was tried.
+          It is not a slot and no AGENT_CORE attempt was allocated, so there
+          is no receipt. Its own provenance identifies the outbound request
+          and the response that answered it. *)
 
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
@@ -43,7 +57,12 @@ type judgment =
   }
 (** [slot_id] names whichever slot answered; [source] says which kind of slot
     it was, because the two carry different evidence and only one of them has
-    a receipt to bind a completion to. *)
+    a receipt to bind a completion to. A [Vendor_system_one] answer has no
+    slot: its [slot_id] holds the same string as its answering model id. *)
+
+val system_one_provenance_to_yojson : system_one_provenance -> Yojson.Safe.t
+(** The same wire object is used in the durable judgment source and terminal
+    observation, so the two evidence surfaces cannot rename its fields. *)
 
 type delivery =
   | Enqueued_to_keeper_lane

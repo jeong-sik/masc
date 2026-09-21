@@ -320,6 +320,7 @@ let tool_failure_total () =
       LocalDiscoveryFailures;
       ThinkingPersistFailures;
       CheckpointFailures;
+      TurnBoundaryFailures;
       WriteMetaCycleFailures;
       MetricsSseFailures;
       DispatchEventFailures;

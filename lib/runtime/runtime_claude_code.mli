@@ -93,12 +93,7 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
-(** Usage counts read from a CLI frame. Each assistant frame carries the
-    usage of the API call that produced it, and the turn reports the newest
-    counted call's, deduplicated by message id: one request's input is what
-    a window is compared with, and the sum the result frame carries over a
-    turn's calls (each carrying the whole context again as cache reads) is
-    not a size any request had. The CLI mirrors Anthropic
+(** Usage counts read from a CLI frame. The CLI mirrors Anthropic
     Messages semantics: [input_tokens] is the exclusive wire count (tokens
     after the last cache breakpoint); absent cache fields read as 0. The
     keeper mapping builds the canonical inclusive
@@ -111,6 +106,13 @@ type turn_usage =
   ; cache_read_input_tokens : int
   }
 
+type observed_usage =
+  | Latest_request of turn_usage
+      (** Newest assistant request, deduplicated by message id. *)
+  | Turn_total of turn_usage
+      (** Result-frame sum over this client turn's provider calls, used when
+          no assistant request reported usage. Not a context window size. *)
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -120,7 +122,7 @@ type turn_result =
   ; subscription : subscription
   ; rate_limit : rate_limit option
   ; resumed : bool
-  ; usage : turn_usage option
+  ; usage : observed_usage option
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =

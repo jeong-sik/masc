@@ -118,6 +118,11 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && Option.is_none attempt.http_status
     && Option.is_none attempt.provider_trace_sha256
     && Option.is_none attempt.raw_response_sha256
+  | Response_body_deadline_exceeded, Response_received ->
+    attempt.dispatch_count = 1
+    && successful_http_status attempt.http_status
+    && Option.is_none attempt.provider_trace_sha256
+    && Option.is_none attempt.raw_response_sha256
   | Serialized_request_refused { http_status }, Response_received ->
     http_status = 413
     && attempt.dispatch_count = 1
@@ -133,6 +138,22 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && attempt.http_status = Some http_status
     && Option.is_some attempt.provider_trace_sha256
     && Option.is_some attempt.raw_response_sha256
+  (* These status classes match [Retry.classify_error]: 529 is the provider's
+     explicit overload response; other 5xx responses are server errors. A
+     complete refusal body must have been recorded in either case. *)
+  | (Overloaded { http_status } | Server_error { http_status }) as failure,
+    Response_received ->
+    let status_matches_failure =
+      match Retry.server_status_class_of_code http_status, failure with
+      | Some Retry.Overloaded_status, Overloaded _
+      | Some Retry.Server_error_status, Server_error _ -> true
+      | (Some Retry.Overloaded_status | Some Retry.Server_error_status | None), _ -> false
+    in
+    status_matches_failure
+    && attempt.dispatch_count = 1
+    && attempt.http_status = Some http_status
+    && Option.is_some attempt.provider_trace_sha256
+    && Option.is_some attempt.raw_response_sha256
   | Invalid_json_output, (Response_received | Terminal) ->
     attempt.dispatch_count = 1
     && successful_http_status attempt.http_status
@@ -140,8 +161,10 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && Option.is_some attempt.raw_response_sha256
   | Candidate_rejected, _
   | Completion_failed_before_dispatch, (Response_received | Terminal)
+  | Response_body_deadline_exceeded, (Before_dispatch | Terminal)
   | Serialized_request_refused _, (Before_dispatch | Terminal)
   | Rate_limited _, (Before_dispatch | Terminal)
+  | (Overloaded _ | Server_error _), (Before_dispatch | Terminal)
   | Invalid_json_output, Before_dispatch -> false
 ;;
 

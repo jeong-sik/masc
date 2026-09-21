@@ -20,6 +20,28 @@ type api_format =
   | Claude_code_runtime
 [@@deriving show, eq]
 
+(** Which vendor dialect an endpoint speaks. [protocol] names the request
+    shape; this names the dialect inside it, and the two do not determine each
+    other — [openai-compatible-http] is spoken both by plain OpenAI-compatible
+    servers and by GLM, [messages-http] both by Anthropic and by Kimi.
+
+    A provider the AGENT_CORE catalog knows states its dialect there, and
+    restating it here is refused at load. The key exists for an endpoint the
+    catalog has never seen: the install wizard builds its provider id from a
+    hash of the operator's answers, so no catalog row can ever match it.
+
+    Re-exports the AGENT_CORE type so a variant added there breaks this
+    compile instead of leaving a stale local mirror. *)
+type provider_wire_kind =
+  Llm_provider.Provider_config.provider_kind =
+  | Anthropic
+  | Kimi
+  | OpenAI_compat
+  | Ollama
+  | Gemini
+  | Glm
+[@@deriving show, eq]
+
 type transport =
   | Http of string
   | Cli of string
@@ -48,6 +70,7 @@ type capabilities =
     startup does not use it for admission. [headers] is retained for
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
+let exact_body_timeout_s_key = "exact-body-timeout-s"
 
 type antigravity_effort =
   | Antigravity_low
@@ -74,6 +97,10 @@ type provider =
   ; display_name : string
   ; protocol : string
   ; api_format : api_format
+  ; wire_kind : provider_wire_kind option
+    (** The dialect this endpoint speaks, for an endpoint the AGENT_CORE
+        catalog does not know. [None] means the catalog answers, and a
+        provider that has a catalog row is refused if it states this. *)
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
@@ -92,6 +119,11 @@ type provider =
       On an exact-output lane a target with neither this key nor a body
       budget is rejected at plan admission (Missing_deadline, #36979): the
       wire would otherwise carry no deadline at all. *)
+  ; exact_body_timeout_s : float option
+    (** Explicit total HTTP request deadline for Exact-output calls through
+        this provider, including connection, response headers and the full
+        response body. [None] declares no body deadline. This does not replace
+        [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
@@ -302,6 +334,7 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
+  ; disable_parallel_tool_use : bool
   ; context_marks : context_marks option
   ; max_tokens : int option
     (** Request-side output budget for this binding ([max_tokens] on Chat
@@ -374,12 +407,12 @@ type config =
         id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
   ; media_failover : string list
-    (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
-        when a turn's input modality (image/audio/document) exceeds the assigned
-        runtime's declared capabilities; the turn reroutes to the first that
-        admits it. [[]] = derive capable runtimes from declared
-        [\[models.*.capabilities\]] in declaration order. Each id must resolve to
-        a configured runtime (rejected at load like [\[runtime\].default]). *)
+    (** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids
+        the vision tool calls, including the image readings made for a runtime
+        that cannot take the image. A keeper turn never dispatches to them; its
+        image reroute stays inside its lane. [[]] = no vision fleet. Each id must
+        resolve to a configured runtime (rejected at load like
+        [\[runtime\].default]). *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

@@ -45,67 +45,54 @@ BASELINE_FILE="${REPO_ROOT}/scripts/tla-ppx-baseline.json"
 
 # Required tools — fail fast (memory:
 # feedback_ci_runner_dep_regression_silent_127).
-for tool in rg python3 wc tr awk; do
+for tool in python3; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "[tla-ppx-ratchet] required tool missing: $tool" >&2
     exit 1
   }
 done
 
+# Every count reads code only. scripts/ci/count_ocaml_code_matches.py blanks
+# comments and strings the way the OCaml lexer reads them before matching, so
+# a sentence that mentions an attribute is not an attribute and editing a
+# comment cannot move a floor.
+COUNT_CODE="${REPO_ROOT}/scripts/ci/count_ocaml_code_matches.py"
+DERIVING_TLA='\[@@deriving tla\]'
+FSM_GUARD='\[@@fsm_guard'
+
+count_code() {
+  python3 "$COUNT_CODE" "$1" "$2" "${REPO_ROOT}/lib"
+}
+
+# Counted per .ml file, not .mli: the implementation is what produces the
+# generated runtime helpers; the .mli is signature only.
 count_deriving_tla_modules() {
-  # Count unique .ml files (not .mli) — the implementation is what
-  # produces the generated runtime helpers; .mli is signature only.
-  ( set +o pipefail
-    cd "$REPO_ROOT"
-    rg -l '\[@@deriving tla\]' lib/ --glob '*.ml' --glob '!*.mli' 2>/dev/null | wc -l | tr -d ' '
-  )
+  count_code files "$DERIVING_TLA"
 }
 
 count_fsm_guard_files() {
-  ( set +o pipefail
-    cd "$REPO_ROOT"
-    rg -l '\[@@fsm_guard' lib/ --glob '*.ml' 2>/dev/null | wc -l | tr -d ' '
-  )
+  count_code files "$FSM_GUARD"
 }
 
 # The two counts above are of files. The hint on each says a decrease means a
 # derived ADT was hand-written or an invariant lost, which is a statement
 # about annotations, and a file keeps its place in the count while all but one
-# of its annotations go: 11 files carry 16 [@@deriving tla] and 6 carry 20
-# [@@fsm_guard], so 19 of the 36 could be deleted without either floor
-# noticing. These two count the annotations, and the file counts stay for the
-# breadth they do measure.
+# of its annotations go. These two count the annotations, and the file counts
+# stay for the breadth they do measure.
 count_deriving_tla_attributes() {
-  ( set +o pipefail
-    cd "$REPO_ROOT"
-    rg -c '\[@@deriving tla\]' lib/ --glob '*.ml' --glob '!*.mli' 2>/dev/null \
-      | awk -F: '{ s += $2 } END { print s + 0 }'
-  )
+  count_code matches "$DERIVING_TLA"
 }
 
 count_fsm_guard_attributes() {
-  ( set +o pipefail
-    cd "$REPO_ROOT"
-    rg -c '\[@@fsm_guard' lib/ --glob '*.ml' 2>/dev/null \
-      | awk -F: '{ s += $2 } END { print s + 0 }'
-  )
+  count_code matches "$FSM_GUARD"
 }
 
+# Distinct first-level entries under lib/ holding at least one .ml with either
+# attribute. Higher is better. A subdir (e.g. lib/keeper) may cluster many PPX
+# files; counting subdirs gives a flat-domain view of how many runtime areas
+# have ANY TLA PPX hook. A .ml directly under lib/ counts as its own entry.
 count_lib_subdirs_with_ppx() {
-  # Count distinct lib/ subdirectories containing at least one .ml
-  # with [@@deriving tla] or [@@fsm_guard]. Higher is better.
-  #
-  # Why subdirs not files: a single subdir (e.g. lib/keeper) may
-  # cluster many PPX files; counting subdirs gives a flat-domain
-  # view of how many runtime areas have ANY TLA PPX hook.
-  ( set +o pipefail
-    cd "$REPO_ROOT"
-    rg -l '\[@@deriving tla\]|\[@@fsm_guard' lib/ --glob '*.ml' 2>/dev/null \
-      | awk -F/ '{print $1"/"$2}' \
-      | sort -u \
-      | wc -l \
-      | tr -d ' '
-  )
+  count_code subdirs "${DERIVING_TLA}|${FSM_GUARD}"
 }
 
 # Strict metrics: name|current_fn|hint

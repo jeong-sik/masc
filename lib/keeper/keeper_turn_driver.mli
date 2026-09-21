@@ -303,6 +303,8 @@ val run_named :
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation
      -> unit) ->
+  ?on_response_observed_model_input:
+    (Turn_record.response_observed_model_input -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
@@ -337,8 +339,8 @@ val run_named :
     its runtime manifest row is emitted, with [dispatch] saying whether the
     candidate's provider or client was invoked or the walk refused the
     candidate first. It does not change candidate selection or the final
-    error; verifier callers use it to aggregate retryability across a bare
-    runtime and its terminal default fallback.
+    error; verifier callers use it to learn whether an attempt on the one
+    runtime a [Tool_verdict] turn dispatches failed retryably.
 
     [on_runtime_lane_terminal_error] observes the candidate error the walk
     returns as the lane's error, with the candidate that produced it, once per
@@ -422,18 +424,15 @@ module For_testing : sig
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
 
-  val first_runtime_after_modality_reroute :
+  val log_modality_reroute :
     keeper_name:string ->
     assignment_id:string ->
     first_candidate_id:string ->
-    first_candidate:Runtime.t ->
     Runtime.t Runtime_agent.reroute_decision ->
-    string * Runtime.t
-  (** Runtime the turn dispatches to after the RFC-0265 decision. On [Reroute],
-      returns the decision's target and logs a WARN naming the runtime left, the
-      runtime taken and [assignment_id]; on [No_reroute_needed] and
-      [No_capable_runtime], returns [first_candidate_id]/[first_candidate]
-      unchanged and logs nothing (the caller reports the degrade). *)
+    unit
+  (** On [Reroute], logs a WARN naming the lane head, the lane candidate the
+      image turn starts from, and [assignment_id]. Logs nothing otherwise (the
+      caller reports the degrade). *)
 
   val modality_reroute_candidates :
     now:float ->
@@ -444,9 +443,7 @@ module For_testing : sig
 
   val attempt_runtimes_for_turn :
     media_walk:Runtime.t list ->
-    assigned_runtime:Runtime.t ->
-    first_runtime:Runtime.t ->
-    remaining_runtimes:Runtime.t list ->
+    lane:Runtime.t list ->
     Runtime.t list
 
   val lane_modality_reroute_decision :

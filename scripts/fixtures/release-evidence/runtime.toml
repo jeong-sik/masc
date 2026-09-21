@@ -25,22 +25,26 @@
 default = "ollama_cloud.deepseek-v4-flash"
 
 # Startup requires every id in Server_runtime_bootstrap.mandatory_exact_output_lane_ids
-# to be declared here with a non-empty slot list; it synthesizes nothing. The
-# slots name AGENT_CORE target refs, which resolve through the sibling
-# agent-core-models-overlay.toml — that overlay declares release_evidence.smoke with an
-# empty api_key_env so admission needs no credential. Without it the second
-# startup gate (require_usable_mandatory_exact_output_lanes) would reject this
-# config for having no credential-usable slot.
+# to be declared here with a non-empty slot list; it synthesizes nothing. A slot
+# names a runtime binding from this same file, so the only slot this fixture can
+# offer is the binding it declares below.
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["release_evidence.smoke"]
+slots = ["ollama_cloud.deepseek-v4-flash"]
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["release_evidence.smoke"]
+slots = ["ollama_cloud.deepseek-v4-flash"]
 
 [providers.ollama_cloud]
 display-name = "Release Evidence Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
+
+# Synthetic authorization for the loopback model fixture. This smoke never
+# reaches Ollama Cloud, so inheriting that catalog row's environment credential
+# would make the hermetic first-turn proof depend on OLLAMA_CLOUD_API_KEY.
+[providers.ollama_cloud.credentials]
+type = "inline"
+value = "release-evidence-loopback"
 
 [models.deepseek-v4-flash]
 api-name = "deepseek-v4-flash"

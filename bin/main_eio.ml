@@ -1565,10 +1565,6 @@ let runtime_default_set_cmd_exit base_path runtime_id setup_lanes fallback_runti
       let (_ : string option) =
         Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
       in
-      let (_ : string option) =
-        Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-          ~config_root:(Filename.dirname runtime_config_path) ()
-      in
       if setup_lanes then
         Runtime.set_first_run_runtime ~runtime_config_path ~fallback_runtime_ids ~bind_imp ~runtime_id ()
       else if bind_imp then Error "--setup-imp requires --setup-lanes"
@@ -1802,8 +1798,6 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
     let config_path = runtime_config_path_for_base_path base_path in
     let loaded = try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root:(Filename.dirname config_path) () in
       Runtime.load_list ~config_path
       |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
       with Env_config_core.Config_error message -> Error message in
@@ -3099,15 +3093,24 @@ let wizard_model_entries client catalog =
   |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
     match client, entry.provider_name with
     | Wizard_claude_code, (None | Some "anthropic") ->
-      String.starts_with ~prefix:"claude-" entry.id_prefix
+      Llm_provider.Model_identifiers.Id_prefix.starts_with
+        ~prefix:
+          (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "claude-")
+        entry.id_prefix
     | Wizard_codex, (None | Some "openai-responses") ->
-      String.starts_with ~prefix:"gpt-" entry.id_prefix
+      Llm_provider.Model_identifiers.Id_prefix.starts_with
+        ~prefix:
+          (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "gpt-")
+        entry.id_prefix
     | _ -> false)
 
 let wizard_model_context model entries =
   let contexts = entries
     |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-      let exact = String.equal entry.id_prefix model
+      let exact =
+        String.equal
+          (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+          model
         || Option.fold ~none:false ~some:(List.mem model) entry.supported_models in
       match entry.max_context_tokens with
       | Some context when exact && context > 0 -> Some context
@@ -3136,7 +3139,8 @@ let runtime_model_list_cmd =
            Ok
              (`List
                (entries
-                |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+                |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+                       Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
                 |> List.sort_uniq String.compare
                 |> List.filter_map (fun model ->
                      Option.map (fun context -> `Assoc [ "id", `String model
@@ -3268,8 +3272,6 @@ let setup_validate_runtime base_path =
   let loaded =
     try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root:(Filename.dirname config_path) () in
       Runtime.load_list ~config_path
       |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
     with Env_config_core.Config_error message -> Error message

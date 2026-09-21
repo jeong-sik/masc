@@ -24,16 +24,20 @@ val agent_core_history_path :
 val agent_core_history_snapshot_id_of_checkpoint :
   Agent_core.Checkpoint.t -> string
 
-(** Delete AGENT_CORE history archive entries by [snapshot_ids]. Returns
-    [(deleted, missing)] in input-order, with [missing] containing
-    every snapshot id whose file was absent OR removal failed. An id
-    that is not one real path segment (empty / "." / ".." / separator /
-    NUL) can never name a history entry and is reported [missing]
-    without touching the filesystem. *)
+(** One input-ordered result from an explicit history deletion request. *)
+type history_delete_result =
+  | History_deleted of string
+  | History_missing of string
+  | History_refused of string
+  | History_removal_failed of string
+
+(** Delete AGENT_CORE history archive entries by [snapshot_ids]. The result
+    keeps an absent file, a filename outside the exact producer contract, and
+    a failed removal distinct. *)
 val delete_agent_core_history_files :
   session_dir:string ->
   snapshot_ids:string list ->
-  string list * string list
+  history_delete_result list
 
 (** Relation between an incoming checkpoint and the current known high
     watermark for the same canonical AGENT_CORE checkpoint path. *)
@@ -129,10 +133,10 @@ val load_agent_core_history_file :
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
 (** Load the canonical AGENT_CORE checkpoint for [session_id]. One read path
-    for Eio and non-Eio contexts: presence is a typed
-    [Fs_compat.file_exists] check, the read is Eio-native when the fs
-    capability is installed, and the JSON decode runs off the calling
-    fiber. A [session_id] that is not one real path segment is refused
+    for Eio and non-Eio contexts: the owned-file read distinguishes an absent
+    file from a read failure. The read and JSON decode run off the calling
+    fiber when the Eio capability is installed.
+    A [session_id] that is not one real path segment is refused
     as [Store_error] (the same rejection agent core store applied). *)
 val load_agent_core :
   session_dir:string ->

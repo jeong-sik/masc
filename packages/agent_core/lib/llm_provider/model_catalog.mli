@@ -4,7 +4,7 @@
     replacing hardcoded code-level registries. *)
 
 type model_entry =
-  { id_prefix : string
+  { id_prefix : Model_identifiers.Id_prefix.t
   ; base_label : string option
     (** Registry provider identity for OpenAI-compatible model families whose
         wire kind alone would otherwise collapse to [openai_compat]. This is
@@ -84,6 +84,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
+  ; supports_parallel_tool_suppression : bool
   }
 
 type t
@@ -109,29 +110,6 @@ val of_toml_string : source:string -> string -> (t, string) result
 
 val load_file : string -> (t, string) result
 
-(** A catalog row excluded by the lenient loaders. [entry_label] is the row's
-    declared [id_prefix]/[id] when readable, otherwise a positional label such
-    as ["<model entry #2>"]. [skip_reason] is the parse/validation error that
-    excluded the row. *)
-type skipped_entry =
-  { entry_label : string
-  ; skip_reason : string
-  }
-
-(** Lenient variant of {!of_toml_string}: rows that fail to parse are excluded
-    and reported instead of failing the whole load. Deployment overlays are
-    hand-written and outlive the binary that wrote them, so one stale field
-    must not block every other row. Whole-file failures — unreadable input,
-    broken TOML, or duplicate identities among surviving rows — remain [Error]:
-    skipping must never turn a contradiction into a silent winner. *)
-val of_toml_string_lenient
-  :  source:string
-  -> string
-  -> (t * skipped_entry list, string) result
-
-(** Lenient variant of {!load_file}; see {!of_toml_string_lenient}. *)
-val load_file_lenient : string -> (t * skipped_entry list, string) result
-
 (** Load the build-time embedded default [models.toml].
 
     The embedded value is generated directly from the AGENT_CORE-owned root
@@ -143,7 +121,8 @@ val load_file_lenient : string -> (t * skipped_entry list, string) result
 val load_default : unit -> (t, string) result
 
 (** Longest-prefix lookup across provider-independent rows using the catalog's
-    exact declared [id_prefix] syntax. Provider-scoped rows are excluded. *)
+    exact declared [id_prefix] syntax. Provider-scoped rows are excluded.
+    Empty or whitespace-padded model ids do not match. *)
 val lookup : t -> string -> model_entry option
 
 (** Exact normalized lookup across provider-scoped rows. Both
@@ -173,18 +152,6 @@ val lookup_for_provider
   -> model_id:string
   -> model_entry option
 
-(** Row-level overlay merge (Agent Core contract). Rows in [overlay] replace rows in
-    [base] with the same identity — [(provider_name, id_prefix)] for model
-    rows (a bare row and a provider-scoped row with the same [id_prefix] are
-    distinct), and [id] for provider entries, compared with lookup normalization —
-    and rows unique to either side are kept. Same-identity overlay rows replace
-    the complete base row. Overlay rows precede base rows in
-    the result, so order-sensitive provider-entry consumers
-    ({!provider_label_for_base_url}, {!provider_label_for_endpoint}) prefer a
-    deployment entry whose endpoint identity is also covered by an embedded
-    entry. *)
-val merge : base:t -> overlay:t -> t
-
 (** Return the catalog-declared provider identity for a concrete endpoint.
 
     Matching is exact and declaration-driven: [base_url] matches either the
@@ -212,27 +179,23 @@ val provider_label_for_endpoint
 
     Resolution order:
     - runtime override installed with {!set_global} (full replacement)
-    - build-time embedded AGENT_CORE [models.toml], merged with the deployment
-      overlay installed with {!set_global_overlay} when one is present
+    - build-time embedded AGENT_CORE [models.toml]
 
-    The embedded result and the merged result are cached after first
-    computation. Invalid generated data raises {!Invalid_embedded_catalog}; it
-    never becomes [None] or an empty catalog. AGENT_CORE does not inspect an
-    environment variable for an alternate catalog. Callers that need a custom
-    catalog must call {!load_file} and {!set_global} or {!set_global_overlay}
-    explicitly.
+    A provider or model fact is written in the embedded catalog and nowhere
+    else. A deployment names which rows it uses in its runtime configuration;
+    it does not restate what a row says. The second copy this module used to
+    accept disagreed with the first on tool support, on replay policy, and on
+    one model's window by a factor of five.
 
-    {!clear_global} clears the runtime override, the overlay, and both
-    caches. *)
+    The embedded result is cached after first computation. Invalid generated
+    data raises {!Invalid_embedded_catalog}; it never becomes [None] or an
+    empty catalog. AGENT_CORE does not inspect an environment variable for an
+    alternate catalog. Callers that need a custom catalog must call
+    {!load_file} and {!set_global} explicitly.
+
+    {!clear_global} clears the runtime override and the cache. *)
 val global : unit -> t option
 
 val set_global : t -> unit
-
-(** Install a deployment overlay {!merge}d onto the embedded default catalog
-    by {!global}. Unlike {!set_global}, embedded rows not shadowed by the
-    overlay stay visible, so the overlay carries only deployment-local deltas
-    (Agent Core contract). A full {!set_global} override, when installed, takes
-    precedence over the overlay. *)
-val set_global_overlay : t -> unit
 
 val clear_global : unit -> unit

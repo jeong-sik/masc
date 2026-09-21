@@ -118,10 +118,16 @@ scan() {
     echo "the globs no longer match anything, so the gate would pass vacuously" >&2
     return 2
   fi
-  local raw_hit allowed_stripped
+  local raw_hit allowed_stripped hit_text
   while IFS= read -r raw_hit; do
     [ -z "${raw_hit}" ] && continue
-    allowed_stripped="$(strip_allowed "${raw_hit#*: *: }")"
+    # rg prints `path:line:text` with no space after either colon, so a
+    # pattern that asks for colon-space never matched and the path stayed in
+    # the text the vendor check re-reads. A worktree under fix/glm-… then
+    # failed this gate with no source change at all. Drop the two fields.
+    hit_text="${raw_hit#*:}"
+    hit_text="${hit_text#*:}"
+    allowed_stripped="$(strip_allowed "${hit_text}")"
     # Re-run the vendor pattern on the stripped text; report the line only
     # when a vendor name survives the strip.
     if printf '%s' "${allowed_stripped}" | rg -q --ignore-case "${VENDOR_PATTERN}"; then
@@ -192,6 +198,37 @@ self_test() {
     return 1
   fi
 
+  # Checkout-path axis: the verdict must come from the line, not from where the
+  # file lives. rg prints `path:line:text`, so a checkout directory carrying a
+  # vendor name once leaked into the text the vendor re-check re-read, and the
+  # gate failed on a worktree with no source change at all. Every axis above
+  # plants under mktemp, whose path never carries a vendor name, so none of
+  # them can see that. Both directions are checked from the same root: a clean
+  # line must still pass, and a real branch must still be caught.
+  tmp="$(mktemp -d)"
+  mkdir -p "${tmp}/glm-lane/lib/keeper"
+  printf '(* backend_anthropic.validate_thinking_controls rejects the pair *)\n' \
+    >"${tmp}/glm-lane/lib/keeper/keeper_turn_selftest_fixture.ml"
+  local under_vendor_path
+  under_vendor_path="$(scan "${tmp}/glm-lane")"
+  if [ -n "${under_vendor_path}" ]; then
+    rm -rf "${tmp}"
+    echo "turn-path gate self-test FAILED: a vendor name in the checkout path was read as a hit:" >&2
+    echo "${under_vendor_path}" >&2
+    return 1
+  fi
+
+  # shellcheck disable=SC2016  # literal OCaml, no shell expansion wanted.
+  printf 'let route ~kind = match kind with Glm -> `Special | _ -> `Normal\n' \
+    >"${tmp}/glm-lane/lib/keeper/keeper_turn_selftest_fixture.ml"
+  local branch_under_vendor_path
+  branch_under_vendor_path="$(scan "${tmp}/glm-lane")"
+  rm -rf "${tmp}"
+  if [ -z "${branch_under_vendor_path}" ]; then
+    echo "turn-path gate self-test FAILED: planted violation under a vendor-named path was not detected" >&2
+    return 1
+  fi
+
   # Execute-bit axis: the gate must refuse to run (exit 3) when its own +x
   # is stripped. This is what turns a silent mode regression into a loud
   # one at self-test time instead of at a later direct invocation.
@@ -210,7 +247,7 @@ self_test() {
   fi
   rm -f "${bit_probe}"
 
-  echo "turn-path gate self-test passed (detects a planted vendor branch, ignores a clean one, allows documented phrases without allowing branches, refuses to run without its execute bit)"
+  echo "turn-path gate self-test passed (detects a planted vendor branch, ignores a clean one, allows documented phrases without allowing branches, judges the line and not a vendor-named checkout path, refuses to run without its execute bit)"
   return 0
 }
 

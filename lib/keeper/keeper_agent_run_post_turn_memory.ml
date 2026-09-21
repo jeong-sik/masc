@@ -98,6 +98,7 @@ let run
   ~agent_core_turn_count
   ~tool_observations
   ~librarian_messages
+  ~checkpoint_owner
   ~post_turn_t0
   ~inference_telemetry
   ()
@@ -142,7 +143,8 @@ let run
           Log.Keeper.warn
             ~keeper_name:meta.name
             "memory os librarian skipped: current snapshot unavailable: %s"
-            detail
+            detail;
+          Keeper_librarian_queue_refresh.Not_entered
         | Ok current ->
           let current_selection, expected_revision =
             match current with
@@ -169,14 +171,15 @@ let run
             ~keepers_dir
             ~keeper_id:meta.name
             ~expected_revision
-            librarian_input
+            librarian_input;
+          Keeper_librarian_queue_refresh.Entered
       in
       let librarian_series ~meta:live_meta trigger =
         (* Submission is asynchronous. Re-check the same live SSOT at the
            execution boundary so an ON -> OFF/INVALID change while queued
            remains a real kill switch before snapshot I/O or provider work. *)
         match Env_config.KeeperMemoryOs.librarian_config_state () with
-        | Disabled | Invalid -> ()
+        | Disabled | Invalid -> Keeper_librarian_queue_refresh.Not_entered
         | Enabled -> run_admitted_librarian ~live_meta trigger
       in
       Keeper_librarian_queue_refresh.remember_turn
@@ -191,7 +194,18 @@ let run
       in
       ()
   in
-  submit_librarian_if_enabled ();
+  (match checkpoint_owner with
+   | Runtime_execution.Masc_agent_core ->
+     Keeper_librarian_queue_refresh.forget_turn
+       ~base_path:config.Workspace.base_path
+       ~keeper_name:meta.name;
+     (match Env_config.KeeperMemoryOs.librarian_config_state () with
+      | Disabled | Invalid -> ()
+      | Enabled ->
+        Keeper_librarian_queue_signal.changed
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:meta.name)
+   | Runtime_execution.Official_client -> submit_librarian_if_enabled ());
   (* Post-turn timing evidence is logged to decisions.jsonl. The keyword
      recall eval that used to ride along here was removed: it was called
      with an empty user message, so it short-circuited to a constant

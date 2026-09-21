@@ -291,6 +291,113 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
           | _ -> Alcotest.fail "properties.verdict is not an object"))
 ;;
 
+(* RFC-0417 section 4.3: evidence posture changes the judge's question, not the
+   verdict after the judge answers. A controlled judge approval therefore
+   remains an approval even when the submitted snapshot is note-only. *)
+let test_note_only_verdict_is_owned_by_the_reviewer () =
+  with_reviewer
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+       Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "everything looks fine")})
+    (fun () ->
+       let result = review () in
+       Alcotest.(check string)
+         "gate"
+         "structured_tool"
+         (AR.gate_to_string result.gate);
+       match result.verdict with
+       | Some (AR.Approve reason) ->
+         Alcotest.(check string) "reviewer reason" "everything looks fine" reason
+       | Some (AR.Reject reason) -> Alcotest.failf "unexpected reject: %s" reason
+       | None -> Alcotest.fail "the reviewer verdict was overwritten")
+;;
+
+(* A completed lookup is exposed to the judge as typed JSON. This lets the
+   prompt begin with [evidence_lookup_succeeded=false] and lets an actual
+   successful tool result move that fact to [true], without a local counter or
+   a post-hoc verdict override. *)
+let test_successful_lookup_is_exposed_to_the_reviewer () =
+  let saw_success = ref false in
+  let lookup =
+    AR.Lookup_tools
+      { schemas =
+          [ { Types_core.name = "keeper_read_file"
+            ; description = "read evidence"
+            ; input_schema = `Assoc []
+            }
+          ]
+      ; dispatch =
+          (fun ~name ~args:_ ->
+             Tool_result.make_ok
+               ~tool_name:name
+               ~start_time:0.0
+               ~data:(`String "artifact body")
+               ~content_blocks:[ Llm_provider.Types.Text "artifact body" ]
+               ())
+      ; root_layout = [ "repo" ]
+      }
+  in
+  with_reviewer
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+       (match lookup with
+        | AR.No_lookup_surface -> saw_success := false
+        | AR.Lookup_tools { dispatch; _ } ->
+          let result = dispatch ~name:"keeper_read_file" ~args:(`Assoc []) in
+          let data_exposes_success =
+            match Tool_result.data result with
+            | `Assoc fields ->
+              List.assoc_opt "evidence_lookup_succeeded" fields = Some (`Bool true)
+              && List.assoc_opt "lookup_result" fields = Some (`String "artifact body")
+            | _ -> false
+          in
+          let blocks_expose_success =
+            match result with
+            | Tool_result.Completed
+                { content_blocks =
+                    Some
+                      (Llm_provider.Types.Text
+                         {|{"evidence_lookup_succeeded":true}|}
+                       :: Llm_provider.Types.Text "artifact body" :: _)
+                ; _
+                } ->
+              true
+            | Tool_result.Completed _
+            | Tool_result.Deferred _
+            | Tool_result.Failed _ ->
+              false
+          in
+          saw_success := data_exposes_success && blocks_expose_success);
+       Ok
+         { AR.selected_runtime_id = "task-reviewer"
+         ; verdict = Some (AR.Approve "checked the lookup result")
+         })
+    (fun () ->
+       let result =
+         AR.review
+           ~evaluator_runtime:"task-reviewer"
+           ~question:
+             { AR.completion_contract = None
+             ; required_evidence = []
+             ; evidence_posture = AR.Note_only
+             ; few_shot_block = ""
+             }
+           ~lookup
+           ~base_path:(Filename.get_temp_dir_name ())
+           request
+       in
+       Alcotest.(check bool)
+         "completed lookup carries the success observation"
+         true
+         !saw_success;
+       Alcotest.(check string)
+         "gate"
+         "structured_tool"
+         (AR.gate_to_string result.gate);
+       match result.verdict with
+       | Some (AR.Approve _) -> ()
+       | Some (AR.Reject reason) -> Alcotest.failf "unexpected reject: %s" reason
+       | None -> Alcotest.fail "structured verdict was lost")
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -340,5 +447,13 @@ let () =
             "verdict enum mirrors valid_verdict_strings"
             `Quick
             test_verdict_enum_mirrors_valid_verdict_strings
+        ; Alcotest.test_case
+            "note-only verdict stays with the reviewer"
+            `Quick
+            test_note_only_verdict_is_owned_by_the_reviewer
+        ; Alcotest.test_case
+            "successful lookup is exposed to the reviewer"
+            `Quick
+            test_successful_lookup_is_exposed_to_the_reviewer
         ] )
     ]

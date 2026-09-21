@@ -72,6 +72,62 @@ val make_append_manifest :
   seq_ref:int Atomic.t ->
   append_manifest_fn
 
+(** When a turn says that the atoms of its trace are numbered from zero (RFC
+    librarian-lifecycle 4.6). A reader may act on a restart line as soon as it
+    sees it, so the line must not be ahead of the restart. *)
+type restart_notice =
+  | No_restart_notice  (** The turn continues a history with atoms. *)
+  | Notice_at_turn_start
+      (** The turn starts from no atom and the saved history is known to hold
+          none: nothing can be saved before the line. *)
+  | Notice_after_first_save
+      (** The turn starts from no atom because its saved checkpoint version
+          was superseded. What is saved may still hold atoms; the restart
+          happens only if a save of this turn is accepted, so the line follows
+          the first accepted stage save, or, when no stage save was accepted,
+          the finalize save -- see {!restart_line_owed_at_finalize}. Either
+          way the line is written, and it is written before the line that ends
+          the turn. *)
+
+(** Pure. Every pair is listed. *)
+val restart_notice :
+  Keeper_turn_boundaries.history_at_start ->
+  Keeper_run_context.saved_history ->
+  restart_notice
+
+type restart_site =
+  | At_turn_start
+  | After_first_save
+
+(** The [site] label of the failure counter. *)
+val restart_site_label : restart_site -> string
+
+(** Append a [History_restarted] line. Never fails the turn: a line that cannot
+    be written is logged and counted. Only a cancellation escapes. *)
+val record_history_restart :
+  config:Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  restart_site ->
+  unit
+
+(** Whether a turn that owed [Notice_after_first_save] still has to write its
+    restart line when it ends. True when the notice is still pending -- no
+    stage save was accepted -- and this turn's own save was, because that save
+    is then the one that replaced the history. A save the store refused as
+    stale replaced nothing, and an official client saved nothing at all; in
+    both the notice dies with the turn.
+
+    The turn's position says the same thing ([Atom_history] and
+    [Empty_atom_history] are the saves that landed), but a position can fail
+    to be computed and this cannot. The restart line carries no position, so
+    it must not wait on one: a turn whose digest cannot be built would
+    otherwise lose its restart line and its end line together. Pure. *)
+val restart_line_owed_at_finalize
+  :  notice_pending:bool
+  -> saved_checkpoint_present:bool
+  -> bool
+
 val turn_progress_callbacks :
   config:Workspace.config ->
   keeper_name:string ->

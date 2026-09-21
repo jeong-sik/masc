@@ -79,13 +79,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.19).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.21).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.35.19 (check tag availability on GitHub Releases).
+> Installation target: v0.35.21 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.35.19
+TAG=v0.35.21
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -431,7 +431,6 @@ Authored configuration lives under `<base-path>/.masc/config` unless
 | `keepers/<name>.toml` | One Keeper: operational settings, prompt instructions, tool posture |
 | `tools/*.toml` | Declarative schemas for the tools the server registers |
 | `repositories.toml` | Registered repositories for the Workspace surface |
-| `agent-core-models-overlay.toml` | Optional model-capability rows over the embedded catalog |
 | `<base-path>/.masc/skills/<name>/SKILL.md` | A capability a Keeper can be handed by name; `name` in the frontmatter must equal the directory name |
 
 [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) lists the environment

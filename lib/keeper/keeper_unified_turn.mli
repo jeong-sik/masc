@@ -1,23 +1,11 @@
-(** Keeper_unified_turn — Single entry point for keeper turns via Agent_core.Agent.run().
+(** MASC orchestration of a Keeper turn.
 
-    Replaces the 3-path dispatcher (social/scheduled-autonomous/autonomy) with a unified
-    observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
-    The model decides what to do; code only enforces safety and observes results.
+    Observes current state, prepares the turn prompt and calls
+    [Keeper_agent_run.run_turn] through [Keeper_unified_turn_execution].
+    [Keeper_turn_driver] dispatches each runtime attempt to AGENT_CORE or an
+    official client according to [Runtime_execution.t].
 
-    Error classification predicates are in [Keeper_error_classify].
-
-    @since Unified Keeper Loop *)
-
-type degraded_retry_decision =
-  | No_degraded_retry
-  | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
-
-val decide_degraded_retry
-  :  base_runtime:string
-  -> effective_runtime:string
-  -> attempted_runtimes:string list
-  -> Agent_core.Error.t
-  -> degraded_retry_decision
+    Error classification predicates are in [Keeper_error_classify]. *)
 
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)
@@ -79,18 +67,6 @@ val decide_turn_plan_at_phase_gate
   -> Keeper_state_machine.phase option
   -> turn_plan
 
-
-(** Resolve the next runtime to try after an auto-recoverable failure.
-    Uses the current effective runtime and the default degraded rotation
-    candidate, then suppresses suggestions
-    that would loop back to a runtime already attempted during the current
-    turn. Exposed for targeted tests. *)
-val next_fail_open_runtime_for_turn
-  :  base_runtime:string
-  -> effective_runtime:string
-  -> attempted_runtimes:string list
-  -> Agent_core.Error.t
-  -> Keeper_error_classify.degraded_retry option
 
 (** Record the streaming-cancel observation shared by the Eio.Cancel handler.
     Exposed so tests can pin the supervisor [fiber_stop] branch without forcing

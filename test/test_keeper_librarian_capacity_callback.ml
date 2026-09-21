@@ -96,7 +96,7 @@ let () =
     "input_error_code", `String "input_too_large";
     "actual_chars", `Int 23; "max_chars", `Int 17])) in
   let generic = codex_error None in
-  let quota = Fusion_official_client.Setup_failure (Fusion_types.Provider_error "quota") in
+  let quota = Fusion_official_client.Setup_failure (Provider_error "quota") in
   let cli_case name cli_errors expected = Alcotest.test_case name `Quick (fun () ->
     Fixture.with_official_client_runtimes @@ fun () ->
     test_callback ~cli_errors ~base_path ~registry ~keeper_id:name

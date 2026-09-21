@@ -150,15 +150,25 @@ type t =
   }
 
 let name t = t.name
-let remote_root t = t.remote_root
 let transport t = t.transport
 
 let keeper_root ~remote_root ~keeper_name =
   Filename.concat remote_root (Playground_paths.sanitize_keeper_name keeper_name)
 ;;
 
-let remote_keeper_root t = keeper_root ~remote_root:t.remote_root ~keeper_name:t.keeper_name
+let per_keeper_workspace_root t =
+  keeper_root ~remote_root:t.remote_root ~keeper_name:t.keeper_name
+;;
+let keeper_control_root t = per_keeper_workspace_root t
 let gh_config_dir t = t.gh_config_dir
+
+(* Docker receives one Keeper's mounted workdir. SSH and a microVM guest
+   receive the shared endpoint volume and resolve the Keeper below it. *)
+let workspace_root t =
+  match t.transport with
+  | Docker_exec _ -> t.remote_root
+  | Openssh _ | Container_exec _ -> per_keeper_workspace_root t
+;;
 
 let of_openssh ~base_path ~keeper_name (o : openssh) =
   let remote_root = o.endpoint.remote_root in
@@ -453,14 +463,14 @@ let remote_cwd t cwd =
   let endpoint_root = Keeper_remote_path.normalize_remote t.remote_root in
   if (match t.transport with Docker_exec _ -> true | Openssh _ | Container_exec _ -> false)
   then
-    if Filename.is_relative normalized
+    if Filename.is_relative cwd
     then Error "docker_observe_cwd_requires_guest_absolute_path"
     else Ok normalized
   else if String.equal normalized endpoint_root
   then Ok endpoint_root
   else
     Keeper_remote_path.host_to_remote ~base_path:t.base_path
-      ~remote_root:t.remote_root ~keeper:t.keeper_name cwd
+      ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name cwd
 ;;
 
 (* A transport that failed on its own, before or instead of the shim. OpenSSH
@@ -648,7 +658,8 @@ let execution_observation_to_yojson = function
 
 type stdout_mode = Text_paths | Binary_bytes
 
-let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
+let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect)
+      ?on_receipt ~request_root ~timeout_sec t =
   (* A real remote exit/signal is [Ran]; a transport that failed before or
      instead of producing one is [Transport_failed]. Every arm below that
      used to return [Unix.WEXITED 1, _, <error>] was a transport failure the
@@ -680,7 +691,7 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
         @ List.filter (fun (name, _) -> not (List.mem_assoc name injected)) env
       in
       let stdin = Option.value stdin_content ~default:"" in
-      let cwd = Option.value cwd ~default:t.remote_root in
+      let cwd = match cwd with Some cwd -> cwd | None -> request_root in
       (match remote_cwd t cwd with
        | Error error -> transport_failed error
        | Ok cwd ->
@@ -689,7 +700,7 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
         ; argv
         ; env
         ; cwd
-        ; remote_root = t.remote_root
+        ; remote_root = request_root
         ; timeout_sec
         ; stdin_len = Int64.of_int (String.length stdin)
         ; mode
@@ -709,7 +720,8 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
              | Docker_exec _ -> emit, (fun () -> ())
              | Openssh _ | Container_exec _ ->
                let stream = Keeper_remote_path.stream ~base_path:t.base_path
-                 ~remote_root:t.remote_root ~keeper:t.keeper_name ~emit in
+                 ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name
+                 ~emit in
                Keeper_remote_path.rewrite_stream_chunk stream,
                (fun () -> Keeper_remote_path.finish_stream stream)
            in
@@ -731,7 +743,7 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
              | Docker_exec _ -> text
              | Openssh _ | Container_exec _ ->
                Keeper_remote_path.rewrite_output ~base_path:t.base_path
-                 ~remote_root:t.remote_root ~keeper:t.keeper_name text
+                 ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name text
            in
            let budget = local_wall_budget t timeout_sec in
            observation := Execution_unavailable Transport_unavailable;
@@ -837,6 +849,28 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
     result
 ;;
 
+let runner ?stdout_mode ?mode ?on_receipt ~timeout_sec t =
+  runner_for_root ?stdout_mode ?mode ?on_receipt
+    ~request_root:(workspace_root t) ~timeout_sec t
+;;
+
+let bootstrap_keeper_control_root ~timeout_sec t =
+  match t.transport with
+  | Openssh _ ->
+    let run = runner_for_root ~request_root:t.remote_root ~timeout_sec t in
+    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:[ "mkdir"; "-p"; keeper_control_root t ] ~env:[||]
+      ~cwd:(Some t.remote_root)
+  | Container_exec _ | Docker_exec _ ->
+    let reason =
+      Printf.sprintf
+        "%s_keeper_control_root_bootstrap_unsupported: endpoint %s is not remote SSH"
+        (lane_prefix t.transport) t.name
+    in
+    Masc_exec.Sandbox_target.Transport_failed
+      { output_files = None; reason; stdout = ""; stderr = reason }
+;;
+
 (* ── Preflight ───────────────────────────────────────────────────────── *)
 
 type preflight_cache_entry =
@@ -872,6 +906,11 @@ let store_preflight ~now t result =
   Stdlib.Mutex.protect preflight_cache_mu (fun () ->
     Hashtbl.replace preflight_cache (preflight_cache_key t)
       { checked_at = now; result })
+;;
+
+let invalidate_preflight t =
+  Stdlib.Mutex.protect preflight_cache_mu (fun () ->
+    Hashtbl.remove preflight_cache (preflight_cache_key t))
 ;;
 
 (* Whether this endpoint's shim can build the box (RFC-0422). The shim says
@@ -917,12 +956,14 @@ let preflight_argv_for_log argv =
   Exec_policy.truncate_for_log (String.concat " " argv)
 ;;
 
-let run_preflight_command t ~error_code argv =
-  let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
+let run_preflight_command_at t ~request_root ~cwd ~error_code argv =
+  let run =
+    runner_for_root ~request_root ~timeout_sec:(preflight_timeout_sec t) t
+  in
   let status, stdout, stderr =
     Masc_exec.Sandbox_target.status_tuple
       (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-         ~argv ~env:[||] ~cwd:(Some t.remote_root))
+         ~argv ~env:[||] ~cwd:(Some cwd))
   in
   match status with
   | Unix.WEXITED 0 -> Ok stdout
@@ -936,6 +977,17 @@ let run_preflight_command t ~error_code argv =
       (Printf.sprintf "%s: endpoint %s ran [%s] signal=%d stderr=%s"
          error_code t.name (preflight_argv_for_log argv) signal
          (Exec_policy.truncate_for_log stderr))
+;;
+
+let run_preflight_command t ~error_code argv =
+  let resolved_root = workspace_root t in
+  run_preflight_command_at t ~request_root:resolved_root ~cwd:resolved_root
+    ~error_code argv
+;;
+
+let run_endpoint_preflight_command t ~error_code argv =
+  run_preflight_command_at t ~request_root:t.remote_root ~cwd:t.remote_root
+    ~error_code argv
 ;;
 
 (* A failed [gh auth status] is not an identity verdict by itself. With the
@@ -962,7 +1014,7 @@ let github_transport t =
   let status, _stdout, _stderr =
     Masc_exec.Sandbox_target.status_tuple
       (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-         ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some t.remote_root))
+         ~argv:github_api_probe_argv ~env:[||] ~cwd:(Some (workspace_root t)))
   in
   match status with
   | Unix.WEXITED 0 -> Api_reachable
@@ -1006,7 +1058,7 @@ let github_identity_intent t =
     Masc_exec.Sandbox_target.status_tuple
       (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
          ~argv:[ "test"; "-s"; github_hosts_path t ]
-         ~env:[||] ~cwd:(Some t.remote_root))
+         ~env:[||] ~cwd:(Some (workspace_root t)))
   in
   match status with
   | Unix.WEXITED 1 -> No_login_configured
@@ -1032,8 +1084,24 @@ let available_kib output =
     | _ -> None)
 ;;
 
-let perform_preflight t =
+let perform_endpoint_preflight t =
   let* (_ : Exec_ssh_protocol.major) = run_probe t in
+  let* _ =
+    run_endpoint_preflight_command t ~error_code:(code t "root_missing")
+      [ "test"; "-d"; t.remote_root ]
+  in
+  Ok ()
+;;
+
+let perform_workspace_preflight t =
+  let* _ =
+    run_endpoint_preflight_command t ~error_code:(code t "keeper_root_missing")
+      [ "test"; "-d"; workspace_root t ]
+  in
+  Ok ()
+;;
+
+let perform_payload_tool_preflight t =
   let* _ =
     run_preflight_command t ~error_code:"remote_git_unavailable"
       [ "git"; "--version" ]
@@ -1042,17 +1110,9 @@ let perform_preflight t =
     run_preflight_command t ~error_code:"remote_ripgrep_unavailable"
       [ "rg"; "--version" ]
   in
-  let* _ =
-    run_preflight_command t ~error_code:(code t "root_missing")
-      [ "test"; "-d"; t.remote_root ]
-  in
-  let* _ =
-    run_preflight_command t ~error_code:(code t "keeper_root_missing")
-      [ "test"; "-d"; remote_keeper_root t ]
-  in
   let* disk =
     run_preflight_command t ~error_code:(code t "disk_probe_failed")
-      [ "df"; "-Pk"; t.remote_root ]
+      [ "df"; "-Pk"; workspace_root t ]
   in
   let minimum = Env_config_sandbox.Preflight.ssh_disk_free_min_kib () in
   let* () =
@@ -1069,6 +1129,10 @@ let perform_preflight t =
            "%s: endpoint %s returned unparseable df output"
            (code t "disk_probe_failed") t.name)
   in
+  Ok ()
+;;
+
+let perform_identity_preflight t =
   let* () =
     match github_identity_intent t with
     | No_login_configured ->
@@ -1095,6 +1159,16 @@ let perform_preflight t =
   in
   Ok ()
 ;;
+
+let perform_preflight t =
+  let* () = perform_endpoint_preflight t in
+  let* () = perform_workspace_preflight t in
+  let* () = perform_payload_tool_preflight t in
+  perform_identity_preflight t
+;;
+
+let check_endpoint_preflight t = perform_endpoint_preflight t
+let check_workspace_preflight t = perform_workspace_preflight t
 
 let check_preflight ?(force = false) t =
   (* NDT-OK: wall time controls only readiness-cache freshness; it is neither

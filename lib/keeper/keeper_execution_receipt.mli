@@ -209,6 +209,11 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  | Reason_official_client_recovery_required
+  (** A durable official-client session refused its claim before provider
+      dispatch and remains held until explicit recovery resolution. Paired
+      with [Disp_operator_action_required]; no runtime continuation or
+      fallback is claimed. *)
   | Reason_provider_attempt_effect_fenced
   (** The provider attempt did not prove whether an effect occurred. Paired
       with [Disp_unknown] so operator attention remains required, while the

@@ -99,11 +99,20 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
         )
         os.write(fd, b"q")
 
+    def prepare_workspace(base_path: str) -> None:
+        directory = Path(base_path, ".masc", "keepers")
+        for default_name in ("alpha", "beta"):
+            directory.joinpath(default_name + ".json").unlink()
+        directory.joinpath(keeper + ".json").write_text(
+            json.dumps(h.keeper_metadata(keeper)), encoding="utf-8"
+        )
+
     h.run_terminal_scenario(
         executable,
         description="Skill applicability durable call",
         interact=interact,
         http_fixtures=fixtures,
+        prepare_workspace=prepare_workspace,
     )
 
 

@@ -1619,7 +1619,7 @@ let test_dashboard_aggregate_separates_unsettled_from_malformed () =
         ~base_dir:(Filename.concat dir ".masc/tool_calls")
         ()
     in
-    let row tool_use_id fields =
+    let row fields =
       `Assoc
         ([ ("ts", `Float (Unix.gettimeofday ()))
          ; ("keeper", `String "k")
@@ -1649,7 +1649,7 @@ let test_dashboard_aggregate_folds_lifecycle_rows_by_tool_use_id () =
         ~base_dir:(Filename.concat dir ".masc/tool_calls")
         ()
     in
-    let row fields =
+    let row tool_use_id fields =
       `Assoc
         ([ ("ts", `Float (Unix.gettimeofday ()))
          ; ("keeper", `String "k")

@@ -66,6 +66,13 @@
   (re_export masc.voice_runtime_overlay)
   (re_export masc_log)
   (re_export masc)
+  ;; #37579 test changes construct Fusion_types.panel_failure values
+  ;; (Setup_failure (Provider_error ...)) directly. masc.fusion_core is
+  ;; (wrapped false) and linked into lib/dune without re_export, so masc's
+  ;; own re-export above does not carry Fusion_types to consumers (same
+  ;; class of gap PR #30087 closed for masc_tui). Re-exported here per this
+  ;; file's own rule: add new deps here, not in individual test stanzas.
+  (re_export masc.fusion_core)
   (re_export masc.run_registry_core)
   (re_export masc.activity_graph)
   ;; Board handler shim removal — tests need direct access to

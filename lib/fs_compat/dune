@@ -9,7 +9,6 @@
   fd_cache
   owned_directory_chain
   capability_leaf
-  capability_exact_read
   capability_mutation_lease
   eio_resource_scope
   capability_recovery_obligation
@@ -27,7 +26,7 @@
   masc_string_util)
  (foreign_stubs
   (language c)
-  (names capability_exact_read_stubs directory_exchange_stubs)))
+  (names directory_exchange_stubs)))
 
 (library
  (name fs_compat)
@@ -49,8 +48,7 @@
  (name fs_compat_test_support)
  (modules
   publication_recovery_for_testing
-  capability_write_for_testing
-  capability_exact_read_for_testing)
+  capability_write_for_testing)
  (flags
   (:standard -w +4))
  (libraries

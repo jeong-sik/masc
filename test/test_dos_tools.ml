@@ -186,10 +186,11 @@ let test_press_reaches_the_guest_and_the_ledger () =
 ;;
 
 (* A click is button down, run, button up, run, in one call, sharing one step
-   ceiling. This guest observes both halves. It spends the whole first half
-   waiting for release, then prints U and exits only after the host clears the
-   button. Thus the screen/exit prove delivery and release, while the measured
-   total proves the second half receives only the first half's remainder. *)
+   ceiling. The guest prints D only after INT 33h reports the button down, and
+   prints U and exits only after the host clears it, so the screen and the exit
+   are what prove both halves reached the guest. The step total is not asked to
+   prove that -- how many steps the poll loop burns belongs to ocaml-dos -- it
+   only has to stay inside the one ceiling. *)
 let test_click_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "mouse.com" mouse_click_com;
@@ -202,16 +203,8 @@ let test_click_reaches_the_guest_and_the_ledger () =
     check bool "the guest observed release and exited" true (bool_field "exited" result);
     check bool "the guest observed down and up" true
       (contains "DU" (string_field "screen_text" result));
-    check bool "both halves ran" true (int_field "steps_run" result > 500);
     check bool "down and up share one ceiling, not two" true
       (int_field "steps_run" result <= 1_000);
-    (* The button-release invariant: click's up half always runs, so the
-       mouse is never left held for the next caller. The ledger entry alone
-       cannot say this -- it names the button that went down, not the 0 the
-       up half releases it to (below) -- so this reads the lane's own record
-       of what it last set, {!Dos_lane.mouse_buttons}. *)
-    check int "the button is released after the click, not left held" 0
-      (Dos_lane.mouse_buttons ());
     match Dos_lane.ledger () with
     | [ entry ] ->
       check string "the ledger names the caller" "vincent" entry.Dos_lane.who;

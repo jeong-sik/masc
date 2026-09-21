@@ -1152,20 +1152,20 @@ let missing_reference_error
 
 let degrade_loaded_for_missing_catalog
     ( (runtimes, (configured_default_route, configured_default), assignments,
-       media_failover, lanes, lsp_servers) :
+       media_failover, lanes, lsp_servers, typesafeai) :
       t list
       * (string * t)
       * (string * string) list
       * string list
       * Runtime_lane.t list
-      * (string * (string * string list)) list )
+      * (string * (string * string list)) list  * Runtime_schema.typesafeai )
     (report : missing_catalog_report)
   : ( ( t list
         * (string * t)
         * (string * string) list
         * string list
         * Runtime_lane.t list
-        * (string * (string * string list)) list )
+        * (string * (string * string list)) list  * Runtime_schema.typesafeai )
       * startup_degradation
     , string )
     result
@@ -1282,7 +1282,8 @@ let degrade_loaded_for_missing_catalog
         , assignments
         , kept_media_failover
         , kept_lanes
-        , lsp_servers )
+        , lsp_servers
+        , typesafeai )
       , degradation )
 ;;
 
@@ -1294,7 +1295,7 @@ let materialize_config
        * (string * string) list
        * string list
        * Runtime_lane.t list
-       * (string * (string * string list)) list)
+       * (string * (string * string list)) list * Runtime_schema.typesafeai)
       * Runtime_schema.exact_output_lane_decl list
     , load_failure )
     result
@@ -1373,7 +1374,8 @@ let materialize_config
     , assignments
     , cfg.media_failover
     , lanes
-    , cfg.lsp_servers )
+    , cfg.lsp_servers
+    , cfg.typesafeai )
   in
   Ok (loaded, cfg.exact_output_lane_decls)
 ;;
@@ -1384,7 +1386,7 @@ let load_list_internal ~(config_path : string) ~validate_max_context
        * (string * string) list
        * string list
        * Runtime_lane.t list
-       * (string * (string * string list)) list)
+       * (string * (string * string list)) list * Runtime_schema.typesafeai)
       * Runtime_schema.exact_output_lane_decl list
     , load_failure )
     result
@@ -1412,7 +1414,8 @@ let load_list_internal_text ~config_path:(_ : string) ~content ~validate_max_con
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
   |> Result.map
-       (fun ((runtimes, (_route, rt), assignments, media_failover, lanes, _lsp_servers), _) ->
+       (fun ((runtimes, (_route, rt), assignments, media_failover, lanes,
+              _lsp_servers, _typesafeai), _) ->
           (runtimes, rt, assignments, media_failover, lanes))
 ;;
 
@@ -1468,7 +1471,8 @@ let set_loaded
     , assignments
     , media_failover
     , lanes
-    , lsp_servers ) =
+    , lsp_servers
+    , typesafeai ) =
   (* Reuse observations only when the actual resolved binding is unchanged.
      Compare the identities frozen at materialization, never re-resolve old
      credentials/catalog facts after a reload. Removed/rebound rows retain no
@@ -1498,6 +1502,7 @@ let set_loaded
     ; config_path = Some config_path
     ; startup_degradation
     };
+  Runtime_typesafeai_policy.publish typesafeai;
   Runtime_startup_state.note_runtime_loaded ()
 
 let init_default ~config_path =
@@ -1528,7 +1533,7 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1542,7 +1547,7 @@ let init_default_strict ~config_path =
 (* Prepare one immutable runtime publication. Boot and config edits share the
    same catalog exclusion so a save cannot reactivate an unavailable route. *)
 let prepare_degraded_loaded ~config_path
-    (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+    (((runtimes, _, _, _, _, _, _) as loaded), exact_output_lane_decls) =
   let* loaded, startup_degradation =
     match missing_runtime_model_capabilities ~config_path runtimes with
     | None -> Ok (loaded, None)
@@ -1550,7 +1555,7 @@ let prepare_degraded_loaded ~config_path
         let* loaded, degradation = degrade_loaded_for_missing_catalog loaded report in
         Ok (loaded, Some degradation)
   in
-  let active_runtimes, _, _, _, _, _ = loaded in
+  let active_runtimes, _, _, _, _, _, _ = loaded in
   let* () =
     validate_runtime_max_context active_runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)

@@ -1596,11 +1596,15 @@ let catalog_decided_capability_pairs
   ; "emits-usage-tokens", emits_usage_tokens, resolved.emits_usage_tokens
   ]
 
-(* The number of seed lines writing one of those twelve today. Pinned rather
-   than left open because a walk that finds nothing looks the same as a walk
-   whose matcher is broken. The change that removes the inert lines takes this
-   to zero; until then a diff here means the seed moved. *)
-let seed_catalog_decided_capability_lines = 13
+(* The seed writes none of those twelve. A count of zero is the weakest kind of
+   assertion on its own — a walk that reached nothing produces the same zero —
+   so the models below are named as proof that the walk arrived. Both keep a
+   [capabilities] block the catalog answers for, so losing either means the
+   catalog stopped being installed or the branch stopped being taken, not that
+   the seed got tidier. *)
+let seed_catalog_decided_capability_lines = 0
+
+let seed_models_whose_capabilities_the_catalog_decides = [ "glm-5-3"; "minimax-m3" ]
 
 (* Prints every seed line that writes one of the twelve next to the value the
    runtime resolves, and fails when the two disagree. A disagreement is not a
@@ -1616,6 +1620,7 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
     | Error detail -> fail detail
   in
   let written = ref 0 in
+  let visited = ref [] in
   let disagreements = ref [] in
   List.iter
     (fun (runtime : Runtime.t) ->
@@ -1642,6 +1647,7 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
           with
           | None -> ()
           | Some _ ->
+            visited := runtime.model.id :: !visited;
             (match Llm_provider.Provider_config.capabilities_for_config_model config with
              | None ->
                failf "%s: no resolved capabilities for a catalogued model" runtime.id
@@ -1674,6 +1680,13 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
                            :: !disagreements)
                  (catalog_decided_capability_pairs declared resolved))))
     runtimes;
+  List.iter
+    (fun model_id ->
+       check bool
+         (Printf.sprintf "walked the catalogued capabilities block of %s" model_id)
+         true
+         (List.exists (String.equal model_id) !visited))
+    seed_models_whose_capabilities_the_catalog_decides;
   check int
     "seed lines writing a key the catalog row decides"
     seed_catalog_decided_capability_lines
@@ -3607,6 +3620,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
+    ; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -5125,6 +5139,71 @@ let test_lsp_servers_reads_a_command_per_language () =
       config.Runtime_schema.lsp_servers
 ;;
 
+(* [typesafeai] is the lane's table; the key is not in it. Absent is the
+   default; present is read strictly, so a misspelt key is a load error. *)
+let typesafeai_table =
+  "[typesafeai]\nenabled = false\nendpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
+   board_attention = false\nabsorb_gate = true\n\
+   excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
+;;
+
+let test_typesafeai_absent_is_the_default () =
+  match Runtime_toml.parse_string (lsp_probe_config "") with
+  | Error errors -> failf "no [typesafeai] must parse: %s" (error_messages errors)
+  | Ok config ->
+    let t = config.Runtime_schema.typesafeai in
+    check bool "the lane is on with a key" true t.Runtime_schema.lane_enabled;
+    check bool "the Board gate is on" true t.Runtime_schema.board_attention;
+    check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
+    check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
+;;
+
+let test_typesafeai_reads_the_whole_table () =
+  match Runtime_toml.parse_string (lsp_probe_config typesafeai_table) with
+  | Error errors -> failf "the table must parse: %s" (error_messages errors)
+  | Ok config ->
+    let t = config.Runtime_schema.typesafeai in
+    check bool "enabled" false t.Runtime_schema.lane_enabled;
+    check string "endpoint" "http://127.0.0.1:9/judge" t.Runtime_schema.lane_endpoint;
+    check string "model" "jev-1.13" t.Runtime_schema.lane_model;
+    check bool "board_attention" false t.Runtime_schema.board_attention;
+    check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
+    check (list string) "excluded keepers, in order"
+      [ "kidsnote-slack-context-collector"; "other" ]
+      t.Runtime_schema.excluded_keepers
+;;
+
+let has_substring haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+let typesafeai_rejects ~what tail expected =
+  match Runtime_toml.parse_string (lsp_probe_config tail) with
+  | Ok _ -> failf "%s must not parse" what
+  | Error errors ->
+    let messages = error_messages errors in
+    if not (has_substring messages expected)
+    then failf "%s: expected %S in %S" what expected messages
+;;
+
+let test_typesafeai_refuses_a_stray_key () =
+  typesafeai_rejects ~what:"a stray [typesafeai] key"
+    "[typesafeai]\nabsorb = true\n" "unknown [typesafeai] key \"absorb\"";
+  typesafeai_rejects ~what:"a sub-table where a switch is expected"
+    "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
+;;
+
+let test_typesafeai_refuses_a_value_that_names_nothing () =
+  typesafeai_rejects ~what:"a blank endpoint" "[typesafeai]\nendpoint = \"  \"\n" "endpoint must be non-empty";
+  typesafeai_rejects ~what:"a keeper name with whitespace"
+    "[typesafeai]\nexcluded_keepers = [\"a b\"]\n" "must be non-empty without whitespace";
+  typesafeai_rejects ~what:"a non-string keeper list"
+    "[typesafeai]\nexcluded_keepers = [1]\n" "excluded_keepers must be an array of strings";
+  typesafeai_rejects ~what:"a non-boolean switch" "[typesafeai]\nenabled = \"yes\"\n" "enabled must be a boolean"
+;;
+
 let test_lsp_servers_absent_is_empty () =
   match Runtime_toml.parse_string (lsp_probe_config "") with
   | Error errors -> failf "no [lsp] must parse: %s" (error_messages errors)
@@ -5523,5 +5602,12 @@ let () =
         ; test_case "refuses a stray [lsp] key" `Quick test_lsp_servers_refuses_a_stray_lsp_key
         ; test_case "Runtime.lsp_servers answers the operator, then the table" `Quick
             test_runtime_lsp_servers_answers_the_operator_then_the_table
+        ] )
+    ; ( "typesafeai"
+      , [ test_case "absent is the default" `Quick test_typesafeai_absent_is_the_default
+        ; test_case "reads the whole table" `Quick test_typesafeai_reads_the_whole_table
+        ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
+        ; test_case "refuses a value that names nothing" `Quick
+            test_typesafeai_refuses_a_value_that_names_nothing
         ] )
     ]

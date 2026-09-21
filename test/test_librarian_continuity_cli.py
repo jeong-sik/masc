@@ -163,8 +163,12 @@ def main() -> None:
         )
         config = root / "runtime.toml"
         config.write_text(
-            config_source.read_text()
-            .replace("http://127.0.0.1:9/v1", f"http://127.0.0.1:{port}/v1")
+            config_source.read_text().replace(
+                "http://127.0.0.1:9/v1", f"http://127.0.0.1:{port}/v1"
+            )
+            + "\n[typesafeai]\n"
+            + f'endpoint = "http://127.0.0.1:{port}/judge"\n'
+            + 'model = "fixture-configured-judge"\n'
         )
         cases = []
         provided_question = "What is the cabinet code?"
@@ -202,13 +206,7 @@ def main() -> None:
             )
         dataset = root / "synthetic.json"
         dataset.write_text(json.dumps({"provenance": ["Synthetic"], "cases": cases}))
-        env = dict(
-            os.environ,
-            TYPESAFEAI_API_KEY="synthetic-fixture-key",
-            MASC_TYPESAFEAI_ENABLED="true",
-            MASC_TYPESAFEAI_ENDPOINT=f"http://127.0.0.1:{port}/judge",
-            MASC_TYPESAFEAI_MODEL="fixture-configured-judge",
-        )
+        env = dict(os.environ, TYPESAFEAI_API_KEY="synthetic-fixture-key")
         command = [
             str(args.binary.resolve()),
             "--input",

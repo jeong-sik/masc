@@ -138,9 +138,7 @@ status: reference
   `Ok`·`Error`·`Unknown`). 외부 투영이라 `Deferred`를 표현하지 못하며, MASC 내부 실행
   결과의 권위가 아니다. 투영 관측이 없으면 필드를 생략하지 않고 `Unknown`으로 기록한다.
   실행이 완료·지연됐어도 결과 전달이 나중에 실패하면 `wire_outcome=error`가 될 수 있다.
-  레거시 `success:bool` 필드는 이 값의 손실 투영이다 — `unknown`과 `error`가 둘 다
-  `false`로 뭉개지므로 `success=false`를 실행 실패로 읽지 않는다. 권위 있는 값은
-  `wire_outcome`과 Execution Disposition이다.
+  권위 있는 값은 `wire_outcome`과 Execution Disposition이다.
   → [Tool_result](../../lib/tool_types/tool_result.mli)
 
 **Execution Disposition**

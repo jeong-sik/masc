@@ -29,6 +29,7 @@ git commit -q -m seed
 git branch -q feature
 git worktree add -q .worktrees/on-a-branch feature
 git worktree add -q --detach .worktrees/detached HEAD
+git worktree add -q --detach .worktrees/retry-detached HEAD
 (
   cd .worktrees/detached
   echo only-here > only-here.txt
@@ -36,28 +37,58 @@ git worktree add -q --detach .worktrees/detached HEAD
   git commit -q -m "a commit no branch points at"
 )
 detached_sha="$(git -C .worktrees/detached rev-parse HEAD)"
+(
+  cd .worktrees/retry-detached
+  echo retry-only-here > retry-only-here.txt
+  git add retry-only-here.txt
+  git commit -q -m "a detached commit whose first removal is locked"
+)
+retry_sha="$(git -C .worktrees/retry-detached rev-parse HEAD)"
 
 if [ -n "$(git for-each-ref --contains "${detached_sha}" --format='%(refname)' \
-             refs/heads refs/remotes refs/tags)" ]; then
+             refs/heads refs/remotes refs/tags)" ] \
+   || [ -n "$(git for-each-ref --contains "${retry_sha}" --format='%(refname)' \
+                  refs/heads refs/remotes refs/tags)" ]; then
   echo "fixture is wrong: the detached commit is already on a ref" >&2
   exit 1
 fi
 
-output="$(bash scripts/cleanup-stale-worktrees.sh --days 1 --apply 2>&1)"
-
 fail() { echo "$1" >&2; echo "--- script output ---" >&2; echo "${output}" >&2; exit 1; }
+
+output="$(bash scripts/cleanup-stale-worktrees.sh --days 1 2>&1)"
+[ -d .worktrees/detached ] || fail "dry-run removed the detached worktree"
+[ -d .worktrees/retry-detached ] || fail "dry-run removed the retry worktree"
+[ -z "$(git tag -l 'archive/worktree/*')" ] || fail "dry-run created an archive tag"
+case "${output}" in
+  *"would_archive=2"*) ;;
+  *) fail "dry-run summary did not count the two commits it would archive" ;;
+esac
+
+git worktree lock .worktrees/retry-detached
+output="$(bash scripts/cleanup-stale-worktrees.sh --days 1 --apply 2>&1)"
 
 [ -d .worktrees/on-a-branch ] && fail "the branch worktree was not removed"
 [ -d .worktrees/detached ] && fail "the detached worktree was not removed"
+[ -d .worktrees/retry-detached ] || fail "the locked worktree should survive its first removal"
 
 tags="$(git tag -l 'archive/worktree/*')"
-[ "$(printf '%s\n' "${tags}" | grep -c .)" = "1" ] \
-  || fail "expected exactly one archive tag, got: ${tags}"
+[ "$(printf '%s\n' "${tags}" | grep -c .)" = "2" ] \
+  || fail "expected exactly two archive tags, got: ${tags}"
+
+git worktree unlock .worktrees/retry-detached
+retry_output="$(bash scripts/cleanup-stale-worktrees.sh --days 1 --apply 2>&1)"
+output="${output}
+${retry_output}"
+[ -d .worktrees/retry-detached ] && fail "the second run did not retry the archived worktree"
 
 git cat-file -e "${detached_sha}" 2>/dev/null \
   || fail "the detached commit is gone"
 [ -n "$(git for-each-ref --contains "${detached_sha}" --format='%(refname)' refs/tags)" ] \
   || fail "the detached commit is on no ref, so removal lost it"
+git cat-file -e "${retry_sha}" 2>/dev/null \
+  || fail "the retried detached commit is gone"
+[ -n "$(git for-each-ref --contains "${retry_sha}" --format='%(refname)' refs/tags)" ] \
+  || fail "the retried commit is on no ref, so removal lost it"
 
 # The branch worktree needs no tag: its commit stays on refs/heads/feature.
 [ "$(git rev-parse feature)" = "$(git rev-parse main)" ] \
@@ -68,4 +99,4 @@ case "${output}" in
   *) fail "the run did not report where it kept the detached commit" ;;
 esac
 
-echo "cleanup-stale-worktrees: a removal keeps every commit (branch on its branch, detached on a tag)"
+echo "cleanup-stale-worktrees: dry-run counts archives and removal retries an existing tag"

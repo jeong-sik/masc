@@ -16,6 +16,10 @@
 #   - leaves the branch in place (only removes the worktree directory)
 #   - a detached worktree has no branch to leave its commit on, so the commit
 #     is tagged archive/worktree/<name>-<sha> before the directory goes
+#   - archive tags are permanent recovery refs until an operator verifies the
+#     commit is no longer needed. List them with
+#       git for-each-ref --format='%(refname:short)' refs/tags/archive/worktree/
+#     and remove a confirmed-obsolete one with git tag -d <tag>.
 #
 # Usage:
 #   ./scripts/cleanup-stale-worktrees.sh                # dry run, 7-day threshold
@@ -59,6 +63,17 @@ active=0
 removed=0
 skipped=0
 archived=0
+would_archive=0
+
+# One reachability walk for the whole run. Calling [for-each-ref --contains]
+# once per detached worktree scales with worktrees x refs, and every archive
+# tag makes the next run slower. This snapshot answers the same question -- is
+# the detached HEAD an ancestor of any current ref? -- with one graph walk.
+# A file, rather than an associative array, keeps this script compatible with
+# macOS's system Bash 3.2.
+reachable_commits_file=$(mktemp -t masc-cleanup-reachable.XXXXXX)
+trap 'rm -f "$reachable_commits_file"' EXIT
+git rev-list --branches --remotes --tags > "$reachable_commits_file"
 
 # `git worktree list --porcelain` emits one stanza per worktree, separated by
 # blank lines. Stanzas always start with `worktree <path>`. Process via
@@ -117,23 +132,36 @@ while read -r wt_path; do
   head_sha=""
   if ! git -C "$wt_path" symbolic-ref --quiet HEAD >/dev/null 2>&1; then
     head_sha=$(git -C "$wt_path" rev-parse HEAD 2>/dev/null || echo "")
-    if [ -n "$head_sha" ] \
-       && [ -z "$(git for-each-ref --contains "$head_sha" --format='%(refname)' \
-                    refs/heads refs/remotes refs/tags 2>/dev/null)" ]; then
+    if [ -n "$head_sha" ] && ! grep -Fqx "$head_sha" "$reachable_commits_file"; then
       archive_tag="archive/worktree/$(basename "$wt_path")-${head_sha:0:10}"
+      would_archive=$((would_archive+1))
+      if [ "$APPLY" -eq 0 ]; then
+        printf '%s\n' "$head_sha" >> "$reachable_commits_file"
+      fi
     fi
   fi
 
   if [ "$APPLY" -eq 1 ]; then
     if [ -n "$archive_tag" ]; then
-      if ! git tag -a "$archive_tag" "$head_sha" \
-             -m "detached worktree $wt_path archived on cleanup; its commit was on no other ref" \
-             2>/dev/null; then
-        echo "SKIP    $wt_path (detached commit could not be archived, so it stays)"
-        skipped=$((skipped+1))
-        continue
+      existing=$(git rev-parse -q --verify "refs/tags/$archive_tag^{commit}" 2>/dev/null || echo "")
+      if [ "$existing" = "$head_sha" ]; then
+        : # A previous run tagged the commit but stopped before removal.
+      else
+        if [ -n "$existing" ]; then
+          echo "SKIP    $wt_path (archive tag $archive_tag points at $existing, not $head_sha)"
+          skipped=$((skipped+1))
+          continue
+        fi
+        if ! tag_err=$(git tag -a "$archive_tag" "$head_sha" \
+               -m "detached worktree $wt_path archived on cleanup; its commit was on no other ref" \
+               2>&1); then
+          echo "SKIP    $wt_path (detached commit could not be archived: $tag_err)"
+          skipped=$((skipped+1))
+          continue
+        fi
       fi
       archived=$((archived+1))
+      printf '%s\n' "$head_sha" >> "$reachable_commits_file"
     fi
     if git worktree remove "$wt_path" 2>/dev/null; then
       if [ -n "$archive_tag" ]; then
@@ -161,6 +189,6 @@ if [ "$APPLY" -eq 1 ]; then
   echo "Summary (--days $DAYS --apply): stale=$stale removed=$removed archived=$archived dirty=$dirty nested=$nested active=$active skipped=$skipped"
 else
   echo ""
-  echo "Summary (--days $DAYS dry-run): stale=$stale dirty=$dirty nested=$nested active=$active skipped=$skipped"
+  echo "Summary (--days $DAYS dry-run): stale=$stale would_archive=$would_archive dirty=$dirty nested=$nested active=$active skipped=$skipped"
   echo "Pass --apply to remove the listed candidates."
 fi

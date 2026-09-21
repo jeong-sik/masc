@@ -390,6 +390,14 @@ type exact_output_lane_decl =
     Routes/aliases/profiles/system_targets/strategy from the deleted
     [runtime_config] are dropped (RFC-0206 §5): the single-binding Runtime model
     has no routing layer. *)
+(** One System One server [\[typesafeai\] destinations] names. *)
+type typesafeai_destination =
+  { endpoint : string  (** the URL the request is posted to *)
+  ; model : string  (** the model id as that server names it *)
+  ; api_key_env : string  (** the environment variable holding that server's bearer key *)
+  }
+[@@deriving show, eq]
+
 (** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. Keys stay in
     the environment; each destination names the variable holding its own
     ([api_key_env]). Everything else about the lane is here. [lane_enabled]
@@ -404,13 +412,6 @@ type exact_output_lane_decl =
     preservation and Skill applicability review are opt-in too. All reach the
     same destinations, so one [excluded_keepers] applies to every review: a
     keeper named there is never asked about, whichever gate asks. *)
-type typesafeai_destination =
-  { endpoint : string  (** the URL the request is posted to *)
-  ; model : string  (** the model id as that server names it *)
-  ; api_key_env : string  (** the environment variable holding that server's bearer key *)
-  }
-[@@deriving show, eq]
-
 type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list

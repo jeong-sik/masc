@@ -102,7 +102,7 @@ RFC 에서는 그 답으로 원문을 남긴다. 그 목록을 Librarian 에게 
   천장 0.02~0.03. 문장을 지시문에 두는 지금 모양은 바닥 0.94·천장 0.10. Jev 문서의 약점("간접 참조", "관련 없는 큰 state")이 그대로다.
   그래서 문장은 지시문에 둔다. 주입 위험은 §8 에 적는다.
 - OpenRouter: 09-18 부터 베타. `POST https://openrouter.ai/api/alpha/decisions`, 모델 `typesafe/jev-1.13`, 본문 모양 같음, 32k, 오류 봉투 `{"error":{...}}`.
-  `[typesafeai] destinations` 의 두 번째 항목이 된다(`https://openrouter.ai/api/v1/systemone`, 모델 `~typesafe/jev-latest`, `api_key_env = "OPENROUTER_API_KEY"`). 응답은 TypeSafe 와 같고 `id`·`provider`·`usage.cost` 가 더 붙는다. 첫 목적지가 답을 못 하거나 자기 사정(401·402·403·404·429·5xx·해독 안 되는 본문)으로 거절하면 다음 목적지에 묻고, 요청 본문이 틀렸다는 답(400·413·422)이면 멈춘다(`Typesafeai_client.disposition_of_refusal`).
+  `[typesafeai] destinations` 의 두 번째 항목이 된다(`https://openrouter.ai/api/v1/systemone`, 모델 `~typesafe/jev-latest`, `api_key_env = "OPENROUTER_API_KEY"`). 응답은 TypeSafe 와 같고 `id`·`provider`·`usage.cost` 가 더 붙는다. 목적지가 답을 못 하거나 거절하면 사유와 상관없이 다음 목적지에 묻는다. 목적지마다 본문의 model id 와 한도가 달라서 한 서버의 400·413·422 가 다음 서버에 대해 말해 주는 게 없기 때문이다. 답에는 지나친 목적지와 거절이 남고(`passed_over`), 전부 거절하면 물어본 순서대로 전부 남는다.
 
 ## 5. 비용과 지연
 

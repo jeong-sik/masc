@@ -5191,6 +5191,22 @@ let test_typesafeai_reads_the_whole_table () =
       t.Runtime_schema.excluded_keepers
 ;;
 
+let test_typesafeai_reads_destinations_written_as_table_headers () =
+  let tail =
+    "[[typesafeai.destinations]]\nendpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
+     api_key_env = \"TYPESAFEAI_API_KEY\"\n\
+     [[typesafeai.destinations]]\nendpoint = \"http://127.0.0.1:9/reserve\"\n\
+     model = \"~typesafe/jev-latest\"\napi_key_env = \"OPENROUTER_API_KEY\"\n"
+  in
+  match Runtime_toml.parse_string (lsp_probe_config tail) with
+  | Error errors -> failf "table headers must parse: %s" (error_messages errors)
+  | Ok config ->
+    let first, rest = config.Runtime_schema.typesafeai.Runtime_schema.destinations in
+    check string "first endpoint" "http://127.0.0.1:9/judge" first.Runtime_schema.endpoint;
+    check (list string) "the rest, in order" [ "http://127.0.0.1:9/reserve" ]
+      (List.map (fun (d : Runtime_schema.typesafeai_destination) -> d.endpoint) rest)
+;;
+
 let has_substring haystack needle =
   let n = String.length needle and h = String.length haystack in
   let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
@@ -5644,6 +5660,8 @@ let () =
     ; ( "typesafeai"
       , [ test_case "absent is the default" `Quick test_typesafeai_absent_is_the_default
         ; test_case "reads the whole table" `Quick test_typesafeai_reads_the_whole_table
+        ; test_case "reads destinations written as table headers" `Quick
+            test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
         ; test_case "refuses a value that names nothing" `Quick
             test_typesafeai_refuses_a_value_that_names_nothing

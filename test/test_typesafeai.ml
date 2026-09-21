@@ -394,14 +394,21 @@ let test_only_destinations_with_a_key_are_armed () =
       with_second None (fun () ->
         Alcotest.(check (list string)) "only the destination whose variable holds a key"
           [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe" ]
-          (armed ())));
+          (armed ());
+        Alcotest.(check (list string)) "the one left out is named for the boot report"
+          [ second_key ]
+          (List.map
+             (fun (left_out : Runtime_schema.typesafeai_destination) -> left_out.api_key_env)
+             (C.unarmed_destinations ()))));
     with_key None (fun () ->
       with_second (Some "k-openrouter") (fun () ->
         Alcotest.(check (list string)) "the second alone is armed"
           [ "https://fixture.invalid/openrouter|~typesafe/jev-latest|k-openrouter" ]
           (armed ()));
       with_second None (fun () ->
-        Alcotest.(check (list string)) "no key anywhere" [ "no_armed_destination" ] (armed ()))))
+        Alcotest.(check (list string)) "no key anywhere" [ "no_armed_destination" ] (armed ());
+        Alcotest.(check int) "a lane that is simply off singles nothing out" 0
+          (List.length (C.unarmed_destinations ())))))
 ;;
 
 let test_config_readiness_is_typed_and_credential_free () =

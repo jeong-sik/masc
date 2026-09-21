@@ -2582,7 +2582,9 @@ let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
   let key_path = path ^ ".destinations" in
   match Otoml.find_opt tbl Fun.id [ "destinations" ] with
   | None -> Ok Runtime_schema.default_typesafeai.Runtime_schema.destinations
-  | Some (Otoml.TomlArray entries) ->
+  (* An array of inline tables and [[typesafeai.destinations]] headers are the
+     same list written two ways. *)
+  | Some (Otoml.TomlArray entries | Otoml.TomlTableArray entries) ->
     let parsed =
       List.mapi
         (fun index entry ->

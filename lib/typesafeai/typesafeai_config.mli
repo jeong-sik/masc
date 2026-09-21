@@ -29,6 +29,13 @@ val configured_destinations :
   unit -> Runtime_schema.typesafeai_destination * Runtime_schema.typesafeai_destination list
 (** [\[typesafeai\] destinations] as loaded, credential-free. *)
 
+val unarmed_destinations : unit -> Runtime_schema.typesafeai_destination list
+(** The configured destinations left out of the walk because the variable
+    each names holds no key, while at least one other destination is armed.
+    A misspelt variable name silently turns a reserve route off, so boot
+    reports each. Empty when no destination is armed at all: the lane is then
+    off, which is not a misconfiguration. *)
+
 val lane_destinations : unit -> (destinations, unavailable_reason) result
 (** The lane switch, then the armed destinations: [Error Lane_disabled] when
     the table turns the lane off, [Error No_armed_destination] when no named

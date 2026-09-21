@@ -62,17 +62,20 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # TypeSafe AI (System One Jev) Opt-in Integration
 # Calibrated probabilistic decisions for the board_attention_exact lane and
 # the librarian absorb gate (RFC-librarian-absorb-gate).
-# A non-blank TYPESAFEAI_API_KEY in the environment (the one secret) turns it
-# on. Everything else about the lane is the [typesafeai] table (sample at the
-# end of this block; absent means the defaults shown there; a misspelt key is
-# a load error): enabled = false turns the lane off even with a key and cannot
-# turn it on without one; endpoint and model choose the route;
+# Keys stay in the environment; each destination names the variable holding
+# its own, and a non-blank key in one of them turns the lane on. Everything
+# else about the lane is the [typesafeai] table (sample at the end of this
+# block; absent means the defaults shown there; a misspelt key is a load
+# error): enabled = false turns the lane off even with a key and cannot turn
+# it on without one; destinations lists the System One servers asked in order
+# until one answers (a destination whose variable is empty is left out and
+# reported at boot; every refusal moves on to the next);
 # board_attention is this gate; absorb_gate is the librarian absorb gate
 # (off unless true); excluded_keepers names keepers that neither gate ever
 # asks the vendor about, so their posts, context and memories never leave
 # the machine (a name that is no keeper is reported at boot).
-# When enabled, MASC POSTs the TYPESAFEAI_API_KEY as an Authorization bearer
-# credential to the configured TypeSafe AI endpoint. The JSON body's top-level
+# When enabled, MASC POSTs each destination's key as an Authorization bearer
+# credential to that destination's endpoint and nowhere else. The JSON body's top-level
 # fields are model, state, and questions. state.items[0] contains candidate_id
 # and only the current signal: kind, post_id, author, title, content, hearth,
 # updated_at,
@@ -91,8 +94,11 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 #
 # [typesafeai]
 # enabled = true
-# endpoint = "https://api.typesafe.ai/v1/systemone"
-# model = "jev-latest"
+# destinations = [
+#   { endpoint = "https://api.typesafe.ai/v1/systemone", model = "jev-latest", api_key_env = "TYPESAFEAI_API_KEY" },
+#   # OpenRouter serves the same protocol; listed second it answers when the first does not:
+#   # { endpoint = "https://openrouter.ai/api/v1/systemone", model = "~typesafe/jev-latest", api_key_env = "OPENROUTER_API_KEY" },
+# ]
 # board_attention = true
 # absorb_gate = false
 # context_review = false       # source Context + proposed summary preservation review

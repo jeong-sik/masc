@@ -789,6 +789,56 @@ let test_failure_bodies_omit_configured_credentials () =
     ; `OK, String.make 1 (Char.chr 255) ]
 ;;
 
+(* Two destinations: the first does not answer, the reserve does. The record
+   says who answered, which model it was asked for, and who was passed over. *)
+let test_run_records_the_destination_passed_over () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let module J = Yojson.Safe.Util in
+  let response = {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":1.0}}}|} in
+  let reserve = F.start_server ~sw ~net ~clock (F.Reply response) in
+  let closed = "http://127.0.0.1:9/never-reached" in
+  let reserve_key = "MASC_TEST_TYPESAFEAI_RESERVE_KEY" in
+  Masc_test_deps.with_process_env reserve_key (Some "synthetic-reserve-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with
+      destinations =
+        ( { Runtime_schema.endpoint = closed
+          ; model = "first-model"
+          ; api_key_env = "TYPESAFEAI_API_KEY"
+          }
+        , [ { Runtime_schema.endpoint = reserve.base_url
+            ; model = "reserve-model"
+            ; api_key_env = reserve_key
+            }
+          ] )
+    } @@ fun () ->
+  let first = fact (List.nth sources 0) in
+  let absorbed = absorbed_into merged [ first ] in
+  let run = Gate.run ~clock ~keeper_id:"reserve-fixture" ~facts:[ first ]
+      ~new_claims:[ merged ] ~absorbed () in
+  let report = Gate.run_result_to_yojson run in
+  match J.member "evaluations" report |> J.to_list with
+  | [ evaluation ] ->
+    Alcotest.(check string) "answered by the reserve" reserve.base_url
+      (J.member "destination_uri" evaluation |> J.to_string);
+    Alcotest.(check string) "with the model the reserve was asked for" "reserve-model"
+      (J.member "requested_model" evaluation |> J.to_string);
+    (match J.member "passed_over" evaluation |> J.to_list with
+     | [ attempt ] ->
+       Alcotest.(check string) "the first destination stays on record" closed
+         (J.member "destination_uri" attempt |> J.to_string);
+       Alcotest.(check string) "as the transport refusal it was" "transport"
+         (J.member "refusal" attempt |> J.member "kind" |> J.to_string)
+     | attempts -> Alcotest.failf "one passed-over attempt, got %d" (List.length attempts));
+    Alcotest.(check int) "both armed destinations are listed as asked" 2
+      (J.member "request" evaluation |> J.member "destinations" |> J.to_list |> List.length);
+    let sent = List.hd (F.request_bodies reserve) |> Yojson.Safe.from_string in
+    Alcotest.(check string) "the reserve read its own model id" "reserve-model"
+      (J.member "model" sent |> J.to_string)
+  | evaluations -> Alcotest.failf "one evaluation, got %d" (List.length evaluations)
+;;
+
 let test_run_uses_one_destination_and_model_snapshot () =
   with_gate_http_fixture @@ fun ~sw ~net ~clock ->
   let module F = Exact_output_fixture in
@@ -1154,6 +1204,8 @@ let () =
             test_open_preserves_unjudged_from_unvisited_groups
         ; Alcotest.test_case "one run uses one endpoint and model snapshot" `Quick
             test_run_uses_one_destination_and_model_snapshot
+        ; Alcotest.test_case "a run records the destination passed over" `Quick
+            test_run_records_the_destination_passed_over
         ; Alcotest.test_case "cancelled next request retains its completed observation" `Quick
             test_cancelled_next_request_keeps_the_completed_observation
         ; Alcotest.test_case "skipped run publishes its completed observation" `Quick

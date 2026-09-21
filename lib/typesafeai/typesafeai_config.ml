@@ -44,6 +44,18 @@ let armed () =
   | first :: rest -> Some (first, rest)
 ;;
 
+(* The destinations the walk leaves out while it still has one to ask: each
+   names a variable that holds no key, so a misspelt variable name silently
+   turns a reserve route off. With no destination armed the lane is simply
+   off, and nothing is singled out. *)
+let unarmed_destinations () =
+  let first, rest = configured_destinations () in
+  match armed () with
+  | None -> []
+  | Some _ ->
+    List.filter (fun destination -> Option.is_none (arm destination)) (first :: rest)
+;;
+
 (* The table turns the lane off; it cannot turn it on without a key, and a
    key in one named variable with the default table is enough to opt in. *)
 let lane_destinations () =

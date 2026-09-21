@@ -3486,6 +3486,22 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            fields)
     | json -> json
   in
+  let map_keeper target_index update = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "keepers"
+              then
+                match value with
+                | `List keepers ->
+                  field, `List (List.mapi (fun index keeper ->
+                    if index = target_index then update keeper else keeper) keepers)
+                | _ -> field, value
+              else field, value)
+           fields)
+    | json -> json
+  in
   let unknown_unread = map_keeper 0
       (fun keeper -> match keeper with
        | `Assoc fields ->
@@ -3561,22 +3577,6 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
               then
                 match value with
                 | `List (first :: _) -> field, `List [ first; first ]
-                | _ -> field, value
-              else field, value)
-           fields)
-    | json -> json
-  in
-  let map_keeper target_index update = function
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (field, value) ->
-              if String.equal field "keepers"
-              then
-                match value with
-                | `List keepers ->
-                  field, `List (List.mapi (fun index keeper ->
-                    if index = target_index then update keeper else keeper) keepers)
                 | _ -> field, value
               else field, value)
            fields)

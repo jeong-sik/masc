@@ -360,7 +360,7 @@ let test_reports_the_librarian_position_without_a_loop () =
     "official turns are not counted"
     true
     (is_null (member "unread_official_turns" librarian));
-  Alcotest.(check (option float))
+  Alcotest.(check (option (float 0.)))
     "the snapshot the Librarian wrote is its last success"
     (Some test_now)
     (float_option_field "last_success_at" librarian);

@@ -47,12 +47,14 @@
       checkpoint past the last such line, so the end alone does not cover
       it.
     - everything ahead of the end of a Librarian working state
-      ({!Librarian_continuity_snapshot}) that fits the history. The turn
-      sends that working state in place of the atoms it covers, and the
-      snapshot holds a digest of their bytes; rewritten, the snapshot would
+      ({!Librarian_continuity_snapshot}) that fits the history. Once caught
+      up, the turn sends that working state in place of the atoms it covers,
+      and the snapshot holds a digest of their bytes; rewritten, the snapshot would
       stop fitting ([Prefix_changed]) and the Librarian would write it again
-      from atom 0, one completed turn per round. Those atoms do not go out
-      in a request, so leaving them only costs disk.
+      from atom 0, one completed turn per round, with no working state in
+      any request until it caught up; a snapshot still catching up would
+      start over. Those atoms do not go out in a request, so leaving them
+      only costs disk.
     {!purge_messages} checks all three against the history it returns — the
     atom count, each kept opener's digest, and the working state through
     {!Librarian_continuity_snapshot.restore} — and returns an error instead

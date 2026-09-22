@@ -17,6 +17,7 @@ type prepared =
   ; start_atom : int
   ; end_atom : int
   ; unread : Agent_core.Types.message list
+  ; catch_up_target : int option
   }
 let path_in ~keepers_dir ~keeper_name =
   Filename.concat (Filename.concat keepers_dir keeper_name) "librarian-continuity.json"
@@ -53,11 +54,38 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
     | Error S.Uncovered_history -> Ok None
     | Error error -> Error (S.error_to_string error)
     | Ok range ->
-      let previous_state, start_atom = match previous with
+      let fitting_previous = match previous with
         | Some snapshot -> (match S.restore ~trace_id ~lines ~messages snapshot with
-            | Ok restored -> Some restored.working_state, snapshot.end_atom
-            | Error _ -> None, 0)
+            | Ok restored -> Some (snapshot, restored.working_state)
+            | Error _ -> None)
+        | None -> None in
+      let previous_state, start_atom = match fitting_previous with
+        | Some ((snapshot : S.t), working_state) -> Some working_state, snapshot.end_atom
         | None -> None, 0 in
+      (* A rewrite from atom 0 must not move a request's start back
+         (RFC keeper-context-window-in-tokens §13.4). While it catches up,
+         the snapshot carries where a request starts without it -- the
+         Librarian's durable position when it fits this history, else the
+         end of the last completed turn, as the turn driver decides -- taken
+         again every round, since both move on while the rewrite runs. The
+         snapshot is not a request's working state until its end reaches
+         that start; the capture drops the target then. An ordinary
+         snapshot, one that fitted and was not catching up, carries none. *)
+      let start_without_snapshot () =
+        let position_fits (progress : Keeper_librarian_progress.t) =
+          let position = progress.position in
+          String.equal position.trace_id trace_id && position.end_atom >= 1
+          && W.atom_opening_digest messages (position.end_atom - 1) = Some position.last_atom_digest in
+        match
+          Keeper_librarian_progress.read
+            ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+        with
+        | Ok (Some progress) when position_fits progress -> progress.position.end_atom
+        | Ok (Some _) | Ok None | Error _ -> range.end_atom in
+      let catch_up_target = match fitting_previous with
+        | Some ((snapshot : S.t), _) ->
+          Option.map (fun _ -> start_without_snapshot ()) snapshot.catch_up_end_atom
+        | None -> Some (start_without_snapshot ()) in
       let cuts = R.cut_lines ~trace_id ~lines ~messages range
         |> List.sort (fun (left : R.atom_cut) (right : R.atom_cut) ->
           compare (left.cut_end_atom, left.cut_line) (right.cut_end_atom, right.cut_line)) in
@@ -93,7 +121,8 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
           | Some cut -> Ok cut
           | None -> Error "continuity source has no covering completed boundary" in
         let unread = R.slice messages {range with R.start_atom; end_atom} in
-        Ok (Some {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread})
+        Ok (Some {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
+                  catch_up_target})
 let messages prepared = prepared.unread
 let turn_ref prepared = prepared.covering_cut.cut_turn_ref
 let start_atom prepared = prepared.start_atom
@@ -168,6 +197,7 @@ let commit ~config ~keeper_name ~prepared ~working_state =
     | W.Pinned -> Some message
     | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom then Some message else None) in
   let* snapshot = S.capture_checkpoint_prefix ~end_atom:prepared.end_atom
+    ~catch_up_end_atom:prepared.catch_up_target
     ~trace_id:prepared.trace_id ~lines:prepared.lines ~messages
     ~working_state () |> Result.map_error S.error_to_string in
   let file = path ~config ~keeper_name in

@@ -290,11 +290,12 @@ system_prompt = "Lens."
 
 let test_settings_are_written () =
   let text =
-    Fusion_config_writer.set_settings fixture
-      { Fusion_config_writer.enabled = false
-      ; default_preset = "quorum"
-      ; staged_judge_group_size = 4
-      }
+    ok_or_fail
+      (Fusion_config_writer.set_settings fixture
+         { Fusion_config_writer.enabled = false
+         ; default_preset = "quorum"
+         ; staged_judge_group_size = 4
+         })
   in
   let after = policy_of text in
   check bool "enabled" false after.Fusion_policy.enabled;
@@ -464,6 +465,222 @@ judge_system_prompt = "J."
   | Ok _ -> fail "deleting the table would leave the dotted key behind"
 ;;
 
+(* An entry whose label is not a string does not load; the writer must not
+   pair it with anything or drop it as a stranger. *)
+let test_an_entry_with_an_ill_typed_identity_is_unaddressable () =
+  let text =
+    {|[fusion.presets.odd]
+judge = "j.one"
+judge_system_prompt = "Judge."
+
+[[fusion.presets.odd.panels]]
+label = 3
+panel = ["p.one"]
+panel_system_prompt = "One."
+|}
+  in
+  let odd = preset_of (policy_of fixture) "quorum" in
+  match upsert text { odd with Fusion_policy.name = "odd" } with
+  | Error (Fusion_config_writer.Unaddressable_preset "odd") -> ()
+  | Error error -> failf "unexpected error: %s" (Fusion_config_writer.error_message error)
+  | Ok _ -> fail "an entry without a readable identity must not be edited by lines"
+;;
+
+(* An unlabelled group is known by its routes, so editing its routes finds no
+   entry with the same identity. It continues the entry left in its place and
+   keeps that entry's note, header comment, wrapped prompt and unknown key. *)
+let test_editing_an_unlabelled_groups_routes_keeps_its_lines () =
+  let text =
+    {|[fusion.presets.a]
+judge = "j.meta"
+judge_system_prompt = "Meta."
+
+# the only group; keep p.one first, it is the cheapest
+[[fusion.presets.a.panels]]  # measured 09-20
+panel = [
+  "p.one",  # cheap
+]
+# wrapped on purpose
+panel_system_prompt = """\
+  Answer \
+  briefly."""
+reasoning_effort = "low"
+|}
+  in
+  let a = preset_of (policy_of text) "a" in
+  let group = List.hd a.panels in
+  let edited =
+    { a with Fusion_policy.panels = [ { group with Fusion_policy.models = [ "p.one"; "p.two" ] } ] }
+  in
+  let written = ok_or_fail (upsert text edited) in
+  check preset_t "the new route reads back" edited (preset_of (policy_of written) "a");
+  List.iter
+    (fun line ->
+       check bool ("kept: " ^ line) true (Option.is_some (index_of_line written line)))
+    [ "# the only group; keep p.one first, it is the cheapest"
+    ; "[[fusion.presets.a.panels]]  # measured 09-20"
+    ; "# wrapped on purpose"
+    ; {|  briefly."""|}
+    ; {|reasoning_effort = "low"|}
+    ];
+  check bool "the array comment went with the rewritten value" false
+    (Option.is_some (index_of_line written {|  "p.one",  # cheap|}))
+;;
+
+(* A comment touching the key below with no blank line describes that key, as
+   the seed's own notes do, and goes with it. A comment that a blank line
+   separates from what follows belongs to the key above and stays when the
+   thing below is dropped. *)
+let test_a_comment_belongs_to_the_key_it_touches () =
+  let text =
+    {|[fusion.presets.a]
+panel = ["p.one"]
+judge = "j.meta"
+# the judge answers slowly; give it a minute
+judge_timeout_s = 60
+panel_system_prompt = "P."
+judge_system_prompt = "Meta."
+|}
+  in
+  let a = preset_of (policy_of text) "a" in
+  let without_timeout = ok_or_fail (upsert text { a with Fusion_policy.judge_timeout_s = None }) in
+  check bool "the note above judge_timeout_s goes with it" false
+    (Option.is_some (index_of_line without_timeout "# the judge answers slowly; give it a minute"));
+  check bool "the dropped key is gone" false
+    (Option.is_some (index_of_line without_timeout "judge_timeout_s = 60"));
+  let entries =
+    {|[fusion.presets.b]
+panel = ["p.one"]
+panel_system_prompt = "P."
+judge = "j.meta"
+judge_system_prompt = "Meta."
+
+[[fusion.presets.b.judges]]
+model = "j.a"
+label = "a"
+system_prompt = "A."
+# timeout_s = 30  # A only, disabled
+
+[[fusion.presets.b.judges]]
+model = "j.b"
+label = "b"
+system_prompt = "B."
+|}
+  in
+  let b = preset_of (policy_of entries) "b" in
+  let only_a =
+    { b with
+      Fusion_policy.judges =
+        List.filter (fun (j : Fusion_policy.judge_spec) -> String.equal j.jlabel "a") b.judges
+    }
+  in
+  let written = ok_or_fail (upsert entries only_a) in
+  check bool "the note under judge a stays when judge b goes" true
+    (line_follows written ~first:{|system_prompt = "A."|} ~then_:"# timeout_s = 30  # A only, disabled");
+  check bool "judge b is gone" false (Option.is_some (index_of_line written {|model = "j.b"|}))
+;;
+
+(* [panels] or [judges] written as an inline array in the body is a second
+   spelling of what the writer manages as entries. *)
+let test_inline_entry_arrays_in_the_body_are_unaddressable () =
+  let refuses label text =
+    let a = preset_of (policy_of text) "a" in
+    match upsert text a with
+    | Error (Fusion_config_writer.Unaddressable_preset "a") -> ()
+    | Error error -> failf "%s: unexpected error: %s" label (Fusion_config_writer.error_message error)
+    | Ok _ -> failf "%s: must not be edited by lines" label
+  in
+  refuses "inline judges"
+    {|[fusion.presets.a]
+panel = ["p.one"]
+judge = "j.meta"
+panel_system_prompt = "P."
+judge_system_prompt = "Meta."
+judges = [ { model = "j.x", system_prompt = "L." } ]
+|};
+  refuses "inline panels"
+    {|[fusion.presets.a]
+judge = "j.meta"
+judge_system_prompt = "Meta."
+panels = [ { panel = ["p.one"], panel_system_prompt = "P." } ]
+|}
+;;
+
+(* [fusion] without its own header cannot take a key by lines: a second
+   [\[fusion\]] would name it twice. *)
+let test_settings_need_a_fusion_header () =
+  let settings =
+    { Fusion_config_writer.enabled = true
+    ; default_preset = "a"
+    ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
+    }
+  in
+  let refuses label text =
+    match Fusion_config_writer.set_settings text settings with
+    | Error Fusion_config_writer.Unaddressable_settings -> ()
+    | Error error -> failf "%s: unexpected error: %s" label (Fusion_config_writer.error_message error)
+    | Ok _ -> failf "%s: must not write a second [fusion]" label
+  in
+  refuses "root dotted keys"
+    {|fusion.enabled = true
+fusion.default_preset = "a"
+
+[fusion.presets.a]
+panel = ["p.one"]
+judge = "j.meta"
+panel_system_prompt = "P."
+judge_system_prompt = "Meta."
+|};
+  refuses "inline table" {|fusion = { enabled = true, default_preset = "a" }
+|};
+  refuses "scalar" "fusion = 1\n";
+  let renamed =
+    Fusion_config_writer.rename_preset
+      {|fusion.default_preset = "a"
+
+[fusion.presets.a]
+panel = ["p.one"]
+judge = "j.meta"
+panel_system_prompt = "P."
+judge_system_prompt = "Meta."
+|}
+      ~from:"a" ~target:"b"
+  in
+  match renamed with
+  | Error Fusion_config_writer.Unaddressable_settings -> ()
+  | Error error -> failf "rename: unexpected error: %s" (Fusion_config_writer.error_message error)
+  | Ok _ -> fail "rename must not write a second [fusion] to follow the default"
+;;
+
+let test_line_endings_and_the_final_newline_are_kept () =
+  let crlf =
+    String.concat "\r\n"
+      [ "[fusion.presets.a]"
+      ; {|panel = ["p.one"]  # seat|}
+      ; {|judge = "j.meta"|}
+      ; {|panel_system_prompt = """|}
+      ; "Line one"
+      ; {|two."""|}
+      ; {|judge_system_prompt = "Meta."|}
+      ; ""
+      ]
+  in
+  let a = preset_of (policy_of crlf) "a" in
+  check string "an unchanged CRLF preset is byte-identical" crlf (ok_or_fail (upsert crlf a));
+  let no_final_newline =
+    String.concat "\n"
+      [ "[fusion.presets.a]"
+      ; {|panel = ["p.one"]|}
+      ; {|judge = "j.meta"|}
+      ; {|panel_system_prompt = "P."|}
+      ; {|judge_system_prompt = "Meta."|}
+      ]
+  in
+  let a = preset_of (policy_of no_final_newline) "a" in
+  check string "a file without a final newline stays without one" no_final_newline
+    (ok_or_fail (upsert no_final_newline a))
+;;
+
 let test_unreadable_text_is_an_error () =
   let text = "[fusion.presets.trio]\njudge = \"a\"\njudge = \"b\"\n" in
   match Fusion_config_writer.delete_preset text ~name:"trio" with
@@ -511,11 +728,12 @@ judge_system_prompt = "J."
 |}
   in
   let written =
-    Fusion_config_writer.set_settings text
-      { Fusion_config_writer.enabled = true
-      ; default_preset = "trio"
-      ; staged_judge_group_size = 4
-      }
+    ok_or_fail
+      (Fusion_config_writer.set_settings text
+         { Fusion_config_writer.enabled = true
+         ; default_preset = "trio"
+         ; staged_judge_group_size = 4
+         })
   in
   check int "the new key reads back" 4 (policy_of written).Fusion_policy.staged_judge_group_size;
   check bool "the new key follows the last key" true
@@ -523,11 +741,12 @@ judge_system_prompt = "J."
   check bool "the next table keeps its note" true
     (line_follows written ~first:"# trio preset note" ~then_:"[fusion.presets.trio]");
   let unchanged =
-    Fusion_config_writer.set_settings text
-      { Fusion_config_writer.enabled = true
-      ; default_preset = "trio"
-      ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
-      }
+    ok_or_fail
+      (Fusion_config_writer.set_settings text
+         { Fusion_config_writer.enabled = true
+         ; default_preset = "trio"
+         ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
+         })
   in
   check string "settings equal to the file leave it byte-identical" text unchanged
 ;;
@@ -603,6 +822,16 @@ let () =
             test_unlabelled_groups_are_told_apart_by_routes
         ; test_case "a key written elsewhere is unaddressable" `Quick
             test_a_key_written_elsewhere_is_unaddressable
+        ; test_case "an entry with an ill-typed identity is unaddressable" `Quick
+            test_an_entry_with_an_ill_typed_identity_is_unaddressable
+        ; test_case "editing an unlabelled group's routes keeps its lines" `Quick
+            test_editing_an_unlabelled_groups_routes_keeps_its_lines
+        ; test_case "a comment belongs to the key it touches" `Quick
+            test_a_comment_belongs_to_the_key_it_touches
+        ; test_case "inline entry arrays in the body are unaddressable" `Quick
+            test_inline_entry_arrays_in_the_body_are_unaddressable
+        ; test_case "line endings and the final newline are kept" `Quick
+            test_line_endings_and_the_final_newline_are_kept
         ; test_case "unreadable text is an error" `Quick test_unreadable_text_is_an_error
         ] )
     ; ( "delete and rename"
@@ -617,6 +846,7 @@ let () =
     ; ( "settings"
       , [ test_case "settings are written" `Quick test_settings_are_written
         ; test_case "a new setting joins the table" `Quick test_a_new_setting_joins_the_table
+        ; test_case "settings need a [fusion] header" `Quick test_settings_need_a_fusion_header
         ] )
     ; ( "seed"
       , [ test_case "seed runtime.toml round-trips" `Quick test_seed_runtime_toml_round_trips ] )

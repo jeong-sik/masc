@@ -157,7 +157,7 @@ let install_operator_token ~base_path ~host ~port =
         Masc_tui_credential.Not_required
     | Masc_tui_credential.No_workspace ->
         operator_token_cell := None;
-        Masc_tui_credential.Unavailable Masc_tui_credential.no_workspace_detail
+        Masc_tui_credential.Workspace_pending
     | Masc_tui_credential.Mint -> (
         match
           Auth_login.mint ~base_path ~host ~port
@@ -173,7 +173,7 @@ let install_operator_token ~base_path ~host ~port =
             Masc_tui_credential.Minted
         | Error err ->
             operator_token_cell := None;
-            Masc_tui_credential.Unavailable
+            Masc_tui_credential.Mint_failed
               (Masc_domain.masc_error_to_string err))
   in
   outcome

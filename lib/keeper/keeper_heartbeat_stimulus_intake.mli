@@ -194,8 +194,9 @@ val reconcile_spent_selection
     because it is attached to an intake error.
 
     The selected observations are merged with the [pending_board_events]
-    already accumulated by the caller, deduplicating by [post_id] (the durable
-    queue admits at most one pending payload for that identity). A
+    already accumulated by the caller using [same_board_event_identity]:
+    comments preserve exact comment IDs and edits preserve content update times,
+    so separate sources on one post remain visible. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be selected.
     A transient Board read keeps that exact source pending and sets

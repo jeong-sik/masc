@@ -279,7 +279,7 @@ let test_a_settle_without_a_number_names_no_turn () =
   in
   let texts = List.map text drawn.Pane.rows in
   let header = List.nth texts (last_index_of_in texts "mute") in
-  check bool "settles with its state" true (contains "settled" header);
+  check bool "settles with its state" true (contains "done" header);
   check bool "no turn is named" false (contains "turn" header)
 
 (* An offline keeper has no fleet row any more, but the operator can still
@@ -294,7 +294,7 @@ let test_a_gone_keepers_turn_is_not_read_as_running () =
   let header = find_row_in dead_texts "goner" in
   check bool "the focus header says the process is gone" true
     (contains "process gone" header);
-  check bool "and that the turn never settled" true (contains "unsettled" header);
+  check bool "and that the turn never settled" true (contains "no end" header);
   check bool "the focus block does not say running" false
     (contains "running" header);
   let body = find_row_in dead_texts "Read" in
@@ -314,18 +314,127 @@ let test_an_open_record_without_a_tool_does_not_claim_a_current_turn () =
   let row = find_row_in dead_texts "bare" in
   check bool "a record with no call shows a dash, not a zero" true
     (contains "    -" row);
-  check bool "and says so in the state column" true (contains "unsettled" row);
+  check bool "and says so in the state column" true (contains "open" row);
   check bool "the fleet row never borrows the phase word" false
     (contains "running" row)
 
+(* ── what the keeper is doing now ────────────────────────────────────── *)
+
+(* The header quotes the record only for a keeper the keepalive vouches
+   for. These use tester's own entries: a Read that returned at 983 and an
+   Execute still out since 990, with now at 1000. *)
+let now_header ?(health = Some Masc.Tui_decode.Health_running) ?(name = "tester") entries_of =
+  let input =
+    { fixture with
+      Pane.keepers = Some [ keeper ~health name ]
+    ; selected = Some name
+    ; approvals = []
+    ; chunks = chunks [ name ] entries_of
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  List.nth texts (last_index_of_in texts name)
+
+let test_a_running_keeper_names_the_call_that_is_out () =
+  let header = now_header fixture_entries in
+  check bool "the call that has not returned, aged from its own start" true
+    (contains "running Execute 10.0s" header);
+  check bool "and the row spends no second clock on it" false
+    (contains "last event" header)
+
+let test_a_running_keeper_between_calls_says_the_model_has_the_turn () =
+  let entries_of =
+    entries
+      [ ( 980.
+        , agent_core ~tool:"Read" ~turn:5 ~tool_use_id:"a" ~at:980.
+            ~correlation:"trace-tester" lane )
+      ; ( 983.
+        , agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:5
+            ~tool_use_id:"a" ~at:983. ~correlation:"trace-tester" lane )
+      ; ( 985.
+        , agent_core ~kind:Observer.Turn_started ~turn:6 ~at:985.
+            ~correlation:"trace-tester" lane )
+      ]
+  in
+  let header = now_header entries_of in
+  check bool "the provider call is in flight, aged from its marker" true
+    (contains "waiting on model 15.0s" header);
+  check bool "the returned call is not called running" false (contains "running" header)
+
+(* A lane that sends no turn markers -- a CLI runtime -- leaves the header
+   as it was: the record's state word and the age of its newest event. *)
+let test_a_record_without_markers_keeps_the_older_reading () =
+  let entries_of =
+    entries
+      [ ( 990.
+        , Observer.Keeper_tool_call
+            { Observer.kt_keeper = "tester"
+            ; kt_turn = Some 4
+            ; kt_tool = "Read"
+            ; kt_duration_ms = Some 5.
+            ; kt_disposition = Some (Ok Masc.Tui_decode.Keeper_call_completed)
+            ; kt_at = 990.
+            ; kt_tool_use_id = Some "only"
+            ; kt_schedule = None
+            ; kt_tool_args = None
+            ; kt_tool_result = None
+            ; kt_tool_args_preview = None
+            ; kt_tool_output_preview = None
+            } )
+      ]
+  in
+  let header = now_header entries_of in
+  check bool "the state word stands" true (contains "open" header);
+  check bool "with the age of the newest event" true (contains "last event 10.0s" header);
+  check bool "nothing is claimed about the model" false (contains "waiting on model" header)
+
+let test_an_idle_keepers_settled_record_says_how_long_it_has_been_quiet () =
+  let header =
+    now_header ~health:(Some Masc.Tui_decode.Health_idle) ~name:"prober"
+      (entries [ 900., settled ~at:900. "prober" ])
+  in
+  check bool "quiet since the settle" true (contains "idle 1m40s" header);
+  check bool "and the turn it closed" true (contains "turn 41" header)
+
 let test_a_gone_keepers_focus_header_says_unfinished () =
   let header = last_index_of_in dead_texts "goner" in
-  check bool "the focus header says the record is unsettled and why" true
-    (contains "unsettled, process gone" (List.nth dead_texts header));
+  check bool "the focus header says no end is coming and why" true
+    (contains "no end, process gone" (List.nth dead_texts header));
   check bool "the focus header does not say in turn" false
     (contains "in turn" (List.nth dead_texts header));
   check bool "an open turn does not borrow the session number" false
     (contains "turn 7" (List.nth dead_texts header))
+
+(* A gone keeper with two turns that never ended: the focus header carries
+   the long form and the earlier turn's own row the short one, each with the
+   [!] mark rather than [~]. Only the header had a test, so the short form
+   could have said anything. *)
+let test_a_gone_keepers_earlier_turn_also_says_no_end () =
+  let input =
+    { fixture with
+      Pane.keepers =
+        Some
+          [ keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
+              ~health:(Some Masc.Tui_decode.Health_offline) "goner" ]
+    ; selected = Some "goner"
+    ; approvals = []
+    ; chunks = chunks [ "goner" ] @@ entries
+        [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
+            ~correlation:"trace-goner" lane
+        ; 980., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
+            ~correlation:"trace-goner" lane
+        ]
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let header = List.nth texts (last_index_of_in texts "goner") in
+  check bool "the header carries the long form" true
+    (contains "no end, process gone" header);
+  let prior = List.nth texts (last_index_of_in texts "no end") in
+  check bool "the earlier row is not the header" false (contains "goner" prior);
+  check bool "the earlier row carries the short form behind the gone mark" true
+    (contains "! no end" prior);
+  check bool "and not the open mark" false (contains "~ " prior)
 
 let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let input =
@@ -337,7 +446,7 @@ let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let header = List.nth texts (last_index_of_in texts "tester") in
   check bool "idle health preserves the unresolved feed record" true
-    (contains "unsettled" header);
+    (contains "open" header);
   check bool "and does not blame the process" false (contains "gone" header);
   check bool "receipt clock remains visible" true (contains "last event 10.0s" header);
   check bool "no row asserts a current turn" false
@@ -391,14 +500,14 @@ let test_earlier_unclosed_record_is_not_presented_as_settled () =
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
-  (* The header says unsettled for the current record; the earlier one is
+  (* The header says open for the current record; the earlier one is
      the later row that says it again. *)
-  let prior = List.nth texts (last_index_of_in texts "unsettled") in
+  let prior = List.nth texts (last_index_of_in texts "open") in
   check bool "the earlier row is not the header" false (contains "tester" prior);
-  check bool "earlier missing settlement remains unsettled" true (contains "~ unsettled" prior);
+  check bool "earlier missing settlement stays open" true (contains "~ open" prior);
   check bool "earlier record uses an observed count" true (contains "no calls yet" prior);
-  check bool "no settled marker is invented" false
-    (contains (Acting.glyph_text Acting.Turn_settled) prior)
+  check bool "no done marker is invented" false
+    (contains (Acting.glyph_text Acting.Turn_done) prior)
 
 (* ── width contract ─────────────────────────────────────────────────── *)
 
@@ -486,6 +595,8 @@ let test_fleet_rows_read_the_state () =
   check bool "waiting names which tool" true (contains "tool_execute" (find_row "polisher"));
   check bool "working names the call out" true (contains "Execute" (find_row "tester"));
   check bool "working counts its calls as at least" true (contains "   2+" (find_row "tester"));
+  check bool "working says open in the state column" true (contains "open" (find_row "tester"));
+  check bool "done says so in the state column" true (contains "done" (find_row "probe"));
   check bool "settled counts its calls" true (contains "    3" (find_row "probe"));
   (* The fleet column carries the sum. The two figures apart are the focus
      block's job: nine cells cannot hold "in 73.9k · out 358". *)
@@ -495,7 +606,7 @@ let test_fleet_rows_read_the_state () =
 
 let test_focus_block_names_the_latest_observed_record () =
   let header = last_index_of "tester" in
-  check bool "the record has no observed settlement" true (contains "unsettled" (nth header));
+  check bool "the record has no observed settlement" true (contains "open" (nth header));
   check bool "the header carries the receipt age" true (contains "last event 10.0s" (nth header));
   check bool "the heading names the order" true
     (contains "calls \xc2\xb7 oldest first" (nth (header + 1)));
@@ -1081,7 +1192,8 @@ let test_focus_header_keeps_its_clock_behind_a_wide_name_and_a_named_turn () =
   let header = List.nth texts (last_index_of_in texts name) in
   check bool "the turn is named" true (contains "turn 3141" header);
   check bool "the clock is whole" true (contains "last event 10.0s" header);
-  check bool "no state word doubles the number" false (contains "settled" header)
+  check bool "no state word doubles the number" false
+    (List.exists (fun word -> contains word header) [ "done"; "open"; "no end" ])
 
 let test_beside_the_roster_a_long_record_folds_and_scrolls () =
   let events =
@@ -1742,6 +1854,34 @@ let test_a_call_row_names_the_call_a_press_opens () =
     (List.nth view.Pane.targets first_call_row
      = Pane.Target_call ("runner", Acting.Call_by_id "first"))
 
+(* Ctrl-W's cursor rests only where Enter would do something: the step
+   skips legend, rule, and padding rows, in both directions, and finds the
+   first row from before the frame. *)
+let cursor_targets =
+  [| Pane.Target_next_tab
+   ; Pane.Target_none
+   ; Pane.Target_keeper "rondo"
+   ; Pane.Target_none
+   ; Pane.Target_none
+   ; Pane.Target_call_order
+   ; Pane.Target_none |]
+
+let test_cursor_steps_over_rows_a_press_does_nothing_on () =
+  let step ~row ~step = Pane.next_target_row ~targets:cursor_targets ~row ~step in
+  check (option int) "first row from before the frame" (Some 0) (step ~row:(-1) ~step:1);
+  check (option int) "down skips the blank row" (Some 2) (step ~row:0 ~step:1);
+  check (option int) "down skips two blank rows" (Some 5) (step ~row:2 ~step:1);
+  check (option int) "up skips two blank rows" (Some 2) (step ~row:5 ~step:(-1));
+  check (option int) "up from a blank row lands above it" (Some 2) (step ~row:3 ~step:(-1))
+
+let test_cursor_stops_at_the_frames_edge () =
+  let step ~row ~step = Pane.next_target_row ~targets:cursor_targets ~row ~step in
+  check (option int) "nothing below the last target" None (step ~row:5 ~step:1);
+  check (option int) "nothing above the first target" None (step ~row:0 ~step:(-1));
+  check (option int) "a zero step goes nowhere" None (step ~row:2 ~step:0);
+  check (option int) "an empty frame has no row" None
+    (Pane.next_target_row ~targets:[||] ~row:(-1) ~step:1)
+
 let () =
   run "tui acting pane"
     [ ( "viewport allocation"
@@ -1776,11 +1916,23 @@ let () =
         ; test_case "folded and scrolled views preserve keeper row and focus" `Quick
             test_folded_and_scrolled_views_preserve_keeper_row_and_focus
         ] )
+    ; ( "what the keeper is doing now"
+      , [ test_case "a running keeper names the call that is out" `Quick
+            test_a_running_keeper_names_the_call_that_is_out
+        ; test_case "a running keeper between calls says the model has the turn" `Quick
+            test_a_running_keeper_between_calls_says_the_model_has_the_turn
+        ; test_case "a record without markers keeps the older reading" `Quick
+            test_a_record_without_markers_keeps_the_older_reading
+        ; test_case "an idle keeper's settled record says how long it has been quiet" `Quick
+            test_an_idle_keepers_settled_record_says_how_long_it_has_been_quiet
+        ] )
     ; ( "a gone keeper"
       , [ test_case "a gone keeper's turn is not read as running" `Quick
             test_a_gone_keepers_turn_is_not_read_as_running
-        ; test_case "a gone keeper's focus header says unsettled, process gone" `Quick
+        ; test_case "a gone keeper's focus header says no end, process gone" `Quick
             test_a_gone_keepers_focus_header_says_unfinished
+        ; test_case "a gone keeper's earlier turn also says no end" `Quick
+            test_a_gone_keepers_earlier_turn_also_says_no_end
         ; test_case "an open record does not claim a current turn" `Quick
             test_an_open_record_without_a_tool_does_not_claim_a_current_turn
         ; test_case "a settled row counts only what the settle confirmed" `Quick
@@ -1889,6 +2041,12 @@ let () =
             test_only_offline_is_dropped
         ; test_case "a failing keeper is not dropped" `Quick
             test_a_failing_keeper_is_not_dropped
+        ] )
+    ; ( "keyboard cursor"
+      , [ test_case "the cursor steps over rows a press does nothing on" `Quick
+            test_cursor_steps_over_rows_a_press_does_nothing_on
+        ; test_case "the cursor stops at the frame's edge" `Quick
+            test_cursor_stops_at_the_frames_edge
         ] )
     ; ( "beside the roster"
       , [ test_case "only the selected keeper's record draws" `Quick

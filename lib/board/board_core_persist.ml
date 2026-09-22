@@ -133,8 +133,8 @@ let mark_dirty_comment store comment_id =
 let with_lock store f = Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
 
 (** Serialize JSONL writes. Callers must never hold the state mutex while
-    acquiring [persist_mutex]; compute snapshots under [with_lock], release it,
-    then call [with_persist_lock]. *)
+    acquiring [persist_mutex]. Acquire the persist lock before taking a state
+    snapshot, and retain it until the snapshot has been written. *)
 let with_persist_lock store f =
   let started = Time_compat.now () in
   Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
@@ -382,10 +382,13 @@ let ensure_masc_dir = Board_paths.ensure_masc_dir
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
-let posts_jsonl_unlocked store =
+let posts_jsonl_unlocked ?replacement store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
-    (fun _ (pst : post) ->
+    (fun key (pst : post) ->
+       let pst = match replacement with
+         | Some (updated : post) when String.equal key (Post_id.to_string updated.id) -> updated
+         | Some _ | None -> pst in
        Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
        Buffer.add_char buf '\n')
     store.posts;
@@ -408,8 +411,8 @@ let save_posts_jsonl_result content =
    row was never committed. Re-marking puts the snapshot back in the queue for
    the next flush, the same way board_votes recovers (#29361). *)
 let rewrite_posts store =
-  let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () ->
+    let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
     match save_posts_jsonl_result content with
     | Ok () -> ()
     | Error _ ->
@@ -437,13 +440,12 @@ let save_comments_jsonl content =
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
 ;;
-(* Mirrors [rewrite_posts]: snapshot under [store.mutex], disk I/O under
-   the persist lock after releasing the state lock. The previous body
-   iterated [store.comments] and wrote the file with no lock at all,
-   contradicting the interface doc; callers must not hold [store.mutex]. *)
+(* Snapshot capture and write share the persist lock, so a waiting rewrite
+   cannot overwrite a newer committed snapshot. *)
 let rewrite_comments store =
-  let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_comments_jsonl content)
+  with_persist_lock store (fun () ->
+    let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
+    save_comments_jsonl content)
 ;;
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -593,8 +595,8 @@ let create_post_with_audience
       | Error _ as error -> error
       | Ok audience ->
       (* Write-ahead (PR #28934 class, #28952): validate under
-         [with_lock] with no mutation, durably append outside any lock,
-         then commit under [with_lock]. The previous shape mutated
+         [with_lock] with no mutation, then hold the persistence lock across the durable
+         append and the in-memory commit under [with_lock]. The previous shape mutated
          first and appended second, so a racing [flush_dirty] could
          snapshot-write a post whose durable append was about to fail
          and be rolled back — reviving it from the snapshot on restart.
@@ -614,6 +616,7 @@ let create_post_with_audience
                 ; meta_json = normalized_meta
                 ; visibility
                 ; created_at = now
+                ; content_updated_at = now
                 ; updated_at = now
                 ; expires_at
                 ; votes_up = 0
@@ -628,11 +631,10 @@ let create_post_with_audience
       match staged with
       | Error _ as e -> e
       | Ok post ->
-        (match with_persist_lock store (fun () -> append_post post) with
-         | Error _ as e -> e
-         | Ok () ->
-           let committed =
-             with_lock store (fun () ->
+        (match with_persist_lock store (fun () ->
+           match append_post post with
+           | Error _ as e -> e
+           | Ok () -> Ok (with_lock store (fun () ->
                (* Commit re-checks the policy: staging validated it, but
                   it can flip while the append is in flight, and commit
                   is the authoritative gate — a durable row without a
@@ -646,8 +648,9 @@ let create_post_with_audience
                  index_post_origin store post;
                  Stdlib.incr store.post_count;
                  invalidate_post_caches store;
-                 Ok ())
-           in
+                 Ok ()) )) with
+         | Error _ as e -> e
+         | Ok committed ->
            (match committed with
             | Ok () -> Ok { post; audience }
             | Error e ->
@@ -818,7 +821,7 @@ let update_post_with_outcome
       ?body
       ?new_author
       ()
-  : (post, board_error) Result.t
+  : (post * bool, board_error) Result.t
   =
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -826,7 +829,10 @@ let update_post_with_outcome
   match Agent_id.of_string editor with
   | Error e -> Error e
   | Ok editor_id ->
-    let snapshot_result =
+    (* Persist-before-commit: acquire persistence first, then state. Keeping
+       state locked through the write preserves unrelated concurrent fields
+       without a rollback or a stale staged-row replacement. *)
+    with_persist_lock store (fun () ->
       with_lock store (fun () ->
         let key = Post_id.to_string pid in
         match Hashtbl.find_opt store.posts key with
@@ -874,7 +880,16 @@ let update_post_with_outcome
             | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
               if String.length normalized_body = 0
               then Error (Validation_error "Content cannot be empty")
-              else (
+              else match Board_audience.audience_for_post ~visibility:existing.visibility
+                  ~title:normalized_title ~content:normalized_body with
+              | Error error -> Error error
+              | Ok _ -> (
+                let content_changed =
+                  not (String.equal existing.title normalized_title
+                       && String.equal existing.body normalized_body
+                       && String.equal (Agent_id.to_string existing.author)
+                            (Agent_id.to_string next_author))
+                in
                 let now = Time_compat.now () in
                 let updated =
                   { existing with
@@ -882,24 +897,17 @@ let update_post_with_outcome
                   ; title = normalized_title
                   ; body = normalized_body
                   ; meta_json = normalized_meta
+                  ; content_updated_at =
+                      if content_changed then now else existing.content_updated_at
                   ; updated_at = now
                   }
                 in
-                Hashtbl.replace store.posts key updated;
-                mark_dirty_post store key;
-                invalidate_post_caches store;
-                Ok (updated, posts_jsonl_unlocked store))))
-    in
-    match snapshot_result with
-    | Error _ as e -> e
-    | Ok (updated, posts_jsonl) ->
-      (* The rewrite carries the edit and the post's updated_at, and a keeper
-         board cursor advances on updated_at. Discarding the failure here
-         reported an edit that a restart would not show, and moved no cursor
-         to say so (#26168). The result variant is right here. *)
-      (match
-         with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl)
-       with
-       | Error _ as e -> e
-       | Ok () -> Ok updated)
+                let snapshot = posts_jsonl_unlocked ~replacement:updated store in
+                match save_posts_jsonl_result snapshot with
+                | Error _ as error -> error
+                | Ok () ->
+                  Hashtbl.replace store.posts key updated;
+                  mark_dirty_post store key;
+                  invalidate_post_caches store;
+                  Ok (updated, content_changed)))))
 ;;

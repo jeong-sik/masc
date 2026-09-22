@@ -25,6 +25,7 @@ let make_post ~id ~created_at ~votes_up ~votes_down ~reply_count () : Board.post
   ; meta_json = None
   ; visibility = Board.Public
   ; created_at
+  ; content_updated_at = created_at
   ; updated_at = created_at
   ; expires_at = created_at +. (30.0 *. Masc_time_constants.day)
   ; votes_up

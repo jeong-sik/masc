@@ -2,7 +2,11 @@ name = "keeper_memory_retract"
 description = """
 Remove one false, obsolete or unsupported current fact by exact memory_id.
 
-Repeated IDs name one fact, not copies; they need no cleanup. Use an ID from memory write or search and give the concrete reason. The atomic commit also removes unsupported derived facts and journals the reason and support invalidations."""
+Repeated IDs name one fact, not copies; they need no cleanup. Use an ID from \
+memory write or source='current' search and give the concrete reason. The \
+atomic commit also removes unsupported derived facts and journals the reason \
+and support invalidations. This Keeper tool removes one fact; operator batch \
+cleanup is a separate Admin HTTP boundary with snapshot revision+SHA-256 CAS."""
 additional_properties = false
 
 
@@ -28,7 +32,7 @@ description = "Concrete non-empty reason this fact is no longer current."
 short_description = "Retract a current keeper memory fact."
 when_to_use = "Use when an ordinary-current fact is false, obsolete, or no longer supported."
 key_constraints = [
-  "Use an exact memory_id from memory write or search.",
+  "Use an exact memory_id from memory write or source='current' search.",
   "Do not retract to deduplicate an identical memory_id; it identifies the single current fact.",
   "A source-bound fact is not an ordinary-current fact and cannot be retracted here.",
   "The reason is durable journal evidence, not transient commentary.",

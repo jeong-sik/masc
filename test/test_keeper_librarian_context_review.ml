@@ -141,14 +141,19 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-context-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled = true;
-      lane_endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port;
-      lane_model = "requested-context-fixture"; context_review = true; absorb_gate = true;
+      destinations =
+        ( { Runtime_schema.endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port
+          ; model = "requested-context-fixture"
+          ; api_key_env = "TYPESAFEAI_API_KEY"
+          }
+        , [] );
+      context_review = true; absorb_gate = true;
       excluded_keepers = if scenario = Excluded then [keeper_id] else []} @@ fun () ->
   let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id in
   let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let receipt_before = Fs_compat.load_file_opt receipt_path in
   let journal_before = Fs_compat.load_file_opt journal_path in
-  let run () = Runtime.run_best_effort ~trigger:Runtime.Queue_changed
+  let run () = Runtime.run_best_effort
       ~write_scope:(if scenario = Context_only then Runtime.Context_only else Runtime.Context_and_memory)
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
   if scenario = Cancel_absorb || scenario = Cancel_review then (

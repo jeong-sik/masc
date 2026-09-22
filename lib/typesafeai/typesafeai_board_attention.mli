@@ -11,7 +11,7 @@ type judged =
 
 val judge_candidate :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  api_key:string ->
+  destinations:Typesafeai_config.destinations ->
   candidate:Keeper_board_attention_candidate.candidate ->
   unit ->
   (judged, string) result

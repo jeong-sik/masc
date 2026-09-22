@@ -82,9 +82,8 @@ let run_safe ~caller fn =
     let bt = Printexc.get_backtrace () in
     Log.Misc.error "masc_agent_core_bridge: AGENT_CORE execution error (caller=%s): %s\n%s"
       caller (Printexc.to_string exn) bt;
-    (* RFC-0159 Phase A: emit typed [Internal_bridge_exception] so the
-       classifier can route bridge-boundary failures off the
-       [Reason_internal_error] catch-all. *)
+    (* Emit typed [Internal_bridge_exception] so the classifier routes
+       bridge-boundary failures off the [Reason_internal_error] catch-all. *)
     Error
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Internal_bridge_exception

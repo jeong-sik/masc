@@ -12,17 +12,17 @@ module StringSet = Set_util.StringSet
    [tool_shard.ml] mirrors the SSOT (cycle: Tool_shard ->
    Keeper_tool_memory_runtime -> ... -> Tool_shard prevented via local mirror,
    sync test catches drift). The previous code used a string match
-   with a wildcard `_ -> memory` branch which silently routed any
-   unknown source to memory. Now unknown values are rejected at the
+   with a wildcard `_ -> current` branch which silently routed any
+   unknown source to the current-memory search. Now unknown values are rejected at the
    tool boundary. *)
 type memory_search_source =
-  | Memory
+  | Current
   | Absorbed
   | History
   | All
 
 let memory_search_source_to_string = function
-  | Memory -> "memory"
+  | Current -> "current"
   | Absorbed -> "absorbed"
   | History -> "history"
   | All -> "all"
@@ -30,14 +30,14 @@ let memory_search_source_to_string = function
 
 let memory_search_source_of_string_opt raw =
   match String.trim (String.lowercase_ascii raw) with
-  | "memory" -> Some Memory
+  | "current" -> Some Current
   | "absorbed" -> Some Absorbed
   | "history" -> Some History
   | "all" -> Some All
   | _ -> None
 ;;
 
-let all_memory_search_sources = [ Memory; Absorbed; History; All ]
+let all_memory_search_sources = [ Current; Absorbed; History; All ]
 
 let valid_memory_search_source_strings =
   List.map memory_search_source_to_string all_memory_search_sources
@@ -470,20 +470,21 @@ let keeper_memory_search_with_outcome
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
   (* [Safe_ops.json_string] returns its default for an absent key and for a key
-     whose value is not a string, so {"source": ["memory"]} used to reach Memory
-     while the merely misspelled {"source": "memry"} was refused below. Read the
+     whose value is not a string, so {"source": ["current"]} could otherwise
+     reach Current
+     while the merely misspelled {"source": "currnt"} was refused below. Read the
      member so a non-string lands on the same rejection a bad string does; the
-     schema documents "memory" as the default for absence only. *)
+     schema documents "current" as the default for absence only. *)
   let source_member = Safe_ops.safe_member "source" args in
   let source_raw =
     match source_member with
-    | `Null -> memory_search_source_to_string Memory
+    | `Null -> memory_search_source_to_string Current
     | `String raw -> raw
     | other -> Yojson.Safe.to_string other
   in
   let parsed_source =
     match source_member with
-    | `Null -> Some Memory
+    | `Null -> Some Current
     | `String raw -> memory_search_source_of_string_opt raw
     | _ -> None
   in
@@ -520,10 +521,9 @@ let keeper_memory_search_with_outcome
        results, and both the model and the operator are told. The store is
        append-only, so the same lines are reported on every search until the
        file is repaired; a count and the first and last line numbers keep that
-       report the same size however many lines there are. For the default
-       search and source=all, a store that cannot be read at all is named
-       beside the stores that answered rather than taking their results with
-       it. *)
+       report the same size however many lines there are. For source=all, a
+       store that cannot be read at all is named beside the stores that
+       answered rather than taking their results with it. *)
     let absorbed_fields ~(absorbed : absorbed_search) ~unavailable =
       (match absorbed.unreadable with
        | [] -> []
@@ -561,16 +561,35 @@ let keeper_memory_search_with_outcome
               ] )
         ]
     in
-    (* The current facts and the absorbed rows answered together, the match
+    let current_stores () =
+      match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+      | Error _ as error -> error
+      | Ok facts ->
+        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
+         | Error _ as error -> error
+         | Ok (fact_matches, fact_total) ->
+           Ok
+             ( durable_json
+                 ~fact_jsons:(List.map fact_match_to_json fact_matches)
+                 ~fact_total
+                 ~total_matches:(List.length fact_matches)
+                 ~extra_matches:[]
+                 ~read_errors:false
+                 ~read_error_fields:[]
+             , List.filter_map
+                 (fun (matched : fact_match) ->
+                    match matched.identity with
+                    | Ordinary_memory_id memory_id -> Some memory_id
+                    | Source_sha256 _ -> None)
+                 fact_matches ))
+    in
+    (* Source=all combines current facts, absorbed rows, and history. The match
        tier before the store order ({!answering}): a weaker current fact does
        not take a slot from an absorbed row holding the whole query. The
-       default search reads these two stores; source=all adds the history.
-       The default reads the absorbed rows because a keeper mostly asks the
-       default and the rows are the originals a librarian merged (RFC-0456
-       §8): a search the snapshot alone leaves unanswered is not the same as
-       the keeper never having known it. Only ordinary current facts are
+       explicit all scope is the only combined view. The default current scope
+       never silently widens into absorbed history. Only ordinary current facts are
        retrievals (RFC-0418); an absorbed row leaves no Retrieved event. *)
-    let durable_stores ~with_history =
+    let all_stores () =
       match read_current_facts ~keepers_dir ~keeper_id:meta.name with
       | Error _ as error -> error
       | Ok facts ->
@@ -589,11 +608,7 @@ let keeper_memory_search_with_outcome
              | Ok absorbed -> absorbed, None
              | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
            in
-           let history =
-             if with_history
-             then search_history ~config ~meta ~ctx_work ~query ~limit
-             else empty_history_search
-           in
+           let history = search_history ~config ~meta ~ctx_work ~query ~limit in
            (* A librarian made one claim of the rows it absorbed (RFC-0456
               §4.2). When that claim answers this search too, the rows say
               the same thing again and are left out, so the claim is not
@@ -653,7 +668,7 @@ let keeper_memory_search_with_outcome
                @ (if no_match then [ "no_match", `Bool true ] else [])
                @ history_read_error_fields history)
           , [] )
-      | All -> durable_stores ~with_history:true
+      | All -> all_stores ()
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
            the events sidecar is about current memories (RFC-0418). *)
@@ -679,7 +694,7 @@ let keeper_memory_search_with_outcome
                     ~read_errors:(absorbed.unreadable <> [])
                     ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
                 , [] )))
-      | Memory -> durable_stores ~with_history:false
+      | Current -> current_stores ()
     in
     match result with
     | Error error ->

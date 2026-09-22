@@ -346,7 +346,7 @@ function LibrarianJournal({
                     <code>librarian_failure</code>
                     <strong class="text-[var(--color-danger)]">${entry.kind}</strong>
                     <time dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
-                    <span class="text-[var(--color-fg-muted)]">스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}${entry.cadenceDeferred ? ' · 주기 연기' : ''}</span>
+                    <span class="text-[var(--color-fg-muted)]">스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}</span>
                   </div>
                   <span class="mt-1 block text-[var(--color-fg-muted)]">${entry.detail}</span>
                 </li>
@@ -747,7 +747,7 @@ export function InternalAgentsMonitor() {
                           ? 'JEV unavailable: Board lane is CLI-only'
                           : lane.jev.state === 'lane_unavailable'
                             ? 'JEV unavailable: Board lane is not ready'
-                            : `JEV CONFIGURED · ${lane.jev.model}`
+                            : `JEV CONFIGURED · ${lane.jev.destinations.map(d => `${d.destinationUri} (${d.model})`).join(', ')}`
                     return html`
                       <tr key=${lane.laneId}>
                         <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>

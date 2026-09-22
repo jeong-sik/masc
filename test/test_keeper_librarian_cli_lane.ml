@@ -370,15 +370,14 @@ let test_failure_reaches_journal
     incr attempts;
     answer
   in
-  Runtime.run_best_effort ~trigger:Runtime.Queue_changed ~cli_runner:runner
+  Runtime.run_best_effort ~cli_runner:runner
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
   check int "only admitted CLI slots reach the runner" calls !attempts;
   let api_failure = if cli_only then None else Some projection_failure in
   (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
-   | [Ok (Current.Journal_failed { detail; kind = actual_kind; cadence_deferred; _ })] ->
+   | [Ok (Current.Journal_failed { detail; kind = actual_kind; _ })] ->
      check_detail ?api_failure ?cli_failure:failure detail;
-     check bool "journal keeps the original failure kind" true (actual_kind = kind);
-     check bool "failure retains the existing cadence policy" true cadence_deferred
+     check bool "journal keeps the original failure kind" true (actual_kind = kind)
    | _ -> fail "failed pass must write one decodable journal failure");
   let runs = Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
     |> List.filter (fun (run : Exact_lane_run_registry.run) ->
@@ -478,7 +477,7 @@ let test_body_timeout_reaches_http_successor ~with_cli () =
     cli_calls := runtime_id :: !cli_calls;
     Ok (Yojson.Safe.to_string valid_selection_json)
   in
-  Runtime.run_best_effort ~trigger:Runtime.Queue_changed ~cli_runner:runner
+  Runtime.run_best_effort ~cli_runner:runner
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision)
     (input ());
   check int "the incomplete HTTP response was requested once" 1

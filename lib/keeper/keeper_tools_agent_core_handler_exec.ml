@@ -24,6 +24,7 @@ let execute_with_observers_with_authority
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
+      ~(keeper_turn_id : int option)
       ?turn_sandbox_factory
       ?sw
       ?clock
@@ -219,6 +220,7 @@ let execute_with_observers_with_authority
       let ts = Time_compat.now () in
       broadcast_keeper_tool_call_event
         ~keeper_name:meta.name
+        ~keeper_turn_id
         ~tool_name:name
         ~duration_ms
         ~disposition:result.disposition
@@ -293,6 +295,7 @@ let execute_with_observers_with_authority
       let ts = Time_compat.now () in
       broadcast_keeper_tool_call_event
         ~keeper_name:meta.name
+        ~keeper_turn_id
         ~tool_name:name
         ~duration_ms
         ~disposition:result.disposition
@@ -354,6 +357,7 @@ let execute_with_observers_with_authority
       let ts = Time_compat.now () in
       broadcast_keeper_tool_call_event
         ~keeper_name:meta.name
+        ~keeper_turn_id
         ~tool_name:name
         ~duration_ms
         ~disposition:result.disposition
@@ -411,6 +415,7 @@ let execute_with_observers_with_authority
     (* Tool-call observability via AGENT_CORE Event_bus. See above. *)
     broadcast_keeper_tool_call_event
       ~keeper_name:meta.name
+      ~keeper_turn_id
       ~tool_name:name
       ~duration_ms
       ~disposition:exception_result

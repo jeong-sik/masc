@@ -117,7 +117,7 @@ type glyph =
   | Call_started
   | Call_returned
   | Turn_boundary
-  | Turn_settled
+  | Turn_done
   | Failure
   | Attention
   | Quiet
@@ -126,7 +126,7 @@ let glyph_text = function
   | Call_started -> "\xe2\x96\xb6"
   | Call_returned -> "\xe2\x9c\x93"
   | Turn_boundary -> "\xe2\x97\x8f"
-  | Turn_settled -> "\xe2\x96\xa0"
+  | Turn_done -> "\xe2\x96\xa0"
   | Failure -> "\xe2\x9c\x97"
   | Attention -> "?"
   (* A quiet row claims no state, so it draws no mark: a blank first cell.
@@ -201,7 +201,7 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
     | Observer.Turn_ready -> (Turn_boundary, "turn ready", "")
     | Observer.Turn_completed -> (Turn_boundary, "turn end", "")
     | Observer.Agent_started -> (Turn_boundary, "agent start", "")
-    | Observer.Agent_completed -> (Turn_settled, "agent done", "")
+    | Observer.Agent_completed -> (Turn_done, "agent done", "")
     | Observer.Agent_failed -> (Failure, "agent failed", "")
     | Observer.Agent_yielded -> (Quiet, "agent yielded", "")
     (* Where the tool name is the whole detail, an event that carries none
@@ -310,8 +310,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       in
       { at
       ; keeper = t.Observer.tc_keeper
-      ; glyph = Turn_settled
-      ; label = "turn settled"
+      ; glyph = Turn_done
+      ; label = "turn done"
       ; detail = turn_text t.Observer.tc_turn ^ tokens ^ cost ^ calls
       }
   | Observer.Keeper_composite_changed { keeper; _ } ->
@@ -423,6 +423,14 @@ type wire_tool = {
   wt_session_turn : int option;
 }
 
+(* The turn marker the agent-core loop last sent for this record: a
+   provider call was asked for, started, or came back. The pane reads the
+   newest one to say whether the model has the turn right now. *)
+type turn_marker =
+  | Marker_ready
+  | Marker_started
+  | Marker_completed
+
 type chunk = {
   ck_keeper : string;
   ck_turn : int option;
@@ -431,13 +439,14 @@ type chunk = {
   ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
   ck_settled : bool;
+  ck_marker : (turn_marker * float) option;
   ck_tokens : int option * int option;
   ck_cost_usd : float option;
   ck_calls : int option;
 }
 
 type chunk_member =
-  | Member_turn_marker of int option
+  | Member_turn_marker of { marker : turn_marker; turn : int option }
   | Member_wire_call of {
       tool : string;
       tool_use_id : string option;
@@ -469,9 +478,12 @@ let member_of_event (event : Observer.event) =
   match event with
   | Observer.Agent_core e -> (
       match e.Observer.kind with
-      | Observer.Turn_ready | Observer.Turn_started | Observer.Turn_completed
-        ->
-          Some (Member_turn_marker e.Observer.turn)
+      | Observer.Turn_ready ->
+          Some (Member_turn_marker { marker = Marker_ready; turn = e.Observer.turn })
+      | Observer.Turn_started ->
+          Some (Member_turn_marker { marker = Marker_started; turn = e.Observer.turn })
+      | Observer.Turn_completed ->
+          Some (Member_turn_marker { marker = Marker_completed; turn = e.Observer.turn })
       | Observer.Tool_called ->
           Some
             (Member_wire_call
@@ -521,6 +533,7 @@ let empty_chunk ~keeper ~at =
   ; ck_wire_tools = []
   ; ck_ledger_tools = []
   ; ck_settled = false
+  ; ck_marker = None
   ; ck_tokens = (None, None)
   ; ck_cost_usd = None
   ; ck_calls = None
@@ -530,7 +543,7 @@ let apply_member chunk ~at member =
   let chunk = { chunk with ck_at = Float.max chunk.ck_at at } in
   match member with
   | Member_quiet -> chunk
-  | Member_turn_marker _ -> chunk
+  | Member_turn_marker { marker; turn = _ } -> { chunk with ck_marker = Some (marker, at) }
   | Member_wire_call { tool; tool_use_id; turn } ->
       { chunk with
         ck_wire_tools =
@@ -667,7 +680,7 @@ let row_of_chunk chunk =
   in
   { at = chunk.ck_at
   ; keeper = chunk.ck_keeper
-  ; glyph = (if chunk.ck_settled then Turn_settled else Call_started)
+  ; glyph = (if chunk.ck_settled then Turn_done else Call_started)
   ; label = turn_text chunk.ck_turn
   ; detail
   }
@@ -687,7 +700,7 @@ let observation_of_event (event : Observer.event) =
 
 (* The agent session's ordinal a member states, if it states one. *)
 let session_of_member = function
-  | Member_turn_marker turn -> turn
+  | Member_turn_marker { turn; _ } -> turn
   | Member_wire_call { turn; _ } | Member_wire_return { turn; _ }
   | Member_ledger_tool { turn; _ } ->
       turn

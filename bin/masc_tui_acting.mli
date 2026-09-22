@@ -65,7 +65,7 @@ type glyph =
   | Call_started  (** [▶] *)
   | Call_returned  (** [✓] *)
   | Turn_boundary  (** [●] *)
-  | Turn_settled  (** [■] *)
+  | Turn_done  (** [■] *)
   | Failure  (** [✗] *)
   | Attention  (** [?] *)
   | Quiet  (** [·] the kinds [Everything] adds *)
@@ -146,6 +146,13 @@ type wire_tool = {
   wt_session_turn : int option;
 }
 
+(** What the agent-core loop last said about this record's provider call:
+    one was asked for, started, or came back. *)
+type turn_marker =
+  | Marker_ready
+  | Marker_started
+  | Marker_completed
+
 type chunk = {
   ck_keeper : string;
   ck_turn : int option;
@@ -161,6 +168,11 @@ type chunk = {
   ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
   ck_settled : bool;
+  ck_marker : (turn_marker * float) option;
+      (** The newest turn marker and the clock it arrived on. [Marker_started]
+          with nothing after it is a provider call in flight: the model has
+          the turn. A CLI lane sends no markers, so this stays [None] and the
+          pane says nothing about what that keeper is doing between calls. *)
   ck_tokens : int option * int option;
   ck_cost_usd : float option;
   ck_calls : int option;

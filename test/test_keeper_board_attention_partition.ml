@@ -47,42 +47,9 @@ let signal post_id : Masc.Board_dispatch.board_signal =
 
 let context name =
   `Assoc
-    [ "instructions", `String ("continue " ^ name)
-    ; "runtime", `Assoc [ "lane", `String "configured-judge" ]
+    [ "lane_keeper_name", `String "alpha"
+    ; "board_interests", `List [ `String name ]
     ]
-;;
-
-let post_id_exn value =
-  match Masc.Board.Post_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board post id fixture: " ^ value)
-;;
-
-let agent_id_exn value =
-  match Masc.Board.Agent_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board agent id fixture: " ^ value)
-;;
-
-let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post =
-  { id = post_id_exn signal.post_id
-  ; author = agent_id_exn signal.author
-  ; title = signal.title
-  ; body = signal.content
-  ; post_kind = Masc.Board.Human_post
-  ; meta_json = None
-  ; visibility = Masc.Board.Public
-  ; created_at = 1.0
-  ; updated_at = Option.value signal.updated_at ~default:1.0
-  ; expires_at = 3601.0
-  ; votes_up = 0
-  ; votes_down = 0
-  ; reply_count = 0
-  ; pinned = false
-  ; hearth = signal.hearth
-  ; thread_id = None
-  ; origin = None
-  }
 ;;
 
 let candidate ?(keeper_name = "alpha") ?(context = context "primary") ~id ~recorded_at () :
@@ -94,11 +61,7 @@ let candidate ?(keeper_name = "alpha") ?(context = context "primary") ~id ~recor
   ; signal
   ; keeper_context = context
   ; recorded_at
-  ; status =
-      A.Pending
-        { last_delivery_failure = None
-        ; material = { post = post_of_signal signal; comments = [] }
-        }
+  ; status = A.Pending { last_delivery_failure = None }
   }
 ;;
 

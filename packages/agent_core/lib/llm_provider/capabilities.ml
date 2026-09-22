@@ -617,12 +617,20 @@ let ollama_capabilities =
    replay and caused the CoT loop (#2236).
 
    IMPORTANT: do not inherit either exact-output capability from local Ollama.
-   The official Ollama structured-output documentation currently states that
-   Ollama Cloud does not support structured outputs
-   (https://docs.ollama.com/capabilities/structured-outputs, checked
-   2026-07-22). This covers both JSON mode and the native local [/api/chat]
-   schema path; Cloud must remain fail-closed for both contracts until the
-   official Cloud contract changes. *)
+   "Ollama's Cloud currently does not support structured outputs"
+   (https://docs.ollama.com/capabilities/structured-outputs, re-read
+   2026-09-22), so a schema request has no Cloud contract to run on.
+
+   JSON mode is a second question, not the same one. The same page separates
+   the schema-constrained form from plain JSON generation, and the
+   OpenAI-compatible surface lists [response_format] among the fields it takes
+   (https://docs.ollama.com/api/openai-compatibility). What the docs do not
+   say is whether Cloud honours [response_format: json_object] for a given
+   model, so this base answers no for both and a row that has been measured
+   says otherwise for itself -- ten ollama_cloud rows below do. A reader who
+   comes here to make those rows agree with this base should measure first:
+   the difference is the only thing standing between the Librarian's JSON
+   lane and these models. *)
 let ollama_cloud_capabilities =
   { ollama_capabilities with
     supports_response_format_json = false

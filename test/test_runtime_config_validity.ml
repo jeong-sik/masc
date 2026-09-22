@@ -776,45 +776,32 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
 ;;
 
 (* A lane slot names a runtime binding, so the slots a config declares are its
-   bindings -- the same derivation the server does at boot. *)
-let declared_targets_of_config (config : Runtime_schema.config) =
-  List.filter_map
-    (fun (binding : Runtime_schema.binding) ->
-       match
-         ( List.find_opt
-             (fun (provider : Runtime_schema.provider) ->
-                String.equal provider.id binding.provider_id)
-             config.providers
-         , List.find_opt
-             (fun (model : Runtime_schema.model_spec) ->
-                String.equal model.id binding.model_id)
-             config.models )
-       with
-       | Some provider, Some model ->
-         Some
-           ({ target_ref = Runtime_schema.binding_key binding
-            ; provider_ref = provider.id
-            ; model_id = model.api_name
-            ; enable_thinking = model.thinking_support
-            ; reasoning_effort = model.reasoning_effort
-            ; connect_timeout_s = provider.connect_timeout_s
-            ; body_timeout_s = provider.exact_body_timeout_s
-            ; api_key_env =
-                (match provider.credentials with
-                 | Some (Runtime_schema.Env name) -> Some name
-                 | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
-            }
-            : Exact_output.declared_target)
-       | Some _, None | None, Some _ | None, None -> None)
-    config.bindings
+   bindings. The server's own derivation answers which, and this asks it
+   instead of keeping a second copy beside it: the copy is how a slot came to
+   run on a different wire than the Keeper requests of the same binding
+   (#37674). *)
+let declared_targets_of_config_path ~label path =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let startup_state = Runtime_startup_state.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Runtime_startup_state.set startup_state)
+  @@ fun () ->
+  match Runtime.init_default ~config_path:path with
+  | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
+  (* Loading the bindings is what makes them targets, so a binding this config
+     disables has no slot here -- the same answer the server gives. *)
+  | Ok () -> Server_runtime_bootstrap.For_testing.exact_output_targets_of_runtimes ()
 ;;
 
-let snapshot_of_config ~io ~label (config : Runtime_schema.config) =
+let snapshot_of_config ~io ~label path =
   match
     Exact_output.load_resolver_snapshot
       ~io
       ~target_binding_policy:Exact_output.Exclude_unbound_targets
-      ~catalog:(Exact_output.Embedded_with_targets (declared_targets_of_config config))
+      ~catalog:
+        (Exact_output.Embedded_with_targets (declared_targets_of_config_path ~label path))
       ()
   with
   | Ok snapshot -> snapshot
@@ -831,7 +818,7 @@ let test_repo_seed_wizard_choices_have_an_exact_output_target () =
   match Runtime_toml.parse_file path with
   | Error errors -> failf "repo runtime.toml should parse: %d error(s)" (List.length errors)
   | Ok (cfg : Runtime_schema.config) ->
-    let snapshot = snapshot_of_config ~io:{ getenv = (fun _ -> Ok None) } ~label:"seed wizard" cfg in
+    let snapshot = snapshot_of_config ~io:{ getenv = (fun _ -> Ok None) } ~label:"seed wizard" path in
     let offered =
       List.filter_map
         (fun (provider : Runtime_schema.provider) ->
@@ -1224,6 +1211,21 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
      "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = []\ncli_slots = []\n" with
    | Error _ -> ()
    | Ok _ -> fail "a lane without HTTP or CLI slots must be rejected");
+  let cli_only_without_slots =
+    "[runtime.exact_output_lanes.hitl_auto_judge]\ncli_slots = [\"codex.codex\"]\n"
+  in
+  (match Runtime_toml.parse_string cli_only_without_slots with
+   | Ok config ->
+     (match config.Runtime_schema.exact_output_lane_decls with
+      | [ lane ] ->
+        check (list string) "absent slots means no HTTP slot" [] lane.slot_ids;
+        check (list string) "the CLI slot stands alone" [ "codex.codex" ]
+          lane.cli_slot_ids
+      | _ -> fail "exactly one CLI-only lane must parse")
+   | Error _ -> fail "a lane that declares only cli_slots must parse");
+  (match Runtime_toml.parse_string "[runtime.exact_output_lanes.hitl_auto_judge]\n" with
+   | Error _ -> ()
+   | Ok _ -> fail "a lane table that declares neither list must be rejected");
   let absent = "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [\"slot-a\"]\n" in
   (match Runtime_toml.parse_string absent with
    | Error _ -> fail "a lane without cli_slots must parse"
@@ -1964,9 +1966,8 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
 let test_release_evidence_fixture_lanes_resolve_without_environment_credentials () =
   let fixture_dir = release_evidence_fixture_dir () in
   let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
-  match
-    Runtime_toml.parse_file (Filename.concat fixture_dir "runtime.toml")
-  with
+  let fixture_runtime_path = Filename.concat fixture_dir "runtime.toml" in
+  match Runtime_toml.parse_file fixture_runtime_path with
   | Error errors ->
     failf
       "release-evidence smoke runtime.toml should load: %s"
@@ -1989,7 +1990,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
     (match provider.credentials with
      | Some (Runtime_schema.Inline "release-evidence-loopback") -> ()
      | _ -> fail "release-evidence provider must own its synthetic inline credential");
-    let snapshot = snapshot_of_config ~io ~label:"release-evidence smoke" config in
+    let snapshot = snapshot_of_config ~io ~label:"release-evidence smoke" fixture_runtime_path in
     let default_runtime_id =
       match config.default_runtime_id with
       | Some runtime_id -> runtime_id
@@ -2102,11 +2103,11 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   match Runtime_toml.parse_file runtime_path with
   | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
   | Ok config ->
-    let snapshot = snapshot_of_config ~io ~label:"deployment seed" config in
+    let snapshot = snapshot_of_config ~io ~label:"deployment seed" runtime_path in
     (* Every GLM binding the seed declares has to come up on the public key
        alone; a first install has no coding-plan key. *)
     let single_key_snapshot =
-      snapshot_of_config ~io:single_key_io ~label:"single-key GLM" config
+      snapshot_of_config ~io:single_key_io ~label:"single-key GLM" runtime_path
     in
     List.iter
       (fun (binding : Runtime_schema.binding) ->
@@ -3991,6 +3992,91 @@ streaming = false
         check (float 0.000001) "actual provider sees the candidate temperature" 0.25
           Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
 
+(* task-1649: a lane whose every candidate is missing from the catalog is
+   dropped whole at load. Read [degrade_loaded_for_missing_catalog]
+   (runtime.ml) end to end before trusting the ticket's premise here: its
+   [Ok] branch -- the only place a [startup_degradation] value is ever
+   built -- is reached only when [has_routing_references] is false, and
+   that flag covers [dropped_lanes] together with [dropped_lane_candidates]
+   / [dropped_routes] / [dropped_media_failover]. A fully-dropped lane
+   always makes [has_routing_references] true, so a live, returned
+   [Initialized_degraded] can never carry a non-empty [dropped_lanes] --
+   [init_default_degraded_report] refuses the boot instead
+   ([Runtime_config_error]), and [server_runtime_bootstrap.ml] answers that
+   by entering [Setup_required], not by serving keeper turns. There is no
+   path from a fully-dropped lane to [Runtime.resolve_assignment] returning
+   [`Missing] for it at keeper-turn time -- confirmed against every writer
+   of runtime state, including the hot-reload save path
+   ([Runtime.save_config_text] / [validate_config_text]), which rejects the
+   same config for the same reason before it is ever applied live.
+   The earlier form of this test asserted the unreachable branch
+   ([Ok (Initialized_degraded ...)] with [orphaned-lane] inside
+   [dropped_lanes]) and failed in CI exactly where this comment says it
+   must: [degrade_loaded_for_missing_catalog] returned [Error]. What *is*
+   reachable, and was still only pinned for a partially-dropped lane
+   (`test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes`,
+   whose lane keeps one live candidate), is that a *fully*-dropped lane
+   also refuses to boot and the refusal names the lane under
+   "[runtime.lanes].dropped.<lane>", not just
+   "[runtime.lanes].candidates.<lane>". That is what this pins. *)
+let test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     provider_name = \"fixture\"\n\
+     base = \"openai_chat\"\n\
+     max_context_tokens = 8192\n\
+     max_output_tokens = 1024\n\
+     supports_tools = true\n\
+     supports_native_streaming = false\n" in
+  let runtime_toml = {|[runtime]
+default = "fixture.good"
+[runtime.assignments]
+affected = "orphaned-lane"
+[runtime.lanes.orphaned-lane]
+candidates = [ "fixture.missing-one", "fixture.missing-two" ]
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.good]
+api-name = "good"
+max-context = 8192
+streaming = false
+[models.missing-one]
+api-name = "missing-one"
+max-context = 8192
+streaming = false
+[models.missing-two]
+api-name = "missing-two"
+max-context = 8192
+streaming = false
+[fixture.good]
+[fixture.missing-one]
+[fixture.missing-two]
+|} in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () -> with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml runtime_toml @@ fun path ->
+      match Runtime.init_default_degraded_report ~config_path:path with
+      | Ok Runtime.Initialized ->
+        fail "a lane with every candidate missing must not boot as fully catalog-known"
+      | Ok (Runtime.Initialized_degraded _) ->
+        fail "a fully-dropped lane must refuse degraded boot, not silently continue with it gone"
+      | Error (Runtime.Missing_catalog_models report) ->
+        failf
+          "expected a routing-reference config error, got a bare missing-catalog report: %s"
+          (Runtime.strict_init_error_to_string (Runtime.Missing_catalog_models report))
+      | Error (Runtime.Runtime_config_error msg) ->
+        check bool "diagnostic names the fully-dropped lane, not just its candidates" true
+          (String_util.contains_substring msg "[runtime.lanes].dropped.orphaned-lane");
+        check bool "diagnostic lists both missing candidates" true
+          (String_util.contains_substring msg "fixture.missing-one"
+           && String_util.contains_substring msg "fixture.missing-two");
+        check bool "diagnostic still refuses to erase the assignment into the default" true
+          (String_util.contains_substring msg "default fallback"))
+
 let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
     "[[models]]\n\
@@ -5142,7 +5228,11 @@ let test_lsp_servers_reads_a_command_per_language () =
 (* [typesafeai] is the lane's table; the key is not in it. Absent is the
    default; present is read strictly, so a misspelt key is a load error. *)
 let typesafeai_table =
-  "[typesafeai]\nenabled = false\nendpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
+  "[typesafeai]\nenabled = false\n\
+   destinations = [\n\
+   \  { endpoint = \"http://127.0.0.1:9/judge\", model = \"jev-1.13\", api_key_env = \"TYPESAFEAI_API_KEY\" },\n\
+   \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
+   ]\n\
    board_attention = false\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
@@ -5153,6 +5243,8 @@ let test_typesafeai_absent_is_the_default () =
   | Ok config ->
     let t = config.Runtime_schema.typesafeai in
     check bool "the lane is on with a key" true t.Runtime_schema.lane_enabled;
+    check bool "the vendor's own server alone" true
+      (t.Runtime_schema.destinations = (Runtime_schema.typesafe_destination, []));
     check bool "the Board gate is on" true t.Runtime_schema.board_attention;
     check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
     check bool "Context review is off" false t.Runtime_schema.context_review;
@@ -5166,8 +5258,16 @@ let test_typesafeai_reads_the_whole_table () =
   | Ok config ->
     let t = config.Runtime_schema.typesafeai in
     check bool "enabled" false t.Runtime_schema.lane_enabled;
-    check string "endpoint" "http://127.0.0.1:9/judge" t.Runtime_schema.lane_endpoint;
-    check string "model" "jev-1.13" t.Runtime_schema.lane_model;
+    let first, rest = t.Runtime_schema.destinations in
+    check string "first endpoint" "http://127.0.0.1:9/judge" first.Runtime_schema.endpoint;
+    check string "first model" "jev-1.13" first.Runtime_schema.model;
+    check string "first key variable" "TYPESAFEAI_API_KEY" first.Runtime_schema.api_key_env;
+    (match rest with
+     | [ second ] ->
+       check string "second endpoint" "http://127.0.0.1:9/reserve" second.Runtime_schema.endpoint;
+       check string "second model" "~typesafe/jev-latest" second.Runtime_schema.model;
+       check string "second key variable" "OPENROUTER_API_KEY" second.Runtime_schema.api_key_env
+     | _ -> failf "two destinations, in order; got %d after the first" (List.length rest));
     check bool "board_attention" false t.Runtime_schema.board_attention;
     check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
     check bool "Context review enabled" true t.Runtime_schema.context_review;
@@ -5175,6 +5275,22 @@ let test_typesafeai_reads_the_whole_table () =
     check (list string) "excluded keepers, in order"
       [ "kidsnote-slack-context-collector"; "other" ]
       t.Runtime_schema.excluded_keepers
+;;
+
+let test_typesafeai_reads_destinations_written_as_table_headers () =
+  let tail =
+    "[[typesafeai.destinations]]\nendpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
+     api_key_env = \"TYPESAFEAI_API_KEY\"\n\
+     [[typesafeai.destinations]]\nendpoint = \"http://127.0.0.1:9/reserve\"\n\
+     model = \"~typesafe/jev-latest\"\napi_key_env = \"OPENROUTER_API_KEY\"\n"
+  in
+  match Runtime_toml.parse_string (lsp_probe_config tail) with
+  | Error errors -> failf "table headers must parse: %s" (error_messages errors)
+  | Ok config ->
+    let first, rest = config.Runtime_schema.typesafeai.Runtime_schema.destinations in
+    check string "first endpoint" "http://127.0.0.1:9/judge" first.Runtime_schema.endpoint;
+    check (list string) "the rest, in order" [ "http://127.0.0.1:9/reserve" ]
+      (List.map (fun (d : Runtime_schema.typesafeai_destination) -> d.endpoint) rest)
 ;;
 
 let has_substring haystack needle =
@@ -5200,7 +5316,27 @@ let test_typesafeai_refuses_a_stray_key () =
 ;;
 
 let test_typesafeai_refuses_a_value_that_names_nothing () =
-  typesafeai_rejects ~what:"a blank endpoint" "[typesafeai]\nendpoint = \"  \"\n" "endpoint must be non-empty";
+  typesafeai_rejects ~what:"the endpoint key the table no longer reads"
+    "[typesafeai]\nendpoint = \"http://127.0.0.1:9/judge\"\n" "unknown [typesafeai] key \"endpoint\"";
+  typesafeai_rejects ~what:"a blank destination endpoint"
+    "[typesafeai]\ndestinations = [{ endpoint = \"  \", model = \"m\", api_key_env = \"K\" }]\n"
+    "endpoint must be non-empty";
+  typesafeai_rejects ~what:"a destination without its key variable"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\" }]\n"
+    "api_key_env is required";
+  typesafeai_rejects ~what:"a key variable with whitespace"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"A B\" }]\n"
+    "must name an environment variable without whitespace";
+  typesafeai_rejects ~what:"a stray destination key"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"K\", key = \"secret\" }]\n"
+    "unknown [typesafeai.destinations[0]] key \"key\"";
+  typesafeai_rejects ~what:"an empty destination list"
+    "[typesafeai]\ndestinations = []\n" "destinations must name at least one server";
+  typesafeai_rejects ~what:"the same server and model twice"
+    "[typesafeai]\ndestinations = [{ endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"K\" }, { endpoint = \"http://127.0.0.1:9/judge\", model = \"m\", api_key_env = \"L\" }]\n"
+    "is listed twice";
+  typesafeai_rejects ~what:"destinations that is not an array"
+    "[typesafeai]\ndestinations = \"http://127.0.0.1:9/judge\"\n" "destinations must be an array of tables";
   typesafeai_rejects ~what:"a keeper name with whitespace"
     "[typesafeai]\nexcluded_keepers = [\"a b\"]\n" "must be non-empty without whitespace";
   typesafeai_rejects ~what:"a non-string keeper list"
@@ -5430,6 +5566,8 @@ let () =
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
           test_case "assignment-only catalog gap isolates requests and recovers" `Quick
             test_degraded_assignment_isolation_preserves_routing_and_recovers;
+          test_case "a fully-dropped lane refuses degraded boot and names the lane" `Quick
+            test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane;
           test_case
             "server degraded init still rejects unavailable lane and media routes"
             `Quick test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes;
@@ -5610,6 +5748,8 @@ let () =
     ; ( "typesafeai"
       , [ test_case "absent is the default" `Quick test_typesafeai_absent_is_the_default
         ; test_case "reads the whole table" `Quick test_typesafeai_reads_the_whole_table
+        ; test_case "reads destinations written as table headers" `Quick
+            test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
         ; test_case "refuses a value that names nothing" `Quick
             test_typesafeai_refuses_a_value_that_names_nothing

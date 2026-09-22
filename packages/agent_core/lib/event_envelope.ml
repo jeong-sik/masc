@@ -14,6 +14,7 @@ type t =
   ; parent_event_id : string option
   ; caused_by : string option
   ; source_clock : source_clock
+  ; caller_scope : Caller_scope.t option
   }
 
 exception Entropy_unavailable of string
@@ -49,6 +50,7 @@ let make
       ?parent_event_id
       ?caused_by
       ?(source_clock = Wall)
+      ?caller_scope
       ()
   =
   let time_or_now = function
@@ -69,6 +71,7 @@ let make
   ; parent_event_id
   ; caused_by
   ; source_clock
+  ; caller_scope
   }
 ;;
 
@@ -88,6 +91,7 @@ let to_json t =
     ; "parent_event_id", option_to_json (fun v -> `String v) t.parent_event_id
     ; "caused_by", option_to_json (fun v -> `String v) t.caused_by
     ; "source_clock", `String (source_clock_to_string t.source_clock)
+    ; "caller_scope", option_to_json Caller_scope.to_json t.caller_scope
     ]
 ;;
 
@@ -144,6 +148,12 @@ let of_json = function
       | Some (`String s) -> source_clock_of_string s
       | Some _ -> Error "field source_clock must be a string"
     in
+    let* caller_scope =
+      match assoc_field "caller_scope" fields with
+      | Ok `Null -> Ok None
+      | Ok json -> Result.map Option.some (Caller_scope.of_json json)
+      | Error detail -> Error detail
+    in
     Ok
       { event_id
       ; correlation_id
@@ -154,6 +164,7 @@ let of_json = function
       ; parent_event_id
       ; caused_by
       ; source_clock
+      ; caller_scope
       }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "event envelope must be a JSON object"

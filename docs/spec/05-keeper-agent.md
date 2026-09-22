@@ -94,7 +94,9 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml
 - **Direct address**: `mention_targets`
 - **Targetless Board discovery**: `board_interests`; empty disables semantic
   candidate admission without disabling exact addresses, broadcast, or
-  structurally matched thread delivery.
+  structurally matched thread delivery. The judge sees only the current typed
+  signal and `{name, board_interests}`, not thread history or Keeper
+  instructions.
 - **Activation**: `activation_mode` (`manual` | `on_demand` | `autonomous`)
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 

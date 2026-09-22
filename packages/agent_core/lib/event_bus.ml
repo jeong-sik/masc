@@ -202,7 +202,7 @@ type subscription =
 
 (* ── Bus ──────────────────────────────────────────────────────────── *)
 
-type t =
+type hub =
   { mutable subscribers : subscription list
   ; mutable next_id : int
   ; mu : Eio.Mutex.t
@@ -211,13 +211,25 @@ type t =
     subscriber_count : int Atomic.t
   }
 
+(* The subscribers live in [hub], which every handle made from one [create]
+   shares; [caller_scope] belongs to the handle alone. *)
+type t =
+  { hub : hub
+  ; caller_scope : Caller_scope.t option
+  }
+
 let create () =
-  { subscribers = []
-  ; next_id = 0
-  ; mu = Eio.Mutex.create ()
-  ; subscriber_count = Atomic.make 0
+  { hub =
+      { subscribers = []
+      ; next_id = 0
+      ; mu = Eio.Mutex.create ()
+      ; subscriber_count = Atomic.make 0
+      }
+  ; caller_scope = None
   }
 ;;
+
+let with_caller_scope bus scope = { bus with caller_scope = Some scope }
 
 (* ── Filters ──────────────────────────────────────────────────────── *)
 
@@ -296,8 +308,8 @@ let rec matches filter event =
 
 let subscribe ~(config : subscription_config) ?(filter = accept_all) ?purpose bus =
   let stream = Eio.Stream.create config.capacity in
-  Eio.Mutex.use_rw ~protect:true bus.mu (fun () ->
-    let id = bus.next_id in
+  Eio.Mutex.use_rw ~protect:true bus.hub.mu (fun () ->
+    let id = bus.hub.next_id in
     let sub =
       { id
       ; stream
@@ -312,18 +324,18 @@ let subscribe ~(config : subscription_config) ?(filter = accept_all) ?purpose bu
       ; cancelled = Atomic.make false
       }
     in
-    bus.subscribers <- sub :: bus.subscribers;
-    bus.next_id <- id + 1;
-    ignore (Atomic.fetch_and_add bus.subscriber_count 1);
+    bus.hub.subscribers <- sub :: bus.hub.subscribers;
+    bus.hub.next_id <- id + 1;
+    Atomic.incr bus.hub.subscriber_count;
     sub)
 ;;
 
 let remove_subscription bus sub =
-  Eio.Mutex.use_rw ~protect:true bus.mu (fun () ->
-    let before = List.length bus.subscribers in
-    bus.subscribers <- List.filter (fun s -> s.id <> sub.id) bus.subscribers;
-    let after = List.length bus.subscribers in
-    if after < before then ignore (Atomic.fetch_and_add bus.subscriber_count (-1)) else ())
+  Eio.Mutex.use_rw ~protect:true bus.hub.mu (fun () ->
+    let before = List.length bus.hub.subscribers in
+    bus.hub.subscribers <- List.filter (fun s -> s.id <> sub.id) bus.hub.subscribers;
+    let after = List.length bus.hub.subscribers in
+    if after < before then Atomic.decr bus.hub.subscriber_count)
 ;;
 
 let drain_locked sub =
@@ -386,7 +398,13 @@ let deliver_to_sub sub event =
 ;;
 
 let publish bus event =
-  let subs = Eio.Mutex.use_ro bus.mu (fun () -> bus.subscribers) in
+  let event =
+    match bus.caller_scope, event.meta.Event_envelope.caller_scope with
+    | Some scope, None ->
+      { event with meta = { event.meta with Event_envelope.caller_scope = Some scope } }
+    | None, (Some _ | None) | Some _, Some _ -> event
+  in
+  let subs = Eio.Mutex.use_ro bus.hub.mu (fun () -> bus.hub.subscribers) in
   List.iter (fun sub -> if matches sub.filter event then deliver_to_sub sub event) subs
 ;;
 
@@ -396,7 +414,7 @@ let drain sub = Eio.Mutex.use_rw ~protect:true sub.deliver_mu (fun () -> drain_l
 
 (* ── Queries ──────────────────────────────────────────────────────── *)
 
-let subscriber_count bus = Atomic.get bus.subscriber_count
+let subscriber_count bus = Atomic.get bus.hub.subscriber_count
 
 type subscription_stats =
   { purpose : string option
@@ -414,7 +432,7 @@ type bus_stats =
   }
 
 let stats bus =
-  let subs = Eio.Mutex.use_ro bus.mu (fun () -> bus.subscribers) in
+  let subs = Eio.Mutex.use_ro bus.hub.mu (fun () -> bus.hub.subscribers) in
   let subscriptions =
     List.map
       (fun (sub : subscription) ->

@@ -869,7 +869,8 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
         ; response ~extra_answers:[ "surplus", `Assoc [ "type", `String "noul"; "noul", `Float 1.0 ] ] "applicable"
         ; "not-json"; response "applicable" ]) in
   let policy = { Runtime_schema.default_typesafeai with
-      skill_applicability = true; lane_endpoint = server.base_url } in
+      skill_applicability = true;
+      destinations = ({ Runtime_schema.typesafe_destination with endpoint = server.base_url }, []) } in
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-skill-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy policy @@ fun () ->
   let captured = ref None in
@@ -1004,7 +1005,8 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let near_selected = resolve_one near_snapshot near_reference in
   let near_server = Exact_output_fixture.start_server ~sw ~net ~clock
       (Exact_output_fixture.Reply (response "applicable")) in
-  Masc_test_deps.with_typesafeai_policy { policy with lane_endpoint = near_server.base_url }
+  Masc_test_deps.with_typesafeai_policy { policy with
+      destinations = ({ Runtime_schema.typesafe_destination with endpoint = near_server.base_url }, []) }
     (fun () ->
       let near_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
@@ -1024,7 +1026,8 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let blocked = Exact_output_fixture.start_server ~sw ~net ~clock
       ~on_request_before_reply:(fun () -> Eio.Fiber.await_cancel ())
       (Exact_output_fixture.Reply (response "applicable")) in
-  Masc_test_deps.with_typesafeai_policy { policy with lane_endpoint = blocked.base_url } @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy { policy with
+      destinations = ({ Runtime_schema.typesafe_destination with endpoint = blocked.base_url }, []) } @@ fun () ->
   captured := None;
   let cancellation, resolve_cancellation = Eio.Promise.create () in
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->

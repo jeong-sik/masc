@@ -34,6 +34,12 @@ let ok label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
+let comment_id raw =
+  match Masc.Board.Comment_id.of_string raw with
+  | Ok id -> id
+  | Error error -> Alcotest.fail (Masc.Board.show_board_error error)
+;;
+
 (* Every case in this file delivers against a candidate it just persisted, so
    [Candidate_absent] here is a bug in the fixture, not the outcome under
    test — see test_keeper_board_attention_worker.ml for the terminal-settlement
@@ -58,72 +64,11 @@ let signal ?(content = "Persisted Board evidence") ?(updated_at = 42.0) post_id 
   }
 ;;
 
-let post_id_exn value =
-  match Masc.Board.Post_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board post id fixture: " ^ value)
-;;
-
-let agent_id_exn value =
-  match Masc.Board.Agent_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board agent id fixture: " ^ value)
-;;
-
-let comment_id_exn value =
-  match Masc.Board.Comment_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board comment id fixture: " ^ value)
-;;
-
-let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post =
-  { id = post_id_exn signal.post_id
-  ; author = agent_id_exn signal.author
-  ; title = signal.title
-  ; body = signal.content
-  ; post_kind = Masc.Board.Human_post
-  ; meta_json = None
-  ; visibility = Masc.Board.Public
-  ; created_at = 1.0
-  ; updated_at = Option.value signal.updated_at ~default:1.0
-  ; expires_at = 3601.0
-  ; votes_up = 0
-  ; votes_down = 0
-  ; reply_count = 0
-  ; pinned = false
-  ; hearth = signal.hearth
-  ; thread_id = None
-  ; origin = None
-  }
-;;
-
-let comment_of_signal
-      (signal : Masc.Board_dispatch.board_signal)
-  : Masc.Board.comment
-  =
-  (* A comment id must have the shape [Comment_id.generate] mints; derive one
-     from the post id so the fixture stays deterministic per post. *)
-  { id = comment_id_exn (Printf.sprintf "c-%032x" (Hashtbl.hash signal.post_id))
-  ; post_id = post_id_exn signal.post_id
-  ; parent_id = None
-  ; author = agent_id_exn "comment-author"
-  ; content = "Canonical Board comment"
-  ; created_at = 2.0
-  ; expires_at = 3602.0
-  ; votes_up = 0
-  ; votes_down = 0
-  }
-;;
-
-let keeper_context ?(mention_keeper_ids = [ "alpha" ]) () =
+let keeper_context ?(board_interests = [ "OCaml"; "runtime" ]) () =
   `Assoc
     [ "lane_keeper_name", `String "alpha"
-    ; "keeper_record_id", `Null
-    ; "keeper_runtime_uid", `Null
-    ; "instructions", `String "continue"
-    ; "current_task_id", `Null
-    ; ( "mention_keeper_ids"
-      , `List (List.map (fun id -> `String id) mention_keeper_ids) )
+    ; ( "board_interests"
+      , `List (List.map (fun interest -> `String interest) board_interests) )
     ]
 ;;
 
@@ -156,20 +101,7 @@ let candidate ?(context = keeper_context ()) signal :
   ; signal
   ; keeper_context = context
   ; recorded_at = 1.0
-  ; status =
-      A.Pending
-        { last_delivery_failure = None
-        ; material =
-            { post = post_of_signal signal
-            ; comments = [ comment_of_signal signal ]
-            }
-        }
-  }
-;;
-
-let material_of ?post ?comments signal : A.judgment_material =
-  { post = Option.value post ~default:(post_of_signal signal)
-  ; comments = Option.value comments ~default:[ comment_of_signal signal ]
+  ; status = A.Pending { last_delivery_failure = None }
   }
 ;;
 
@@ -202,9 +134,8 @@ let quarantine_state ~phase prior_status : A.quarantine_state =
 ;;
 
 let test_status_view_preserves_resumability_and_quarantine () =
-  let material = material_of (signal "status-view") in
-  let pending = A.Resumable_pending { last_delivery_failure = None; material } in
-  (match A.status_view (A.Pending { last_delivery_failure = None; material }) with
+  let pending = A.Resumable_pending { last_delivery_failure = None } in
+  (match A.status_view (A.Pending { last_delivery_failure = None }) with
    | A.Direct_resumable observed when observed = pending -> ()
    | A.Direct_resumable _
    | A.Requeued_resumable _
@@ -309,9 +240,8 @@ let load_one ~base_path =
   | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
 ;;
 
-(* #29457: a vote signal round-trips through the candidate codec with its
-   payload under a [vote] key that only vote rows carry, so the rows written
-   before votes were a signal (exactly eight [signal] keys) still decode. *)
+(* A vote signal round-trips through the v7 candidate codec with its payload
+   under the [vote] key that only vote rows carry. *)
 let test_vote_signal_codec_round_trips_without_widening_other_rows () =
   let vote_signal : Masc.Board_dispatch.board_signal =
     { (signal "post-vote") with
@@ -337,11 +267,32 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
   in
   Alcotest.(check (list string))
     "vote row carries the vote key"
-    [ "author"; "content"; "hearth"; "kind"; "post_id"; "reaction"; "title"; "updated_at"; "vote" ]
+    [ "author"
+    ; "comment_id"
+    ; "content"
+    ; "hearth"
+    ; "kind"
+    ; "parent_id"
+    ; "post_id"
+    ; "reaction"
+    ; "title"
+    ; "updated_at"
+    ; "vote"
+    ]
     (signal_keys (A.signal_to_yojson vote_signal));
   Alcotest.(check (list string))
-    "post row keeps the eight pre-vote keys"
-    [ "author"; "content"; "hearth"; "kind"; "post_id"; "reaction"; "title"; "updated_at" ]
+    "post row keeps the v7 non-vote shape"
+    [ "author"
+    ; "comment_id"
+    ; "content"
+    ; "hearth"
+    ; "kind"
+    ; "parent_id"
+    ; "post_id"
+    ; "reaction"
+    ; "title"
+    ; "updated_at"
+    ]
     (signal_keys (A.signal_to_yojson (signal "post-plain")));
   Alcotest.(check bool)
     "a vote and a post on the same post_id are distinct candidates"
@@ -354,7 +305,7 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
-      ~context:(keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] ())
+      ~context:(keeper_context ~board_interests:[ "OCaml"; "runtime" ] ())
       (signal "post-codec")
   in
   let encoded = A.candidate_to_json original in
@@ -369,19 +320,19 @@ let test_codec_and_context_identity_are_strict () =
         (List.map
            (fun (name, value) ->
               if String.equal name "schema_version"
-              then name, `Int 2
+              then name, `Int 6
               else name, value)
            fields)
     | _ -> Alcotest.fail "candidate codec did not produce an object"
   in
   (match A.candidate_of_json old_schema with
    | Error _ -> ()
-   | Ok _ -> Alcotest.fail "candidate schema v2 was accepted");
+   | Ok _ -> Alcotest.fail "candidate schema v6 was accepted");
   let left = ok "left context" (A.Context_key.of_candidate original) in
   let reordered =
     candidate
       ~context:
-        (match keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] () with
+        (match keeper_context ~board_interests:[ "OCaml"; "runtime" ] () with
          | `Assoc fields -> `Assoc (List.rev fields)
          | _ -> assert false)
       (signal "post-reordered")
@@ -394,15 +345,24 @@ let test_codec_and_context_identity_are_strict () =
     (A.Context_key.equal left reordered);
   let changed_list =
     candidate
-      ~context:(keeper_context ~mention_keeper_ids:[ "peer"; "alpha" ] ())
+      ~context:(keeper_context ~board_interests:[ "Board"; "runtime" ] ())
       (signal "post-list-order")
     |> A.Context_key.of_candidate
     |> ok "changed list context"
   in
   Alcotest.(check bool)
-    "list order remains context identity"
+    "a different normalized interest list changes context identity"
     false
     (A.Context_key.equal left changed_list);
+  let noncanonical =
+    candidate
+      ~context:(keeper_context ~board_interests:[ "runtime"; "OCaml" ] ())
+      (signal "post-noncanonical-interests")
+    |> A.candidate_to_json
+  in
+  (match A.candidate_of_json noncanonical with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "non-normalized Board interests were accepted");
   (* 중복 keeper_context 키를 거부하는지 보던 검사가 있었다. keeper_context 가
      재료의 필드가 된 뒤로는 그 상태를 만들 수 없어 지웠다. RFC-0424. *)
   ()
@@ -443,14 +403,14 @@ let expect_record_error ?expected_detail ~base_path label candidate =
 ;;
 
 (* 요청은 후보의 현재 signal 과 최소 Keeper 역할로만 만든다. 원장의
-   keeper_context 전체와 pending Board 재료는 이 경계를 넘지 않는다. *)
+   과거 Board thread 는 이 경계를 넘지 않는다. *)
 let test_judgment_requests_project_only_current_signal_and_keeper_role () =
   let source = signal "post-canonical-request" in
   let original = candidate source in
   let role =
     `Assoc
       [ "name", `String original.keeper_name
-      ; "instructions", `String "continue"
+      ; "board_interests", `List [ `String "OCaml"; `String "runtime" ]
       ]
   in
   let item =
@@ -480,35 +440,45 @@ let test_old_relevant_comment_cannot_override_current_unrelated_signal () =
     { (signal
          ~content:"Lunch is available in the kitchen."
          "post-current-unrelated-comment") with
-      kind = Masc.Board_dispatch.Board_comment_added
-    }
-  in
-  let old_relevant_comment =
-    { (comment_of_signal current_signal) with
-      id = comment_id_exn "c-00000000000000000000000000000001"
-    ; content = "@alpha please perform the keeper's specialist review"
-    ; created_at = 1.0
-    }
-  in
-  let current_unrelated_comment =
-    { (comment_of_signal current_signal) with
-      id = comment_id_exn "c-00000000000000000000000000000002"
-    ; content = current_signal.content
-    ; created_at = 2.0
-    }
-  in
-  let original =
-    { (candidate current_signal) with
-      status =
-        A.Pending
-          { last_delivery_failure = None
-          ; material =
-              { post = post_of_signal current_signal
-              ; comments = [ old_relevant_comment; current_unrelated_comment ]
-              }
+      kind =
+        Masc.Board_dispatch.Board_comment_added
+          { comment_id = comment_id "c-00000000000000000000000000000002"
+          ; parent_id = None
           }
     }
   in
+  let original = candidate current_signal in
+  let old_relevant_comment =
+    `Assoc
+      [ "id", `String "c-00000000000000000000000000000001"
+      ; "content", `String "@alpha perform the specialist review"
+      ]
+  in
+  let legacy_v6 =
+    match A.candidate_to_json original with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "schema_version", _ -> "schema_version", `Int 6
+             | "status", _ ->
+               ( "status"
+               , `Assoc
+                   [ "kind", `String "pending"
+                   ; ( "material"
+                     , `Assoc
+                         [ "post", `Null
+                         ; "comments", `List [ old_relevant_comment ]
+                         ] )
+                   ; "last_delivery_failure", `Null
+                   ] )
+             | field -> field)
+           fields)
+    | _ -> Alcotest.fail "candidate codec did not produce an object"
+  in
+  (match A.candidate_of_json legacy_v6 with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "v6 history-bearing candidate was accepted");
   let request =
     ok
       "build current-signal-only request"
@@ -522,7 +492,7 @@ let test_old_relevant_comment_cannot_override_current_unrelated_signal () =
          [ ( "keeper_role"
            , `Assoc
                [ "name", `String "alpha"
-               ; "instructions", `String "continue"
+               ; "board_interests", `List [ `String "OCaml"; `String "runtime" ]
                ] )
          ; ( "items"
            , `List
@@ -533,96 +503,111 @@ let test_old_relevant_comment_cannot_override_current_unrelated_signal () =
          ])
 ;;
 
-let test_record_rejects_malformed_without_poisoning_ledger () =
-  with_temp_base "board-attention-candidate-record-validation" @@ fun base_path ->
-  let valid = candidate (signal "post-record-validation") in
-  let with_material material =
-    { valid with status = A.Pending { last_delivery_failure = None; material } }
+let test_distinct_comment_ids_with_the_same_body_are_distinct_candidates () =
+  let make raw_comment_id =
+    { (signal ~content:"same body" "post-comment-identity") with
+      kind =
+        Masc.Board_dispatch.Board_comment_added
+          { comment_id = comment_id raw_comment_id; parent_id = None }
+    }
   in
-  let expect_rejected label candidate =
-    (match A.record ~base_path candidate with
-     | A.Record_error _ -> ()
-     | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded"));
-    Alcotest.(check int)
-      (label ^ " left the ledger empty")
-      0
-      (ok
-         "load ledger after rejected record"
-         (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
-       |> List.length)
-  in
-  let mismatched_post =
-    { (post_of_signal valid.signal) with id = post_id_exn "different-post" }
-  in
-  expect_rejected
-    "mismatched Board post identity"
-    (with_material (material_of ~post:mismatched_post valid.signal));
-  let mismatched_comment =
-    { (comment_of_signal valid.signal) with post_id = post_id_exn "different-post" }
-  in
-  expect_rejected
-    "mismatched Board comment identity"
-    (with_material (material_of ~comments:[ mismatched_comment ] valid.signal));
-  let persisted = record ~base_path valid in
+  let first = make "c-00000000000000000000000000000001" in
+  let second = make "c-00000000000000000000000000000002" in
   Alcotest.(check bool)
-    "valid current material is the only durable row"
-    true
-    (load_one ~base_path = persisted)
+    "producer comment identity, not body text, owns candidate identity"
+    false
+    (String.equal
+       (A.candidate_id_of_signal ~keeper_name:"alpha" first)
+       (A.candidate_id_of_signal ~keeper_name:"alpha" second))
 ;;
 
-(* 판정 증거는 pending 에서만 읽힌다. 판정이 끝나면 행에서 사라지고, 파티션
-   정체성인 keeper_context 는 남는다. 소비된 후보 9,808건이 원장의 92% 를 차지하던
-   이유가 이 둘을 한 덩어리로 들고 있었기 때문이다. RFC-0424. *)
-let test_judgment_drops_board_evidence_but_keeps_partition_identity () =
-  with_temp_base "board-attention-candidate-evidence-lifetime" @@ fun base_path ->
-  let source = signal "post-evidence-lifetime" in
-  (* signal.content 과 post.body 는 같은 문자열이므로, 게시글에만 있는 표식을
-     심어야 "행에서 사라졌다"를 실제로 잴 수 있다. *)
-  let marker = "evidence-marker-must-not-outlive-the-judgment" in
-  let persisted =
-    record
-      ~base_path
-      { (candidate source) with
-        status =
-          A.Pending
-            { last_delivery_failure = None
-            ; material =
-                material_of ~post:{ (post_of_signal source) with body = marker } source
-            }
-      }
+let test_edit_candidates_preserve_revision_identity () =
+  with_temp_base "board-edit-candidates" @@ fun base_path ->
+  let edited at =
+    { (signal "post-edited") with
+      kind = Masc.Board_dispatch.Board_post_updated { content_updated_at = at }
+    }
   in
-  let mentions_body candidate =
-    let row = Yojson.Safe.to_string (A.candidate_to_json candidate) in
-    let rec search index =
-      index + String.length marker <= String.length row
-      && (String.equal (String.sub row index (String.length marker)) marker
-          || search (index + 1))
+  let first = candidate (edited 10.0) in
+  let persisted = record ~base_path first in
+  let replay = candidate { (edited 10.0) with updated_at = Some 99.0 } in
+  (match A.record ~base_path replay with
+   | A.Duplicate existing ->
+     Alcotest.(check bool) "same edit converges" true (existing = persisted)
+   | _ -> Alcotest.fail "same edit was not deduplicated");
+  let next = candidate (edited 20.0) in
+  ignore (record ~base_path next);
+  let loaded = ok "reload edits" (A.load_candidates ~base_path ~keeper_name:"alpha") in
+  Alcotest.(check int) "different edits remain separate" 2 (List.length loaded);
+  Alcotest.(check bool) "typed edit survives persistence" true
+    (List.exists (fun item -> item.A.signal = next.signal) loaded);
+  let invalid fields =
+    match A.candidate_to_json first with
+    | `Assoc candidate_fields ->
+      let json = `Assoc (List.map (function
+        | "signal", `Assoc signal_fields -> "signal", `Assoc (fields signal_fields)
+        | field -> field) candidate_fields) in
+      Alcotest.(check bool) "invalid edit coordinate rejected" true
+        (Result.is_error (A.candidate_of_json json))
+    | _ -> Alcotest.fail "candidate encoder did not emit an object"
+  in
+  invalid (List.remove_assoc "content_updated_at");
+  invalid (fun fields -> ("content_updated_at", `Float nan)
+    :: List.remove_assoc "content_updated_at" fields)
+;;
+
+let test_codec_rejects_malformed_comment_identity () =
+  let valid = candidate (signal "post-record-validation") in
+  let invalid_signal replacements =
+    let replace fields =
+      List.map
+        (fun (key, value) ->
+           key, Option.value ~default:value (List.assoc_opt key replacements))
+        fields
     in
-    search 0
+    match A.candidate_to_json valid with
+    | `Assoc candidate_fields ->
+      `Assoc
+        (List.map
+           (function
+             | "signal", `Assoc signal_fields -> "signal", `Assoc (replace signal_fields)
+             | field -> field)
+           candidate_fields)
+    | _ -> Alcotest.fail "candidate codec did not produce an object"
+  in
+  let expect_rejected label json =
+    match A.candidate_of_json json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " was decoded")
+  in
+  expect_rejected
+    "comment signal without producer identity"
+    (invalid_signal [ "kind", `String "comment_added" ]);
+  expect_rejected
+    "comment signal with a non-Board id"
+    (invalid_signal
+       [ "kind", `String "comment_added"; "comment_id", `String "comment-two" ]);
+  expect_rejected
+    "non-comment signal carrying comment identity"
+    (invalid_signal
+       [ "comment_id", `String "c-00000000000000000000000000000003" ])
+;;
+
+let test_pending_row_has_no_board_thread_history () =
+  let pending = candidate (signal "post-no-history") in
+  let status =
+    match A.candidate_to_json pending with
+    | `Assoc fields -> List.assoc "status" fields
+    | _ -> Alcotest.fail "candidate codec did not produce an object"
   in
   Alcotest.(check bool)
-    "a pending row carries the Board evidence"
+    "pending v7 row has no post or comments snapshot"
     true
-    (Option.is_some (A.pending_judgment_material persisted.status)
-     && mentions_body persisted);
-  let judged =
-    ok
-      "record judgment"
-      (A.record_judgment ~base_path persisted (judgment J.Not_relevant))
-  in
-  Alcotest.(check bool)
-    "a judged row carries none"
-    true
-    (Option.is_none (A.pending_judgment_material judged.status)
-     && not (mentions_body judged));
-  Alcotest.(check bool)
-    "the durable row agrees with the value in hand"
-    true
-    (load_one ~base_path = judged);
-  Alcotest.(check bool)
-    "partition identity outlives the evidence"
-    true
-    (A.Context_key.of_candidate judged = A.Context_key.of_candidate persisted)
+    (status
+     = `Assoc
+         [ "kind", `String "pending"
+         ; "last_delivery_failure", `Null
+         ])
 ;;
 
 let test_judgment_write_invariant_rejects_blank_provenance () =
@@ -800,9 +785,7 @@ let test_non_finite_lifecycle_times_are_rejected () =
     { valid with
       status =
         A.Pending
-          { last_delivery_failure = Some infinite_failure
-          ; material = material_of valid.signal
-          }
+          { last_delivery_failure = Some infinite_failure }
     };
   expect_record_error
     ~base_path
@@ -871,67 +854,24 @@ let test_non_finite_lifecycle_times_are_rejected () =
       (List.length candidates)
 ;;
 
-let test_non_finite_complete_request_evidence_is_rejected () =
-  with_temp_base "board-attention-candidate-request-finite" @@ fun base_path ->
-  let base = candidate (signal "post-request-finite") in
-  let with_material (candidate : A.candidate) material : A.candidate =
-    { candidate with status = A.Pending { last_delivery_failure = None; material } }
-  in
+let test_non_finite_current_signal_is_rejected () =
+  with_temp_base "board-attention-candidate-signal-finite" @@ fun base_path ->
+  let base = candidate (signal "post-signal-finite") in
   let at_signal value =
     (* [candidate] derives candidate_id by serializing the signal, which yojson 3
        refuses to do for a non-finite float. Hash a finite placeholder and inject
        the value afterwards: the stored record, not the id, is under test. *)
-    let placeholder =
-      { (signal "post-request-finite") with updated_at = Some 0.0 }
-    in
+    let placeholder = { (signal "post-signal-finite") with updated_at = Some 0.0 } in
     let candidate = candidate placeholder in
     let source = { candidate.signal with updated_at = Some value } in
-    with_material
-      { candidate with signal = source }
-      (material_of
-         ~post:{ (post_of_signal source) with updated_at = 42.0 }
-         source)
-  in
-  let at_post value =
-    with_material
-      base
-      (material_of
-         ~post:{ (post_of_signal base.signal) with created_at = value }
-         base.signal)
-  in
-  let at_comment value =
-    with_material
-      base
-      (material_of
-         ~comments:[ { (comment_of_signal base.signal) with created_at = value } ]
-         base.signal)
-  in
-  let at_nested_evidence value =
-    (* post.meta_json stays untyped JSON, so a non-finite number can still hide
-       inside it and the canonicalizer is what answers. *)
-    let nested =
-      `Assoc [ "evidence", `List [ `Assoc [ "confidence", `Float value ] ] ]
-    in
-    with_material
-      base
-      (material_of
-         ~post:{ (post_of_signal base.signal) with meta_json = Some nested }
-         base.signal)
+    { candidate with signal = source }
   in
   let locations =
-    [ (* signal.updated_at is a typed field, so the record's own finiteness
-         check answers before the JSON canonicalizer walks the request, and it
-         names the field rather than the enclosing object. The untyped
-         locations below keep the canonicalizer's generic message, which is why
-         they pin no detail. *)
-      ( "signal.updated_at"
+    [ ( "signal.updated_at"
       , Some
           "invalid Board attention candidate: candidate.signal.updated_at must \
            be finite"
       , at_signal )
-    ; "post.created_at", None, at_post
-    ; "comment.created_at", None, at_comment
-    ; "nested post evidence", None, at_nested_evidence
     ]
   in
   let non_finite_values =
@@ -952,7 +892,7 @@ let test_non_finite_complete_request_evidence_is_rejected () =
          non_finite_values)
     locations;
   Alcotest.(check int)
-    "non-finite request fixtures left no durable row"
+    "non-finite signal fixtures left no durable row"
     0
     (ok
        "load after rejected request fixtures"
@@ -968,31 +908,6 @@ let test_finite_numeric_boundary_is_persisted () =
     }
   in
   let original = candidate signal in
-  let nested_boundary =
-    `Assoc
-      [ ( "evidence"
-        , `List
-            [ `Assoc
-                [ "positive", `Float Float.max_float
-                ; "negative", `Float (-. Float.max_float)
-                ]
-            ] )
-      ]
-  in
-  let material =
-    material_of
-      ~post:
-        { (post_of_signal signal) with
-          created_at = -.Float.max_float
-        ; meta_json = Some nested_boundary
-        }
-      ~comments:
-        [ { (comment_of_signal signal) with created_at = Float.max_float } ]
-      signal
-  in
-  let original =
-    { original with status = A.Pending { last_delivery_failure = None; material } }
-  in
   let persisted = record ~base_path original in
   Alcotest.(check bool)
     "largest finite magnitudes round-trip"
@@ -1350,13 +1265,21 @@ let () =
             `Quick
             test_old_relevant_comment_cannot_override_current_unrelated_signal
         ; Alcotest.test_case
-            "judgment drops Board evidence and keeps partition identity"
+            "edit candidates preserve revision identity"
             `Quick
-            test_judgment_drops_board_evidence_but_keeps_partition_identity
+            test_edit_candidates_preserve_revision_identity
         ; Alcotest.test_case
-            "record rejects malformed input without poisoning ledger"
+            "distinct comment ids with the same body are distinct candidates"
             `Quick
-            test_record_rejects_malformed_without_poisoning_ledger
+            test_distinct_comment_ids_with_the_same_body_are_distinct_candidates
+        ; Alcotest.test_case
+            "pending row has no Board thread history"
+            `Quick
+            test_pending_row_has_no_board_thread_history
+        ; Alcotest.test_case
+            "codec rejects malformed comment identity"
+            `Quick
+            test_codec_rejects_malformed_comment_identity
         ; Alcotest.test_case
             "judgment write invariant rejects blank provenance"
             `Quick
@@ -1378,9 +1301,9 @@ let () =
             `Quick
             test_non_finite_lifecycle_times_are_rejected
         ; Alcotest.test_case
-            "non-finite complete request evidence is rejected"
+            "non-finite current signal is rejected"
             `Quick
-            test_non_finite_complete_request_evidence_is_rejected
+            test_non_finite_current_signal_is_rejected
         ; Alcotest.test_case
             "finite numeric boundary is persisted"
             `Quick

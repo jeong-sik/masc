@@ -6,6 +6,16 @@ module Gate = Masc.Keeper_librarian_absorb_gate
 module T = Masc.Typesafeai_types
 module Types = Masc.Keeper_memory_os_types
 
+(* The one element a single-destination case expects. A mismatch fails with
+   every element it got, not only how many, so the failure log shows what the
+   run actually reported. *)
+let only_one ~what ~to_json = function
+  | [ item ] -> item
+  | items ->
+    Alcotest.failf "one destination, got %d %s: %s" (List.length items) what
+      (Yojson.Safe.to_string (`List (List.map to_json items)))
+;;
+
 let fact claim : Types.fact =
   Types.observed
     ~claim
@@ -254,7 +264,7 @@ let runtime_skip_reason = function
   | Gate_disabled_run -> Some "absorb_gate_disabled"
   | Excluded_run -> Some "keeper_excluded"
   | Lane_disabled_run -> Some "lane_disabled"
-  | Missing_key_run -> Some "missing_api_key"
+  | Missing_key_run -> Some "no_armed_destination"
   | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure -> None
 ;;
@@ -405,14 +415,14 @@ let run_runtime_evidence ?fixture_dir () =
       Masc_test_deps.with_typesafeai_policy
         { Runtime_schema.default_typesafeai with
           lane_enabled = scenario <> Lane_disabled_run
-        ; lane_endpoint = jev_uri
-        ; lane_model = requested_model
+        ; destinations =
+            ( { Runtime_schema.endpoint = jev_uri; model = requested_model; api_key_env = "TYPESAFEAI_API_KEY" }
+            , [] )
         ; absorb_gate = scenario <> Gate_disabled_run
         ; excluded_keepers = (if scenario = Excluded_run then [ keeper_id ] else [])
         }
         (fun () ->
           Masc.Keeper_librarian_runtime.run_best_effort
-            ~trigger:Masc.Keeper_librarian_runtime.Queue_changed
             ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input));
     Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
     Alcotest.(check int) "JEV request count"
@@ -476,10 +486,14 @@ let run_runtime_evidence ?fixture_dir () =
        let raw = List.hd !jev_requests in
        let sent = Yojson.Safe.from_string raw in
        let request = member "request" evaluation in
+       let asked =
+         only_one ~what:"listed" ~to_json:Fun.id
+           (member "destinations" request |> Yojson.Safe.Util.to_list) in
        Alcotest.(check string) "endpoint observation omits userinfo/query/fragment" displayed_jev_uri
-         (member "endpoint" request |> string);
+         (member "destination_uri" asked |> string);
+       check_json "actual JEV request model" (member "model" sent) (member "model" asked);
        List.iter (fun key -> check_json ("actual JEV request " ^ key)
-         (member key sent) (member key request)) [ "model"; "state"; "questions" ];
+         (member key sent) (member key request)) [ "state"; "questions" ];
        Alcotest.(check string) "the configured request model was sent" requested_model
          (member "model" sent |> string);
        (match scenario with
@@ -491,9 +505,10 @@ let run_runtime_evidence ?fixture_dir () =
           let failure = member "failure" evaluation in
           Alcotest.(check string) "the walk records every destination asked" "every_destination_refused"
             (member "kind" failure |> string);
-          let refusal = match member "attempts" failure |> Yojson.Safe.Util.to_list with
-            | [ attempt ] -> member "refusal" attempt
-            | attempts -> Alcotest.failf "one destination, %d attempts" (List.length attempts) in
+          let refusal =
+            only_one ~what:"attempts" ~to_json:Fun.id
+              (member "attempts" failure |> Yojson.Safe.Util.to_list)
+            |> member "refusal" in
           Alcotest.(check int) "actual HTTP failure status" 503 (member "status" refusal |> Yojson.Safe.Util.to_int);
           Alcotest.(check string) "actual HTTP failure body" "fixture unavailable" (member "body" refusal |> string);
           List.iter (fun key -> check_json ("failure does not invent " ^ key)
@@ -501,9 +516,10 @@ let run_runtime_evidence ?fixture_dir () =
         | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run ->
           Alcotest.(check string) "a rejected HTTP response is a failed evaluation" "failed"
             (member "status" evaluation |> string);
-          let refusal = match member "failure" evaluation |> member "attempts" |> Yojson.Safe.Util.to_list with
-            | [ attempt ] -> member "refusal" attempt
-            | attempts -> Alcotest.failf "one destination, %d attempts" (List.length attempts) in
+          let refusal =
+            only_one ~what:"attempts" ~to_json:Fun.id
+              (member "failure" evaluation |> member "attempts" |> Yojson.Safe.Util.to_list)
+            |> member "refusal" in
           Alcotest.(check string) "HTTP and transport failures remain distinct" "http_response"
             (member "kind" refusal |> string);
           Alcotest.(check int) "actual successful HTTP status survives decoding failure" 200
@@ -762,9 +778,8 @@ let test_failure_bodies_omit_configured_credentials () =
     let failure =
       match Client.evaluate ~clock ~destinations:(destination, []) ~state:`Null ~questions:[] () with
       | Error failure ->
-        (match Client.attempts failure with
-         | [ attempt ] -> attempt.refusal
-         | asked -> Alcotest.failf "one destination, %d attempts" (List.length asked))
+        (only_one ~what:"attempts" ~to_json:Client.attempt_to_yojson
+           (Client.attempts failure)).refusal
       | Ok _ -> Alcotest.fail "the gateway response must remain a typed failure" in
     let expected = "gateway echo [REDACTED] url=" ^ displayed ^ suffix in
     (match failure with
@@ -786,6 +801,56 @@ let test_failure_bodies_omit_configured_credentials () =
     ; `OK, String.make 1 (Char.chr 255) ]
 ;;
 
+(* Two destinations: the first does not answer, the reserve does. The record
+   says who answered, which model it was asked for, and who was passed over. *)
+let test_run_records_the_destination_passed_over () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let module J = Yojson.Safe.Util in
+  let response = {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":1.0}}}|} in
+  let reserve = F.start_server ~sw ~net ~clock (F.Reply response) in
+  let closed = "http://127.0.0.1:9/never-reached" in
+  let reserve_key = "MASC_TEST_TYPESAFEAI_RESERVE_KEY" in
+  Masc_test_deps.with_process_env reserve_key (Some "synthetic-reserve-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with
+      destinations =
+        ( { Runtime_schema.endpoint = closed
+          ; model = "first-model"
+          ; api_key_env = "TYPESAFEAI_API_KEY"
+          }
+        , [ { Runtime_schema.endpoint = reserve.base_url
+            ; model = "reserve-model"
+            ; api_key_env = reserve_key
+            }
+          ] )
+    } @@ fun () ->
+  let first = fact (List.nth sources 0) in
+  let absorbed = absorbed_into merged [ first ] in
+  let run = Gate.run ~clock ~keeper_id:"reserve-fixture" ~facts:[ first ]
+      ~new_claims:[ merged ] ~absorbed () in
+  let report = Gate.run_result_to_yojson run in
+  match J.member "evaluations" report |> J.to_list with
+  | [ evaluation ] ->
+    Alcotest.(check string) "answered by the reserve" reserve.base_url
+      (J.member "destination_uri" evaluation |> J.to_string);
+    Alcotest.(check string) "with the model the reserve was asked for" "reserve-model"
+      (J.member "requested_model" evaluation |> J.to_string);
+    (match J.member "passed_over" evaluation |> J.to_list with
+     | [ attempt ] ->
+       Alcotest.(check string) "the first destination stays on record" closed
+         (J.member "destination_uri" attempt |> J.to_string);
+       Alcotest.(check string) "as the transport refusal it was" "transport"
+         (J.member "refusal" attempt |> J.member "kind" |> J.to_string)
+     | attempts -> Alcotest.failf "one passed-over attempt, got %d" (List.length attempts));
+    Alcotest.(check int) "both armed destinations are listed as asked" 2
+      (J.member "request" evaluation |> J.member "destinations" |> J.to_list |> List.length);
+    let sent = List.hd (F.request_bodies reserve) |> Yojson.Safe.from_string in
+    Alcotest.(check string) "the reserve read its own model id" "reserve-model"
+      (J.member "model" sent |> J.to_string)
+  | evaluations -> Alcotest.failf "one evaluation, got %d" (List.length evaluations)
+;;
+
 let test_run_uses_one_destination_and_model_snapshot () =
   with_gate_http_fixture @@ fun ~sw ~net ~clock ->
   let module F = Exact_output_fixture in
@@ -796,15 +861,23 @@ let test_run_uses_one_destination_and_model_snapshot () =
         (* A new table published mid-run must not move the run's requests. *)
         Runtime_typesafeai_policy.publish
           { (Runtime_typesafeai_policy.current ()) with
-            lane_endpoint = alternate.base_url
-          ; lane_model = "changed-after-first-request"
+            destinations =
+              ( { Runtime_schema.endpoint = alternate.base_url
+                ; model = "changed-after-first-request"
+                ; api_key_env = "TYPESAFEAI_API_KEY"
+                }
+              , [] )
           })
       (F.Reply response) in
   let configured_endpoint = initial.base_url ^ "?access=fixture-query#fixture-fragment" in
   Masc_test_deps.with_typesafeai_policy
     { (Runtime_typesafeai_policy.current ()) with
-      lane_endpoint = configured_endpoint
-    ; lane_model = "initial-request-model"
+      destinations =
+        ( { Runtime_schema.endpoint = configured_endpoint
+          ; model = "initial-request-model"
+          ; api_key_env = "TYPESAFEAI_API_KEY"
+          }
+        , [] )
     } @@ fun () ->
   let first = fact (List.nth sources 0) in
   let second = fact (List.nth sources 1) in
@@ -818,8 +891,11 @@ let test_run_uses_one_destination_and_model_snapshot () =
    | Gate.Skipped _ -> Alcotest.fail "expected evaluations"
    | Gate.Evaluated { evaluations; _ } ->
      List.iter (fun (evaluation : Gate.evaluation) ->
+       let asked =
+         only_one ~what:"listed" ~to_json:Masc.Typesafeai_client.destination_id_to_yojson
+           evaluation.destinations in
        Alcotest.(check string) "typed evaluation has an observation endpoint"
-         initial.base_url evaluation.endpoint) evaluations);
+         initial.base_url asked.destination_uri) evaluations);
   let report = Gate.run_result_to_yojson run in
   (match List.rev !observations with
    | [ Gate.Incomplete [ first ]; Gate.Incomplete [ again; second ]; Gate.Complete final ] ->
@@ -839,11 +915,13 @@ let test_run_uses_one_destination_and_model_snapshot () =
       "initial-request-model" (Yojson.Safe.from_string raw |> member "model" |> to_string))
     (F.request_bodies initial);
   List.iter (fun evaluation ->
-    let request = member "request" evaluation in
+    let asked =
+      only_one ~what:"listed" ~to_json:Fun.id
+        (member "request" evaluation |> member "destinations" |> to_list) in
     Alcotest.(check string) "reported endpoint is the transmitted snapshot" initial.base_url
-      (member "endpoint" request |> to_string);
+      (member "destination_uri" asked |> to_string);
     Alcotest.(check string) "reported model is the transmitted snapshot" "initial-request-model"
-      (member "model" request |> to_string))
+      (member "model" asked |> to_string))
     (member "evaluations" report |> to_list)
 ;;
 
@@ -870,8 +948,9 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
       (F.Reply response) in
   Masc_test_deps.with_typesafeai_policy
     { (Runtime_typesafeai_policy.current ()) with
-      lane_endpoint = server.base_url
-    ; lane_model = "request-model"
+      destinations =
+        ( { Runtime_schema.endpoint = server.base_url; model = "request-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+        , [] )
     } @@ fun () ->
   let first = fact (List.nth sources 0) in
   let second = fact (List.nth sources 1) in
@@ -908,11 +987,14 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   match List.rev !observed with
   | [ Gate.Incomplete [ evaluation ] as observation ] ->
     let sent = List.hd (F.request_bodies server) in
+    let asked =
+      only_one ~what:"listed" ~to_json:Masc.Typesafeai_client.destination_id_to_yojson
+        evaluation.destinations in
     Alcotest.(check string) "completed request destination remains inspectable"
-      server.base_url evaluation.endpoint;
+      server.base_url asked.destination_uri;
     Alcotest.(check string) "completed request model remains inspectable"
-      "request-model" evaluation.model;
-    let request = T.request_to_yojson ~model:evaluation.model
+      "request-model" asked.model;
+    let request = T.request_to_yojson ~model:asked.model
         ~state:evaluation.state ~questions:evaluation.questions in
     Alcotest.(check string) "the completed request context is the HTTP body"
       (Yojson.Safe.from_string sent |> Yojson.Safe.to_string) (Yojson.Safe.to_string request);
@@ -958,7 +1040,9 @@ let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
     { Runtime_schema.default_typesafeai with
-      lane_endpoint = "http://127.0.0.1:9/never-reached"
+      destinations =
+        ( { Runtime_schema.typesafe_destination with endpoint = "http://127.0.0.1:9/never-reached" }
+        , [] )
     ; absorb_gate = true
     ; excluded_keepers = [ "kept-home" ]
     } @@ fun () ->
@@ -988,7 +1072,9 @@ let test_rejected_response_retains_every_typed_answer () =
     (List.map (fun (_, answers) -> Yojson.Safe.to_string
        (`Assoc [ "model", `String "invalid-response-model"; "answers", answers ])) cases)) in
   Masc_test_deps.with_typesafeai_policy
-    { (Runtime_typesafeai_policy.current ()) with lane_endpoint = server.base_url } @@ fun () ->
+    { (Runtime_typesafeai_policy.current ()) with
+      destinations = ({ Runtime_schema.typesafe_destination with endpoint = server.base_url }, []) }
+  @@ fun () ->
   let facts = List.map fact sources in
   List.iter (fun (label, expected) ->
     let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~facts
@@ -1130,6 +1216,8 @@ let () =
             test_failure_preserves_unjudged_from_unvisited_groups
         ; Alcotest.test_case "one run uses one endpoint and model snapshot" `Quick
             test_run_uses_one_destination_and_model_snapshot
+        ; Alcotest.test_case "a run records the destination passed over" `Quick
+            test_run_records_the_destination_passed_over
         ; Alcotest.test_case "cancelled next request retains its completed observation" `Quick
             test_cancelled_next_request_keeps_the_completed_observation
         ; Alcotest.test_case "skipped run publishes its completed observation" `Quick

@@ -21,7 +21,7 @@ PREFLIGHT_HELPER_COMMIT=""
 # literal, so the gate and its test cannot drift apart.
 KEEPER_META_REJECTED='current keeper meta is invalid'
 # Keep aligned with Keeper_board_attention_candidate.schema_version.
-BOARD_ATTENTION_SCHEMA_VERSION=6
+BOARD_ATTENTION_SCHEMA_VERSION=7
 
 usage() {
   sed -n '2,/^$/p' "$0"
@@ -319,7 +319,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     local queue_dir="$target_root/.masc/keepers/fixture"
     mkdir -p "$queue_dir"
     jq -n '
-      {schema: "keeper.event_queue.state.v18", revision: 1,
+      {schema: "keeper.event_queue.state.v19", revision: 1,
        pending: [], last_transition: null,
        projected_dispositions: [], transition_outbox: [],
        accepted_transfer_projections: []}
@@ -460,13 +460,13 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   stale_candidate_root="$fixture_root/candidate-old-schema"
   write_schedules "$stale_candidate_root" running
   mkdir -p "$stale_candidate_root/.masc/board_attention_candidates"
-  printf '{"schema_version": 3, "candidate_id": "fixture"}\n' \
+  printf '{"schema_version": 6, "candidate_id": "fixture"}\n' \
     >"$stale_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
   expect_failure stale_board_attention_candidate_ledger "$stale_candidate_root"
 
   # Reject prior, future, and wrong-typed versions after a valid row, so a
   # successful first row cannot mask an incompatible later row.
-  for rejected_version in 4 5 7 6.5 '"6"' null true; do
+  for rejected_version in 6 8 7.5 '"7"' null true; do
     version_candidate_root="$fixture_root/candidate-rejected-version"
     write_schedules "$version_candidate_root" running
     mkdir -p "$version_candidate_root/.masc/board_attention_candidates"
@@ -490,7 +490,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   many_stale_candidate_root="$fixture_root/candidate-many-old-schema"
   write_schedules "$many_stale_candidate_root" running
   mkdir -p "$many_stale_candidate_root/.masc/board_attention_candidates"
-  jq -nc 'range(0; 5000) | {schema_version: 3, candidate_id: "fixture"}' \
+  jq -nc 'range(0; 5000) | {schema_version: 6, candidate_id: "fixture"}' \
     >"$many_stale_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
   expect_failure_contains \
     many_stale_board_attention_candidate_rows \

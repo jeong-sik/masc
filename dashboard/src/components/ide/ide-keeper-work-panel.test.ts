@@ -232,6 +232,16 @@ function compositeFixture(
     fsm_guard_violation_breakdown: [],
     is_live: true,
     last_outcome: null,
+    runtime_attention: {
+      state: 'ok',
+      needs_attention: false,
+      blocked: false,
+      fiber_stop_requested: false,
+      reason: null,
+      raw_phase: 'running',
+      is_live: true,
+      source: 'composite_snapshot',
+    },
     recommended_actions: [],
     ...overrides,
   }

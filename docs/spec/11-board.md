@@ -188,11 +188,23 @@ list admits no such candidates; exact targets, broadcast, and structurally
 matched thread participants still receive their typed delivery. Interest does
 not assign a Task or authorize an external effect.
 
+Board-attention candidate schema v7 preserves a comment's producer-issued
+`comment_id` and optional `parent_id` from the `add_comment` boundary through
+candidate persistence and the judge request. Candidate identity for comments
+is `(keeper, kind, post_id, comment_id)`, never body text. A pending row stores
+only the current typed signal and
+`keeper_context {lane_keeper_name, board_interests}`; it stores no post/comment
+snapshot. The judge receives that signal plus
+`keeper_role {name, board_interests}`. The existing post-verdict Keeper event
+queue DTO remains unchanged. Older candidate schemas are not decoded.
+Deployment preflight requires every non-empty candidate ledger to use schema
+v7. Candidate and partition stores follow the fresh-state hard-cut contract.
+
 | 이벤트 | 필드 |
 |--------|------|
 | `post_created` | post_id, author, hearth |
 | `post_voted` | post_id, voter, direction, new_score |
-| `comment_added` | post_id, comment_id, author |
+| `comment_added` | post_id, comment_id, optional parent_id, author |
 | `comment_voted` | comment_id, voter, direction |
 
 ### 7.2 SSE Dispatch (formerly Board_listener)

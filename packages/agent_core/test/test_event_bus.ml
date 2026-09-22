@@ -1021,6 +1021,101 @@ let test_mk_event_propagates_caused_by () =
   check (option string) "event.meta.caused_by" (Some "parent-7") ev.meta.caused_by
 ;;
 
+(* ── caller scope ─────────────────────────────────────────────────── *)
+
+let scope_exn value =
+  match Caller_scope.of_string value with
+  | Ok scope -> scope
+  | Error detail -> failf "test scope %S refused: %s" value detail
+;;
+
+let scope_text (meta : Event_bus.envelope) = Option.map Caller_scope.to_string meta.caller_scope
+
+let turn_started turn = Event_bus.mk_event (TurnStarted { agent_name = "a"; turn })
+
+let test_a_scoped_handle_stamps_only_what_it_publishes () =
+  Eio_main.run
+  @@ fun _env ->
+  let bus = Event_bus.create () in
+  let sub = subscribe_routing bus in
+  let scoped = Event_bus.with_caller_scope bus (scope_exn "turn-7") in
+  Event_bus.publish scoped (turn_started 0);
+  Event_bus.publish bus (turn_started 1);
+  match Event_bus.drain sub with
+  | [ through_scoped; through_bus ] ->
+    check (option string) "the scoped handle names its scope" (Some "turn-7")
+      (scope_text through_scoped.meta);
+    check (option string) "the bus it was made from names none" None
+      (scope_text through_bus.meta)
+  | events -> failf "expected two events, drained %d" (List.length events)
+;;
+
+let test_a_scoped_handle_shares_the_subscribers () =
+  Eio_main.run
+  @@ fun _env ->
+  let bus = Event_bus.create () in
+  let scoped = Event_bus.with_caller_scope bus (scope_exn "turn-7") in
+  let sub = subscribe_routing scoped in
+  check int "one subscriber, seen from the bus" 1 (Event_bus.subscriber_count bus);
+  Event_bus.publish bus (turn_started 0);
+  check int "a subscription made through the handle hears the bus" 1
+    (List.length (Event_bus.drain sub))
+;;
+
+let test_a_scope_the_event_already_names_is_kept () =
+  Eio_main.run
+  @@ fun _env ->
+  let bus = Event_bus.create () in
+  let sub = subscribe_routing bus in
+  let scoped = Event_bus.with_caller_scope bus (scope_exn "turn-7") in
+  let relayed =
+    { (turn_started 0) with
+      meta = Event_envelope.make ~caller_scope:(scope_exn "turn-3") ()
+    }
+  in
+  Event_bus.publish scoped relayed;
+  match Event_bus.drain sub with
+  | [ event ] ->
+    check (option string) "the producer's scope, not the handle's" (Some "turn-3")
+      (scope_text event.meta)
+  | events -> failf "expected one event, drained %d" (List.length events)
+;;
+
+(* The official-client host runs tools through [find_and_execute_tool] with
+   its own bus rather than through an agent, so the scope has to reach the
+   tool events from the handle alone. *)
+let test_tool_events_on_a_scoped_handle_carry_the_scope () =
+  Eio_main.run
+  @@ fun _env ->
+  let context = Context.create_sync () in
+  let bus = Event_bus.create () in
+  let sub = subscribe_routing ~filter:Event_bus.filter_tools_only bus in
+  let tool =
+    Tool.create ~name:"ok" ~description:"Succeeds" ~parameters:[] (fun _ ->
+      Ok { Types.content = "done"; content_blocks = None; _meta = None })
+  in
+  let _result =
+    Agent_tools.find_and_execute_tool
+      ~context
+      ~tools:[ tool ]
+      ~hooks:Hooks.empty
+      ~event_bus:(Some (Event_bus.with_caller_scope bus (scope_exn "turn-7")))
+      ~tracer:Tracing.null
+      ~agent_name:"agent"
+      ~invocation:(invocation ~tool_use_id:"tool-1" ())
+      "ok"
+      (`Assoc [])
+    |> require_tool_execution
+  in
+  match Event_bus.drain sub with
+  | [ { meta = called; payload = ToolCalled _ }
+    ; { meta = completed; payload = ToolCompleted _ }
+    ] ->
+    check (option string) "tool_called" (Some "turn-7") (scope_text called);
+    check (option string) "tool_completed" (Some "turn-7") (scope_text completed)
+  | events -> failf "expected tool called/completed, drained %d" (List.length events)
+;;
+
 let test_publish_preserves_fifo_without_drain () =
   Eio_main.run
   @@ fun _env ->
@@ -1308,6 +1403,24 @@ let () =
             "mk_event propagates caused_by"
             `Quick
             test_mk_event_propagates_caused_by
+        ] )
+    ; ( "caller scope"
+      , [ test_case
+            "a scoped handle stamps only what it publishes"
+            `Quick
+            test_a_scoped_handle_stamps_only_what_it_publishes
+        ; test_case
+            "a scoped handle shares the subscribers"
+            `Quick
+            test_a_scoped_handle_shares_the_subscribers
+        ; test_case
+            "a scope the event already names is kept"
+            `Quick
+            test_a_scope_the_event_already_names_is_kept
+        ; test_case
+            "tool events on a scoped handle carry the scope"
+            `Quick
+            test_tool_events_on_a_scoped_handle_carry_the_scope
         ] )
     ; ( "purpose"
       , [ test_case

@@ -85,39 +85,6 @@ let signal post_id : Masc.Board_dispatch.board_signal =
   }
 ;;
 
-let post_id_exn value =
-  match Masc.Board.Post_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board post id fixture: " ^ value)
-;;
-
-let agent_id_exn value =
-  match Masc.Board.Agent_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board agent id fixture: " ^ value)
-;;
-
-let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post =
-  { id = post_id_exn signal.post_id
-  ; author = agent_id_exn signal.author
-  ; title = signal.title
-  ; body = signal.content
-  ; post_kind = Masc.Board.Human_post
-  ; meta_json = None
-  ; visibility = Masc.Board.Public
-  ; created_at = 1.0
-  ; updated_at = Option.value signal.updated_at ~default:1.0
-  ; expires_at = 3601.0
-  ; votes_up = 0
-  ; votes_down = 0
-  ; reply_count = 0
-  ; pinned = false
-  ; hearth = signal.hearth
-  ; thread_id = None
-  ; origin = None
-  }
-;;
-
 let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   let keeper_name = "alpha" in
   let signal = signal id in
@@ -129,17 +96,9 @@ let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   ; keeper_context =
       `Assoc
         [ "lane_keeper_name", `String keeper_name
-        ; "keeper_record_id", `Null
-        ; "keeper_runtime_uid", `Null
-        ; "instructions", `String "continue"
-        ; "current_task_id", `Null
-        ; "mention_keeper_ids", `List [ `String keeper_name ]
+        ; "board_interests", `List [ `String "runtime" ]
         ]
-  ; status =
-      A.Pending
-        { last_delivery_failure = None
-        ; material = { post = post_of_signal signal; comments = [] }
-        }
+  ; status = A.Pending { last_delivery_failure = None }
   }
 ;;
 
@@ -327,7 +286,14 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
      | _ -> Alcotest.fail "third callback did not durably bind projected provenance");
     callbacks := !callbacks @ [ "bind-third" ];
     observed_time := 9.0;
-    Ok (judgment third J.Not_relevant)
+    (* Relevant, not Not_relevant: task-1666 makes the worker settle a
+       Not_relevant completion immediately (no owner turn), which would
+       collapse the mid-test Pending assertion below before it can observe
+       the callback-chain's intermediate Completed state. The callback
+       sequence under test here is orthogonal to the verdict; a dedicated
+       test (test_a_not_relevant_judgment_settles_without_an_owner_turn)
+       covers the Not_relevant direct-settle path. *)
+    Ok (judgment third J.Relevant)
   in
   (match
      ok
@@ -369,8 +335,51 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
    | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
   match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
-  | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
+  | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
   | _ -> Alcotest.fail "owner settlement did not consume and settle the judgment"
+;;
+
+(* task-1666: a [Not_relevant] verdict carries nothing across the owner lane
+   (nothing is enqueued for the owner to consume --
+   keeper_board_attention_candidate.mli: "Relevant judgments cross the owner
+   lane only when the owner durably applies and consumes the exact candidate
+   judgment"), so the worker settles it the moment it is judged instead of
+   waiting for the owner's own heartbeat to run [settle_completed_snapshot]
+   -- which never runs at all while that owner is not currently ticking.
+   No call to [settle_completed_snapshot] appears anywhere in this test: the
+   owner never turns, and the candidate still reaches Consumed. *)
+let test_a_not_relevant_judgment_settles_without_an_owner_turn () =
+  with_temp_base "board-attention-worker-not-relevant-direct-settle" @@ fun base_path ->
+  let discarded = record ~base_path (candidate ~id:"candidate-not-relevant" ()) in
+  let execute ~before_dispatch ~before_advance:_ prepared =
+    let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
+    ok "bind" (before_dispatch attempt);
+    Ok (judgment attempt J.Not_relevant)
+  in
+  (match
+     ok
+       "judge the discard"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id discarded.candidate_id -> ()
+   | W.Judgment_completed _
+   | W.Idle
+   | W.Contended _
+   | W.Rescan_later _
+   | W.Candidate_already_consumed _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "fixture did not complete the discard's judgment");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
+   | A.Consumed { delivery = A.Not_relevant; _ }, (P.Ready | P.Running _ | P.Completed _ | P.Blocked _) ->
+     Alcotest.fail "candidate consumed but its partition never settled"
+   | (A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _), _ ->
+     Alcotest.fail "a Not_relevant verdict waited for an owner turn it never got");
+  Alcotest.(check int)
+    "nothing was enqueued for the owner"
+    0
+    (relevant_delivery_count ~base_path ~candidate_id:discarded.candidate_id)
 ;;
 
 (* Non-relevant judgments settle without queue delivery. *)
@@ -1579,7 +1588,12 @@ let test_terminal_root_does_not_strand_ready_sibling () =
          then Error (E.Providers_exhausted { attempts = []; detail = "provider exhausted" })
          else (
            ok "bind sibling" (before_dispatch sibling_exact);
-           Ok (judgment sibling_exact J.Not_relevant))))
+           (* Relevant, not Not_relevant: this test's subject is the drain
+              continuing past a terminal root, and its final assertion reads
+              the sibling as Completed — the pre-task-1666 resting state.
+              A Not_relevant verdict now settles inside the worker fiber, so
+              the sibling would be past Completed before this test looks. *)
+           Ok (judgment sibling_exact J.Relevant))))
      : W.drain_outcome);
   Alcotest.(check (list string))
     "terminal root and sibling were each visited once"
@@ -2064,7 +2078,13 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   let exact = provenance "manual-requeue-success" in
   let execute ~before_dispatch ~before_advance:_ _candidate =
     ok "bind manual requeue attempt" (before_dispatch exact);
-    Ok (judgment exact J.Not_relevant)
+    (* Relevant, not Not_relevant: task-1666 makes the worker settle a
+       Not_relevant completion right in the worker fiber, so the boundary
+       assertion below (Requeued + Completed, not yet settled) would see
+       Settled instead. This test's subject is the owner-turn settlement
+       path after an authorized manual requeue; the direct path is
+       test_a_not_relevant_judgment_settles_without_an_owner_turn. *)
+    Ok (judgment exact J.Relevant)
   in
   (match
      ok
@@ -2093,7 +2113,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
    | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
-   | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
+   | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
    | _ -> Alcotest.fail "manual requeue did not normalize, consume, and settle");
   (match (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items with
    | [] -> ()
@@ -2890,6 +2910,10 @@ let () =
             "discards do not hold the owner delivery slot"
             `Quick
             test_discards_do_not_hold_the_owner_delivery_slot
+        ; Alcotest.test_case
+            "a not-relevant judgment settles without an owner turn (task-1666)"
+            `Quick
+            test_a_not_relevant_judgment_settles_without_an_owner_turn
         ; Alcotest.test_case
             "drain outcome labels stay distinct"
             `Quick

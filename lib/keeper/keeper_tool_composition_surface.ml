@@ -850,6 +850,13 @@ let async_parent_invocation ~request_id source =
     ~completion:Agent_core.Tool_contract.Continue_after_success
 ;;
 
+(* The keeper turn the tool-call ledger files the composition's calls under:
+   the turn context snapshot taken when the composition was invoked. *)
+let keeper_turn_id_of turn_context () =
+  Option.bind turn_context (fun (context : Keeper_tool_call_log_context.turn_context) ->
+    context.keeper_turn_id)
+;;
+
 let execute_keeper_plan ~capability_authority =
   match capability_authority with
   | Keeper_tool_runtime.Frozen_surface capability_surface ->
@@ -896,6 +903,7 @@ let async_worker_result
     ~meta
     ~publication_recovery
     ~ctx_snapshot
+    ~keeper_turn_id:(keeper_turn_id_of turn_context)
     ~turn_sandbox_factory:sandbox_factory
     ?observe_node_result:
       (Option.map
@@ -1981,6 +1989,7 @@ let make_tools_with_authority
                  ~meta
                  ~publication_recovery
                  ~ctx_snapshot
+                 ~keeper_turn_id:(keeper_turn_id_of turn_context)
                  ?turn_sandbox_factory
                  ?clock
                  ?continuation_channel

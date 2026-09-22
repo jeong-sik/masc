@@ -20,6 +20,9 @@ type t =
     (** External causation pointer. Private execution events carry typed plural
         causes outside this envelope and require this field to be [None]. *)
   ; source_clock : source_clock
+  ; caller_scope : Caller_scope.t option
+    (** The scope of the bus handle the event was published on
+        ({!Event_bus.with_caller_scope}); [None] on a bus that names none. *)
   }
 
 (** Raised when the operating-system entropy source cannot mint an identity.
@@ -43,8 +46,12 @@ val make
   -> ?parent_event_id:string
   -> ?caused_by:string
   -> ?source_clock:source_clock
+  -> ?caller_scope:Caller_scope.t
   -> unit
   -> t
 
 val to_json : t -> Yojson.Safe.t
+
+(** Every key [to_json] writes must be present; [caller_scope] may be [null]
+    but not absent. *)
 val of_json : Yojson.Safe.t -> (t, string) result

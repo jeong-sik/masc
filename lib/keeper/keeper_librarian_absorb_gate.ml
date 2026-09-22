@@ -426,8 +426,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { endpoint : string
-  ; model : string
+  { destinations : Typesafeai_client.destination_id list
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
@@ -453,7 +452,7 @@ let absorbed_of_run = function
   | Evaluated { outcome = Judged { absorbed; _ }; _ } -> absorbed
 ;;
 
-let evaluation_to_yojson { endpoint; model; state; questions; result } =
+let evaluation_to_yojson { destinations; state; questions; result } =
   let response =
     match result with
     | Error failure ->
@@ -497,8 +496,7 @@ let evaluation_to_yojson { endpoint; model; state; questions; result } =
      body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
     @ [ "request", `Assoc
-          [ "endpoint", `String endpoint
-          ; "model", `String model
+          [ "destinations", `List (List.map Typesafeai_client.destination_id_to_yojson destinations)
           ; "state", state
           ; "questions", `Assoc
               (List.map (fun (id, question) -> id, Typesafeai_types.question_to_yojson question)
@@ -563,7 +561,7 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
   match absorbed with
   | [] -> complete (Skipped { reason = No_absorptions; absorbed })
   | _ :: _ ->
-    (match Typesafeai_config.absorb_gate_api_key ~keeper_id with
+    (match Typesafeai_config.absorb_gate_destinations ~keeper_id with
      | Error reason ->
        Log.Keeper.info
          ~keeper_name:keeper_id
@@ -571,20 +569,15 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
          (Typesafeai_config.unavailable_reason_to_string reason)
          (List.length absorbed);
        complete (Skipped { reason = Unavailable reason; absorbed })
-     | Ok api_key ->
-       let endpoint = Typesafeai_config.endpoint () in
-       let model = Typesafeai_config.model () in
+     | Ok ((first, rest) as armed) ->
+       let destinations = List.map Typesafeai_client.identify (first :: rest) in
        (* The sha256 of each request body, as the client computed it, so the
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
-       let destination = { Typesafeai_client.endpoint; model; api_key } in
        let evaluate ~state ~questions =
-         let result =
-           Typesafeai_client.evaluate ?clock ~destinations:(destination, []) ~state ~questions ()
-         in
-         let endpoint = Typesafeai_client.endpoint_for_observation endpoint in
-         evaluations := { endpoint; model; state; questions; result } :: !evaluations;
+         let result = Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () in
+         evaluations := { destinations; state; questions; result } :: !evaluations;
          publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string

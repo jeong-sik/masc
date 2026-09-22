@@ -139,9 +139,8 @@ export function deriveKeeperOperationalState(
 
   const blockerClass = canonicalRuntimeBlockerClass(keeper.runtime_blocker_class ?? null)
   const attention = composite?.runtime_attention ?? null
-  // An explicit stale marker is required to demote a blocker. The absence
-  // of `runtime_attention` (older backend, missing composite) leaves the
-  // blocker meaningful — fail-closed default.
+  // An explicit stale marker is required to demote a blocker. Without a
+  // composite snapshot the blocker stays meaningful — fail-closed default.
   const explicitlyStale =
     attention?.execution_current === false
     || attention?.stale_execution_receipt === true

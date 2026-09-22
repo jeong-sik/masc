@@ -986,6 +986,10 @@ let exact_lane_of_id = function
   | _ -> None
 ;;
 
+(* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
+   any CLI slot, so [false] here is that refusal read in advance. The two are
+   tied by these comments alone; making a CLI slot on such a lane unloadable
+   would leave one rule and let that refusal go. *)
 let exact_lane_supports_cli_tail = function
   | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
   | Workspace_curator -> false
@@ -3546,9 +3550,10 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
                 lane_id)))
 ;;
 
-(* Exact-output lanes name their walk order in [slots]; the routing API edits
-   them the same way conversation lanes edit [candidates]. Every exact lane id
-   is a bare key. *)
+(* Exact-output lanes name their walk order in [slots] and, on a lane that
+   walks a CLI tail, in [cli_slots] after them; the routing API edits them the
+   same way conversation lanes edit [candidates]. Every exact lane id is a bare
+   key. *)
 let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ exact_lane_id lane
 
 let exact_lane_decl (config : Runtime_schema.config) lane =
@@ -3579,12 +3584,48 @@ let exact_lane_editable ~content (config : Runtime_schema.config) lane =
          path)
 ;;
 
+(* The two declared lists of an exact lane. An official client answers
+   through its own CLI, so it can only be a CLI slot; every other id -- an
+   Agent Core runtime, a catalog id, or a binding whose provider is not
+   declared -- is a slot the registry admits or reports when it publishes the
+   lane. *)
+type exact_slot_list =
+  | Catalog_slots
+  | Cli_slots
+
+let exact_slot_list_key = function
+  | Catalog_slots -> "slots"
+  | Cli_slots -> "cli_slots"
+;;
+
+let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
+  match
+    List.find_opt (fun (binding : binding) -> String.equal (id_of_binding binding) slot)
+      config.bindings
+  with
+  | None -> Catalog_slots
+  | Some binding ->
+    (match Runtime_schema.provider_of_id config binding.provider_id with
+     | None -> Catalog_slots
+     | Some provider ->
+       (match provider.api_format with
+        | Runtime_schema.Codex_app_server_runtime
+        | Runtime_schema.Antigravity_cli_runtime
+        | Runtime_schema.Claude_code_runtime -> Cli_slots
+        | Runtime_schema.Messages_api
+        | Runtime_schema.Chat_completions_api
+        | Runtime_schema.Ollama_api
+        | Runtime_schema.Gemini_api
+        | Runtime_schema.Vertex_gemini_api -> Catalog_slots))
+;;
+
 let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
   let slots = List.map String.trim slots in
   if slots = []
   then
-    (* Mandatory exact lanes fail the boot fail-closed without a slot; a lane
-       that resolves to nothing is not the edit an operator is making. *)
+    (* This writer names the whole catalog order, and an order of nothing is
+       not the edit an operator is making. Taking the last catalog slot off a
+       lane that keeps a CLI slot is [drop_exact_output_lane_slot]. *)
     Error "an exact-output lane needs at least one slot"
   else if List.exists (String.equal "") slots
   then Error "slots must not contain empty entries"
@@ -3605,12 +3646,31 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
       | Some slot ->
         Error (Printf.sprintf "%s is already a CLI slot of %s" slot (exact_lane_id lane))
       | None ->
-        Ok
-          (Toml_line_editor.edit_table_multiline_array
-             content
-             ~path:(exact_lane_table_path lane)
-             ~key:"slots"
-             ~values:slots))
+        (match
+           List.find_opt
+             (fun slot ->
+                match exact_slot_list_of_new_slot config slot with
+                | Cli_slots -> true
+                | Catalog_slots -> false)
+             slots
+         with
+         | Some slot ->
+           Error
+             (Printf.sprintf
+                (if exact_lane_supports_cli_tail lane
+                 then "%s is an official client, so it can only be a CLI slot of %s"
+                 else
+                   "%s is an official client and %s does not walk a CLI tail, so it \
+                    has no list to go in")
+                slot
+                (exact_lane_id lane))
+         | None ->
+           Ok
+             (Toml_line_editor.edit_table_multiline_array
+                content
+                ~path:(exact_lane_table_path lane)
+                ~key:"slots"
+                ~values:slots)))
 ;;
 
 (* The order an operator extends is the one the file declares. The standalone
@@ -3641,12 +3701,27 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
       else if List.exists (String.equal slot) cli_slots
       then Error (Printf.sprintf "%s is already a CLI slot of %s" slot lane_id)
       else
-        Ok
-          (Toml_line_editor.edit_table_multiline_array
-             content
-             ~path:(exact_lane_table_path lane)
-             ~key:"slots"
-             ~values:(slots @ [ slot ])))
+        let path = exact_lane_table_path lane in
+        match exact_slot_list_of_new_slot config slot with
+        | Catalog_slots ->
+          Ok
+            (Toml_line_editor.edit_table_multiline_array
+               content ~path ~key:"slots" ~values:(slots @ [ slot ]))
+        | Cli_slots when not (exact_lane_supports_cli_tail lane) ->
+          (* [Server_workspace_memory_curator.execute] refuses a run whose lane
+             declares any CLI slot, so writing one here would stop the lane
+             instead of extending it. [set_first_run_runtime] drops CLI slots
+             on these lanes for the same reason. *)
+          Error
+            (Printf.sprintf
+               "%s is an official client and %s does not walk a CLI tail, so it has \
+                no list to go in"
+               slot
+               lane_id)
+        | Cli_slots ->
+          Ok
+            (Toml_line_editor.edit_table_multiline_array
+               content ~path ~key:"cli_slots" ~values:(cli_slots @ [ slot ])))
 ;;
 
 (* Which way [move_exact_output_lane_slot] walks a slot through the declared
@@ -3674,51 +3749,61 @@ let with_declared_exact_slots ~lane ~slot decide =
     Ok
       (fun ~content config ->
          let* () = exact_lane_editable ~content config lane in
-         let slots =
+         let slots, cli_slots =
            match exact_lane_decl config lane with
-           | Some decl -> decl.slot_ids
-           | None -> []
+           | Some decl -> decl.slot_ids, decl.cli_slot_ids
+           | None -> [], []
          in
-         match List.find_index (String.equal slot) slots with
+         let located =
+           match List.find_index (String.equal slot) slots with
+           | Some position -> Some (Catalog_slots, slots, cli_slots, position)
+           | None ->
+             Option.map
+               (fun position -> Cli_slots, cli_slots, slots, position)
+               (List.find_index (String.equal slot) cli_slots)
+         in
+         match located with
          | None ->
            Error
              (Printf.sprintf
                 "%s is not a slot of %s; the lane declares %s"
                 slot
                 lane_id
-                (match slots with [] -> "none" | _ -> String.concat ", " slots))
-         | Some position ->
-           let* values = decide ~lane_id ~slot ~slots ~position in
+                (match slots @ cli_slots with
+                 | [] -> "none"
+                 | declared -> String.concat ", " declared))
+         | Some (list, declared, other, position) ->
+           let* values = decide ~lane_id ~slot ~slots:declared ~other ~position in
            Ok
              (Toml_line_editor.edit_table_multiline_array
                 content
                 ~path:(exact_lane_table_path lane)
-                ~key:"slots"
+                ~key:(exact_slot_list_key list)
                 ~values))
 ;;
 
 let drop_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
   let* edit =
-    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
-      match List.filteri (fun index _ -> index <> position) slots with
-      | [] ->
-        (* The same floor {!set_exact_output_lane_slots} holds: a mandatory
-           lane with no slot fails the boot fail-closed, and emptying a lane is
-           not the edit dropping its last slot means. Remove the lane's table
-           instead. *)
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other ~position ->
+      match List.filteri (fun index _ -> index <> position) slots, other with
+      | [], [] ->
+        (* The floor the parser holds: a lane needs one slot across its two
+           lists, and a mandatory lane with none fails the boot fail-closed.
+           Emptying a lane is not the edit dropping its last slot means.
+           Remove the lane's table instead. *)
         Error
           (Printf.sprintf
              "%s is the last slot of %s; an exact-output lane needs at least one"
              slot
              lane_id)
-      | remaining -> Ok remaining)
+      | remaining, _ -> Ok remaining)
   in
   edit_runtime_lanes ?runtime_config_path edit
 ;;
 
 let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
   let* edit =
-    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~position ->
+    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other:_ ~position ->
       let count = List.length slots in
       let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 in
       if target < 0 || target >= count

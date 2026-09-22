@@ -176,6 +176,134 @@ let test_keeper_up_route_classifies_and_extracts () =
        Server_dashboard_http_keeper_api.keeper_suffix_up)
 ;;
 
+let test_keeper_memory_cleanup_routes_and_closed_requests () =
+  let module Cleanup = Server_dashboard_http_keeper_memory_cleanup in
+  let memory_path = "/api/v1/keepers/fixture-keeper/memory/retractions" in
+  let context_path =
+    "/api/v1/keepers/fixture-keeper/working-context/source-retractions"
+  in
+  check bool "cleanup route permission is Admin" true
+    (Cleanup.permission = Masc_domain.CanAdmin);
+  (match Cleanup.route memory_path with
+   | Some (Cleanup.Current_memory keeper) ->
+     check string "memory route keeper" "fixture-keeper" keeper
+   | Some (Cleanup.Working_context _) | None ->
+     fail "exact memory cleanup route was not classified");
+  (match Cleanup.route context_path with
+   | Some (Cleanup.Working_context keeper) ->
+     check string "context route keeper" "fixture-keeper" keeper
+   | Some (Cleanup.Current_memory _) | None ->
+     fail "exact context cleanup route was not classified");
+  check bool "memory route rejects trailing segments" true
+    (Cleanup.route (memory_path ^ "/bulk") = None);
+  check bool "context route rejects trailing segments" true
+    (Cleanup.route (context_path ^ "/bulk") = None);
+  let memory_id = "sha256:" ^ String.make 64 'a' in
+  let memory_body =
+    `Assoc
+      [ "plan_id", `String "plan-memory-1"
+      ; "expected_revision", `Int 7
+      ; "expected_snapshot_sha256", `String (String.make 64 'b')
+      ; ( "retractions"
+        , `List
+            [ `Assoc
+                [ "memory_id", `String memory_id
+                ; "reason", `String "wrong domain"
+                ]
+            ] )
+      ]
+  in
+  (match
+     Cleanup.parse_current_memory_request
+       (Yojson.Safe.to_string memory_body)
+   with
+   | Ok parsed ->
+     check string "memory plan id" "plan-memory-1" parsed.plan_id;
+     check int "memory expected revision" 7 parsed.expected_revision;
+     check string "memory expected snapshot hash" (String.make 64 'b')
+       parsed.expected_snapshot_sha256;
+     check int "one exact memory target" 1 (List.length parsed.retractions)
+   | Error detail -> fail detail);
+  let with_extra =
+    match memory_body with
+    | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "memory request rejects unknown fields" true
+    (Result.is_error
+       (Cleanup.parse_current_memory_request
+          (Yojson.Safe.to_string with_extra)));
+  let uppercase_hash =
+    match memory_body with
+    | `Assoc fields ->
+      `Assoc
+        (("expected_snapshot_sha256", `String (String.make 64 'A'))
+         :: List.remove_assoc "expected_snapshot_sha256" fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "memory request requires a lowercase snapshot hash" true
+    (Result.is_error
+       (Cleanup.parse_current_memory_request
+          (Yojson.Safe.to_string uppercase_hash)));
+  let duplicate_target =
+    match memory_body with
+    | `Assoc fields ->
+      `Assoc
+        (( "retractions"
+         , `List
+             [ `Assoc
+                 [ "memory_id", `String memory_id
+                 ; "reason", `String "first"
+                 ]
+             ; `Assoc
+                 [ "memory_id", `String memory_id
+                 ; "reason", `String "second"
+                 ]
+             ] )
+         :: List.remove_assoc "retractions" fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "memory request rejects duplicate exact targets" true
+    (Result.is_error
+       (Cleanup.parse_current_memory_request
+          (Yojson.Safe.to_string duplicate_target)));
+  let context_body =
+    `Assoc
+      [ "plan_id", `String "plan-context-1"
+      ; "expected_generation", `String "generation-1"
+      ; "expected_revision", `Int 3
+      ; "expected_snapshot_sha256", `String (String.make 64 'c')
+      ; "source_references", `List [ `String "event:source:1" ]
+      ]
+  in
+  (match
+     Cleanup.parse_working_context_request
+       (Yojson.Safe.to_string context_body)
+   with
+   | Ok parsed ->
+     check string "context plan id" "plan-context-1" parsed.plan_id;
+     check (pair string int) "context expected version"
+       ("generation-1", 3) parsed.expected_version;
+     check string "context expected snapshot hash" (String.make 64 'c')
+       parsed.expected_snapshot_sha256;
+     check (list string) "exact source references"
+       ["event:source:1"] parsed.source_references
+   | Error detail -> fail detail);
+  let duplicate_source =
+    match context_body with
+    | `Assoc fields ->
+      `Assoc
+        (( "source_references"
+         , `List [ `String "event:source:1"; `String "event:source:1" ] )
+         :: List.remove_assoc "source_references" fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "context request rejects duplicate exact sources" true
+    (Result.is_error
+       (Cleanup.parse_working_context_request
+          (Yojson.Safe.to_string duplicate_source)))
+;;
+
 let test_keeper_sensitive_get_permissions_are_exact () =
   let permission path =
     Server_dashboard_http_keeper_api.keeper_get_permission path
@@ -191,7 +319,7 @@ let test_keeper_sensitive_get_permissions_are_exact () =
        part of what raw-trace already holds. Same data, same gate — a lighter
        one here would be a second door onto the first door's content. *)
     [ "raw-traces"; "raw-trace"; "provider-input"; "memory-journal"
-    ; "memory-facts"; "file-changes"; "tool-calls" ];
+    ; "memory-facts"; "working-context"; "file-changes"; "tool-calls" ];
   check bool "safe chat history stays on its ordinary read route" true
     (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);
   check bool "checkpoint permission" true
@@ -3244,6 +3372,40 @@ let test_offline_keeper_composite_exposes_secret_projection () =
     false
     (String_util.contains_substring (Yojson.Safe.to_string json) sentinel)
 
+let test_offline_keeper_composite_names_why_the_keeper_is_not_running () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let module Claims = Server_dashboard_http_composite_claims in
+  let attention_state ~paused =
+    let keeper_name = if paused then "offline-paused" else "offline-absent" in
+    let meta =
+      match
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+             [ "name", `String keeper_name
+             ; "trace_id", `String (keeper_name ^ "-trace")
+             ])
+      with
+      | Ok meta -> { meta with Masc.Keeper_meta_contract.paused }
+      | Error err -> Alcotest.failf "meta fixture failed: %s" err
+    in
+    Server_dashboard_http_keeper_api.offline_keeper_composite_json
+      ~config
+      keeper_name
+      meta
+    |> Yojson.Safe.Util.member "runtime_attention"
+    |> Yojson.Safe.Util.member "state"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string)
+    "a paused keeper without a registry entry reads as paused"
+    (Claims.runtime_attention_state_to_wire Claims.Attention_paused)
+    (attention_state ~paused:true);
+  Alcotest.(check string)
+    "an unpaused keeper without a registry entry reads as offline"
+    (Claims.runtime_attention_state_to_wire Claims.Attention_offline)
+    (attention_state ~paused:false)
+
 let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
   let runtime_attempt_fields =
     match last_runtime_attempt_provider with
@@ -4754,7 +4916,23 @@ let test_composite_blocked_uses_terminal_contract_not_observational_metadata () 
     (blocked
        (execution
           ~terminal_reason_code:"opaque_terminal_failure"
-          ~operator_disposition_reason:"success"))
+          ~operator_disposition_reason:"success"));
+  (* Every receipt the classifier marks [Disp_operator_action_required] ends
+     on a failed terminal, so the terminal alone blocks it. *)
+  let module R = Masc.Keeper_execution_receipt in
+  check bool
+    "an operator-action receipt is blocked by its failed terminal"
+    true
+    (blocked
+       (`Assoc
+          [ "terminal_reason_code", `String "config_error"
+          ; ( "operator_disposition"
+            , `String
+                (R.operator_disposition_kind_to_string R.Disp_operator_action_required) )
+          ; ( "operator_disposition_reason"
+            , `String (R.operator_disposition_reason_to_string R.Reason_config_invalid) )
+          ; "error", `Null
+          ]))
 
 (* Context-window shrink guard (#25062/#25268): reducing max_context_override
    must be detected so the config POST can require an explicit
@@ -6260,6 +6438,8 @@ let () =
             test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper up route classifies and extracts" `Quick
             test_keeper_up_route_classifies_and_extracts;
+          test_case "keeper memory cleanup routes and requests are closed" `Quick
+            test_keeper_memory_cleanup_routes_and_closed_requests;
           test_case "keeper sensitive GET permissions are exact" `Quick
             test_keeper_sensitive_get_permissions_are_exact;
           test_case "internal exact lane registry is Admin-only" `Quick
@@ -6312,6 +6492,8 @@ let () =
             test_execution_trust_does_not_call_full_keeper_projection;
           test_case "offline keeper composite exposes secret projection" `Quick
             test_offline_keeper_composite_exposes_secret_projection;
+          test_case "offline keeper composite names why the keeper is not running" `Quick
+            test_offline_keeper_composite_names_why_the_keeper_is_not_running;
           test_case "state diagram runtime projection redacts live evidence" `Quick
             test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
           test_case "activation config materializes missing TOML" `Quick

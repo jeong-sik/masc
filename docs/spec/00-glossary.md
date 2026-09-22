@@ -771,6 +771,18 @@ status: reference
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.
 
+**Repository Status (저장소 상태)**
+: Workspace가 추적하는 repository 하나의 상태. `Repo_manager_types.repository_status`가
+  닫힌 어휘를 소유한다 — `Active`·`Paused`·`Cloning`·`Error of string`. wire 단어는
+  `status_wire_name` 한 표가 정하고(`active`·`paused`·`cloning`·`error`), `Error`는
+  사유 문자열을 함께 나른다(`status_error_message`). 읽는 쪽은
+  `status_of_wire_name`으로 되돌리며, 이 빌드가 모르는 단어와 사유 없는 `error`는
+  `None`이다(TUI는 `Unrecognised_repository_status`로 그대로 보존한다). Workspace
+  표면은 상태 칸에 단어만 그리고, 사유는 선택 행의 context에 Path·Keepers 아래로
+  그린다.
+  → [Repo_manager_types](../../lib/repo_manager/repo_manager_types.mli),
+  [Tui_decode](../../lib/tui_decode.mli)
+
 ## Continuity
 
 **Autoboot Exclusion Reason (자동 부팅 제외 이유)**

@@ -1137,6 +1137,77 @@ let test_attempt_input_is_projected_per_runtime () =
       0
       (List.length vision_events))
 
+let json_testable = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
+
+(* The per-candidate projection writes two media rows besides the degrade, and
+   each keeps the field that tells it apart in the public view dashboards read.
+   [delegated] is written by any image turn on a text-only candidate.
+   [degrade_unavailable] is written only when the scan required media that
+   neither the image projection nor the strip removed, so the projector here
+   rewrites the image and reports no delegation: the disagreement that row is
+   there to report. *)
+let test_media_rows_keep_their_fields_in_the_public_view () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime_id = "primary.text_model" in
+    let runtime =
+      match Runtime.get_runtime_by_id runtime_id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" runtime_id
+    in
+    let public_row ~status ~project_images =
+      let events = ref [] in
+      ignore
+        (Driver.For_testing.project_input_for_attempt
+           ~project_images
+           ~keeper_name:"media-row-public-view"
+           ~emit_runtime_manifest:(emit_manifest_collector events)
+           ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; synthetic_image () ])
+           ~initial_messages:[]
+           ~agent_core_checkpoint:None
+           ~runtime_id
+           runtime
+         : Driver.attempt_input);
+      match
+        List.find_opt
+          (fun (event, row_status, _decision) ->
+             event = Runtime_manifest.Runtime_routed && row_status = Some status)
+          !events
+      with
+      | Some (_, _, Some decision) ->
+        Runtime_manifest.public_projection_of_decision decision
+      | Some (_, _, None) -> Alcotest.failf "the %s row carries no decision" status
+      | None -> Alcotest.failf "no %s row was emitted" status
+    in
+    let delegated =
+      public_row
+        ~status:"delegated"
+        ~project_images:
+          (Masc.Keeper_vision_ingest.fallback_projector
+             ~keeper_name:"media-row-public-view"
+             ())
+    in
+    Alcotest.(check (option json_testable))
+      "the delegated row keeps its image count"
+      (Some (`Int 1))
+      (assoc_member "image_occurrences" delegated);
+    let unavailable =
+      public_row
+        ~status:"degrade_unavailable"
+        ~project_images:(fun ~mode:_ blocks ->
+          { Masc.Keeper_vision_ingest.blocks =
+              List.map
+                (function
+                  | Agent_core.Types.Image _ -> Agent_core.Types.Text "[image reading]"
+                  | block -> block)
+                blocks
+          ; delegated_images = 0
+          })
+    in
+    Alcotest.(check (option json_testable))
+      "the degrade_unavailable row keeps the modality it could not remove"
+      (Some (`String "image"))
+      (assoc_member "required_modalities" unavailable))
+
 let test_image_fallback_checkpoint_keeps_canonical_prefix () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     let runtime id =
@@ -4917,6 +4988,10 @@ let () =
             "attempt input is projected per runtime"
             `Quick
             test_attempt_input_is_projected_per_runtime;
+          Alcotest.test_case
+            "media rows keep their fields in the public view"
+            `Quick
+            test_media_rows_keep_their_fields_in_the_public_view;
           Alcotest.test_case
             "image fallback restores canonical checkpoint and later vision input"
             `Quick

@@ -1334,11 +1334,14 @@ let project_input_for_attempt
           text-only turn to offer and the provider capability floor will reject
           this attempt. Say so here. Falling through in silence is what left the
           operator with a bare provider capability error and no record that
-          RFC-0265 had run and given up. Reachable when the modalities are
-          each supported but the runtime does not accept them bundled: no single
-          media block is individually unsupported, so the strip removes nothing.
-          ToolResult-nested media used to land here too, before the strip
-          learned to descend. *)
+          RFC-0265 had run and given up. While the scan, the image projection
+          and the strip cover the same blocks, this arm is not reached: a
+          runtime that takes two modalities one at a time also takes them
+          together (the bundle rule in
+          [Runtime_agent.caps_admit_required_modalities]), so a refused turn
+          holds a block of a refused modality, and either the projection counts
+          it or the strip removes it. This row is what the operator reads when
+          one of them stops covering a block the scan reported. *)
        Log.Keeper.warn
          "%s: RFC-0265 media degrade unavailable on %s -- required %s, nothing \
           strippable; the capability floor rejects this attempt"

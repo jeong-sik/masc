@@ -110,7 +110,7 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
         let expected_presence =
           match core_error, expected with
           | Some _, KPB.Provider_timeout _ -> true
-          | None, _ | Some _, KPB.Not_provider_runtime_failure -> false
+          | None, _ | Some _, KPB.No_timeout_observed -> false
         in
         Alcotest.(check bool) "typed timeout evidence survives post-turn refresh"
           expected_presence (Option.is_some agent_core_timeout);
@@ -128,9 +128,7 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
           "%s (%s): %s; keeper can soft-fail and retry with provider cooldown."
           prefix code raw_error
       | None ->
-        Printf.sprintf
-          "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
-          code raw_error
+        Printf.sprintf "Provider runtime error (%s): %s" code raw_error
     in
     match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason stored with
     | Some surface ->
@@ -187,7 +185,7 @@ let timeout_observation_cases =
       Some "Provider timeout during http_operation"
   ; "Provider network error without timeout evidence",
       network Llm_provider.Http_client.Dns_failure None,
-      KPB.Not_provider_runtime_failure, None
+      KPB.No_timeout_observed, None
   ]
 
 let test_wire_only_api_timeout_does_not_invent_evidence () =
@@ -197,7 +195,7 @@ let test_wire_only_api_timeout_does_not_invent_evidence () =
          (Keeper_turn_terminal_code.of_core_error_wire "api_error_timeout"))
   in
   check_registry_observation terminal ~core_error:None
-    ~expected:KPB.Not_provider_runtime_failure
+    ~expected:KPB.No_timeout_observed
     ~expected_timeout_prefix:None
 
 let test_wire_only_provider_timeout_keeps_its_known_phase () =
@@ -470,7 +468,7 @@ let test_failed_ticks_preserve_current_runtime_cause () =
      | R.Provider_runtime_error { reason = None; code; detail; agent_core_timeout; _ } ->
        (match KPB.classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () with
         | KPB.Provider_timeout _ -> ()
-        | KPB.Not_provider_runtime_failure -> Alcotest.fail "new cause is not a timeout")
+        | KPB.No_timeout_observed -> Alcotest.fail "new cause is not a timeout")
      | reason -> Alcotest.failf "new timeout cause lost: %s" (R.failure_reason_to_string reason));
     Alcotest.(check bool) "successful turn resets" true
       (Keeper_turn_failure_streak.reset ~base_path ~keeper_name:meta.name);

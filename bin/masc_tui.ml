@@ -2364,10 +2364,12 @@ let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
 let tui_auto_start_attempted = ref false
 
 (* Whether the credential decision taken at boot is still owed a second look.
-   Set only when that decision came back [Unavailable]: minting needs a
+   Set only when that decision came back [Workspace_pending]: minting needs a
    workspace that already exists, and on a first install this process runs
-   before any server has made one. Cleared once a retry against a reachable
-   server settles it. *)
+   before any server has made one. A mint that failed against a workspace
+   that was already here is not set, because the failure was local file work
+   and a server answering later does not change it. Cleared once a retry
+   against a reachable server settles it. *)
 let tui_credential_retry_pending = ref false
 
 (* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
@@ -12604,11 +12606,15 @@ let contact_of_connection_status :
 
 (* A mint and a failure are not the same news. Both were reported as errors,
    which reads a working first start as a broken one -- and on a first
-   install, where the client mints for itself, that is the ordinary path. *)
+   install, where the client mints for itself, that is the ordinary path.
+   Waiting for the workspace is that same ordinary path one step earlier, so
+   it reads as system too; only a workspace that refused a credential is a
+   fault the operator has to act on. *)
 let credential_notice_level = function
-  | Masc_tui_credential.Unavailable _ -> "error"
+  | Masc_tui_credential.Mint_failed _ -> "error"
   | Masc_tui_credential.Held | Masc_tui_credential.Minted
-  | Masc_tui_credential.Not_required -> "system"
+  | Masc_tui_credential.Not_required
+  | Masc_tui_credential.Workspace_pending -> "system"
 
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.

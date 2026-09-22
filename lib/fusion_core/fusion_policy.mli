@@ -190,10 +190,30 @@ module Validated_preset : sig
   (** 검증된 preset을 raw [preset]으로 (read-only coercion). *)
   val preset : t -> preset
 
+  val invalid_to_string : invalid -> string
+  (** ["preset <name>"] 뒤에 붙는 서술어 (예: ["has no panel seat"]). 도구·HTTP·
+      설정 편집 경계가 같은 문장을 쓴다. 분기에 쓰지 않는다. *)
+
   val pp : Format.formatter -> t -> unit
   val show : t -> string
   val equal : t -> t -> bool
 end
+
+val with_roster
+  :  preset
+  -> Fusion_types.roster
+  -> (Validated_preset.t, Validated_preset.invalid) result
+(** 요청의 명단을 preset 에 얹은 이번 실행의 preset (RFC fusion-seat-routes §2.4).
+
+    - [judge_route] 가 있으면 [judge] 를 바꾼다.
+    - [panel_routes] 가 있으면 panel 명단을 라벨 없는 그룹 하나로 바꾼다. 그 그룹의
+      system_prompt·web_tools·max_output_tokens·timeout_s 는 preset 첫 그룹 값이다.
+    - JOJ 1차 judge 명단([judges])과 [min_answered] 는 그대로다.
+
+    결과는 {!Validated_preset.of_preset} 로 다시 검사한다. 빈 명단은 [No_panel_models],
+    같은 경로 두 번은 [Duplicate_panelist], 새 명단보다 큰 [min_answered] 는
+    [Min_answered_above_max] 로 거절하고 값을 줄여 맞추지 않는다. [Fusion_types.preset_roster]
+    를 주면 검사를 통과한 preset 이 그대로 돌아온다. *)
 
 (** 해석된 [fusion] config. {!Fusion_config}가 runtime.toml에서 생성한다.
     [presets]는 검증된 preset만 담는다 (RFC-0280). *)
@@ -212,6 +232,15 @@ val find_preset : t -> string -> Validated_preset.t option
 (** Structural admission for a top-level Fusion submission before its
     canonical async request id exists. This is the SSOT used by {!decide}. *)
 val decide_top_level : policy:t -> preset:string -> (unit, Fusion_types.deny_reason) result
+
+(** 이번 실행이 쓸 preset: 이름으로 찾아 {!with_roster} 로 명단을 얹는다. 없으면
+    [Preset_unknown], 얹은 결과가 검사를 못 넘으면 [Roster_invalid]. 제출하는 쪽과
+    실행하는 쪽이 같은 규칙을 쓰도록 둘 다 이 함수를 부른다. *)
+val effective_preset
+  :  policy:t
+  -> preset:string
+  -> roster:Fusion_types.roster
+  -> (Validated_preset.t, Fusion_types.deny_reason) result
 
 (** 결정론적 게이트 (순수, side-effect 없음).
 

@@ -526,12 +526,17 @@ class Journey(StepByStep):
                 target.chmod(0o700)
                 return True
             credentials = type('Credentials', (), {'binary':'/owned/masc'})()
-            with patch.dict(os.environ, HOME=home), patch.object(SETUP.shutil, 'which', return_value=None), \
+            # The lookup is masc's; here it answers the way the runtime would
+            # once the installer has written the file, and nothing before.
+            def located(binary, choice, command):
+                self.assertEqual((binary, choice, command), ('/owned/masc', 'antigravity', 'agy'))
+                return str(target) if target.is_file() else None
+            with patch.dict(os.environ, HOME=home), patch.object(SETUP, 'official_client_path', side_effect=located), \
                     patch.object(SETUP, 'prerequisite_menu', side_effect=install) as action, \
                     patch.object(SETUP, 'prepare_antigravity_account', side_effect=lambda row, _: row):
-                result = SETUP.prepare_connection(source, credentials)
+                result = SETUP.prepare_connection('/owned/masc', source, credentials)
             action.assert_called_once_with('/owned/masc', 'antigravity')
-            self.assertEqual(result['command'], str(target.resolve()))
+            self.assertEqual(result['command'], str(target))
 
     def test_prerequisite_runs_only_selected_action_with_terminal_prompts(self):
         catalog = dict(schema='masc.prerequisite_actions.v1', actions=[
@@ -1233,6 +1238,83 @@ def actions_of(*ids):
     return dict(schema='masc.prerequisite_actions.v1', actions=[dict(id=value) for value in ids])
 
 
+class OfficialClientLookup(unittest.TestCase):
+    """The wizard asks masc where a client runs from and looks for none itself,
+    so its list, its selection and the runtime's verification agree (#37747).
+    """
+
+    def receipt(self, path, schema='masc.runtime_client_path.v1', code=0):
+        return completed(json.dumps(dict(schema=schema, client='claude-code', command='claude', path=path)), code)
+
+    def test_the_path_is_masc_s_answer(self):
+        with patch.object(SETUP.subprocess, 'run', return_value=self.receipt('/home/u/.local/bin/claude')) as run:
+            self.assertEqual(SETUP.official_client_path('/owned/masc', 'claude_code', 'claude'),
+                             '/home/u/.local/bin/claude')
+        self.assertEqual(run.call_args.args[0],
+                         ['/owned/masc', 'runtime-client-path', '--client', 'claude-code', '--command', 'claude'])
+        with patch.object(SETUP.subprocess, 'run', return_value=self.receipt(None)):
+            self.assertIsNone(SETUP.official_client_path('/owned/masc', 'claude_code', 'claude'))
+
+    def test_an_http_connection_asks_nothing(self):
+        with patch.object(SETUP.subprocess, 'run') as run:
+            self.assertIsNone(SETUP.official_client_path('/owned/masc', 'openai_compatible', ''))
+            self.assertIsNone(SETUP.official_client_path('/owned/masc', 'ollama', 'ollama'))
+        run.assert_not_called()
+
+    def test_an_answer_that_is_not_the_lookup_s_is_an_error_not_an_absence(self):
+        for broken in (self.receipt(None, code=1), self.receipt(None, schema='other'), completed('not json')):
+            with self.subTest(stdout=broken.stdout, code=broken.returncode), \
+                    patch.object(SETUP.subprocess, 'run', return_value=broken), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.official_client_path('/owned/masc', 'claude_code', 'claude')
+
+    def test_the_list_says_what_the_lookup_found(self):
+        inventory = dict(runtimes=[], integrations=[
+            dict(id='claude-code', display_name='Claude Code', protocol='claude-code', command='claude',
+                 origin='runtime_config', setup_support='new_connection')])
+        located = {('claude_code', 'claude'): '/home/u/.local/bin/claude', ('codex', 'codex'): None}
+        with patch.object(SETUP, 'official_client_path',
+                          side_effect=lambda binary, choice, command: located[(choice, command)]):
+            sources = SETUP.connection_sources('/owned/masc', inventory)
+        claude = next(source for source in sources if source['choice'] == 'claude_code')
+        self.assertEqual(claude['command_path'], '/home/u/.local/bin/claude')
+        self.assertIn('CLI found', SETUP.source_label(claude))
+        self.assertFalse(any(source['choice'] == 'codex' for source in sources))
+        claude['command_path'] = None
+        self.assertIn('CLI needs installation', SETUP.source_label(claude))
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_masc_finds_the_client_the_shell_has_not_yet(self):
+        """The issue's shape: the installer wrote ~/.local/bin/claude as a link,
+        and the shell masc runs from has no ~/.local/bin on PATH."""
+        with tempfile.TemporaryDirectory() as home:
+            versions = Path(home, '.local/share/claude/versions/2.0.0')
+            versions.mkdir(parents=True)
+            real = versions / 'claude'
+            real.write_text('#!/bin/sh\necho fixture\n')
+            real.chmod(0o700)
+            link = Path(home, '.local/bin/claude')
+            link.parent.mkdir(parents=True)
+            link.symlink_to(real)
+            elsewhere = Path(home, 'elsewhere')
+            elsewhere.mkdir()
+            on_path = elsewhere / 'claude'
+            on_path.write_text('#!/bin/sh\necho other\n')
+            on_path.chmod(0o700)
+            def ask(path, *arguments):
+                env = dict(os.environ, HOME=home, PATH=path)
+                result = subprocess.run([BINARY, 'runtime-client-path', '--client', 'claude-code'] + list(arguments),
+                                        env=env, cwd=home, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                receipt = json.loads(result.stdout)
+                self.assertEqual(receipt['schema'], 'masc.runtime_client_path.v1')
+                return receipt['path']
+            self.assertEqual(ask('/usr/bin:/bin'), str(link), 'the vendor directory, and the link as the link')
+            self.assertEqual(ask(str(elsewhere) + ':/usr/bin:/bin'), str(on_path), 'PATH first, as the shell finds it')
+            self.assertIsNone(ask('/usr/bin:/bin', '--command', 'my-claude'),
+                              'a custom name is not looked for in the vendor directory')
+
+
 class QuickSetup(unittest.TestCase):
     """One screen, then straight through: workspace, Claude Code, text only, sandbox.
 
@@ -1242,7 +1324,14 @@ class QuickSetup(unittest.TestCase):
     """
 
     def test_without_claude_code_there_is_no_plan(self):
-        with patch.object(SETUP.shutil, 'which', return_value=None), \
+        with patch.object(SETUP, 'official_client_path', return_value=None) as located, \
+                patch.object(SETUP, 'sandbox_catalog') as catalog:
+            self.assertIsNone(SETUP.quick_plan('masc', '/workspace'))
+        located.assert_called_once_with('masc', 'claude_code', 'claude')
+        catalog.assert_not_called()
+
+    def test_a_lookup_that_cannot_run_offers_no_plan(self):
+        with patch.object(SETUP, 'official_client_path', side_effect=SETUP.SetupError('no masc')), \
                 patch.object(SETUP, 'sandbox_catalog') as catalog:
             self.assertIsNone(SETUP.quick_plan('masc', '/workspace'))
         catalog.assert_not_called()
@@ -1250,7 +1339,7 @@ class QuickSetup(unittest.TestCase):
     def test_the_plan_goes_to_apple_container_wherever_the_host_supports_it(self):
         catalog = sandbox_catalog_of(sandbox_row('apple_container', 'missing_prerequisite'),
                                      sandbox_row('docker', 'service_ready'))
-        with patch.object(SETUP.shutil, 'which', return_value='/bin/claude'), \
+        with patch.object(SETUP, 'official_client_path', return_value='/bin/claude'), \
                 patch.object(SETUP, 'sandbox_catalog', return_value=catalog):
             plan = SETUP.quick_plan('masc', '/workspace')
         self.assertEqual(plan, dict(model='claude-sonnet-5', sandbox='apple_container', sandbox_ready=False))
@@ -1259,12 +1348,12 @@ class QuickSetup(unittest.TestCase):
         unsupported = sandbox_row('apple_container', 'unsupported_host')
         for docker, expected in ((sandbox_row('docker', 'service_ready'), 'docker'),
                                  (sandbox_row('docker', 'probe_failed'), None)):
-            with patch.object(SETUP.shutil, 'which', return_value='/bin/claude'), \
+            with patch.object(SETUP, 'official_client_path', return_value='/bin/claude'), \
                     patch.object(SETUP, 'sandbox_catalog', return_value=sandbox_catalog_of(unsupported, docker)):
                 self.assertEqual(SETUP.quick_plan('masc', '/workspace')['sandbox'], expected)
 
     def test_an_unreadable_sandbox_catalog_offers_no_plan(self):
-        with patch.object(SETUP.shutil, 'which', return_value='/bin/claude'), \
+        with patch.object(SETUP, 'official_client_path', return_value='/bin/claude'), \
                 patch.object(SETUP, 'sandbox_catalog', side_effect=SETUP.SetupError('unreadable')):
             self.assertIsNone(SETUP.quick_plan('masc', '/workspace'))
 
@@ -1349,12 +1438,12 @@ class QuickSetup(unittest.TestCase):
         with patch.object(SETUP, 'connection_sources', return_value=[]), contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'))
         with patch.object(SETUP, 'connection_sources', return_value=[claude]), \
-                patch.object(SETUP, 'prepare_connection', side_effect=lambda source, _: source), \
+                patch.object(SETUP, 'prepare_connection', side_effect=lambda _binary, source, _: source), \
                 patch.object(SETUP, 'source_models', return_value=([dict(id='claude-opus-5')], 'catalog')), \
                 contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'))
         with patch.object(SETUP, 'connection_sources', return_value=[claude]), \
-                patch.object(SETUP, 'prepare_connection', side_effect=lambda source, _: source), \
+                patch.object(SETUP, 'prepare_connection', side_effect=lambda _binary, source, _: source), \
                 patch.object(SETUP, 'source_models', return_value=([dict(id='claude-sonnet-5')], 'catalog')), \
                 patch.object(SETUP, 'resolve_model_spec', return_value=('rid', dict(model='claude-sonnet-5'))):
             self.assertEqual(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'),

@@ -14,6 +14,9 @@ type accepted_payload =
   ; source_context : Fusion_request_context.t option
   ; preset : string
   ; web_tools : bool
+  ; roster : Fusion_types.roster
+      (** 이번 실행이 쓴 명단 바꾸기. 재시작 뒤 복원도 이 값으로 실행 기록을 다시 연다.
+          기록에는 [roster] 키가 늘 있고, 이 키가 없는 기록은 읽지 않는다. *)
   ; topology : Fusion_types.fusion_topology
   ; channel : Keeper_continuation_channel.t
   }

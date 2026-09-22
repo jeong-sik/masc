@@ -267,7 +267,15 @@ open Alcotest
    that a document whose header does not read is listed by filename and
    reason, which is the row the reader now returns instead of skipping it.
    Pin the measured surface with no headroom. *)
-let ceiling_bytes = 121_242
+(* 2026-09-22: +658 rendered bytes, the production renderer's rules replayed on
+   config/tools/masc_fusion.toml (not a CI reading). masc_fusion takes judge
+   (+215) and panel (+443): a Keeper or operator swaps the judge route or the
+   panel roster for one run without editing runtime.toml, and learns before
+   the run starts that a route is unknown or that the new panel is smaller
+   than the preset's min_answered (RFC fusion-seat-routes §2.4). The tool
+   declares defer_loading = true, so these bytes reach the wire only on a turn
+   that names it. No headroom. *)
+let ceiling_bytes = 121_900
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

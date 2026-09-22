@@ -126,9 +126,12 @@ val consume_one
     [boundary_lines_seen] and starts from atom zero: the resulting [end_atom]
     may equal or precede the old one. When metadata moves to another trace,
     an available prior checkpoint is drained first. Once it is exhausted, or
-    when owner/session removal made it unavailable, the current trace's own
-    fresh/restart boundary authorizes the transition instead of leaving the
-    old cursor as a permanent stop.
+    when owner/session removal made it unavailable, the traces that started
+    after it are read in the order their fresh/restart boundary appears in the
+    log, each from atom zero, up to the current trace; a trace with nothing to
+    read is passed. The counterpart lower bound stays at the prior position's
+    boundary across that move. With no started trace to move to, the old
+    cursor stays and the pass reports [Position_in_other_trace].
 
     Under the progress store's single-writer contract, a fixed boundary
     snapshot and checkpoint therefore cannot select the same range again

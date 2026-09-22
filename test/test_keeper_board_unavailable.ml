@@ -759,16 +759,23 @@ let test_board_replay_row_names_the_replies_after_the_own_comment () =
   | rows -> failf "expected one replay row for the thread, got %d" (List.length rows)
 ;;
 
-let test_accepted_comment_identity_survives_queue_projection () =
+(* [`Reply] queues a comment with a parent, [`Top_level] one without: the
+   parent survives the queue as [Some id] and its absence as [None], so both
+   sides of the optional field make the same round trip. *)
+let accepted_comment_identity_survives_queue_projection ~shape () =
   let module Signal = Keeper_world_observation_board_signal in
   let post_id = create_thread ~title:"queued identity" "thread topic" in
-  let parent_id = add_comment ~post_id ~author:"parent-author" "parent" in
+  let parent_id =
+    match shape with
+    | `Reply -> Some (add_comment ~post_id ~author:"parent-author" "parent")
+    | `Top_level -> None
+  in
   let captured = ref None in
   Board_dispatch.set_board_signal_hook (fun addressed -> captured := Some addressed);
   Fun.protect ~finally:(fun () -> Board_dispatch.set_board_signal_hook (fun _ -> ()))
   @@ fun () ->
   let accepted =
-    match Board_dispatch.add_comment ~post_id ~parent_id ~author:"reply-author"
+    match Board_dispatch.add_comment ~post_id ?parent_id ~author:"reply-author"
             ~content:"the queued reply" () with
     | Ok comment -> comment
     | Error error -> fail (Board.show_board_error error)
@@ -800,7 +807,7 @@ let test_accepted_comment_identity_survives_queue_projection () =
    | Signal.Observed_comment_added identity ->
      check string "accepted comment ID" (Board.Comment_id.to_string accepted.id)
        identity.comment_id;
-     check (option string) "accepted parent ID" (Some parent_id) identity.parent_id
+     check (option string) "accepted parent ID" parent_id identity.parent_id
    | _ -> fail "restored signal is not a comment");
   check string "queued author does not become the later author"
     "reply-author" observation.author;
@@ -857,7 +864,11 @@ let () =
       , [ test_case
             "accepted comment identity survives queue projection"
             `Quick
-            (with_eio test_accepted_comment_identity_survives_queue_projection)
+            (with_eio (accepted_comment_identity_survives_queue_projection ~shape:`Reply))
+        ; test_case
+            "a top-level comment keeps no parent through queue projection"
+            `Quick
+            (with_eio (accepted_comment_identity_survives_queue_projection ~shape:`Top_level))
         ; test_case
             "a comment event names the replies after the latest own comment"
             `Quick

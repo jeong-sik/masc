@@ -65,15 +65,16 @@
 
     Recovery from a structurally broken input drops the broken tail, so its
     end moves by design; atoms are then counted on the history it returns.
-    With a Librarian position in the trace, that end is where the position
-    moves ({!librarian_rebase}), and the Librarian reads from a position only
-    when a boundary line it has counted states it
-    ({!Keeper_turn_boundaries.witness_line}). So the recovery ends the history
-    at the last turn end such a line states, ahead of the break, and is
-    refused with [Recovery_end_unwitnessed] when there is none; a position
-    moved to an end no line states stops the Librarian for good (masc #37772).
-    What it cuts between that turn end and the break is in atoms the
-    Librarian has read. Without a position in the trace it ends at the break.
+    When the rebase moves a Librarian position (it is in the trace and at
+    the history's end, {!librarian_rebase}), that end is where the position
+    moves, and the Librarian reads from a position only when a boundary line
+    it has counted states it ({!Keeper_turn_boundaries.witness_line}). So the
+    recovery ends the history at the last turn end such a line states, ahead
+    of the break, and is refused with [Recovery_end_unwitnessed] when there is
+    none; a position moved to an end no line states stops the Librarian for
+    good (masc #37772). What it cuts between that turn end and the break is
+    in atoms the Librarian has read. Otherwise it ends at the break, and a
+    position the rebase refuses is refused for its own reason.
     A working state that covers the dropped tail no longer fits, and the
     recovery is refused; with the server stopped, removing that working
     state (the keeper's [librarian-continuity.json]) lets it through, and
@@ -185,7 +186,9 @@ type report =
   ; tool_results_cleared : int (** tool-result blocks whose content was replaced *)
   ; messages_dropped_at_structural_break : int
       (** Messages discarded because the input transcript was already broken:
-          the offending cycle and everything after it. Zero for a structurally
+          the offending cycle and everything after it, and on a recovery that
+          moves a Librarian position also the units between the last turn end
+          a counted line states and the break. Zero for a structurally
           sound input, which is every input that is not being recovered.
 
           Purge refused a broken transcript until 2026-09-01, which made it
@@ -217,8 +220,8 @@ type purge_error =
           sound input this is a bug in the transform; on a recovery the
           dropped tail was part of what it covers. *)
   | Recovery_end_unwitnessed of { boundary_lines_seen : int }
-      (** A recovery with a Librarian position in the trace found no turn end
-          ahead of the break that one of the position's first
+      (** A recovery that moves a Librarian position found no turn end ahead
+          of the break that one of the position's first
           [boundary_lines_seen] boundary lines states
           ({!Keeper_turn_boundaries.witness_line}). Moved to any other end,
           the position would stand on no line and the Librarian would stop on
@@ -242,7 +245,8 @@ val purge_messages
     keeper's turn-boundary log, [continuity] its saved Librarian working
     state and [progress] its Librarian position, all as they are when the
     result is installed: the first two say which messages stay byte-exact,
-    and on a recovery the first and the last say where the history may end.
+    and on a recovery that moves the position the first and the last say
+    where the history may end.
     Exposed for tests. *)
 
 val purge

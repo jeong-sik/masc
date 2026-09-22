@@ -1022,6 +1022,16 @@ let test_recovery_keeps_the_last_atom_it_returns () =
       report.reasoning_blocks_stripped
 ;;
 
+(* A second tool_use opens while the first is unanswered: the break a
+   recovery drops, and everything after it. *)
+let overlapping_cycles () =
+  [ block_message Types.Assistant [ tool_use "c1" ]
+  ; block_message Types.Assistant [ tool_use "c2" ]
+  ; { (block_message Types.Tool [ tool_result "c1" ]) with tool_call_id = Some "c1" }
+  ; { (block_message Types.Tool [ tool_result "c2" ]) with tool_call_id = Some "c2" }
+  ]
+;;
+
 (* masc #37772. Two turns: the first ends after two atoms and its line says
    so; the second asks, answers, and then breaks on an overlapping tool cycle.
    The broken turn still ended, and the Librarian read to its end. *)
@@ -1034,14 +1044,7 @@ let broken_second_turn () =
     ; block_message Types.Assistant [ unsigned_thinking "t2"; Types.Text "a2" ]
     ]
   in
-  let broken =
-    [ block_message Types.Assistant [ tool_use "c1" ]
-    ; block_message Types.Assistant [ tool_use "c2" ]
-    ; { (block_message Types.Tool [ tool_result "c1" ]) with tool_call_id = Some "c1" }
-    ; { (block_message Types.Tool [ tool_result "c2" ]) with tool_call_id = Some "c2" }
-    ]
-  in
-  let messages = first_turn @ before_the_break @ broken in
+  let messages = first_turn @ before_the_break @ overlapping_cycles () in
   let lines =
     [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
     ; turn_ended_line ~line:2 ~absolute_turn:2 messages ~end_atom:(atom_count messages)
@@ -1080,7 +1083,7 @@ let test_recovery_ends_where_a_counted_line_states_the_end () =
   Alcotest.(check (option int)) "an end no counted line states" None
     (stated_by ~progress lines at_break);
   let recovered, report =
-    purge_with ~progress:(Some progress) ~boundary_lines:lines ~continuity:None messages
+    purge_with ~progress ~boundary_lines:lines ~continuity:None messages
   in
   Alcotest.(check (list string)) "with one it ends at the first turn's end, byte-exact"
     (List.map Types.show_message first_turn) (List.map Types.show_message recovered);
@@ -1106,7 +1109,7 @@ let test_recovery_passes_over_a_line_the_position_has_not_counted () =
   in
   let recovered, _ =
     purge_with
-      ~progress:(Some progress)
+      ~progress
       ~boundary_lines:(lines @ [ uncounted ])
       ~continuity:None
       messages
@@ -1144,7 +1147,7 @@ let test_recovery_ignores_a_position_of_another_trace () =
     { progress with position = { progress.position with trace_id = "trace-elsewhere" } }
   in
   let recovered, _ =
-    purge_with ~progress:(Some elsewhere) ~boundary_lines:lines ~continuity:None messages
+    purge_with ~progress:elsewhere ~boundary_lines:lines ~continuity:None messages
   in
   Alcotest.(check int) "it ends at the break"
     (List.length (first_turn @ before_the_break)) (List.length recovered)
@@ -1155,10 +1158,121 @@ let test_a_sound_history_is_not_cut_for_a_position () =
   let first_turn, before_the_break, _messages, lines, progress = broken_second_turn () in
   let sound = first_turn @ before_the_break in
   let purged, report =
-    purge_with ~progress:(Some progress) ~boundary_lines:lines ~continuity:None sound
+    purge_with ~progress ~boundary_lines:lines ~continuity:None sound
   in
   Alcotest.(check int) "every message stays" (List.length sound) (List.length purged);
   Alcotest.(check int) "nothing dropped" 0 report.messages_dropped_at_structural_break
+;;
+
+(* Two turns ended ahead of the break, and a line the position counted
+   states each end. The recovery keeps the later: the longest history the
+   position can stand on. *)
+let two_ended_turns_then_a_break () =
+  let first_turn =
+    [ text_message Types.User "q1"; block_message Types.Assistant [ Types.Text "a1" ] ]
+  in
+  let second_turn =
+    [ text_message Types.User "q2"; block_message Types.Assistant [ Types.Text "a2" ] ]
+  in
+  let messages =
+    first_turn @ second_turn @ [ text_message Types.User "q3" ] @ overlapping_cycles ()
+  in
+  let progress =
+    { (progress_at messages ~end_atom:(atom_count messages)) with boundary_lines_seen = 3 }
+  in
+  first_turn, second_turn, messages, progress
+;;
+
+let test_recovery_keeps_the_latest_counted_turn_end () =
+  let first_turn, second_turn, messages, progress = two_ended_turns_then_a_break () in
+  let lines =
+    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
+    ; turn_ended_line ~line:2 ~absolute_turn:2 messages ~end_atom:4
+    ; turn_ended_line ~line:3 ~absolute_turn:3 messages ~end_atom:(atom_count messages)
+    ]
+  in
+  let recovered, _ = purge_with ~progress ~boundary_lines:lines ~continuity:None messages in
+  Alcotest.(check (list string)) "it keeps both ended turns"
+    (List.map Types.show_message (first_turn @ second_turn))
+    (List.map Types.show_message recovered)
+;;
+
+(* A line with the end count of the second turn but another history's digest
+   is not the second turn's end: the Librarian would not find the position on
+   it, so the recovery does not stop there. *)
+let test_recovery_needs_the_digest_as_well_as_the_count () =
+  let first_turn, _second_turn, messages, progress = two_ended_turns_then_a_break () in
+  let of_another_history : Purge.boundary_line =
+    ( 2
+    , Ok
+        { Boundaries.recorded_at = 100.0
+        ; event =
+            Boundaries.Turn_ended
+              { turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:2
+              ; history_at_start = Boundaries.Continued_history
+              ; position =
+                  Boundaries.Atom_history
+                    { end_atom = 4; last_atom_digest = "a digest of another history" }
+              }
+        } )
+  in
+  let lines =
+    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
+    ; of_another_history
+    ; turn_ended_line ~line:3 ~absolute_turn:3 messages ~end_atom:(atom_count messages)
+    ]
+  in
+  let recovered, _ = purge_with ~progress ~boundary_lines:lines ~continuity:None messages in
+  Alcotest.(check (list string)) "it goes back to the first turn's end"
+    (List.map Types.show_message first_turn)
+    (List.map Types.show_message recovered)
+;;
+
+(* A position short of the history's end is not moved: the rebase refuses it
+   for its unread atoms. The recovery then ends at the break and asks no line
+   of it, so that refusal, not a missing turn end, is what the operator
+   reads. *)
+let test_recovery_leaves_an_unread_position_to_the_rebase () =
+  let first_turn, before_the_break, messages, lines, _progress = broken_second_turn () in
+  let short =
+    { (progress_at messages ~end_atom:(atom_count messages - 1)) with
+      boundary_lines_seen = 2
+    }
+  in
+  let only_the_broken_turn = List.filter (fun (line, _) -> line = 2) lines in
+  let recovered, _ =
+    purge_with ~progress:short ~boundary_lines:only_the_broken_turn ~continuity:None messages
+  in
+  Alcotest.(check int) "it ends at the break"
+    (List.length (first_turn @ before_the_break)) (List.length recovered);
+  match rebase ~progress:(Some short) ~before:messages ~after:recovered () with
+  | Error (Purge.Unread_atoms_present _) -> ()
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a position with unread atoms was moved"
+;;
+
+(* The protected tail is the last [keep_recent_messages] messages of the
+   history the recovery returns, not of the input it cut. *)
+let test_recovery_protects_the_tail_of_what_it_returns () =
+  let reply_in_the_tail =
+    block_message Types.Assistant [ unsigned_thinking "t1"; Types.Text "a1" ]
+  in
+  let messages =
+    [ text_message Types.User "q1"
+    ; reply_in_the_tail
+    ; text_message Types.User "q2"
+    ; block_message Types.Assistant [ Types.Text "a2" ]
+    ]
+    @ overlapping_cycles ()
+  in
+  match purge_plain ~config:{ no_tail_config with keep_recent_messages = 3 } messages with
+  | Error error -> Alcotest.fail (Purge.purge_error_to_string error)
+  | Ok (purged, report) ->
+    Alcotest.(check string) "the reply inside the tail is byte-exact"
+      (Types.show_message reply_in_the_tail)
+      (Types.show_message (List.nth purged 1));
+    Alcotest.(check int) "nothing in the returned tail is stripped" 0
+      report.Purge.reasoning_blocks_stripped
 ;;
 
 let () =
@@ -1209,6 +1323,22 @@ let () =
             "a sound history is not cut for a position"
             `Quick
             test_a_sound_history_is_not_cut_for_a_position
+        ; Alcotest.test_case
+            "recovery keeps the latest counted turn end"
+            `Quick
+            test_recovery_keeps_the_latest_counted_turn_end
+        ; Alcotest.test_case
+            "recovery needs the digest as well as the count"
+            `Quick
+            test_recovery_needs_the_digest_as_well_as_the_count
+        ; Alcotest.test_case
+            "recovery leaves an unread position to the rebase"
+            `Quick
+            test_recovery_leaves_an_unread_position_to_the_rebase
+        ; Alcotest.test_case
+            "recovery protects the tail of what it returns"
+            `Quick
+            test_recovery_protects_the_tail_of_what_it_returns
         ] )
     ; ( "rules"
       , [ Alcotest.test_case "reasoning strip scope" `Quick test_reasoning_strip_scope

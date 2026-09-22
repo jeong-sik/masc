@@ -65,9 +65,13 @@ let refusal_to_string = function
     "checkpoint position invariant violated: " ^ detail
 ;;
 
-let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id ~before ~after =
+(* The position a rewrite of [before] moves, or why it must not move one:
+   none without a position, and otherwise the position only when it is in
+   this trace and at [before]'s end, digest and all. The rebase and a
+   recovery's cut ask this one question. *)
+let position_at_end ~(progress : Keeper_librarian_progress.t option) ~trace_id ~before =
   match progress with
-  | None -> Ok No_progress
+  | None -> Ok None
   | Some progress ->
     if not (String.equal progress.position.trace_id trace_id)
     then Error (Position_in_other_trace progress.position.trace_id)
@@ -87,27 +91,7 @@ let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id 
           Error
             (Position_in_other_history
                { held = progress.position.last_atom_digest; history = history_digest })
-        else (
-          match Keeper_turn_boundaries.position_of_messages after with
-          | Error detail -> Error (Position_unreadable detail)
-          | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
-            Ok
-              (Rebased
-                 { before = progress
-                 ; after =
-                     { progress with
-                       position = { progress.position with end_atom; last_atom_digest }
-                     }
-                 })
-          | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
-          | Ok Keeper_turn_boundaries.No_atom_history ->
-            Error
-              (Position_invariant_violation
-                 "position_of_messages(after) answered no_atom_history")
-          | Ok Keeper_turn_boundaries.Stale_noop ->
-            Error
-              (Position_invariant_violation
-                 "position_of_messages(after) answered stale_noop"))
+        else Ok (Some progress)
       | Ok Keeper_turn_boundaries.Empty_atom_history ->
         Error (Unread_atoms_present { end_atom = progress.position.end_atom; atom_count = 0 })
       | Ok Keeper_turn_boundaries.No_atom_history ->
@@ -118,6 +102,33 @@ let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id 
         Error
           (Position_invariant_violation
              "position_of_messages(before) answered stale_noop"))
+;;
+
+let librarian_rebase ~progress ~trace_id ~before ~after =
+  match position_at_end ~progress ~trace_id ~before with
+  | Error refusal -> Error refusal
+  | Ok None -> Ok No_progress
+  | Ok (Some (progress : Keeper_librarian_progress.t)) ->
+    (match Keeper_turn_boundaries.position_of_messages after with
+     | Error detail -> Error (Position_unreadable detail)
+     | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
+       Ok
+         (Rebased
+            { before = progress
+            ; after =
+                { progress with
+                  position = { progress.position with end_atom; last_atom_digest }
+                }
+            })
+     | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
+     | Ok Keeper_turn_boundaries.No_atom_history ->
+       Error
+         (Position_invariant_violation
+            "position_of_messages(after) answered no_atom_history")
+     | Ok Keeper_turn_boundaries.Stale_noop ->
+       Error
+         (Position_invariant_violation
+            "position_of_messages(after) answered stale_noop"))
 ;;
 
 let cleared_tool_result_content =
@@ -280,92 +291,88 @@ let strip_reasoning_keeping_the_message message =
 ;;
 
 (* The closed units a recovery keeps. The break and everything after it go,
-   so the history's end moves, and a Librarian position in this trace moves
-   with it ({!librarian_rebase}). The Librarian reads from a position only when
-   a line it has counted states it ({!Keeper_turn_boundaries.witness_line}), so
-   the recovered history ends at the last unit where such a line does: a turn
-   end the position has taken in. A rebase is refused unless the position is
-   at the history's end, so what is cut between that turn end and the break
-   is in atoms the Librarian has read. Without a position in this trace no
-   line is needed and the history ends at the break.
+   so the history's end moves, and a position the rebase moves
+   ({!position_at_end}: in this trace and at the history's end) moves with
+   it. The Librarian reads from a position only when a line it has counted
+   states it ({!Keeper_turn_boundaries.witness_line}), so the recovered
+   history ends at the last unit where such a line does: a turn end the
+   position has taken in. The position is at the history's end, so what is
+   cut between that turn end and the break is in atoms the Librarian has
+   read. A position the rebase refuses is not moved, and the history ends at
+   the break so that the rebase's refusal is the one reported; without a
+   position it ends there too.
 
    [annotate] numbers atoms in one pass from the front, so a prefix holds the
    atoms and openers the whole history gives it; one labelling prices every
    unit boundary, and the one kept is checked again on its own messages. *)
-let recovered_units
-      ~trace_id
-      ~boundary_lines
-      ~(progress : Keeper_librarian_progress.t option)
-      closed_prefix
-  =
-  match progress with
-  | None -> Ok closed_prefix
-  | Some { Keeper_librarian_progress.position; boundary_lines_seen } ->
-    if not (String.equal position.trace_id trace_id)
-    then Ok closed_prefix
-    else (
-      let stated ~end_atom ~last_atom_digest =
-        Option.is_some
-          (Keeper_turn_boundaries.witness_line
-             ~through:boundary_lines_seen
-             ~trace_id
-             ~end_atom
-             ~last_atom_digest
-             boundary_lines)
-      in
-      let messages_of units =
-        List.concat_map Keeper_transcript_unit.messages_of_closed_unit units
-      in
-      let units = Array.of_list closed_prefix in
-      let messages = messages_of closed_prefix in
-      let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
-      let opening_digest = Runtime_model_input_tail_window.atom_opening_digest messages in
-      (* [atoms_through.(m)]: the atoms the first [m] messages hold. *)
-      let atoms_through = Array.make (List.length messages + 1) 0 in
-      List.iteri
-        (fun index (_message, label) ->
-           atoms_through.(index + 1)
-           <- (match label with
-               | Runtime_model_input_tail_window.Atom atom ->
-                 max atoms_through.(index) (atom + 1)
-               | Runtime_model_input_tail_window.Pinned -> atoms_through.(index)))
-        labelled;
-      (* [messages_through.(u)]: the messages the first [u] units hold. *)
-      let messages_through = Array.make (Array.length units + 1) 0 in
-      Array.iteri
-        (fun index unit_ ->
-           messages_through.(index + 1)
-           <- messages_through.(index)
-              + List.length (Keeper_transcript_unit.messages_of_closed_unit unit_))
-        units;
-      let stated_at unit_count =
-        let end_atom = atoms_through.(messages_through.(unit_count)) in
-        end_atom >= 1
-        && (match opening_digest (end_atom - 1) with
-            | Some last_atom_digest -> stated ~end_atom ~last_atom_digest
-            | None -> false)
-      in
-      let rec last_stated unit_count =
-        if unit_count = 0
-        then None
-        else if stated_at unit_count
-        then Some unit_count
-        else last_stated (unit_count - 1)
-      in
-      let unwitnessed = Error (Recovery_end_unwitnessed { boundary_lines_seen }) in
-      match last_stated (Array.length units) with
-      | None -> unwitnessed
-      | Some unit_count ->
-        let kept = Array.to_list (Array.sub units 0 unit_count) in
-        (match Keeper_turn_boundaries.position_of_messages (messages_of kept) with
-         | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest })
-           when stated ~end_atom ~last_atom_digest -> Ok kept
-         | Ok
-             ( Keeper_turn_boundaries.Atom_history _
-             | Keeper_turn_boundaries.Empty_atom_history
-             | Keeper_turn_boundaries.No_atom_history
-             | Keeper_turn_boundaries.Stale_noop )
-         | Error (_ : string) -> unwitnessed))
+let recovered_units ~trace_id ~boundary_lines ~progress ~messages closed_prefix =
+  match position_at_end ~progress ~trace_id ~before:messages with
+  | Ok None | Error (_ : refusal) -> Ok closed_prefix
+  | Ok (Some { Keeper_librarian_progress.position = _; boundary_lines_seen }) ->
+    let stated ~end_atom ~last_atom_digest =
+      Option.is_some
+        (Keeper_turn_boundaries.witness_line
+           ~through:boundary_lines_seen
+           ~trace_id
+           ~end_atom
+           ~last_atom_digest
+           boundary_lines)
+    in
+    let messages_of units =
+      List.concat_map Keeper_transcript_unit.messages_of_closed_unit units
+    in
+    let units = Array.of_list closed_prefix in
+    let ahead_of_break = messages_of closed_prefix in
+    let labelled, _atom_count = Runtime_model_input_tail_window.annotate ahead_of_break in
+    let opening_digest =
+      Runtime_model_input_tail_window.atom_opening_digest ahead_of_break
+    in
+    (* [atoms_through.(m)]: the atoms the first [m] messages hold. *)
+    let atoms_through = Array.make (List.length ahead_of_break + 1) 0 in
+    List.iteri
+      (fun index (_message, label) ->
+         atoms_through.(index + 1)
+         <- (match label with
+             | Runtime_model_input_tail_window.Atom atom ->
+               max atoms_through.(index) (atom + 1)
+             | Runtime_model_input_tail_window.Pinned -> atoms_through.(index)))
+      labelled;
+    (* [messages_through.(u)]: the messages the first [u] units hold. *)
+    let messages_through = Array.make (Array.length units + 1) 0 in
+    Array.iteri
+      (fun index unit_ ->
+         messages_through.(index + 1)
+         <- messages_through.(index)
+            + List.length (Keeper_transcript_unit.messages_of_closed_unit unit_))
+      units;
+    let stated_at unit_count =
+      let end_atom = atoms_through.(messages_through.(unit_count)) in
+      end_atom >= 1
+      && (match opening_digest (end_atom - 1) with
+          | Some last_atom_digest -> stated ~end_atom ~last_atom_digest
+          | None -> false)
+    in
+    let rec last_stated unit_count =
+      if unit_count = 0
+      then None
+      else if stated_at unit_count
+      then Some unit_count
+      else last_stated (unit_count - 1)
+    in
+    let unwitnessed = Error (Recovery_end_unwitnessed { boundary_lines_seen }) in
+    match last_stated (Array.length units) with
+    | None -> unwitnessed
+    | Some unit_count ->
+      let kept = Array.to_list (Array.sub units 0 unit_count) in
+      (match Keeper_turn_boundaries.position_of_messages (messages_of kept) with
+       | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest })
+         when stated ~end_atom ~last_atom_digest -> Ok kept
+       | Ok
+           ( Keeper_turn_boundaries.Atom_history _
+           | Keeper_turn_boundaries.Empty_atom_history
+           | Keeper_turn_boundaries.No_atom_history
+           | Keeper_turn_boundaries.Stale_noop )
+       | Error (_ : string) -> unwitnessed)
 ;;
 
 let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messages =
@@ -399,7 +406,7 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messa
     | Ok { closed_prefix; protected_suffix } ->
       (match
          if recovering
-         then recovered_units ~trace_id ~boundary_lines ~progress closed_prefix
+         then recovered_units ~trace_id ~boundary_lines ~progress ~messages closed_prefix
          else Ok closed_prefix
        with
        | Error error -> Error error
@@ -494,9 +501,10 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messa
         (* The last atom goes out whole along with the count-based tail. A turn
            that ends in more tool messages than [keep_recent_messages] puts its
            opening assistant message outside the count-based tail; this reaches
-           it. *)
+           it. The tail is counted on [retained], the history this returns and
+           the one [flat_last] indexes: a recovery's dropped tail is not in it. *)
         let protected_from =
-          let count_based = messages_before - config.keep_recent_messages in
+          let count_based = List.length retained - config.keep_recent_messages in
           match if atom_count > 0 then opener_of_atom.(atom_count - 1) else None with
           | Some opener -> min count_based opener
           | None -> count_based

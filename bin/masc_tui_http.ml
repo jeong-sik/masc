@@ -51,12 +51,14 @@ let preset_restore_timeout_sec = 120.0
 
 (* A config save can land mid-turn: the server commits the metadata, then
    stops the lane for the restart, and that stop waits the turn out with no
-   deadline of its own. A stuck attempt is ended by the provider_call_deadline
-   failsafe floor (900s, provider_call_deadline_failsafe_floor_sec in
-   lib/config/env_config_keeper.ml), and observed turns ran 12-160s
-   (2026-09-21), so 900s covers the realistic wait. A turn that stays healthy
-   past it can still drop the save; the server-side fix is #37612. *)
-let keeper_config_save_timeout_sec = 900.0
+   deadline of its own. The budget is the provider-call failsafe floor, so
+   it cannot drift from the one deadline the code already maintains; observed
+   turns ran 12-160s (2026-09-21). An env or runtime.toml
+   provider_call_deadline_sec above the floor can still outlive this budget,
+   and a healthy long turn can outlive any budget -- both drop the save; the
+   server-side fix is #37612. *)
+let keeper_config_save_timeout_sec =
+  Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec
 
 (* The server asks every declared endpoint in turn, and a provider that is
    simply slow can hold one of them for tens of seconds. The ordinary 10s
@@ -2109,10 +2111,13 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
 
 (** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
     contract. The keeper name in the path is the row the operator launched
-    from; the body carries the rest of the declaration. *)
+    from; the body carries the rest of the declaration. The update arm runs
+    the same lane swap as a config save, so this call carries the same
+    extended budget. *)
 let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
     ~(declaration_json : string) : (Yojson.Safe.t, string) result =
-  post_json ~host ~port
+  post_json_with_timeout ~timeout_sec:keeper_config_save_timeout_sec ~host
+    ~port
     ~path:
       (Printf.sprintf "/api/v1/keepers/%s/up"
          (percent_encode_path_segment keeper_name))

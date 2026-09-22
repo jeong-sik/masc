@@ -15,10 +15,14 @@ val build_keeper_system_prompt :
 (** Repository identity and checkout freshness are obtained from the typed
     context projection rather than inferred from prompt prose.
 
+    Block order: the shared [keeper] body in the system tags, the world's
+    [keeper.worldview], the world's articles, the keeper's identity and
+    workspace, then [instructions] in the role tags. The first three are the
+    same for every keeper in a world, so the shared prefix stays maximal.
+
     [constitution] is the world's own articles, already rendered
-    ({!World_constitution_render.articles}). It sits ahead of the
-    keeper-specific blocks because every keeper in a world reads the same text,
-    and an empty one renders nothing at all. *)
+    ({!World_constitution_render.articles}); an empty one renders nothing at
+    all. *)
 
 (** {1 Text Processing}
 

@@ -403,6 +403,28 @@ type fusion_tool_trace =
   ; ftt_events : fusion_tool_event list
   }
 
+(* One seat's route through its candidates (the sink's [seat_routes] array):
+   who was tried, who answered. A panel seat is its panelist id; a judge seat
+   is its topology role and identity, read back through the same closed role
+   set the tool actors use. *)
+type fusion_seat =
+  | Fusion_panel_seat of string
+  | Fusion_judge_seat of { fs_role : fusion_judge_role; fs_identity : string }
+
+type fusion_seat_attempt =
+  { fsa_runtime : string
+  ; fsa_code : string
+  ; fsa_detail : string
+  }
+
+type fusion_seat_route =
+  { fsr_seat : fusion_seat
+  ; fsr_route : string
+  ; fsr_answered_by : string option
+        (** [None]: every candidate failed, or the route did not resolve. *)
+  ; fsr_failed_attempts : fusion_seat_attempt list
+  }
+
 type fusion_evidence = {
   fe_post_id : string;
   fe_title : string;
@@ -411,6 +433,11 @@ type fusion_evidence = {
   fe_judge : fusion_judge;
   fe_judges : fusion_judge_node list;
   fe_tool_trace : fusion_tool_trace;
+  fe_seat_routes : fusion_seat_route list option;
+      (** [None] when the post's meta carries no [seat_routes] key, which is
+          how a post written before seats were recorded reads; the detail
+          draws no block for it. An empty list is a post that carries the key
+          with no seat in it. *)
 }
 
 type fusion_evidence_status =
@@ -6833,6 +6860,35 @@ let decode_fusion_tool_trace json =
         ; ftt_events
         }
 
+let decode_fusion_seat json =
+  let* phase = required_string_field json "phase" in
+  let* fs_identity = required_string_field json "seat" in
+  let* judge_role = optional_string_field json "judge_role" in
+  match phase, judge_role with
+  | "panel", None -> Ok (Fusion_panel_seat fs_identity)
+  | "judge", Some role ->
+      let* fs_role = fusion_judge_role_of_label role in
+      Ok (Fusion_judge_seat { fs_role; fs_identity })
+  | "panel", Some _ -> Error "fusion panel seat cannot carry judge_role"
+  | "judge", None -> Error "fusion judge seat requires judge_role"
+  | phase, _ -> Error (Printf.sprintf "unknown fusion seat phase %S" phase)
+
+let decode_fusion_seat_attempt json =
+  let* fsa_runtime = required_string_field json "runtime" in
+  let* fsa_code = required_string_field json "code" in
+  let* fsa_detail = required_string_field json "detail" in
+  Ok { fsa_runtime; fsa_code; fsa_detail }
+
+let decode_fusion_seat_route json =
+  let* fsr_seat = decode_fusion_seat json in
+  let* fsr_route = required_string_field json "route" in
+  let* fsr_answered_by = optional_string_field json "answered_by" in
+  let* attempts = required_list_field json "failed_attempts" in
+  let* fsr_failed_attempts =
+    decode_list "failed_attempts" decode_fusion_seat_attempt attempts
+  in
+  Ok { fsr_seat; fsr_route; fsr_answered_by; fsr_failed_attempts }
+
 let decode_fusion_evidence ~run_id json =
   let* fe_post_id = required_string_field json "id" in
   let* fe_title = required_string_field json "title" in
@@ -6868,6 +6924,16 @@ let decode_fusion_evidence ~run_id json =
   in
   let* tool_trace_json = required_object_field meta "tool_trace" in
   let* fe_tool_trace = decode_fusion_tool_trace tool_trace_json in
+  let* fe_seat_routes =
+    (* A post whose meta has no [seat_routes] key was written before seats
+       were recorded; the key, when present, is the sink's whole array. *)
+    match member "seat_routes" meta with
+    | `Null -> Ok None
+    | `List routes ->
+        let* routes = decode_list "seat_routes" decode_fusion_seat_route routes in
+        Ok (Some routes)
+    | bad -> field_type_error "seat_routes" "an array" bad
+  in
   Ok
     { fe_post_id
     ; fe_title
@@ -6876,6 +6942,7 @@ let decode_fusion_evidence ~run_id json =
     ; fe_judge
     ; fe_judges
     ; fe_tool_trace
+    ; fe_seat_routes
     }
 
 let decode_fusion_historical_detail ~reference json =
@@ -6965,6 +7032,33 @@ let decode_fusion_detail json =
              })
   | "absent", _ -> Error "absent fusion evidence must carry post:null"
   | other, _ -> Error (Printf.sprintf "unknown fusion evidence status %S" other)
+
+(* What the launch form offers, from [GET /api/v1/runtime/config/fusion]:
+   the preset names and the one the tool applies when none is named. Only
+   the names are read; the panels and judges behind them are the server's. *)
+type fusion_launch_options =
+  { flo_enabled : bool
+  ; flo_default_preset : string
+  ; flo_presets : string list
+  }
+
+let decode_fusion_launch_options json =
+  let* config = required_object_field json "config" in
+  let* flo_enabled = required_bool_field config "enabled" in
+  let* flo_default_preset = required_string_field config "default_preset" in
+  let* presets = required_list_field config "presets" in
+  let* flo_presets =
+    decode_list "presets" (fun preset -> required_string_field preset "name") presets
+  in
+  Ok { flo_enabled; flo_default_preset; flo_presets }
+
+(* The answer to [POST /api/v1/keepers/<keeper>/fusion]: a refusal travels
+   as a 4xx and never reaches here, so a 2xx body that says [ok:false] is a
+   shape this reader does not know rather than a refusal to report. *)
+let decode_fusion_launch_receipt json =
+  let* ok = required_bool_field json "ok" in
+  if ok then required_string_field json "run_id"
+  else Error "fusion launch answered 2xx with ok:false"
 
 (* The counts are read with a default rather than required: the server adds
    fields to this section over time, and a TUI that refuses the whole reading

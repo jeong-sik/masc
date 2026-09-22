@@ -17,13 +17,17 @@
 ### system 자리 — `keeper_prompt.ml` 의 조립 순서
 
 ```
-<system> keeper.md 본문(첫 마커 앞) </system>   ← keeper 전원이 글자 그대로 공유
-keeper.md ### identity                          ← "너는 <이름>이다"
+<system> keeper.md 본문(첫 마커 앞) </system>   ← 이 세계가 돌아가는 방식. keeper 전원이 글자 그대로 공유
+keeper.md ### worldview                         ← <world> 이 세계의 가치관. 운영자가 덮어쓴다
+keeper.md ### constitution                      ← <norms> keeper 가 쓴 규범 (RFC-0442). 조항이 없으면 빠진다
+keeper.md ### identity                          ← "당신은 <이름>이다"
 keeper.md ### workspace                         ← 샌드박스 루트
-<instructions> keeper TOML 의 instructions </instructions>
+<role> keeper TOML 의 instructions </role>
 ```
 
 공유 블록이 맨 앞인 것은 의도적이다. keeper 여럿이 같은 접두를 쓰면 provider 의 KV 캐시가 재사용된다. keeper 별로 달라지는 것은 그 뒤에 온다.
+
+본문은 가치관을 담지 않는다. 세계 프리셋이 모두 이 본문 위에 올라가므로, 본문이 무엇을 귀하게 여기라고 말하면 모든 세계에 그 가치가 섞인다. 무엇을 잘한 일로 칠지는 운영자가 `keeper.worldview` 로 정하거나, 정하지 않으면 각 keeper 의 역할(`instructions`)이 정한다. `worldview` 의 배포 기본값이 바로 그 말이다.
 
 ### user 자리 — 턴마다 새로 조립되는 세계 상태
 
@@ -106,12 +110,13 @@ keeper.md ### world.frame.frame
 
 ## 등급의 기준
 
-**운영자가 고쳤을 때 제품 동작이 바뀌면 `primary`, 아니면 조각이다.** 라벨(`CURRENT GOAL:`), 진단 CLI 픽스처, 내부 템플릿은 config 에 남되 목록에는 안 나온다. 이 기준으로 운영자 목록은 15행이다.
+**운영자가 고쳤을 때 제품 동작이 바뀌면 `primary`, 아니면 조각이다.** 라벨(`CURRENT GOAL:`), 진단 CLI 픽스처, 내부 템플릿은 config 에 남되 목록에는 안 나온다. 이 기준으로 운영자 목록은 17행이다.
 
 | 파일 | 운영자용 키 |
 |---|---|
-| `keeper.md` | `keeper`, `keeper.identity`, `keeper.workspace` |
+| `keeper.md` | `keeper`, `keeper.worldview`, `keeper.identity`, `keeper.workspace` |
 | `librarian.md` | `librarian` |
+| `workspace_memory_curator.md` | `workspace_memory_curator` |
 | `verification.md` | `verification` |
 | `judge.md` | `judge.board`, `judge.effect` |
 | `goal_verification.md` | `goal_verification.proof` |
@@ -119,7 +124,7 @@ keeper.md ### world.frame.frame
 | `mcp.md` | `mcp.full`, `.managed_agent`, `.operator_remote` |
 | `tool_failure.md` `lane_cli_probe.md` `eval.calibration.few_shot.md` | 없음 |
 
-슬롯은 기본이 조각이고, 운영자가 따로 손대는 것만 마커 끝에 `[primary: 설명]` 을 단다. 설명을 적지 않으면 그룹 파일의 설명을 쓰는데, 그러면 목록의 모든 행이 같은 문장을 말한다. 파일을 읽는 사람 기준으로 접었더니 한 파일 안에 운영자용 프롬프트와 조립용 조각이 같이 살게 됐고, 등급이 파일 단위면 그 둘을 구분할 수 없다. 운영자용은 15개다.
+슬롯은 기본이 조각이고, 운영자가 따로 손대는 것만 마커 끝에 `[primary: 설명]` 을 단다. 설명을 적지 않으면 그룹 파일의 설명을 쓰는데, 그러면 목록의 모든 행이 같은 문장을 말한다. 파일을 읽는 사람 기준으로 접었더니 한 파일 안에 운영자용 프롬프트와 조립용 조각이 같이 살게 됐고, 등급이 파일 단위면 그 둘을 구분할 수 없다.
 
 서식도 config 에 남는다. 운영자가 바꿀 일이 드물 뿐 바꿀 수 있어야 한다. 다만 재정의 목록에서 문장과 서식이 같은 무게로 보이면 목록이 읽히지 않으므로, 표시 등급은 따로 다룬다 (#32890).
 

@@ -1922,6 +1922,11 @@ type async_msg =
   | Fusion_historical_detail_loaded of
       int * Masc.Tui_decode.fusion_historical_evidence
       * (Masc.Tui_decode.fusion_historical_detail, string) result
+  (* Both carry the launch generation: the answer to a read or a submit the
+     operator already left must not open or close a form they are not in. *)
+  | Fusion_launch_options_loaded of
+      int * (Masc.Tui_decode.fusion_launch_options, string) result
+  | Fusion_launched of int * (string, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
@@ -2287,13 +2292,15 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
               | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
               | _ -> []);
           me_memory_summary = None;
+          me_memory_pass = Masc_tui_message_layout.No_pass;
+          me_journal = [];
           me_gate = None;
           me_submitted_at = submitted_at;
           (* Session rows carry no tool or skill block: a turn's calls are
              drawn from its log, and a loaded row's block comes from the
              server ([msg_entry_of_history_row]). *)
           me_tool_block = None;
-          me_skill_activity = None;
+          me_skill_block = [];
           me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
@@ -2362,10 +2369,12 @@ let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
 let tui_auto_start_attempted = ref false
 
 (* Whether the credential decision taken at boot is still owed a second look.
-   Set only when that decision came back [Unavailable]: minting needs a
+   Set only when that decision came back [Workspace_pending]: minting needs a
    workspace that already exists, and on a first install this process runs
-   before any server has made one. Cleared once a retry against a reachable
-   server settles it. *)
+   before any server has made one. A mint that failed against a workspace
+   that was already here is not set, because the failure was local file work
+   and a server answering later does not change it. Cleared once a retry
+   against a reachable server settles it. *)
 let tui_credential_retry_pending = ref false
 
 (* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
@@ -5885,6 +5894,57 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
              (generation, reference, Error "Eio switch is unavailable"))
   end
 
+(* The two requests behind the launch form. Neither is inflight-guarded by
+   a field of its own: the form's state says which request it waits on, and
+   the generation in the answer says whether it is still that one. *)
+let launch_fusion_launch_options_load state ~mailbox =
+  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+  let generation = state.fusion_launch_generation in
+  state.fusion_launch <- Some (Fusion_launch_reading_presets generation);
+  state.fusion_scroll <- 0;
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_fusion_launch_options ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Fusion_launch_options_loaded (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Fusion_launch_options_loaded (generation, Error "Eio switch is unavailable"))
+
+(* Named apart from [Masc_tui_loader.launch_fusion_run], which it calls: one
+   name for both is a shadow that turns a missing qualifier into unbounded
+   recursion rather than a compile error. *)
+let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
+  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+  let generation = state.fusion_launch_generation in
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.launch_fusion_run ~host ~port ~request with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Fusion_launched (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Fusion_launched (generation, Error "Eio switch is unavailable"))
+
 let launch_keeper_lanes_load state ~mailbox =
   if state.keeper_lanes_inflight then ()
   else begin
@@ -7137,7 +7197,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   in
   let memory_summary =
     match row.Keeper_chat_history.kind with
-    | Keeper_chat_history.Memory_activity { summary } -> summary
+    | Keeper_chat_history.Memory_activity { summary; journal = _; pass = _ } -> summary
     | Keeper_chat_history.Gate_activity _
     | Keeper_chat_history.Addressed_to_keeper _
     | Keeper_chat_history.Said_by_keeper
@@ -7149,7 +7209,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Fusion_conclusion _ ->
         None
   in
-  let role, turn_phase, text, tool_block, skill_activity =
+  let role, turn_phase, text, tool_block, skill_block =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         (* The label is what the row draws; the speaker is what it is. Both
@@ -7170,13 +7230,13 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
           | Keeper_chat_history.Unresolved _ ->
               Sent_by_other { speaker = name; surface = arrived_by }
         in
-        (Message_user author, Turn_input, row.text, None, None)
+        (Message_user author, Turn_input, row.text, None, [])
     | Keeper_chat_history.Said_by_keeper ->
-        (Message_keeper, Turn_output, row.text, None, None)
+        (Message_keeper, Turn_output, row.text, None, [])
     | Keeper_chat_history.Autonomous_reply ->
         (* The decoder no longer emits a blank autonomous reply, so there is
            nothing here to stand in for. *)
-        (Message_autonomous, Turn_output, row.text, None, None)
+        (Message_autonomous, Turn_output, row.text, None, [])
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
           match
@@ -7189,22 +7249,22 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_output
         , text
         , None
-        , None )
+        , [] )
     | Keeper_chat_history.Tool_calls block ->
         ( Message_tool
         , Turn_tool
         , String.concat "\n" (Keeper_chat_history.tool_rows block)
         , Some block
-        , None )
-    | Keeper_chat_history.Skill_activity activity ->
-        ( Message_skill activity.Keeper_chat_transcript.state
+        , [] )
+    | Keeper_chat_history.Skill_activity activities ->
+        ( Message_skill (Keeper_chat_transcript.skill_block_state activities)
         , Turn_progress
         , String.concat "\n"
-            (Keeper_chat_transcript.skill_rows ~full:false activity)
+            (Keeper_chat_transcript.skill_rows ~full:false activities)
         , None
-        , Some activity )
+        , activities )
     | Keeper_chat_history.Reasoning lines ->
-        (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
+        (Message_thinking, Turn_progress, String.concat "\n" lines, None, [])
     | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool; summary } ->
         (* Server-owned gate status, drawn from the phase rather than from
            the sentence the store composed. It is not Memory: putting it in
@@ -7214,9 +7274,9 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_progress
         , Masc_tui_gate_text.lifecycle_line ~phase ~tool ~summary
         , None
-        , None )
+        , [] )
     | Keeper_chat_history.Memory_activity _ ->
-        (Message_memory, Turn_progress, row.text, None, None)
+        (Message_memory, Turn_progress, row.text, None, [])
     | Keeper_chat_history.Fusion_conclusion
         { fusion_run_id; fusion_board_post_id } ->
         (* A pointer row, not keeper speech: the conclusion text is the
@@ -7232,7 +7292,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_progress
         , Printf.sprintf "Fusion deliberation %s — 상세는 Runs 탭" pointer
         , None
-        , None )
+        , [] )
   in
   let submitted_at =
     match row.Keeper_chat_history.kind, row.Keeper_chat_history.turn_id with
@@ -7283,10 +7343,55 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
         memory_summary
+  ; me_journal =
+      (let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:false in
+       match row.Keeper_chat_history.kind with
+       | Keeper_chat_history.Memory_activity { journal; summary = _; pass = _ } ->
+           List.map
+             (function
+               | Masc_tui_message_layout.Journal_fact { sign; category; tone; claim } ->
+                   Masc_tui_message_layout.Journal_fact
+                     { sign; category = safe category; tone; claim = safe claim }
+               | Masc_tui_message_layout.Journal_drop { memory_id; reason } ->
+                   Masc_tui_message_layout.Journal_drop
+                     { memory_id = safe memory_id; reason = safe reason })
+             journal
+       | Keeper_chat_history.Gate_activity _
+       | Keeper_chat_history.Addressed_to_keeper _
+       | Keeper_chat_history.Said_by_keeper
+       | Keeper_chat_history.Autonomous_reply
+       | Keeper_chat_history.Delivery_failed _
+       | Keeper_chat_history.Tool_calls _
+       | Keeper_chat_history.Skill_activity _
+       | Keeper_chat_history.Reasoning _
+       | Keeper_chat_history.Fusion_conclusion _ ->
+           [])
+  ; me_memory_pass =
+      (match row.Keeper_chat_history.kind with
+       | Keeper_chat_history.Memory_activity
+           { pass = Masc_tui_message_layout.Pass_failed { kind }; summary = _; journal = _ } ->
+           Masc_tui_message_layout.Pass_failed
+             { kind = Keeper_chat.terminal_safe_text ~preserve_newlines:false kind }
+       | Keeper_chat_history.Memory_activity
+           { pass = (Masc_tui_message_layout.Pass_committed | Masc_tui_message_layout.No_pass) as pass
+           ; summary = _
+           ; journal = _
+           } ->
+           pass
+       | Keeper_chat_history.Gate_activity _
+       | Keeper_chat_history.Addressed_to_keeper _
+       | Keeper_chat_history.Said_by_keeper
+       | Keeper_chat_history.Autonomous_reply
+       | Keeper_chat_history.Delivery_failed _
+       | Keeper_chat_history.Tool_calls _
+       | Keeper_chat_history.Skill_activity _
+       | Keeper_chat_history.Reasoning _
+       | Keeper_chat_history.Fusion_conclusion _ ->
+           Masc_tui_message_layout.No_pass)
   ; me_gate = gate
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
-  ; me_skill_activity = skill_activity
+  ; me_skill_block = skill_block
   ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* Direct rows retain their typed delivery key; autonomous rows retain the
@@ -8224,13 +8329,30 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
    composer row or the chat pane's input. Text goes to the keeper as it
    always did; a slash word is the TUI's to act on, and a mistyped one is
    reported rather than sent to the keeper as an instruction. *)
-(* A command's answer, drawn into the pane the operator typed it in. Recent
-   Events lives on another surface, and a /help answered there is a /help
-   that looks ignored. Falls back to the event log when the pane has no
-   keeper to file the row under. *)
-let chat_notice state ~keeper_name ~role text =
-  match keeper_name with
-  | Some keeper ->
+(* What the pane says back to something the operator did.
+
+   A reply is a row in the conversation, drawn into the pane the operator
+   typed in: the command list, a queue snapshot, what a preset restore
+   applied and skipped. Recent Events lives on another surface, and a /help
+   answered there is a /help that looks ignored. It falls back to the event
+   log when the pane has no keeper to file the row under.
+
+   A failure is the operator's own step that did not work -- the clipboard
+   held no image, a command was missing its argument, an image would not
+   open. The conversation with the keeper is not where that belongs: it
+   says so in the footer of the pane they are standing on for
+   [last_action_window_s], and in the event log. *)
+type notice_kind =
+  | Notice_reply
+  | Notice_failure
+
+let chat_notice state ~keeper_name ~kind text =
+  match kind, keeper_name with
+  | Notice_failure, (Some _ | None) ->
+      report_action state "error" (Terminal_text.single_line text)
+  | Notice_reply, None -> add_event state "system" text
+  | Notice_reply, Some keeper ->
+      let role = Message_local in
       state.msg_history <-
         state.msg_history
         @ [ {
@@ -8247,24 +8369,22 @@ let chat_notice state ~keeper_name ~role text =
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
               me_image = Masc_tui_image_preview.No_image;
               me_memory_summary = None;
+              me_memory_pass = Masc_tui_message_layout.No_pass;
+              me_journal = [];
               me_gate = None;
               me_submitted_at = None;
               me_tool_block = None;
-              me_skill_activity = None;
+              me_skill_block = [];
               me_timestamp = current_clock_text ();
               me_keeper_name = keeper;
               me_request_id = "";
               me_at = Unix.gettimeofday ();
             } ]
-  | None ->
-      add_event state
-        (match role with Message_error -> "error" | _ -> "system")
-        text
 
 let launch_keeper_queue state ~mailbox ~keeper_name action =
   let module Inbox = Masc_tui_queue_inspection in
   if List.mem keeper_name state.keeper_queue_inflight then
-    chat_notice state ~keeper_name:(Some keeper_name) ~role:Message_local
+    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
       "A queue request is pending; wait for its result before the next change"
   else begin
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
@@ -8342,7 +8462,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
     enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, result)) in
-  chat_notice state ~keeper_name:(Some keeper_name) ~role:Message_local
+  chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
     (String.concat "\n" (local_lines () @ ["Reading server queue…"]));
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
@@ -8366,7 +8486,7 @@ let paste_clipboard_image state =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match Masc_tui_clipboard.read_image () with
   | Error error ->
-    notice ~role:Message_error
+    notice ~kind:Notice_failure
       ("Ctrl-V: " ^ Masc_tui_clipboard.error_to_string error)
   | Ok bytes ->
     (* Numbered by staging order and restarting at 1 with each message, so the
@@ -8376,7 +8496,7 @@ let paste_clipboard_image state =
     let name = Printf.sprintf "image-%d.png" index in
     (match Masc_tui_attachment.of_bytes ~name bytes with
      | Error error ->
-       notice ~role:Message_error
+       notice ~kind:Notice_failure
          ("Ctrl-V: " ^ Masc_tui_attachment.error_to_string error)
      | Ok attachment ->
        forget_recall state;
@@ -8392,7 +8512,7 @@ let paste_clipboard_image state =
        in
        if needs_separator then Buffer.add_char state.msg_input ' ';
        Buffer.add_string state.msg_input (Printf.sprintf "[Image #%d] " index);
-       notice ~role:Message_local
+       notice ~kind:Notice_reply
          (Printf.sprintf
             "pasted [Image #%d] (%s, %d bytes) \xe2\x80\x94 %d staged for the next message"
             index
@@ -8833,7 +8953,7 @@ let retry_image_mosaic img =
 
 let open_image state ~notice path =
   let refuse reason =
-    notice ~role:Message_error (Printf.sprintf "/image %s: %s" path reason)
+    notice ~kind:Notice_failure (Printf.sprintf "/image %s: %s" path reason)
   in
   let is_remote =
     String.starts_with ~prefix:"http://" path
@@ -8842,7 +8962,7 @@ let open_image state ~notice path =
   if is_remote && !terminal_draws_images = Some false then
     match Masc_tui_browser.open_url path with
     | Ok opener ->
-        notice ~role:Message_local
+        notice ~kind:Notice_reply
           (Printf.sprintf "Opened in browser (%s): %s" opener path)
     | Error err ->
         refuse (Printf.sprintf "Could not open browser: %s" err)
@@ -8854,7 +8974,7 @@ let open_image state ~notice path =
     | Error dl_err ->
         (match Masc_tui_browser.open_url path with
          | Ok opener ->
-             notice ~role:Message_local
+             notice ~kind:Notice_reply
                (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
          | Error _ ->
              refuse (Masc_tui_image_cache.download_error_text dl_err))
@@ -8885,7 +9005,7 @@ let open_image state ~notice path =
                     if is_remote then
                       match Masc_tui_browser.open_url path with
                       | Ok opener ->
-                          notice ~role:Message_local
+                          notice ~kind:Notice_reply
                             (Printf.sprintf "Terminal draws PNG only. Opened image in browser (%s): %s" opener path)
                       | Error _ ->
                           draw_image state ~refuse ~title:path prepared_data
@@ -8912,12 +9032,12 @@ let launch_image_render ~mailbox ~notice ~title ~caption ~page_url image_url =
     in
     match Masc_tui_browser.open_url url with
     | Ok opener ->
-        notice ~role:Message_local
+        notice ~kind:Notice_reply
           (Printf.sprintf "Opened in browser (%s): %s" opener url)
     | Error err ->
-        notice ~role:Message_error (Printf.sprintf "Could not open browser: %s" err)
+        notice ~kind:Notice_failure (Printf.sprintf "Could not open browser: %s" err)
   else begin
-    notice ~role:Message_local (Printf.sprintf "Loading image: %s" image_url);
+    notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
     let run () =
       let result =
         Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
@@ -8943,7 +9063,7 @@ let launch_image_render ~mailbox ~notice ~title ~caption ~page_url image_url =
 let open_staged_image state ~notice attachment =
   let title = attachment.Masc_tui_keeper_chat_projection.name in
   let refuse reason =
-    notice ~role:Message_error (Printf.sprintf "Ctrl-O %s: %s" title reason)
+    notice ~kind:Notice_failure (Printf.sprintf "Ctrl-O %s: %s" title reason)
   in
   match !terminal_draws_images with
   | Some false -> refuse terminal_draws_no_images
@@ -8992,9 +9112,9 @@ let named_vs_staged_order state ~named_index =
    receives only the decoded image after network work completes. *)
 let open_stored_image state ~mailbox ~notice ~name reference =
   if !terminal_draws_images = Some false then
-    notice ~role:Message_error terminal_draws_no_images
+    notice ~kind:Notice_failure terminal_draws_no_images
   else begin
-    notice ~role:Message_local (Printf.sprintf "Loading sent image (any key cancels): %s" name);
+    notice ~kind:Notice_reply (Printf.sprintf "Loading sent image (any key cancels): %s" name);
     let port = state.port in
     let keeper_name = state.msg_target_keeper_name in
     let generation = state.image_request_generation in
@@ -9015,7 +9135,7 @@ let open_stored_image state ~mailbox ~notice ~name reference =
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-    | None -> notice ~role:Message_error "sent image preview requires an active connection"
+    | None -> notice ~kind:Notice_failure "sent image preview requires an active connection"
   end
 
 let open_named_image state ~mailbox =
@@ -9034,10 +9154,10 @@ let open_named_image state ~mailbox =
   | Masc_tui_image_preview.Stored_attachment { name; reference } ->
       open_stored_image state ~mailbox ~notice ~name reference
   | Masc_tui_image_preview.Unavailable_attachment name ->
-      notice ~role:Message_error
+      notice ~kind:Notice_failure
         (Printf.sprintf "Ctrl-O %s: this attachment has no retained image payload; attach it again to preview it" name)
   | Masc_tui_image_preview.No_image ->
-      notice ~role:Message_local "Ctrl-O: no image in this conversation or the composer"
+      notice ~kind:Notice_reply "Ctrl-O: no image in this conversation or the composer"
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -9090,7 +9210,7 @@ let seek_in_chat state ~target ~restart =
   let notice = chat_notice state ~keeper_name:target in
   match target with
   | None ->
-      notice ~role:Message_error "/find needs a Keeper selected on the roster"
+      notice ~kind:Notice_failure "/find needs a Keeper selected on the roster"
   | Some keeper_name -> (
       let older_than = if restart then None else state.msg_find_at in
       (* Normalised here, at the door the operator's text comes through.
@@ -9104,19 +9224,19 @@ let seek_in_chat state ~target ~restart =
       | Some (scroll, anchor) ->
           state.msg_find_at <- Some anchor;
           set_msg_scroll state scroll;
-          notice ~role:Message_local
+          notice ~kind:Notice_reply
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
                state.msg_find scroll)
       | None ->
           if restart then
-            notice ~role:Message_local
+            notice ~kind:Notice_reply
               (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
                  state.msg_find)
           else
             (* The walk is over, not empty. Said apart from the case above
                because starting again is what fixes this one and not that
                one. *)
-            notice ~role:Message_local
+            notice ~kind:Notice_reply
               (Printf.sprintf
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
                  state.msg_find state.msg_find))
@@ -9376,7 +9496,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
     Option.is_some state.msg_recall_replaces
     && match command with Masc_tui_command.Say _ -> false | _ -> true
   then
-    notice ~role:Message_error
+    notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
   else
   match command with
@@ -9385,13 +9505,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Task_missing_title ->
       add_event state "error" "/task needs a title on the same line"
   | Masc_tui_command.View_image_missing_path ->
-      notice ~role:Message_error "/image needs a path on the same line"
+      notice ~kind:Notice_failure "/image needs a path on the same line"
   | Masc_tui_command.Measurement_missing_sha ->
-      notice ~role:Message_error "/measurement needs a SHA-256 on the same line"
+      notice ~kind:Notice_failure "/measurement needs a SHA-256 on the same line"
   | Masc_tui_command.Open_measurement sha256 ->
       (match Tool_blob_store.validate_sha256 sha256 with
        | Error error ->
-           notice ~role:Message_error (Tool_blob_store.invalid_sha256_to_string error)
+           notice ~kind:Notice_failure (Tool_blob_store.invalid_sha256_to_string error)
        | Ok () ->
            Buffer.clear state.msg_input;
            goto_surface state ~mailbox Lanes;
@@ -9400,9 +9520,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       open_image state ~notice (String.trim path)
   | Masc_tui_command.Attach_image_missing_path ->
-      notice ~role:Message_error "/attach needs a path on the same line"
+      notice ~kind:Notice_failure "/attach needs a path on the same line"
   | Masc_tui_command.Attach_image_ref_missing_value ->
-      notice ~role:Message_error "/ref needs a URL or file_id on the same line"
+      notice ~kind:Notice_failure "/ref needs a URL or file_id on the same line"
   | Masc_tui_command.Attach_image_ref value -> (
       Buffer.clear state.msg_input;
       (* A whole-token http(s) URL is a URL reference; anything else non-blank
@@ -9418,7 +9538,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       in
       match reference with
       | None ->
-          notice ~role:Message_error "/ref needs a URL or file_id on the same line"
+          notice ~kind:Notice_failure "/ref needs a URL or file_id on the same line"
       | Some reference ->
           state.msg_references <- state.msg_references @ [ reference ];
           note_attachment_staged state;
@@ -9427,7 +9547,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | Keeper_chat.Ref_url _ -> "url"
             | Keeper_chat.Ref_file_id _ -> "file_id"
           in
-          notice ~role:Message_local
+          notice ~kind:Notice_reply
             (Printf.sprintf
                "referenced %s (%s) — the provider fetches it; %d reference(s)                 staged for the next message"
                value
@@ -9437,12 +9557,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       match Masc_tui_attachment.of_file ~path:(String.trim path) with
       | Error error ->
-          notice ~role:Message_error
+          notice ~kind:Notice_failure
             (Masc_tui_attachment.error_to_string error)
       | Ok attachment ->
           state.msg_attachments <- state.msg_attachments @ [ attachment ];
           note_attachment_staged state;
-          notice ~role:Message_local
+          notice ~kind:Notice_reply
             (Printf.sprintf
                "attached %s (%s, %d bytes) — %d staged for the next message"
                attachment.Masc_tui_keeper_chat_projection.name
@@ -9451,7 +9571,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                (List.length state.msg_attachments)))
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
@@ -9469,7 +9589,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       let banner =
         Masc_tui_command.about_banner ~theme_name ?active_keepers ()
       in
-      notice ~role:Message_local banner
+      notice ~kind:Notice_reply banner
   | Masc_tui_command.Open_diff ->
       Buffer.clear state.msg_input;
       state.repository_changes_return_chat <- true;
@@ -9492,7 +9612,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.burn_hud_visible <- not state.burn_hud_visible;
       let status_str = if state.burn_hud_visible then "shown" else "hidden" in
       let cost = Masc_tui_types.fleet_total_cost_usd state in
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
@@ -9518,7 +9638,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            in
            state.link_modal_cursor <- find_idx 0 all_urls
        | None ->
-           notice ~role:Message_local
+           notice ~kind:Notice_reply
              "No web links found in this conversation to preview. Use /preview <url> to preview any link.")
   | Masc_tui_command.Open_links_list ->
       Buffer.clear state.msg_input;
@@ -9531,7 +9651,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            state.link_modal_scroll <- 0;
            state.link_modal_cursor <- 0
        | [] ->
-           notice ~role:Message_local "No web links found in this conversation.")
+           notice ~kind:Notice_reply "No web links found in this conversation.")
   | Masc_tui_command.Set_embeds mode ->
       Buffer.clear state.msg_input;
       state.link_previews_mode <-
@@ -9539,7 +9659,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `On -> `Rich
          | `Compact -> `Compact
          | `Off -> `Off);
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         (Printf.sprintf "Inline link embed cards: %s"
            (match state.link_previews_mode with
             | `Rich -> "Rich (Full Cards)"
@@ -9553,9 +9673,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       (match toggle_acting_pane state with
        | Ok layout ->
-           notice ~role:Message_local
+           notice ~kind:Notice_reply
              ("Activity pane " ^ Masc_tui_acting_pane.layout_label layout)
-       | Error reason -> notice ~role:Message_error reason)
+       | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Show_acting_pane_tab tab ->
       Buffer.clear state.msg_input;
       let tab =
@@ -9566,12 +9686,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match show_acting_pane_tab state tab with
        | Ok () ->
            ensure_acting_pane_changes state ~mailbox;
-           notice ~role:Message_local
+           notice ~kind:Notice_reply
              ("Activity pane on " ^ Masc_tui_acting_pane.tab_label tab)
-       | Error reason -> notice ~role:Message_error reason)
+       | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_error
+      notice ~kind:Notice_failure
         (Printf.sprintf "/activity takes fleet, changes, order or scroll, not %s" word)
   | Masc_tui_command.Set_acting_pane_call_order which ->
       Buffer.clear state.msg_input;
@@ -9590,12 +9710,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
              | `By_tool -> Masc_tui_acting_pane.By_tool
            in
            state.acting_pane_call_order <- order;
-           notice ~role:Message_local
+           notice ~kind:Notice_reply
              ("Activity calls " ^ Masc_tui_acting_pane.call_order_label order)
-       | Error reason -> notice ~role:Message_error reason)
+       | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Acting_pane_call_order_unknown word ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_error
+      notice ~kind:Notice_failure
         (Printf.sprintf
            "/activity order takes newest, oldest, longest or tool, not %s" word)
   | Masc_tui_command.Scroll_acting_pane how ->
@@ -9605,12 +9725,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          reasons it is not drawn are said the way the toggle says them. *)
       let _rows, cols = Masc_tui_ansi.get_terminal_size () in
       if Masc_tui_render.acting_pane_suppressed state then
-        notice ~role:Message_error
+        notice ~kind:Notice_failure
           "Activity pane is not drawn over this surface; nothing to scroll"
       else if
         Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols = 0
       then
-        notice ~role:Message_error
+        notice ~kind:Notice_failure
           "Activity pane is not shown; Ctrl-L or /activity shows it"
       else begin
         (match how with
@@ -9618,14 +9738,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `Up -> scroll_acting_pane state ~delta:(-wheel_notch_rows)
          | `Down -> scroll_acting_pane state ~delta:wheel_notch_rows
          | `By rows -> scroll_acting_pane state ~delta:rows);
-        notice ~role:Message_local
+        notice ~kind:Notice_reply
           (Printf.sprintf "Activity pane scrolled to row %d of %d"
              (state.acting_pane_scroll + 1)
              (Masc_tui_render.acting_pane_scroll_limit () + 1))
       end
   | Masc_tui_command.Acting_pane_scroll_unknown word ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_error
+      notice ~kind:Notice_failure
         (Printf.sprintf
            "/activity scroll takes up, down, top, +N or -N, not %s" word)
   | Masc_tui_command.Lane_addons input ->
@@ -9647,7 +9767,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.runtime_params_notice <- None;
       goto_surface state ~mailbox Config
   | Masc_tui_command.Switch_keeper_missing_name ->
-      notice ~role:Message_error "/keeper needs a name on the same line"
+      notice ~kind:Notice_failure "/keeper needs a name on the same line"
   | Masc_tui_command.Switch_keeper name -> (
       let names =
         List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
@@ -9660,24 +9780,24 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           launch_keeper_history_load state ~mailbox ~keeper_name;
           state.view <- Keepers Keeper_message
       | Masc_tui_command.Keeper_ambiguous candidates ->
-          notice ~role:Message_error
+          notice ~kind:Notice_failure
             (Printf.sprintf "%S names more than one keeper: %s" name
                (String.concat ", " candidates))
       | Masc_tui_command.Keeper_unknown ->
-          notice ~role:Message_error
+          notice ~kind:Notice_failure
             (Printf.sprintf "no keeper named %S on the roster" name))
   | Masc_tui_command.Queue input ->
       Buffer.clear state.msg_input;
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
-       | None, _ -> notice ~role:Message_error "Select a Keeper first"
-       | _, Error detail -> notice ~role:Message_error detail
+       | None, _ -> notice ~kind:Notice_failure "Select a Keeper first"
+       | _, Error detail -> notice ~kind:Notice_failure detail
        | Some keeper_name, Ok action ->
          let local_id = match action with
            | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
            | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> None in
          match Option.bind local_id (fun id -> Chat_queue.find state.msg_queued ~request_id:id) with
          | Some item when item.request.keeper_name <> keeper_name ->
-           notice ~role:Message_error "That message belongs to another Keeper"
+           notice ~kind:Notice_failure "That message belongs to another Keeper"
          | Some item ->
            (match action with
             | Masc_tui_queue_inspection.Cancel id ->
@@ -9688,46 +9808,46 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                     | Some editing when editing.Chat_queue.request.request_id = id ->
                       state.msg_recall_replaces <- None; clear_staged_attachments state
                     | Some _ | None -> ());
-                   notice ~role:Message_local ("Cancelled unsent message " ^ id)
-               | None -> notice ~role:Message_error "Local queue changed; inspect /queue again")
+                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id)
+               | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again")
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
               (match Chat_queue.replace_request state.msg_queued ~request_id:id request with
-               | Error detail -> notice ~role:Message_error detail
+               | Error detail -> notice ~kind:Notice_failure detail
                | Ok queue -> state.msg_queued <- queue; update_queued_history_text state request;
-                   notice ~role:Message_local ("Updated unsent message " ^ id))
-            | Move_to_end _ -> notice ~role:Message_error "Local input is already joined in submission order"
+                   notice ~kind:Notice_reply ("Updated unsent message " ^ id))
+            | Move_to_end _ -> notice ~kind:Notice_failure "Local input is already joined in submission order"
             | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> assert false)
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next ->
       Buffer.clear state.msg_input;
       if Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight then
-        notice ~role:Message_local "A run-next request is already pending"
+        notice ~kind:Notice_reply "A run-next request is already pending"
       else (match state.msg_target_keeper_name with
-       | None -> notice ~role:Message_error "Select a Keeper first"
+       | None -> notice ~kind:Notice_failure "Select a Keeper first"
        | Some name ->
          match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
          | Some _ when Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight ->
-           notice ~role:Message_local "A run-next request is already pending"
+           notice ~kind:Notice_reply "A run-next request is already pending"
          | Some item ->
            (match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
-            | None -> notice ~role:Message_error "Local queue changed; inspect /queue again"
+            | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
             | Some (_, rest) ->
               state.msg_queued <- rest;
               state.keeper_run_next_pending <- Some item.request;
               launch_keeper_request ~promoted:item state ~mailbox item.request;
-              notice ~role:Message_local "Submitting queued input; it will be prioritized once the server accepts it")
+              notice ~kind:Notice_reply "Submitting queued input; it will be prioritized once the server accepts it")
          | None ->
          match inflight_for state name, live_for_keeper state name with
          | Some _, Some live when Keeper_chat_transcript.phase live.tl_transcript = Keeper_chat_transcript.Working ->
-           notice ~role:Message_local "Your message has already started; no new run was created"
+           notice ~kind:Notice_reply "Your message has already started; no new run was created"
          | Some request, Some live ->
            (match Keeper_chat_transcript.admission live.tl_transcript with
             | Some (Keeper_chat_live.Queued, _) -> launch_keeper_run_next state ~mailbox request
-            | Some (Running, _) -> notice ~role:Message_local "Your message has already started; no new run was created"
-            | Some (Settled, _) -> notice ~role:Message_local "Your message already finished; its result is being replayed"
-            | None -> notice ~role:Message_local "Waiting for server admission; /run-next is available once this message is queued")
-         | _ -> notice ~role:Message_local "No submitted message is waiting; send your message with Enter first")
+            | Some (Running, _) -> notice ~kind:Notice_reply "Your message has already started; no new run was created"
+            | Some (Settled, _) -> notice ~kind:Notice_reply "Your message already finished; its result is being replayed"
+            | None -> notice ~kind:Notice_reply "Waiting for server admission; /run-next is available once this message is queued")
+         | _ -> notice ~kind:Notice_reply "No submitted message is waiting; send your message with Enter first")
   | Masc_tui_command.Priority opt ->
       Buffer.clear state.msg_input;
       let new_value =
@@ -9740,14 +9860,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           else not state.user_input_priority_next
       in
       state.user_input_priority_next <- new_value;
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         (Printf.sprintf "User input auto-next priority: %s (new messages will %sbe promoted to run next)"
            (if new_value then "ON" else "OFF")
            (if new_value then "" else "NOT "))
   | Masc_tui_command.Answer_tool_approval allow ->
       Buffer.clear state.msg_input;
       (match target with
-       | None -> notice ~role:Message_local "Select a Keeper first"
+       | None -> notice ~kind:Notice_reply "Select a Keeper first"
        | Some target ->
          match inflight_for_keeper state target with
          | Some entry ->
@@ -9755,8 +9875,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | Some awaiting ->
               launch_keeper_approval state ~mailbox entry.sent_request
                 ~tool_call_id:awaiting.call_id ~allow
-            | None -> notice ~role:Message_local "No tool approval is waiting for this Keeper")
-         | None -> notice ~role:Message_local "No tool approval is waiting for this Keeper")
+            | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
+         | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
   | Masc_tui_command.Interrupt_turn -> (
       Buffer.clear state.msg_input;
       match Option.bind state.msg_target_keeper_name (interrupt_observed_keeper ~explicit:true state ~mailbox) with
@@ -9769,11 +9889,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             inflight_by_request_id state (turn_log_request_id live)
           with
           | Some request -> launch_keeper_interrupt state ~mailbox request
-          | None -> notice ~role:Message_local "no turn of this pane's to interrupt")
+          | None -> notice ~kind:Notice_reply "no turn of this pane's to interrupt")
       | Some _ ->
-          notice ~role:Message_local
+          notice ~kind:Notice_reply
             "an interrupt is already outstanding for this turn"
-      | None -> notice ~role:Message_local "no turn is streaming in this pane")
+      | None -> notice ~kind:Notice_reply "no turn is streaming in this pane")
   | Masc_tui_command.Interrupt_keeper_turn name -> (
       Buffer.clear state.msg_input;
       (* The pane's own turn is [Interrupt_turn]'s business. This arm is for
@@ -9790,10 +9910,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | None -> match Masc_tui_types.inflight_for_keeper state name with
       | Some entry -> launch_keeper_interrupt state ~mailbox entry.sent_request
       | None ->
-          notice ~role:Message_local
+          notice ~kind:Notice_reply
             (Printf.sprintf "no turn of %S is in flight from this pane" name))
   | Masc_tui_command.Steer_missing_message ->
-      notice ~role:Message_error "/steer needs replacement text on the same line"
+      notice ~kind:Notice_failure "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
       start_keeper_steer ?keeper_name state ~base_path ~mailbox message
   | Masc_tui_command.Set_thinking mode ->
@@ -9804,7 +9924,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `Folded -> Reasoning_folded
          | `Full -> Reasoning_full
          | `Cycle -> next_reasoning_visibility state.msg_reasoning_visibility);
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         ("reasoning "
          ^ reasoning_visibility_to_string state.msg_reasoning_visibility)
   | Masc_tui_command.Set_tools mode ->
@@ -9819,13 +9939,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
        | Tools_compact, _ | Tools_full, None -> ());
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Cycle_memory ->
       Buffer.clear state.msg_input;
       state.msg_memory_visibility <-
         next_memory_visibility state.msg_memory_visibility;
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         ("Librarian/Memory timeline: "
          ^ memory_visibility_to_string state.msg_memory_visibility
          ^ " (Ctrl-N or /memory to cycle)")
@@ -9843,7 +9963,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Find_next ->
       Buffer.clear state.msg_input;
       if String.equal state.msg_find "" then
-        notice ~role:Message_error
+        notice ~kind:Notice_failure
           "/find needs text the first time; /find on its own repeats it"
       else seek_in_chat state ~target ~restart:false
   | Masc_tui_command.Inspect_context ->
@@ -9852,7 +9972,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            Buffer.clear state.msg_input;
            open_context_inspector state ~mailbox ~keeper_name
        | None ->
-           notice ~role:Message_error
+           notice ~kind:Notice_failure
              "/context needs a Keeper selected on the roster")
   | Masc_tui_command.Preset_list ->
       Buffer.clear state.msg_input;
@@ -9860,7 +9980,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
         ~wrap:(fun result -> Presets_listed (Preset_to_chat target, result))
   | Masc_tui_command.Preset_save_missing_name ->
-      notice ~role:Message_error "/preset save needs a name on the same line"
+      notice ~kind:Notice_failure "/preset save needs a name on the same line"
   | Masc_tui_command.Preset_save { name; description } ->
       Buffer.clear state.msg_input;
       launch_preset_call state ~mailbox
@@ -9868,9 +9988,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           Masc_tui_loader.save_preset ~host ~port ~name ~description)
         ~wrap:(fun result -> Preset_saved (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore_missing_name ->
-      notice ~role:Message_error "/preset restore needs a name on the same line"
+      notice ~kind:Notice_failure "/preset restore needs a name on the same line"
   | Masc_tui_command.Preset_show_missing_name ->
-      notice ~role:Message_error "/preset show needs a name on the same line"
+      notice ~kind:Notice_failure "/preset show needs a name on the same line"
   | Masc_tui_command.Preset_show name ->
       (* [/preset] alone lists names and counts; a count cannot be read, so
          this asks the server what that one preset actually holds. *)
@@ -9880,7 +10000,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~wrap:(fun result -> Preset_contents_shown (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore name ->
       Buffer.clear state.msg_input;
-      notice ~role:Message_local
+      notice ~kind:Notice_reply
         (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
@@ -10314,7 +10434,32 @@ let apply_fusion_runs_load state = function
           List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
         |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_error <- None;
-      state.fusion_cursor <- next_cursor;
+      (* A run the form just started is selected the first time the list
+         carries it, and the wait ends there. *)
+      (match state.fusion_launch with
+       | Some (Fusion_launch_started started) -> (
+           match
+             fusion_snapshot_entries snapshot
+             |> List.find_index (function
+                  | Tui_decode.Fusion_retained_run run ->
+                      String.equal run.fur_run_id started.fls_run_id
+                  | Tui_decode.Fusion_historical_evidence _ -> false)
+           with
+           | Some cursor ->
+               state.fusion_cursor <- cursor;
+               state.fusion_launch <- None
+           | None ->
+               state.fusion_cursor <- next_cursor;
+               (* Each read that does not carry it spends one of the waits.
+                  Spent, the wait ends rather than moving the cursor onto
+                  that run at whatever later refresh first carries it. *)
+               let reads_left = started.fls_reads_left - 1 in
+               state.fusion_launch <-
+                 (if reads_left > 0 then
+                    Some (Fusion_launch_started { started with fls_reads_left = reads_left })
+                  else None))
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) | None ->
+           state.fusion_cursor <- next_cursor);
       (match state.fusion_mode, current_selected_id with
        | Fusion_detail run_id, Some selected
          when String.equal ("run:" ^ run_id) selected
@@ -12542,11 +12687,15 @@ let contact_of_connection_status :
 
 (* A mint and a failure are not the same news. Both were reported as errors,
    which reads a working first start as a broken one -- and on a first
-   install, where the client mints for itself, that is the ordinary path. *)
+   install, where the client mints for itself, that is the ordinary path.
+   Waiting for the workspace is that same ordinary path one step earlier, so
+   it reads as system too; only a workspace that refused a credential is a
+   fault the operator has to act on. *)
 let credential_notice_level = function
-  | Masc_tui_credential.Unavailable _ -> "error"
+  | Masc_tui_credential.Mint_failed _ -> "error"
   | Masc_tui_credential.Held | Masc_tui_credential.Minted
-  | Masc_tui_credential.Not_required -> "system"
+  | Masc_tui_credential.Not_required
+  | Masc_tui_credential.Workspace_pending -> "system"
 
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
@@ -12614,15 +12763,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | (Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _), (Ok _ | Error _) -> ());
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
       launch_keeper_turns_load state ~mailbox;
-      let role, lines = match result with
-        | Error detail -> Message_error, [detail]
-        | Ok lines -> Message_local,
+      let kind, lines = match result with
+        | Error detail -> Notice_failure, [detail]
+        | Ok lines -> Notice_reply,
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
               "Enter queues your line to run next; Esc stops the current turn and pauses queue consumption."])
       in
-      chat_notice state ~keeper_name:(Some keeper_name) ~role (String.concat "\n" lines);
+      chat_notice state ~keeper_name:(Some keeper_name) ~kind (String.concat "\n" lines);
       drain_queued_message state ~base_path ~mailbox
   | Lane_subscriptions_loaded (generation,result) ->
       map_lane_addons state (fun view ->
@@ -12767,9 +12916,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.voice_wizard
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
-      (* The Config surface re-reads voice on entry and after every save, so
-         a transcriber set up there is named on the next empty draft. *)
-      state.voice_stt_set_up <- Masc.Voice_bridge.stt_set_up ();
       (match result with
        | Ok json ->
            state.voice_config <- Some json;
@@ -12850,7 +12996,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            level and the level speech had to clear, so this row answers "is
            the microphone working" rather than only reporting that it is
            not. *)
-        chat_notice state ~keeper_name:(Some keeper) ~role:Message_local
+        chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
   | Voice_discarded { keeper; reason } ->
@@ -12864,7 +13010,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (* In the transcript, like a silence, and worded as what it was. An
            operator who pressed Esc mid-sentence and then read "nothing was
            heard" went looking for a microphone fault that was not there. *)
-        chat_notice state ~keeper_name:(Some keeper) ~role:Message_local
+        chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
         state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
   | Voice_failed { keeper; error } ->
@@ -12876,9 +13022,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            it again, and a loop that re-arms on failure spins. *)
         state.voice_continuous <- None;
         state.voice_floor <- None;
-        chat_notice state ~keeper_name:(Some keeper) ~role:Message_error
-          ("voice failed: " ^ error);
-        state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
+        chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
+          ("voice failed: " ^ error))
   | Http_refresh_done (Refresh_server_booting { identity; approval_ticket }) ->
       http_refresh_inflight := false;
       (* Nothing else was asked of a booting server, so nothing else follows:
@@ -13443,10 +13588,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Presets_listed (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
-           chat_notice state ~keeper_name:target ~role:Message_local
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
              (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
        | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok snapshot ->
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
@@ -13462,10 +13607,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Preset_contents_shown (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok detail ->
-           chat_notice state ~keeper_name:target ~role:Message_local
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
              (String.concat "\n" (Masc_tui_preset_text.contents_lines detail))
        | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        (* The pane reads its own detail through [Preset_detail_loaded], keyed
           by the cursor, so a pane sink here would be a second answer to a
           question nobody asked. *)
@@ -13479,10 +13624,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
-           chat_notice state ~keeper_name:target ~role:Message_local
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
              (Masc_tui_preset_text.saved_line manifest)
        | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok manifest ->
            state.preset_busy <- false;
            report_action state "system" (Masc_tui_preset_text.saved_line manifest);
@@ -13493,14 +13638,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Preset_restored (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok report ->
-           let role =
-             if Masc_tui_preset_text.restore_is_clean report then Message_local
-             else Message_error
-           in
-           chat_notice state ~keeper_name:target ~role
+           (* What was applied and what was skipped, line by line, is the
+              answer to the restore even when a part failed: the lines say
+              which, and a footer line could not hold them. *)
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
              (String.concat "\n" (Masc_tui_preset_text.restore_lines report))
        | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~role:Message_error detail
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok report ->
            state.preset_busy <- false;
            state.preset_report <- Some report;
@@ -14244,7 +14388,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          && view = state.view && keeper_name = state.msg_target_keeper_name then begin
         let notice = chat_notice state ~keeper_name in
         let refuse reason =
-          notice ~role:Message_error (Printf.sprintf "sent image %s: %s" name reason)
+          notice ~kind:Notice_failure (Printf.sprintf "sent image %s: %s" name reason)
         in
         match result with
         | Error reason -> refuse reason
@@ -14256,7 +14400,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result with
        | Ok data ->
            let refuse reason =
-             notice ~role:Message_error (Printf.sprintf "image %s: %s" title reason)
+             notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason)
            in
            draw_image state ~caption ~refuse ~title data
        | Error e -> (
@@ -14265,11 +14409,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            in
            match Masc_tui_browser.open_url url with
            | Ok opener ->
-               notice ~role:Message_local
+               notice ~kind:Notice_reply
                  (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
                     e opener url)
            | Error opener_err ->
-               notice ~role:Message_error
+               notice ~kind:Notice_failure
                  (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
       end
   | Msx_frame_loaded (request, result) ->
@@ -15334,6 +15478,63 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.fusion_historical_inflight <- None
        | Some _ | None -> ());
       apply_fusion_historical_detail_load state generation reference result
+  | Fusion_launch_options_loaded (generation, result) ->
+      (match state.fusion_launch with
+       | Some (Fusion_launch_reading_presets pending) when pending = generation ->
+           (match result with
+            | Error detail ->
+                state.fusion_launch <- None;
+                (* [fusion_error] draws the reason now and the event keeps it:
+                   a successful list load clears that line, and the cadence
+                   issues one every two seconds, so the line alone would show
+                   the reason for less time than it takes to read. *)
+                state.fusion_error <- Some detail;
+                add_event state "system" ("Fusion launch: " ^ detail)
+            | Ok options ->
+                let keepers = List.map (fun (k : keeper) -> k.k_name) state.keepers in
+                (* The run under the cursor names the Keeper the operator is
+                   looking at; without one, the roster's own cursor does. *)
+                let keeper =
+                  match selected_fusion_entry state with
+                  | Some (Tui_decode.Fusion_retained_run run) -> Some run.fur_keeper
+                  | Some (Tui_decode.Fusion_historical_evidence _) | None ->
+                      Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state)
+                in
+                (match Masc_tui_fusion_launch.open_form ~keepers ~keeper ~options with
+                 | Ok launch ->
+                     state.fusion_launch <- Some (Fusion_launch_open launch);
+                     state.fusion_error <- None
+                 | Error detail ->
+                     state.fusion_launch <- None;
+                     state.fusion_error <- Some detail;
+                     add_event state "system" ("Fusion launch: " ^ detail)))
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
+       | None -> ())
+  | Fusion_launched (generation, result) ->
+      (match state.fusion_launch with
+       | Some (Fusion_launch_open launch)
+         when generation = state.fusion_launch_generation
+              && Masc_tui_fusion_launch.submitting launch ->
+           (match result with
+            | Error detail ->
+                state.fusion_launch <-
+                  Some (Fusion_launch_open (Masc_tui_fusion_launch.refused ~detail launch));
+                state.fusion_scroll <- 0;
+                add_event state "system" ("Fusion launch refused: " ^ detail)
+            | Ok run_id ->
+                (* The list selects the run once it carries it; a list read
+                   already in flight may answer without it. *)
+                state.fusion_launch <-
+                  Some
+                    (Fusion_launch_started
+                       { fls_run_id = run_id
+                       ; fls_reads_left = Masc_tui_types.fusion_started_list_reads
+                       });
+                state.fusion_scroll <- 0;
+                add_event state "system" ("Fusion run " ^ run_id ^ " started");
+                launch_fusion_runs_load state ~mailbox)
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
+       | None -> ())
   | Verification_loaded result ->
       state.verification_inflight <- false;
       (match result with
@@ -15727,7 +15928,6 @@ let main
     Option.value
       (tui_settings.send_on_stop)
       ~default:false;
-  state.voice_stt_set_up <- Masc.Voice_bridge.stt_set_up ();
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -17697,7 +17897,22 @@ and is loaded on demand through keeper_skill.
             | Some Text_board_draft ->
                 Buffer.add_string state.board_draft
                   (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-                     paste.Masc_tui_paste.text))
+                     paste.Masc_tui_paste.text)
+            (* A prompt holds many lines, like a board post; the form puts
+               the text into whichever field its cursor is on. *)
+            | Some Text_fusion_launch ->
+                (match state.fusion_launch with
+                 | Some (Fusion_launch_open launch) ->
+                     state.fusion_launch <-
+                       Some
+                         (Fusion_launch_open
+                            (Masc_tui_fusion_launch.paste
+                               ~text:
+                                 (Keeper_chat.terminal_safe_text ~preserve_newlines:true
+                                    paste.Masc_tui_paste.text)
+                               launch));
+                     state.fusion_scroll <- 0
+                 | Some (Fusion_launch_reading_presets _ | Fusion_launch_started _) | None -> ()))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
        | Some (Pasted _) when state.view = Approvals && Option.is_some state.ask_text_entry ->
@@ -17800,6 +18015,13 @@ and is loaded on demand through keeper_skill.
            (Masc_tui_http.ms_of_ns gap_ns);
        last_loop_at_ns := now_ns);
       ensure_acting_pane_changes state ~mailbox:async_messages;
+      (* The Fusion launch form outlives nothing: whatever moved the surface
+         -- a key, the Activity pane's mouse handler, or an async message
+         that jumps to a Keeper chat -- it is gone before this iteration
+         dispatches anything. *)
+      if Masc_tui_types.reconcile_fusion_launch state then
+        add_event state "system"
+          "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
@@ -17809,7 +18031,7 @@ and is loaded on demand through keeper_skill.
         match key with
         | Some k ->
             (match text_input_target state ~compact_viewport with
-             | Some Text_browser_url | Some Text_ask_answer -> false
+             | Some Text_browser_url | Some Text_ask_answer | Some Text_fusion_launch -> false
              | _ -> Render_schedule.Input_shortcut.is_quit ~message_mode k)
         | None -> false
       in
@@ -18342,6 +18564,52 @@ and is loaded on demand through keeper_skill.
                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                   set (Masc_tui_types.voice_wizard_append session s)
                 | _ -> ()))
+       (* The launch form owns every key while it is up, above the quit key
+          the way the Lane Add-ons form is: a prompt with a q in it is a
+          prompt. Its paste arrives through [Text_fusion_launch], which is
+          claimed under the same viewport condition -- a frame too small to
+          draw the form must not feed it keys either. *)
+       | Some key
+         when state.view = Fusion && not compact_viewport
+              && (match state.fusion_launch with
+                  | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) -> true
+                  | Some (Fusion_launch_started _) | None -> false) ->
+           (match state.fusion_launch with
+            | Some (Fusion_launch_reading_presets _) ->
+                (* Leaving bumps the generation, so the read's answer finds
+                   no form to open. *)
+                if String.equal key "esc" then begin
+                  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+                  state.fusion_launch <- None
+                end
+            | Some (Fusion_launch_open launch) ->
+                (match key with
+                 | "pageup" ->
+                     state.fusion_scroll
+                       <- max 0 (state.fusion_scroll - surface_page_rows state)
+                 | "pagedown" ->
+                     state.fusion_scroll
+                       <- Masc_tui_types.scroll_down_from state.fusion_scroll
+                            ~by:(surface_page_rows state)
+                 | _ ->
+                     (match Masc_tui_fusion_launch.edit ~key launch with
+                      | Masc_tui_fusion_launch.Closed ->
+                          (* The operator stays on Fusion, so this is the
+                             drop itself rather than a surface jump. Its
+                             answer is whether a submit was still out. *)
+                          if Masc_tui_types.abandon_fusion_launch state then
+                            add_event state "system"
+                              "Fusion launch left while its answer was out; the run may have \
+                               started - r refreshes the list";
+                          state.fusion_scroll <- 0
+                      | Masc_tui_fusion_launch.Editing next ->
+                          state.fusion_launch <- Some (Fusion_launch_open next);
+                          state.fusion_scroll <- 0
+                      | Masc_tui_fusion_launch.Submitted (next, request) ->
+                          state.fusion_launch <- Some (Fusion_launch_open next);
+                          state.fusion_scroll <- 0;
+                          start_fusion_run state ~mailbox:async_messages ~request))
+            | Some (Fusion_launch_started _) | None -> ())
        | Some _
          when quit_key
               && (compact_viewport
@@ -20014,6 +20282,8 @@ and is loaded on demand through keeper_skill.
                 state.fusion_detail <- None;
                 state.fusion_detail_error <- None;
                 launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+       | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
+           launch_fusion_launch_options_load state ~mailbox:async_messages
        | Some "K" when state.view = Fusion
            && (match state.fusion_mode, selected_fusion_entry state with
                | Fusion_historical_detail _, _
@@ -20858,7 +21128,7 @@ and is loaded on demand through keeper_skill.
                 state.link_modal_scroll <- 0;
                 state.link_modal_cursor <- 0
             | [] ->
-                chat_notice state ~keeper_name:state.msg_target_keeper_name ~role:Message_local
+                chat_notice state ~keeper_name:state.msg_target_keeper_name ~kind:Notice_reply
                   "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board

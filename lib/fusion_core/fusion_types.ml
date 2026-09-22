@@ -69,10 +69,13 @@ type panel_failure =
   | Empty_response of string
   | Invalid_max_output_tokens of int
   | Invalid_timeout_s of float
+  | Unknown_route of string
+  | Route_unavailable of string
 [@@deriving to_yojson, show, eq]
 
 let panel_failure_of_yojson = function
   | `List [ `String "Timeout" ] -> Ok Timeout
+  | `List [ `String "Bridge_error"; `String detail ] -> Ok (Bridge_error detail)
   | `List [ `String "Provider_error"; `String detail ] -> Ok (Provider_error detail)
   | `List [ `String "Invalid_structured_response"; `String detail ] ->
     Ok (Invalid_structured_response detail)
@@ -80,6 +83,8 @@ let panel_failure_of_yojson = function
   | `List [ `String "Invalid_max_output_tokens"; `Int value ] ->
     Ok (Invalid_max_output_tokens value)
   | `List [ `String "Invalid_timeout_s"; `Float value ] -> Ok (Invalid_timeout_s value)
+  | `List [ `String "Unknown_route"; `String route ] -> Ok (Unknown_route route)
+  | `List [ `String "Route_unavailable"; `String detail ] -> Ok (Route_unavailable detail)
   | json ->
     Error
       (Printf.sprintf
@@ -371,6 +376,8 @@ type judge_failure =
   | Build_error of string
   | Parse_error of string
   | Panels_unavailable of skip_reason
+  | Unknown_route of string
+  | Route_unavailable of string
   | Internal_error of string
 [@@deriving yojson, show, eq]
 
@@ -384,6 +391,8 @@ let judge_failure_text = function
   | Build_error detail -> detail
   | Parse_error detail -> detail
   | Panels_unavailable reason -> render_skip_reason reason
+  | Unknown_route route -> Printf.sprintf "judge route %s does not resolve to a loaded lane or runtime" route
+  | Route_unavailable detail -> detail
   | Internal_error detail -> detail
 
 let judge_failure_tag = function
@@ -394,6 +403,8 @@ let judge_failure_tag = function
   | Build_error _ -> "build_error"
   | Parse_error _ -> "parse_error"
   | Panels_unavailable _ -> "panels_unavailable"
+  | Unknown_route _ -> "unknown_route"
+  | Route_unavailable _ -> "route_unavailable"
   | Internal_error _ -> "internal_error"
 
 type judge_error_node =
@@ -433,6 +444,30 @@ let result_of_yojson ok_of_yojson error_of_yojson = function
          (Yojson.Safe.to_string json))
 ;;
 
+type seat =
+  | Panel_seat of string
+  | Judge_seat of judge_role
+[@@deriving yojson, show, eq]
+
+type attempt_failure =
+  | Panel_attempt_failed of panel_failure
+  | Judge_attempt_failed of judge_failure
+[@@deriving yojson, show, eq]
+
+type seat_attempt =
+  { attempt_runtime : string
+  ; attempt_failure : attempt_failure
+  }
+[@@deriving yojson, show, eq]
+
+type seat_route =
+  { seat : seat
+  ; route : string
+  ; answered_by : string option
+  ; failed_attempts : seat_attempt list
+  }
+[@@deriving yojson, show, eq]
+
 type deliberation_evidence =
   { question : string
   ; panel : panel_outcome list
@@ -440,6 +475,7 @@ type deliberation_evidence =
   ; judges : judge_outcome list
   ; judge_usage : usage
   ; tool_trace : tool_trace
+  ; seat_routes : seat_route list
   }
 [@@deriving yojson, show, eq]
 
@@ -452,12 +488,26 @@ type fusion_trigger =
   | Harness_eval
 [@@deriving yojson, show, eq]
 
+type roster =
+  { judge_route : string option
+  ; panel_routes : string list option
+  }
+[@@deriving yojson, show, eq]
+
+let preset_roster = { judge_route = None; panel_routes = None }
+
+let route_name text =
+  let route = String.trim text in
+  if String.equal route "" then None else Some route
+;;
+
 type fusion_request =
   { run_id : string
   ; keeper : string
   ; prompt : string
   ; preset : string
   ; web_tools : bool
+  ; roster : roster
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
   }
@@ -467,12 +517,14 @@ type deny_reason =
   | Disabled
   | Preset_unknown of string
   | Depth_exceeded
+  | Roster_invalid of string
 [@@deriving yojson, show, eq]
 
 let deny_reason_label = function
   | Disabled -> "disabled"
   | Preset_unknown _ -> "preset_unknown"
   | Depth_exceeded -> "depth_exceeded"
+  | Roster_invalid _ -> "roster_invalid"
 
 type gate_decision =
   | Allow of fusion_request

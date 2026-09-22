@@ -34,7 +34,10 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  turn_start:int ->
+  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?on_carried_front:
+    (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -57,7 +60,16 @@ val run :
     admission window and its observation likewise apply only to that fresh
     input. A resumed conversation reports [Held_by_client_session]: the CLI
     re-sends just the new turn, so what the model reads is not this process's
-    to measure. *)
+    to measure.
+
+    [librarian_front] reads the turn's continuity choice as a position in the
+    history a fresh conversation starts from
+    ({!Keeper_official_client_host.read_librarian_front}); a reader error
+    refuses the request, as the same check refuses an Agent Core request.
+    [on_carried_front] receives the front that history started from and its
+    bytes in the canonical encoding, before the declared window cuts it; the
+    caller records it where the Agent Core lane records its own request
+    ({!Keeper_official_client_host.continuity_observation_input}). *)
 
 module For_testing : sig
   val capacity_bounded_model_input_projection
@@ -67,13 +79,18 @@ module For_testing : sig
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
-    -> turn_start:int
+    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?on_carried_front:
+         (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
+    -> turn_start:Keeper_carried_front.turn_start
     -> keeper_name:string
     -> runtime_id:string
     -> Agent_core.Agent.model_input_projection option
     -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
   (** Starts from the admitted carried front, runs the source projection, then
-      applies the declared byte window. Thus a Gate replay reference is
+      applies the declared byte window. A Librarian front carries a pinned
+      working state that the window cannot trim; a window it does not fit
+      refuses the request, as for any pinned message. Thus a Gate replay reference is
       charged to the provider-bound input without becoming a front in the
       durable checkpoint vocabulary. Refuses an undeclared window:
       Antigravity has no typed overflow response from which MASC could derive
@@ -88,4 +105,10 @@ module For_testing : sig
       transmitted prompt byte count. *)
 
   val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
+
+  val measure_model_input_message_bytes : Agent_core.Types.message -> int
+  (** What the window charges one message, framing included. A test that has
+      to place a capacity inside one band -- the working state fits and the
+      newest atom does not -- measures with this rather than restating the
+      framing and drifting from it. *)
 end

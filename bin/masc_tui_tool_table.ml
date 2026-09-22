@@ -12,6 +12,23 @@ let effective_row_indent = "   "
 let skill_usage_name_indent = "   "
 let skill_usage_keeper_indent = "     "
 
+(* A keeper that ran a skill, in columns: who, then the three counts that
+   say what came of it, then when it last ran. The counts are narrow and
+   right-aligned so a skill with one keeper and one with six read down the
+   same columns. *)
+let skill_usage_keeper_name_width = 22
+let skill_usage_count_width = 9
+
+let skill_usage_keeper_cells ~keeper ~invocations ~deliveries ~actions =
+  [ Table.cell ~header:"KEEPER" ~width:skill_usage_keeper_name_width keeper
+  ; Table.cell ~align:Table.Right ~header:"TRIGGERED"
+      ~width:skill_usage_count_width invocations
+  ; Table.cell ~align:Table.Right ~header:"DELIVERED"
+      ~width:skill_usage_count_width deliveries
+  ; Table.cell ~align:Table.Right ~header:"ACTIONS"
+      ~width:skill_usage_count_width actions
+  ]
+
 let effective_tool_cells name =
   [ Table.cell ~header:"TOOL" ~width:effective_tool_name_width name ]
 
@@ -52,3 +69,21 @@ let catalog_tool_line ~metadata ~name ~direct ~surfaces =
       (Table.row
          (catalog_tool_cells ~direct_style:metadata ~name ~direct ()))
     ~tail:(metadata ^ surfaces)
+
+let skill_usage_keeper_header =
+  framed ~indent:""
+    ~cells:
+      (Table.header_row
+         (skill_usage_keeper_cells ~keeper:"" ~invocations:"" ~deliveries:""
+            ~actions:""))
+    ~tail:"LAST USED"
+
+let skill_usage_keeper_line ~keeper ~invocations ~deliveries ~actions ~last_used =
+  framed ~indent:""
+    ~cells:
+      (Table.row
+         (skill_usage_keeper_cells ~keeper
+            ~invocations:(string_of_int invocations)
+            ~deliveries:(string_of_int deliveries)
+            ~actions:(string_of_int actions)))
+    ~tail:last_used

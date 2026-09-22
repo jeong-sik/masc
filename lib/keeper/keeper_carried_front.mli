@@ -28,8 +28,8 @@
     ({!Runtime_model_input_tail_window.atom_opening_digest}). A seed is used
     only while the history in hand opens the same index with the same
     message ({!for_history}); the history's atom count is not compared. A
-    history one unsaved atom shorter keeps the position, and a purge before
-    the front moves another message under the index and drops it. *)
+    history one unsaved atom shorter keeps the position, and a checkpoint
+    purge that rewrote the message opening the front drops it. *)
 
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
@@ -52,6 +52,26 @@ type seed =
   ; source : source
   }
 
+(** Where a request with no absorbed point and no seed starts (RFC
+    keeper-context-window-in-tokens §13.4), as {!Keeper_turn_driver_try_provider.turn_start}
+    reads it from the keeper's turn-boundary store and checks it against
+    the history in hand. *)
+type turn_start =
+  | Turn_boundary of { end_atom : int }
+      (** The end of the last completed turn on this history, verified
+          against it by digest. 0 on a history with no completed turn: the
+          short history of a new keeper, all of which goes out. *)
+  | Turn_boundary_unknown of { reason : string }
+      (** The store could not be read, or no boundary in it matches this
+          history. Where this turn began is not known, and the request opens
+          on the newest atom alone ({!newest_atom}) rather than on everything:
+          §13.4 does not fold an unknown start into the whole history, and a
+          short range costs one turn of context where a 16 MB one costs the
+          turn. [reason] is what the reader said. *)
+
+val turn_start_to_string : turn_start -> string
+(** [boundary:<end_atom>] or [unknown:<reason>], for log lines. *)
+
 type origin =
   | Carried of source  (** The front came from a seed. *)
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
@@ -64,8 +84,15 @@ type origin =
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
           atoms go out and the atoms before them wait for the Librarian
-          (§13.4). [end_atom] is 0 on a history with no completed turn,
-          where that is the short history a fresh keeper has. *)
+          (§13.4). [end_atom] is that boundary as the turn-boundary store
+          states it, not the atom the range opened on: a boundary at or past
+          the newest atom still carries that atom ({!clamp}). It is 0 on a
+          history with no completed turn, where that is the short history a
+          fresh keeper has. *)
+  | Turn_start_unknown of { reason : string }
+      (** No absorbed point, no seed, and the turn start could not be read
+          ({!Turn_boundary_unknown}): the range opened on the newest atom
+          alone. [reason] is what the boundary reader said. *)
 
 val of_ledger : Keeper_model_input_ledger.t -> seed option
 (** The ledger's front with the digest the ledger recorded for it; [None]
@@ -186,6 +213,10 @@ val dropped_front_to_string : dropped_front -> string
 val clamp : atom_count:int -> int -> int
 (** The front as a position in a history of [atom_count] atoms: at least 0,
     at most the newest atom, so the range always carries the turn. *)
+
+val newest_atom : atom_count:int -> int
+(** The newest atom of a history of [atom_count] atoms, 0 when it has none:
+    where a range opens when the turn start is unknown. *)
 
 val halve : first_atom:int -> atom_count:int -> int option
 (** The front moved halfway to the newest atom, or [None] when the range is

@@ -21,10 +21,12 @@ let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
+  ; me_journal = []
+  ; me_memory_pass = Masc_tui_message_layout.No_pass
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = request_id
   ; me_at = at

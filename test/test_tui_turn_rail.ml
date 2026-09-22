@@ -23,6 +23,7 @@ let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
   ; role_label_mark_cells = Layout.role_label_mark_cells ~style ()
   ; request_label = ""
   ; body
+  ; journal = []
   ; markdown_source = Layout.Markdown_streaming
   ; turn_rail
   ; action = Layout.Action_none

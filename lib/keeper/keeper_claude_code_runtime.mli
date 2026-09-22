@@ -36,7 +36,10 @@ module For_testing : sig
   val start_seed_projection
     :  capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
-    -> turn_start:int
+    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?on_carried_front:
+         (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
+    -> turn_start:Keeper_carried_front.turn_start
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> keeper_name:string
@@ -82,7 +85,10 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  turn_start:int ->
+  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?on_carried_front:
+    (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -108,9 +114,29 @@ val run :
     whichever of the two positions is later, so a turn seeded from a narrow
     range does not widen it and the ceiling does not undo the seed.
     [turn_start] is where the range starts when no seed names a front: the
-    end of the last completed turn on this history, 0 when it has none (RFC
+    end of the last completed turn on this history, 0 when it has none, and
+    the newest atom alone when that boundary is unknown (RFC
     keeper-context-window-in-tokens §13.4). A caller that passes no seed
     starts there, inside the ceiling.
+
+    [librarian_front] hands over the turn's continuity choice as a position
+    in the messages it is handed
+    ({!Keeper_turn_driver_try_provider.librarian_position}): a fitting working
+    state, carried in place of the atoms before it, or the Librarian's read
+    position alone, with nothing carried for the atoms before it. It wins when it is at or past
+    the seed that holds, or the ceiling's cut when no seed holds, so the range
+    never moves back behind either; [turn_start] is not weighed against it,
+    since it is where a range with no absorbed point begins. The request can
+    still grow
+    by the working state, which the declared ceiling has already cut around
+    before this lane composes. A reader error refuses the request, as the
+    same check refuses an Agent Core request.
+
+    [on_carried_front] receives the front the range started from and the
+    range's bytes in the canonical encoding, once per composition that cut a
+    range (the zero-history floor cuts none). The caller records it where the
+    Agent Core lane records its own request
+    ({!Keeper_official_client_host.continuity_observation_input}).
 
     [on_transmitted_model_input] fires once per attempt, after the capacity
     window has cut the history and before the prompt is built. Required rather

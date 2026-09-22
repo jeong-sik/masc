@@ -78,6 +78,12 @@ type panel_failure =
           ({!Fusion_policy.valid_timeout_s}), so reaching this means a direct
           [build_agent] caller supplied one — fail loudly instead of dropping
           the deadline. *)
+  | Unknown_route of string
+      (** 자리에 적힌 경로 이름이 lane 도 런타임도 아니다 ([Runtime.resolve_assignment]
+          가 [`Missing]). payload 는 적힌 이름이다. 후보를 하나도 시도하지 않았다. *)
+  | Route_unavailable of string
+      (** 경로가 가리키는 런타임의 카탈로그 행이 없다 ([`Unavailable]). payload 는
+          [Runtime.missing_catalog_model_to_string] 이다. *)
 [@@deriving to_yojson, show, eq]
 
 val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
@@ -351,6 +357,11 @@ type judge_failure =
           전멸을 "judge failed"로 오귀속했다 — 진단 주체(키퍼)가 judge 메커니즘을
           의심하게 만든 원인. typed로 분리해 failure_code/헤드라인이 패널 실패를
           패널 실패로 말하게 한다. *)
+  | Unknown_route of string
+      (** 심판 자리의 경로 이름이 lane 도 런타임도 아니다. {!panel_failure} 의 같은
+          갈래와 같은 뜻이다. *)
+  | Route_unavailable of string
+      (** 심판 자리의 경로가 가리키는 런타임의 카탈로그 행이 없다. *)
   | Internal_error of string  (** all_fail_error fallback / 미분류 *)
 [@@deriving yojson, show, eq]
 
@@ -391,6 +402,44 @@ type judge_outcome =
   | Judge_failed of judge_error_node
 [@@deriving yojson, show, eq]
 
+(** {1 자리 경로 (RFC fusion-seat-routes)}
+
+    panel 한 명과 judge 하나는 각각 한 자리다. 자리에 적힌 값은 경로 이름이고
+    ([Runtime.resolve_assignment] 로 푼다), 그 경로의 후보를 차례로 시도해 처음 쓸 수
+    있는 답을 낸 후보에서 멈춘다. 이 기록은 그 과정의 사후 관측이다. 자리의 결과
+    자체는 [panel_outcome] / [judge_outcome] 이 그대로 나르고, 이 기록은 누가 답했고
+    누구를 거쳤는지만 더한다. *)
+
+(** 자리 정체성. panel 은 [panelist_id], judge 는 위상 역할이다. 한 심의 안에서
+    유일하다 (panel 정체성 중복은 config 로드가 거절하고, judge 역할은 노드마다 다르다). *)
+type seat =
+  | Panel_seat of string
+  | Judge_seat of judge_role
+[@@deriving yojson, show, eq]
+
+(** 실패한 시도 한 번의 사유. 자리 종류마다 실패 어휘가 달라 둘로 나눈다. *)
+type attempt_failure =
+  | Panel_attempt_failed of panel_failure
+  | Judge_attempt_failed of judge_failure
+[@@deriving yojson, show, eq]
+
+type seat_attempt =
+  { attempt_runtime : string  (** 시도한 후보 런타임 id *)
+  ; attempt_failure : attempt_failure
+  }
+[@@deriving yojson, show, eq]
+
+type seat_route =
+  { seat : seat
+  ; route : string  (** 자리에 적힌 경로 이름 (lane 이름 또는 런타임 id) *)
+  ; answered_by : string option
+      (** 답을 낸 후보 런타임 id. 모든 후보가 실패했거나 경로를 못 풀었으면 [None]. *)
+  ; failed_attempts : seat_attempt list
+      (** 답 전에 실패한 시도, 시도한 순서대로. [answered_by = None] 이면 시도 전부다.
+          경로를 못 풀었으면 빈 목록이다. *)
+  }
+[@@deriving yojson, show, eq]
+
 (** One completed panel+judge computation before any Board/chat/wake
     projection. This is the typed payload stored in the common async request's
     canonical terminal record; projection failures are outside this record. *)
@@ -403,6 +452,9 @@ type deliberation_evidence =
   ; tool_trace : tool_trace
       (** An empty ledger — no events, drops, or gaps — proves that the
           instrumented actors made no tool calls. *)
+  ; seat_routes : seat_route list
+      (** 자리마다 한 줄. panel 자리를 선언 순서대로, 그 뒤에 [judges] 순서대로
+          judge 자리. *)
   }
 [@@deriving yojson, show, eq]
 
@@ -426,6 +478,28 @@ type fusion_trigger =
 
 (** {1 심의 요청} *)
 
+(** 이번 실행만 preset 의 명단 대신 쓰는 자리 경로 (RFC fusion-seat-routes §2.4).
+    [None] 인 칸은 preset 값을 그대로 쓴다. 명단을 preset 에 얹는 규칙과 검사는
+    {!Fusion_policy.with_roster} 한 곳에 있다. [panel_routes = Some []] 은 "바꾸지 않음"
+    이 아니라 빈 명단이고, 검사가 거절한다. *)
+type roster =
+  { judge_route : string option
+      (** preset 의 [judge] 자리 대신 쓸 경로 이름 (lane 이름 또는 런타임 id). JOJ 에서는
+          meta judge 자리다. 1차 judge 명단은 바꾸지 않는다. *)
+  ; panel_routes : string list option
+      (** preset 의 panel 명단 대신 쓸 경로 이름들. 라벨 없는 그룹 하나가 된다. *)
+  }
+[@@deriving yojson, show, eq]
+
+val preset_roster : roster
+(** 두 칸 모두 [None]: preset 명단을 그대로 쓴다. *)
+
+val route_name : string -> string option
+(** 명단에 적힌 자리 경로를 이름으로 읽는다: 앞뒤 공백을 떼고, 남은 것이 없으면
+    [None]. 공백만 다른 두 이름은 같은 경로를 가리키지만 {!Fusion_policy.panelist_id}
+    는 다른 자리로 세므로, 명단을 만드는 자리(도구 인자, CLI 플래그)는 모두 이 함수를
+    지나야 한다. *)
+
 (** out-of-band 오케스트레이터에 전달되는 심의 요청. *)
 type fusion_request =
   { run_id : string  (** correlation: 패널 N + 심판 + board post를 하나로 묶음 *)
@@ -434,6 +508,7 @@ type fusion_request =
   ; preset : string  (** runtime.toml [fusion.presets.*] 이름 *)
   ; web_tools : bool
       (** web search/fetch 도구를 패널/심판에 주입할지 여부. preset을 오버라이드. *)
+  ; roster : roster  (** 이번 실행의 명단 바꾸기. 바꾸지 않으면 {!preset_roster}. *)
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
   }
@@ -446,6 +521,9 @@ type deny_reason =
   | Disabled  (** [fusion].enabled = false *)
   | Preset_unknown of string  (** preset 이름이 config에 없음 (fail-fast) *)
   | Depth_exceeded  (** depth = Nested *)
+  | Roster_invalid of string
+      (** 요청의 명단을 얹은 preset 이 검사를 통과하지 못했다
+          ({!Fusion_policy.with_roster}). payload 는 사람이 읽는 사유다. *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 짧은 라벨 (로깅·메트릭용). *)

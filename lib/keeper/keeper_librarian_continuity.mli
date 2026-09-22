@@ -2,6 +2,10 @@
     Memory progress and queued-input pockets do not authorize this frontier. *)
 type prepared
 val path : config:Workspace.config -> keeper_name:string -> string
+val read_in : keepers_dir:string -> keeper_name:string ->
+  (Librarian_continuity_snapshot.t option, string) result
+(** {!read} for a caller that holds the runtime keepers directory rather than a
+    workspace config, as the offline checkpoint purge does. *)
 val read : config:Workspace.config -> keeper_name:string ->
   (Librarian_continuity_snapshot.t option, string) result
 val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->

@@ -233,14 +233,16 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                code
                detail
          }
-     | Keeper_provider_runtime_boundary.Not_provider_runtime_failure ->
+     | Keeper_provider_runtime_boundary.No_timeout_observed ->
+       (* The record already says what happened: [code] is the typed wire
+          ([provider_error_repeating_generation:...], [provider_error_rate_limited],
+          ...) and [detail] is the provider boundary's own sentence, which for
+          a lane failure also says where the input went next. The summary
+          used to call this a catch-all and tell the operator to go and find
+          a typed cause, which was wrong whenever the code was typed. *)
        Some
          { blocker_class = "provider_runtime_error"
-         ; summary =
-             Printf.sprintf
-               "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
-               code
-               detail
+         ; summary = Printf.sprintf "Provider runtime error (%s): %s" code detail
          })
   | Keeper_registry.Official_client_recovery_required recovery ->
     Some

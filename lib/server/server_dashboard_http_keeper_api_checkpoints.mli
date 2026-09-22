@@ -27,9 +27,7 @@ type purge_report =
   ; messages_after : int
   ; bytes_before : int
   ; bytes_after : int
-  ; duplicates_dropped : int
   ; reasoning_blocks_stripped : int
-  ; reasoning_messages_dropped : int
   ; tool_results_cleared : int
   }
 
@@ -53,10 +51,16 @@ type purge_error =
       (** The Librarian progress file exists and cannot be read. Never taken
           as "no position": that would let a rewrite pass over what it
           holds. *)
+  | Purge_boundaries_unreadable of string
+      (** The turn-boundary log cannot be read, so which messages its lines
+          name, and so must stay byte-exact, is unknown. *)
+  | Purge_continuity_unreadable of string
+      (** The saved Librarian working state cannot be read, so whether it
+          fits the history and which prefix it holds is unknown. *)
   | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
   | Purge_librarian_cancel_failed of string
-      (** The server-owned lane could not be cancelled before either file was
-          replaced. *)
+      (** The server-owned lane could not be closed to new units and
+          cancelled before either file was replaced. *)
   | Purge_librarian_position_not_written of string
       (** The checkpoint was installed and the position write after it
           failed. *)
@@ -71,10 +75,13 @@ val purge_error_to_string : purge_error -> string
     Apply requires the Keeper to be fully absent from the runtime registry and
     serializes that check with same-Keeper boot registration. A rewrite is
     refused while the Librarian has atoms left to read
-    ({!Keeper_checkpoint_purge.librarian_rebase}); otherwise apply cancels and
-    awaits the server-owned Librarian lane, installs the checkpoint, and
-    writes the rebased position after it. The canonical checkpoint is
-    installed only if its exact source reference is unchanged. *)
+    ({!Keeper_checkpoint_purge.librarian_rebase}). Otherwise apply keeps the
+    server-owned Librarian lane closed to new units and cancels and awaits
+    running ones for the whole apply, reads the turn-boundary log and the
+    saved working state that say which messages stay byte-exact, backs the
+    checkpoint up, installs it, writes the rebased position after it, and
+    logs what it did. The canonical checkpoint is installed only if its exact
+    source reference is unchanged. *)
 val purge_current :
   Workspace.config ->
   keeper_name:string ->

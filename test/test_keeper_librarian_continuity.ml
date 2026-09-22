@@ -463,8 +463,53 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     (Option.is_none (O.latest_synthesis ~config ~keeper_name)
      && Option.is_none (O.latest ~config ~keeper_name))
 
+(* A rewrite from atom 0 carries where a request starts without it -- here
+   the end of the last completed turn, as no Librarian position is saved --
+   takes it again each round, since turns keep ending while it catches up,
+   and drops it once its end reaches it. A target fixed when the rewrite
+   began would clear at the third turn, and the next request would start
+   back there and resend the fourth. *)
+let test_rewrite_from_zero_follows_its_target () = with_source @@ fun _env config save _append boundary ->
+  let one = [message "first"] in
+  let two = one @ [message "second"] in
+  let three = two @ [message "third"] in
+  let four = three @ [message "fourth"] in
+  save three; boundary ~fresh:true 1 one; boundary ~fresh:false 2 two; boundary ~fresh:false 3 three;
+  let first = commit config (prepare config |> some) "after the first turn" in
+  check int "the rewrite starts with the first turn" 1 first.end_atom;
+  check (option int) "short of the last completed turn" (Some 3) first.catch_up_end_atom;
+  save four; boundary ~fresh:false 4 four;
+  let second = commit config (prepare config |> some) "after the second turn" in
+  check int "one more turn" 2 second.end_atom;
+  check (option int) "the target follows the turn that ended meanwhile" (Some 4)
+    second.catch_up_end_atom;
+  let third = commit config (prepare config |> some) "after the third turn" in
+  check (option int) "past where it began, still short of where requests start" (Some 4)
+    third.catch_up_end_atom;
+  let fourth = commit config (prepare config |> some) "after the fourth turn" in
+  check int "caught up" 4 fourth.end_atom;
+  check (option int) "and the target is gone" None fourth.catch_up_end_atom
+
+(* With a Librarian position that fits the history, that position is where
+   requests started, so it is the target. *)
+let test_rewrite_target_is_the_librarian_position () = with_source @@ fun _env config save _append boundary ->
+  let one = [message "first"] in
+  let two = one @ [message "second"] in
+  let three = two @ [message "third"] in
+  save three; boundary ~fresh:true 1 one; boundary ~fresh:false 2 two; boundary ~fresh:false 3 three;
+  let last_atom_digest =
+    Runtime_model_input_tail_window.atom_opening_digest three 1 |> Option.get in
+  Masc.Keeper_librarian_progress.write
+    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+    { position = { trace_id; end_atom = 2; last_atom_digest }; boundary_lines_seen = 2 }
+  |> Result.map_error Masc.Keeper_librarian_progress.write_error_to_string |> get;
+  let first = commit config (prepare config |> some) "after the first turn" in
+  check (option int) "the target is the Librarian's position" (Some 2) first.catch_up_end_atom
+
 let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;
+    test_case "a rewrite from atom 0 follows its target" `Quick test_rewrite_from_zero_follows_its_target;
+    test_case "the rewrite target is the Librarian's position" `Quick test_rewrite_target_is_the_librarian_position;
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;

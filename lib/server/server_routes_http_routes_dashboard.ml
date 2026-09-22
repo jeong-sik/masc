@@ -427,6 +427,31 @@ let runtime_config_line_count text =
     in
     if Char.equal text.[String.length text - 1] '\n' then newlines else newlines + 1)
 
+(* RFC fusion-seat-routes §2.5 — the typed fusion write. The client sends the
+   revision it read with the settings; the edit re-checks it inside the config
+   lock, so a write that landed in between is refused rather than overwritten. *)
+let parse_fusion_edit_body body_str =
+  match Yojson.Safe.from_string body_str with
+  | exception Yojson.Json_error err -> Error ("invalid json: " ^ err)
+  | `Assoc fields ->
+    (match
+       List.find_opt
+         (fun (key, _) -> not (List.mem key [ "expected_revision"; "operation" ]))
+         fields
+     with
+     | Some (key, _) -> Error (Printf.sprintf "unknown key %S" key)
+     | None ->
+       (match List.assoc_opt "expected_revision" fields, List.assoc_opt "operation" fields with
+        | Some (`String revision), Some operation ->
+          Result.map
+            (fun operation -> revision, operation)
+            (Fusion_config_edit.operation_of_yojson operation)
+        | Some (`String _), None -> Error "operation required"
+        | Some _, _ -> Error "expected_revision must be a string"
+        | None, _ -> Error "expected_revision required"))
+  | _ -> Error "JSON object body required"
+;;
+
 let parse_runtime_config_raw_body body_str =
   try
     match Yojson.Safe.from_string body_str with
@@ -815,6 +840,7 @@ type runtime_config_write_operation =
   | Runtime_config_exact_slot_moved of
       Runtime.exact_lane * string * Runtime.exact_slot_move
   | Runtime_config_assignment of string * string option
+  | Runtime_config_fusion of string
 
 let runtime_config_write_operation_details = function
   | Runtime_config_raw_save -> [ ("operation", `String "raw_save") ]
@@ -891,6 +917,8 @@ let runtime_config_write_operation_details = function
     (match runtime_id with
      | None -> []
      | Some id -> [ ("runtime_id", `String id) ])
+  | Runtime_config_fusion edit ->
+    [ ("operation", `String "fusion"); ("edit", `String edit) ]
 
 let runtime_config_write_operation_label = function
   | Runtime_config_raw_save -> "raw_save"
@@ -900,6 +928,7 @@ let runtime_config_write_operation_label = function
   | Runtime_config_exact_slot_appended _ | Runtime_config_exact_slot_dropped _
   | Runtime_config_exact_slot_moved _ -> "routing"
   | Runtime_config_assignment _ -> "assignment"
+  | Runtime_config_fusion _ -> "fusion"
 ;;
 
 let keeper_validation_error_message report =
@@ -2512,17 +2541,82 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
-           match Fusion_config_loader.load ~base_path with
-           | Ok config ->
-             Http.Response.json_value ~compress:true ~request:req
-               (`Assoc
-                 [ ("generated_at", `String (Masc_domain.now_iso ()))
-                 ; ("config", Fusion_config_json.to_yojson config)
-                 ])
-               reqd
+           let runtime_config_path = Fusion_config_loader.runtime_toml_path ~base_path in
+           (* The config and its revision come from one read, so the revision a
+              client sends back names exactly the text it was shown. *)
+           match Runtime.load_config_observation ~runtime_config_path () with
            | Error msg ->
-             respond_dashboard_error ~status:`Internal_server_error
-               ~request:req reqd msg)
+             respond_dashboard_error
+               ~status:(runtime_config_path_error_status msg)
+               ~request:req reqd msg
+           | Ok observation ->
+             (match Otoml.Parser.from_string observation.source_text with
+              | exception Otoml.Parse_error (_, msg) ->
+                respond_dashboard_error ~status:`Internal_server_error ~request:req reqd
+                  ("runtime.toml parse error: " ^ msg)
+              | toml ->
+                (match Fusion_config.of_toml toml with
+                 | Ok config ->
+                   Http.Response.json_value ~compress:true ~request:req
+                     (`Assoc
+                       [ ("generated_at", `String (Masc_domain.now_iso ()))
+                       ; ( "source_revision"
+                         , `String
+                             (Runtime.config_source_revision_to_string
+                                observation.source_revision) )
+                       ; ("config", Fusion_config_json.to_yojson config)
+                       ])
+                     reqd
+                 | Error errors ->
+                   respond_dashboard_error ~status:`Internal_server_error ~request:req reqd
+                     ("fusion config invalid: "
+                      ^ String.concat "; "
+                          (List.map Fusion_config.config_error_message errors)))))
+         request reqd)
+  |> Http.Router.post "/api/v1/runtime/config/fusion" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_fusion_edit_body body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok (expected_revision, operation) ->
+               let base_path = (Mcp_server.workspace_config state).base_path in
+               let runtime_config_path =
+                 Fusion_config_loader.runtime_toml_path ~base_path
+               in
+               let audit_operation =
+                 Runtime_config_fusion (Fusion_config_edit.operation_label operation)
+               in
+               (match
+                  Fusion_config_edit.apply ~runtime_config_path ~expected_revision operation
+                with
+                | Ok receipt ->
+                  respond_runtime_config_commit state agent_name ~operation:audit_operation
+                    ~receipt req reqd
+                | Error error ->
+                  audit_runtime_config_write state agent_name ~operation:audit_operation
+                    ~text:body_str
+                    ~outcome:(Audit_log.Failure (Fusion_config_edit.error_message error))
+                    ();
+                  let status =
+                    match error with
+                    | Fusion_config_edit.Configuration_changed -> `Conflict
+                    | Fusion_config_edit.Configuration_unavailable _ -> `Internal_server_error
+                    | Fusion_config_edit.Preset_invalid _
+                    | Fusion_config_edit.Route_unresolved _
+                    | Fusion_config_edit.Name_invalid _
+                    | Fusion_config_edit.Default_preset_deleted _
+                    | Fusion_config_edit.Edit_refused _
+                    | Fusion_config_edit.Fusion_invalid _
+                    | Fusion_config_edit.Configuration_rejected _ -> `Bad_request
+                  in
+                  Http.Response.json_value ~status ~request:req
+                    (`Assoc
+                       [ "ok", `Bool false
+                       ; "error", Fusion_config_edit.error_to_yojson error
+                       ])
+                    reqd)))
          request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw/preview" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

@@ -20,7 +20,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
  (public_name masc)
  (package masc)
  (libraries
@@ -199,6 +199,7 @@
  (package masc)
  (libraries
   masc
+  masc.keeper_registry
   masc.server
   masc.host_config
   masc_core
@@ -448,6 +449,22 @@
  (wrapped false)
  (modules masc_tui_lane_addons)
  (libraries masc masc_tui_message_layout masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
+
+;; The Fusion launch form: what it offers, what a submit means, what the
+;; overlay says. Names Fusion_types for the topology sum, so it lists
+;; masc.fusion_core the way masc_tui does.
+(library
+ (name masc_tui_fusion_launch)
+ (wrapped false)
+ (modules masc_tui_fusion_launch)
+ (libraries masc masc.fusion_core masc_tui_schema_form yojson))
+
+;; The seat-routes block of a Fusion run's detail, pure so a test reads it.
+(library
+ (name masc_tui_fusion_seat_routes)
+ (wrapped false)
+ (modules masc_tui_fusion_seat_routes)
+ (libraries masc))
 
 (library
  (name masc_tui_command)
@@ -750,6 +767,12 @@
  (wrapped false)
  (modules masc_tui_tool_detail)
  (libraries masc_tui_keeper_chat_projection masc_tui_message_layout yojson))
+
+(library
+ (name masc_tui_execute_result)
+ (wrapped false)
+ (modules masc_tui_execute_result)
+ (libraries masc masc_tool_blob_store unix yojson))
 
 (library
  (name masc_tui_keeper_chat_diff)
@@ -1142,6 +1165,7 @@
   masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
+  masc_tui_fusion_launch
   masc_tui_queue_inspection
   masc_tui_lane_declaration
   masc.browser_lane
@@ -1410,6 +1434,7 @@
   masc_tui_ansi
   masc_tui_markdown_render_cache
   masc_tui_message_layout
+  masc_tui_execute_result
   masc_tui_tool_detail
   masc_tui_theme
   masc_tui_gate_text
@@ -1454,6 +1479,8 @@
   masc.voice_config
   masc.workspace_connection
   masc_tui_lane_addons
+  masc_tui_fusion_launch
+  masc_tui_fusion_seat_routes
   masc_tui_lane_installer
   masc_tui_queue_inspection
   masc_tui_fork_guard

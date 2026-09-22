@@ -55,6 +55,10 @@ type run =
   { run_id : string
   ; keeper : string
   ; preset : string
+  ; roster : Fusion_types.roster
+      (** 이 run 이 preset 명단 대신 쓴 자리 경로. 바꾸지 않은 칸은 [None] 이다.
+          저장 줄에는 바꾼 칸만 [judge_route] / [panel_routes] 키로 적히고, 키가 없으면
+          preset 의 그 칸을 쓴 run 이다. *)
   ; topology : Fusion_types.fusion_topology
       (** 이 run 이 실행한 심의 위상. obligation payload 에도 있지만 그 레코드는
           배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 수 있는 자리는 여기뿐이다.
@@ -78,6 +82,7 @@ val register_running
   -> run_id:string
   -> keeper:string
   -> preset:string
+  -> roster:Fusion_types.roster
   -> topology:Fusion_types.fusion_topology
   -> started_at:float
   -> unit

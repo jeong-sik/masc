@@ -231,14 +231,6 @@ type capture_status =
 val capture_status_to_string : capture_status -> string
 val capture_status_of_string : string -> capture_status option
 
-val stt_set_up : unit -> bool
-(** Whether speech-to-text is set up where this process runs: a voice config
-    with an [stt] section holding an enabled endpoint, or a voice config that
-    exists and does not parse (the capture reports why). [false] when voice is
-    not configured, the config has no [stt] section, or every endpoint is
-    disabled -- the cases {!transcribe_audio} refuses before asking anyone.
-    A surface reads this to decide whether to name the capture keys at all. *)
-
 val transcribe_audio :
   audio_file:string ->
   ?language_code:string ->

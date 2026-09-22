@@ -2,9 +2,9 @@
     (RFC-0351 S1).
 
     Loads the canonical AGENT_CORE checkpoint for one trace, applies
-    {!Masc.Keeper_checkpoint_purge.purge} (duplicate collapse, unsigned
-    reasoning strip, tool-result content clear — no LLM involved), and prints
-    a per-rule report. Dry-run by default; [--apply] backs the original file
+    {!Masc.Keeper_checkpoint_purge.purge} (unsigned reasoning strip and
+    tool-result content clear, neither of which removes an atom — no LLM
+    involved), and prints a per-rule report. Dry-run by default; [--apply] backs the original file
     up byte-exact and saves the purged checkpoint through
     [Keeper_checkpoint_store.save_agent_core_classified] (locked, structure-validated,
     watermark-checked; [turn_count] is unchanged so the save lands as an
@@ -21,19 +21,22 @@
     The Librarian's atom position moves with the checkpoint (RFC
     librarian-lifecycle §10-2, {!Masc.Keeper_checkpoint_purge.librarian_rebase}):
     the rewrite is refused while the Librarian has atoms left to read, and
-    otherwise the position is written after the checkpoint. *)
+    otherwise the position is written after the checkpoint. The turn-boundary
+    log and the saved Librarian working state are read first: the messages
+    they name stay byte-exact, so both still match the purged checkpoint. *)
 
 let usage =
-  {|Usage: masc_checkpoint_purge --trace TRACE_ID [OPTIONS]
+  {|Usage: masc_checkpoint_purge --keeper NAME [OPTIONS]
 
 Deterministic offline checkpoint purge (RFC-0351 S1). Dry-run by default.
 
 Options:
-  --trace ID               trace/session id in the selected cluster runtime root
+  --keeper NAME            the keeper whose checkpoint is purged; its meta names
+                           the trace, and its Librarian files are read and moved
+  --trace ID               optional: refuse unless the keeper's meta names this trace
   --base DIR               workspace root (default: MASC_BASE_PATH or cwd)
   --apply                  back up, then write the purged checkpoint
   --keep-recent N          protected tail length in messages (default 20)
-  --dup-threshold N        duplicate collapse threshold (default 3, >= 2)
   --no-strip-thinking      keep unsigned Thinking/ReasoningDetails blocks
   --no-clear-tool-results  keep ToolResult payloads
   -h, --help               print this help
@@ -73,15 +76,19 @@ let purge_error_text = function
   | Purge.Invalid_config detail -> "invalid config: " ^ detail
   | Purge.Invalid_input_structure structural ->
     Printf.sprintf
-      "checkpoint failed structural validation and was not modified: %s\n\
-       (a broken history has to be repaired at the write boundary that \
-       admitted it, not by this tool — see #25443)"
+      "checkpoint failed structural validation even with its break set aside, \
+       and was not modified: %s"
       (structural_error_text structural)
   | Purge.Invalid_output_structure structural ->
     Printf.sprintf
       "purge produced an invalid structure — this is a bug in \
        keeper_checkpoint_purge, nothing was written: %s"
       (structural_error_text structural)
+  | ( Purge.Atom_count_changed _
+    | Purge.Kept_atom_rewritten _
+    | Purge.Continuity_no_longer_fits _
+    | Purge.Recovery_end_unwitnessed _ ) as purge_error ->
+    Purge.purge_error_to_string purge_error
 
 let load_error_text = function
   | Store.Not_found -> "canonical checkpoint file not found"
@@ -110,7 +117,8 @@ let timestamp_utc () =
     tm.tm_hour tm.tm_min tm.tm_sec
 
 let () =
-  let trace = ref None in
+  let keeper = ref None in
+  let trace_arg = ref None in
   let base = ref None in
   let apply = ref false in
   let config = ref Purge.default_config in
@@ -119,8 +127,11 @@ let () =
     | "-h" :: _ | "--help" :: _ ->
       print_string usage;
       exit 0
+    | "--keeper" :: value :: rest ->
+      keeper := Some value;
+      parse rest
     | "--trace" :: value :: rest ->
-      trace := Some value;
+      trace_arg := Some value;
       parse rest
     | "--base" :: value :: rest ->
       base := Some value;
@@ -134,12 +145,6 @@ let () =
            Purge.keep_recent_messages = parse_positive_int_arg "--keep-recent" value
          };
       parse rest
-    | "--dup-threshold" :: value :: rest ->
-      config
-      := { !config with
-           Purge.dup_threshold = parse_positive_int_arg "--dup-threshold" value
-         };
-      parse rest
     | "--no-strip-thinking" :: rest ->
       config := { !config with Purge.strip_thinking = false };
       parse rest
@@ -149,10 +154,10 @@ let () =
     | unknown :: _ -> error (Printf.sprintf "unknown argument: %S\n%s" unknown usage)
   in
   parse (List.tl (Array.to_list Sys.argv));
-  let trace =
-    match !trace with
+  let keeper_name =
+    match !keeper with
     | Some value when String.trim value <> "" -> value
-    | Some _ | None -> error ("--trace is required\n" ^ usage)
+    | Some _ | None -> error ("--keeper is required\n" ^ usage)
   in
   let base_path =
     (match !base with
@@ -169,8 +174,41 @@ let () =
   Masc.Runtime_params.restore ~base_path;
   let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
   let runtime_root = Filename.dirname session_store in
-  let session_dir = Filename.concat session_store trace in
   let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+  (* The keeper names the trace, as the dashboard purge does. A checkpoint's
+     own [agent_name] is the agent-core agent's name, the runtime id, not the
+     keeper, so nothing under keepers/<name>/ can be found from it (#37770).
+     The read is the strict snapshot read: no storage backend, no repair. *)
+  let trace =
+    let path =
+      Filename.concat
+        runtime_keepers_dir
+        (Masc.Keeper_runtime_root_entry.keeper_basename
+           ~keeper_name Masc.Keeper_runtime_root_entry.Metadata)
+    in
+    match
+      Masc.Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:runtime_root path
+    with
+    | Error (Masc.Keeper_meta_store.Unreadable detail) ->
+      error ("keeper meta unreadable: " ^ detail)
+    | Error (Masc.Keeper_meta_store.Not_current detail) ->
+      error ("keeper meta is not the current schema: " ^ detail)
+    | Ok None -> error ("no keeper named " ^ keeper_name ^ ": " ^ path ^ " does not exist")
+    | Ok (Some meta) ->
+      if not (String.equal meta.Masc.Keeper_meta_contract.name keeper_name)
+      then error (path ^ " names keeper " ^ meta.Masc.Keeper_meta_contract.name);
+      let trace =
+        Keeper_id.Trace_id.to_string
+          meta.Masc.Keeper_meta_contract.runtime.Masc.Keeper_meta_contract.trace_id
+      in
+      (match !trace_arg with
+       | Some requested when not (String.equal (String.trim requested) trace) ->
+         error
+           (Printf.sprintf
+              "keeper %s is on trace %s, not %s; nothing purged" keeper_name trace requested)
+       | Some _ | None -> trace)
+  in
+  let session_dir = Filename.concat session_store trace in
   let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
   if not (Sys.file_exists checkpoint_path)
   then error ("no canonical checkpoint at " ^ checkpoint_path);
@@ -178,18 +216,44 @@ let () =
   match Store.load_agent_core ~session_dir ~session_id:trace with
   | Error load_error -> error (load_error_text load_error)
   | Ok checkpoint ->
-    (match Purge.purge ~config:!config checkpoint with
+    let boundary_lines =
+      match
+        Masc.Keeper_turn_boundaries.read
+          ~keepers_dir:runtime_keepers_dir
+          ~keeper_id:keeper_name
+      with
+      | Ok lines -> lines
+      | Error detail -> error ("turn-boundary log unreadable: " ^ detail)
+    in
+    let continuity =
+      match
+        Masc.Keeper_librarian_continuity.read_in
+          ~keepers_dir:runtime_keepers_dir
+          ~keeper_name:keeper_name
+      with
+      | Ok continuity -> continuity
+      | Error detail -> error ("Librarian working state unreadable: " ^ detail)
+    in
+    (* One read of the position serves both: a recovery ends the history where
+       a line it counted states it, and the rebase moves it there. *)
+    let progress =
+      match Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name with
+      | Ok progress -> progress
+      | Error read_error ->
+        error ("Librarian position unreadable: " ^ Progress.read_error_to_string read_error)
+    in
+    (match
+       Purge.purge
+         ~config:!config
+         ~trace_id:trace
+         ~boundary_lines
+         ~continuity
+         ~progress
+         checkpoint
+     with
      | Error purge_error -> error (purge_error_text purge_error)
      | Ok (purged, report) ->
        let rebase =
-         let progress =
-           match
-             Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:checkpoint.agent_name
-           with
-           | Ok progress -> progress
-           | Error read_error ->
-             error ("Librarian position unreadable: " ^ Progress.read_error_to_string read_error)
-         in
          Purge.librarian_rebase
            ~progress
            ~trace_id:trace
@@ -199,6 +263,7 @@ let () =
        let purged_bytes = Agent_core.Checkpoint.to_string purged in
        let before_len = String.length original_bytes in
        let after_len = String.length purged_bytes in
+       Printf.printf "keeper: %s\n" keeper_name;
        Printf.printf "trace: %s\n" trace;
        Printf.printf "checkpoint: %s\n" checkpoint_path;
        Printf.printf
@@ -216,14 +281,10 @@ let () =
             *. (float_of_int after_len -. float_of_int before_len)
             /. float_of_int before_len);
        Printf.printf
-         "R1 duplicate messages dropped: %d\n"
-         report.Purge.duplicates_dropped;
+         "reasoning blocks stripped: %d\n"
+         report.Purge.reasoning_blocks_stripped;
        Printf.printf
-         "R2 reasoning blocks stripped: %d (messages dropped when emptied: %d)\n"
-         report.Purge.reasoning_blocks_stripped
-         report.Purge.reasoning_messages_dropped;
-       Printf.printf
-         "R3 tool results cleared: %d\n"
+         "tool results cleared: %d\n"
          report.Purge.tool_results_cleared;
        (match rebase with
         | Ok Purge.No_progress -> print_endline "librarian position: none"
@@ -302,7 +363,7 @@ let () =
                (match
                   Progress.write
                     ~keepers_dir:runtime_keepers_dir
-                    ~keeper_id:checkpoint.agent_name
+                    ~keeper_id:keeper_name
                     after
                 with
                 | Ok () ->

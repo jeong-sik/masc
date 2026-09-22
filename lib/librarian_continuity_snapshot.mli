@@ -18,6 +18,15 @@ type t = private
   ; last_atom_digest : string
   ; prefix_sha256 : string
   ; working_state : string
+  ; catch_up_end_atom : int option
+      (** Set on a snapshot the Librarian is rewriting from atom 0: where a
+          request starts without it, as of the round that wrote it -- the
+          Librarian's durable position when it fits the history, else the
+          end of the last completed turn. The snapshot does not stand for the
+          history until its end reaches that start, so a rewrite never moves a
+          request's start back (RFC keeper-context-window-in-tokens §13.4).
+          Always past [end_atom]; [None] once a round's end reaches it, and
+          the key is absent from the JSON then. *)
   }
 
 type error =
@@ -50,11 +59,13 @@ val checkpoint_prefix_range : trace_id:string ->
 (** Actual completed checkpoint prefix, including history predating the log.
     This is source selection, never evidence of a Memory read or cursor move. *)
 
-val capture_checkpoint_prefix : ?end_atom:int -> trace_id:string ->
+val capture_checkpoint_prefix : ?end_atom:int -> catch_up_end_atom:int option -> trace_id:string ->
   lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
   messages:Agent_core.Types.message list -> working_state:string -> unit -> (t, error) result
 (** Explicitly capture the supplied prefix through a whole atom, covered by a
-    real completed boundary. No synthetic restart or progress is introduced. *)
+    real completed boundary. No synthetic restart or progress is introduced.
+    [catch_up_end_atom] is the rewrite's catch-up target ({!t}); one the
+    captured end already reached is dropped. *)
 
 val restore
   :  trace_id:string

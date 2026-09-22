@@ -17,6 +17,16 @@ type origin =
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
   | Librarian_progress of { end_atom : int }
   | Turn_start of { end_atom : int }
+  | Turn_start_unknown of { reason : string }
+
+type turn_start =
+  | Turn_boundary of { end_atom : int }
+  | Turn_boundary_unknown of { reason : string }
+
+let turn_start_to_string = function
+  | Turn_boundary { end_atom } -> Printf.sprintf "boundary:%d" end_atom
+  | Turn_boundary_unknown { reason } -> "unknown:" ^ reason
+;;
 
 let of_ledger (ledger : Keeper_model_input_ledger.t) =
   match ledger.last.ends with
@@ -236,6 +246,8 @@ let clamp ~atom_count first_atom =
   if atom_count <= 0 then 0 else max 0 (min first_atom (atom_count - 1))
 ;;
 
+let newest_atom ~atom_count = if atom_count <= 0 then 0 else atom_count - 1
+
 let halve ~first_atom ~atom_count =
   let first_atom = clamp ~atom_count first_atom in
   let carried = atom_count - first_atom in
@@ -262,6 +274,7 @@ let origin_to_string = function
   | Librarian_progress _ -> "librarian_progress"
   | Carried source -> source_to_string source
   | Turn_start _ -> "turn_start"
+  | Turn_start_unknown _ -> "turn_start_unknown"
 ;;
 
 let origin_to_json = function
@@ -279,4 +292,6 @@ let origin_to_json = function
     `Assoc [ "kind", `String "librarian_progress"; "end_atom", `Int end_atom ]
   | Turn_start { end_atom } ->
     `Assoc [ "kind", `String "turn_start"; "end_atom", `Int end_atom ]
+  | Turn_start_unknown { reason } ->
+    `Assoc [ "kind", `String "turn_start_unknown"; "reason", `String reason ]
 ;;

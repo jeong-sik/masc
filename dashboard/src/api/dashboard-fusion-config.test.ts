@@ -43,6 +43,7 @@ function preset(name: string, judges: number): FusionPresetConfigView {
 describe('parseFusionConfigResponse', () => {
   it('reads the deadline and budget axes the raw-TOML reader could not see', () => {
     const parsed = parseFusionConfigResponse({
+      source_revision: 'rev-1',
       config: {
         enabled: true,
         default_preset: 'trio',
@@ -93,6 +94,7 @@ describe('parseFusionConfigResponse', () => {
 
   it('keeps an unset optional as null instead of inventing a number', () => {
     const parsed = parseFusionConfigResponse({
+      source_revision: 'rev-1',
       config: {
         enabled: true,
         default_preset: 'p',

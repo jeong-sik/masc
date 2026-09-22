@@ -50,8 +50,13 @@ type skill_state =
   | Skill_evidence_missing
   | Skill_evidence_unavailable
 
+type skill_invocation =
+  | Instruction_read
+  | Composition_run of { tool_name : string }
+
 type skill_activity =
   { skill_name : string
+  ; invocation : skill_invocation option
   ; skill_tool_use_id : string option
   ; turn_ref : string option
   ; content_revision : string option
@@ -744,9 +749,16 @@ let activity_kind (activity : tool_activity) =
         | None -> Tool_activity
         | Some descriptor -> handler_activity_kind descriptor.runtime_handler)
 
-let make_skill_activity ?skill_tool_use_id ?turn_ref ?content_revision
-    ?runtime_id ?detail ~skill_name ~state ~actions () =
+let make_skill_activity ?invocation ?skill_tool_use_id ?turn_ref
+    ?content_revision ?runtime_id ?detail ~skill_name ~state ~actions () =
   { skill_name = safe_line skill_name
+  ; invocation =
+      Option.map
+        (function
+          | Instruction_read -> Instruction_read
+          | Composition_run { tool_name } ->
+              Composition_run { tool_name = safe_line tool_name })
+        invocation
   ; skill_tool_use_id = Option.map safe_line (nonblank skill_tool_use_id)
   ; turn_ref = Option.map safe_line (nonblank turn_ref)
   ; content_revision = Option.map safe_line (nonblank content_revision)
@@ -768,12 +780,21 @@ let skill_activity_of_tool (activity : tool_activity) =
         | Failed -> Skill_failed
         | Never_returned | Outcome_unrecorded -> Skill_evidence_missing
       in
-      let skill_name =
-        Option.value activity.subject
-          ~default:(display_tool_name activity.tool_name)
+      (* [activity_kind] admitted the call as a skill on one of two names:
+         the read tool, or a composition's own tool. A composition tool is
+         named after its skill, so the name says which skill ran even when
+         the arguments have not arrived. *)
+      let invocation, named_by_tool =
+        match
+          Masc.Keeper_tool_composition_catalog.skill_name_of_tool_name
+            activity.tool_name
+        with
+        | Some skill -> Composition_run { tool_name = activity.tool_name }, skill
+        | None -> Instruction_read, display_tool_name activity.tool_name
       in
+      let skill_name = Option.value activity.subject ~default:named_by_tool in
       Some
-        (make_skill_activity ?skill_tool_use_id:activity.call_id
+        (make_skill_activity ~invocation ?skill_tool_use_id:activity.call_id
            ~skill_name ~state ~actions:[] ())
 
 (* One phrase per state, and no interpunct inside one.
@@ -798,10 +819,18 @@ let skill_activity_of_tool (activity : tool_activity) =
    and the old word, 증거 없음, read as a verdict on the skill when it was a
    fact about the pane. [Skill_evidence_unavailable] is a skill record the
    server sent in a shape this build cannot read. *)
-let skill_state_label = function
-  | Skill_calling -> "읽는 중"
-  | Skill_served_pending -> "읽음, 전달 확인 중"
-  | Skill_served_only -> "읽음, 전달 기록 없음"
+let skill_state_label ?invocation state =
+  (* An instruction skill is read; a composition is run. The three states
+     before delivery say which, and the rest are the same for both. *)
+  let read, done_ =
+    match invocation with
+    | Some (Composition_run _) -> "실행 중", "실행됨"
+    | Some Instruction_read | None -> "읽는 중", "읽음"
+  in
+  match state with
+  | Skill_calling -> read
+  | Skill_served_pending -> done_ ^ ", 전달 확인 중"
+  | Skill_served_only -> done_ ^ ", 전달 기록 없음"
   | Skill_delivered -> "전달됨, 도구 안 씀"
   | Skill_used -> "전달됨, 도구 씀"
   | Skill_failed -> "실패"
@@ -867,6 +896,17 @@ let legend =
   @ List.map
       (fun state -> skill_state_label state, skill_meaning state)
       all_skill_states
+  @ (let composition = Composition_run { tool_name = "" } in
+     List.filter_map
+       (fun state ->
+         let run_word = skill_state_label ~invocation:composition state in
+         if String.equal run_word (skill_state_label state) then None
+         else
+           Some
+             ( run_word,
+               "as above, for a composition: the skill ran as its own tool \
+                rather than being read as text" ))
+       all_skill_states)
   @ [ ( proof_word
       , "the ids behind a skill row: use= the read call, turn= the turn, \
          runtime= who ran it, rev= the skill text's revision" )
@@ -880,22 +920,21 @@ let short_proof value =
     String.sub value 0 8 ^ "\xe2\x80\xa6"
     ^ String.sub value (String.length value - 8) 8
 
-let skill_rows ~full (activity : skill_activity) =
+(* The full rows of one invocation: state and name, then each observed
+   action, the proof coordinates and the detail. State first, then which
+   skill, then what came of it -- the Gate row's order, because the pane
+   should not read left to right one way on one kind of row and the other
+   way on the next. *)
+let skill_full_rows (activity : skill_activity) =
   let action_count = List.length activity.actions in
-  (* State, then which skill, then what came of it -- the Gate row's order,
-     because the pane should not read left to right one way on one kind of row
-     and the other way on the next. The name led before, and a skill name is
-     the part a reader can already see repeated down the column; the state is
-     the part that differs, so it is the part a narrow pane keeps. *)
   let summary =
     Printf.sprintf "**%s** \xc2\xb7 **%s**%s"
-      (skill_state_label activity.state)
+      (skill_state_label ?invocation:activity.invocation activity.state)
       activity.skill_name
       (if action_count = 0 then ""
        else Printf.sprintf " \xc2\xb7 %s" (Masc_tui_message_layout.count_noun action_count "action"))
   in
-  if not full then [ summary ]
-  else
+  begin
     let actions =
       List.map
         (fun action ->
@@ -923,6 +962,79 @@ let skill_rows ~full (activity : skill_activity) =
       | Some detail -> [ "  " ^ detail ]
     in
     summary :: actions @ proof @ detail
+  end
+
+(* Which of a skill's invocations in one block did not come off. The
+   compact row names a skill and how many times it was triggered; that a
+   trigger failed, or that the pane could not read its evidence, is the one
+   thing about a trigger that is not "it happened", so it is the one thing
+   said beside the count. *)
+let skill_trigger_problem (activity : skill_activity) =
+  match activity.state with
+  | Skill_failed | Skill_evidence_missing | Skill_evidence_unavailable -> true
+  | Skill_calling | Skill_served_pending | Skill_served_only | Skill_delivered
+  | Skill_used -> false
+
+(* Compact: one row per skill named in the block, in the order each was
+   first triggered, with how many times. A turn that ran one composition
+   seven times said the same row seven times; the tool block under it folded
+   its twelve calls into one line, and this is the same fold.
+
+   The row carries no lifecycle word: whether the text was delivered or a
+   tool followed is bookkeeping a reader of the chat does not act on, and
+   [full] keeps it. A trigger that failed, or evidence the pane could not
+   read, is said with the state's own words. *)
+let skill_compact_rows (activities : skill_activity list) =
+  let names =
+    List.fold_left
+      (fun names activity ->
+        if List.mem activity.skill_name names then names
+        else activity.skill_name :: names)
+      [] activities
+    |> List.rev
+  in
+  List.map
+    (fun name ->
+      let mine = List.filter (fun a -> String.equal a.skill_name name) activities in
+      let count = List.length mine in
+      let problems = List.filter skill_trigger_problem mine in
+      let times = if count = 1 then "" else Printf.sprintf " \xc3\x97%d" count in
+      let problem =
+        match problems with
+        | [] -> ""
+        | [ one ] when count = 1 ->
+            Printf.sprintf " \xc2\xb7 %s" (skill_state_label ?invocation:one.invocation one.state)
+        | first :: _ ->
+            Printf.sprintf " \xc2\xb7 %s %d"
+              (skill_state_label ?invocation:first.invocation first.state)
+              (List.length problems)
+      in
+      Printf.sprintf "**%s**%s%s" name times problem)
+    names
+
+let skill_rows ~full (activities : skill_activity list) =
+  if full then List.concat_map skill_full_rows activities
+  else skill_compact_rows activities
+
+(* The state one row of several invocations answers to: the worst of them,
+   so a block with one failed trigger among seven draws in the failure's
+   colour. Order: what went wrong, then what is still moving, then how far
+   a finished one got. *)
+let skill_block_state (activities : skill_activity list) =
+  let rank = function
+    | Skill_failed -> 0
+    | Skill_evidence_unavailable -> 1
+    | Skill_evidence_missing -> 2
+    | Skill_calling -> 3
+    | Skill_served_pending -> 4
+    | Skill_served_only -> 5
+    | Skill_delivered -> 6
+    | Skill_used -> 7
+  in
+  List.fold_left
+    (fun worst activity ->
+      if rank activity.state < rank worst then activity.state else worst)
+    Skill_used activities
 
 (* The kind a run of calls amounts to, when the names alone do not show it.
    [compact_tool_mix] on the same line already names every distinct tool with
@@ -1089,7 +1201,7 @@ let tool_rows t =
 
 type trail_item =
   | Trail_thinking of string list
-  | Trail_skill of skill_activity
+  | Trail_skill of skill_activity list
   | Trail_tools of tool_block
   | Trail_text of string
   | Trail_superseded of
@@ -1110,6 +1222,9 @@ let trail t =
       (fun (call : live_tool_call) -> call.local_id = local_id)
       t.reversed_tool_calls
   in
+  (* Consecutive skill calls are one block, as consecutive generic calls
+     are: a turn that runs a composition seven times over is one stretch of
+     skill work, drawn as one row that counts them. *)
   let flush_tools acc group =
     let flush_generic acc generic =
       match generic with
@@ -1117,16 +1232,23 @@ let trail t =
       | activities ->
           Trail_tools (tool_block (List.rev activities)) :: acc
     in
-    let rec split acc generic = function
-      | [] -> flush_generic acc generic
+    let flush_skills acc skills =
+      match skills with
+      | [] -> acc
+      | skills -> Trail_skill (List.rev skills) :: acc
+    in
+    let rec split acc generic skills = function
+      | [] -> flush_skills (flush_generic acc generic) skills
       | activity :: rest -> (
           match skill_activity_of_tool activity with
-          | None -> split acc (activity :: generic) rest
+          | None ->
+              let acc = flush_skills acc skills in
+              split acc (activity :: generic) [] rest
           | Some skill ->
               let acc = flush_generic acc generic in
-              split (Trail_skill skill :: acc) [] rest)
+              split acc [] (skill :: skills) rest)
     in
-    group |> List.rev |> List.map (activity_of_live_call t) |> split acc []
+    group |> List.rev |> List.map (activity_of_live_call t) |> split acc [] []
   in
   let rec walk acc group = function
     | [] -> List.rev (flush_tools acc group)
@@ -1970,7 +2092,7 @@ let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
 
 type drawn =
   | Drawn_thinking of string list
-  | Drawn_skill of skill_activity
+  | Drawn_skill of skill_activity list
   | Drawn_tools of tool_block
   | Drawn_text of string
   | Drawn_reply of string

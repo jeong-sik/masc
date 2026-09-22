@@ -390,7 +390,8 @@ let drawn_to_string (item : Transcript.drawn_item) =
   ^
   match item.Transcript.drawn with
   | Transcript.Drawn_thinking lines -> "thinking:" ^ String.concat "|" lines
-  | Transcript.Drawn_skill skill -> "skill:" ^ skill.Transcript.skill_name
+  | Transcript.Drawn_skill skills ->
+      "skill:" ^ String.concat "," (List.map (fun (s : Transcript.skill_activity) -> s.skill_name) skills)
   | Transcript.Drawn_tools block -> "tools:" ^ String.concat "|" (Transcript.project_tool_block Transcript.Full block).Transcript.details
   | Transcript.Drawn_text text -> "text:" ^ text
   | Transcript.Drawn_reply text -> "reply:" ^ text
@@ -1943,9 +1944,9 @@ let test_a_registered_length_name_passes_through_whole () =
 let rec trail_item_to_string : Transcript.trail_item -> string = function
   | Transcript.Trail_thinking lines ->
       "thinking(" ^ String.concat "\\n" lines ^ ")"
-  | Transcript.Trail_skill skill ->
+  | Transcript.Trail_skill skills ->
       "skill("
-      ^ String.concat "\\n" (Transcript.skill_rows ~full:true skill)
+      ^ String.concat "\\n" (Transcript.skill_rows ~full:true skills)
       ^ ")"
   | Transcript.Trail_tools block ->
       "tools(" ^ String.concat "\\n" (full_tool_rows block) ^ ")"
@@ -2096,18 +2097,23 @@ let test_live_skill_is_not_folded_into_generic_tools () =
     ; Live.Text "done"
     ];
   match Transcript.trail t with
-  | [ Transcript.Trail_skill skill; Transcript.Trail_text "done" ] ->
+  | [ Transcript.Trail_skill [ skill ]; Transcript.Trail_text "done" ] ->
       check string "the nested identity names the Skill" "ci-red-attribution"
         skill.skill_name;
+      check bool "the read tool is an instruction read" true
+        (skill.invocation = Some Transcript.Instruction_read);
       check bool "a returned body is not yet claimed as used" true
         (skill.state = Transcript.Skill_served_pending);
-      (match Transcript.skill_rows ~full:false skill with
+      (match Transcript.skill_rows ~full:false [ skill ] with
        | [ row ] ->
-           check bool "the Skill name is bold" true
-             (contains ~needle:"**ci-red-attribution**" row);
-           check bool "the pending delivery state is explicit" true
+           check string "the compact row is the bold name and nothing else"
+             "**ci-red-attribution**" row
+       | rows -> failf "expected one compact Skill row, got %d" (List.length rows));
+      (match Transcript.skill_rows ~full:true [ skill ] with
+       | row :: _ ->
+           check bool "the full row says the delivery is pending" true
              (contains ~needle:"**읽음, 전달 확인 중**" row)
-       | rows -> failf "expected one compact Skill row, got %d" (List.length rows))
+       | [] -> fail "expected full Skill rows")
   | items ->
       failf "expected skill/text, got %d item(s): %s" (List.length items)
         (String.concat "; " (List.map trail_item_to_string items))
@@ -2117,10 +2123,70 @@ let test_terminal_skill_is_not_still_calling () =
   feed t [ Live.Run_started; tool_started "skill" "keeper_skill";
            tool_ended "skill"; Live.Run_failed { message = "provider timeout" } ];
   match Transcript.trail t with
-  | [ Transcript.Trail_skill skill ] ->
+  | [ Transcript.Trail_skill [ skill ] ] ->
     check bool "a missing result does not keep a skill call active" true
       (skill.state = Transcript.Skill_evidence_missing)
   | _ -> fail "expected the skill row to remain visible"
+
+(* A turn that runs the same composition seven times is one skill stretch,
+   and the compact row counts the triggers. Seven identical rows between a
+   journal row and a tool block is what the pane drew before
+   (msx-retro-mania, 2026-09-22). *)
+let test_consecutive_live_skill_calls_are_one_counted_block () =
+  let t = fresh () in
+  let call index =
+    let id = Printf.sprintf "compose-%d" index in
+    [ tool_started id "keeper_compose_msx-observe"
+    ; tool_ended id
+    ; tool_result id (Printf.sprintf "exec-%d" index)
+    ]
+  in
+  feed t
+    (Live.Run_started
+     :: List.concat_map call [ 1; 2; 3; 4; 5; 6; 7 ]
+     @ [ tool_started "press" "masc_msx_press"
+       ; tool_ended "press"
+       ; tool_result "press" "exec-press"
+       ]);
+  match Transcript.trail t with
+  | [ Transcript.Trail_skill skills; Transcript.Trail_tools tools ] ->
+      check int "seven invocations in one block" 7 (List.length skills);
+      check bool "a composition's own tool names it as run" true
+        ((List.hd skills).invocation
+         = Some (Transcript.Composition_run { tool_name = "keeper_compose_msx-observe" }));
+      check (list string) "the compact row counts the triggers"
+        [ "**msx-observe** \xc3\x977" ]
+        (Transcript.skill_rows ~full:false skills);
+      let full = Transcript.skill_rows ~full:true skills in
+      check int "full: one summary and one proof line per invocation" 7
+        (List.length
+           (List.filter (fun row -> contains ~needle:"**msx-observe**" row) full));
+      check bool "full: a composition ran, it was not read" true
+        (contains ~needle:"**실행됨, 전달 확인 중** \xc2\xb7 **msx-observe**"
+           (List.hd full));
+      check int "the generic call is its own block" 1
+        (List.length tools.Transcript.activities)
+  | items ->
+      failf "expected one skill block then one tool block, got %d: %s"
+        (List.length items)
+        (String.concat "; " (List.map trail_item_to_string items))
+
+(* A trigger that failed is the one thing the compact row says beside the
+   count: the others are bookkeeping the full rows keep. *)
+let test_a_failed_trigger_is_named_on_the_compact_row () =
+  let ok =
+    Transcript.make_skill_activity ~invocation:Transcript.Instruction_read
+      ~skill_name:"prior-art" ~state:Transcript.Skill_used ~actions:[ "Read" ] ()
+  in
+  let failed =
+    Transcript.make_skill_activity ~invocation:Transcript.Instruction_read
+      ~skill_name:"prior-art" ~state:Transcript.Skill_failed ~actions:[] ()
+  in
+  check (list string) "the count, then what went wrong"
+    [ "**prior-art** \xc3\x972 \xc2\xb7 실패 1" ]
+    (Transcript.skill_rows ~full:false [ ok; failed ]);
+  check bool "the block draws in the failure's state" true
+    (Transcript.skill_block_state [ ok; failed ] = Transcript.Skill_failed)
 
 let test_full_skill_rows_show_actions_and_exact_proof () =
   let skill =
@@ -2130,7 +2196,7 @@ let test_full_skill_rows_show_actions_and_exact_proof () =
       ~runtime_id:"codex-app-server" ~state:Transcript.Skill_used
       ~actions:[ "Execute"; "Read" ] ()
   in
-  let body = String.concat "\n" (Transcript.skill_rows ~full:true skill) in
+  let body = String.concat "\n" (Transcript.skill_rows ~full:true [ skill ]) in
   check bool "used is stated in the strongest evidence vocabulary" true
     (contains ~needle:"**전달됨, 도구 씀**" body);
   check bool "observed Execute is visible" true
@@ -2448,8 +2514,8 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   let full =
     String.concat "\n"
       (Transcript.skill_rows ~full:true
-         (Transcript.make_skill_activity ~skill_name:"s" ~skill_tool_use_id:"use-1"
-            ~state:Transcript.Skill_used ~actions:[ "Read" ] ()))
+         [ Transcript.make_skill_activity ~skill_name:"s" ~skill_tool_use_id:"use-1"
+             ~state:Transcript.Skill_used ~actions:[ "Read" ] () ])
   in
   List.iter
     (fun word ->
@@ -2529,6 +2595,10 @@ let () =
             test_live_skill_is_not_folded_into_generic_tools
         ; test_case "terminal Skill is not still calling" `Quick
             test_terminal_skill_is_not_still_calling
+        ; test_case "consecutive live Skill calls are one counted block" `Quick
+            test_consecutive_live_skill_calls_are_one_counted_block
+        ; test_case "a failed trigger is named on the compact row" `Quick
+            test_a_failed_trigger_is_named_on_the_compact_row
         ; test_case "full Skill rows show actions and exact proof" `Quick
             test_full_skill_rows_show_actions_and_exact_proof
         ] )

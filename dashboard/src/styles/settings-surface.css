@@ -1553,6 +1553,94 @@
   min-width: 0;
 }
 
+/* fusion preset editor — one card per panel group / first-pass judge, the
+   prompt textarea, and the save/copy/rename/delete row. */
+.set-fusion-preset-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.set-fusion-group {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0;
+  padding: 4px 13px 8px;
+  background: var(--bg-well);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.set-fusion-group-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 0 4px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.set-fusion-group-h > button {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.set-fusion-group-h > button:hover {
+  color: var(--status-bad);
+  border-color: var(--status-bad);
+}
+
+.set-fusion-group-h > button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.set-line > .set-fusion-prompt {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.45;
+  padding: 8px 10px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.set-line > .set-fusion-prompt:focus {
+  border-color: var(--volt-dim);
+  box-shadow: 0 0 0 2px var(--volt-wash);
+}
+
+.set-fusion-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.set-fusion-editor .set-ok {
+  font-size: var(--fs-12);
+  color: var(--volt);
+}
+
+.set-fusion-editor .set-err {
+  font-size: var(--fs-12);
+  color: var(--status-bad);
+}
+
 .set-line > input[type='checkbox'] {
   flex: none;
   width: 16px;

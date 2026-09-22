@@ -10,21 +10,23 @@
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.1 *)
 
-(** 이종 패널 그룹들을 하나의 fan-out으로 병렬 실행해 결과를 [panel_outcome]으로 반환.
+(** 패널 자리들을 동시에 실행해 결과를 [panel_outcome]으로 반환한다.
 
-    - [groups]: 각 그룹은 자기 [system_prompt]/[web_tools]로
-      모델들을 에이전트로 빌드한다 (그룹마다 다를 수 있음 = 이종). 모든 그룹의
-      에이전트를 하나의 [Async_agent.all]에 union으로 던진다.
-      설정된 모델 전체가 정확한 fan-out 집합이며 Fusion은 별도 수치 cap을 두지 않는다.
-    - [web_tools]가 true인 그룹은 web_search/web_fetch 도구를 주입한다.
+    - 자리 하나 = 그룹의 [models] 한 항목. 항목 값은 경로 이름이다 (lane 이름 또는
+      런타임 id, {!Fusion_seat.resolve}). 정체성은 그룹 라벨 + 경로 이름이다.
+    - 한 자리는 경로의 후보를 차례로 시도하고 처음 비어 있지 않은 답에서 멈춘다.
+      Agent_core 후보는 그룹의 [system_prompt]/[web_tools]/출력 예산/[timeout_s]로
+      에이전트를 빌드하고, 공식 클라이언트 후보는 한 턴짜리 CLI 실행으로 돈다.
+      실패는 종류와 상관없이 다음 후보로 넘어간다.
+    - 답한 자리의 usage 는 답한 시도와 그 전에 실패한 시도가 쓴 토큰의 합이다. 모든
+      후보가 실패한 자리는 [panel_error]에 usage 칸이 없어 그 토큰을 싣지 못한다.
+    - 경로를 못 풀면 [Failed (Unknown_route _ | Route_unavailable _)]이고 후보를 시도하지
+      않는다.
     - 패널 답변 계약은 free text다: 응답의 visible text 전체(trim)가 답변이 된다.
-      빈 텍스트만 [Failed Empty_response]. JSON envelope를 요구하지 않는다 —
-      단일 문자열에 envelope는 정보 이득 0에 provider가 schema를 무시하면 패널이
-      전멸하는 실패 클래스만 추가했다 (2026-07-01 사고, 구현부 주석 참조).
+      JSON envelope를 요구하지 않는다 (구현부 주석 참조).
     - Fusion은 fan-out timeout을 합성하지 않는다. provider/runtime timeout은
-      typed [Failed Timeout] 관측으로 보존한다.
-    - 빌드 실패·실행 실패·빈 응답은 [Failed]로 격리되어 다른 패널을 죽이지 않는다.
-    - 반환 순서: 빌드 실패분 먼저, 그 다음 실행 결과(그룹순 × 그룹내 모델순). *)
+      typed [Timeout] 관측으로 보존한다.
+    - 반환 순서와 [on_seat_routes] 순서는 그룹순 × 그룹내 항목순이다. *)
 val run
   :  base_dir:string
   -> sw:Eio.Switch.t
@@ -33,14 +35,15 @@ val run
   -> prompt:string
   -> ?on_tool_trace:(Fusion_types.tool_trace -> unit)
        (** Receives actual AGENT_CORE tool events and explicit official-client
-           observation gaps after the panel fan-out settles. *)
+           observation gaps after every seat settles, one entry per attempt. *)
+  -> ?on_seat_routes:(Fusion_types.seat_route list -> unit)
+       (** Receives one seat route per panel seat after every seat settles. *)
   -> unit
   -> Fusion_types.panel_outcome list
 
 module For_testing : sig
-  val outcome_of_result
-    :  panelist:string
-    -> model:string
+  val attempt_of_result
+    :  model:string
     -> (Agent_core.Types.api_response, Agent_core.Error.t) result
-    -> Fusion_types.panel_outcome
+    -> (string * Fusion_types.usage, Fusion_types.panel_failure * Fusion_types.usage) result
 end

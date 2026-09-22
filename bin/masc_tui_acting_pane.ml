@@ -11,8 +11,8 @@ module Reading = Masc.Tui_decode
    and both token parts: [~ network_read · 3+ calls] and
    [■ 123 calls · in 999.9k · out 999.9k] at exactly 36. No slack: labelling
    the parts spent the five cells the old [999.9k+999.9k tok] left over, and
-   anything added to a settled reading now has to take width from somewhere
-   else. [test_widest_settled_reading_fits_whole] is what says so. The age of the newest
+   anything added to a done reading now has to take width from somewhere
+   else. [test_widest_done_reading_fits_whole] is what says so. The age of the newest
    event is one fact and sits on the focus header, not here. *)
 let border_cells = 1
 let mark_cells = 2
@@ -307,7 +307,7 @@ let latest_tool (chunk : Acting.chunk) =
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
-(* One word for the count. A settle reports the whole turn: [12 calls]. An
+(* One word for the count. The end event reports the whole turn: [12 calls]. An
    open record only knows what this feed observed, which may have
    started mid-turn or lost rows, so it says at least that many: [4+ calls],
    and [no calls yet] when it saw none. *)
@@ -323,7 +323,7 @@ let chunk_calls_text (chunk : Acting.chunk) =
 
 (* The same count as a figure alone, for the fleet row's four-cell column.
    The word "calls" moves to the column header, which says it once for every
-   row instead of once per row. "?" is a settle that named no count, and "-"
+   row instead of once per row. "?" is an end event that named no count, and "-"
    is a record with no call yet: they are different facts and neither is 0. *)
 let calls_figure (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then
@@ -375,7 +375,8 @@ type logical_row =
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
   | Calls_heading of int option
-  | Tool_row of Acting.chunk * Acting.chunk_tool * record_state * response_place
+  | Tool_row of
+      Acting.chunk * Acting.chunk_tool * record_state * response_place * Acting.chunk_tool list
   | Call_detail of Acting.chunk * Acting.chunk_tool * detail_part
   | Earlier_turn of Acting.chunk * Reading.keeper_health_reading option
   | Rule
@@ -430,31 +431,57 @@ let record_glyph = function
    whatever order a row happened to have them, the same cell held a tool name
    on one line and a call count on the next.
 
-   The four add up to [reading_cells] exactly. Widest members measured:
+   The four add up to [reading_cells] exactly on a pane of [pane_cols]; a
+   wide pane adds cells to the tool column, which is where the names that
+   outgrow it are. Widest members measured:
    "no events" 9 in a 10-cell state column, whose last cell is the gap to
    the next -- without it the state word and a tool name ran together;
    "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
-   "999.9k" 6 under a 9-cell "tok/turn". Widening one has to narrow another,
-   and [test_widest_settled_reading_fits_whole] fails when the sum drifts. *)
+   "999.9k" 6 under a 9-cell "tokens". Widening one has to narrow another,
+   and [test_widest_done_reading_fits_whole] fails when the sum drifts. *)
 let state_cells = 10
 let tool_cells = 12
 let calls_cells = 5
 let tokens_cells = 9
 
+(* The wide pane's extra cells, split between the two columns that carry
+   names. The keeper column takes what the longest name on the live roster
+   needs whole (kidsnote-slack-context-collector, 32); the two cells left go
+   to the tool column, where masc_msx_press (14) was cut at twelve. What
+   still outgrows a column is cut with a mark, because a name cut silently
+   reads as another name. *)
+let wide_name_extra_cells = 16
+let wide_tool_extra_cells = wide_extra_cols - wide_name_extra_cells
+
 (* Figures read down a column when their last digits line up, so counts and
    tokens are right-aligned; names read from their first letter. *)
+(* Text cut to [room] cells, the cut shown: a preview that ends mid-word
+   with no mark reads as the whole. *)
+let clip_cells text room =
+  if Layout.display_width text <= room then text
+  else Layout.take_cells text (max 0 (room - 1)) ^ ellipsis
+
 let pad_right width text =
-  let text = Layout.take_cells text width in
+  let text = clip_cells text width in
   text ^ String.make (max 0 (width - Layout.display_width text)) ' '
 
 let pad_left width text =
   let text = Layout.take_cells text width in
   String.make (max 0 (width - Layout.display_width text)) ' ' ^ text
 
-(* The glyph is the record's state; the words are the newest tool and the
-   count, or the count and the tokens once settled. No clock here: the age
+(* The state word, then the newest tool and the count, or the count and
+   the tokens once done. No clock here: the age
    of the newest event is one fact, and it sits on the focus header. *)
-let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
+(* The fleet row's name column and the tool column beside it: the wide pane's
+   extra cells, split between them. *)
+let name_cells_for ~cols =
+  if is_wide ~cols then name_cells + wide_name_extra_cells else name_cells
+
+let tool_cells_for ~cols =
+  if is_wide ~cols then tool_cells + wide_tool_extra_cells else tool_cells
+
+let keeper_state_text ~cols ~health ~approval (chunk : Acting.chunk option) =
+  let tool_cells = tool_cells_for ~cols in
   let blank width = { text = String.make width ' '; tone = Plain } in
   match approval, chunk with
   | Some tool, _ ->
@@ -476,9 +503,9 @@ let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
     let state = record_state ~health chunk in
     let word, word_tone = record_word state in
     (* Which columns a row fills is the record's shape, not a choice. A turn
-       still open names the tool it is in and has no token count; a settled one
-       carries the counts and names no tool, because a finished turn is not in
-       one. Each fact keeps its own column either way. *)
+       still open names the tool it is in and has no token count; a done one
+       carries the counts and names no tool, because a turn that is over is
+       not in one. Each fact keeps its own column either way. *)
     let tool, tokens =
       match state with
       | Record_done -> ("", tokens_sum_figure chunk.Acting.ck_tokens)
@@ -582,24 +609,33 @@ let header_line ~cols input =
          let hidden = offline_count input in
          Masc_tui_message_layout.count_noun (List.length (working_keepers input)) "keeper"
          ^ (if hidden = 0 then "" else Printf.sprintf " (%d offline)" hidden))
-      ^ middle_dot
     | Selected_only -> ""
   in
+  (* The feed is said when it is not delivering. Live is the state the rows
+     below are already evidence of, and a word for it sat on the header of
+     every frame. *)
   let feed =
     match input.feed with
-    | Feed_off -> { text = "no feed"; tone = Dim }
-    | Feed_opening -> { text = "feed opening"; tone = Dim }
-    | Feed_live _ -> { text = "feed live"; tone = Ok }
-    | Feed_closed reason -> { text = "feed closed: " ^ reason; tone = Bad }
+    | Feed_live _ -> []
+    | Feed_off -> [ { text = middle_dot ^ "no feed"; tone = Dim } ]
+    | Feed_opening -> [ { text = middle_dot ^ "feed opening"; tone = Dim } ]
+    | Feed_closed reason ->
+        [ { text = middle_dot ^ "feed closed: " ^ reason; tone = Bad } ]
+  in
+  let count =
+    (* The count carried the separator that joined it to the feed word. With
+       the word gone on a live feed, the separator goes with it. *)
+    match count with
+    | "" -> []
+    | count -> [ { text = middle_dot ^ count; tone = Dim } ]
   in
   fit_line ~cols
     (with_border
-       [ tab_pill ~active:(input.tab = Tab_fleet) Tab_fleet
-       ; { text = " "; tone = Plain }
-       ; tab_pill ~active:(input.tab = Tab_changes) Tab_changes
-       ; { text = middle_dot ^ count; tone = Dim }
-       ; feed
-       ])
+       ([ tab_pill ~active:(input.tab = Tab_fleet) Tab_fleet
+        ; { text = " "; tone = Plain }
+        ; tab_pill ~active:(input.tab = Tab_changes) Tab_changes
+        ]
+        @ count @ feed))
 
 (* Newest chunk per keeper: the fold returns chunks newest-activity first,
    so the first one met for a keeper is its latest observed record. *)
@@ -619,7 +655,7 @@ let approval_for approvals name =
       else None)
     approvals
 
-(* Pending approvals rank first, then unclosed records before settled ones,
+(* Pending approvals rank first, then open records before done ones,
    each by receipt time. The order does not assert current owner-turn state.
    Keepers without observed activity retain the roster's own order. *)
 let fleet_order input newest =
@@ -631,10 +667,6 @@ let fleet_order input newest =
     | None, None -> (3, 0.)
   in
   List.stable_sort (fun a b -> compare (rank a) (rank b)) (working_keepers input)
-
-(* The fleet row's name column: the wide pane's extra cells, all of them. *)
-let name_cells_for ~cols =
-  if is_wide ~cols then name_cells + wide_extra_cols else name_cells
 
 let fleet_row ~cols input keeper chunk =
   let approval = approval_for input.approvals keeper.name in
@@ -651,7 +683,7 @@ let fleet_row ~cols input keeper chunk =
             }
           ; { text = String.make gap_cells ' '; tone = Plain }
           ]
-          @ keeper_state_text ~health:keeper.health ~approval chunk))
+          @ keeper_state_text ~cols ~health:keeper.health ~approval chunk))
   , Target_keeper keeper.name )
 
 let more_line ~cols n =
@@ -719,14 +751,31 @@ let rail_span = function
    age widens its own row rather than losing digits to a cut. *)
 let age_min_cells = 6
 
-let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
-  let duration =
-    match tool.Acting.ct_duration_ms with
-    | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
-    (* The feed does not carry a receipt clock for each folded tool. Its
-       unknown duration stays blank; the record header owns the event age. *)
-    | None -> { text = ""; tone = Dim }
-  in
+(* How many calls a row stands for, after its name: [\xc3\x975]. A run of one
+   says nothing -- the row is that call. *)
+let run_badge run =
+  match List.length run with
+  | count when count <= 1 -> ""
+  | count -> Printf.sprintf " \xc3\x97%d" count
+
+(* What the run took. Each call's own duration, newest first, for a reader
+   comparing them; on a pane too narrow for that, their sum, which is the
+   one figure a run has. A call the feed gave no duration is left out of the
+   list and out of the sum: the pane does not invent one. *)
+let run_durations run =
+  List.filter_map (fun (tool : Acting.chunk_tool) -> tool.Acting.ct_duration_ms) run
+
+let run_duration_texts run =
+  match run_durations run with
+  | [] -> []
+  | durations ->
+      [ String.concat " " (List.map Acting.elapsed_text durations)
+      ; Acting.elapsed_text (List.fold_left ( +. ) 0. durations)
+      ]
+
+let tool_line ~cols ~now ~state ~place ~run (chunk : Acting.chunk)
+    (tool : Acting.chunk_tool) =
+
   let glyph =
     match tool.Acting.ct_disposition with
     | Some (Ok Reading.Keeper_call_failed) -> { text = failed_call_glyph ^ " "; tone = Bad }
@@ -750,17 +799,42 @@ let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chu
     else []
   in
   let inner = cols - border_cells - mark_cells - dispatch_cells - gap_cells in
-  let right =
-    Layout.display_width duration.text
-    + List.fold_left (fun cells span -> cells + Layout.display_width span.text) 0 age
+  let age_cells =
+    List.fold_left (fun cells span -> cells + Layout.display_width span.text) 0 age
   in
+  (* The name and the count it stands for are one reading and are cut
+     together, so a narrow pane never drops the count and leaves the name
+     looking like a single call. What the run took yields first: the
+     durations, then their sum, then nothing. *)
+  let named = tool.Acting.ct_tool ^ run_badge run in
+  let candidates =
+    match run with
+    | _ :: _ :: _ -> run_duration_texts run @ [ "" ]
+    (* The feed does not carry a receipt clock for every folded call. An
+       unknown duration stays blank; the record header owns the event age. *)
+    | [] | [ _ ] -> (
+        match tool.Acting.ct_duration_ms with
+        | Some ms -> [ Acting.elapsed_text ms ]
+        | None -> [ "" ])
+  in
+  let duration_text =
+    let room = max 0 (inner - age_cells - gap_cells - Layout.display_width named) in
+    match
+      List.find_opt
+        (fun text -> Layout.display_width text <= max 0 (room - gap_cells))
+        candidates
+    with
+    | Some text -> text
+    | None -> ""
+  in
+  let right = Layout.display_width duration_text + age_cells in
   let name_room = max 0 (inner - right - (if right > 0 then gap_cells else 0)) in
   fit_line ~cols
     (rail_span place
      :: (glyph :: dispatch_marks tool)
-     @ [ { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
+     @ [ { text = Layout.fit_width named name_room; tone = Plain }
        ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
-       ; duration
+       ; { text = duration_text; tone = Dim }
        ]
      @ age)
 
@@ -780,12 +854,6 @@ let calls_heading_line ~cols order responses =
        [ { text = String.make mark_cells ' '; tone = Plain }
        ; { text = "calls" ^ middle_dot ^ call_order_label order ^ count; tone = Dim }
        ])
-
-(* Text cut to [room] cells, the cut shown: a preview that ends mid-word
-   with no mark reads as the whole. *)
-let clip_cells text room =
-  if Layout.display_width text <= room then text
-  else Layout.take_cells text (max 0 (room - 1)) ^ ellipsis
 
 (* The mode and, in a batch, how many ran at once. Not the planned step:
    the list already shows the calls in receipt order, and the facts row has
@@ -907,7 +975,7 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
      that tool is out, and the clock is the call's own start.
    - Running keeper, no call out, [Marker_started] newest: the provider call
      is in flight, so the model has the turn.
-   - Idle keeper on a settled record: the turn is over, and the clock is how
+   - Idle keeper on a done record: the turn is over, and the clock is how
      long the keeper has been quiet.
 
    [None] everywhere else, and the header reads as it did before: the
@@ -957,7 +1025,7 @@ let focus_header_line ~cols ~now ~health name current =
       let clock =
         { text = middle_dot ^ last_event_text ~now current.Acting.ck_at; tone = Dim }
       in
-      (* A named turn is a settled one, since only a settle names it: the
+      (* A named turn is a done one, since only the end event names it: the
          number says what the word would, and the word pushed the clock off
          the row behind a sixteen-cell name. Every other record spells its
          state, the long form first, and gives that up before the clock. *)
@@ -1096,8 +1164,8 @@ let focus_rows input chunks name =
     | current :: earlier ->
         let state = record_state ~health current in
         let ordered = ordered_calls input.call_order (Acting.chunk_tools current) in
-        let call_rows (tool, place) =
-          Tool_row (current, tool, state, place)
+        let call_rows (tool, place, run) =
+          Tool_row (current, tool, state, place, run)
           ::
           (if is_expanded input ~keeper:name (Acting.call_key tool) then
              List.map
@@ -1123,7 +1191,34 @@ let focus_rows input chunks name =
                 groups
           | None -> List.map (fun tool -> (tool, Ungrouped)) ordered
         in
-        let calls = List.concat_map call_rows placed in
+        (* A run of the same tool is one row that counts it. A turn that
+           ran Execute five times drew five rows saying the same word, in a
+           pane whose whole list is about twenty rows; the row stands for
+           the run and presses the newest of them, and the Keeper Calls
+           surface ([t], or a press on an earlier turn) is where every call
+           is read one by one. *)
+        let runs =
+          let rec gather acc current = function
+            | [] -> List.rev (match current with [] -> acc | run -> List.rev run :: acc)
+            | ((tool, _) as entry) :: rest -> (
+                match current with
+                | ((previous, _) : Acting.chunk_tool * response_place) :: _
+                  when String.equal previous.Acting.ct_tool tool.Acting.ct_tool ->
+                    gather acc (entry :: current) rest
+                | [] -> gather acc [ entry ] rest
+                | run -> gather (List.rev run :: acc) [ entry ] rest)
+          in
+          gather [] [] placed
+        in
+        let calls =
+          List.concat_map
+            (fun run ->
+              match run with
+              | [] -> []
+              | (tool, place) :: _ ->
+                  call_rows (tool, place, List.map fst run))
+            runs
+        in
         (* A call-less record draws no body row: the header already states
            the observation state and its receipt age. The heading names the
            order only when there are calls in it. *)
@@ -1387,8 +1482,8 @@ let materialize_row ~cols input = function
   | Approval_row tool -> approval_line ~cols tool, Target_none
   | Calls_heading responses ->
       calls_heading_line ~cols input.call_order responses, Target_call_order
-  | Tool_row (chunk, tool, state, place) ->
-      ( tool_line ~cols ~now:input.now ~state ~place chunk tool
+  | Tool_row (chunk, tool, state, place, run) ->
+      ( tool_line ~cols ~now:input.now ~state ~place ~run chunk tool
       , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
   | Call_detail (chunk, tool, part) ->
       ( call_detail_line ~cols ~now:input.now tool part
@@ -1407,13 +1502,20 @@ let materialize_row ~cols input = function
    fixed columns the names can sit over them, which says what each one is
    once for the whole list instead of a glyph key the reader has to carry
    down every row. Built from the same widths, so a change to one moves both
-   the heading and the column under it. *)
+   the heading and the column under it.
+
+   The [calls] column carries a [+] on an open record ([16+]): the feed may
+   have started mid-turn, so the count is at least that many. The heading
+   cannot say so in five cells; the guide does. *)
 let legend ~cols =
   String.make (mark_cells + name_cells_for ~cols + gap_cells) ' '
   ^ pad_right state_cells "state"
-  ^ pad_right tool_cells "tool"
+  ^ pad_right (tool_cells_for ~cols) "tool"
   ^ pad_left calls_cells "calls"
-  ^ pad_left tokens_cells "tok/turn"
+  (* The figure is the turn's own tokens, in and out summed. "tok/turn"
+     read as a rate -- tokens per turn across turns -- which is not what any
+     row carries. *)
+  ^ pad_left tokens_cells "tokens"
 
 let next_target_row ~(targets : row_target array) ~row ~step =
   let count = Array.length targets in

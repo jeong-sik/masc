@@ -46,7 +46,12 @@ type provider_timeout =
 
 type t =
   | Provider_timeout of provider_timeout
-  | Not_provider_runtime_failure
+  | No_timeout_observed
+      (** No provider-runtime timeout was observed. The error may still be a
+          provider failure of another kind (repeated generation, rate limit,
+          quota, auth, an unavailable provider), an API or configuration
+          error, or a masc internal error: the wire code names which. This
+          classification answers the timeout question only. *)
 
 val classify_core_error : Agent_core.Error.t -> t
 

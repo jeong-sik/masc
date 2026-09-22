@@ -244,6 +244,40 @@ only while the pane has room to show. Below 110 columns it reports the width
 requirement and leaves the preference unchanged, so resizing wider cannot
 reveal a hidden toggle that had no visible effect when it was pressed.
 
+### The Activity pane
+
+`Ctrl-L` walks the pane on the right of every surface through narrow, wide
+and hidden. Its `[Recent]` tab is what each keeper is doing now, one row
+each:
+
+```
+ [Recent] Changes · 11 keepers (5 offline)
+                    state     tool          calls   tokens
+ ● ocaml-agent-ic   open      tool_execute    16+
+ ● pr-updater       done                        10   72.3k
+ ● jazz-developer   no events
+```
+
+The mark is the keeper's health, as on the roster. `state` is the record the
+feed has: `open` (no end event yet), `done`, `no end` (the process is gone,
+so no end will come), `approval` (waiting on you), or `no events`. An open
+record names the tool it is in and counts the calls seen *so far*, which is
+what the `+` says: the feed may have started mid-turn. A done record carries
+the turn's calls and its tokens, in and out summed. A name longer than its
+column is cut with `…`; the wide pane has cells for the ones that outgrow
+the narrow one. The header says the feed only when it is not delivering
+(`no feed`, `feed opening`, `feed closed: …`).
+
+Under a rule, the selected keeper's own record: its state and the age of its
+newest event, then its calls, newest first (`o` turns the order). A run of
+the same tool is one row that counts it and says what the calls took
+(`Execute ×5 · 2.7s 274ms 1.4s 2.9s 4.7s`, or their sum where that does not
+fit); the Keeper Calls surface (`t`) reads each call one by one. `Enter` or
+a press on a call opens its facts, input and output; on an earlier turn's
+row it opens that keeper's calls surface.
+
+The `Changes` tab lists the files this keeper's calls wrote, newest first.
+
 ## Surfaces
 
 ### Overview
@@ -368,6 +402,12 @@ names. A line that starts with `/` is a command for the TUI instead:
 - Any other `/word` is reported as unknown and sent nowhere - a mistyped
   command must not become an instruction the keeper acts on. Text that
   merely contains a slash later in the line is a message.
+
+A command's answer (the command list, a queue snapshot, a preset listing) is
+a row in the chat pane. A step of the operator's that did not work - a
+command missing its argument, `Ctrl-V` on a clipboard with no image, an image
+that would not open - is not part of the conversation: it reads on the
+footer for twelve seconds and stays in the event log.
 
 ### Keepers
 
@@ -614,19 +654,23 @@ when chat opened from detail.
 
 ```
  Message to: sangsu  ● active · running anthropic.claude-opus-5  (port 8935)
-   ► YOU · tui-019... ──────────────────────────────────────── 14:35:01
+   ► YOU ───────────────────────────────────────────────────── 14:35:01
      hello, how are you?
-   ● sangsu · tui-019... ───────────────────────────────────── 14:35:03
+   ● ───────────────────────────────────────────────────────── 14:35:03
+   │ ✓ Read a.ml
      ...reply text...
    > type here_
   Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
 ```
 
 That is the `metadata:full` heading (`Ctrl-F`): the speaker whole at the
-left, the request id after it, the clock at the right edge and a rule
-between. A later row from the same speaker draws only the rule and its
-clock. A row without a trustworthy time draws no clock and the rule runs to
-the edge.
+left, the clock at the right edge and a rule
+between. A heading opens a turn, not a block: the keeper's reasoning, tool
+calls and reply in one request share it, and a later minute of that turn
+draws only the rule and its clock. The pane's own keeper is not named on
+its headings, since the header already says whose chat it is; the operator,
+another keeper writing in, `STATUS` and `AUTO` still are. A row without a
+trustworthy time draws no clock and the rule runs to the edge.
 
 The header joins the selected Keeper's published status with its typed runtime
 phase and producer-owned canonical `runtime_id`, using the same roster reading
@@ -656,10 +700,15 @@ and emphasis keep their own hierarchy. Connector and agent origins remain in
 the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
 inferred from row position.
 
+A line someone else wrote -- another keeper, another person, a connector --
+steps in two cells and reads behind a solid bar in the sender's colour, where
+the journal's rows carry a dotted one. The operator's lines, the keeper's
+replies and its work rows stay at the conversation's edge.
+
 Chat opens with a short clock beside the speaker mark and label. The clock is
 drawn only where the minute moved, so a run of rows inside one minute leaves
 the column blank and keeps its width. `Ctrl-F` walks the axis: a full
-timestamp/request-id heading, then the bare clock-free gutter, then back. The
+timestamp heading, then the bare clock-free gutter, then back. The
 header names the two stops away from rest as `metadata:full` or
 `metadata:off`. A streaming
 row uses its actual start clock rather than the word `live`; the active-turn
@@ -703,11 +752,33 @@ output:` tail it used to carry is left out while the pane draws that text.
 A turn whose stream the TUI opened and lost is followed the same way.
 
 Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. The summary itself
-ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
+instead of reconstructing a summary from rendered prose. The footer's
+`Ctrl-N:journal` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
+
+A failed Librarian pass is not a row in summary mode. While the passes after
+the last commit keep failing, the header's second row names the run once, in
+every journal mode: `Librarian failing ×5 since 14:02:13 ·
+exact_execution_failure` - how many in a row, when the first was recorded,
+and the server's word for how the newest failed. The next commit ends it.
+`journal:full` still draws every failed pass as a row of its own.
+
+Under `journal:full` a committed revision draws its summary, then each fact
+in two columns: the sign and category at the left, padded to the revision's
+widest category, and the claim wrapped under itself. A blank row separates
+the facts; a pane too narrow for the claim column wraps the claim under its
+lead at the full width.
+
+```
+◈ JOURNAL  ┊ Librarian · revision 454 · +2 −1 · 63 retained
+           ┊
+           ┊ + lesson   verifier_exact cannot read the job log,
+           ┊            so ancestry alone never satisfies …
+           ┊
+           ┊ − blocker  pr-check.yml has no pnpm step …
+```
 
 The folded tool row retains exact outcome counts and ends with
 `Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
@@ -716,7 +787,24 @@ change view are discoverable from the row that owns it. The typed calls
 themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
-a mixed block does not collapse into an anonymous tool count. A held tool call
+a mixed block does not collapse into an anonymous tool count.
+
+A turn's Skill invocations are one block, like its tool calls. At rest it
+draws one row per skill, in the order each was first triggered, with how many
+times: `msx-observe ×7`. A trigger that failed, or whose evidence the pane
+could not read, adds that state's words (`prior-art ×2 · 실패 1`). `Ctrl-D`
+opens every invocation: how far it got (an instruction skill is `읽음`, a
+composition `실행됨`), the tool calls the server attributes to it, and its
+proof coordinates. An `Execute`
+call whose result reads as the output schema its descriptor declares draws
+`status` (`exit 0 · 808 ms`, `signal 9 · 30012 ms · timed out at 30 s`), the
+command's `output`, and any `stderr`. Output too large to ride inline is named
+by the artifact that holds it (`artifact sha256:9f3a12c4d5e6… · 48213 bytes`).
+Where the command ran and the sandbox around it are not drawn; a result that
+does not read is drawn as it arrived. A served `input` or `output` longer
+than eight lines keeps its first eight and closes on `… +N lines · Keeper
+Calls (t)`; one line over is drawn rather than folded. The Keeper Calls view
+(`t`) keeps the stored result whole. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.
@@ -950,8 +1038,8 @@ screen. Inside tmux the escapes are wrapped for passthrough, which also needs
 `allow-passthrough on` in the tmux config - that is the operator's setting and
 the TUI cannot check it.
 
-A path that cannot be read, or a file that is empty, is refused as a line in
-the pane. Nothing takes the screen to report a failure.
+A path that cannot be read, or a file that is empty, is refused on the
+footer. Nothing takes the screen to report a failure.
 
 #### Lines typed during a turn
 
@@ -1222,6 +1310,25 @@ what `Enter` opens.
   j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
 ```
 
+`a` starts a run from the list. It reads the presets from
+`GET /api/v1/runtime/config/fusion` and opens the same schema form the Lane
+Add-ons action uses: `keeper`, `preset`, `topology` and `web_tools` are
+Left/Right choices, `prompt` is typed, `Tab` walks the fields, `Ctrl-S` opens
+the review and `Enter` there posts
+`POST /api/v1/keepers/<keeper>/fusion`. `Esc` cancels. The Keeper starts on
+the one that owns the selected run, the preset on the configured
+`default_preset`, and the topology on `simple`; a Keeper outside the roster
+or a preset outside the configuration falls back to the first of each. A
+prompt that is blank after trimming does not leave the form. While the post
+is out the form takes no key, so a second `Enter` cannot start a second run.
+A refusal — a preset that cannot run the chosen topology, for instance —
+returns the server's own sentence above the form with the values intact; the
+form does not restate it. A request that goes unanswered says the run may
+have started anyway, because it may have. On success the list is read again
+and the cursor moves to the new run the first time the list carries it; a
+list read that was already in flight can answer without it, so the move waits
+for one that has it.
+
 The detail is a separate exact read. Lifecycle remains the Registry fact;
 evidence comes only from a Board post whose typed origin is
 `source=fusion` with the same `fusion_run_id`. The header repeats the current
@@ -1246,6 +1353,17 @@ cannot publish this evidence; an official-client panel is shown as
 `official_client_uninstrumented` instead of being misreported as “used no
 tools.” Older Board evidence has `Trace unavailable` rather than a fabricated
 empty ledger.
+
+`SEAT ROUTES` is the walk each seat took through its candidates, from the
+`seat_routes` array the sink writes. One line per seat names the route it was
+given and the runtime that answered — `panel/first · route panel-lane →
+answered by glm-4.6` — with every candidate that failed before that one
+indented under it as `<runtime>: <code> <detail>`. A seat no candidate
+answered says so. Seats are spelled as the tool ledger spells its actors:
+`panel/<panelist>` and `judge/<role>/<identity>`. Evidence recorded before
+seats were written carries no `seat_routes` key and draws no block, and the
+`EVIDENCE RECORDED` section keeps its number; with the block present it
+follows as section 6.
 
 `pending` is legal only while the Registry row is running. `absent` means the
 retained completed/failed run has no current Board projection; it does not
@@ -1449,10 +1567,23 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
-The Skill Usage pane shows each Keeper's invocation/delivery/action counts and
-the producer-recorded `last_used_at` value. If retained usage coverage has no
-time, it says `time unavailable`; it does not turn bounded evidence into a
-`never used` claim.
+The Skill Usage pane puts each Keeper on its own row under the skill, in
+columns: `TRIGGERED`, `DELIVERED`, `ACTIONS`, and when it last ran, in this
+terminal's zone like every other clock on the screen. If retained usage
+coverage has no time, the row says `time unavailable`; it does not turn
+bounded evidence into a `never used` claim.
+
+The effective surface lists a skill's name, kind and sizes; a composition
+also carries the shape of its plan (`nodes`, `batches`, `parallel`), which an
+instruction skill has none of. `why loaded` is drawn only when something
+other than the catalog chose the skill - a Keeper profile or a task - or when
+nothing accounts for it at all.
+
+The Skill activations pane reads as counts rather than as the ledger's field
+names: per scope, `triggered / delivered / handed off / actions` for
+instruction and composition, then what it served and which runtimes it ran
+on. The scope itself is the skill, its revision, its turn and its snapshot;
+the JSON encoding of the same reference is not drawn beside them.
 
 ### Runtime
 
@@ -1605,6 +1736,7 @@ Per surface:
 | Right / `Enter` | Schedules | Open schedule details |
 | Right / `Enter` | Planning | Open goal detail |
 | Right / `Enter` | Fusion | Open exact run evidence detail |
+| `a` | Fusion list | Open the launch form for a new run |
 | `[` / `]` | Changes | Previous / next Keeper |
 | Right / `Enter` | Changes | Open the selected recorded diff |
 | `v` | Changes | View the row's file on the Code surface, in the keeper's workspace |
@@ -1759,6 +1891,8 @@ Config Prompts labels whether the effective text comes from an override or the M
 Fusion lists full start dates. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
 
 Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+`a` on the list starts a run instead of following one, and the detail's `SEAT ROUTES` block names the runtime that answered each seat and the candidates that failed before it.
 
 ### Questions and Gate modes
 

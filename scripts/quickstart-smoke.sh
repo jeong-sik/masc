@@ -126,15 +126,7 @@ raw_token_file="$base_path/.masc/auth/quickstart-mcp-client.token"
 
 # shellcheck source=/dev/null
 source "$env_file"
-[[ "${MASC_OPERATOR_AGENT:-}" == "quickstart-mcp-client" ]] || {
-  echo "quickstart-smoke: wrong MASC_OPERATOR_AGENT" >&2
-  exit 1
-}
 [[ -n "${MASC_TOKEN:-}" ]] || { echo "quickstart-smoke: MASC_TOKEN is empty" >&2; exit 1; }
-[[ "${MASC_OPERATOR_TOKEN:-}" == "$MASC_TOKEN" ]] || {
-  echo "quickstart-smoke: operator and MCP bearer exports diverge" >&2
-  exit 1
-}
 [[ "$(<"$raw_token_file")" == "$MASC_TOKEN" ]] || {
   echo "quickstart-smoke: persisted and exported bearers diverge" >&2
   exit 1

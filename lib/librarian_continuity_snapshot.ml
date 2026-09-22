@@ -16,6 +16,7 @@ type t =
   ; last_atom_digest : string
   ; prefix_sha256 : string
   ; working_state : string
+  ; catch_up_end_atom : int option
   }
 
 type error =
@@ -68,12 +69,16 @@ let validate (snapshot : t) =
   then Error (Invalid_snapshot "digests must be canonical SHA256")
   else if String.trim snapshot.working_state = ""
   then Error (Invalid_snapshot "blank working_state")
-  else Ok snapshot
+  else
+    match snapshot.catch_up_end_atom with
+    | Some target when target <= snapshot.end_atom ->
+      Error (Invalid_snapshot "catch-up target is not past the snapshot's end")
+    | Some _ | None -> Ok snapshot
 ;;
 
 let to_json (snapshot : t) =
   `Assoc
-    [ "origin", `String (match snapshot.origin with Witnessed_history -> "witnessed_history" | Captured_checkpoint_prefix -> "captured_checkpoint_prefix")
+    ([ "origin", `String (match snapshot.origin with Witnessed_history -> "witnessed_history" | Captured_checkpoint_prefix -> "captured_checkpoint_prefix")
     ; "covering_end_atom", `Int snapshot.covering_end_atom
     ; "covering_last_atom_digest", `String snapshot.covering_last_atom_digest
     ; "trace_id", `String snapshot.trace_id
@@ -85,15 +90,28 @@ let to_json (snapshot : t) =
     ; "prefix_sha256", `String snapshot.prefix_sha256
     ; "working_state", `String snapshot.working_state
     ]
+    @ (match snapshot.catch_up_end_atom with
+       | Some target -> [ "catch_up_end_atom", `Int target ]
+       | None -> []))
 ;;
 
 let of_json = function
   | `Assoc fields ->
     let keys = ["origin"; "covering_end_atom"; "covering_last_atom_digest"; "trace_id"; "history_start_boundary_line"; "end_boundary_line"; "end_turn_ref"; "end_atom";
       "last_atom_digest"; "prefix_sha256"; "working_state"] in
-    if List.sort String.compare (List.map fst fields) <> List.sort String.compare keys
+    (* [catch_up_end_atom] is written only while a rewrite is catching up. *)
+    let catch_up_key = "catch_up_end_atom" in
+    let present = List.map fst fields in
+    let expected =
+      if List.mem catch_up_key present then catch_up_key :: keys else keys in
+    if List.sort String.compare present <> List.sort String.compare expected
     then Error (Invalid_snapshot "unexpected, duplicate or missing fields")
     else (
+      let* catch_up_end_atom =
+        match List.assoc_opt catch_up_key fields with
+        | None -> Ok None
+        | Some (`Int target) -> Ok (Some target)
+        | Some _ -> Error (Invalid_snapshot "catch-up target is not an integer") in
       let* origin = match List.assoc "origin" fields with
         | `String "witnessed_history" -> Ok Witnessed_history
         | `String "captured_checkpoint_prefix" -> Ok Captured_checkpoint_prefix
@@ -110,7 +128,7 @@ let of_json = function
       | `Int end_boundary_line, `String trace_id, `Int history_start_boundary_line, `Int end_atom,
         `String last_atom_digest, `String prefix_sha256, `String working_state ->
         validate { origin; covering_end_atom; covering_last_atom_digest; trace_id; history_start_boundary_line; end_boundary_line; end_turn_ref; end_atom;
-                   last_atom_digest; prefix_sha256; working_state }
+                   last_atom_digest; prefix_sha256; working_state; catch_up_end_atom }
       | _ -> Error (Invalid_snapshot "field type mismatch"))
   | _ -> Error (Invalid_snapshot "expected object")
 ;;
@@ -155,8 +173,12 @@ let prefix_sha256 messages range =
   |> fun messages -> Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List messages)) |> to_hex)
 ;;
 
-let capture_range ~origin ?end_atom ~trace_id ~lines ~messages ~working_state range =
+let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range =
   let end_atom = Option.value end_atom ~default:range.R.end_atom in
+  let catch_up_end_atom =
+    match catch_up_end_atom with
+    | Some target when target > end_atom -> Some target
+    | Some _ | None -> None in
   let* last_atom_digest =
     if end_atom < 1 || end_atom > range.end_atom then Error Uncovered_history
     else match Window.atom_opening_digest messages (end_atom - 1) with
@@ -185,17 +207,18 @@ let capture_range ~origin ?end_atom ~trace_id ~lines ~messages ~working_state ra
     ; last_atom_digest
     ; prefix_sha256 = prefix_sha256 messages {range with R.end_atom; last_atom_digest}
     ; working_state
+    ; catch_up_end_atom
     }
 ;;
 
 let capture ~trace_id ~lines ~messages ~working_state =
   let* range = source_range ~trace_id ~lines ~messages in
-  capture_range ~origin:Witnessed_history ~trace_id ~lines ~messages ~working_state range
+  capture_range ~origin:Witnessed_history ~catch_up_end_atom:None ~trace_id ~lines ~messages ~working_state range
 ;;
 
-let capture_checkpoint_prefix ?end_atom ~trace_id ~lines ~messages ~working_state () =
+let capture_checkpoint_prefix ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state () =
   let* range = checkpoint_prefix_range ~trace_id ~lines ~messages in
-  capture_range ~origin:Captured_checkpoint_prefix ?end_atom ~trace_id ~lines ~messages ~working_state range
+  capture_range ~origin:Captured_checkpoint_prefix ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range
 ;;
 
 let restore ~trace_id ~lines ~messages (snapshot : t) =

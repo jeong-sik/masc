@@ -125,6 +125,13 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-7-code"
+    ; api_name = "kimi-k2.7-code"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k3"
     ; api_name = "kimi-k3"
     ; context = 1048576
@@ -555,9 +562,10 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
     ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
-(* runtime id -> the OpenRouter wire id it dispatches. Twelve ids probed live
-   on 2026-09-10 (evidence/task-openrouter-support/PROBE-SUMMARY.md). The
-   generic binding test below already requires every seed runtime to resolve a
+(* runtime id -> the OpenRouter wire id it dispatches. The ids were probed
+   live on 2026-09-10 (evidence/task-openrouter-support/PROBE-SUMMARY.md) and
+   2026-09-22 (evidence/task-openrouter-new-models/SUMMARY.md). The generic
+   binding test below already requires every seed runtime to resolve a
    catalog row; what this pins is the OpenRouter-specific half the generic
    check cannot see. *)
 let openrouter_seed_runtimes =
@@ -574,6 +582,15 @@ let openrouter_seed_runtimes =
   ; "openrouter.openrouter-deepseek-v4-1-flash", "deepseek/deepseek-v4.1-flash"
   ; "openrouter.openrouter-deepseek-v4-pro", "deepseek/deepseek-v4-pro"
   ; "openrouter.openrouter-qwen3-8-max", "qwen/qwen3.8-max-0902"
+  ; "openrouter.openrouter-claude-fable-5-1", "anthropic/claude-fable-5.1"
+  ; "openrouter.openrouter-claude-haiku-4-5", "anthropic/claude-haiku-4.5"
+  ; "openrouter.openrouter-gpt-6-astra", "openai/gpt-6-astra"
+  ; "openrouter.openrouter-gpt-5-6-terra", "openai/gpt-5.6-terra"
+  ; "openrouter.openrouter-gpt-5-6-luna", "openai/gpt-5.6-luna"
+  ; "openrouter.openrouter-gemini-3-1-pro", "google/gemini-3.1-pro-preview"
+  ; "openrouter.openrouter-grok-4-7", "x-ai/grok-4.7"
+  ; "openrouter.openrouter-qwen3-8-flash", "qwen/qwen3.8-flash"
+  ; "openrouter.openrouter-glm-5-3-flashx", "z-ai/glm-5.3-flashx"
   ]
 
 let test_openrouter_seed_runtimes_are_dispatchable () =
@@ -3149,6 +3166,20 @@ let test_runtime_toml_rejects_non_positive_max_concurrent () =
            (String_util.contains_substring rendered "max-concurrent"))
     [ 0; -1 ]
 
+(* No official client anywhere, so a configured command stays as configured
+   ({!Runtime_official_cli_install.locate}); a case about the configuration
+   should not read this machine's ~/.local/bin. A blank CODEX_INSTALL_DIR
+   reads as unset, which is what the lookup asks. *)
+let without_an_installed_client f =
+  let home = Filename.temp_dir "masc-no-client-" "" in
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir home)
+    (fun () ->
+       Masc_test_deps.with_process_env "PATH" (Some "") (fun () ->
+         Masc_test_deps.with_process_env "HOME" (Some home) (fun () ->
+           Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" (Some "") f)))
+;;
+
 let with_temp_runtime_toml content f =
   let path = Filename.temp_file "runtime" ".toml" in
   let oc = open_out path in
@@ -4972,6 +5003,7 @@ let codex_app_server_runtime_toml ?credential ?(options = "") () =
 
 let test_codex_app_server_materializes_as_turn_runtime () =
   with_temp_runtime_toml (codex_app_server_runtime_toml ()) (fun path ->
+    without_an_installed_client @@ fun () ->
     match load_list_text ~config_path:path with
     | Error error -> failf "codex-app-server runtime should load: %s" error
     | Ok (runtimes, default, _, _, _) ->
@@ -4982,7 +5014,8 @@ let test_codex_app_server_materializes_as_turn_runtime () =
        | Runtime_execution.Claude_code _ ->
          fail "codex-app-server was incorrectly materialized as agent_core"
        | Runtime_execution.Codex_app_server config ->
-         check string "cli path" "codex" config.cli_path;
+         check string "cli path, as configured when no client is installed" "codex"
+           config.cli_path;
          check (option string) "model" (Some "gpt-5.6-sol") config.model
        | Runtime_execution.Antigravity_cli _ ->
          fail "codex-app-server was incorrectly materialized as antigravity-cli"))
@@ -5062,6 +5095,7 @@ let test_antigravity_cli_materializes_typed_process_options () =
        ~options
        ())
     (fun path ->
+       without_an_installed_client @@ fun () ->
        match load_list_text ~config_path:path with
        | Error error -> failf "antigravity-cli runtime should load: %s" error
        | Ok (runtimes, default, _, _, _) ->
@@ -5069,7 +5103,8 @@ let test_antigravity_cli_materializes_typed_process_options () =
          check string "default id" "antigravity.gemini" default.id;
          (match default.execution with
           | Runtime_execution.Antigravity_cli config ->
-            check string "cli path" "agy" config.cli_path;
+            check string "cli path, as configured when no client is installed" "agy"
+              config.cli_path;
             check string "model" "gemini-3.6-flash-high" config.model;
             check (option string) "agent" (Some "fixture-agent") config.agent;
             check bool

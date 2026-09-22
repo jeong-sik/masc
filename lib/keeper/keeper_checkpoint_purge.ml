@@ -4,18 +4,13 @@
    from the first line to the last. *)
 
 type config =
-  { dup_threshold : int
-  ; keep_recent_messages : int
+  { keep_recent_messages : int
   ; strip_thinking : bool
   ; clear_tool_results : bool
   }
 
 let default_config =
-  { dup_threshold = 3
-  ; keep_recent_messages = 20
-  ; strip_thinking = true
-  ; clear_tool_results = true
-  }
+  { keep_recent_messages = 20; strip_thinking = true; clear_tool_results = true }
 ;;
 
 type rebase =
@@ -46,8 +41,8 @@ type refusal =
 let refusal_to_string = function
   | Unread_atoms_present { end_atom; atom_count } ->
     Printf.sprintf
-      "the Librarian has read %d of %d atoms; the unread ones have no place in \
-       the rewritten history"
+      "the Librarian has read %d of %d atoms; the rewrite would clear tool output \
+       and reasoning in atoms it has not read yet"
       end_atom
       atom_count
   | Position_beyond_history { end_atom; atom_count } ->
@@ -70,9 +65,13 @@ let refusal_to_string = function
     "checkpoint position invariant violated: " ^ detail
 ;;
 
-let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id ~before ~after =
+(* The position a rewrite of [before] moves, or why it must not move one:
+   none without a position, and otherwise the position only when it is in
+   this trace and at [before]'s end, digest and all. The rebase and a
+   recovery's cut ask this one question. *)
+let position_at_end ~(progress : Keeper_librarian_progress.t option) ~trace_id ~before =
   match progress with
-  | None -> Ok No_progress
+  | None -> Ok None
   | Some progress ->
     if not (String.equal progress.position.trace_id trace_id)
     then Error (Position_in_other_trace progress.position.trace_id)
@@ -92,27 +91,7 @@ let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id 
           Error
             (Position_in_other_history
                { held = progress.position.last_atom_digest; history = history_digest })
-        else (
-          match Keeper_turn_boundaries.position_of_messages after with
-          | Error detail -> Error (Position_unreadable detail)
-          | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
-            Ok
-              (Rebased
-                 { before = progress
-                 ; after =
-                     { progress with
-                       position = { progress.position with end_atom; last_atom_digest }
-                     }
-                 })
-          | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
-          | Ok Keeper_turn_boundaries.No_atom_history ->
-            Error
-              (Position_invariant_violation
-                 "position_of_messages(after) answered no_atom_history")
-          | Ok Keeper_turn_boundaries.Stale_noop ->
-            Error
-              (Position_invariant_violation
-                 "position_of_messages(after) answered stale_noop"))
+        else Ok (Some progress)
       | Ok Keeper_turn_boundaries.Empty_atom_history ->
         Error (Unread_atoms_present { end_atom = progress.position.end_atom; atom_count = 0 })
       | Ok Keeper_turn_boundaries.No_atom_history ->
@@ -125,6 +104,33 @@ let librarian_rebase ~(progress : Keeper_librarian_progress.t option) ~trace_id 
              "position_of_messages(before) answered stale_noop"))
 ;;
 
+let librarian_rebase ~progress ~trace_id ~before ~after =
+  match position_at_end ~progress ~trace_id ~before with
+  | Error refusal -> Error refusal
+  | Ok None -> Ok No_progress
+  | Ok (Some (progress : Keeper_librarian_progress.t)) ->
+    (match Keeper_turn_boundaries.position_of_messages after with
+     | Error detail -> Error (Position_unreadable detail)
+     | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
+       Ok
+         (Rebased
+            { before = progress
+            ; after =
+                { progress with
+                  position = { progress.position with end_atom; last_atom_digest }
+                }
+            })
+     | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
+     | Ok Keeper_turn_boundaries.No_atom_history ->
+       Error
+         (Position_invariant_violation
+            "position_of_messages(after) answered no_atom_history")
+     | Ok Keeper_turn_boundaries.Stale_noop ->
+       Error
+         (Position_invariant_violation
+            "position_of_messages(after) answered stale_noop"))
+;;
+
 let cleared_tool_result_content =
   "[old tool result content cleared by keeper checkpoint purge]"
 ;;
@@ -132,9 +138,7 @@ let cleared_tool_result_content =
 type report =
   { messages_before : int
   ; messages_after : int
-  ; duplicates_dropped : int
   ; reasoning_blocks_stripped : int
-  ; reasoning_messages_dropped : int
   ; tool_results_cleared : int
   ; messages_dropped_at_structural_break : int
   }
@@ -143,6 +147,39 @@ type purge_error =
   | Invalid_config of string
   | Invalid_input_structure of Keeper_transcript_unit.structural_error
   | Invalid_output_structure of Keeper_transcript_unit.structural_error
+  | Atom_count_changed of
+      { before : int
+      ; after : int
+      }
+  | Kept_atom_rewritten of { atom : int }
+  | Continuity_no_longer_fits of Librarian_continuity_snapshot.error
+  | Recovery_end_unwitnessed of { boundary_lines_seen : int }
+
+let purge_error_to_string = function
+  | Invalid_config detail -> "invalid config: " ^ detail
+  | Invalid_input_structure structural ->
+    Keeper_transcript_unit.show_structural_error structural
+  | Invalid_output_structure structural ->
+    "purge produced invalid structure: "
+    ^ Keeper_transcript_unit.show_structural_error structural
+  | Atom_count_changed { before; after } ->
+    Printf.sprintf "purge changed the atom count (%d -> %d)" before after
+  | Kept_atom_rewritten { atom } ->
+    Printf.sprintf
+      "purge rewrote the message opening atom %d, which the history's end or a \
+       turn-boundary line names"
+      atom
+  | Continuity_no_longer_fits error ->
+    "the Librarian working state fits the history before the purge and not after it: "
+    ^ Librarian_continuity_snapshot.error_to_string error
+  | Recovery_end_unwitnessed { boundary_lines_seen } ->
+    Printf.sprintf
+      "recovery drops the history from its structural break on, and none of the %d \
+       turn-boundary lines the Librarian position has counted names an end ahead \
+       of the break; the position would stand on no line and the Librarian would \
+       stop there, so the keeper's Librarian files need a purge"
+      boundary_lines_seen
+;;
 
 (* One purge work item: an ordinary message or a whole closed tool cycle.
    [flat_last] is the index of the item's last message in the original list,
@@ -152,30 +189,17 @@ type item =
   ; flat_last : int
   }
 
-let is_text_only (message : Agent_core.Types.message) =
-  (match message.role with
-   | Agent_core.Types.User | Agent_core.Types.Assistant -> true
-   | Agent_core.Types.System | Agent_core.Types.Tool -> false)
-  && Option.is_none message.tool_call_id
-  && message.content <> []
-  && List.for_all
-       (function
-         | Agent_core.Types.Text _ -> true
-         | _ -> false)
-       message.content
-;;
-
 let is_assistant (message : Agent_core.Types.message) =
   match message.role with
   | Agent_core.Types.Assistant -> true
   | Agent_core.Types.User | Agent_core.Types.System | Agent_core.Types.Tool -> false
 ;;
 
-(* R2: remove unsigned reasoning blocks. Signed thinking and
+(* Reasoning strip: remove unsigned reasoning blocks. Signed thinking and
    [RedactedThinking] replay byte-exact on tool turns and are kept — that
    distinction lives in the match below, which is the whole safety argument.
 
-   R2 originally also skipped any assistant message carrying a ToolUse
+   The strip originally also skipped any assistant message carrying a ToolUse
    (#25537). That outer guard had no rationale of its own: the commit message
    justified it with "providers replay [signed thinking] byte-exact", which the
    [signature = None] pattern already enforces per block. On an agentic keeper
@@ -199,7 +223,7 @@ let strip_reasoning_blocks (message : Agent_core.Types.message) =
   { message with Agent_core.Types.content = List.rev kept }, stripped
 ;;
 
-(* R3: replace a SUCCESSFUL tool result's payload with the fixed marker while
+(* Tool-result clear: replace a SUCCESSFUL tool result's payload with the fixed marker while
    keeping the [tool_use_id] pairing and the typed delivery outcome.
    Failed results ([Tool_failed]) are exempt: their payload is the feedback
    the keeper reads on later turns and the only lesson evidence the librarian
@@ -234,60 +258,125 @@ let clear_tool_result_blocks (message : Agent_core.Types.message) =
   { message with Agent_core.Types.content }, !cleared_count
 ;;
 
-(* An item after R2/R3: its surviving messages ([] when R2 emptied and
-   dropped it) and, when it is an unprotected text-only ordinary message, the
-   R1 grouping key over its full derived representation. *)
-type transformed_item =
-  { messages : Agent_core.Types.message list
-  ; dedup_key : string option
-  }
+type boundary_line =
+  int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result
 
-(* R1 bookkeeping: positions (item indices) of duplicate-eligible items,
-   grouped by their transformed representation. *)
-let duplicate_positions_to_drop ~dup_threshold transformed_items =
-  let groups : (string, int list) Hashtbl.t = Hashtbl.create 64 in
-  List.iteri
-    (fun position transformed ->
-       match transformed.dedup_key with
-       | Some key ->
-         let positions =
-           (* DET-OK: Hashtbl accumulator — an absent key is the empty group
-              by construction, not unknown input collapsed to a default. *)
-           Option.value ~default:[] (Hashtbl.find_opt groups key)
-         in
-         Hashtbl.replace groups key (position :: positions)
-       | None -> ())
-    transformed_items;
-  let dropped = Hashtbl.create 64 in
-  Hashtbl.iter
-    (fun _key positions ->
-       if List.length positions >= dup_threshold
-       then (
-         (* [positions] is in reverse traversal order: the head is the last
-            occurrence. Keep the first and last occurrence; drop the middle. *)
-         match positions with
-         | _last :: rest ->
-           (match List.rev rest with
-            | _first :: middle ->
-              List.iter
-                (fun position -> Hashtbl.replace dropped position ())
-                middle
-            | [] -> ())
-         | [] -> ()))
-    groups;
-  dropped
+(* The atom each completed turn of [trace_id] ended on, [end_atom - 1]: its
+   turn-boundary line holds the digest of that atom's opening message, and
+   the request front, the Librarian's range and its witness lookup all find
+   the line by that digest. A line that cannot be read names nothing anyone
+   can match, so it adds nothing to keep. *)
+let atoms_named_by_boundaries ~trace_id (lines : boundary_line list) =
+  List.filter_map
+    (fun ((_line, decoded) : boundary_line) ->
+       match decoded with
+       | Error (_ : Keeper_turn_boundaries.read_error) -> None
+       | Ok record ->
+         (match Keeper_turn_boundaries.atom_position_stated ~trace_id record with
+          | Some (_turn_ref, end_atom, _digest) when end_atom >= 1 -> Some (end_atom - 1)
+          | Some _ | None -> None))
+    lines
 ;;
 
-let purge_messages ~config messages =
-  if config.dup_threshold < 2
-  then
-    Error
-      (Invalid_config
-         (Printf.sprintf
-            "dup_threshold must be >= 2 (got %d): every group keeps its first \
-             and last occurrence"
-            config.dup_threshold))
-  else if config.keep_recent_messages < 0
+(* The reasoning strip over one assistant message, never emptying it. A
+   message whose only content is unsigned reasoning opens an atom; removing it
+   would renumber every atom after it (goo-yang-bong, 2026-09-22), and
+   stripping it to nothing would leave an assistant message no provider
+   accepts. It stays as it was. *)
+let strip_reasoning_keeping_the_message message =
+  let stripped, count = strip_reasoning_blocks message in
+  match stripped.Agent_core.Types.content with
+  | [] -> message, 0
+  | _ :: _ -> stripped, count
+;;
+
+(* The closed units a recovery keeps. The break and everything after it go,
+   so the history's end moves, and a position the rebase moves
+   ({!position_at_end}: in this trace and at the history's end) moves with
+   it. The Librarian reads from a position only when a line it has counted
+   states it ({!Keeper_turn_boundaries.witness_line}), so the recovered
+   history ends at the last unit where such a line does: a turn end the
+   position has taken in. The position is at the history's end, so what is
+   cut between that turn end and the break is in atoms the Librarian has
+   read. A position the rebase refuses is not moved, and the history ends at
+   the break so that the rebase's refusal is the one reported; without a
+   position it ends there too.
+
+   [annotate] numbers atoms in one pass from the front, so a prefix holds the
+   atoms and openers the whole history gives it; one labelling prices every
+   unit boundary, and the one kept is checked again on its own messages. *)
+let recovered_units ~trace_id ~boundary_lines ~progress ~messages closed_prefix =
+  match position_at_end ~progress ~trace_id ~before:messages with
+  | Ok None | Error (_ : refusal) -> Ok closed_prefix
+  | Ok (Some { Keeper_librarian_progress.position = _; boundary_lines_seen }) ->
+    let stated ~end_atom ~last_atom_digest =
+      Option.is_some
+        (Keeper_turn_boundaries.witness_line
+           ~through:boundary_lines_seen
+           ~trace_id
+           ~end_atom
+           ~last_atom_digest
+           boundary_lines)
+    in
+    let messages_of units =
+      List.concat_map Keeper_transcript_unit.messages_of_closed_unit units
+    in
+    let units = Array.of_list closed_prefix in
+    let ahead_of_break = messages_of closed_prefix in
+    let labelled, _atom_count = Runtime_model_input_tail_window.annotate ahead_of_break in
+    let opening_digest =
+      Runtime_model_input_tail_window.atom_opening_digest ahead_of_break
+    in
+    (* [atoms_through.(m)]: the atoms the first [m] messages hold. *)
+    let atoms_through = Array.make (List.length ahead_of_break + 1) 0 in
+    List.iteri
+      (fun index (_message, label) ->
+         atoms_through.(index + 1)
+         <- (match label with
+             | Runtime_model_input_tail_window.Atom atom ->
+               max atoms_through.(index) (atom + 1)
+             | Runtime_model_input_tail_window.Pinned -> atoms_through.(index)))
+      labelled;
+    (* [messages_through.(u)]: the messages the first [u] units hold. *)
+    let messages_through = Array.make (Array.length units + 1) 0 in
+    Array.iteri
+      (fun index unit_ ->
+         messages_through.(index + 1)
+         <- messages_through.(index)
+            + List.length (Keeper_transcript_unit.messages_of_closed_unit unit_))
+      units;
+    let stated_at unit_count =
+      let end_atom = atoms_through.(messages_through.(unit_count)) in
+      end_atom >= 1
+      && (match opening_digest (end_atom - 1) with
+          | Some last_atom_digest -> stated ~end_atom ~last_atom_digest
+          | None -> false)
+    in
+    let rec last_stated unit_count =
+      if unit_count = 0
+      then None
+      else if stated_at unit_count
+      then Some unit_count
+      else last_stated (unit_count - 1)
+    in
+    let unwitnessed = Error (Recovery_end_unwitnessed { boundary_lines_seen }) in
+    match last_stated (Array.length units) with
+    | None -> unwitnessed
+    | Some unit_count ->
+      let kept = Array.to_list (Array.sub units 0 unit_count) in
+      (match Keeper_turn_boundaries.position_of_messages (messages_of kept) with
+       | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest })
+         when stated ~end_atom ~last_atom_digest -> Ok kept
+       | Ok
+           ( Keeper_turn_boundaries.Atom_history _
+           | Keeper_turn_boundaries.Empty_atom_history
+           | Keeper_turn_boundaries.No_atom_history
+           | Keeper_turn_boundaries.Stale_noop )
+       | Error (_ : string) -> unwitnessed)
+;;
+
+let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messages =
+  if config.keep_recent_messages < 0
   then
     Error
       (Invalid_config
@@ -315,139 +404,214 @@ let purge_messages ~config messages =
     match Keeper_transcript_unit.partition ~quarantine:recovering messages with
     | Error structural -> Error (Invalid_input_structure structural)
     | Ok { closed_prefix; protected_suffix } ->
-      (* On a sound input the suffix is the open tail crash recovery needs, and
-         it is kept. On a broken one it starts at the break. *)
-      let dropped_at_break =
-        if recovering then List.length protected_suffix else 0
-      in
-      let protected_suffix = if recovering then [] else protected_suffix in
-      let messages_before = List.length messages in
-      let items =
-        let flat_index = ref (-1) in
-        List.map
-          (fun unit_ ->
-             let unit_messages = Keeper_transcript_unit.messages_of_closed_unit unit_ in
-             flat_index := !flat_index + List.length unit_messages;
-             { unit_; flat_last = !flat_index })
-          closed_prefix
-      in
-      let protected_from = messages_before - config.keep_recent_messages in
-      let protected item = item.flat_last >= protected_from in
-      let reasoning_blocks_stripped = ref 0 in
-      let reasoning_messages_dropped = ref 0 in
-      let tool_results_cleared = ref 0 in
-      (* R2/R3 run before R1: stripping reasoning can turn previously
-         distinct assistant messages byte-identical, and only the stripped
-         form participates in duplicate grouping. This ordering is what makes
-         a single pass a fixpoint (verified by the idempotence test; measured
-         on the same checkpoint, R1-first left 229 duplicates for a second
-         pass to find). *)
-      let dedup_key_of message =
-        if is_text_only message
-        then Some (Agent_core.Types.show_message message)
-        else None
-      in
-      let purge_item item =
-        if protected item
-        then
-          { messages = Keeper_transcript_unit.messages_of_closed_unit item.unit_
-          ; dedup_key = None
-          }
-        else (
-          match item.unit_ with
-          | Keeper_transcript_unit.Ordinary_message message ->
+      (match
+         if recovering
+         then recovered_units ~trace_id ~boundary_lines ~progress ~messages closed_prefix
+         else Ok closed_prefix
+       with
+       | Error error -> Error error
+       | Ok closed_prefix ->
+        (* On a sound input the suffix is the open tail crash recovery needs,
+           and it is kept. On a broken one it starts at the break. *)
+        let protected_suffix = if recovering then [] else protected_suffix in
+        let messages_before = List.length messages in
+        (* The history the output keeps: all of it, or on a recovery the closed
+           units {!recovered_units} keeps. Atoms are counted on this history,
+           so a recovery keeps the last atom it returns, not one it drops. *)
+        let retained =
+          if recovering
+          then List.concat_map Keeper_transcript_unit.messages_of_closed_unit closed_prefix
+          else messages
+        in
+        let dropped_at_break = messages_before - List.length retained in
+        let labelled, atom_count = Runtime_model_input_tail_window.annotate retained in
+        let opener_of_atom = Array.make atom_count None in
+        List.iteri
+          (fun index (_message, label) ->
+             match label with
+             | Runtime_model_input_tail_window.Atom atom ->
+               (match opener_of_atom.(atom) with
+                | None -> opener_of_atom.(atom) <- Some index
+                | Some _ -> ())
+             | Runtime_model_input_tail_window.Pinned -> ())
+          labelled;
+        (* The atoms whose opening message is kept byte-exact, because a record
+           names each by that message's digest: the last atom, which every
+           position at the history's end names, and the atom each completed
+           turn ended on, which its boundary line names. Everything else may be
+           rewritten; none of it is removed. *)
+        let kept_atoms =
+          (if atom_count > 0 then [ atom_count - 1 ] else [])
+          @ List.filter
+              (fun atom -> atom < atom_count)
+              (atoms_named_by_boundaries ~trace_id boundary_lines)
+          |> List.sort_uniq Int.compare
+        in
+        let kept_message = Array.make (List.length retained) false in
+        List.iter
+          (fun atom ->
+             Option.iter (fun index -> kept_message.(index) <- true) opener_of_atom.(atom))
+          kept_atoms;
+        (* A continuity snapshot that fits this history holds a digest of the
+           bytes of the atoms it covers, and once caught up it is the request's
+           front: the turn sends its working state in place of those atoms.
+           Rewritten, the snapshot would stop fitting ([Prefix_changed]) and the
+           Librarian would write a working state again, from atom 0 and one
+           completed turn per round, and each request until it caught up would
+           carry no working state; a snapshot still catching up would start
+           over. So everything ahead of its end stays byte-exact. A snapshot
+           that does not fit is written again from atom 0 whatever the purge
+           does, so it holds nothing back. *)
+        let fitting_continuity =
+          match continuity with
+          | None -> None
+          | Some snapshot ->
+            (match
+               Librarian_continuity_snapshot.restore
+                 ~trace_id
+                 ~lines:boundary_lines
+                 ~messages
+                 snapshot
+             with
+             | Ok _ -> Some snapshot
+             | Error _ -> None)
+        in
+        Option.iter
+          (fun (snapshot : Librarian_continuity_snapshot.t) ->
+             let covered_until =
+               match
+                 if snapshot.end_atom < atom_count
+                 then opener_of_atom.(snapshot.end_atom)
+                 else None
+               with
+               | Some opener -> opener
+               | None -> List.length retained
+             in
+             for index = 0 to covered_until - 1 do
+               kept_message.(index) <- true
+             done)
+          fitting_continuity;
+        let items =
+          let flat_index = ref (-1) in
+          List.map
+            (fun unit_ ->
+               let unit_messages = Keeper_transcript_unit.messages_of_closed_unit unit_ in
+               flat_index := !flat_index + List.length unit_messages;
+               { unit_; flat_last = !flat_index })
+            closed_prefix
+        in
+        (* The last atom goes out whole along with the count-based tail. A turn
+           that ends in more tool messages than [keep_recent_messages] puts its
+           opening assistant message outside the count-based tail; this reaches
+           it. The tail is counted on [retained], the history this returns and
+           the one [flat_last] indexes: a recovery's dropped tail is not in it. *)
+        let protected_from =
+          let count_based = List.length retained - config.keep_recent_messages in
+          match if atom_count > 0 then opener_of_atom.(atom_count - 1) else None with
+          | Some opener -> min count_based opener
+          | None -> count_based
+        in
+        let protected item = item.flat_last >= protected_from in
+        let reasoning_blocks_stripped = ref 0 in
+        let tool_results_cleared = ref 0 in
+        let rewrite ~in_cycle index message =
+          if kept_message.(index)
+          then message
+          else (
+            let message =
+              if in_cycle && config.clear_tool_results
+              then (
+                let cleared_message, cleared = clear_tool_result_blocks message in
+                tool_results_cleared := !tool_results_cleared + cleared;
+                cleared_message)
+              else message
+            in
             if config.strip_thinking && is_assistant message
             then (
-              let stripped_message, stripped = strip_reasoning_blocks message in
+              let kept, stripped = strip_reasoning_keeping_the_message message in
               reasoning_blocks_stripped := !reasoning_blocks_stripped + stripped;
-              match stripped_message.Agent_core.Types.content with
-              | [] ->
-                incr reasoning_messages_dropped;
-                { messages = []; dedup_key = None }
-              | _ :: _ ->
-                { messages = [ stripped_message ]
-                ; dedup_key = dedup_key_of stripped_message
-                })
-            else { messages = [ message ]; dedup_key = dedup_key_of message }
-          | Keeper_transcript_unit.Closed_tool_cycle cycle_messages ->
-            let cycle_messages =
-              if config.clear_tool_results
-              then
-                List.map
-                  (fun message ->
-                     let cleared_message, cleared =
-                       clear_tool_result_blocks message
-                     in
-                     tool_results_cleared := !tool_results_cleared + cleared;
-                     cleared_message)
-                  cycle_messages
-              else cycle_messages
+              kept)
+            else message)
+        in
+        let purge_item item =
+          let unit_messages = Keeper_transcript_unit.messages_of_closed_unit item.unit_ in
+          if protected item
+          then unit_messages
+          else (
+            (* The reasoning strip reaches into a tool cycle too: the assistant
+               message that opens one is grouped here, never in
+               [Ordinary_message], so without it unsigned reasoning on tool turns
+               would survive a full purge. *)
+            let in_cycle =
+              match item.unit_ with
+              | Keeper_transcript_unit.Ordinary_message _ -> false
+              | Keeper_transcript_unit.Closed_tool_cycle _ -> true
             in
-            (* R2 inside the cycle. The assistant message that OPENS a tool
-               cycle is grouped here, never in [Ordinary_message], so before
-               this branch existed R2 could not reach it at all — the single
-               largest reason unsigned reasoning survived a full purge.
-               The opening ToolUse and matching ToolResult anchors always
-               survive. An interstitial assistant message containing only
-               unsigned reasoning has no anchor, so it can be removed without
-               breaking the indivisible ToolUse/ToolResult pair. *)
-            let cycle_messages =
-              if config.strip_thinking
-              then
-                List.filter_map
-                  (fun message ->
-                     if not (is_assistant message)
-                     then Some message
-                     else (
-                       let stripped, count = strip_reasoning_blocks message in
-                       match stripped.Agent_core.Types.content with
-                       | [] when count > 0 ->
-                         reasoning_blocks_stripped
-                         := !reasoning_blocks_stripped + count;
-                         incr reasoning_messages_dropped;
-                         None
-                       | [] -> Some stripped
-                       | _ :: _ ->
-                         reasoning_blocks_stripped
-                         := !reasoning_blocks_stripped + count;
-                         Some stripped))
-                  cycle_messages
-              else cycle_messages
-            in
-            { messages = cycle_messages; dedup_key = None })
-      in
-      let transformed_items = List.map purge_item items in
-      let dropped_positions =
-        duplicate_positions_to_drop
-          ~dup_threshold:config.dup_threshold
-          transformed_items
-      in
-      let duplicates_dropped = Hashtbl.length dropped_positions in
-      let purged_prefix =
-        List.concat
-          (List.filteri
-             (fun position _item -> not (Hashtbl.mem dropped_positions position))
-             transformed_items
-           |> List.map (fun transformed -> transformed.messages))
-      in
-      let purged = purged_prefix @ protected_suffix in
-      (match Keeper_transcript_unit.validate purged with
-       | Error structural -> Error (Invalid_output_structure structural)
-       | Ok () ->
-         Ok
-           ( purged
-           , { messages_before
-             ; messages_after = List.length purged
-             ; duplicates_dropped
-             ; reasoning_blocks_stripped = !reasoning_blocks_stripped
-             ; reasoning_messages_dropped = !reasoning_messages_dropped
-             ; tool_results_cleared = !tool_results_cleared
-             ; messages_dropped_at_structural_break = dropped_at_break
-             } )))
+            let first = item.flat_last - List.length unit_messages + 1 in
+            List.mapi
+              (fun offset message -> rewrite ~in_cycle (first + offset) message)
+              unit_messages)
+        in
+        let purged = List.concat_map purge_item items @ protected_suffix in
+        (* The rules above keep every atom, every kept opener and a fitting
+           snapshot's bytes; this states it rather than trusting them to go on
+           doing so. *)
+        let kept_atoms_intact () =
+          let _labelled, purged_atom_count =
+            Runtime_model_input_tail_window.annotate purged
+          in
+          if purged_atom_count <> atom_count
+          then Error (Atom_count_changed { before = atom_count; after = purged_atom_count })
+          else (
+            let before = Runtime_model_input_tail_window.atom_opening_digest retained in
+            let after = Runtime_model_input_tail_window.atom_opening_digest purged in
+            match
+              List.find_opt
+                (fun atom -> not (Option.equal String.equal (before atom) (after atom)))
+                kept_atoms
+            with
+            | Some atom -> Error (Kept_atom_rewritten { atom })
+            | None ->
+              (match fitting_continuity with
+               | None -> Ok ()
+               | Some snapshot ->
+                 (match
+                    Librarian_continuity_snapshot.restore
+                      ~trace_id
+                      ~lines:boundary_lines
+                      ~messages:purged
+                      snapshot
+                  with
+                  | Ok _ -> Ok ()
+                  | Error error -> Error (Continuity_no_longer_fits error))))
+        in
+        (match Keeper_transcript_unit.validate purged with
+         | Error structural -> Error (Invalid_output_structure structural)
+         | Ok () ->
+           (match kept_atoms_intact () with
+            | Error _ as error -> error
+            | Ok () ->
+              Ok
+                ( purged
+                , { messages_before
+                  ; messages_after = List.length purged
+                  ; reasoning_blocks_stripped = !reasoning_blocks_stripped
+                  ; tool_results_cleared = !tool_results_cleared
+                  ; messages_dropped_at_structural_break = dropped_at_break
+                  } )))))
 ;;
 
-let purge ~config (ckpt : Agent_core.Checkpoint.t) =
-  match purge_messages ~config ckpt.messages with
+let purge
+      ~config
+      ~trace_id
+      ~boundary_lines
+      ~continuity
+      ~progress
+      (ckpt : Agent_core.Checkpoint.t)
+  =
+  match
+    purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress ckpt.messages
+  with
   | Error error -> Error error
   | Ok (messages, report) ->
     Ok ({ ckpt with Agent_core.Checkpoint.messages }, report)

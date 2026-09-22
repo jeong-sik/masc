@@ -4820,7 +4820,14 @@ let test_access_failover_preserves_effect_and_caller_authority () =
 
 let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
   let cases =
-    (access_error_from_http 400, ["first"])
+    (* #37631 changed [attempt_rejected_should_try_next] to rotate on
+       [Unknown_invalid_request] (the reason [classify_error] assigns a flat,
+       non-JSON HTTP 400 body such as this fixture's) so the lane walk can
+       advance past a candidate that rejected the request without a
+       machine-readable reason. This case exercised that exact reason and
+       expected it to stay terminal; #37631 updated its own census test but
+       missed this one. *)
+    (access_error_from_http 400, ["first"; "last"])
     :: (Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
           (Runtime_codex_app_server.Invalid_config "bad path"), ["first"])
     :: List.map (fun (_, error) -> error, ["first"; "last"])

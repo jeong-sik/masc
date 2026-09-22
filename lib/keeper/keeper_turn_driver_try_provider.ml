@@ -816,8 +816,8 @@ let compose_carried_model_input
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
   (* A front whose index this history does not open with the same message
-     names no atom of it: the history is shorter than the front, or atoms
-     before the front were purged. The request starts over as with no front
+     names no atom of it: the history is shorter than the front, or a purge
+     rewrote the message that opens it. The request starts over as with no front
      rather than carrying the newest atom alone from a position that would
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)

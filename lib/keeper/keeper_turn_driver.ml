@@ -1616,12 +1616,11 @@ let run_named
                    | Librarian_continuity_snapshot.History_changed
                    | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
                 (* The snapshot no longer fits this history. The Librarian's
-                   durable position may still: a purge renumbers the atoms and
-                   moves that position with them (Keeper_checkpoint_purge) but
-                   leaves the snapshot in the old numbering, which is how a
-                   keeper came to send its 12,720 atoms, 16.4 MB, 44 cycles in
-                   a row (goo-yang-bong, 2026-09-22). From the position the
-                   request carries what the Librarian has not read (RFC
+                   durable position may still: goo-yang-bong's did on
+                   2026-09-22 while its snapshot did not, and the keeper sent
+                   its 12,720 atoms, 16.4 MB, 44 cycles in a row until the
+                   position was used. From the position the request carries
+                   what the Librarian has not read (RFC
                    keeper-context-window-in-tokens §13.6); with no position it
                    starts at this turn's own boundary (§13.4). *)
                 absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)

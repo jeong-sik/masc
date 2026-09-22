@@ -35,10 +35,10 @@
     A position is an atom index and the digest of the message that opens
     that atom. Keeping the count is not enough: a completed turn usually ends
     on an assistant reply, the reasoning strip rewrites it, and the turn's
-    boundary line would stop matching. The request front of a keeper with no
-    Librarian working state starts at the last completed turn that still
-    matches, and at the oldest atom when none does. So these stay
-    byte-exact:
+    boundary line would stop matching. With no working state that fits and
+    no Librarian position that matches, the request front starts at the last
+    completed turn that still matches, and at the oldest atom when none does.
+    So these stay byte-exact:
     - the last atom, returned whole along with the tail. Every position at
       the history's end names it, the Librarian position included: a rewrite
       requires that position at the end ({!librarian_rebase}).

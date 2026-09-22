@@ -146,11 +146,16 @@ let rendered_source_bytes ~facts ~invalidations =
    continuity round publishes nothing this process can read, and a health
    request that waited for one would show nothing for a keeper whose round
    has not run since boot. *)
-let continuity_unread_atoms ~keepers_dir ~keeper_id saved =
+(* The read position lives under the runtime keepers dir, one folder per
+   keeper, while the journal and the snapshots this handler otherwise reads
+   are flat files under the config keepers dir. Both parameters were called
+   [keepers_dir], so passing the wrong one read nothing and every lag came
+   back as "cannot say". The name here says which root it is. *)
+let continuity_unread_atoms ~runtime_keepers_dir ~keeper_id saved =
   match (saved : Keeper_continuity_observation.frontier option) with
   | None -> None
   | Some frontier ->
-    (match Keeper_librarian_progress.read ~keepers_dir ~keeper_id with
+    (match Keeper_librarian_progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id with
      | Ok (Some { Keeper_librarian_progress.position = { trace_id; end_atom; _ }; _ })
        when String.equal trace_id frontier.Keeper_continuity_observation.trace_id
             && end_atom >= frontier.Keeper_continuity_observation.end_atom ->
@@ -185,7 +190,10 @@ let librarian_health ~config ~keepers_dir keeper_id ~snapshot ~continuity_saved 
       Option.bind measurement (fun (m : Keeper_librarian_queue_refresh.measurement) ->
         Option.map (fun (u : Keeper_librarian_durable_consumer.unread) -> u.official) m.unread)
   ; continuity_unread_atoms =
-      continuity_unread_atoms ~keepers_dir ~keeper_id:keeper_id continuity_saved
+      continuity_unread_atoms
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_id
+        continuity_saved
   ; last_success_at
   ; last_failure_kind
   }

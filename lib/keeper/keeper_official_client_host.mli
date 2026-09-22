@@ -249,9 +249,9 @@ type carried_start =
     ({!Keeper_turn_driver_try_provider.librarian_position}). The choice is
     made once per turn for every lane
     ({!Keeper_turn_driver_try_provider.continuity_for_request}); this lane
-    only applies it. A seed is checked against this history on its own
-    ([Keeper_carried_front.for_history]), so a Librarian position that does
-    not fit says nothing about it. *)
+    only applies it. A position the messages no longer hold is not a value
+    of this type but an error from the reader ({!librarian_front_reader}),
+    and the lane refuses the request with it before any seed is weighed. *)
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
 type librarian_front_reader =

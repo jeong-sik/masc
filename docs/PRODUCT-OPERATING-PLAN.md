@@ -6,7 +6,7 @@ status: live
 
 > Current package version: v0.36.0
 > Latest changelog entry: v0.36.0 (2026-09-22)
-> Latest published GitHub release: v0.35.22 (2026-09-22)
+> Latest published GitHub release: v0.36.0 (2026-09-22)
 > Updated: 2026-09-22
 > Release line: pre-1.0 (`0.y.z`)
 

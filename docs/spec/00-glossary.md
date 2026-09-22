@@ -147,6 +147,16 @@ status: reference
   합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
   않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
 
+**Caller Scope**
+: 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값
+  (`Caller_scope.t`, `Event_envelope.caller_scope`). Agent Core는 그대로 나르기만 하고
+  내용을 읽지 않으며, 빈 값은 scope가 아니고 거부된다. 무엇을 뜻하는지는 handle을 만든
+  쪽만 정한다. Keeper는 이 scope에 자기 Keeper turn id를 실어, 한 turn이 낸 여러 provider
+  호출의 event를 그 turn에 귀속시킨다(`Keeper_turn_scope`). 위의 Usage Scope(토큰 집계
+  범위)와 이름이 겹치지만 다른 축이다.
+  → [Caller_scope](../../packages/agent_core/lib/caller_scope.mli),
+  [Keeper_turn_scope](../../lib/keeper/keeper_turn_scope.mli)
+
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)

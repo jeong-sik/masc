@@ -2306,7 +2306,10 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   in
   let slots_result =
     match Otoml.find_opt tbl Fun.id [ "slots" ] with
-    | None -> Error (error (path ^ ".slots") "exact-output lane slots is required")
+    (* Absent reads as empty, the same as [cli_slots] below. The lane's rule is
+       one slot across the two lists, refused further down; requiring the key
+       on top of that only made a CLI-only lane carry an empty one. *)
+    | None -> Ok []
     | Some value ->
       (try Ok (Otoml.get_array Otoml.get_string value) with
        | Otoml.Type_error msg ->

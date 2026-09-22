@@ -1224,6 +1224,21 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
      "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = []\ncli_slots = []\n" with
    | Error _ -> ()
    | Ok _ -> fail "a lane without HTTP or CLI slots must be rejected");
+  let cli_only_without_slots =
+    "[runtime.exact_output_lanes.hitl_auto_judge]\ncli_slots = [\"codex.codex\"]\n"
+  in
+  (match Runtime_toml.parse_string cli_only_without_slots with
+   | Ok config ->
+     (match config.Runtime_schema.exact_output_lane_decls with
+      | [ lane ] ->
+        check (list string) "absent slots means no HTTP slot" [] lane.slot_ids;
+        check (list string) "the CLI slot stands alone" [ "codex.codex" ]
+          lane.cli_slot_ids
+      | _ -> fail "exactly one CLI-only lane must parse")
+   | Error _ -> fail "a lane that declares only cli_slots must parse");
+  (match Runtime_toml.parse_string "[runtime.exact_output_lanes.hitl_auto_judge]\n" with
+   | Error _ -> ()
+   | Ok _ -> fail "a lane table that declares neither list must be rejected");
   let absent = "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [\"slot-a\"]\n" in
   (match Runtime_toml.parse_string absent with
    | Error _ -> fail "a lane without cli_slots must parse"

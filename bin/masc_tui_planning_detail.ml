@@ -177,10 +177,13 @@ let subject_column = 18
    preview, a keeper's is its event summary -- none of them identify the row on
    their own, which is why the pane read as a list of statuses with nothing
    attached. A summary that only repeats the title adds nothing and is
-   dropped. *)
-let headline (event : Tui_decode.goal_timeline_event) =
+   dropped, and so is one that repeats the subject column beside it: a goal's
+   own creation event carries its kind in both, and the row read
+   "goal_created  Goal Event \xc2\xb7 goal_created". *)
+let headline ~subject (event : Tui_decode.goal_timeline_event) =
   let title = String.trim event.gt_title in
   let summary = String.trim event.gt_summary in
+  let summary = if String.equal summary subject then "" else summary in
   if String.equal summary "" || String.equal summary title then title
   else if String.equal title "" then summary
   else title ^ "  \xc2\xb7 " ^ summary
@@ -203,10 +206,11 @@ let timeline ~width ~goal_id
             List.concat_map
               (fun (event : Tui_decode.goal_timeline_event) ->
                 let tone = severity_tone event.gt_severity in
+                let subject = subject event in
                 wrapped ~width tone
                   (Printf.sprintf "  %s  %s  %s" (short_ts event.gt_ts)
-                     (Message_layout.fit_width (subject event) subject_column)
-                     (headline event)))
+                     (Message_layout.fit_width subject subject_column)
+                     (headline ~subject event)))
               events
         | Ok (Tui_decode.Goal_timeline_unavailable detail) ->
             wrapped ~width Unreadable ("  timeline unavailable: " ^ detail)

@@ -43,7 +43,11 @@ val session_id_of_headers : (string * string) list -> (string, string) result
 
 (** The [agent_core:*] event family, by [event_type]. A type the server
     named and this build was not taught keeps its name rather than being
-    dropped, so a new event draws as itself instead of vanishing. *)
+    dropped, so a new event draws as itself instead of vanishing.
+
+    A run that ended carries how long it ran, and a failed one the error's
+    code and text, read from the payload with {!Sse_event.Json}'s readers -- the
+    contract the bridge writes it with. *)
 type agent_core_kind =
   | Tool_called
   | Tool_completed
@@ -51,9 +55,9 @@ type agent_core_kind =
   | Turn_ready
   | Turn_completed
   | Agent_started
-  | Agent_completed
-  | Agent_failed
-  | Agent_yielded
+  | Agent_completed of { elapsed_s : float }
+  | Agent_failed of { elapsed_s : float; error_code : string; error : string }
+  | Agent_yielded of { elapsed_s : float }
   | Tool_approval_completed
   | Telemetry
   | Agent_core_other of string

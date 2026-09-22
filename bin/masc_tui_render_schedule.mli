@@ -232,6 +232,9 @@ val system_log_row :
 
 type verification_row_values = {
   vrow_task : string;
+  vrow_verdict : string;
+      (** Which verdict the row waits on: [complete], [cancel], or nothing
+          when the server did not join the backlog. *)
   vrow_submitted_by : string;
   vrow_evidence : string;
   vrow_title : string;

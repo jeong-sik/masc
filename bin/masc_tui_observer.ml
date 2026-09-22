@@ -40,9 +40,9 @@ type agent_core_kind =
   | Turn_ready
   | Turn_completed
   | Agent_started
-  | Agent_completed
-  | Agent_failed
-  | Agent_yielded
+  | Agent_completed of { elapsed_s : float }
+  | Agent_failed of { elapsed_s : float; error_code : string; error : string }
+  | Agent_yielded of { elapsed_s : float }
   | Tool_approval_completed
   | Telemetry
   | Agent_core_other of string
@@ -225,19 +225,44 @@ let optional_int_field fields name ~event =
   | Some (`Int value) -> Ok (Some value)
   | Some _ -> Error (Printf.sprintf "%s carries a non-integer %s" event name)
 
-let agent_core_kind_of_event_type = function
-  | "tool_called" -> Tool_called
-  | "tool_completed" -> Tool_completed
-  | "turn_started" -> Turn_started
-  | "turn_ready" -> Turn_ready
-  | "turn_completed" -> Turn_completed
-  | "agent_started" -> Agent_started
-  | "agent_completed" -> Agent_completed
-  | "agent_failed" -> Agent_failed
-  | "agent_yielded" -> Agent_yielded
-  | "tool_approval_completed" -> Tool_approval_completed
-  | "telemetry_event" -> Telemetry
-  | other -> Agent_core_other other
+(* A lifecycle payload read with the generated reader of the contract the
+   bridge wrote it with. A payload that does not satisfy it is a frame this
+   build cannot read, and is said so rather than drawn without its numbers. *)
+let read_payload ~event_type reader payload =
+  match reader (Yojson.Safe.to_string (`Assoc payload)) with
+  | value -> Ok value
+  | exception (Atdgen_runtime.Oj_run.Error detail | Yojson.Json_error detail) ->
+      Error (Printf.sprintf "%s payload: %s" event_type detail)
+
+let agent_core_kind ~event_type payload =
+  match event_type with
+  | "tool_called" -> Ok Tool_called
+  | "tool_completed" -> Ok Tool_completed
+  | "turn_started" -> Ok Turn_started
+  | "turn_ready" -> Ok Turn_ready
+  | "turn_completed" -> Ok Turn_completed
+  | "agent_started" -> Ok Agent_started
+  | "agent_completed" ->
+      Result.map
+        (fun (p : Sse_event.Types.agent_completed_payload) ->
+          Agent_completed { elapsed_s = p.elapsed_s })
+        (read_payload ~event_type Sse_event.Json.agent_completed_payload_of_string
+           payload)
+  | "agent_failed" ->
+      Result.map
+        (fun (p : Sse_event.Types.agent_failed_payload) ->
+          Agent_failed
+            { elapsed_s = p.elapsed_s; error_code = p.error_code; error = p.error })
+        (read_payload ~event_type Sse_event.Json.agent_failed_payload_of_string payload)
+  | "agent_yielded" ->
+      Result.map
+        (fun (p : Sse_event.Types.agent_yielded_payload) ->
+          Agent_yielded { elapsed_s = p.elapsed_s })
+        (read_payload ~event_type Sse_event.Json.agent_yielded_payload_of_string
+           payload)
+  | "tool_approval_completed" -> Ok Tool_approval_completed
+  | "telemetry_event" -> Ok Telemetry
+  | other -> Ok (Agent_core_other other)
 
 let ( let* ) = Result.bind
 
@@ -261,9 +286,10 @@ let decode_agent_core ~type_name fields =
     | Some index, Some size -> Some (index, size)
     | _, _ -> None
   in
+  let* kind = agent_core_kind ~event_type payload in
   Ok
     (Agent_core
-       { kind = agent_core_kind_of_event_type event_type
+       { kind
        ; agent
        ; tool = string_field fields "tool_name"
        ; task = string_field fields "task_id"

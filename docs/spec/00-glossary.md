@@ -357,6 +357,18 @@ status: reference
   `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
+**Keeper Health Reading (Keeper 건강 판독)**
+: Keepers 명단이 한 Keeper의 상태를 읽는 닫힌 네 값(`Tui_decode.keeper_health_reading`).
+  `Health_running`(Phase Running이고 turn이 하나 이상 기록됨)·`Health_idle`(Phase
+  Running, 아직 turn 없음)·`Health_failing`(Phase Failing — keepalive는 turn을 계속
+  돌리지만 그 turn들이 실패한다)·`Health_offline`(keepalive가 돌지 않아 turn을 받지
+  못함). 좁은 칸은 글자 대신 mark 하나로 그린다 — `●` healthy·`!` failing·`·` idle·
+  `×` offline, 그리고 사람이 멈춘 `○` paused와 명단을 읽지 못한 `-` unread. mark는
+  health label 문자열이 아니라 이 variant를 match해 고르므로, 새 health 어휘가
+  생기면 조용히 healthy로 읽히는 대신 컴파일 오류가 난다.
+  → [masc_tui_keeper_mark.mli](../../bin/masc_tui_keeper_mark.mli),
+  [tui_decode.mli](../../lib/tui_decode.mli)
+
 **Reasoning Effort (추론 노력)**
 : OpenAI 호환 wire가 싣는 추론 노력의 정규 typed 값. `Reasoning_effort.t`가
   유일한 SSOT이고 일곱 단계다 — `None_`·`Minimal`·`Low`·`Medium`·`High`·
@@ -531,6 +543,21 @@ status: reference
   `Fusion_delivery_projector`다.
   → [Fusion_delivery_obligation](../../lib/fusion/fusion_delivery_obligation.mli)
 
+**Fusion Run Failure Code (Fusion 실행 실패 코드)**
+: Fusion 실행 목록의 STATE 칸이 실패한 실행에 그리는 코드. 서버가 실행을 `Failed` 로
+  종결할 때 적는 `failure_code` 이고, 두 닫힌 집합 중 하나에서 온다 — 심판 종합이
+  실패하면 `Fusion_core.Fusion_types.judge_failure_tag` 가 돌려주는 열 이름
+  (`timeout`·`provider_error`·`empty_response`·`empty_result`·`build_error`·`parse_error`·
+  `panels_unavailable`·`unknown_route`·`route_unavailable`·`internal_error`), 전달이
+  실패하면 `Fusion_sink.delivery_failure_code` 가 닫힌 합 `delivery_failure`(생성자 여섯:
+  `Computation_failed`·`Lost`·`Cancelled`·`Persistence_failed`·`Evidence_unavailable`·
+  `Evidence_unreadable`)에서 파생해 돌려주는 문자열 여섯(`computation_failed`·`lost`·
+  `cancelled`·`persistence_failed`·`evidence_unavailable`·`evidence_unreadable`)이다.
+  코드는 문장이 아니라 tag 이고, 서버가 쓰는 가장 넓은 값이 `evidence_unavailable` 이라
+  STATE 칸은 스무 칸이다. 전체 오류 문장은 고른 실행의 줄에 남는다.
+  → [Fusion_core.Fusion_types.judge_failure_tag](../../lib/fusion_core/fusion_types.mli),
+  [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
+
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
@@ -564,6 +591,15 @@ status: reference
   `AwaitingVerification` 이 되고 새 Verification ID 를 받는다. 판정을 기다리는 Task 는
   claim 한도에 세지 않는다. Producer 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
   바뀐다.
+
+**Verification Intent (검증 의도)**
+: 제출이 판정자에게 요청하는 종류의 닫힌 두 값(`Types_core.verification_intent`). wire
+  이름은 `complete`(`Complete_task`)와 `cancel`(`Cancel_task`)이고,
+  `verification_intent_of_string`은 다른 이름을 어느 쪽으로도 기본값 처리하지 않고
+  거절한다. 완료 제출과 취소 요청은 같은 대기열에서 같은 판정자를 기다리므로, 대시보드
+  검증 대기열 행은 자기가 어느 쪽을 기다리는지 이 값으로 밝힌다. 어느 쪽이든 승인·반려는
+  Verdict 가 정한다.
+  → [Types_core](../../lib/types/types_core.mli)
 
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
@@ -630,6 +666,17 @@ status: reference
   `Keeper_skill_activation_ledger`는 결과 전달(`delivery`)과 이후 모델이 고른
   도구 호출(`actions`)을 별도로 붙인다. 이후 호출이 있다는 사실만으로 Skill이
   그 행동의 원인이었거나 작업을 성공시켰다고 판정하지 않는다.
+
+**Skill State (Skill 상태)**
+: 로그가 Skill 행 하나에 적는 닫힌 여덟 값(`Masc_tui_keeper_chat_transcript.skill_state`).
+  `keeper_skill` 호출이 성공했다는 사실은 본문이 실렸다는 뜻일 뿐, 제공자가 그것을
+  받았거나(delivered) 이후 도구가 그 Skill을 썼다는(used) 뜻이 아니다 — 그래서 상태가
+  그 셋을 나눠 적는다. 생애 순서는 `Skill_calling` → `Skill_served_pending` →
+  `Skill_served_only` → `Skill_delivered` → `Skill_used` 이고, 나머지 셋(`Skill_failed`·
+  `Skill_evidence_missing`·`Skill_evidence_unavailable`)은 그 생애의 걸음이 아니라 증거가
+  실패·부재·형식 불일치인 경우를 말한다. Instruction Skill 은 읽고 Composition Skill 은
+  자기 이름의 도구로 실행하므로, 앞 세 상태의 문구가 "읽음"과 "실행됨"으로 갈린다.
+  → [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli)
 
 ## Repository Execution
 

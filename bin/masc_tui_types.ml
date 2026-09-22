@@ -9984,10 +9984,15 @@ let keeper_message_activity_rows (state : state) =
   | None -> []
   | Some keeper_name ->
     let working = working_chat_for_keeper state keeper_name in
+    (* By execution, the test the in-flight rows above the band apply
+       ([render_keeper_message]'s [live_request_id]): a request bound into the
+       live request's batch is the live row's to draw, and asking by request
+       id here drew it twice -- the band's "in progress" beside the live
+       row's WAITING TO START for the same execution. *)
     let live_draws entry =
       match state.msg_live with
       | Some live ->
-        String.equal (turn_log_request_id live) entry.sent_request.request_id
+        String.equal (turn_log_execution_id live) (turn_log_execution_id entry.log)
       | None -> false
     in
     let activity = match working with
@@ -9998,18 +10003,14 @@ let keeper_message_activity_rows (state : state) =
               " · "
               ^ Masc_tui_keeper_chat_projection.terminal_safe_text
                   (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
-              ^ " · in progress" } ]
+              ^ " · in progress"
+          ; keys = "" } ]
       | None ->
-        let rows =
-          Masc_tui_answering.chat_activity ~frame:state.activity_frame
-            ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-            ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
-            state.keeper_turns
-        in
-        (match keeper_observed_stop_hint state, rows with
-         | Some hint, first :: rest ->
-           { first with Masc_tui_answering.rest = first.Masc_tui_answering.rest ^ hint } :: rest
-         | Some _, [] | None, _ -> rows)
+        Masc_tui_answering.chat_activity ~frame:state.activity_frame
+          ?stop_keys:(keeper_observed_stop_hint state)
+          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+          ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
+          state.keeper_turns
     in
     let waiting_items = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
@@ -10018,7 +10019,7 @@ let keeper_message_activity_rows (state : state) =
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
       state.keeper_interactive_waiting in
-    let plain text = { Masc_tui_answering.lead = text; rest = "" } in
+    let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []

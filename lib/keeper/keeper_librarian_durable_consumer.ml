@@ -1079,8 +1079,6 @@ let commit_with_runtime
   =
   let committed = ref false in
   Keeper_librarian_runtime.run_best_effort
-    ~trigger:Keeper_librarian_runtime.Durable_range
-    ~input_projection:Keeper_librarian_runtime.Already_selected_range
     ~on_memory_committed:(fun () -> committed := true)
     ?durable_range_id:range_id
     ?official_range_id

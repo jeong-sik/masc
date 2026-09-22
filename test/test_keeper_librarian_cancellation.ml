@@ -134,7 +134,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
     Eio.Cancel.sub (fun cc ->
       Eio.Promise.resolve set_cancel_context cc;
       try
-        Runtime.run_best_effort ~trigger:Runtime.Queue_changed
+        Runtime.run_best_effort
           ~on_memory_committed:(fun () -> memory_committed := true)
           ~base_path ~keepers_dir ~keeper_id
           ~expected_revision:(Some seeded.revision) input
@@ -239,7 +239,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
    | Second_judgment | After_commit | After_completion ->
      let successor_committed = ref false in
      let successor = Eio.Fiber.fork_promise ~sw (fun () ->
-       Runtime.run_best_effort ~trigger:Runtime.Queue_changed
+       Runtime.run_best_effort
          ~on_memory_committed:(fun () -> successor_committed := true)
          ~base_path ~keepers_dir ~keeper_id
          ~expected_revision:(Some seeded.revision) input) in

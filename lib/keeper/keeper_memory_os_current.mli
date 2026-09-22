@@ -146,7 +146,6 @@ type journal_entry =
       ; kind : librarian_failure_kind
       ; detail : string
       ; snapshot_present : bool
-      ; cadence_deferred : bool
       }
   | Journal_quarantined of
       { recorded_at : float
@@ -193,7 +192,6 @@ val append_librarian_failure :
   -> kind:librarian_failure_kind
   -> detail:string
   -> snapshot_present:bool
-  -> cadence_deferred:bool
   -> unit
 
 (** Last [limit] journal lines, oldest first, one result per line. A line this

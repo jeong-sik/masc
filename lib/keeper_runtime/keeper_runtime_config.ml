@@ -525,10 +525,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_int Env_config_keeper.KeeperMetrics.max_file_bytes
        | "MASC_KEEPER_METRICS_MAX_ROTATED" ->
          display_int Env_config_keeper.KeeperMetrics.max_rotated_files
-       | "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS" ->
-         display_int (Env_config_keeper.KeeperMemoryOs.librarian_cadence_turns ())
-       | "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" ->
-         display_int (Env_config_keeper.KeeperMemoryOs.librarian_max_messages ())
        | "MASC_KEEPER_MEMORY_OS_RECALL" ->
          display_bool (Env_config_keeper.KeeperMemoryOs.recall_enabled ())
        | "MASC_KEEPER_MEMORY_OS_LIBRARIAN" ->

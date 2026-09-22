@@ -435,6 +435,29 @@ status: reference
   요청할 수 없다. 이 요청 정책은 도구를 실행할 때의 동시성이나
   spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
+**Identity Row State (Identity 행 상태)**
+: Identity 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값(`Masc_tui_types.identity_row_state`).
+  `Identity_not_attached`(선언이 없거나 도구 목록이 `None` — 한 번도 붙지 않음)·
+  `Identity_attached_without_tools`(붙었으나 제공하는 도구가 빈 목록)·
+  `Identity_switch_unreadable`(스위치 저장소를 읽지 못함)·`Identity_switched_off`(운영자가
+  껐음)·`Identity_attached of int`(붙었고 도구 n개). 우선순위가 있다 — 아무것도 제공하지
+  않는 서비스는 스위치가 무엇이라 말하든 그렇게 말하고, 읽지 못한 스위치는 스위치 값보다,
+  스위치 값은 도구 수보다 앞선다. 운영자가 꺼 둔 서비스는 catalog가 도구를 아무리 많이
+  이름 대도 이 Keeper에게 아무것도 주지 않는다. 행과 그 위 요약 줄이 이 한 함수를 읽으므로
+  둘이 어긋날 수 없다. 요약 줄은 `attached`·`switched off`·`attached with no tools`·
+  `with an unreadable switch`를 센다.
+  → [masc_tui_types.ml](../../bin/masc_tui_types.ml)
+
+**Detail State (상세 상태)**
+: 상세를 가진 판의 바인딩이 어느 상태에서 응답하는지의 닫힌 세 값
+  (`Masc_tui_keys.detail_state`). `Either`(두 상태 모두 — 기본)·`List_only`(상세가 닫혀
+  있을 때만)·`Detail_only`(상세가 열려 있을 때만). 상세를 가진 판은 한 푸터로 두 상태를
+  그리므로, 이 축이 없으면 화면에서 안 먹는 키를 정확히 하나 광고한다 — 상세가 열린 뒤의
+  `Right / Enter`, 닫힌 동안의 `[ / ]`. 푸터는 `~detail_open`으로 자기 상태를 말하고,
+  그 인자를 빠뜨린 판은 예전처럼 모든 바인딩을 광고한다. `has_detail_scoped_keys`가
+  그런 판을 잡는다.
+  → [masc_tui_keys.mli](../../bin/masc_tui_keys.mli)
+
 ## Collaboration State
 
 **Board**

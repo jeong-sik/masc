@@ -377,6 +377,8 @@ let move_identity_cursor (state : state) ~delta =
               Masc_tui_scroll.ensure_visible
                 ~cursor:
                   (Masc_tui_types.identity_provider_line
+                     ~summary:
+                       (Masc_tui_types.identity_summary ~providers ~query)
                      ~notice:
                        (Masc_tui_types.identity_notice
                           ~cols:(identity_pane_columns state)

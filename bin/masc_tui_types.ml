@@ -2228,6 +2228,79 @@ let identity_connectable ?(query = "") providers =
       | Identity_unreadable _ -> None)
     providers
 
+(** What the Identity pane says about one service.
+
+    The rows and the summary above them read this one function, so the line
+    and the list cannot disagree about what this Keeper holds. *)
+type identity_row_state =
+  | Identity_not_attached
+  | Identity_attached_without_tools
+  | Identity_switch_unreadable
+  | Identity_switched_off
+  | Identity_attached of int  (** how many tools it offers *)
+
+(* The pane's precedence: a service offering nothing says so whatever its
+   switch says, then a switch that cannot be read outranks the switch's
+   value, which outranks the tool count -- a service an operator turned off
+   hands this Keeper nothing, however many tools its catalog names. *)
+let identity_row_state ~providers ~id =
+  let readings =
+    List.find_map
+      (function
+        | Identity_declared { idp_id; idp_tools; idp_enabled; idp_switch_problem; _ }
+          when String.equal idp_id id ->
+          Some (idp_tools, idp_enabled, idp_switch_problem)
+        | Identity_declared _ | Identity_unreadable _ -> None)
+      providers
+  in
+  match readings with
+  | None | Some (None, _, _) -> Identity_not_attached
+  | Some (Some [], _, _) -> Identity_attached_without_tools
+  | Some (Some _, _, Some _) -> Identity_switch_unreadable
+  | Some (Some _, Some false, None) -> Identity_switched_off
+  | Some (Some tools, (Some true | None), None) ->
+    Identity_attached (List.length tools)
+
+(** The line above the provider list: how many services it draws, out of how
+    many this Keeper has, and what the drawn ones report. The states a row
+    already spells one by one are summed here only where one holds: a pane of
+    nothing but unattached services says so by having no tally to print. *)
+let identity_summary ~providers ~query =
+  let shown = identity_connectable ~query providers in
+  let total = List.length (identity_connectable ~query:"" providers) in
+  let states =
+    List.map (fun (id, _) -> identity_row_state ~providers ~id) shown
+  in
+  let count wanted =
+    List.length (List.filter (fun state -> state = wanted) states)
+  in
+  let attached =
+    List.length
+      (List.filter
+         (function Identity_attached _ -> true | _ -> false)
+         states)
+  in
+  let parts =
+    List.filter_map
+      (fun (label, n) ->
+        if n > 0 then Some (Masc_tui_message_layout.count_noun n label) else None)
+      [ ("attached", attached)
+      ; ("switched off", count Identity_switched_off)
+      ; ("attached with no tools", count Identity_attached_without_tools)
+      ; ("with an unreadable switch", count Identity_switch_unreadable)
+      ]
+  in
+  let drawn = List.length shown in
+  let head =
+    if drawn = total then Masc_tui_message_layout.count_noun total "service"
+    else
+      Printf.sprintf "%d of %s" drawn
+        (Masc_tui_message_layout.count_noun total "service")
+  in
+  match parts with
+  | [] -> "  " ^ head
+  | parts -> "  " ^ head ^ " \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts
+
 (** The lines the Identity pane prints above the provider rows.
 
     Here rather than in the renderer because the key handler has to know how
@@ -2323,10 +2396,10 @@ let identity_filter_rows ~providers filter =
    before the hint starts, so the title is cut inside "Automation" and the
    keys are never drawn. Until that row is fixed this sentence is the only
    place an operator can read them -- #35539. *)
-let identity_preamble ~keeper ~notice =
+let identity_preamble ~keeper ~summary ~notice =
   ("  Move with arrows, enter to connect " ^ keeper
    ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
-  :: "" :: notice
+  :: summary :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -2334,8 +2407,8 @@ let identity_preamble ~keeper ~notice =
     just made belongs where the operator is looking rather than below
     fifty-odd rows they would have to scroll past. It moves the list down,
     so the row a keypress scrolls to moves with it. *)
-let identity_provider_line ~notice ~index =
-  List.length (identity_preamble ~keeper:"" ~notice) + index
+let identity_provider_line ~summary ~notice ~index =
+  List.length (identity_preamble ~keeper:"" ~summary ~notice) + index
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no

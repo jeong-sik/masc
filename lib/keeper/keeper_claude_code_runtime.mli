@@ -123,14 +123,17 @@ val run :
     in the messages it is handed
     ({!Keeper_turn_driver_try_provider.librarian_position}): a fitting working
     state, carried in place of the atoms before it, or the Librarian's read
-    position alone, with nothing carried for the atoms before it. It wins when it is at or past
-    the seed that holds, or the ceiling's cut when no seed holds, so the range
-    never moves back behind either; [turn_start] is not weighed against it,
-    since it is where a range with no absorbed point begins. The request can
-    still grow
-    by the working state, which the declared ceiling has already cut around
-    before this lane composes. A reader error refuses the request, as the
-    same check refuses an Agent Core request.
+    position alone, with nothing carried for the atoms before it. It wins
+    when it is at or past the seed that holds, or the ceiling's cut when no
+    seed holds, so the range never moves back behind either; [turn_start] is
+    not weighed against it, since it is where a range with no absorbed point
+    begins. The ceiling cuts before the working state is known, so a range
+    that carries one is windowed once more at the declared max-prompt-bytes:
+    atoms in front of the working state go until it fits, the working state
+    stays, and a ceiling that the pinned messages and the newest atom alone
+    do not fit refuses the request, as Antigravity's window does. A reader
+    error refuses the request, as the same check refuses an Agent Core
+    request.
 
     [on_carried_front] receives the front the range started from and the
     range's bytes in the canonical encoding, once per composition that cut a

@@ -34,6 +34,7 @@ function makeEntry(
     context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
     librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
+      continuity_unread_atoms: 0,
       last_success_at: null, last_failure_kind: null },
     librarian_failures: 0,
     vision_ingest_errors: 0,
@@ -87,6 +88,8 @@ function makeResponse(
       source_invalidations: 0,
       source_snapshot_bytes: 0,
       librarian_unread_turns: 0,
+      librarian_continuity_unread_atoms: 0,
+      librarian_continuity_unmeasured: 0,
       librarian_failures: 0,
       vision_ingest_errors: 0,
       read_errors: 0,
@@ -238,6 +241,7 @@ describe('KeeperMemoryHealth', () => {
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry({ librarian: { state: 'not_committed', detail: null,
           measured_at: 1_699_999_950, unread_atom_turns: 3, unread_official_turns: 0,
+          continuity_unread_atoms: 0,
           last_success_at: null, last_failure_kind: null }, alerts: [alert] })],
       { librarian_unread_turns: 3 },
       makeAlertSummary({
@@ -260,6 +264,7 @@ describe('KeeperMemoryHealth', () => {
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry({ librarian: { state: null, detail: null, measured_at: null,
         unread_atom_turns: null, unread_official_turns: null,
+        continuity_unread_atoms: 0,
         last_success_at: null, last_failure_kind: null } })],
       { librarian_unread_turns: null },
     ))

@@ -2162,18 +2162,31 @@ let with_noted_skills noted items =
   match noted with
   | [] -> items, []
   | noted ->
+      (* A call the stream saw fail keeps its failure. The server records a
+         composition's delivery from any tool result its read call answered,
+         an error result included ([Keeper_skill_activation_ledger]'s
+         [Composition_invocation] receipt match), and the activation itself
+         is written before the plan runs. So a record can say delivered for
+         a call that failed, and taking it would draw a failed read as a
+         finished one. The record is then not drawn at all: its id is on the
+         failed item, so nothing appends it either. *)
       let exact (skill : skill_activity) =
-        match skill.skill_tool_use_id with
-        | None -> skill
-        | Some use_id -> (
-            match
-              List.find_map
-                (fun (noted_id, note) ->
-                  if String.equal noted_id use_id then Some note else None)
-                noted
-            with
-            | Some note -> note
-            | None -> skill)
+        match skill.state with
+        | Skill_failed -> skill
+        | Skill_calling | Skill_served_pending | Skill_served_only
+        | Skill_delivered | Skill_used | Skill_evidence_missing
+        | Skill_evidence_unavailable -> (
+            match skill.skill_tool_use_id with
+            | None -> skill
+            | Some use_id -> (
+                match
+                  List.find_map
+                    (fun (noted_id, note) ->
+                      if String.equal noted_id use_id then Some note else None)
+                    noted
+                with
+                | Some note -> note
+                | None -> skill))
       in
       let skills_of item =
         match item.drawn with

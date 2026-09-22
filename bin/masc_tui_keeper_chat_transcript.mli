@@ -446,9 +446,12 @@ val drawn : t -> drawn_item list
     rows stay.
 
     A skill item whose read call has a record from {!note_skill_activity} is
-    drawn as that record. Records no skill item carries form one more
-    [Drawn_skill], ahead of the stretch the reply stands for, or ahead of the
-    appended reply or status row when no stretch streamed. *)
+    drawn as that record, unless the item is [Skill_failed]: the server
+    records a composition's delivery from an error tool result too, so a
+    record cannot turn a call the stream saw fail into a finished read.
+    Records no skill item carries form one more [Drawn_skill], ahead of the
+    stretch the reply stands for, or ahead of the appended reply or status
+    row when no stretch streamed. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** The transcript a log projects to: {!create} from the log's identity, then

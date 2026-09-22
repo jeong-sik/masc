@@ -1465,6 +1465,51 @@ let test_skill_evidence_stands_for_a_read_the_trail_missed () =
   | drawn -> failf "expected the skill then the reply, got %d rows" (List.length drawn)
 ;;
 
+(* A composition writes its activation before its plan runs, and the server
+   counts the error tool result of a failed plan as a delivery, so the exact
+   record says delivered for a call the stream saw fail. The failure is the
+   fact about that call, and it stands. *)
+let test_a_failed_skill_call_keeps_its_failure () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let occurrence =
+    { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
+  in
+  let log =
+    settled_log ~request_id:"op-1"
+      [ Live.Run_started
+      ; Live.Tool_started { occurrence; tool_name = "keeper_skill" }
+      ; Live.Tool_ended { occurrence }
+      ; Live.Tool_result { occurrence; execution_id = "exec-1" }
+      ; visible_reply "done"
+      ; Live.Run_finished
+      ]
+  in
+  state.msg_settled_logs <- [ log ];
+  let failed_call =
+    { (chat_entry ~request_id:"op-1" ~role:Tui_types.Message_tool
+         ~text:"keeper_skill" ~at:101. ())
+      with
+      me_tool_block =
+        Some
+          (Keeper_chat_transcript.tool_block
+             [ Keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
+                 ~call_id:(Some "c1") ~tool_name:"keeper_skill" ~args:"{}"
+                 ~outcome:Keeper_chat_transcript.Failed ~duration:(Some "32ms") () ])
+    }
+  in
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha"
+    [ failed_call; skill_evidence_row ~request_id:"op-1" ~at:102. ];
+  match drawn_skills_of log with
+  | [ skill ] ->
+      check bool "the failed read is not drawn as a delivered one" true
+        (skill.Keeper_chat_transcript.state = Keeper_chat_transcript.Skill_failed);
+      check (list string) "and the record's actions do not land on it" []
+        skill.Keeper_chat_transcript.actions
+  | skills -> failf "expected one drawn skill, got %d" (List.length skills)
+;;
+
 (* The reload is wired: a history page names its targets, one fiber per load
    reads their journals in turn, and the handler builds and holds the log. *)
 let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
@@ -3800,6 +3845,8 @@ let () =
             test_loaded_skill_evidence_is_folded_into_the_held_log
         ; test_case "skill evidence stands for a read the trail missed" `Quick
             test_skill_evidence_stands_for_a_read_the_trail_missed
+        ; test_case "a failed skill call keeps its failure" `Quick
+            test_a_failed_skill_call_keeps_its_failure
         ; test_case "settled logs are read per keeper" `Quick
             test_settled_logs_are_read_per_keeper
         ; test_case "journal fetch targets choose the newest unheld turns" `Quick

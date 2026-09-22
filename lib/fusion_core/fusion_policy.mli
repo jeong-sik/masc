@@ -20,8 +20,10 @@ type panel_group =
   ; max_output_tokens : int option
       (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; timeout_s : float option
-      (** 그룹 모델당 응답 데드라인(초) — Agent_core 경로는 [body_timeout_s],
-          official-client 경로는 어댑터 turn timeout 으로 집행된다. [None]이면
+      (** 그룹 모델당 응답 데드라인(초) — Agent_core 경로는 [body_timeout_s](호출
+          전체 상한), official-client 경로는 어댑터 turn timeout(스트림 메시지 사이
+          최대 무응답 시간. 계속 스트리밍하는 턴은 이 값을 넘길 수 있다)으로
+          집행된다. [None]이면
           런타임/provider 가 이미 선언한 값이 그대로 쓰인다: preset 은 그 위에
           얹는 소비자 override 이며 별도 SSOT 가 아니다. *)
   }
@@ -57,7 +59,9 @@ type preset =
       (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
   ; judge_timeout_s : float option
       (** 심판 응답 데드라인(초). single/refine/meta/stage-meta 와, 자기
-          [jtimeout_s] 가 없는 1차 심판에 적용된다. [None]이면 런타임/provider 설정. *)
+          [jtimeout_s] 가 없는 1차 심판에 적용된다. 집행 방식은 {!panel_group}의
+          [timeout_s]와 같다(official-client 는 스트림 무응답 한도). [None]이면
+          런타임/provider 설정. *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)

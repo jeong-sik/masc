@@ -421,7 +421,11 @@ let test_drawn_cols_follow_the_choice_and_the_room () =
   check int "no room, whatever the reader chose" 0
     (Pane.drawn_cols ~layout:Pane.Wide ~cols:narrow);
   check int "no room for the narrow pane either" 0
-    (Pane.drawn_cols ~layout:Pane.Narrow ~cols:narrow)
+    (Pane.drawn_cols ~layout:Pane.Narrow ~cols:narrow);
+  check int "exactly room for the wide pane" Pane.wide_pane_cols
+    (Pane.drawn_cols ~layout:Pane.Wide ~cols:Pane.wide_threshold_cols);
+  check int "exactly room for the narrow pane" Pane.pane_cols
+    (Pane.drawn_cols ~layout:Pane.Wide ~cols:Pane.threshold_cols)
 
 let test_ctrl_l_walks_narrow_wide_hidden () =
   let step layout_now cols = Pane.next_layout ~layout:layout_now ~cols in
@@ -430,7 +434,11 @@ let test_ctrl_l_walks_narrow_wide_hidden () =
   check (option layout) "hidden to narrow" (Some Pane.Narrow) (step Pane.Hidden roomy);
   check (option layout) "no room for wide: narrow to hidden" (Some Pane.Hidden)
     (step Pane.Narrow middling);
-  check (option layout) "no room at all leaves the choice" None (step Pane.Narrow narrow)
+  check (option layout) "no room at all leaves the choice" None (step Pane.Narrow narrow);
+  check (option layout) "exactly room for wide: narrow to wide" (Some Pane.Wide)
+    (step Pane.Narrow Pane.wide_threshold_cols);
+  check (option layout) "exactly room for narrow: hidden to narrow" (Some Pane.Narrow)
+    (step Pane.Hidden Pane.threshold_cols)
 
 let test_content_cols_give_the_surface_the_rest () =
   check int "narrow takes the narrow pane" (roomy - Pane.pane_cols)
@@ -1484,7 +1492,7 @@ let two_responses =
   ; runner_call ~at:970. ~duration_ms:5. ~id:"r4" ~session:(Some 8) "Execute"
   ]
 
-let responses_view ?(order = Pane.Newest_first) ?(expanded = []) calls =
+let responses_view ?(cols = cols) ?(order = Pane.Newest_first) ?(expanded = []) calls =
   Pane.lines ~rows ~cols ~scroll:0
     { (runner_input ~order ~expanded ()) with
       Pane.chunks = chunks [ "runner" ] (entries calls)
@@ -1631,14 +1639,29 @@ let test_wire_calls_split_into_responses_too () =
 
 let wide_cols = Pane.wide_pane_cols
 
-let test_every_wide_row_is_the_wide_width () =
-  List.iter
-    (fun (scope, label) ->
-      let view = Pane.lines ~rows ~cols:wide_cols ~scroll:0 { fixture with Pane.scope } in
-      List.iteri
-        (fun i line -> check int (Printf.sprintf "%s: row %d" label i) wide_cols (width line))
-        view.Pane.rows)
-    [ Pane.Whole_fleet, "whole fleet"; Pane.Selected_only, "selected only" ]
+(* A bracketed call row in the wide pane keeps its bracket, its name and
+   its age, and an opened call's facts row says the same age the same way
+   as the row above it. The calls arrived at 950, 953, 956 and 970; now is
+   1000. *)
+let test_a_wide_bracketed_row_and_its_detail_say_one_age () =
+  let view =
+    responses_view ~cols:wide_cols ~order:Pane.Oldest_first
+      ~expanded:[ "runner", Acting.Call_by_id "r2" ]
+      two_responses
+  in
+  let row i = List.nth view.Pane.rows (first_call_row + i) in
+  check bool "Read opens the bracket, ends with its age" true
+    (rail (row 0) = (opens, Pane.Plain)
+     && contains "Read" (text (row 0))
+     && String.ends_with ~suffix:"5ms  50.0s" (text (row 0)));
+  check bool "Grep inside it, with its age" true
+    (rail (row 1) = (inside, Pane.Plain)
+     && String.ends_with ~suffix:"5ms  47.0s" (text (row 1)));
+  check bool "Grep's facts row says the same age" true
+    (contains "47.0s ago" (text (row 2)));
+  check bool "Execute alone, its age at the edge" true
+    (rail (row 6) = (alone, Pane.Plain)
+     && String.ends_with ~suffix:"5ms  30.0s" (text (row 6)))
 
 (* The longest name on the live roster: the narrow pane cuts it, the wide
    one keeps it whole, and the column names move over with the name column. *)
@@ -1684,14 +1707,26 @@ let test_a_wide_call_row_ends_with_its_age () =
   let view = Pane.lines ~rows ~cols:wide_cols ~scroll:0 (runner_input ()) in
   let row i = text (List.nth view.Pane.rows (first_call_row + i)) in
   check bool "Read: its duration, then its age" true
-    (String.ends_with ~suffix:"5ms    50s" (row 0));
+    (String.ends_with ~suffix:"5ms  50.0s" (row 0));
   check bool "masc_delegate: the same columns" true
-    (String.ends_with ~suffix:"50ms    40s" (row 1));
+    (String.ends_with ~suffix:"50ms  40.0s" (row 1));
   check bool "Execute, still out: the age alone" true
-    (String.ends_with ~suffix:"   30s" (row 2) && not (contains "ms" (row 2)));
+    (String.ends_with ~suffix:" 30.0s" (row 2) && not (contains "ms" (row 2)));
   let narrow_view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
   check bool "the narrow pane draws no age" false
-    (List.exists (contains "50s") (List.map text narrow_view.Pane.rows))
+    (List.exists (contains "50.0s") (List.map text narrow_view.Pane.rows))
+
+(* An age past ninety-nine minutes is wider than the six cells the column
+   is padded to: the row widens the age and keeps every digit. *)
+let test_an_old_call_keeps_every_digit_of_its_age () =
+  let old = [ runner_call ~at:(now -. 7_205.) ~duration_ms:5. ~id:"old" "Read" ] in
+  let view =
+    Pane.lines ~rows ~cols:wide_cols ~scroll:0
+      { (runner_input ()) with Pane.chunks = chunks [ "runner" ] (entries old) }
+  in
+  let row = List.nth view.Pane.rows first_call_row in
+  check bool "120m05s whole at the edge" true (String.ends_with ~suffix:"5ms 120m05s" (text row));
+  check int "the row still fits" wide_cols (width row)
 
 let test_a_call_row_names_the_call_a_press_opens () =
   let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
@@ -1778,12 +1813,14 @@ let () =
             test_the_order_cycles_through_all_four
         ] )
     ; ( "wide"
-      , [ test_case "every wide row is the wide width" `Quick
-            test_every_wide_row_is_the_wide_width
+      , [ test_case "a wide bracketed row and its detail say one age" `Quick
+            test_a_wide_bracketed_row_and_its_detail_say_one_age
         ; test_case "the wide fleet row keeps a long name whole" `Quick
             test_the_wide_fleet_row_keeps_a_long_name_whole
         ; test_case "a wide call row ends with its age" `Quick
             test_a_wide_call_row_ends_with_its_age
+        ; test_case "an old call keeps every digit of its age" `Quick
+            test_an_old_call_keeps_every_digit_of_its_age
         ] )
     ; ( "responses"
       , [ test_case "each model response gets a bracket beside its calls" `Quick

@@ -9102,6 +9102,12 @@ let seek_in_chat state ~target ~restart =
    narrowed it. *)
 let toggle_acting_pane (state : state) =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
+  if Masc_tui_render.acting_pane_suppressed state then
+    (* The same rule as the width check below, for a surface the pane never
+       draws beside: a press here would move narrow to wide unseen, and the
+       reader would meet the change on the next surface. *)
+    Error "Activity pane is not drawn over this surface; preference unchanged"
+  else
   match
     Masc_tui_acting_pane.next_layout ~layout:state.acting_pane_layout ~cols
   with

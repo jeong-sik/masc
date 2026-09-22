@@ -695,11 +695,13 @@ let rail_span = function
   | Inside -> { border with tone = Plain }
   | Closes -> { text = "\xe2\x94\x94"; tone = Plain }
 
-(* A call's age in the wide pane, at the row's end: the span since the
-   call's receipt, in the one ladder the TUI spells spans with, padded to
-   its widest reading so the ages and the durations before them each line
-   up down the list. *)
-let age_cells = 6
+(* A call's age in the wide pane, at the row's end, in the pane's own age
+   wording ({!age_text}): the facts row under an opened call and the focus
+   header spell ages that way, and a row and its own detail must not say
+   one age two ways. Padded to six cells, so the ages and the durations
+   before them line up down the list through ninety-nine minutes; an older
+   age widens its own row rather than losing digits to a cut. *)
+let age_min_cells = 6
 
 let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
   let duration =
@@ -723,15 +725,18 @@ let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chu
   in
   let age =
     if is_wide ~cols then
+      let text = age_text ~now tool.Acting.ct_at in
       [ { text = String.make gap_cells ' '; tone = Plain }
-      ; { text = pad_left age_cells (Layout.span_text (now -. tool.Acting.ct_at)); tone = Dim }
+      ; { text = String.make (max 0 (age_min_cells - Layout.display_width text)) ' ' ^ text
+        ; tone = Dim
+        }
       ]
     else []
   in
   let inner = cols - border_cells - mark_cells - dispatch_cells - gap_cells in
   let right =
     Layout.display_width duration.text
-    + (match age with [] -> 0 | _ :: _ -> gap_cells + age_cells)
+    + List.fold_left (fun cells span -> cells + Layout.display_width span.text) 0 age
   in
   let name_room = max 0 (inner - right - (if right > 0 then gap_cells else 0)) in
   fit_line ~cols
@@ -1299,9 +1304,6 @@ let materialize_row ~cols input = function
   | File_row (index, file) -> file_line ~cols ~now:input.now index file
   | Formatted_status (line, target) -> line, target
 
-(* One legend row: the two record glyphs a fleet row can start with, what
-   a count with a plus means, and what the token figure adds up. It fits
-   the 55 text cells the pane has beside its border. *)
 (* Column headings, in the row the legend used to hold. With the parts in
    fixed columns the names can sit over them, which says what each one is
    once for the whole list instead of a glyph key the reader has to carry

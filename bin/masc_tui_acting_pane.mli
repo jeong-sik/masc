@@ -244,8 +244,8 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     when the ledger said the call failed, then two dispatch cells: [&] when
     it ran in a batch with others, [>] when it returned a deferral. At
     {!wide_pane_cols} and wider the call row ends with the call's age since
-    receipt, six cells wide, and the fleet row's name column holds eighteen
-    more cells.
+    receipt in {!age_text}'s wording, padded to six cells, and the fleet
+    row's name column holds eighteen more cells.
 
     Under either receipt order, a record whose calls came from more than one
     model response brackets each response in the call rows' border cell:

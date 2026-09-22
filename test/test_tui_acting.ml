@@ -657,16 +657,32 @@ let test_keeper_rows_say_what_the_keeper_did () =
     "  bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (heartbeat "bandleader")))
 
+(* The four lifecycle kinds carry the run's own wire id as [task_id] -- an
+   [evt-] id on every one of the live fleet's agent_started rows, keepers and
+   internal runs alike. It is not a task, so the row does not print it; it
+   says how the run went instead. *)
 let test_agent_terminal_rows_keep_success_and_failure_distinct () =
+  let run_id = "evt-9565f12c61e9c2d7" in
+  let started = agent_core ~kind:Observer.Agent_started ~task:run_id "analyst" in
   let completed =
-    agent_core ~kind:Observer.Agent_completed ~task:"task-1" "analyst"
+    agent_core ~kind:(Observer.Agent_completed { elapsed_s = 1.5 }) ~task:run_id
+      "analyst"
   in
-  let failed = agent_core ~kind:Observer.Agent_failed ~task:"task-2" "analyst" in
-  check string "a successful run is one completed row"
-    "\xe2\x96\xa0 analyst agent done | task-1"
+  let failed =
+    agent_core
+      ~kind:
+        (Observer.Agent_failed
+           { elapsed_s = 0.5; error_code = "provider_error"; error = "rate limited" })
+      ~task:run_id "analyst"
+  in
+  check string "a started run says nothing it does not know yet"
+    "\xe2\x97\x8f analyst agent start | "
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None started));
+  check string "a successful run says how long it ran"
+    "\xe2\x96\xa0 analyst agent done | 1.5s"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None completed));
-  check string "a failed run is one failed row"
-    "\xe2\x9c\x97 analyst agent failed | task-2"
+  check string "a failed run says how long and why"
+    "\xe2\x9c\x97 analyst agent failed | 500ms \xc2\xb7 provider_error \xc2\xb7 rate limited"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None failed))
 
 let test_a_lane_named_event_is_attributed_by_its_trace () =

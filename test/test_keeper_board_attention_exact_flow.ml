@@ -739,7 +739,7 @@ let test_mixed_semantic_rejection_and_cli_failure_keep_both_causes () =
       in
       let before = board_attention_run_ids () in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-        Error "client unavailable"
+        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
       in
       (match
          Exact_flow.execute
@@ -970,7 +970,7 @@ let test_mixed_cli_failure_keeps_http_evidence () =
       let cli_calls = ref 0 in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         incr cli_calls;
-        Error "client unavailable"
+        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
       in
       match
         Exact_flow.execute
@@ -1445,11 +1445,12 @@ let run_eio_with_http_pool f =
 (* Jev is on for [f] and asks the server at [endpoint]. *)
 let with_jev ~endpoint f =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
-    Masc_test_deps.with_process_env "MASC_TYPESAFEAI_ENDPOINT" (Some endpoint) (fun () ->
-      Masc_test_deps.with_process_env "MASC_TYPESAFEAI_MODEL" (Some "requested-model") (fun () ->
-        (* The Board gate's own switch, so a shell that turned it off does
-           not reach these tests. *)
-        Masc_test_deps.with_process_env "MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED" (Some "true") f)))
+    Masc_test_deps.with_typesafeai_policy
+      { Runtime_schema.default_typesafeai with
+        lane_endpoint = endpoint
+      ; lane_model = "requested-model"
+      }
+      f)
 ;;
 
 (* A System One answer to the adapter's one question, [relevance]. *)
@@ -1759,12 +1760,6 @@ let test_jev_choice_outside_the_question_is_judged_again () =
 let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
-    let material =
-      match candidate.Candidate.status with
-      | Candidate.Pending { material; _ } -> material
-      | Candidate.Judged _ | Candidate.Consumed _ | Candidate.Quarantine _ ->
-        Alcotest.fail "the candidate fixture is not pending"
-    in
     let jev =
       Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant"))
     in
@@ -1775,7 +1770,6 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
             ~clock
             ~api_key:"test-typesafeai-key"
             ~candidate
-            ~material
             ()
         with
         | Ok judged -> judged
@@ -1799,14 +1793,25 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
           "the adapter hashes the exact serialized body"
           Digestif.SHA256.(digest_string body |> to_hex)
           judged.provenance.request_body_sha256;
-        let relevance =
-          match Yojson.Safe.from_string body with
+        let request_json = Yojson.Safe.from_string body in
+        let state, relevance =
+          match request_json with
           | `Assoc fields ->
-            (match List.assoc_opt "questions" fields with
-             | Some (`Assoc questions) -> List.assoc_opt "relevance" questions
-             | Some _ | None -> None)
-          | _ -> None
+            ( List.assoc_opt "state" fields
+            , match List.assoc_opt "questions" fields with
+              | Some (`Assoc questions) -> List.assoc_opt "relevance" questions
+              | Some _ | None -> None )
+          | _ -> None, None
         in
+        Alcotest.(check bool)
+          "Jev receives exactly the current signal and projected keeper role"
+          true
+          (state =
+           Some
+             (match Candidate.singleton_judgment_request candidate with
+              | Ok request -> request
+              | Error detail ->
+                Alcotest.failf "candidate request projection failed: %s" detail));
         (match relevance with
          | Some (`Assoc question) ->
            Alcotest.(check (option string))
@@ -1818,7 +1823,21 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
               Alcotest.(check (list string))
                 "the request offers every decision under its label"
                 Judgment.decision_tokens
-                (List.map fst criteria)
+                (List.map fst criteria);
+              Alcotest.(check (option string))
+                "relevant requires the current signal, not capability overlap"
+                (Some
+                   "The current signal itself directly addresses this keeper, requests or assigns the role described by its instructions, or contains a concrete request specific to that role; general topic or capability overlap alone is insufficient.")
+                (match List.assoc_opt "relevant" criteria with
+                 | Some (`String description) -> Some description
+                 | Some _ | None -> None);
+              Alcotest.(check (option string))
+                "not relevant includes broad capability overlap"
+                (Some
+                   "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with the keeper's broad capabilities, or does not require this keeper to act.")
+                (match List.assoc_opt "not_relevant" criteria with
+                 | Some (`String description) -> Some description
+                 | Some _ | None -> None)
             | Some _ | None -> Alcotest.fail "the relevance question has no criteria map")
          | Some _ | None -> Alcotest.fail "the request carries no relevance question")
       | bodies ->

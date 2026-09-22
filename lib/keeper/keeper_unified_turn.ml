@@ -77,11 +77,11 @@ let execution_boundary_of_turn_failure error =
   match Keeper_internal_error.classify_masc_internal_error error with
   | Some
       ( Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Official_client_recovery_required _
       | Keeper_internal_error.Gate_replay_repair_required _ ) ->
-    (* Both failures are produced by MASC — the first over the transcript MASC
-       persisted, the second after host replay and before provider dispatch.
-       The shared [Agent_core.Error.Internal] carrier must not misattribute
-       either local boundary to AGENT_CORE. *)
+    (* These failures are produced by MASC before provider dispatch: transcript
+       validation, a durable session claim, or host replay. The shared carrier
+       must not attribute these local boundaries to AGENT_CORE. *)
     Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
@@ -440,6 +440,7 @@ let continuation_channel_of_wake = function
 
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
+      ~(execution_path : Keeper_unified_metrics_decision.execution_path)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ~(config : Workspace.config)
@@ -531,27 +532,11 @@ let run_keeper_cycle
   in
   let turn_start = Mtime_clock.now () in
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
-    let degraded_retry_info =
-      Option.map
-        (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-           let fallback_reason =
-             match
-               Keeper_error_classify.recoverable_runtime_failure_reason
-                 hint.failure
-             with
-             | Some reason -> reason
-             | None -> Keeper_error_classify.Deferred_runtime_lane
-           in
-           { Keeper_error_classify.next_runtime = hint.next_runtime_id
-           ; fallback_reason
-           })
-        deferred_runtime_lane
-    in
     { cycle_completed = false
     ; manifest_seq = 0
     ; current_turn_blocker_info = None
     ; last_execution = None
-    ; degraded_retry_info
+    ; degraded_retry_settled = None
     ; deferred_runtime_lane = None
     ; failure_reason = None
     ; runtime_attempt_errors = []
@@ -830,11 +815,8 @@ let run_keeper_cycle
                  |> Option.map (fun cap ->
                    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
                in
-               let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
-                 (* Named so a run on the main domain during prompt assembly
-                    reads as [keeper <name> cycle > turn:prompt] in the trace. *)
-                 Eio_guard.with_named_switch "turn:prompt" (fun () ->
-                   Keeper_unified_prompt.build_prompt
+               let render_prompt observation =
+                 Keeper_unified_prompt.build_prompt
                      ~meta
                      ~config
                      ~profile_defaults
@@ -848,8 +830,22 @@ let run_keeper_cycle
                      ~repository_freshness
                      ?context_budget_bytes
                      ~observation
-                     ())
+                     ()
                in
+               let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
+                 Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt observation)
+               in
+               let dynamic_context_for_tools = match meta.input_policy, observation.own_recent_actions with
+                 | Keeper_input_policy.Small, Ok turns ->
+                   Some (fun tools ->
+                     if Result.is_error (Keeper_recovery_transmission.require_reader tools)
+                     then world_state
+                     else Domain_pool_ref.submit_io_or_inline (fun () ->
+                       let own_recent_actions = Keeper_own_recent_actions.externalize_failures
+                         ~base_path:config.base_path ~keeper_name:meta.name
+                         ~policy:meta.input_policy ~tools turns in
+                       (render_prompt {observation with own_recent_actions=Ok own_recent_actions}).world_state))
+                 | Wide, _ | Small, Error _ -> None in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)
@@ -885,7 +881,7 @@ let run_keeper_cycle
                     (943/945 identical frames in one live checkpoint, #25193)
                     and exhausted the request window. Persisted user content is utterances
                     only (wake marker, answered Asks, and HITL resolutions). *)
-                 { system_prompt; dynamic_context = world_state }
+                 { system_prompt; dynamic_context = world_state; dynamic_context_for_tools }
                in
                (* 5. Run via Agent_core.Agent.run() with transient-error retry.
                   The turn-local AGENT_CORE Event_bus preserves factual
@@ -1148,31 +1144,16 @@ let run_keeper_cycle
                         (turn_event_bus_manifest_decision turn_event_bus))
                    Keeper_runtime_manifest.Event_bus_correlated
                in
-               let degraded_retry_info = turn_state.degraded_retry_info in
-               (* These three feed the decision record below, and nothing else:
-                  the execution receipt now reports the two lanes on its own,
-                  in [Keeper_agent_run_receipt].
-
-                  [degraded_retry_info] is seeded at [initial_turn_state] from the
-                  [deferred_runtime_lane] argument -- a hint a *previous* turn left
-                  behind -- and no path in this turn writes it. Its presence says a
-                  deferred lane is pending, not that a retry ran, which is why the
-                  comparison in [Keeper_unified_turn_types] stands between it and
-                  the label. *)
-               let degraded_retry_applied =
-                 degraded_retry_applied_for_turn
-                   ~degraded_retry_info
-                   ~last_execution:turn_state.last_execution
-               in
-               let degraded_retry_runtime =
-                 Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.next_runtime)
-                   degraded_retry_info
-               in
-               let fallback_reason =
-                 Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
-                   degraded_retry_info
+               (* What the turn's receipt recorded, not a second answer to the
+                  same question. Absent when the turn never reached
+                  [Keeper_agent_run_receipt.finalize] -- a phase-gate or
+                  pre-dispatch end -- and then no lane was run or left behind
+                  either. *)
+               let degraded_retry_applied, degraded_retry_deferred =
+                 match turn_state.degraded_retry_settled with
+                 | Some (settled : Keeper_agent_run.turn_settlement) ->
+                   settled.degraded_retry_applied, settled.degraded_retry_deferred
+                 | None -> None, None
                in
                (match run_result with
                 | Error err when EC.is_input_required_error err ->
@@ -1396,10 +1377,9 @@ let run_keeper_cycle
                     ~observation
                     ~latency_ms
                     ~outcome:"error"
+                    ~execution_path
                     ~degraded_retry_applied
-                    ?degraded_retry_runtime
-                    ?fallback_reason:
-                      (Option.map EC.degraded_retry_reason_to_string fallback_reason)
+                    ~degraded_retry_deferred
                     ~error:e_str
                     ~terminal_reason
                     (* The runtime walk's own name for the last candidate it
@@ -1500,8 +1480,7 @@ let run_keeper_cycle
                       ~observation
                       ~latency_ms
                       ~degraded_retry_applied
-                      ~degraded_retry_runtime
-                      ~fallback_reason
+                      ~degraded_retry_deferred
                       ~keeper_turn_id
                       execution_outcome
                   in

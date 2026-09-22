@@ -236,6 +236,7 @@ type attempt_input =
     the same turn. *)
 
 val run_named :
+  ?input_policy:Keeper_input_policy.t ->
   runtime_id:string ->
   ?keeper_name:string ->
   ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

@@ -4,7 +4,7 @@ type failure =
   | Not_an_official_client of { runtime_id : string }
   | Execution_failed of
       { runtime_id : string
-      ; detail : string
+      ; cause : Fusion_official_client.failure
       }
   | Invalid_json_output of
       { runtime_id : string
@@ -20,7 +20,9 @@ let failure_to_string = function
     Printf.sprintf "cli lane slot %s answered invalid domain output: %s" runtime_id detail
   | Not_an_official_client { runtime_id } ->
     Printf.sprintf "cli lane slot %s is not an official-client runtime" runtime_id
-  | Execution_failed { runtime_id; detail } ->
+  | Execution_failed { runtime_id; cause } ->
+    let detail = Fusion_official_client.panel_failure ~runtime_id cause
+      |> Fusion_types.show_panel_failure in
     Printf.sprintf "cli lane slot %s failed to answer: %s" runtime_id detail
   | Invalid_json_output { runtime_id; detail } ->
     Printf.sprintf "cli lane slot %s answered non-JSON: %s" runtime_id detail
@@ -30,18 +32,21 @@ type runner =
   -> system_prompt:string
   -> output_schema:Yojson.Safe.t
   -> prompt:string
-  -> (string, string) result
+  -> (string, Fusion_official_client.failure) result
 
 let default_runner ~base_dir : runner =
   fun ~runtime_id ~system_prompt ~output_schema ~prompt ->
-  Fusion_official_client.run_panelist
-    ~base_dir
-    ~runtime_id
-    ~system_prompt
-    ~output_schema
-    ~prompt
-    ()
-  |> Result.map_error Fusion_types.show_panel_failure
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Error (Fusion_official_client.Setup_failure
+      (Fusion_types.Provider_error "runtime is not configured"))
+  | Some runtime ->
+    Fusion_official_client.run_with_images ~images:[]
+      ~base_dir ~runtime ~system_prompt ~output_schema ~prompt ()
+    |> Result.map (fun (response : Fusion_official_client.response) -> response.text)
+;;
+
+let prompt_with_schema ~requirement ~prompt =
+  prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
 ;;
 
 let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
@@ -62,7 +67,7 @@ let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
        channels answer different halves -- one says what to write, the other
        refuses what does not match. *)
     let prompt =
-      prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
+      prompt_with_schema ~requirement ~prompt
     in
     match
       runner
@@ -71,7 +76,7 @@ let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
         ~output_schema:(Exact_output.domain_schema requirement)
         ~prompt
     with
-    | Error detail -> Error (Execution_failed { runtime_id; detail })
+    | Error cause -> Error (Execution_failed { runtime_id; cause })
     | Ok answer ->
       (* Strict on purpose: Agent Core parses a [Json_syntax_only] HTTP body
          with exactly [Yojson.Safe.from_string] and no repair, and a lane
@@ -104,4 +109,16 @@ let walk ?runner ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~valid
        | Error failure -> reject failures rest failure)
   in
   loop [] cli_slots
+;;
+
+type input_capacity =
+  { runtime_id : string
+  ; capacity : Runtime_codex_app_server.input_capacity
+  }
+
+let input_capacity = function
+  | Execution_failed { runtime_id; cause = Fusion_official_client.Codex_failure error } ->
+    Runtime_codex_app_server.input_capacity_refusal error
+    |> Option.map (fun capacity -> {runtime_id; capacity})
+  | _ -> None
 ;;

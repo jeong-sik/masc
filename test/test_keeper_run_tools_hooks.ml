@@ -799,6 +799,82 @@ let test_plain_tool_commits_before_hook_returns ~success () =
         (List.length rows))
 ;;
 
+let test_projection_failure_keeps_execution_and_wire_outcomes_separate () =
+  with_temp_base_path @@ fun base_path ->
+  let module Log = Masc.Keeper_tool_call_log in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Log.reset_for_testing ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Log.init ~base_path ();
+       let hooks =
+         Masc.Keeper_hooks_agent_core.make_hooks
+           ~config:(Masc.Workspace.default_config base_path)
+           ~meta_ref:(ref (make_meta "projection-failure"))
+           ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
+           ~trace_id:"projection-failure-trace"
+           ~keeper_turn_id:1
+           ~on_after_turn_ordinal:ignore
+           ()
+       in
+       let invocation =
+         Agent_core.Tool_contract.Invocation.create
+           ~tool_use_id:"projection-failure-call"
+           ~turn:1
+           ~completion:Agent_core.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_core.Tool_contract.Serial
+             }
+       in
+       Log.set_disposition
+         ~invocation
+         ~disposition:(Tool_result.Completed ());
+       let post_tool_use = Option.get hooks.Agent_core.Hooks.post_tool_use in
+       ignore
+         (post_tool_use
+            (Agent_core.Hooks.PostToolUse
+               { invocation
+               ; tool_name = "keeper_artifact_transfer"
+               ; input = `Assoc []
+               ; output =
+                   Error
+                     { Agent_core.Types.message =
+                         "tool output artifact storage failed"
+                     ; recoverable = false
+                     ; error_class = Some Agent_core.Types.Unknown
+                     }
+               ; result_bytes = 35
+               ; duration_ms = 1.
+               }));
+       let rows =
+         match Log.read_recent ~keeper_name:"projection-failure" () with
+         | Ok rows -> rows
+         | Error (Log.Index_unavailable detail) -> fail detail
+       in
+       let row =
+         match rows with
+         | [ row ] -> row
+         | _ -> fail "projection failure must write exactly one row"
+       in
+       let open Yojson.Safe.Util in
+       check bool "legacy success field is absent" true
+         (row |> member "success" = `Null);
+       check string "typed disposition preserves the completed execution"
+         "completed"
+         (row |> member "disposition" |> to_string);
+       check string "wire outcome records the projection failure"
+         "error"
+         (row |> member "wire_outcome" |> to_string);
+       check bool "completed execution has no fabricated failure class" true
+         (row |> member "failure_class" = `Null))
+;;
+
 let rejected_rows_for ?on_tool_result_ready ~stage () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
@@ -874,7 +950,7 @@ let test_an_unreadable_index_is_an_error_not_an_empty_read () =
        Masc.Keeper_tool_call_log.init ~base_path ();
        Masc.Keeper_tool_call_log.log_call
          ~keeper_name:"blind-keeper" ~tool_name:"keeper_lane_status"
-         ~input:(`Assoc []) ~output_text:"docker" ~success:true ~duration_ms:1.0 ();
+         ~input:(`Assoc []) ~output_text:"docker" ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
        Masc.Keeper_tool_call_log.flush_now ();
        let ledger_dir =
          match Masc.Keeper_tool_call_log.store_dir () with
@@ -925,7 +1001,8 @@ let test_a_rejected_call_leaves_a_row () =
       | None -> "<absent>"
     in
     check string "the tool that refused" "keeper_broadcast" (field "tool");
-    check string "recorded as a failure" "false" (field "success");
+    check string "recorded wire failure" "error" (field "wire_outcome");
+    check string "legacy success field is absent" "<absent>" (field "success");
     check bool "the argument object it was refused for" true
       (String.length (field "input") > 0);
     check bool "the refusal text" true
@@ -1604,6 +1681,10 @@ let () =
             (test_plain_tool_commits_before_hook_returns ~success:true)
         ; test_case "autonomous rejected call commits before completion" `Quick
             (test_plain_tool_commits_before_hook_returns ~success:false)
+        ; test_case
+            "projection failure keeps execution and wire outcomes separate"
+            `Quick
+            test_projection_failure_keeps_execution_and_wire_outcomes_separate
         ; test_case
             "a call refused before execution leaves a row"
             `Quick

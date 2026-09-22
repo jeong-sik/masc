@@ -107,9 +107,60 @@ let memory_context_lines (k : memory_keeper_health) =
       k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
       k.mkh_removed k.mkh_support_invalidations
   in
+  (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
+     and what the journal last said. A count the durable drain could not take prints
+     as "unread ?" rather than as zero. *)
   let librarian_line =
-    Printf.sprintf "  Librarian · deferred %d · failed %d (counters since server start)"
-      k.mkh_librarian_lane_busy k.mkh_librarian_failures
+    let librarian = k.mkh_librarian in
+    let unread =
+      match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
+      | Some atoms, Some official -> Printf.sprintf "unread %d" (atoms + official)
+      | Some _, None | None, Some _ | None, None -> "unread ?"
+    in
+    Printf.sprintf
+      "  Librarian · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
+      (match librarian.mlh_state with
+       | Some state -> state
+       | None -> "not measured")
+      unread
+      (memory_updated_text librarian.mlh_measured_at)
+      (memory_updated_text librarian.mlh_last_success_at)
+      (Option.value librarian.mlh_last_failure_kind ~default:"-")
+      k.mkh_librarian_failures
+  in
+  let context_lines =
+    let cycle = k.mkh_context_cycle in
+    let frontier value = Printf.sprintf "atom %d / boundary %d · trace %s"
+      value.mcf_end_atom value.mcf_boundary_line (Terminal_text.single_line value.mcf_trace_id) in
+    let saved = match cycle.mcc_saved with
+      | Some value -> frontier value
+      | None -> if cycle.mcc_saved_unreadable then "unreadable" else "absent" in
+    let prepared, input = match cycle.mcc_prepared with
+      | None -> "not observed since server start", "not observed"
+      | Some value ->
+        let input = match value.mcp_input with
+          | Context_summarized value -> "summary " ^ frontier value
+          | Context_uncompressed -> "full history"
+          | Context_not_applied -> "saved context not applied" in
+        Printf.sprintf "%s · %d request bytes · %s"
+          (memory_updated_text (Some value.mcp_prepared_at))
+          value.mcp_request_bytes (Terminal_text.single_line value.mcp_runtime_id), input in
+    let synthesis = match cycle.mcc_synthesis with
+      | None -> "not observed since server start"
+      | Some value ->
+        let module O = Masc.Keeper_continuity_observation in
+        let state = match value.state with
+          | O.No_source -> "no new completed source (coverage not inferred)"
+          | state -> O.synthesis_state_to_string state in
+        let range = match value.range with
+          | None -> " · atom range unavailable"
+          | Some range -> Printf.sprintf " · last selected atoms [%d,%d) / observed completed %d"
+              range.start_atom range.end_atom range.completed_end_atom in
+        state ^ range ^ " · " ^ memory_updated_text (Some value.observed_at) in
+    ["  Context synthesis · " ^ synthesis;
+     "  Context saved · " ^ saved;
+     "  Request prepared (not provider success) · " ^ prepared;
+     "  Context used · " ^ input]
   in
   let source_line =
     Printf.sprintf
@@ -154,8 +205,8 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  current_line :: facts_line :: source_line :: librarian_line :: vision_line
-  :: (read_error_lines @ alert_lines)
+  [current_line; facts_line; source_line; librarian_line] @ context_lines
+  @ (vision_line :: (read_error_lines @ alert_lines))
 
 type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
@@ -471,9 +522,10 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %d failures since server start"
+       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d failures since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         snapshot.mhs_total_support_invalidations snapshot.mhs_total_librarian_failures));
+         snapshot.mhs_total_support_invalidations
+         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns) snapshot.mhs_total_librarian_failures));
   push info_bar;
   let search_bar =
     if query <> "" then

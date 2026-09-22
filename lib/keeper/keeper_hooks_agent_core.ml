@@ -659,11 +659,11 @@ let make_hooks
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
-             ~success:(outcome = Tool_result.Ok)
-             (* The boolean above is what AGENT_CORE's result can say. The
-                typed value crossed from the masc dispatch boundary; without
-                it the row cannot tell a policy rejection from a runtime
-                failure, and cannot represent [Deferred] at all. *)
+             ~wire_outcome:outcome
+             (* The wire outcome is what AGENT_CORE's result can say. The typed
+                value crossed from the masc dispatch boundary; without it the
+                row cannot tell a policy rejection from a runtime failure, and
+                cannot represent [Deferred] at all. *)
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
@@ -900,7 +900,8 @@ let make_hooks
               Keeper_tool_call_log.log_call
                 ~keeper_name:meta.name
                 ~tool_name ~input ~output_text:error
-                ~success:false ~duration_ms
+                ~wire_outcome:Tool_result.Error
+                ~duration_ms
                 ~model:(current_keeper_model meta)
                 ?agent_name:tctx.agent_name
                 ?turn_kind:tctx.turn_kind

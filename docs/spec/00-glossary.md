@@ -42,6 +42,18 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
+**Cluster**
+: `.masc/` 상태 디렉터리 레이아웃을 가르는 이름 범위(`MASC_CLUSTER_NAME`). 기본값은
+  `default`이며 그때 경로는 `<base>/.masc/`다. 다른 이름은
+  `<base>/.masc/clusters/<sanitized>/`를 쓴다. TUI 개요의 `Cluster:` 행이 이 값을
+  보여준다. Turn Boundary와 Read Position 같은 runtime 좌표는 선택한 cluster의
+  디렉터리에만 의미가 있고, 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
+  Memory OS와 Working Context는 cluster가 아니라 Keeper 이름에 귀속되므로 cluster
+  간에 공유된다.
+  → [masc_root_dir_from](../../lib/workspace/workspace_utils_paths_backend.mli),
+  [backend_config_for](../../lib/workspace/workspace_utils_backend_setup.mli),
+  [cluster_name](../../lib/config/env_config_core.mli)
+
 **Workspace Heartbeat**
 : `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
   `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
@@ -56,6 +68,14 @@ status: reference
 : MASC가 lifecycle을 관리하는 장기 실행 Agent. 현재 typed event와 tool schema를
   관찰하고 자율 turn을 실행한다. 이어 실행할 상태는 runtime에 따라 AGENT_CORE 또는
   공식 클라이언트가 관리한다([`Runtime_execution.checkpoint_owner`](../../lib/runtime/runtime_execution.mli)).
+
+**Board Interest**
+: Keeper가 직접 지목되지 않은 Board post와 아직 참여하지 않은 thread comment를
+  의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이
+  targetless discovery를 끈다. 정확한 Keeper 지목과 broadcast, 이미 참여한 thread의
+  전달에는 영향을 주지 않으며 Task 할당이나 실행 권한도 아니다.
+  `mention_targets`는 정확한 주소 토큰이고 `board_interests`는 의미 판정의 입력이므로
+  서로 fallback하지 않는다.
 
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
@@ -84,6 +104,18 @@ status: reference
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Official-client Session Recovery**
+: 공식 클라이언트 세션에 기록된 `Input_rejected` 때문에 같은 runtime의 새 실행
+  요청을 거절하는 상태. `bootstrap_floor_exceeded`는 줄일 수 있는 이력을 제거한
+  입력도 용량을 넘은 경우이고, `effect_fenced`는 앞선 응답이나 도구 실행이 관측되어
+  입력을 줄여 재실행할 수 없는 경우다. 현재 거절은 provider 호출 전에 일어나며 앞선
+  provider attempt의 효과 자체와 구분한다. 상태 표시는 원인·runtime ID·recovery ID를
+  기존 session에서 전달하며, 복구 승인이나 fence 해제를 수행하지 않는다.
+  Fleet는 일시정지되지 않은 `Failing` Keeper의 이 원인을 `recovering`과 구분해
+  `official_client_recovery_required_keeper_count/names`로 표시한다. 이는 운영자
+  조치가 필요한 fleet health 저하 사유이며, 다른 차단 사유가 없으면 `degraded`로
+  표시한다. 실행 fiber의 생존·실행 가능 여부를 바꾸거나 세션 복구를 승인하지 않는다.
 
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
@@ -166,7 +198,9 @@ status: reference
   Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
   `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
   판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
-  구간의 소유자다.
+  구간의 소유자다. `AwaitingVerification`은 `Held_pending_verdict`로 claim에
+  응답하므로 Keeper가 다시 맡을 수 없다. 완료·취소 verdict는 Keeper action이
+  아니라 system LLM 또는 인증된 운영자의 authority 경계에서만 적용된다.
 
 **Evidence**
 : 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
@@ -177,7 +211,10 @@ status: reference
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
   `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
-  `Completed`가 된다(`lib/goal/goal_phase.mli`).
+  `Completed`가 된다(`lib/goal/goal_phase.mli`). `Verifying` 중에도 연결된
+  Task는 계속 진행할 수 있다. 완료 verdict는 verifier가 기록하고, 사람의
+  확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
+  `admits_self_directed_progress`가 이 경계를 정의한다.
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와
@@ -263,6 +300,7 @@ status: reference
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
   본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
+  선택적으로 제공되는 JEV 적용 가능성 의견도 권한·실행·성공의 증거가 아니다.
 
 **Composition Skill**
 : 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
@@ -307,6 +345,19 @@ status: reference
 
 ## Continuity
 
+**Autoboot Exclusion Reason (자동 부팅 제외 이유)**
+: 설정상 부팅 가능한데도 `bootable_keeper_names`에서 의도적으로 빠진 Keeper의
+  닫힌 이유. `Paused`·`Declarative_autoboot_disabled`·`Autoboot_disabled`·
+  `Shutdown_admission_fence` 넷이다. 앞의 셋은 Keeper 설정에서 유도되지만
+  `Shutdown_admission_fence`는 아니다 — durable shutdown operation이 아직 그
+  Keeper의 admission을 소유하고 있어, autoboot 호출자가 boot-scan shutdown
+  inventory(`blocked_keeper_names`)를 들고 표시한다. boot recovery가 회수
+  가능한 operation을 같은 bootstrap에서 정산하면 supervisor의 주기 pass가 그
+  Keeper를 등록한다. 배제된 Keeper는 excluded list에 찍는다 — 2026-07-21
+  wedge에서는 한 Keeper가 boot set과 excluded list 양쪽에서 조용히 빠져
+  장애가 autoboot 보고에서 보이지 않았다.
+  → [keeper_runtime.mli](../../lib/keeper/keeper_runtime.mli)
+
 **Checkpoint**
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
   (`<trace 디렉터리>/<trace id>.json`)다. 실행 중에는
@@ -320,6 +371,13 @@ status: reference
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
   checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다.
+  `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
+  평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
+  참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
+  `insufficient_evidence`는 검증 통과가 아니며 기존 저장 검사를 유지한다.
+  실행 상세의 `context_review`는 판정, `context_write`는 정리 저장 결과다.
+  `outcome_unconfirmed`는 저장 도중 중단되어 저장 여부를 확인하지 못한 상태다.
+  원본 요청 처리·Memory 변경·Checkpoint 저장 결과와 구분한다.
   → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 
 **History**
@@ -333,11 +391,15 @@ status: reference
   원문 줄 수를 제한하지 않는다. 읽지 못한 파일·행은 `history_read_errors`로 알리며,
   불완전한 빈 검색 결과를 `no_match`로 표시하지 않는다.
   운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
-  진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
+  함께 남아 있던 official-client session binding도 지워 다음 provider turn을 새 session으로
+  시작한다. 진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
 
 **Message**
 : History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content
-  조각(`Text`, `Thinking`, `ToolUse`, `ToolResult`, `Image`)의 목록으로 이뤄진다.
+  조각의 목록으로 이뤄진다. 조각은 아홉 가지다: `Text`, `Thinking`,
+  `ReasoningDetails`, `RedactedThinking`, `ToolUse`, `ToolResult`, `Image`,
+  `Document`, `Audio`. 정본은 `packages/agent_core/lib/llm_provider/types.mli`의
+  `content_block`이다.
 
 **Atom**
 : History를 자를 때 쓰는 가장 작은 단위. `User` message 하나, 또는 `Assistant`
@@ -410,6 +472,39 @@ status: reference
   같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
   Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
 
+**Continuity Snapshot (하던 일 저장본)**
+: 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
+  한 파일. 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
+  Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
+  저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
+  완료 대화 합성 회차는 대기열 정리를 요청하거나 Working Context를 변경하지 않는다.
+  대기열 정리 응답의 오류가 완료 대화의 기억·요약 저장을 막지 않도록 분리한다.
+  Agent Core는 저장본을 검증한 뒤, 완료된 원문 구간 대신 하던 일을 다음
+  요청에 전달한다. 원본 checkpoint는 보존한다. 저장 완료와 요청에 사용한
+  상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
+  `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
+  → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
+
+**Continuity Synthesis Observation (대화 요약 진행 관측)**
+: 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
+  완료 경계, 실행·저장·중단 상태. `context_cycle.synthesis`와 TUI Memory 화면에
+  표시한다. 일반 Memory 소비자의 `drained`와 별개이며 다음 실행을 통제하지 않는다.
+  `no_source`는 새로 읽을 완료 구간을 얻지 못했다는 뜻으로, 전체 요약 완료를
+  증명하지 않는다. 구간이 없거나 관측 전이면 알 수 없음으로 표시한다.
+
+**Input Policy (입력 구성 방식)**
+: Keeper의 `input_policy` 설정. `small`은 Agent Core에 보내는 완료된 과거 도구 결과를
+  조회 가능한 원문 참조로 바꾸고, `wide`는 그 본문을 함께 보낸다. 둘 다 검증된
+  하던 일 저장본을 사용하며, 아직 완료되지 않은 작업과 일반 대화는 유지한다.
+  `small`은 새로 조립하는 작업 이력의 실패 호출 인자와 상세 오류도 원문 참조로 전달한다.
+  이 새 briefing 구성은 실제 요청에 원문 조회 도구를 제공하는 모든 runtime에
+  적용할 수 있다. 공식 클라이언트가 소유한 대화 History를 요약하는 것은 아니다.
+  조회 도구가 없거나 저장에 실패하면 원문을 유지한다.
+  조립 시점의 지문은 원문 기준이며, 실제 전송 내용은 요청별 capture와 block digest로 확인한다.
+  원본 checkpoint나 Memory의 처리 위치를 바꾸지 않는다. 기본은 `small`이다.
+  `max_context_override`는 별도의 토큰 상한이며, 이 설정이나 채워야 할 목표가 아니다.
+  공식 클라이언트는 자체 문맥 처리를 사용하므로 선택값과 실제 적용 여부를 구분한다.
+
 **Working Context**
 : Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
   operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
@@ -421,13 +516,14 @@ status: reference
   SHA-256이다. 글자가 하나라도 다르면 다른 Fact다.
 
 **Origin**
-: Fact를 누가 적었나. `authored`는 Keeper가 `memory_write`로 직접 적은 것,
+: Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다.
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
-  `derived`는 근거가 된 다른 Fact의 Memory ID를 갖는다. 근거가 사라지면 `derived`
-  Fact도 무효가 된다.
+  `derived`는 유도(derivation)를 하나 이상 갖고, 유도마다 전제가 된 다른 Fact의
+  Memory ID를 갖는다. 전제가 모두 살아 있는 유도가 하나라도 남아 있으면 `derived`
+  Fact는 유지되고, 그런 유도가 하나도 없으면 무효가 된다.
 
 **Dropped / Supersedes / Absorbs**
 : Librarian이 기억을 바꾸는 세 가지 말. `dropped`는 이유를 적고 버린다.
@@ -454,11 +550,20 @@ status: reference
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
-
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
   참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
   통과율이 아니다. Board의 Choice 판정과도 구분한다.
+  Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
+  Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
+  `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
+  `failed`는 검사 실패다. 모든 문장이 전달된다고 확인된 원문만 흡수하고,
+  확인하지 못한 원문은 현재 Memory에 남긴다. 새 claim 저장은 계속한다.
+  `judged`는 검사를 마친 결과다. 검사 비활성화 등 `skipped`일 때는 Librarian의 결정을 그대로 적용한다.
+  취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
+  반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면
+  `output.after`에 저장된 snapshot과 revision을 남긴다. 저장 전 취소는 이 기록이 없다.
+  이미 저장된 실행 완료 결과는 이후 화면 갱신 알림의 취소로 덮어쓰지 않는다.
 
 **Continuity Measurement (의미 보존 측정)**
 : 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
@@ -466,3 +571,10 @@ status: reference
   입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
   게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
   Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
+
+### 대화 작업 상태 (working_state)
+
+Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
+같은 파일에 저장된 정확한 대화 범위와 한 쌍이며, 큐 원본을 정리한
+`working_contexts`나 장기 Memory facts와 다릅니다. 모델의 출력만으로 범위가
+소비된 것은 아닙니다. pair 저장과 소비 시 이력 검증이 필요합니다.

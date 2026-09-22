@@ -191,7 +191,7 @@ let run (ctx : ctx)
     let turn_state =
       { turn_state with last_execution = Some execution }
     in
-    let result =
+    let authorized_settlement =
       Otel_genai.with_keeper_turn_span
         ~keeper_name:run_meta.name
         ~agent_name:run_meta.name
@@ -208,6 +208,7 @@ let run (ctx : ctx)
            run_provider_dispatch_if_authorized
              ~before_dispatch_authority
              (fun () ->
+            Ok (
             Keeper_registry.mark_turn_provider_attempt_started
               ~base_path:config.base_path
               meta.name;
@@ -296,9 +297,22 @@ let run (ctx : ctx)
                 ~runtime_id:execution.runtime_id
                 ~keeper_turn_id
                 ();
-              raise exn))
+              raise exn)))
     in
-    result, turn_state
+    let settlement : Keeper_agent_run.turn_settlement =
+      match authorized_settlement with
+      | Ok settlement -> settlement
+      (* Authority rejected the dispatch, so no provider ran, no receipt was
+         written, and neither lane settled. *)
+      | Error err ->
+        Keeper_agent_run.not_dispatched err
+    in
+    (* The receipt's own verdict rides up on [turn_state] so the decision
+       record below reports it rather than deciding again. *)
+    let turn_state =
+      { turn_state with degraded_retry_settled = Some settlement }
+    in
+    settlement.Keeper_agent_run.result, turn_state
   in
   let run_once (turn_state : turn_state) =
     let mark_terminal_error err =

@@ -70,11 +70,11 @@ def run_case(executable: str, fixture_path: Path) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"absorb_gate")
         h.drain_until_quiet(process, fd, output)
         first_screen = h.screen_text(bytes(output))
-        status = b"failed" if scenario == "memory-write-failure" else b"succeeded"
+        status = cast(str, run["status"]).encode()
         for needle in (b"absorb_gate", gate["status"].encode(), b"RUN  " + status):
             if needle not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {needle!r}")
-        if gate["status"] != "skipped":
+        if gate["status"] not in ("skipped", "incomplete"):
             boundary = f'"conveyed_boundary": {gate["conveyed_boundary"]}'.encode()
             if boundary not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {boundary!r}")
@@ -83,6 +83,16 @@ def run_case(executable: str, fixture_path: Path) -> None:
 
         if gate["status"] == "skipped":
             needles = [cast(str, gate["reason"]).encode()]
+        elif scenario in (
+            "cancel-second-judgment",
+            "cancel-after-commit",
+            "cancel-after-completion",
+        ):
+            needles = [
+                b"completed-jev",
+                b"requested-cancel-model",
+                b'"s0_0": 0.875',
+            ]
         elif scenario == "http-failure":
             needles = [
                 b"HTTP 503",
@@ -128,6 +138,13 @@ def run_case(executable: str, fixture_path: Path) -> None:
             ]
             if scenario == "memory-write-failure":
                 needles.append(cast(str, run["detail"]).encode())
+        if scenario in ("cancel-after-commit", "cancel-after-completion"):
+            needles.extend(
+                [
+                    b'"after"',
+                    f'"revision": {run["output"]["after"]["revision"]}'.encode(),
+                ]
+            )
         if gate["status"] != "skipped":
             needles.append(
                 cast(str, gate["evaluations"][0]["request"]["endpoint"]).encode()
@@ -135,7 +152,17 @@ def run_case(executable: str, fixture_path: Path) -> None:
         seen = first_screen
         # Only the short report is searched. The unrelated exact_output can
         # be much larger, so its size must not decide how far this test walks.
-        for _ in range(len(json.dumps(gate, indent=2).splitlines()) + 1):
+        for _ in range(
+            len(
+                json.dumps(
+                    run["output"]
+                    if scenario in ("cancel-after-commit", "cancel-after-completion")
+                    else gate,
+                    indent=2,
+                ).splitlines()
+            )
+            + 1
+        ):
             if all(needle in seen for needle in needles):
                 break
             h.read_available(fd, output)
@@ -192,6 +219,8 @@ def run_case(executable: str, fixture_path: Path) -> None:
 def main() -> None:
     executable = h.tui_executable(sys.argv[1])
     producer = str(Path(sys.argv[2]).resolve())
+    cancellation_producer = str(Path(sys.argv[3]).resolve())
+    producer_timeout = 120
     test_dir = Path(__file__).resolve().parent
     environment = os.environ.copy()
     environment["DUNE_SOURCEROOT"] = str(test_dir.parent)
@@ -203,13 +232,14 @@ def main() -> None:
             cwd=test_dir,
             env=environment,
             check=True,
-            timeout=120,
+            timeout=producer_timeout,
         )
         for scenario in (
             "judged",
             "disabled",
             "lane-disabled",
             "missing-key",
+            "excluded",
             "http-failure",
             "invalid-json",
             "invalid-response",
@@ -220,6 +250,41 @@ def main() -> None:
             "memory-write-failure",
         ):
             run_case(executable, Path(directory, scenario + ".json"))
+        cancelled = subprocess.run(
+            [cancellation_producer, "-v"],
+            cwd=test_dir,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+            timeout=producer_timeout,
+        )
+        print(cancelled.stdout, end="", flush=True)
+        cancelled.check_returncode()
+        partial: list[str] = []
+        prefix = "CANCELLATION_FIXTURE "
+        for line in cancelled.stdout.splitlines():
+            if line.startswith(prefix):
+                encoded = line[len(prefix) :]
+                fixture = cast(dict[str, Any], json.loads(encoded))
+                if fixture["scenario"] in (
+                    "cancel-second-judgment",
+                    "cancel-after-commit",
+                    "cancel-after-completion",
+                ):
+                    partial.append(encoded)
+        scenarios = [json.loads(encoded)["scenario"] for encoded in partial]
+        if sorted(scenarios) != [
+            "cancel-after-commit",
+            "cancel-after-completion",
+            "cancel-second-judgment",
+        ]:
+            raise AssertionError(f"unexpected cancellation fixtures: {scenarios}")
+        for encoded in partial:
+            fixture_path = Path(directory, json.loads(encoded)["scenario"] + ".json")
+            fixture_path.write_text(encoded, encoding="utf-8")
+            run_case(executable, fixture_path)
     print("Librarian absorb gate durable evidence reaches the TUI: PASS")
 
 

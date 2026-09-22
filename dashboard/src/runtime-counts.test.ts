@@ -255,6 +255,7 @@ describe('resolveRuntimeCounts', () => {
       keeper_fleet_safety: {
         running_keeper_fiber_count: 4,
         recovering_keeper_fiber_count: 3,
+        official_client_recovery_required_keeper_count: 2,
         executable_keeper_fiber_count: 7,
         paused_keeper_count: 5,
       },
@@ -263,6 +264,7 @@ describe('resolveRuntimeCounts', () => {
     expect(resolveKeeperFleetExecutionCounts(runtimeFleetSafety)).toEqual({
       running: 4,
       recovering: 3,
+      sessionRecoveryRequired: 2,
       executable: 7,
       paused: 1,
     })
@@ -279,6 +281,7 @@ describe('resolveRuntimeCounts', () => {
     expect(resolveKeeperFleetExecutionCounts(runtimeFleetSafety)).toEqual({
       running: 0,
       recovering: null,
+      sessionRecoveryRequired: null,
       executable: 2,
       paused: null,
     })

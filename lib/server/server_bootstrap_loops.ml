@@ -914,8 +914,10 @@ let prepare_keeper_persistence ?requested_base_path ~accept_store_quarantine ~co
               ~config
       with
       | outcome -> outcome
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
+      (* This handler already propagates, at the end of its body. It runs
+         first so the lifecycle leaves [preparing]; a cancellation that
+         skipped it would strand the state machine there. *)
+      | exception exn -> (* cancel-guard-ok: records the failed lifecycle and then re-throws with the original backtrace, past the guard's lookahead *)
         let backtrace = Printexc.get_raw_backtrace () in
         let failure =
           persistence_failure
@@ -1897,9 +1899,12 @@ let start_keeper_loops_owned
      supervisor startup or sibling lanes. See #5717. *)
   fork_subsystem "keeper_autoboot" (fun () ->
     Runtime_startup_state.await_available ();
-    if not (Env_config.KeeperBootstrap.enabled ())
-    then Log.Keeper.info "autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false"
-    else (
+    let persisted, launched =
+      if not (Env_config.KeeperBootstrap.enabled ())
+      then (
+        Log.Keeper.info "autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false";
+        Keeper_meta_store.keeper_names config, [])
+      else (
       wait_for_lazy_startup ();
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
@@ -2119,7 +2124,25 @@ let start_keeper_loops_owned
       | exn ->
         Log.Keeper.error
           "autoboot: supervisor sweep failed to start: %s"
-          (Printexc.to_string exn))));
+          (Printexc.to_string exn));
+      all_names, booted)
+    in
+    (* RFC librarian-lifecycle section 8, stage 4, item 2: a Keeper that
+       autoboot did not launch has no launch transaction to submit its durable
+       Librarian catch-up, so the server submits it here, once, after the
+       exact-output registry is public ([await_available] above). A Keeper
+       that boots later on retry submits its own; the lane serializes the two
+       and the second finds nothing unread. *)
+    let caught_up =
+      Keeper_librarian_queue_refresh.submit_durable_for_unlaunched
+        ~base_path:config.base_path
+        ~persisted
+        ~launched
+    in
+    Log.Keeper.info
+      "autoboot: durable Librarian catch-up submitted for %d unlaunched keeper(s) [%s]"
+      (List.length caught_up)
+      (String.concat ", " caught_up));
   (* Discord presence bridge — syncs keeper liveness to bot status. *)
   fork_subsystem "discord_presence" (fun () ->
     Discord_presence_bridge.start

@@ -49,6 +49,22 @@ val startup_sweep_microvm_guests : Mcp_server.server_state -> unit
 (** Collect abandoned guests with the runtime lifecycle lock. Failure is
     logged without failing server readiness. *)
 
+val declared_keeper_names :
+  keepers_dir:string -> (string list, string) result
+(** The keepers a directory declares: the basenames of its [.toml] files, or
+    the directory read failure. An unreadable directory is not an empty
+    roster. *)
+
+val unknown_typesafeai_exclusions :
+  keepers_dir:string -> (string list, string) result
+(** The names in [\[typesafeai\].excluded_keepers] that {!declared_keeper_names}
+    does not list, or the declaration-directory read failure. *)
+
+val report_unknown_typesafeai_exclusions : base_path:string -> unit
+(** One warning per name {!unknown_typesafeai_exclusions} finds, or one
+    directory-read warning without accusing any configured name. Called once
+    the runtime table is loaded. *)
+
 val start_microvm_guest_maintenance :
   sw:Eio.Switch.t -> sweep:(unit -> unit) -> unit
 (** Fork a switch-owned startup sweep outside the Keeper readiness barrier.

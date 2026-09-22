@@ -199,22 +199,24 @@ let percent_encode_query_value value =
 let request_clock () = Eio_context.get_clock_opt ()
 
 (** Send an HTTP GET request and return the structured status/body pair. *)
-let http_get ~(host : string) ~(port : int) ~(path : string) :
+let http_get_with_body_limit ~max_body_bytes ~(host : string) ~(port : int) ~(path : string) :
     (int * string, string) result =
   let url = url_of ~host ~port ~path in
   timed ~verb:"GET" ~path @@ fun () ->
   match
     Masc_http_client.get_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
+      ~timeout_sec:(request_timeout_sec ()) ?max_body_bytes ~url ~headers:(auth_headers ()) ()
   with
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+
+let http_get = http_get_with_body_limit ~max_body_bytes:None
 
 (** Fetch an arbitrary external URL's body for web link previews. Unlike the
     dashboard helpers above this sends NO masc auth header -- the URL is a
     third-party site, so leaking the operator's token there would be a real
     credential exposure. Only http(s) is followed, and only a 2xx response
-    yields a body. Response size is capped by {!Masc_http_client} (8 MB). *)
+    yields a body. *)
 let fetch_link_preview_body ~(url : string) : (string, string) result =
   if not (String.starts_with ~prefix:"http://" url
           || String.starts_with ~prefix:"https://" url)
@@ -965,15 +967,12 @@ let fetch_measurement_artifact ~host ~port ~sha256 =
   match Tool_blob_store.validate_sha256 sha256 with
   | Error error -> Error (Tool_blob_store.invalid_sha256_to_string error)
   | Ok () ->
-    (match http_get ~host ~port ~path:("/api/v1/artifacts/" ^ sha256) with
-     | Error detail -> Error ("Measurement artifact request failed: " ^ detail)
+    (match http_get_with_body_limit
+        ~max_body_bytes:(Some lane_run_detail_max_body_bytes)
+        ~host ~port ~path:("/api/v1/artifacts/" ^ sha256) with
+     | Error detail -> Error ("Measurement: " ^ detail)
      | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
        Error (named_refusal "Measurement artifact" ~status ~body)
-     | Ok (_, body) when String.length body > lane_run_detail_max_body_bytes ->
-       Error
-         (Printf.sprintf
-            "Measurement artifact is %d bytes; the inspector limit is %d bytes"
-            (String.length body) lane_run_detail_max_body_bytes)
      | Ok (_, body) ->
        (match Yojson.Safe.from_string body with
         | json -> Masc_tui_types.Measurement.decode_artifact ~sha256 json
@@ -1003,26 +1002,20 @@ let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
 let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     (Masc.Tui_decode.lane_run_detail, string) result =
   match
-    http_get ~host ~port
+    http_get_with_body_limit ~max_body_bytes:(Some lane_run_detail_max_body_bytes)
+      ~host ~port
       ~path:
         ("/api/v1/dashboard/exact-lane-runs/"
          ^ percent_encode_path_segment run_id)
   with
-  | Error detail -> Error ("lane run detail request failed: " ^ detail)
+  | Error detail -> Error ("Lane run detail: " ^ detail)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
       Error (named_refusal "lane run detail" ~status ~body)
   | Ok (_, body) ->
-      if String.length body > lane_run_detail_max_body_bytes then
-        Error
-          (Printf.sprintf
-             "lane run record is %d bytes; the TUI does not render a payload \
-              above %d bytes"
-             (String.length body) lane_run_detail_max_body_bytes)
-      else
-        (match Yojson.Safe.from_string body with
-         | json -> Masc.Tui_decode.decode_lane_run_detail json
-         | exception Yojson.Json_error detail ->
-             Error ("lane run detail was not JSON: " ^ detail))
+      (match Yojson.Safe.from_string body with
+       | json -> Masc.Tui_decode.decode_lane_run_detail json
+       | exception Yojson.Json_error detail ->
+           Error ("lane run detail was not JSON: " ^ detail))
 
 (** Fetch one page of chat rows older than [before].
 
@@ -1503,6 +1496,27 @@ let post_runtime_lane_action ~host ~port fields =
     |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 ;;
 
+(** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
+    vision read fleet, in order. The endpoint takes the whole list for this
+    route -- it has no per-entry action -- so a caller must know it is sending
+    everything the file should hold. *)
+let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)
+  : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String "media_failover"
+    ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
+
+(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the runtime
+    a keeper with no assignment walks. [None] clears the entry. *)
+let set_runtime_default ~(host : string) ~(port : int)
+      ~(runtime_id : string option) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String "default"
+    ; ( "runtime_id"
+      , match runtime_id with None -> `Null | Some id -> `String id )
+    ]
+
 (** POST /api/v1/runtime/config/routing with [action = "create"]: declare a
     lane under [lane] with [runtime_ids] as its candidates. The server refuses
     a name the file already declares. *)
@@ -1512,6 +1526,18 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     [ "lane", `String lane
     ; "action", `String "create"
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
+
+(** POST /api/v1/runtime/config/routing with [action = "rename"]: give the
+    declared lane [lane] the name [new_lane]. The server rewrites the table
+    header and every reference to it -- assignments and [\[runtime\].default] --
+    in one validated write, because a lane's name is its routing key. *)
+let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
+      ~(new_lane : string) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String lane
+    ; "action", `String "rename"
+    ; "to", `String new_lane
     ]
 
 (** POST /api/v1/runtime/config/routing with [action = "append"]: add
@@ -1526,6 +1552,40 @@ let append_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
     [ "lane", `String (exact_lane_route name)
     ; "action", `String "append"
     ; "runtime_id", `String runtime_id
+    ]
+
+(** Which way {!move_exact_lane_slot} walks a slot through the declared
+    order. *)
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+
+(** POST /api/v1/runtime/config/routing with [action = "drop"]: take
+    [runtime_id] out of the standalone lane [name]. Only the one id is sent,
+    for the reason the append gives -- this caller can see the slots the
+    registry admitted, and an order rebuilt from that view would delete every
+    declared slot it rejected. The server refuses a slot the lane does not
+    declare, and its last one. *)
+let drop_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "drop"
+    ; "runtime_id", `String runtime_id
+    ]
+
+(** POST /api/v1/runtime/config/routing with [action = "move"]: exchange
+    [runtime_id] with its neighbour in the lane's declared order. Sent as one
+    id and a direction for the same reason as the drop. The server refuses a
+    slot already at the end the move heads for. *)
+let move_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+      ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String (exact_lane_route name)
+    ; "action", `String "move"
+    ; "runtime_id", `String runtime_id
+    ; ( "direction"
+      , `String (match move with Move_slot_up -> "up" | Move_slot_down -> "down") )
     ]
 
 (** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the

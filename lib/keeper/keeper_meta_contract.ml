@@ -256,6 +256,7 @@ type keeper_meta =
   ; microvm_memory : Keeper_microvm_guest_size.memory option
   ; microvm_cpus : Keeper_microvm_guest_size.cpus option
   ; mention_targets : string list
+  ; board_interests : string list
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string
@@ -268,6 +269,7 @@ type keeper_meta =
         transcript-corruption reset-required paths may write it. [None] while
         paused is a fail-closed unclassified state that requires operator
         action. *)
+  ; input_policy : Keeper_input_policy.t
   ; activation_mode : Keeper_activation_mode.t
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
@@ -389,12 +391,14 @@ let effective_meta_of_profile_defaults
         { meta with
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
+          input_policy = apply_profile_default defaults.input_policy Keeper_input_policy.default;
           activation_mode =
             apply_profile_default defaults.activation_mode meta.activation_mode;
           mention_targets =
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
+          board_interests = defaults.board_interests;
           max_context_override =
             apply_profile_default_opt defaults.max_context_override
               meta.max_context_override;
@@ -470,7 +474,12 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
-  | Some _ | None -> Runtime.get_default_runtime_id ()
+  (* schema-compat: this changes only the fallback route accessor; no
+     [keeper_meta] wire field or persisted variant is removed. *)
+  (* The route, not the runtime it enters on: [\[runtime\].default] may name a
+     declared lane, and a keeper with no assignment walks that lane's
+     candidates the same way an assigned one does. *)
+  | Some _ | None -> Runtime.get_default_route ()
 ;;
 
 let proactive_cycle_outcome_to_string = function

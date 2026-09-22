@@ -47,6 +47,44 @@ type checkpoint_progress =
   | Checkpoint_stage_reached
   | Tool_results_saved
 
+type continuity =
+  | Uncompressed_history
+  | Summarized of
+  { snapshot : Librarian_continuity_snapshot.t
+  ; covered_messages : Agent_core.Types.message list
+  }
+
+let uncompressed_history = Uncompressed_history
+
+let covered_messages ~end_atom messages =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  List.filter_map (fun (message, label) -> match label with
+    | Runtime_model_input_tail_window.Atom atom when atom < end_atom -> Some message
+    | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned -> None)
+    labelled
+;;
+
+let completed_history_end ~trace_id ~lines ~messages =
+  Librarian_continuity_snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages
+  |> Result.map (fun range -> range.Keeper_librarian_range.end_atom)
+;;
+
+let prepare_continuity ~trace_id ~lines ~messages snapshot =
+  Result.map (fun _ ->
+    Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
+    (Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot)
+;;
+
+let validate_continuity ~messages = function
+  | Uncompressed_history -> Ok ()
+  | Summarized continuity ->
+  let current = covered_messages ~end_atom:continuity.snapshot.end_atom messages in
+  if List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages
+  then Ok ()
+  else Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+    { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+;;
+
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
@@ -66,6 +104,9 @@ type try_provider_ctx =
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; continuity : continuity option
+  ; input_policy : Keeper_input_policy.t
+  ; completed_end_atom : int
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
@@ -698,6 +739,8 @@ let last_resort_demotes ~measure_message_bytes ~base_path messages =
 ;;
 
 let compose_carried_model_input
+      ?(input_policy = Keeper_input_policy.Wide)
+      ?continuity
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
       ~(history_digest_at : int -> string option)
@@ -714,20 +757,45 @@ let compose_carried_model_input
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
   let front, outlived_seed =
-    match front with
-    | Some seed ->
+    match continuity, front with
+    | Some _, _ -> None, None
+    | None, Some seed ->
       (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
        | Ok seed -> Some seed, None
        | Error dropped -> None, Some (seed, dropped))
-    | None -> None, None
+    | None, None -> None, None
   in
-  let demote_before = if last_resort then history_atom_count else demote_before in
+  let demote_before =
+    match input_policy, continuity with
+    | Keeper_input_policy.Small, _ -> demote_before
+    | Keeper_input_policy.Wide, Some _ -> 0
+    | Wide, None -> if last_resort then history_atom_count else demote_before in
   let planned =
     demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
   in
   let projection, transmitted_bytes, origin =
-    match front with
-    | Some (seed : Keeper_carried_front.seed) ->
+    match continuity, front with
+    | Some (Summarized { snapshot; _ }), _ ->
+      let working : Agent_core.Types.message =
+        { role = Agent_core.Types.User
+        ; content = [ Agent_core.Types.Text
+            ("[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
+             ^ snapshot.working_state) ]
+        ; name = None; tool_call_id = None
+        ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+        }
+      in
+      let projection, transmitted_bytes =
+        Runtime_model_input_tail_window.project_from_atom
+          ~allow_empty_history:true
+          ~history_already_announced:true ~measure_message_bytes
+          ~first_atom:snapshot.end_atom
+          (working :: planned.Keeper_model_input_demotion.messages)
+      in
+      projection, transmitted_bytes,
+        Keeper_carried_front.Librarian_snapshot
+          { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
+    | None, Some (seed : Keeper_carried_front.seed) ->
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
@@ -742,7 +810,7 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | None ->
+    | None, None | Some Uncompressed_history, _ ->
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -784,6 +852,8 @@ type request_view =
   }
 
 let request_view
+      ?(input_policy = Keeper_input_policy.Wide)
+      ?continuity
       ~provider_config
       ~measure_message_bytes
       ~front
@@ -797,6 +867,7 @@ let request_view
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
+        ~input_policy ?continuity
         ~measure_message_bytes
         ~front
         ~history_digest_at
@@ -904,9 +975,6 @@ let bounded_model_input_projection
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
   in
-  (* A position in the durable history, which is what the composition
-     annotates: the messages the turn was seeded with come first. *)
-  let initial_message_index = List.length ctx.initial_messages in
   (* One memo per provider attempt, not per request.  A turn issues one
      projection per provider request — measured on the live wire capture:
      83 requests for turn 12263, 62 for 15638 — and every request re-measures
@@ -934,6 +1002,17 @@ let bounded_model_input_projection
      be thrown away between the attempt's 62 to 83 requests, which is what it
      was before. *)
   let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
+  let store_failure_reported = ref false in
+  let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
+  let references_enabled = match ctx.input_policy, ctx.recovery_view with
+    | Keeper_input_policy.Small, None -> reader_available && ctx.completed_end_atom > 0
+    | _ -> false in
+  let demotion_base_path = if references_enabled then ctx.base_path else "" in
+  Log.Keeper.info ~keeper_name:ctx.keeper_name
+    "input policy runtime=%s selected=%s context_owner=agent_core completed_end_atom=%d blob_reader_available=%b body_externalization_enabled=%b"
+    ctx.runtime_id (Keeper_input_policy.to_string ctx.input_policy)
+    ctx.completed_end_atom reader_available references_enabled;
+
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
@@ -953,6 +1032,11 @@ let bounded_model_input_projection
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
+    let ( let* ) = Result.bind in
+    let* () = match ctx.continuity with
+      | None -> Ok ()
+      | Some continuity -> offload_model_input_cpu (fun () -> validate_continuity ~messages continuity)
+    in
     (* [messages] is the durable history, the checkpoint's messages, in which
        the ledger, the seed and the forecast count atoms; the range is
        composed in that vocabulary and the wire's projection runs afterwards
@@ -962,7 +1046,9 @@ let bounded_model_input_projection
         Runtime_model_input_tail_window.atom_opening_digest messages)
     in
     let front, dropped_ledger =
-      carried_front
+      match ctx.continuity with
+      | Some _ -> None, None
+      | None -> carried_front
         ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id
@@ -997,39 +1083,17 @@ let bounded_model_input_projection
        compose with the ordinary boundary again. *)
     let last_resort = !(state.last_resort_armed) in
     state.last_resort_armed := false;
-    let demotion_base_path =
-      (* #27268 A/B kill-switch: an empty base path makes the composition
-         keep every atom verbatim, so the RFC-0363 demotion effect can be
-         measured on and off in one deployment. Default on preserves
-         current behavior. *)
-      if Env_config_core.get_bool ~default:true "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
-      then ctx.base_path
-      else ""
-    in
-    state.last_resort_probe
-    := Some
-         (fun () ->
-            offload_model_input_cpu (fun () ->
-              last_resort_demotes
-                ~measure_message_bytes
-                ~base_path:demotion_base_path
-                messages));
-    (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
-       reasoning over right now is what this turn produced, and
-       [ctx.initial_messages] is exactly the history the turn was seeded
-       with — so everything past it is this turn's own work and stays
-       verbatim, and everything before it was already reported through a
-       receipt or a board post and becomes a readable address. The
-       boundary moves once per turn, so appending a message cannot
-       rewrite the retained prefix. *)
-    let demote_before =
-      offload_model_input_cpu (fun () ->
-        Runtime_model_input_tail_window.first_atom_at_or_after
-          messages
-          ~message_index:initial_message_index)
-    in
+    (* Completed-turn evidence, not attempt seed length, protects unfinished
+       resumed tool work. Capacity refusal does not move this boundary. *)
+    let demote_before = ctx.completed_end_atom in
+    state.last_resort_probe :=
+      (match ctx.input_policy, ctx.continuity with
+       | Keeper_input_policy.Small, _ | _, Some _ -> None
+       | Wide, None -> Some (fun () -> offload_model_input_cpu (fun () ->
+           last_resort_demotes ~measure_message_bytes ~base_path:demotion_base_path messages)));
     let view =
       request_view
+        ~input_policy:ctx.input_policy ?continuity:ctx.continuity
         ~provider_config
         ~measure_message_bytes
         ~front
@@ -1056,6 +1120,11 @@ let bounded_model_input_projection
               ~pending
               messages
           in
+          if outcome.Keeper_model_input_demotion.reverted > 0 && not !store_failure_reported then (
+            store_failure_reported := true;
+            Log.Keeper.warn ~keeper_name:ctx.keeper_name
+              "input policy kept original tool bodies after externalization failure: count=%d"
+              outcome.reverted);
           outcome.Keeper_model_input_demotion.messages)
         messages
     in
@@ -1204,10 +1273,8 @@ let bounded_model_input_projection
         composed from, whose atom count [history_atom_count] is.
         - (Some, Some): the range carried atoms [first_atom] to the newest.
         - (None, None): the history has no atom; nothing was carried.
-        - (None, Some _): [first_atom] is outside the history, which it is
-          when this request carried no atom of a non-empty one. The
-          composition always carries the newest atom, so it does not occur
-          on this path.
+        - (None, Some _): the saved working state covers every history atom,
+          so the request carries only pinned context and no raw atom.
         - (Some _, None): cannot occur. A front index below the atom count
           puts the newest index at or above it, and both are read from the
           same lookup.
@@ -1440,6 +1507,18 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; pre_dispatch_serialization_observer =
               Some
                 (fun observation ->
+                   let input = match ctx.continuity with
+                     | Some (Summarized {snapshot; _}) ->
+                       Keeper_continuity_observation.Summarized
+                         { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
+                           boundary_line = snapshot.end_boundary_line }
+                     | Some Uncompressed_history -> Keeper_continuity_observation.Uncompressed
+                     | None -> Keeper_continuity_observation.Not_applied in
+                   if Option.is_some ctx.session_id then
+                     Keeper_continuity_observation.record
+                     ~config:(Workspace.default_config ctx.base_path) ~keeper_name:ctx.keeper_name
+                     { prepared_at = Time_compat.now (); runtime_id = ctx.runtime_id; input;
+                       request_bytes = observation.Llm_provider.Request_wire_observer.body_bytes };
                    Option.iter
                      (fun observe ->
                         observe
@@ -2090,16 +2169,17 @@ let run_try_provider_with_carried_range_eviction
       candidate
   =
   let state = new_attempt_state ctx in
-  evict_at_turn_boundary
-    ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
-    ~context_marks:ctx.context_marks state.ledger;
-  match ctx.recovery_view with
-  | Some _ ->
+  if Option.is_none ctx.continuity then
+    evict_at_turn_boundary
+      ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+      ~context_marks:ctx.context_marks state.ledger;
+  match ctx.recovery_view, ctx.continuity with
+  | Some _, _ | None, Some _ ->
     (* The validated semantic view owns retained source obligations. Retrying
        the same view with a shorter range cannot recover it. Final serialized
        request admission still enforces the request-body cap. *)
     run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
-  | None ->
+  | None, None ->
     (* An uncapped runtime retries like any other. #36817 kept such a
        runtime out of the token halving because that walk invented a seed
        from a declared window and ran 18 refusals to zero; this walk moves a
@@ -2217,6 +2297,7 @@ let max_tokens_truncation_error error =
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Official_client_recovery_required _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Host_stopped_turn _

@@ -169,6 +169,7 @@ type standalone_lane = {
   sl_admitted_slots : string list;
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
+  sl_declared_slots : string list;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -544,6 +545,7 @@ type fleet_safety = {
   fs_failing_count : int;
   fs_recovering_count : int;
   fs_turn_configuration_error_count : int;
+  fs_official_client_recovery_required_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
@@ -551,6 +553,7 @@ type fleet_safety = {
   fs_running_names : string list;
   fs_executable_names : string list;
   fs_turn_configuration_error_names : string list;
+  fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -1470,8 +1473,8 @@ let json_error_sentence body =
 let raw_error_body_head_bytes = 240
 
 let http_transport_error ~verb ~url ~detail =
-  Printf.sprintf "(%s %s failed: %s)" (sanitize_terminal_text url)
-    (sanitize_terminal_text verb) (sanitize_terminal_text detail)
+  Printf.sprintf "%s failed: %s (%s)" (sanitize_terminal_text verb)
+    (sanitize_terminal_text detail) (sanitize_terminal_text url)
 
 let http_status_error ~status_code ~body =
   let body = String.trim body in
@@ -2400,18 +2403,22 @@ type runtime_option = {
 type runtime_resolved_lane = {
   rrl_id : string;
   rrl_runtime_ids : string list;
+  rrl_declared : bool;
 }
 
 type runtime_resolved_snapshot = {
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
+  rrs_media_failover : string list;
+  rrs_media_failover_declared : string list;
   rrs_runtimes : runtime_option list;
   rrs_lanes : runtime_resolved_lane list;
 }
 
 type runtime_candidate_row = {
   rcr_lane_id : string;
+  rcr_lane_declared : bool;
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
@@ -2469,7 +2476,7 @@ type repository_change_snapshot = {
 type memory_alert_code =
   | Snapshot_read_error
   | Source_snapshot_read_error
-  | Librarian_lane_busy
+  | Librarian_stopped
   | Librarian_failures
   | Librarian_starvation
   | Vision_ingest_errors
@@ -2478,6 +2485,42 @@ type memory_alert = {
   ma_code : memory_alert_code;
   ma_label : string;
   ma_message : string;
+}
+
+(* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
+   standing, and what its last pass and its journal say. [None] in a field is
+   "not measured", which the header prints as such; it is not zero. *)
+type memory_librarian_health = {
+  mlh_state : string option;
+  mlh_detail : string option;
+  mlh_measured_at : float option;
+  mlh_unread_atom_turns : int option;
+  mlh_unread_official_turns : int option;
+  mlh_last_success_at : float option;
+  mlh_last_failure_kind : string option;
+}
+
+type memory_context_frontier = {
+  mcf_trace_id : string;
+  mcf_end_atom : int;
+  mcf_boundary_line : int;
+}
+type memory_context_input =
+  | Context_summarized of memory_context_frontier
+  | Context_uncompressed
+  | Context_not_applied
+
+type memory_context_prepared = {
+  mcp_prepared_at : float;
+  mcp_runtime_id : string;
+  mcp_input : memory_context_input;
+  mcp_request_bytes : int;
+}
+type memory_context_cycle = {
+  mcc_saved : memory_context_frontier option;
+  mcc_saved_unreadable : bool;
+  mcc_prepared : memory_context_prepared option;
+  mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
 
 type memory_keeper_health = {
@@ -2492,7 +2535,8 @@ type memory_keeper_health = {
   mkh_added : int;
   mkh_removed : int;
   mkh_snapshot_present : bool;
-  mkh_librarian_lane_busy : int;
+  mkh_context_cycle : memory_context_cycle;
+  mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;
   mkh_vision_ingest_errors : int;
   mkh_vision_ingest_error_reasons : (string * int) list;
@@ -2518,6 +2562,7 @@ type memory_health_snapshot = {
   mhs_total_source_invalidations : int;
   mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
+  mhs_total_librarian_unread_turns : int option;
   mhs_total_vision_ingest_errors : int;
   mhs_total_read_errors : int;
   mhs_total_source_read_errors : int;
@@ -4336,6 +4381,7 @@ let decode_runtime_default_member json =
 
 let decode_runtime_resolved_lane json =
   let* rrl_id = required_string_field json "id" in
+  let* rrl_declared = required_bool_field json "declared" in
   let* runtime_ids = required_list_field json "runtime_ids" in
   let* rrl_runtime_ids =
     decode_list "runtime_ids"
@@ -4365,7 +4411,7 @@ let decode_runtime_resolved_lane json =
     in
     loop rrl_runtime_ids
   in
-  Ok { rrl_id; rrl_runtime_ids }
+  Ok { rrl_id; rrl_runtime_ids; rrl_declared }
 
 let decode_runtime_resolved_snapshot json =
   let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
@@ -4378,6 +4424,17 @@ let decode_runtime_resolved_snapshot json =
            source)
   in
   let* rrs_config_path = required_nullable_string_field json "config_path" in
+  let string_list_field name =
+    let* items = required_list_field json name in
+    decode_list
+      name
+      (function
+        | `String value -> Ok value
+        | bad -> field_type_error name "a string" bad)
+      items
+  in
+  let* rrs_media_failover = string_list_field "media_failover" in
+  let* rrs_media_failover_declared = string_list_field "media_failover_declared" in
   let* default_json, rrs_default_runtime_id =
     decode_runtime_default_member json
   in
@@ -4456,6 +4513,8 @@ let decode_runtime_resolved_snapshot json =
     { rrs_generated_at_iso
     ; rrs_config_path
     ; rrs_default_runtime_id
+    ; rrs_media_failover
+    ; rrs_media_failover_declared
     ; rrs_runtimes
     ; rrs_lanes
     }
@@ -4487,6 +4546,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
            | Some runtime ->
                loop (position + 1)
                  ({ rcr_lane_id = lane.rrl_id
+                  ; rcr_lane_declared = lane.rrl_declared
                   ; rcr_position = position
                   ; rcr_candidate_count = candidate_count
                   ; rcr_runtime = runtime
@@ -4649,7 +4709,7 @@ let require_exact_object_fields context expected = function
 let memory_alert_severity = function
   | Snapshot_read_error
   | Source_snapshot_read_error
-  | Librarian_lane_busy
+  | Librarian_stopped
   | Librarian_failures
   | Vision_ingest_errors -> `Warn
   | Librarian_starvation -> `Error
@@ -4657,7 +4717,7 @@ let memory_alert_severity = function
 let memory_alert_code_of_wire = function
   | "snapshot_read_error" -> Some Snapshot_read_error
   | "source_snapshot_read_error" -> Some Source_snapshot_read_error
-  | "librarian_lane_busy" -> Some Librarian_lane_busy
+  | "librarian_stopped" -> Some Librarian_stopped
   | "librarian_failures" -> Some Librarian_failures
   | "librarian_starvation" -> Some Librarian_starvation
   | "vision_ingest_errors" -> Some Vision_ingest_errors
@@ -4665,6 +4725,72 @@ let memory_alert_code_of_wire = function
 
 let memory_alert_severity_wire code =
   match memory_alert_severity code with `Warn -> "warn" | `Error -> "error"
+
+(* The states the server sends (RFC §4.9). A spelling this build does not know
+   is refused rather than shown as an unknown word: the header's job is to say
+   whether the keeper is behind, and a word it cannot place says nothing. *)
+let memory_librarian_states =
+  [ "off"; "lane_unconfigured"; "drained"; "not_committed"; "stopped"; "raised" ]
+
+let decode_memory_librarian_health keeper_json =
+  let* json = required_member keeper_json "librarian" in
+  let* () =
+    require_exact_object_fields
+      "memory librarian health"
+      [ "state"
+      ; "detail"
+      ; "measured_at"
+      ; "unread_atom_turns"
+      ; "unread_official_turns"
+      ; "last_success_at"
+      ; "last_failure_kind"
+      ]
+      json
+  in
+  let* mlh_state = required_nullable_string_field json "state" in
+  let* () =
+    match mlh_state with
+    | None -> Ok ()
+    | Some state ->
+      if List.mem state memory_librarian_states
+      then Ok ()
+      else Error ("unsupported librarian state: " ^ state)
+  in
+  let* mlh_detail = required_nullable_string_field json "detail" in
+  let* mlh_measured_at = required_nullable_float_field json "measured_at" in
+  let* mlh_unread_atom_turns = required_nullable_int_field json "unread_atom_turns" in
+  let* mlh_unread_official_turns =
+    required_nullable_int_field json "unread_official_turns"
+  in
+  let* mlh_last_success_at = required_nullable_float_field json "last_success_at" in
+  let* mlh_last_failure_kind =
+    required_nullable_string_field json "last_failure_kind"
+  in
+  let* () =
+    if List.for_all
+         (fun count -> Option.fold ~none:true ~some:(fun count -> count >= 0) count)
+         [ mlh_unread_atom_turns; mlh_unread_official_turns ]
+    then Ok ()
+    else Error "librarian unread turns must be non-negative"
+  in
+  let* () =
+    (* A count without a measurement has no time it was taken at. *)
+    if Option.is_some mlh_measured_at
+       || (Option.is_none mlh_unread_atom_turns
+           && Option.is_none mlh_unread_official_turns
+           && Option.is_none mlh_state)
+    then Ok ()
+    else Error "librarian measurement must carry the time it was taken"
+  in
+  Ok
+    { mlh_state
+    ; mlh_detail
+    ; mlh_measured_at
+    ; mlh_unread_atom_turns
+    ; mlh_unread_official_turns
+    ; mlh_last_success_at
+    ; mlh_last_failure_kind
+    }
 
 let decode_memory_alert json =
   let* () =
@@ -4686,6 +4812,54 @@ let decode_memory_alert json =
           && not (String.equal ma_message "") -> Ok { ma_code; ma_label; ma_message }
    | Some _ | None -> Error "memory alert has an invalid typed code contract")
 
+let decode_memory_context_cycle keeper_json =
+  let* json = required_member keeper_json "context_cycle" in
+  let* () = require_exact_object_fields "context cycle"
+    ["saved"; "saved_read_error"; "prepared"; "synthesis"] json in
+  let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
+  let frontier json =
+    let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
+    let* mcf_trace_id = required_string_field json "trace_id" in
+    let* mcf_end_atom = required_int_field json "end_atom" in
+    let* mcf_boundary_line = required_int_field json "boundary_line" in
+    if String.trim mcf_trace_id = "" || mcf_end_atom < 1 || mcf_boundary_line < 1
+    then Error "invalid context frontier"
+    else Ok {mcf_trace_id; mcf_end_atom; mcf_boundary_line} in
+  let prepared json =
+    let* () = require_exact_object_fields "prepared context"
+      ["prepared_at"; "runtime_id"; "input"; "request_bytes"] json in
+    let* prepared_at = required_nullable_float_field json "prepared_at" in
+    let* mcp_prepared_at = match prepared_at with
+      | Some time when Float.is_finite time && time >= 0. -> Ok time
+      | _ -> Error "invalid prepared context time" in
+    let* mcp_runtime_id = required_string_field json "runtime_id" in
+    let* mcp_request_bytes = required_int_field json "request_bytes" in
+    let* () = if String.trim mcp_runtime_id <> "" && mcp_request_bytes >= 0
+      then Ok () else Error "invalid prepared context runtime or bytes" in
+    let* input = required_member json "input" in
+    let* () = require_exact_object_fields "context input" ["kind"; "frontier"] input in
+    let* kind = required_string_field input "kind" in
+    let* value = required_member input "frontier" in
+    let* value = nullable frontier value in
+    let* mcp_input = match kind, value with
+      | "summarized", Some value -> Ok (Context_summarized value)
+      | "uncompressed", None -> Ok Context_uncompressed
+      | "not_applied", None -> Ok Context_not_applied
+      | _ -> Error "context input kind disagrees with frontier" in
+    Ok {mcp_prepared_at; mcp_runtime_id; mcp_request_bytes; mcp_input} in
+  let* saved = required_member json "saved" in
+  let* mcc_saved = nullable frontier saved in
+  let* read_error = required_nullable_string_field json "saved_read_error" in
+  let* mcc_saved_unreadable = match read_error, mcc_saved with
+    | None, _ -> Ok false
+    | Some "snapshot_unreadable", None -> Ok true
+    | _ -> Error "context saved frontier disagrees with read error" in
+  let* value = required_member json "prepared" in
+  let* mcc_prepared = nullable prepared value in
+  let* value = required_member json "synthesis" in
+  let* mcc_synthesis = nullable Keeper_continuity_observation.synthesis_of_json value in
+  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared; mcc_synthesis}
+
 let decode_memory_keeper_health json =
   let* () =
     require_exact_object_fields
@@ -4701,7 +4875,8 @@ let decode_memory_keeper_health json =
       ; "added"
       ; "removed"
       ; "snapshot_present"
-      ; "librarian_lane_busy"
+      ; "context_cycle"
+      ; "librarian"
       ; "librarian_failures"
       ; "vision_ingest_errors"
       ; "vision_ingest_error_reasons"
@@ -4740,7 +4915,8 @@ let decode_memory_keeper_health json =
     then Ok ()
     else Error "memory updated_at must describe a readable snapshot"
   in
-  let* mkh_librarian_lane_busy = required_int_field json "librarian_lane_busy" in
+  let* mkh_context_cycle = decode_memory_context_cycle json in
+  let* mkh_librarian = decode_memory_librarian_health json in
   let* mkh_librarian_failures = required_int_field json "librarian_failures" in
   let* vision_reasons_json =
     required_list_field json "vision_ingest_error_reasons"
@@ -4812,7 +4988,6 @@ let decode_memory_keeper_health json =
         ; mkh_snapshot_bytes
         ; mkh_added
         ; mkh_removed
-        ; mkh_librarian_lane_busy
         ; mkh_librarian_failures
         ; mkh_vision_ingest_errors
         ; mkh_source_revision
@@ -4835,7 +5010,8 @@ let decode_memory_keeper_health json =
     ; mkh_added
     ; mkh_removed
     ; mkh_snapshot_present
-    ; mkh_librarian_lane_busy
+    ; mkh_context_cycle
+    ; mkh_librarian
     ; mkh_librarian_failures
     ; mkh_vision_ingest_errors
     ; mkh_vision_ingest_error_reasons
@@ -4855,7 +5031,6 @@ let decode_memory_health_snapshot json =
       "memory health snapshot"
       [ "schema"
       ; "generated_at"
-      ; "cadence_counter_entries"
       ; "keepers"
       ; "totals"
       ; "alert_summary"
@@ -4864,17 +5039,13 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v4"
+    if String.equal schema "keeper.memory_os.current_health.v7"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
   let* mhs_generated_at = require_float_field json "generated_at" in
-  let* cadence_counter_entries =
-    required_int_field json "cadence_counter_entries"
-  in
   let* () =
     if Float.is_finite mhs_generated_at && mhs_generated_at >= 0.0
-       && cadence_counter_entries >= 0
     then Ok ()
     else Error "memory health observation metadata must be non-negative"
   in
@@ -4902,7 +5073,7 @@ let decode_memory_health_snapshot json =
       ; "source_facts"
       ; "source_invalidations"
       ; "source_snapshot_bytes"
-      ; "librarian_lane_busy"
+      ; "librarian_unread_turns"
       ; "librarian_failures"
       ; "vision_ingest_errors"
       ; "read_errors"
@@ -4944,8 +5115,8 @@ let decode_memory_health_snapshot json =
   in
   let* total_added = required_int_field totals_json "added" in
   let* total_removed = required_int_field totals_json "removed" in
-  let* total_librarian_lane_busy =
-    required_int_field totals_json "librarian_lane_busy"
+  let* mhs_total_librarian_unread_turns =
+    required_nullable_int_field totals_json "librarian_unread_turns"
   in
   let* summary_json = required_member json "alert_summary" in
   let* () =
@@ -4957,7 +5128,7 @@ let decode_memory_health_snapshot json =
       ; "keepers_with_alerts"
       ; "snapshot_read_error_keepers"
       ; "source_snapshot_read_error_keepers"
-      ; "librarian_lane_busy_keepers"
+      ; "librarian_stopped_keepers"
       ; "librarian_starving_keepers"
       ]
       summary_json
@@ -4977,8 +5148,8 @@ let decode_memory_health_snapshot json =
   let* source_snapshot_read_error_keepers =
     required_int_field summary_json "source_snapshot_read_error_keepers"
   in
-  let* librarian_lane_busy_keepers =
-    required_int_field summary_json "librarian_lane_busy_keepers"
+  let* librarian_stopped_keepers =
+    required_int_field summary_json "librarian_stopped_keepers"
   in
   let all_totals =
     [ mhs_total_facts
@@ -4991,7 +5162,6 @@ let decode_memory_health_snapshot json =
     ; mhs_total_source_facts
     ; mhs_total_source_invalidations
     ; mhs_total_source_snapshot_bytes
-    ; total_librarian_lane_busy
     ; mhs_total_librarian_failures
     ; mhs_total_vision_ingest_errors
     ; mhs_total_read_errors
@@ -5002,7 +5172,7 @@ let decode_memory_health_snapshot json =
     ; keepers_with_alerts
     ; snapshot_read_error_keepers
     ; source_snapshot_read_error_keepers
-    ; librarian_lane_busy_keepers
+    ; librarian_stopped_keepers
     ; mhs_starving_keepers
     ]
   in
@@ -5013,6 +5183,15 @@ let decode_memory_health_snapshot json =
   in
   let sum field =
     List.fold_left (fun total keeper -> total + field keeper) 0 mhs_keepers
+  in
+  let expected_unread = List.fold_left (fun total keeper ->
+    match total, keeper.mkh_librarian.mlh_unread_atom_turns,
+          keeper.mkh_librarian.mlh_unread_official_turns with
+    | Some total, Some atoms, Some official -> Some (total + atoms + official)
+    | _ -> None) (Some 0) mhs_keepers in
+  let* () =
+    if mhs_total_librarian_unread_turns = expected_unread then Ok ()
+    else Error "memory health unread total disagrees with keeper rows"
   in
   let expected_totals =
     [ mhs_total_facts, sum (fun keeper -> keeper.mkh_facts)
@@ -5025,7 +5204,6 @@ let decode_memory_health_snapshot json =
     ; mhs_total_source_facts, sum (fun keeper -> keeper.mkh_source_facts)
     ; mhs_total_source_invalidations, sum (fun keeper -> keeper.mkh_source_invalidations)
     ; mhs_total_source_snapshot_bytes, sum (fun keeper -> keeper.mkh_source_snapshot_bytes)
-    ; total_librarian_lane_busy, sum (fun keeper -> keeper.mkh_librarian_lane_busy)
     ; mhs_total_librarian_failures, sum (fun keeper -> keeper.mkh_librarian_failures)
     ; mhs_total_vision_ingest_errors, sum (fun keeper -> keeper.mkh_vision_ingest_errors)
     ; mhs_total_read_errors, sum (fun keeper -> if Option.is_some keeper.mkh_read_error then 1 else 0)
@@ -5066,8 +5244,11 @@ let decode_memory_health_snapshot json =
       && keepers_with_alerts = sum (fun keeper -> if keeper.mkh_alerts = [] then 0 else 1)
       && snapshot_read_error_keepers = mhs_total_read_errors
       && source_snapshot_read_error_keepers = mhs_total_source_read_errors
-      && librarian_lane_busy_keepers
-         = sum (fun keeper -> if keeper.mkh_librarian_lane_busy > 0 then 1 else 0)
+      && librarian_stopped_keepers
+         = sum (fun keeper ->
+           match keeper.mkh_librarian.mlh_state with
+           | Some ("lane_unconfigured" | "not_committed" | "stopped" | "raised") -> 1
+           | Some _ | None -> 0)
       && mhs_starving_keepers
          = sum (fun keeper ->
            if keeper.mkh_librarian_failures > 0 && not keeper.mkh_snapshot_present
@@ -5088,6 +5269,7 @@ let decode_memory_health_snapshot json =
     ; mhs_total_source_invalidations
     ; mhs_total_source_snapshot_bytes
     ; mhs_total_librarian_failures
+    ; mhs_total_librarian_unread_turns
     ; mhs_total_vision_ingest_errors
     ; mhs_total_read_errors
     ; mhs_total_source_read_errors
@@ -5953,6 +6135,15 @@ let decode_standalone_lane json =
         | _ -> Error "dropped_slots: expected a string")
       dropped_slots
   in
+  let* declared_slots = required_list_field json "declared_slots" in
+  let* sl_declared_slots =
+    decode_list
+      "declared_slots"
+      (function
+        | `String slot_id -> Ok slot_id
+        | _ -> Error "declared_slots: expected a string")
+      declared_slots
+  in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -5980,6 +6171,7 @@ let decode_standalone_lane json =
     ; sl_admitted_slots
     ; sl_cli_slots
     ; sl_dropped_slots
+    ; sl_declared_slots
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count
@@ -8734,6 +8926,12 @@ let decode_fleet_safety json =
   let* fs_turn_configuration_error_count =
     int_field_or section "turn_configuration_error_keeper_count" ~default:0
   in
+  let* fs_official_client_recovery_required_count =
+    required_int_field section "official_client_recovery_required_keeper_count"
+  in
+  let* fs_official_client_recovery_required_names =
+    require_string_list section "official_client_recovery_required_keeper_names"
+  in
   let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
   let* fs_target_reaction_capacity =
     int_field_or section "target_reaction_capacity_count" ~default:0
@@ -8765,6 +8963,8 @@ let decode_fleet_safety json =
     ; fs_failing_count
     ; fs_recovering_count
     ; fs_turn_configuration_error_count
+    ; fs_official_client_recovery_required_count
+    ; fs_official_client_recovery_required_names
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall

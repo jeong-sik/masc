@@ -164,13 +164,64 @@ let () =
         ; Alcotest.test_case "an unknown action is refused" `Quick
             (fun () ->
               expect_error "unknown-action"
-                ~message:"unknown lane action: rename (expected set, create, remove or append)"
-                {|{"lane":"runpod_mtp.qwen","action":"rename","runtime_ids":[]}|})
+                ~message:
+                  "unknown lane action: renombrar (expected set, create, remove, \
+                   rename, append, drop or move)"
+                {|{"lane":"runpod_mtp.qwen","action":"renombrar","runtime_ids":[]}|})
         ; Alcotest.test_case "append adds one slot to an exact lane" `Quick
             (fun () ->
               check_case "append"
                 {|{"lane":"exact/board_attention_exact","action":"append","runtime_id":"runpod_mtp.qwen"}|}
                 "exact/board_attention_exact" "append" [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "rename names the lane and what it becomes" `Quick
+            (fun () ->
+              check_case "rename"
+                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"primary"}|}
+                "runpod_mtp.qwen" "rename" [ "primary" ])
+        ; Alcotest.test_case "rename needs a name to take" `Quick
+            (fun () ->
+              expect_error "rename-no-to"
+                ~message:"to required"
+                {|{"lane":"runpod_mtp.qwen","action":"rename"}|})
+        ; Alcotest.test_case "rename refuses another route at either end" `Quick
+            (fun () ->
+              expect_error "rename-from-default"
+                ~message:{|"default" names another route, not a lane|}
+                {|{"lane":"default","action":"rename","to":"primary"}|};
+              expect_error "rename-to-media-failover"
+                ~message:{|"media_failover" names another route, not a lane|}
+                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"media_failover"}|})
+        ; Alcotest.test_case "drop names one slot of an exact lane" `Quick
+            (fun () ->
+              check_case "drop"
+                {|{"lane":"exact/board_attention_exact","action":"drop","runtime_id":"runpod_mtp.qwen"}|}
+                "exact/board_attention_exact" "drop" [ "runpod_mtp.qwen" ])
+        ; Alcotest.test_case "move carries the slot and a direction" `Quick
+            (fun () ->
+              check_case "move-up"
+                {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"up"}|}
+                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "up" ];
+              check_case "move-down"
+                {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"down"}|}
+                "exact/board_attention_exact" "move" [ "runpod_mtp.qwen"; "down" ])
+        ; Alcotest.test_case "move refuses a direction it cannot read" `Quick
+            (fun () ->
+              expect_error "move-sideways"
+                ~message:"unknown direction: sideways (expected up or down)"
+                {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen","direction":"sideways"}|};
+              expect_error "move-no-direction"
+                ~message:"direction required"
+                {|{"lane":"exact/board_attention_exact","action":"move","runtime_id":"runpod_mtp.qwen"}|})
+        ; Alcotest.test_case "drop and move refuse a conversation lane" `Quick
+            (fun () ->
+              expect_error "drop-named"
+                ~message:
+                  {|"runpod_mtp.qwen" is not an exact-output lane; drop acts on a slot of exact/<name>|}
+                {|{"lane":"runpod_mtp.qwen","action":"drop","runtime_id":"openai.gpt"}|};
+              expect_error "move-named"
+                ~message:
+                  {|"runpod_mtp.qwen" is not an exact-output lane; move acts on a slot of exact/<name>|}
+                {|{"lane":"runpod_mtp.qwen","action":"move","runtime_id":"openai.gpt","direction":"up"}|})
         ; Alcotest.test_case "append refuses a conversation lane" `Quick
             (fun () ->
               expect_error "append-named"

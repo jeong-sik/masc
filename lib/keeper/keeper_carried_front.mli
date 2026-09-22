@@ -52,6 +52,7 @@ type seed =
 
 type origin =
   | Carried of source  (** The front came from a seed. *)
+  | Librarian_snapshot of { end_atom : int; boundary_line : int }
   | Whole_history
       (** No front to start from: everything, until the first usage on the
           pair is counted or a refusal halves the range. *)

@@ -128,6 +128,7 @@ type misc_operation =
   | Misc_dos_screen
   | Misc_dos_step
   | Misc_dos_press
+  | Misc_dos_click
   | Misc_dos_type
   | Misc_dos_peek
 [@@deriving enumerate]

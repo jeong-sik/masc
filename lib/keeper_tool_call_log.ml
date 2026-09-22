@@ -224,10 +224,12 @@ let rec advance_committed_revision ~keeper_name =
 type record_kind =
   | Tool_call
   | Composition_run
+  | Lifecycle_event
 
 let record_kind_to_string = function
   | Tool_call -> "tool_call"
   | Composition_run -> "composition_run"
+  | Lifecycle_event -> "lifecycle_event"
 ;;
 
 type append_entry =
@@ -675,7 +677,6 @@ let log_call
       ~tool_name
       ~(input : Yojson.Safe.t)
       ~(output_text : string)
-      ~(success : bool)
       ~(duration_ms : float)
       ?(record_kind = Tool_call)
       ?(model : string = "")
@@ -691,6 +692,7 @@ let log_call
       ?batch_index
       ?batch_size
       ?execution_mode
+      ?wire_outcome
       ?typed_result
       ?disposition
       ?file_change_evidence
@@ -893,6 +895,16 @@ let log_call
              @ failure_class_of_shape
            | None -> [])
       in
+      let wire_outcome =
+        match wire_outcome with
+        | Some outcome -> outcome
+        | None -> Tool_result.Unknown
+      in
+      let wire_outcome_field =
+        [ ( "wire_outcome"
+          , `String (Tool_result.string_of_tool_call_outcome wire_outcome) )
+        ]
+      in
       let file_change_evidence_field =
         match file_change_evidence with
         | Some evidence ->
@@ -980,16 +992,33 @@ let log_call
           ?runtime_profile
           ()
       in
-      let error = if success then None else Some safe_output in
-      let action_radius =
-        Keeper_runtime_contract.action_radius_json
-          ~tool_name
-          ~input:safe_input
-          ~success
-          ~duration_ms
-          ?error
-          ?sandbox_target:sandbox_profile
-          ()
+      let execution_completed =
+        match typed_result, disposition, wire_outcome with
+        | Some (Tool_result.Completed _), _, _
+        | None, Some (Tool_result.Completed ()), _
+        | None, None, Tool_result.Ok ->
+          Some true
+        | Some (Tool_result.Deferred _ | Tool_result.Failed _), _, _
+        | None, Some (Tool_result.Deferred () | Tool_result.Failed _), _
+        | None, None, Tool_result.Error ->
+          Some false
+        | None, None, Tool_result.Unknown -> None
+      in
+      let action_radius_field =
+        match execution_completed with
+        | None -> []
+        | Some success ->
+          let error = if success then None else Some safe_output in
+          [ ( "action_radius"
+            , Keeper_runtime_contract.action_radius_json
+                ~tool_name
+                ~input:safe_input
+                ~success
+                ~duration_ms
+                ?error
+                ?sandbox_target:sandbox_profile
+                () )
+          ]
       in
       let route_evidence_field =
         match
@@ -1006,11 +1035,10 @@ let log_call
            ; "tool", `String tool_name
            ; "input", safe_input
            ; "output", output_json
-           ; "success", `Bool success
            ; "duration_ms", `Float duration_ms
            ; "runtime_contract", runtime_contract
-           ; "action_radius", action_radius
            ]
+           @ action_radius_field
            @ route_evidence_field
            @ agent_name_field
            @ model_field
@@ -1026,6 +1054,7 @@ let log_call
            @ batch_index_field
            @ batch_size_field
            @ execution_mode_field
+           @ wire_outcome_field
            @ typed_result_fields
            @ artifact_ref_fields
            @ file_change_evidence_field

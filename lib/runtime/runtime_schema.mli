@@ -141,33 +141,41 @@ type reasoning_streaming_format =
 
 type model_capabilities =
   { max_output_tokens : int option
-  ; supports_tool_choice : bool
-  ; supports_required_tool_choice : bool
-  ; supports_named_tool_choice : bool
-  ; supports_parallel_tool_calls : bool
+  ; supports_tool_choice : bool option
+  ; supports_required_tool_choice : bool option
+  ; supports_named_tool_choice : bool option
+  ; supports_parallel_tool_calls : bool option
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
       (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
   ; reasoning_streaming_format : reasoning_streaming_format option
       (** Exact streaming side-channel for this transport binding. *)
-  ; supports_image_input : bool
-  ; supports_audio_input : bool
-  ; supports_video_input : bool
-  ; supports_multimodal_inputs : bool
-  ; supports_response_format_json : bool
-  ; supports_structured_output : bool
-  ; supports_system_prompt : bool
-  ; supports_prompt_caching : bool
-  ; supports_top_k : bool
-  ; supports_min_p : bool
-  ; supports_seed : bool
-  ; emits_usage_tokens : bool
+  ; supports_image_input : bool option
+  ; supports_audio_input : bool option
+  ; supports_video_input : bool option
+  ; supports_multimodal_inputs : bool option
+  ; supports_response_format_json : bool option
+  ; supports_structured_output : bool option
+  ; supports_system_prompt : bool option
+  ; supports_prompt_caching : bool option
+  ; supports_top_k : bool option
+  ; supports_min_p : bool option
+  ; supports_seed : bool option
+  ; emits_usage_tokens : bool option
   }
 [@@deriving show, eq]
 
-(** All-false / [None] defaults, except [emits_usage_tokens = true] (most
-    providers report usage; CLI wrappers opt out). Used when
-    [\[models.<id>.capabilities\]] is absent. *)
+(** Every field [None]: nothing was stated. Used when
+    [\[models.<id>.capabilities\]] is absent.
+
+    [None] is not [Some false]. A consumer resolves it to the value its own
+    layer holds — the provider wire's preset for the capability fields, and
+    [false] for the media fields, which MASC keeps fail-closed
+    ([Runtime_agent.apply_runtime_model_input_capabilities]). Before #37435
+    these were plain [bool] parsed with a [false] default, so an unwritten key
+    was indistinguishable from a written [false]: on a catalogued model the
+    whole block had to be dropped to avoid zeroing the catalog, and on an
+    uncatalogued one it zeroed the wire preset instead. *)
 val model_capabilities_default : model_capabilities
 
 type model_spec =
@@ -296,6 +304,32 @@ type exact_output_lane_decl =
 
 (** {1 Top-level config} *)
 
+(** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. The key stays in
+    the environment ([TYPESAFEAI_API_KEY]); everything else about the lane is
+    here. [lane_enabled] turns the lane off; it cannot turn it on without a
+    key. Two gates ask the vendor: [board_attention] (the Board attention
+    judgment, {!Keeper_board_attention_exact_flow}, which sends the post and
+    the keeper's context) and [absorb_gate] (the librarian absorb gate,
+    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context preservation and Skill applicability review are opt-in too.
+    All reach the same endpoint, so one [excluded_keepers] applies to every review: a keeper
+    named there is never asked about, whichever gate asks. *)
+type typesafeai =
+  { lane_enabled : bool
+  ; lane_endpoint : string
+  ; lane_model : string
+  ; board_attention : bool
+  ; absorb_gate : bool
+  ; context_review : bool
+  ; skill_applicability : bool
+  ; excluded_keepers : string list
+  }
+[@@deriving show, eq]
+
+val default_typesafeai : typesafeai
+(** What an absent [\[typesafeai\]] table means: the lane on when a key is
+    set, the vendor's endpoint and latest model, Board attention on, the absorb
+    gate off. *)
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -332,6 +366,8 @@ type config =
         Replaces {!Lsp_process_manager.command_of_language} for that language
         and no other. A key naming no language, or a value that is not a
         non-empty array of strings, is refused at load. *)
+  ; typesafeai : typesafeai
+    (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list
     (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
         reach (RFC-0415). A keeper with no entry has an empty allowlist,

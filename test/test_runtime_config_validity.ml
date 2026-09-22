@@ -206,15 +206,28 @@ let assert_ollama_cloud_seed_runtime runtimes case =
       (Option.is_some
          (Llm_provider.Provider_config.capabilities_for_config_model
             (agent_core_provider_config runtime)));
+    (* "forced tool_choice disabled" is a claim about what this runtime can
+       send, and the seed declares supports-tool-choice for none of these
+       eighteen models. It read false only because an unwritten key parsed as
+       false; the ollama wire is what actually disables it. Ask the resolved
+       capability, which is what the name always meant (#37435). *)
+    (match
+       Llm_provider.Provider_config.capabilities_for_config_model
+         (agent_core_provider_config runtime)
+     with
+     | None -> failf "expected resolved capabilities for %s" case.runtime_id
+     | Some (resolved : Llm_provider.Capabilities.capabilities) ->
+       check bool (case.runtime_id ^ " forced tool_choice disabled") false
+         resolved.supports_tool_choice);
+    (* Media input is the declaration, not the resolved value: MASC's model
+       spec is the SSOT for it and an unwritten media key means no. *)
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
-       check bool (case.runtime_id ^ " forced tool_choice disabled") false
-         caps.supports_tool_choice;
-       check bool (case.runtime_id ^ " image input") case.vision
-         caps.supports_image_input;
-       check bool (case.runtime_id ^ " multimodal input") case.vision
-         caps.supports_multimodal_inputs)
+       check (option bool) (case.runtime_id ^ " image input declared")
+         (Some case.vision) caps.supports_image_input;
+       check (option bool) (case.runtime_id ^ " multimodal input declared")
+         (Some case.vision) caps.supports_multimodal_inputs)
 
 let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
@@ -1520,6 +1533,172 @@ let test_kimi_for_coding_declares_the_reasoning_it_returns () =
     check bool "declares reasoning" true
       caps.Llm_provider.Capabilities.supports_reasoning
 
+(* For a model the catalog names, [Runtime_adapter] forwards only
+   max-output-tokens, thinking-control-format and reasoning-streaming-format out
+   of [models.<id>.capabilities]; the media four travel their own path through
+   [Runtime_agent.apply_runtime_model_input_capabilities]. The twelve paired
+   below reach nothing at all (#37435).
+
+   Every field of [Runtime_schema.model_capabilities] is bound by name so that a
+   twenty-first field cannot join the record without this list being read again.
+   Declared and resolved are spelled on one line each, because a pair that reads
+   one field and compares another is the defect this case exists to find. *)
+let catalog_decided_capability_pairs
+      (declared : Runtime_schema.model_capabilities)
+      (resolved : Llm_provider.Capabilities.capabilities)
+  : (string * bool option * bool) list
+  =
+  let { Runtime_schema.max_output_tokens = _
+      ; supports_tool_choice
+      ; supports_required_tool_choice
+      ; supports_named_tool_choice
+      ; supports_parallel_tool_calls
+      ; thinking_control_format = _
+      ; declared_thinking_control_format = _
+      ; reasoning_streaming_format = _
+      ; supports_image_input = _
+      ; supports_audio_input = _
+      ; supports_video_input = _
+      ; supports_multimodal_inputs = _
+      ; supports_response_format_json
+      ; supports_structured_output
+      ; supports_system_prompt
+      ; supports_prompt_caching
+      ; supports_top_k
+      ; supports_min_p
+      ; supports_seed
+      ; emits_usage_tokens
+      }
+    =
+    declared
+  in
+  [ "supports-tool-choice", supports_tool_choice, resolved.supports_tool_choice
+  ; ( "supports-required-tool-choice"
+    , supports_required_tool_choice
+    , resolved.supports_required_tool_choice )
+  ; ( "supports-named-tool-choice"
+    , supports_named_tool_choice
+    , resolved.supports_named_tool_choice )
+  ; ( "supports-parallel-tool-calls"
+    , supports_parallel_tool_calls
+    , resolved.supports_parallel_tool_calls )
+  ; ( "supports-response-format-json"
+    , supports_response_format_json
+    , resolved.supports_response_format_json )
+  ; ( "supports-structured-output"
+    , supports_structured_output
+    , resolved.supports_structured_output )
+  ; "supports-system-prompt", supports_system_prompt, resolved.supports_system_prompt
+  ; "supports-prompt-caching", supports_prompt_caching, resolved.supports_prompt_caching
+  ; "supports-top-k", supports_top_k, resolved.supports_top_k
+  ; "supports-min-p", supports_min_p, resolved.supports_min_p
+  ; "supports-seed", supports_seed, resolved.supports_seed
+  ; "emits-usage-tokens", emits_usage_tokens, resolved.emits_usage_tokens
+  ]
+
+(* The seed writes none of those twelve. A count of zero is the weakest kind of
+   assertion on its own — a walk that reached nothing produces the same zero —
+   so the models below are named as proof that the walk arrived. Both keep a
+   [capabilities] block the catalog answers for, so losing either means the
+   catalog stopped being installed or the branch stopped being taken, not that
+   the seed got tidier. *)
+let seed_catalog_decided_capability_lines = 0
+
+let seed_models_whose_capabilities_the_catalog_decides = [ "glm-5-3"; "minimax-m3" ]
+
+(* Prints every seed line that writes one of the twelve next to the value the
+   runtime resolves, and fails when the two disagree. A disagreement is not a
+   line to delete: it is a declaration losing an argument with the catalog,
+   which is either a defect or a deliberate override, and both want reading
+   before anything is removed. *)
+let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let runtimes =
+    match load_list_text ~config_path:path with
+    | Ok (runtimes, _, _, _, _) -> runtimes
+    | Error detail -> fail detail
+  in
+  let written = ref 0 in
+  let visited = ref [] in
+  let disagreements = ref [] in
+  List.iter
+    (fun (runtime : Runtime.t) ->
+       match runtime.execution, runtime.model.capabilities with
+       | Runtime_execution.Agent_core _, None
+       | ( ( Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ )
+         , _ ) -> ()
+       | Runtime_execution.Agent_core config, Some declared ->
+         let provider_label =
+           match config.Llm_provider.Provider_config.provider_id with
+           | Some label -> label
+           | None -> failf "%s: an agent_core seed binding without a provider id" runtime.id
+         in
+         (* The adapter's own lookup, argument for argument: the branch that
+            drops the twelve is the one this answers [Some] for. *)
+         (match
+            Llm_provider.Capabilities.for_provider_model_id
+              ~wire:(Some config.Llm_provider.Provider_config.kind)
+              ~allow_bare_fallback:false
+              ~provider_label
+              ~model_id:config.Llm_provider.Provider_config.model_id
+          with
+          | None -> ()
+          | Some _ ->
+            visited := runtime.model.id :: !visited;
+            (match Llm_provider.Provider_config.capabilities_for_config_model config with
+             | None ->
+               failf "%s: no resolved capabilities for a catalogued model" runtime.id
+             | Some resolved ->
+               List.iter
+                 (fun (key, declared_value, resolved_value) ->
+                    match declared_value with
+                    | None -> ()
+                    | Some declared_value ->
+                      incr written;
+                      Printf.printf
+                        "seed %s [models.%s.capabilities].%s: declared %b, resolved %b%s\n"
+                        runtime.id
+                        runtime.model.id
+                        key
+                        declared_value
+                        resolved_value
+                        (if Bool.equal declared_value resolved_value
+                         then ""
+                         else "  <- DISAGREES");
+                      if not (Bool.equal declared_value resolved_value)
+                      then
+                        disagreements
+                        := Printf.sprintf
+                             "%s.%s (declared %b, resolved %b)"
+                             runtime.model.id
+                             key
+                             declared_value
+                             resolved_value
+                           :: !disagreements)
+                 (catalog_decided_capability_pairs declared resolved))))
+    runtimes;
+  List.iter
+    (fun model_id ->
+       check bool
+         (Printf.sprintf "walked the catalogued capabilities block of %s" model_id)
+         true
+         (List.exists (String.equal model_id) !visited))
+    seed_models_whose_capabilities_the_catalog_decides;
+  check int
+    "seed lines writing a key the catalog row decides"
+    seed_catalog_decided_capability_lines
+    !written;
+  match List.rev !disagreements with
+  | [] -> ()
+  | disagreements ->
+    failf
+      "%d seed declaration(s) disagree with the catalog and must be read, not removed: %s"
+      (List.length disagreements)
+      (String.concat "; " disagreements)
+
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -1612,11 +1791,14 @@ List.iter
        check (option (float 0.0)) "DeepSeek keeps AGENT_CORE connect timeout default"
          None
          (agent_core_provider_config runtime).connect_timeout_s;
-       (match runtime.model.capabilities with
-        | Some caps ->
+       (match
+          Llm_provider.Provider_config.capabilities_for_config_model
+            (agent_core_provider_config runtime)
+        with
+        | Some (resolved : Llm_provider.Capabilities.capabilities) ->
           check bool "DeepSeek Pro structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Pro capabilities"));
+            resolved.supports_structured_output
+        | None -> fail "expected DeepSeek Pro resolved capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1625,11 +1807,23 @@ List.iter
      with
      | None -> fail "expected DeepSeek Flash runtime in seed"
      | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "DeepSeek Flash structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Flash capabilities"));
+       (* This asserted "disabled" and passed, but the seed declares nothing
+          for it and the catalog row says supports_structured_output = true.
+          It was reading the declaration, which an unwritten key forced to
+          false, so the assertion was the opposite of what this binding does
+          (#37435). The behaviour the name claims is the resolved one. *)
+       (match
+          Llm_provider.Provider_config.capabilities_for_config_model
+            (agent_core_provider_config runtime)
+        with
+        | Some (resolved : Llm_provider.Capabilities.capabilities) ->
+          check bool "DeepSeek Flash structured output enabled by its catalog row"
+            true resolved.supports_structured_output;
+          check (option bool) "the seed declares nothing for it" None
+            (Option.bind runtime.model.capabilities (fun (caps :
+               Runtime_schema.model_capabilities) -> Some caps.supports_structured_output)
+             |> Option.join)
+        | None -> fail "expected DeepSeek Flash resolved capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1644,17 +1838,35 @@ List.iter
          (Runtime.resolve_max_context_of_runtime runtime
           |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source));
        (match runtime.model.capabilities with
-       | Some caps ->
-          check bool "MiniMax M3 response_format json disabled" false
-            caps.supports_response_format_json;
+        | Some caps ->
+          check (option bool) "MiniMax M3 image input declared" (Some true)
+            caps.supports_image_input;
+          check (option bool) "MiniMax M3 multimodal input declared" (Some true)
+            caps.supports_multimodal_inputs
+        | None -> fail "expected MiniMax M3 capabilities");
+       (match
+          Llm_provider.Provider_config.capabilities_for_config_model
+            (agent_core_provider_config runtime)
+        with
+        | Some (resolved : Llm_provider.Capabilities.capabilities) ->
           check bool "MiniMax M3 structured output disabled" false
-            caps.supports_structured_output;
-          check bool "MiniMax M3 image input" true caps.supports_image_input;
-          check bool "MiniMax M3 multimodal input" true
-            caps.supports_multimodal_inputs;
+            resolved.supports_structured_output;
           check bool "MiniMax M3 forced tool_choice disabled" false
-            caps.supports_tool_choice
-        | None -> fail "expected MiniMax M3 capabilities"))
+            resolved.supports_tool_choice;
+          (* JSON mode comes from the ollama_cloud catalog row for this
+             binding's wire, and config/runtime.toml says nothing about it —
+             which is what a config should say when the catalog decides. The
+             second check fails the moment an inert line is written back into
+             that block, which is the mistake this whole thread came from
+             (#37435). *)
+          check bool "MiniMax M3 response_format json follows its catalog row"
+            true resolved.supports_response_format_json;
+          check (option bool) "and the seed declares nothing for it" None
+            (Option.bind runtime.model.capabilities (fun (caps :
+               Runtime_schema.model_capabilities) ->
+               Some caps.supports_response_format_json)
+             |> Option.join)
+        | None -> fail "expected MiniMax M3 resolved capabilities"))
 
 (* The lane-resolution test below iterates the lanes a config declares, so it
    passes vacuously on a config that declares none of them. Startup does the
@@ -3408,6 +3620,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
+    ; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -4926,6 +5139,75 @@ let test_lsp_servers_reads_a_command_per_language () =
       config.Runtime_schema.lsp_servers
 ;;
 
+(* [typesafeai] is the lane's table; the key is not in it. Absent is the
+   default; present is read strictly, so a misspelt key is a load error. *)
+let typesafeai_table =
+  "[typesafeai]\nenabled = false\nendpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
+   board_attention = false\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
+   excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
+;;
+
+let test_typesafeai_absent_is_the_default () =
+  match Runtime_toml.parse_string (lsp_probe_config "") with
+  | Error errors -> failf "no [typesafeai] must parse: %s" (error_messages errors)
+  | Ok config ->
+    let t = config.Runtime_schema.typesafeai in
+    check bool "the lane is on with a key" true t.Runtime_schema.lane_enabled;
+    check bool "the Board gate is on" true t.Runtime_schema.board_attention;
+    check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
+    check bool "Context review is off" false t.Runtime_schema.context_review;
+    check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
+    check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
+;;
+
+let test_typesafeai_reads_the_whole_table () =
+  match Runtime_toml.parse_string (lsp_probe_config typesafeai_table) with
+  | Error errors -> failf "the table must parse: %s" (error_messages errors)
+  | Ok config ->
+    let t = config.Runtime_schema.typesafeai in
+    check bool "enabled" false t.Runtime_schema.lane_enabled;
+    check string "endpoint" "http://127.0.0.1:9/judge" t.Runtime_schema.lane_endpoint;
+    check string "model" "jev-1.13" t.Runtime_schema.lane_model;
+    check bool "board_attention" false t.Runtime_schema.board_attention;
+    check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
+    check bool "Context review enabled" true t.Runtime_schema.context_review;
+    check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
+    check (list string) "excluded keepers, in order"
+      [ "kidsnote-slack-context-collector"; "other" ]
+      t.Runtime_schema.excluded_keepers
+;;
+
+let has_substring haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+let typesafeai_rejects ~what tail expected =
+  match Runtime_toml.parse_string (lsp_probe_config tail) with
+  | Ok _ -> failf "%s must not parse" what
+  | Error errors ->
+    let messages = error_messages errors in
+    if not (has_substring messages expected)
+    then failf "%s: expected %S in %S" what expected messages
+;;
+
+let test_typesafeai_refuses_a_stray_key () =
+  typesafeai_rejects ~what:"a stray [typesafeai] key"
+    "[typesafeai]\nabsorb = true\n" "unknown [typesafeai] key \"absorb\"";
+  typesafeai_rejects ~what:"a sub-table where a switch is expected"
+    "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
+;;
+
+let test_typesafeai_refuses_a_value_that_names_nothing () =
+  typesafeai_rejects ~what:"a blank endpoint" "[typesafeai]\nendpoint = \"  \"\n" "endpoint must be non-empty";
+  typesafeai_rejects ~what:"a keeper name with whitespace"
+    "[typesafeai]\nexcluded_keepers = [\"a b\"]\n" "must be non-empty without whitespace";
+  typesafeai_rejects ~what:"a non-string keeper list"
+    "[typesafeai]\nexcluded_keepers = [1]\n" "excluded_keepers must be an array of strings";
+  typesafeai_rejects ~what:"a non-boolean switch" "[typesafeai]\nenabled = \"yes\"\n" "enabled must be a boolean"
+;;
+
 let test_lsp_servers_absent_is_empty () =
   match Runtime_toml.parse_string (lsp_probe_config "") with
   | Error errors -> failf "no [lsp] must parse: %s" (error_messages errors)
@@ -5102,6 +5384,8 @@ let () =
             test_lane_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "seed capability keys the catalog row decides agree with it" `Quick
+            test_seed_catalog_decided_capability_keys_agree_with_the_catalog;
           test_case "kimi-for-coding declares the reasoning it returns" `Quick
             test_kimi_for_coding_declares_the_reasoning_it_returns;
           test_case "repo-runtime-toml-declares-no-clamped-max-context" `Quick
@@ -5322,5 +5606,12 @@ let () =
         ; test_case "refuses a stray [lsp] key" `Quick test_lsp_servers_refuses_a_stray_lsp_key
         ; test_case "Runtime.lsp_servers answers the operator, then the table" `Quick
             test_runtime_lsp_servers_answers_the_operator_then_the_table
+        ] )
+    ; ( "typesafeai"
+      , [ test_case "absent is the default" `Quick test_typesafeai_absent_is_the_default
+        ; test_case "reads the whole table" `Quick test_typesafeai_reads_the_whole_table
+        ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
+        ; test_case "refuses a value that names nothing" `Quick
+            test_typesafeai_refuses_a_value_that_names_nothing
         ] )
     ]

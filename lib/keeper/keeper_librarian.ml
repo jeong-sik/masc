@@ -55,6 +55,7 @@ type selection =
   ; absorbed : Keeper_memory_os_types.absorbed_statement list
   ; facts : fact list
   ; revisions : revision list
+  ; working_state : string option
   ; working_contexts : Keeper_librarian_context.pocket list
   }
 
@@ -69,7 +70,7 @@ let wire_field_absorbs = Keeper_memory_os_types.wire_field_absorbs
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 let wire_dropped_fields = Keeper_memory_os_types.wire_librarian_dropped_fields
 let wire_current_fields =
-  [ wire_field_new_claims; wire_field_dropped; "working_contexts" ]
+  [ wire_field_new_claims; wire_field_dropped; "working_contexts"; "working_state" ]
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -234,6 +235,7 @@ let goal_context_to_json = function
 let prompt_variables (inp : input) : (string * string) list =
   [ ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
+  ; "continuity", "null"
   ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current
@@ -282,6 +284,7 @@ let first_object_field_error ~allowed fields =
 type parse_error =
   | Top_level_not_object
   | Working_context_invalid of string
+  | Working_state_invalid of string
   | Unexpected_field of string
   | Duplicate_field of string
   | Missing_required_fields
@@ -299,6 +302,7 @@ type parse_error =
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
   | Working_context_invalid detail -> "working_context_invalid: " ^ detail
+  | Working_state_invalid detail -> "working_state_invalid: " ^ detail
   | Unexpected_field field -> "unexpected_field: " ^ field
   | Duplicate_field field -> "duplicate_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
@@ -616,6 +620,10 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
      | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
      | None ->
        let open Result.Syntax in
+       let* working_state = match List.assoc_opt "working_state" fields with
+         | None | Some `Null -> Ok None
+         | Some (`String text) when String.trim text <> "" -> Ok (Some text)
+         | Some _ -> Error (Working_state_invalid "working_state must be nonblank text or null") in
        let* working_contexts =
          match List.assoc_opt "working_contexts" fields with
          | None -> Error Missing_required_fields
@@ -670,6 +678,7 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                                 ; absorbed
                                 ; facts
                                 ; revisions
+                                ; working_state
                                 ; working_contexts
                                 }
                             | Error _ as error -> error)

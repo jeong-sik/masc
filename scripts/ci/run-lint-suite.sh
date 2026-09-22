@@ -67,6 +67,12 @@ blocking_lints() {
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
+  # The release page body is cut from this section by
+  # scripts/ci/changelog-section.py. Checking it on every PR means a version
+  # bump without a section -- or with two -- fails here, before a tag does.
+  run_lint "CHANGELOG has one section for this version" \
+    python3 scripts/ci/changelog-section.py \
+    "$(sed -n 's/^(version \([0-9.]*\))$/\1/p' dune-project)" CHANGELOG.md /dev/null
   run_lint "Logging consistency" bash scripts/ci/check-logging-consistency.sh
   run_lint "Issue taxonomy parser and reconciliation" node scripts/test-issue-taxonomy-core.cjs
   run_self_test_when_changed "OCaml test suite reporter self-test" \
@@ -196,6 +202,7 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  run_lint "Stale-worktree cleanup keeps commits" bash scripts/test-cleanup-stale-worktrees.sh
   # A guard nobody runs is a document. Twice a guard sat red on untouched main
   # because nothing reached it -- the cancel-guard lint and
   # check-tui-render-purity.sh -- and a sweep on 2026-09-07 found four more in
@@ -260,11 +267,6 @@ blocking_lints() {
   # guard's: keeper meta carries the fields, and keeper_meta_store reads them.
   run_lint "Exact-field decoders have a preflight" \
     python3 scripts/ci/check_exact_field_decoder_preflight.py
-  # Named only by a comment in the root dune until now, and red the whole
-  # time: half of it asserted a nine-job lane #32511 deleted. That half is
-  # gone; what runs here is the half the root dune's comment claims.
-  run_lint "Root dune warning mask" \
-    bash scripts/ci/check-ocaml-compile-authority.sh
   run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
   run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
   # The two ratchets that survived #33313, which deleted eighteen nobody ran.
@@ -349,7 +351,12 @@ blocking_pr_lints() {
   # runtime as an Assert_failure. The lint existed but no workflow ran it, so
   # the count drifted to 32 and back to 0 without anyone seeing either move.
   # Blocking at 0 keeps the next one from landing unnoticed.
-  run_lint "Cancel guard on wildcard catches" bash scripts/lint-cancel-guard.sh
+  # The guard runs its own fixtures first: nine cases, each either a shape
+  # the shell version answered wrongly or a swallow that has to stay
+  # reported. A guard nobody has seen catch anything is an untested test
+  # (#37458).
+  run_lint "Cancel guard fixtures" python3 scripts/ci/check-cancel-guard.py --self-test
+  run_lint "Cancel guard on wildcard catches" python3 scripts/ci/check-cancel-guard.py
   # A match whose every arm is a bare wildcard computes its scrutinee and
   # throws it away, while reading as if it told two cases apart. Four were in
   # the tree on 2026-09-06 and two of them sat on a real classifier, so the

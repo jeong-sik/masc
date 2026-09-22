@@ -32,6 +32,8 @@ let observation_fields (o : Dos_lane.observation) =
   ; ("waiting_for_key", `Bool o.waiting_for_key)
   ; ("ticks", `Int o.ticks)
   ; ("screen_text", `String o.screen_text)
+  ; ("frame_nonblack", `Int o.frame_nonblack)
+  ; ("frame_ascii", `String o.frame_ascii)
   ; ("program", match o.program with Some p -> `String p | None -> `Null)
   ; ("files", `List (List.map (fun f -> `String f) o.files))
   ]
@@ -294,6 +296,15 @@ let handle_press ~tool_name ~start_time ~who args =
   of_lane_run ~tool_name ~start_time
     (Dos_lane.press ~who
        ~keys:(get_string_list args "keys")
+       ~steps:(get_int args "steps" default_steps))
+;;
+
+let handle_click ~tool_name ~start_time ~who args =
+  of_lane_run ~tool_name ~start_time
+    (Dos_lane.click ~who
+       ~x:(get_int args "x" 0)
+       ~y:(get_int args "y" 0)
+       ~buttons:(get_int args "buttons" 1)
        ~steps:(get_int args "steps" default_steps))
 ;;
 

@@ -369,6 +369,7 @@ let assemble_hooks
       ~(runtime_config_path : string option)
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list)
+      ?dynamic_context_for_tools
       ?repetition_execution
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -787,9 +788,6 @@ let assemble_hooks
                     ~injected_this_turn:(acc.prompt_blocks <> [])
                     messages
                 in
-                (if String.trim dynamic_context <> ""
-                 then
-                   record_block Prompt_block_id.Dynamic_context dynamic_context);
                 record_block
                   Prompt_block_id.Temporal_summary
                   (Masc_context_injector.render_temporal_summary shared_context);
@@ -831,6 +829,17 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
+                let dynamic_context =
+                  match dynamic_context_for_tools with
+                  | Some project when not post_tool_round ->
+                    let offered = Keeper_agent_tool_surface.on_the_wire
+                        ~agent_cell:turn_agent_cell ~built:built_tools
+                      |> List.filter (fun (tool : Agent_core.Tool.t) ->
+                        List.mem tool.schema.name schema_filter) in
+                    project offered
+                  | Some _ | None -> dynamic_context in
+                (if String.trim dynamic_context <> ""
+                 then record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (* The Librarian publishes this small index in its own lane.
                    Never scan a growing queue or serialize all pockets while
                    the user is waiting for the first model request. Only offer

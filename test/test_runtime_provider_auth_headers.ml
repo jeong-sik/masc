@@ -1031,7 +1031,10 @@ let test_runtime_toml_accepts_glm_coding_capability () =
     (match model.capabilities with
      | Some caps ->
        check (option int) "max output" (Some 128000) caps.max_output_tokens;
-       check bool "forced tool choice disabled" false caps.supports_tool_choice
+       (* This test is about the parser accepting the declaration, so the
+          declaration is what it asserts. *)
+       check (option bool) "forced tool choice declared off" (Some false)
+         caps.supports_tool_choice
      | None -> fail "expected model capabilities")
   | models -> failf "expected one model, got %d" (List.length models)
 
@@ -1065,7 +1068,7 @@ let test_runtime_adapter_file_credentials () =
       ; bindings = [ runpod_binding ]
       ; default_runtime_id = Some "runpod_mtp.qwen"
       ; keeper_assignments = []; media_failover = []; lane_decls = []
-      ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+      ; exact_output_lane_decls = []; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
       ; egress_allowlists = []; lsp_servers = []
       }
     in
@@ -1116,7 +1119,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1151,7 +1154,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1187,7 +1190,7 @@ let provider_cfg () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1288,7 +1291,7 @@ thinking_control_format = "ollama_think"
          ; media_failover = []
          ; lane_decls = []
          ; exact_output_lane_decls = []
-         ; exec_ssh_endpoints = []
+         ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
          ; egress_allowlists = []
          ; lsp_servers = []
          }
@@ -1329,7 +1332,7 @@ let glm_vision_binding_config ~runtime_caps =
     { Runtime_schema.providers = [ provider ]; models = [ model ]
     ; bindings = [ binding ]; default_runtime_id = Some "glm-coding.glm-4.6v"
     ; keeper_assignments = []; media_failover = []; lane_decls = []
-    ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+    ; exact_output_lane_decls = []; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []; lsp_servers = [] }
   in
   match Runtime_adapter.binding_to_provider_config cfg binding with
@@ -1473,7 +1476,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1581,7 +1584,7 @@ let test_runtime_of_binding_preserves_failure_reason () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }
@@ -1813,7 +1816,7 @@ let test_dashboard_runtime_probe_groups_models_by_provider () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
-    ; exec_ssh_endpoints = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []
     ; lsp_servers = []
     }

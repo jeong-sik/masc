@@ -41,6 +41,15 @@ let with_process_env key value f =
   Fun.protect ~finally:(fun () -> install inherited) f
 ;;
 
+(** Publish a [typesafeai] policy for the duration of [f], then restore the
+    one that was published: what [Runtime.set_loaded] does on load, for a test
+    that has no runtime.toml. *)
+let with_typesafeai_policy (policy : Runtime_schema.typesafeai) f =
+  let inherited = Runtime_typesafeai_policy.current () in
+  Runtime_typesafeai_policy.publish policy;
+  Fun.protect ~finally:(fun () -> Runtime_typesafeai_policy.publish inherited) f
+;;
+
 let init_unified_tool_registry () =
   if not (Tool_dispatch.is_tag_registry_initialized ()) then
     (Masc.Unified_tool_registry.register_all ();
@@ -53,6 +62,7 @@ let init_unified_tool_registry () =
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let fixture_config_keys =
     [ "mention_targets"
+    ; "board_interests"
     ; "always_allow"
     ; "activation_mode"
     ; "telemetry_feedback_enabled"
@@ -174,6 +184,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     Ok
       { meta with
         mention_targets = apply_string_list "mention_targets" meta.mention_targets
+      ; board_interests = apply_string_list "board_interests" meta.board_interests
       ; activation_mode =
           (match Safe_ops.json_string_opt "activation_mode" fixture_json with
            | None -> meta.activation_mode

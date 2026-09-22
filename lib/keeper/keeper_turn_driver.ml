@@ -417,7 +417,8 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   | ( ( Route.Retry_after_observed
           { retry_class =
               ( Route.Rate_limited | Route.Hard_quota | Route.Server_error
-              | Route.Network_transient | Route.Provider_timeout )
+              | Route.Empty_completion _ | Route.Network_transient
+              | Route.Provider_timeout )
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -441,7 +442,9 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     in
     Some (Wait_until { release_at; waiting_on; wait = Path_release })
   | ( ( Route.Retry_after_observed
-          { retry_class = Route.Server_error | Route.Network_transient | Route.Provider_timeout
+          { retry_class =
+              Route.Empty_completion _ | Route.Server_error
+              | Route.Network_transient | Route.Provider_timeout
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -744,6 +747,19 @@ let attempt_runtime_candidates
        response to the replacement catalog row. *)
     let attempt_quota_scope = quota_scope_of candidate in
     let attempt_candidate_backpressure = candidate_backpressure_of candidate in
+    let clear_answered_candidate_evidence () =
+      Option.iter
+        (fun candidate ->
+           Runtime_candidate_backpressure.note_candidate_success ~candidate)
+        attempt_candidate_backpressure;
+      (* A call getting through is the only evidence a quota came back that
+         a provider stating no reset time leaves available, so it is what
+         clears the observation. A stated window is left alone: it names a
+         time, and one answer inside it does not make that untrue. *)
+      match attempt_quota_scope with
+      | Some scope -> Runtime_quota_window.note_succeeded ~scope
+      | None -> ()
+    in
     emit_runtime_manifest
       ~status:"attempt"
       ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -760,17 +776,7 @@ let attempt_runtime_candidates
           queued person before the first token -- says nothing about the
           candidate, so it clears no evidence (RFC-0458 §3.4). *)
        if provider_answered value
-       then (
-         Option.iter
-           (fun candidate -> Runtime_candidate_backpressure.note_candidate_success ~candidate)
-           attempt_candidate_backpressure;
-         (* A call getting through is the only evidence a quota came back that
-            a provider stating no reset time leaves available, so it is what
-            clears the observation. A stated window is left alone: it names a
-            time, and one success inside it does not make that untrue. *)
-         match attempt_quota_scope with
-         | Some scope -> Runtime_quota_window.note_succeeded ~scope
-         | None -> ());
+       then clear_answered_candidate_evidence ();
        Ok value
      | Error error, checkpoint_after, effect_disposition, dispatch ->
        emit_runtime_manifest
@@ -862,6 +868,14 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Server_error
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Empty_completion _
+            ; retry_after = _
+            } ->
+          (* The provider answered. It disproves an earlier "failed without
+             answering" observation and an undated quota, even though this
+             turn still fails for having no usable completion. *)
+          clear_answered_candidate_evidence ()
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Network_transient; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Network_transient
@@ -1424,6 +1438,7 @@ let official_client_dispatch ~provider_config_transform =
   | None -> Keeper_attempt_dispatch.Dispatched
 
 let run_named
+    ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
     ?(keeper_name = "")
     ?pre_tool_rejects
@@ -1529,6 +1544,55 @@ let run_named
 	     next candidate composed the whole history again (2026-09-18:
 	     pr-updater shrank 16 MB to 3.7 MB on one candidate and sent 16 MB
 	     to the next). *)
+      (* Freeze the pair for the whole dispatch, including provider failover.
+         The checkpoint remains the source of every atom index. *)
+      let completed_end_atom = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+        match input_policy, session_id, recovery_view with
+        | Keeper_input_policy.Small, Some trace_id, None ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            let config = Workspace.default_config base_path in
+            match Keeper_turn_boundaries.read
+              ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name with
+            | Error detail ->
+              Log.Keeper.warn ~keeper_name
+                "small input policy retained original bodies: boundary read failed: %s" detail;
+              0
+            | Ok lines ->
+              match Keeper_turn_driver_try_provider.completed_history_end
+                ~trace_id ~lines ~messages:initial_messages with
+              | Ok end_atom -> end_atom
+              | Error Librarian_continuity_snapshot.Uncovered_history -> 0
+              | Error error ->
+                Log.Keeper.warn ~keeper_name
+                  "small input policy retained original bodies: %s"
+                  (Librarian_continuity_snapshot.error_to_string error);
+                0)
+        | _ -> 0) in
+      let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+        match session_id, recovery_view with
+        | None, _ | _, Some _ -> Ok None
+        | Some trace_id, None ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            let config = Workspace.default_config base_path in
+            let ( let* ) = Result.bind in
+            let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
+            match saved with
+            | None -> Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
+            | Some snapshot ->
+              let* lines = Keeper_turn_boundaries.read
+                ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                ~keeper_id:keeper_name in
+              match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
+                ~messages:initial_messages snapshot with
+              | Ok restored -> Ok (Some restored)
+              | Error (Librarian_continuity_snapshot.Trace_mismatch
+                       | Librarian_continuity_snapshot.History_changed
+                       | Librarian_continuity_snapshot.Uncovered_history) ->
+                Log.Keeper.info ~keeper_name
+                  "Librarian continuity belongs to an earlier history; sending current history in full";
+                Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
+              | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
+      in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client
 	     branches: they cut their start seed from this very history
@@ -2004,6 +2068,12 @@ let run_named
           ~fallback_enable_thinking:enable_thinking
           ()
       in
+      (match runtime.Runtime.execution with
+       | Runtime_execution.Agent_core _ -> ()
+       | Codex_app_server _ | Claude_code _ | Antigravity_cli _ ->
+         Log.Keeper.info ~keeper_name
+           "input policy runtime=%s selected=%s context_owner=official_client applied=false"
+           attempt_runtime_id (Keeper_input_policy.to_string input_policy));
       match runtime.Runtime.execution with
       | (Runtime_execution.Codex_app_server _
         | Runtime_execution.Claude_code _
@@ -2393,7 +2463,13 @@ let run_named
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Agent_core runtime_provider_config ->
+       let continuity = Eio.Lazy.force continuity in
        (match
+          match continuity, recovery_view with
+          | Error detail, None ->
+            Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+              { field = "librarian.continuity"; detail }))
+          | (Ok _ | Error _), _ ->
           match provider_config_transform with
           | None -> Ok runtime_provider_config
           | Some transform -> transform runtime_provider_config
@@ -2447,6 +2523,11 @@ let run_named
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
             ; context_marks
+            ; input_policy
+            ; completed_end_atom = Eio.Lazy.force completed_end_atom
+            ; continuity = (match recovery_view, continuity with
+                | None, Ok snapshot -> snapshot
+                | Some _, _ | None, Error _ -> None)
             ; (* Read only when the process holds no ledger for this pair:
                  the range the newest completed Agent Core turn record on
                  this history measured, whichever runtime ran it, so a

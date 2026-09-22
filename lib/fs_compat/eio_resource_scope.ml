@@ -48,7 +48,7 @@ let run_resource_only f =
       callback := Some (capture_callback (fun () -> f sw));
       None
     with
-    | exception_ ->
+    | exception_ -> (* cancel-guard-ok: the captured exception is not discarded: the production consumer reached through atomic_write is Capability_recovery_obligation.raise_resource_scope_exception, whose :1379 arm raises it again unchanged, which is the cancellation-as-value design this module exists for. Whether its :1380 arm should also preserve identity when a release failure coincides is #37455. *)
       let backtrace = Printexc.get_raw_backtrace () in
       Some { exception_; backtrace }
   in

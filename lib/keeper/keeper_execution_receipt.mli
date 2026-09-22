@@ -145,6 +145,12 @@ val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> s
 val sandbox_kind_of_meta : Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val to_json : t -> Yojson.Safe.t
 
+(** One deferred lane as [{"runtime": _, "reason": _}], or [`Null]. Re-exported
+    from [Keeper_execution_receipt_types] so the decision record writes the two
+    lanes in the shape the receipt writes them. *)
+val degraded_retry_json :
+  Keeper_error_classify.degraded_retry option -> Yojson.Safe.t
+
 (** Operator-facing classification of a finished turn. Closed set.
 
     Producer is [operator_disposition]; consumers
@@ -173,10 +179,19 @@ val operator_disposition_kind_of_string : string -> operator_disposition_kind op
 type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
-  | Reason_preflight_config_error
-  (** Terminal configuration or authorization failure before provider
-      dispatch. Paired with [Disp_operator_action_required]; the receipt does
-      not claim a fallback that did not happen. *)
+  | Reason_config_invalid
+  (** A setting the runtime rejected before provider dispatch
+      ({!Keeper_terminal_reason.Config_invalid}). Paired with
+      [Disp_operator_action_required]; the operator edits the runtime's toml.
+      The receipt does not claim a fallback that did not happen. *)
+  | Reason_authorization_refused
+  (** The provider refused the request under authorization before the turn
+      could proceed ({!Keeper_terminal_reason.Authorization_refused}). Paired
+      with [Disp_operator_action_required] for the same reason as before the
+      split: the wire carries weekly and five-hour usage limits, which hold
+      that runtime for days, so the operator moves the slot rather than
+      waiting. Kept apart from [Reason_config_invalid] because the operator
+      does a different thing for each. *)
   | Reason_degraded_retry
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry
@@ -200,6 +215,11 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  | Reason_official_client_recovery_required
+  (** A durable official-client session refused its claim before provider
+      dispatch and remains held until explicit recovery resolution. Paired
+      with [Disp_operator_action_required]; no runtime continuation or
+      fallback is claimed. *)
   | Reason_provider_attempt_effect_fenced
   (** The provider attempt did not prove whether an effect occurred. Paired
       with [Disp_unknown] so operator attention remains required, while the

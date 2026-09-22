@@ -26,6 +26,7 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
+module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
@@ -2168,6 +2169,68 @@ let render_board_list (state : state) =
 let board_read_layout = Board_read_layout.create ()
 ;;
 
+(* The thread beside the post, one screen row at a time (p-7784d032). Owns
+   its own allocation and scroll projection so [board_read_pane] only ever
+   touches the shared [board_read_allocation] the stacked layout uses -- the
+   shape test_tui_http_ast.ml's AST contract checks for: each layout
+   consumes its own row budget through the calls that produced it, not by
+   re-reading the record across two branches inside one binding. *)
+let draw_board_read_side buf (state : state) document ~rows ~body_cols
+    ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count =
+  let side_budget =
+    Layout.allocate_board_read_side ~terminal_rows:rows
+      ~body_line_count:total_lines ~comment_count:detail_line_count
+  in
+  (* The heading spends the comment column's first row; only what is
+     left under it can hold thread lines. *)
+  let comment_header_rows = if side_budget.comment_rows > 0 then 1 else 0 in
+  let comment_content_rows =
+    max 0 (side_budget.comment_rows - comment_header_rows)
+  in
+  let scroll =
+    Layout.project_board_read_scroll
+      ~body_line_count:total_lines
+      ~body_rows:side_budget.body_rows
+      ~comment_count:detail_line_count
+      ~comment_rows:comment_content_rows
+      state.board_scroll
+  in
+  (* box_top/box_bottom draw no border in the borderless geometry this
+     pane already uses (see their definitions) -- they would only add
+     two blank rows the row budget above never reserved. The two
+     columns are plain content, exactly [rows_drawn] lines each, so
+     [write_two_panes] zips them without falling back to its blank-pad
+     case. *)
+  let rows_drawn = max side_budget.body_rows side_budget.comment_rows in
+  let body_buf = Buffer.create (4 * 1024) in
+  let comment_buf = Buffer.create (4 * 1024) in
+  for i = 0 to rows_drawn - 1 do
+    if i < side_budget.body_rows then
+      let idx = i + scroll.body_offset in
+      if idx < total_lines then
+        box_line body_buf body_cols
+          ("  " ^ Board_read_layout.body_line document idx)
+      else box_empty body_buf body_cols
+    else box_empty body_buf body_cols
+  done;
+  for i = 0 to rows_drawn - 1 do
+    if i = 0 && comment_header_rows > 0 then
+      box_line comment_buf comment_cols
+        (Ansi.bold
+        ^ Printf.sprintf "  Comments (%d)" detail_comment_count
+        ^ Ansi.reset)
+    else if i < side_budget.comment_rows then
+      let idx = i - comment_header_rows + scroll.comment_offset in
+      if idx >= 0 && idx < detail_line_count then
+        box_line comment_buf comment_cols
+          (Board_read_layout.comment_line document idx)
+      else box_empty comment_buf comment_cols
+    else box_empty comment_buf comment_cols
+  done;
+  write_two_panes buf ~left_cols:body_cols ~left:body_buf ~right:comment_buf;
+  (scroll, side_budget.body_rows, comment_content_rows)
+;;
+
 (** Render the Board surface (read view). *)
 (* The read post alone -- borders, header, body, comments -- at [cols]
    wide, footer excluded, so a caller can lay it beside the post list.
@@ -2234,6 +2297,34 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
        Ansi.reset);
   box_divider buf cols;
 
+  (* The thread sits beside the post, not under it, when the pane is wide
+     enough for both columns to stay readable (p-7784d032). A narrow pane
+     keeps the stacked layout below -- the same rows, drawn the way they were
+     before the side arrangement existed. Decided here, before the document
+     below wraps a single word of it, so the body and comment text get
+     wrapped to the column that will actually draw them -- not the full pane
+     width every layout used to assume, which is what let a wide-formatted
+     comment line get clipped down to its author chip in the narrow column
+     (p-7784d032 follow-up). *)
+  let has_detail_content =
+    match detail with
+    | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+        false
+    | Board_detail.Ready (_, comments) -> comments <> []
+  in
+  let side_layout =
+    if has_detail_content then Layout.board_read_side_layout ~cols
+    else None
+  in
+  let body_wrap_cols =
+    match side_layout with Some (body_cols, _) -> body_cols | None -> cols
+  in
+  let comment_wrap_cols =
+    match side_layout with
+    | Some (_, comment_cols) -> comment_cols
+    | None -> cols
+  in
+
   let source : Board_read_layout.source =
     { post; detail; related_posts = state.board_posts;
       keeper_names = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers;
@@ -2245,7 +2336,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   let document =
     Board_read_layout.get board_read_layout ~source ~render:(fun () ->
       (* Body lines *)
-      let text_width = cols - 8 in
+      let text_width = body_wrap_cols - 8 in
       (* Sanitised a line at a time. A newline is a control byte, so sanitising the
          body whole escaped every break and the post arrived as one unbroken run
          with "\x0A" printed through it. *)
@@ -2293,7 +2384,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                     the id is whatever the writer typed. *)
                  Printf.sprintf "  %s%-10s %s%s" Ansi.reset
                    (Link.kind_label kind)
-                   (fit_width (Terminal_text.single_line id) (max 8 (cols - 16)))
+                   (fit_width (Terminal_text.single_line id)
+                      (max 8 (body_wrap_cols - 16)))
                    Ansi.reset)
                referenced
       in
@@ -2312,7 +2404,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      (fit_width (Terminal_text.single_line other.bp_id) 12)
                      Ansi.dim
                      (fit_width (Terminal_text.single_line other.bp_title)
-                        (max 8 (cols - 26)))
+                        (max 8 (body_wrap_cols - 26)))
                      Ansi.reset))
       in
       let body_lines = body_lines @ reference_lines @ related_lines in
@@ -2324,7 +2416,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
             [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
         | Board_detail.Failed error ->
             [ (Theme.bad ()) ^ "  Board detail unavailable: "
-              ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
+              ^ fit_width (Terminal_text.single_line error)
+                  (max 1 (comment_wrap_cols - 32))
               ^ Ansi.reset
             ]
         | Board_detail.Ready (_, comments) ->
@@ -2362,66 +2455,117 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      created_at
                      Ansi.reset
                  in
-                 let body =
-                   Message_layout.wrap_body ~markdown:board_document_markdown
-                     ~max_cells:
-                       (max 1
-                          (cols - 10 - Message_layout.display_width rail))
-                     ~sanitize:Terminal_text.single_line c.bc_content
-                 in
-                 match body with
-                 | [ line ] -> [ heading ^ "  " ^ line ]
-                 | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
-                 | lines ->
-                     heading
-                     :: List.map
-                          (fun line -> "  " ^ rail ^ "  " ^ line) lines)
+                 (* [heading] must itself fit before content can join it on
+                    the same row: a narrow column can be too narrow for the
+                    author chip and date alone, and wrapping content to
+                    whatever a negative or near-zero remainder leaves is not
+                    wrapping -- it is clipping with extra steps (p-7784d032
+                    follow-up: a wide-column approximation of the heading's
+                    width left almost no room for content once the column
+                    narrowed). When the heading claims the column on its own,
+                    content gets its own row wrapped to the width left after
+                    its thread rail instead of the sliver the heading did not
+                    use. *)
+                 let inner_width = framed_inner_width comment_wrap_cols in
+                 let heading_width = Message_layout.display_width heading in
+                 let joined_budget = inner_width - heading_width - 2 in
+                 if joined_budget >= 8 then
+                   match
+                     Message_layout.wrap_body ~markdown:board_document_markdown
+                       ~max_cells:joined_budget
+                       ~sanitize:Terminal_text.single_line c.bc_content
+                   with
+                   | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
+                   | [ line ] -> [ heading ^ "  " ^ line ]
+                   | lines ->
+                       heading
+                       :: List.map
+                            (fun line -> "  " ^ rail ^ "  " ^ line) lines
+                 else
+                   let identity =
+                     Printf.sprintf "  %s%s@%s%s%s" rail
+                       (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                       author Ansi.reset author_role
+                   in
+                   let timestamp =
+                     Printf.sprintf "  %s%s%s%s" rail Ansi.dim created_at
+                       Ansi.reset
+                   in
+                   let content_prefix = "  " ^ rail ^ "  " in
+                   let content_width =
+                     max 1
+                       (inner_width
+                       - Message_layout.display_width content_prefix)
+                   in
+                   let lines =
+                     Message_layout.wrap_body
+                       ~markdown:board_document_markdown
+                       ~max_cells:content_width
+                       ~sanitize:Terminal_text.single_line c.bc_content
+                   in
+                   identity :: timestamp
+                   :: List.map (fun line -> content_prefix ^ line) lines)
       in
       (body_lines, detail_lines))
   in
   let total_lines = Board_read_layout.body_count document in
   let detail_line_count = Board_read_layout.comment_count document in
-  let row_budget =
-    Render_schedule.allocate_board_read ~terminal_rows:rows
-      ~body_line_count:total_lines
-      ~comment_count:detail_line_count
+  let detail_comment_count =
+    match detail with
+    | Board_detail.Ready (_, comments) -> List.length comments
+    | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> 0
   in
-  let content_height = row_budget.body_rows in
-  let comment_height = row_budget.comment_rows in
-  let scroll =
-    Render_schedule.project_board_read_scroll ~body_line_count:total_lines
-      ~body_rows:content_height
-      ~comment_count:detail_line_count
-      ~comment_rows:comment_height state.board_scroll
+  (* [board_read_allocation] and [board_read_side_allocation] share field
+     names but are different record types, so this match cannot return one
+     of them -- only the scroll and the two drawn-row counts survive it. *)
+  let scroll, body_lines_drawn, comment_lines_drawn =
+    match side_layout with
+    | Some (body_cols, comment_cols) ->
+        draw_board_read_side buf state document ~rows ~body_cols
+          ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count
+    | None ->
+        let row_budget =
+          Layout.allocate_board_read ~terminal_rows:rows
+            ~body_line_count:total_lines ~comment_count:detail_line_count
+        in
+        let content_height = row_budget.body_rows in
+        let comment_height = row_budget.comment_rows in
+        let scroll =
+          Layout.project_board_read_scroll
+            ~body_line_count:total_lines ~body_rows:content_height
+            ~comment_count:detail_line_count ~comment_rows:comment_height
+            state.board_scroll
+        in
+        for i = 0 to content_height - 1 do
+          let idx = i + scroll.body_offset in
+          if idx < total_lines then
+            box_line buf cols ("  " ^ Board_read_layout.body_line document idx)
+          else box_empty buf cols
+        done;
+        if comment_height > 0 then begin
+          box_divider buf cols;
+          box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
+          for i = 0 to comment_height - 1 do
+            box_line buf cols
+              (Board_read_layout.comment_line document (i + scroll.comment_offset))
+          done
+        end;
+        (scroll, content_height, comment_height)
   in
-  for i = 0 to content_height - 1 do
-    let idx = i + scroll.body_offset in
-    if idx < total_lines then
-      box_line buf cols ("  " ^ Board_read_layout.body_line document idx)
-    else
-      box_empty buf cols
-  done;
-
-  if comment_height > 0 then begin
-    box_divider buf cols;
-    box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
-    for i = 0 to comment_height - 1 do
-      box_line buf cols (Board_read_layout.comment_line document (i + scroll.comment_offset))
-    done
-  end;
-
   (* Reading without a position is guessing: the post body and the comment
      thread each name where they stand, in the window the other reading
      surfaces draw. *)
-  if total_lines > content_height || detail_line_count > comment_height then
+  if
+    total_lines > body_lines_drawn || detail_line_count > comment_lines_drawn
+  then
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "post %s%s"
          (Masc_tui_scroll.window_text ~scroll:scroll.body_offset
-            ~height:content_height total_lines)
-         (if detail_line_count > comment_height then
+            ~height:body_lines_drawn total_lines)
+         (if detail_line_count > comment_lines_drawn then
             "  \xc2\xb7  comments "
             ^ Masc_tui_scroll.window_text ~scroll:scroll.comment_offset
-                ~height:comment_height detail_line_count
+                ~height:comment_lines_drawn detail_line_count
           else ""));
   box_bottom buf cols;
   scroll.normalized_scroll
@@ -4186,13 +4330,16 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
        | _ -> Some (color, label, String.concat ", " names))
     [ (not_running, "not running", (Theme.bad ()))
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
-    ; (* The one failing subset an operator must act on: turn configuration
+    ; (* Failing subsets that need operator action: turn configuration
          errors survive every retry, so the names are listed where the
          failing counter only counts them. Unscoped on purpose -- the
          configuration_blocked_* wire fields are autoboot-scoped and skip a
          blocked keeper booted on request. *)
       ( fleet.fs_turn_configuration_error_names
       , "config-blocked"
+      , (Theme.bad ()) )
+    ; ( fleet.fs_official_client_recovery_required_names
+      , "session recovery required"
       , (Theme.bad ()) )
     ]
 
@@ -4350,20 +4497,19 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* Failing is not a mystery bucket. Every failing keeper is either
-          retrying on its own -- a clean turn returns it to Running -- or
-          blocked on turn configuration, which no retry fixes. Both parts
-          come from the same phase snapshot, which sorts each failing keeper
-          into exactly one of the two, so they sum to the failing count and
-          print beside the whole instead of as a separate "recovering"
-          counter whose relationship to failing was invisible. *)
+       (* The phase snapshot partitions failing keepers into recovering,
+          configuration errors and explicit official-client session recovery.
+          Every failing Keeper belongs to exactly one class, so these three
+          counts sum to the displayed failing count. The latter two require
+          action beyond repeating the same turn. *)
        let failing_entry =
          if fleet.fs_failing_count = 0 then []
          else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d)"
+           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
                fleet.fs_failing_count
                fleet.fs_recovering_count
                fleet.fs_turn_configuration_error_count
+               fleet.fs_official_client_recovery_required_count
            ]
        in
        let counts =
@@ -4982,6 +5128,13 @@ let render_lanes_overview (state : state) =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
+         (* The slot editor's heading, its rows and its key line, counted here
+            so the lane detail below gives up the space rather than the
+            editor being drawn past the frame. *)
+         + (match state.slot_editor with
+            | None -> 0
+            | Some _ ->
+              2 + max 1 (List.length (Masc_tui_types.slot_editor_rows state)))
        in
        let available =
          max 0
@@ -5025,6 +5178,39 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
+  (* The slot editor the "s" key opens. Its rows are the lane's declared
+     order, which is what the lane walks; a slot publication rejected keeps
+     its place there and is marked rather than left out, because dropping it
+     from the drawing would put the numbers beside the other slots out of step
+     with the file. *)
+  (match state.slot_editor with
+   | None -> ()
+   | Some editor ->
+       box_line_styled buf cols ~style:(Theme.info ())
+         (Printf.sprintf "  slots of %s — the order it walks"
+            (Terminal_text.single_line
+               (Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target)));
+       let slot_rows = Masc_tui_types.slot_editor_rows state in
+       if slot_rows = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (this lane declares no slot; a slots array is what it walks)"
+       else
+         List.iteri
+           (fun index (row : Masc_tui_types.slot_editor_row) ->
+              let line =
+                Printf.sprintf "  %s %d  %s%s"
+                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                  (index + 1)
+                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
+                  (if row.Masc_tui_types.sr_admitted then ""
+                   else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
+              in
+              if index = editor.Masc_tui_types.se_cursor then
+                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+              else box_line buf cols line)
+           slot_rows;
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  j/k move · x drop · J/K reorder · Esc close");
   (* The failover-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
@@ -6486,7 +6672,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                      /. 10.0
                    in
                    let bar_width =
-                     Masc_tui_render_schedule.keeper_context_bar_width
+                     Layout.keeper_context_bar_width
                        ~inner_width:inner
                    in
                    add_row "Context:"
@@ -10884,6 +11070,14 @@ let runtime_detail_lines state target ~width =
                | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
+      let probe_limitations =
+        match state.runtime_surface with
+        | Some { rss_probe = Some snapshot; _ } ->
+            List.concat_map
+              (runtime_detail_field ~width ~style:Ansi.reset "Probe limitation")
+              snapshot.rps_limitations
+        | Some { rss_probe = None; _ } | None -> []
+      in
       let keeper_lines =
         let target_keepers =
           match target with
@@ -10911,7 +11105,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ quota @ keeper_lines @ probe_lines
+      fields @ candidate @ quota @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -11092,6 +11286,62 @@ let render_runtime (state : state) =
   in
   c.push_styled ~style:authority_style authority_line;
   c.push_divider ();
+  (* The two routes that are not lanes. They hold runtime ids and nothing
+     dispatches a keeper turn to them, so they sit above the lane table rather
+     than among its rows, where the lane count and the lane-editing keys would
+     both be wrong about them. *)
+  (match state.runtime_mode with
+   | Masc_tui_types.Runtime_all -> ()
+   | Masc_tui_types.Runtime_lanes ->
+       let resolved =
+         Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)
+           state.runtime_surface
+       in
+       let default_text =
+         match resolved with
+         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | Some resolved ->
+             (match resolved.rrs_default_runtime_id with
+              | Some id -> Terminal_text.single_line id
+              | None -> Ansi.dim ^ "none — every keeper needs an assignment" ^ Ansi.reset)
+       in
+       let fleet_text =
+         match resolved with
+         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | Some resolved ->
+             let declared = resolved.rrs_media_failover_declared in
+             let admitted = resolved.rrs_media_failover in
+             let dropped =
+               List.filter
+                 (fun id -> not (List.exists (String.equal id) admitted))
+                 declared
+             in
+             (match declared, dropped with
+              | [], [] -> Ansi.dim ^ "none — no vision fleet" ^ Ansi.reset
+              | declared, dropped ->
+                  String.concat " → "
+                    (List.map Terminal_text.single_line declared)
+                  ^
+                  (match dropped with
+                   | [] -> ""
+                   | _ ->
+                     (Theme.warn ())
+                     ^ Printf.sprintf "  (%s unresolved at boot: %s)"
+                         (Message_layout.count_noun (List.length dropped) "entry")
+                         (String.concat ", " (List.map Terminal_text.single_line dropped))
+                     ^ Ansi.reset))
+       in
+       c.push_styled ~style:(Theme.recede ())
+         (Printf.sprintf "  %s %s   %s"
+            (runtime_column runtime_lane_width "[runtime].default")
+            (runtime_column runtime_candidate_width default_text)
+            (Ansi.dim ^ "f replaces it · the runtime an unassigned keeper walks" ^ Ansi.reset));
+       c.push_styled ~style:(Theme.recede ())
+         (Printf.sprintf "  %s %s   %s"
+            (runtime_column runtime_lane_width "media_failover")
+            (runtime_column runtime_candidate_width fleet_text)
+            (Ansi.dim ^ "m edits it · the vision fleet, in call order" ^ Ansi.reset));
+       c.push_divider ());
   c.push_styled ~style:(Theme.recede ())
     ("  "
      ^ runtime_column runtime_lane_width
@@ -11136,6 +11386,13 @@ let render_runtime (state : state) =
      above, so the footer keeps its row while the prompt is up. *)
   (match Masc_tui_types.runtime_lane_prompt state with
    | None -> ()
+   | Some (Masc_tui_types.Lane_rename_prompt (lane, draft)) ->
+       c.push_styled ~style:(Theme.info ())
+         (Printf.sprintf
+            "  rename lane %s to: %s_  — Enter renames it and every reference, Esc cancel"
+            (Terminal_text.single_line lane)
+            (Terminal_text.single_line draft));
+       c.push_divider ()
    | Some (Masc_tui_types.Lane_name_prompt draft) ->
        c.push_styled ~style:(Theme.info ())
          (Printf.sprintf "  new lane name: %s_  — Enter pick its first runtime, Esc cancel"
@@ -11145,6 +11402,30 @@ let render_runtime (state : state) =
        c.push_styled ~style:(Theme.warn ())
          (Printf.sprintf "  press D again to remove lane %s"
             (Terminal_text.single_line lane));
+       c.push_divider ());
+  (* The route editor, drawn here when it was opened on media_failover. The
+     Lanes surface draws the same editor for an exact lane's slots; both show
+     one ordered list of runtime ids and take the same keys. *)
+  (match state.slot_editor with
+   | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
+   | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
+       c.push_styled ~style:(Theme.info ())
+         "  [runtime].media_failover — the order the vision fleet is called in";
+       let entries = Masc_tui_types.slot_editor_rows state in
+       if entries = [] then
+         c.push_styled ~style:(Theme.recede ())
+           "  (empty — no vision fleet; a adds the first runtime)"
+       else
+         List.iteri
+           (fun index (row : Masc_tui_types.slot_editor_row) ->
+              c.push
+                (Printf.sprintf "  %s %d  %s"
+                   (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                   (index + 1)
+                   (Terminal_text.single_line row.Masc_tui_types.sr_slot)))
+           entries;
+       c.push_styled ~style:(Theme.recede ())
+         "  j/k move · a add · x drop · J/K reorder · Esc close";
        c.push_divider ());
   (match runtime_picker_projection state with
    | None -> ()
@@ -11156,7 +11437,13 @@ let render_runtime (state : state) =
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
               Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
-                (Terminal_text.single_line lane));
+                (Terminal_text.single_line lane)
+          | Masc_tui_types.Pick_media_failover ->
+              "  adding to the vision fleet [runtime].media_failover — j/k move, Enter append, e cancel"
+          | Masc_tui_types.Pick_route_default ->
+              (* Replaces rather than appends, and the row it replaces is
+                 marked "(already a candidate)" in the choices below. *)
+              "  the runtime an unassigned keeper walks — j/k move, Enter replace, e cancel");
        if picker.rlp_choices = [] then
          c.push_styled ~style:(Theme.recede ()) "  (runtime catalogue unread)"
        else
@@ -11314,9 +11601,18 @@ let render_runtime (state : state) =
             else []
           in
           let lane_fact =
-            if candidate.rcr_candidate_count = 1 then [ "single candidate" ]
-            else if is_first then [ "head" ]
-            else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
+            (* [Lane_undeclared] reads like a one-candidate lane on the wire --
+               one candidate, first position -- so until this row said so there
+               was nothing on the surface telling them apart. A declared lane
+               of one candidate walks no failover either; what separates this
+               one is that [D] has no table to remove. *)
+            match Masc_tui_types.runtime_lane_fact_of_row candidate with
+            | Masc_tui_types.Lane_undeclared ->
+              [ (Theme.recede ()) ^ "runtime, not a declared lane" ^ Ansi.reset ]
+            | Masc_tui_types.Lane_single_candidate -> [ "single candidate" ]
+            | Masc_tui_types.Lane_head -> [ "head" ]
+            | Masc_tui_types.Lane_fallback position ->
+              [ Printf.sprintf "fallback #%d" position ]
           in
           let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
           (* The lane fact leads. This cell is what is left of the row after
@@ -11576,15 +11872,15 @@ let render_keeper_calls (state : state) =
            @ labeled_rows ~call_index ~style:Ansi.dim ~label:"input" call.kc_input
          in
          let output_rows =
-           match
-             Option.bind call.kc_output (fun result ->
-               Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
-           with
+           (* This is the recorded-call inspector. A timeline digest drops
+              structured receipt fields and can hide an assessment behind a
+              later failure; preserve the stored output and let rows scroll. *)
+           match call.kc_output with
            | None -> []
-           | Some digest ->
+           | Some output ->
              labeled_rows ~call_index
                ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
-               ~label:"output" digest
+               ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)
     |> List.concat

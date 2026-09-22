@@ -1,8 +1,4 @@
-(** The Keeper chat surface.
-
-    The definitions only this surface reaches, computed from the call graph
-    and closed: nothing here belongs to another screen. 56 of the 60
-    stay inside -- they are what the exported four are built from. *)
+(** Keeper chat rendering and shared message layout. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Message_layout = Masc_tui_message_layout
@@ -23,3 +19,18 @@ val render_keeper_message :
   Masc_tui_types.state ->
   Masc_tui_render_prim.Frame_presenter.frame *
   Masc_tui_types.clamped_scroll option
+
+(** Layout and body rendering share the final body budget. *)
+val keeper_message_layout_entries :
+  ?messages:Masc_tui_types.msg_entry list -> Masc_tui_types.state ->
+  keeper_name:string -> chat_cols:int -> Message_layout.entry list
+
+val chat_body_with_previews :
+  preview:(string -> Masc_tui_link_preview.og_preview) ->
+  mode:[ `Rich | `Compact | `Off ] -> entry:Message_layout.entry ->
+  width:int -> string
+
+val cached_chat_markdown :
+  link_previews_mode:[ `Rich | `Compact | `Off ] ->
+  theme:Masc_tui_ansi.Chat_theme.snapshot -> entry:Message_layout.entry ->
+  width:int -> string list

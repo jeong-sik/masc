@@ -67,9 +67,18 @@ let start
     let* credentials, registered_now =
       match configured with
       (* An operator who made their own app keeps using it. Registering
-         anyway would leave a second client behind for no reason. *)
+         anyway would leave a second client behind for no reason.
+
+         A lapsed secret is the exception. The authorization server has
+         forgotten that pair, so presenting it reaches the token endpoint
+         with an id nobody recognises and the login ends in the server's own
+         wording for it. Registering again is the only way back, and the
+         second client record it leaves behind is the price of a login that
+         works. *)
       | Some ({ Store.client_id; _ } as credentials)
-        when String.trim client_id <> "" -> Ok (credentials, false)
+        when String.trim client_id <> ""
+             && not (Store.secret_expired credentials ~now) ->
+        Ok (credentials, false)
       | Some _ | None ->
         (match discovered.Discovery.registration_url with
          | None -> Error (No_registration discovered.Discovery.issuer)
@@ -78,6 +87,7 @@ let start
              (fun (r : Registration.registered) ->
                ( { Store.client_id = r.Registration.client_id
                  ; client_secret = r.Registration.client_secret
+                 ; secret_expires_at = r.Registration.secret_expires_at
                    (* Nothing recorded: a client this install registered can
                       be granted whatever the resource publishes. *)
                  ; scopes = []

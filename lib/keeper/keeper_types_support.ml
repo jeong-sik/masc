@@ -156,11 +156,14 @@ let keeper_raw_trace_turn_path config name =
 let keeper_session_dir config trace_id =
   Filename.concat (session_base_dir_ config) trace_id
 
+let history_file_name = "history.jsonl"
+let internal_history_file_name = "history.internal.jsonl"
+
 let keeper_history_path config trace_id =
-  Filename.concat (keeper_session_dir config trace_id) "history.jsonl"
+  Filename.concat (keeper_session_dir config trace_id) history_file_name
 
 let keeper_internal_history_path config trace_id =
-  Filename.concat (keeper_session_dir config trace_id) "history.internal.jsonl"
+  Filename.concat (keeper_session_dir config trace_id) internal_history_file_name
 
 let normalize_history_source (source : string) =
   source |> String.trim |> String.lowercase_ascii

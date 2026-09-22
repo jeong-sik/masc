@@ -17,7 +17,7 @@ const entries = chatHistoryEntriesFromRest('display-label-is-not-owner', [{
   blocks: [{ t: 'trace', trace: [{ kind: 'tool', name: 'Edit', status: 'ok', execution_id: id }] }],
 }])
 function response(keeper = 'writer') { return { keeper, execution_id: id, entry: {
-  keeper, execution_id: id, ts: 1, tool: 'Edit', success: true, duration_ms: 3,
+  keeper, execution_id: id, ts: 1, tool: 'Edit', wire_outcome: 'ok' as const, duration_ms: 3,
   input: { old_string: 'old', new_string: 'new' },
   output: JSON.stringify({ ok: true, mode: 'patch', path: `${keeper}.md`, occurrences: 1 }),
   route_evidence: { descriptor_id: 'agent.edit_file' },
@@ -135,7 +135,7 @@ describe('historical autonomous tool outputs', () => {
     vi.mocked(get).mockImplementation(async path => {
       const keeper = new URL(path, 'http://localhost').pathname.includes('/writer/') ? 'writer' : 'peer'
       const payload = response(keeper)
-      return { ...payload, entry: { ...payload.entry, success: keeper === 'writer', duration_ms: keeper === 'writer' ? 12 : 9000 } }
+      return { ...payload, entry: { ...payload.entry, wire_outcome: keeper === 'writer' ? 'ok' : 'error', duration_ms: keeper === 'writer' ? 12 : 9000 } }
     })
     const view = render(html`<div>
       <section data-testid="writer">${transcript('writer')}</section>

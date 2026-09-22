@@ -11,6 +11,7 @@ import {
   fetchKeeperToolCalls,
   fetchKeeperTrajectory,
 } from '../../api/dashboard'
+import { toolCallCompletion } from '../../api/dashboard-keeper-tool-calls'
 import {
   deleteLiveTraceSlot,
   ensureLiveTraceSlot,
@@ -438,7 +439,7 @@ function toolEventSuccess(event: UnifiedTraceEvent): boolean {
 }
 
 function toolCallEntryIsFailure(entry: ToolCallEntry): boolean {
-  return entry.disposition ? entry.disposition === 'failed' : !entry.success
+  return toolCallCompletion(entry) === false
 }
 
 function toolCallEntryMatchesTraceEvent(

@@ -218,7 +218,8 @@ let test_librarian_source_requirement_matches_the_domain () =
   List.iter (fun (label, sources, pockets, accepted) ->
     let working_contexts = `List pockets in
     let output = `Assoc
-      [ "working_contexts", working_contexts
+      [ "working_state", `Null
+      ; "working_contexts", working_contexts
       ; Keeper_librarian.wire_field_new_claims, `List []
       ; Keeper_librarian.wire_field_dropped, `List [] ] in
     let schema_result = Tool_input_validation.validate

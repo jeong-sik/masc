@@ -341,6 +341,7 @@ sandbox_profile = "docker"
 sandbox_image = "node:22-bookworm"
 network_mode = "none"
 mention_targets = ["operator"]
+board_interests = [] # no targetless semantic Board discovery
 
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete

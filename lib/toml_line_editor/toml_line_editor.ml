@@ -857,3 +857,34 @@ let remove_table content ~path =
   | kept, true -> Table_removed (join_lines kept ~trailing_newline:true)
   | _, false -> Table_absent
 ;;
+
+type table_rename =
+  | Table_renamed of string
+  | Table_rename_absent
+  | Table_rename_conflict
+
+(* Rename one standard table's header, leaving its body and the comments
+   around it where they are. Only the header line changes, so a rename cannot
+   reorder or reformat what the table holds -- which is what makes it safe to
+   apply beside other edits of the same file in one write.
+
+   The walk is the one {!remove_table} does, for the same reason: a header
+   inside a multi-line string is not a header, and [is_structural] is what
+   tells them apart. A file that already declares [to_path] is refused rather
+   than left with the name twice, which would fail the whole load. *)
+let rename_table content ~path ~to_path =
+  let lines, _trailing = split_lines content in
+  if List.exists (fun line -> is_table ~path:to_path line) lines
+  then Table_rename_conflict
+  else (
+    let renamed_header = Printf.sprintf "[%s]" to_path in
+    let rec loop acc ~renamed state = function
+      | [] -> List.rev acc, renamed
+      | line :: rest when is_structural state && is_table ~path line ->
+        loop (renamed_header :: acc) ~renamed:true (scan_line state line) rest
+      | line :: rest -> loop (line :: acc) ~renamed (scan_line state line) rest
+    in
+    match loop [] ~renamed:false outside lines with
+    | kept, true -> Table_renamed (join_lines kept ~trailing_newline:true)
+    | _, false -> Table_rename_absent)
+;;

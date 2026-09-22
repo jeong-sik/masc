@@ -200,7 +200,7 @@ let test_a_new_lane_name_claims_typing_on_runtime () =
   let state = fresh_state () in
   state.Tui_types.view <- Tui_types.Runtime;
   check target "reading lanes" None (resolved state);
-  state.Tui_types.runtime_lane_name_draft <- Some "";
+  state.Tui_types.runtime_lane_name_draft <- Some (Tui_types.Naming_new_lane "");
   check target "naming a lane" (Some Tui_types.Text_runtime_lane_name) (resolved state);
   state.Tui_types.view <- Tui_types.Lanes;
   check target "another surface" None (resolved state)
@@ -311,6 +311,19 @@ let test_ask_answer_input_ownership () =
   check target "retained answer cannot capture another surface" None (resolved state)
 ;;
 
+let test_github_token_claims_input_when_active () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
+  state.Tui_types.detail_tab <- Tui_types.Detail_github;
+  state.Tui_types.github_token_input <- Some "github_pat_123";
+  check target "github token input owns typing" (Some Tui_types.Text_github_token) (resolved state);
+  state.Tui_types.palette_open <- true;
+  check target "palette takes priority over github token" (Some Tui_types.Text_palette) (resolved state);
+  state.Tui_types.palette_open <- false;
+  state.Tui_types.github_token_input <- None;
+  check target "no input when not editing token" None (resolved state)
+;;
+
 let () =
   Alcotest.run
     "tui text input target"
@@ -319,6 +332,7 @@ let () =
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
           test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
           test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
+          test_case "github token claims input when active" `Quick test_github_token_claims_input_when_active;
           test_case "nothing claims a plain surface" `Quick
             test_nothing_claims_a_plain_surface;
           test_case "the palette claims while it is open" `Quick

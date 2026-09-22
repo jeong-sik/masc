@@ -22,6 +22,7 @@ import {
   normalizeSkillActivationProjection,
   fetchDashboardFullHealth,
   fetchKeeperToolCalls,
+  toolCallCompletion,
   fetchKeeperToolStats,
   fetchKeeperTurnRecords,
   parseMemoryOsFactCategory,
@@ -407,7 +408,7 @@ describe('keeper tool telemetry fetchers', () => {
             tool: 'keeper_context_status',
             input: {},
             output: 'ok',
-            success: true,
+            wire_outcome: 'ok',
             duration_ms: 5,
             tool_use_id: '',
             turn: 6,
@@ -430,7 +431,7 @@ describe('keeper tool telemetry fetchers', () => {
 
     const result = await fetchKeeperToolCalls('keeper-alpha')
     const entry = result.entries[0]
-    expect(entry?.success).toBe(true)
+    expect(entry?.wire_outcome).toBe('ok')
     expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
     expect(entry?.tool_use_id).toBe('')
     expect(entry?.turn).toBe(6)
@@ -444,6 +445,34 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.composition_node_id).toBe('fetch_sources')
     expect(entry?.composition_execution).toBe('async')
     expect(entry?.parent_tool_use_id).toBe('outer-7')
+  })
+
+  it('does not revive the removed success shadow when typed outcomes are absent', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_context_status',
+            input: {},
+            output: 'legacy row',
+            success: true,
+            duration_ms: 5,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    expect(entry?.wire_outcome).toBe('unknown')
+    expect(entry && toolCallCompletion(entry)).toBeUndefined()
+    expect(entry).not.toHaveProperty('success')
   })
 
   it('decodes recorded execution evidence (runtime contract, action radius, route evidence)', async () => {
@@ -461,7 +490,7 @@ describe('keeper tool telemetry fetchers', () => {
             tool: 'keeper_lane_status',
             input: {},
             output: '{"profile":"docker","lane":null,"endpoint":null,"operator_action":null}',
-            success: true,
+            wire_outcome: 'ok',
             duration_ms: 0.5,
             thinking_enabled: true,
             prompt_fingerprint: '464ce7b3280c24fe1cbdcd990a70db87',
@@ -580,7 +609,7 @@ describe('keeper tool telemetry fetchers', () => {
             tool: 'WebSearch',
             input: {},
             output: 'ok',
-            success: true,
+            wire_outcome: 'ok',
             duration_ms: 5,
             route_evidence: { descriptor_id: 'agent.search_web', status: 'ok' },
           },
@@ -590,7 +619,7 @@ describe('keeper tool telemetry fetchers', () => {
             tool: 'Execute',
             input: {},
             output: 'done',
-            success: true,
+            wire_outcome: 'ok',
             duration_ms: 5,
             route_evidence: { descriptor_id: 'agent.execute', status: { kind: 'exit', code: 0 } },
           },
@@ -618,7 +647,7 @@ describe('keeper tool telemetry fetchers', () => {
             tool: 'keeper_context_status',
             input: {},
             output: 'ok',
-            success: true,
+            wire_outcome: 'ok',
             duration_ms: 5,
           },
         ],
@@ -648,7 +677,7 @@ describe('keeper tool telemetry fetchers', () => {
             tool: 'keeper_context_status',
             input: {},
             output: 'ok',
-            success: true,
+            wire_outcome: 'ok',
           },
           {
             ts: 2,
@@ -656,7 +685,7 @@ describe('keeper tool telemetry fetchers', () => {
             tool: 'masc_board_post_get',
             input: {},
             output: 'ok',
-            success: true,
+            wire_outcome: 'ok',
             duration_ms: 'not recorded',
           },
         ],
@@ -3398,6 +3427,7 @@ describe('fetchKeeperConfig', () => {
       },
       workspace: {
         mention_targets: 'sangsu',
+        board_interests: [],
         bound_workspace_ids: 'default',
       },
       sources: {
@@ -3446,6 +3476,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
+    expect(result.workspace.board_interests).toEqual([])
     expect(result.skills.names).toEqual(['ocaml-coding', 'proof-harness'])
     expect(result.hooks?.scope).toBe('keeper_runtime_composite')
     expect(result.hooks?.slots.pre_tool_use?.features).toEqual(['tool_start_timing'])

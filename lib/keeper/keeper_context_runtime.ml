@@ -27,6 +27,7 @@ let set_system_prompt = Keeper_context_core.set_system_prompt
 let append = Keeper_context_core.append
 let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
+let persist_tool_observation = Keeper_context_core.persist_tool_observation
 
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
 let context_of_agent_core_checkpoint = Keeper_context_core.context_of_agent_core_checkpoint

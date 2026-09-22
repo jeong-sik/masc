@@ -13,7 +13,7 @@ let max_entries = 32
 
 let close_silently w =
   try Stdlib.close_out w.oc with
-  | _ -> ()
+  | _ -> () (* cancel-guard-ok: Stdlib.close_out performs no Eio operation. *)
 ;;
 
 let drop_cached_writer_locked path w =

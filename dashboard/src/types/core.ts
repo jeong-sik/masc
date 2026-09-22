@@ -56,6 +56,12 @@ export interface Task {
   goal_id?: string | null
   status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled' | 'blocked' | 'paused' | 'unknown'
   status_raw?: string | null
+  /** The question an `awaiting_verification` task asked: `complete` finishes,
+   *  `cancel` stops. It rides on the task status (types_core.ml) because an
+   *  approval must know which terminal state it authorises, and it is the
+   *  reliable stop signal — unlike a request's `cancellation_reason`, which a
+   *  stop submitted before the field was kept (2026-09-15) does not carry. */
+  verification_intent?: 'complete' | 'cancel' | null
   priority?: number
   assignee?: string
   description?: string
@@ -407,6 +413,7 @@ export interface ProviderHealth {
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'runtime_exhausted',
   'provider_runtime_error',
+  'official_client_recovery_required',
   'fiber_unresolved',
   'stale_termination_storm',
   'heartbeat_failures',
@@ -1603,6 +1610,7 @@ interface KeeperConfigRuntime {
 
 interface KeeperConfigWorkspace {
   mention_targets: string[]
+  board_interests: string[]
   bound_workspace_ids: string[]
 }
 
@@ -1675,12 +1683,15 @@ interface KeeperHookIntrospection {
   slots: Record<string, KeeperHookSlot>
 }
 
+export type KeeperInputPolicy = 'small' | 'wide'
+
 export interface KeeperConfig {
   name: string
   config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
   config_transaction_warnings?: KeeperManifestWarning[]
   activation_mode: KeeperActivationMode
+  input_policy: KeeperInputPolicy
   max_context_override: number | null
   // The server's string, unnormalized. It is not a `SandboxProfile`: when the
   // response omits the field `normalizeKeeperConfig` writes the placeholder

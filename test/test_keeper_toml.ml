@@ -628,6 +628,7 @@ let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
     ; "activation_mode", "true", "string"
     ; "max_context_override", "\"128001\"", "integer"
     ; "mention_targets", "true", "string array"
+    ; "board_interests", "true", "string array"
     ; "tools.deny", "true", "string array"
     ]
 
@@ -735,6 +736,36 @@ let test_skill_names_preserve_absent_empty_and_exact_values () =
   check (option (list string)) "explicit empty overrides inherited names" (Some []) merged.skill_names
 ;;
 
+let test_board_interests_default_off_and_clear_inherited_values () =
+  let parse input =
+    match TL.parse_toml input with
+    | Error error -> fail error
+    | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok defaults -> defaults
+       | Error detail -> fail detail)
+  in
+  let absent = parse "[keeper]\ninstructions = \"test\"\n" in
+  check (list string) "omission turns targetless discovery off" []
+    absent.KTP.board_interests;
+  let exact =
+    parse
+      "[keeper]\nboard_interests = [\" Memory \", \"Board\", \"Memory\"]\n"
+  in
+  check (list string) "interests are canonical" [ "Board"; "Memory" ]
+    exact.KTP.board_interests;
+  let merged =
+    KTP.merge_keeper_profile_defaults
+      ~base:
+        { KTP.empty_keeper_profile_defaults with
+          board_interests = [ "inherited" ]
+        }
+      ~overlay:KTP.empty_keeper_profile_defaults
+  in
+  check (list string) "an omitted Keeper-local field clears inherited interests"
+    [] merged.board_interests
+;;
+
 let test_tool_deny_parses_absent_empty_and_exact_values () =
   let parse input =
     match TL.parse_toml input with
@@ -782,6 +813,24 @@ let test_tool_deny_parses_absent_empty_and_exact_values () =
     inherited.tool_deny
 ;;
 
+let test_input_policies () =
+  let parse body =
+    let doc = match TL.parse_toml ("[keeper]\n" ^ body ^ "\n") with
+      | Ok doc -> doc | Error error -> fail error in
+    KTP.profile_defaults_of_toml doc in
+  List.iter (fun wire ->
+    match parse (Printf.sprintf "input_policy = %S" wire) with
+    | Ok defaults -> check (option string) "typed TOML policy" (Some wire)
+        (Option.map Masc.Keeper_input_policy.to_string defaults.input_policy)
+    | Error error -> fail error) ["small"; "wide"];
+  List.iter (fun value -> match parse ("input_policy = " ^ value) with
+    | Error _ -> () | Ok _ -> fail "invalid TOML input policy accepted")
+    ["\"automatic\""; "true"; "42"];
+  match parse "" with
+  | Ok defaults -> check bool "absence leaves profile inheritance open" true (defaults.input_policy = None)
+  | Error error -> fail error
+;;
+
 let test_activation_modes () =
   List.iter (fun (wire, restores, spontaneous) ->
     let doc = match TL.parse_toml (Printf.sprintf "[keeper]\nactivation_mode = %S\n" wire) with
@@ -808,6 +857,7 @@ let test_profile_full () =
   let input = {|
 [keeper]
 mention_targets = ["sherlock", "log-analyzer"]
+board_interests = [" Memory ", "Board", "Memory"]
 activation_mode = "manual"
 max_context_override = 128001
 |} in
@@ -818,6 +868,8 @@ max_context_override = 128001
     | Error e -> fail e
     | Ok d ->
       check int "mention_targets" 2 (List.length d.mention_targets);
+      check (list string) "canonical board interests" [ "Board"; "Memory" ]
+        d.board_interests;
       check (option string) "activation mode" (Some "manual")
         (Option.map Masc.Keeper_activation_mode.to_string d.activation_mode);
       check (option int) "max_context_override" (Some 128_001)
@@ -2095,6 +2147,7 @@ let () =
           test_case "rejects unknown [keeper.tools] sibling" `Quick
             test_profile_rejects_unknown_tools_sibling_key;
           test_case "activation modes" `Quick test_activation_modes;
+          test_case "input policies" `Quick test_input_policies;
           test_case "full" `Quick test_profile_full;
           test_case "rejects wrong known-field shape" `Quick
             test_profile_rejects_wrong_known_field_shape;
@@ -2176,6 +2229,8 @@ let () =
             test_each_keeper_field_kind_rejects_a_wrong_typed_value;
           test_case "Skill names preserve three-state selection" `Quick
             test_skill_names_preserve_absent_empty_and_exact_values;
+          test_case "Board interests default off and do not inherit" `Quick
+            test_board_interests_default_off_and_clear_inherited_values;
           test_case "tool deny parses and merges" `Quick
             test_tool_deny_parses_absent_empty_and_exact_values;
           test_case "materializable helper uses base path" `Quick

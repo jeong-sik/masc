@@ -14,11 +14,7 @@ let contains needle text =
   in
   walk 0
 
-(* Every item in this projection needs operator attention, and the panel that
-   draws it is titled for that. On the live fleet the Overview's Attention panel
-   gives a row forty-one cells for its reading; the phrase spent twenty-seven of
-   them, and five of six rows read "<keeper> needs operator attention: paus…" --
-   the reason, which is what the operator acts on, was the half that was cut. *)
+(* The row carries what differs between rows: the Keeper and the reason. *)
 let test_a_row_says_which_keeper_and_why () =
   check string "the keeper and its reason" "lane-smith: paused"
     (summary ~reason:(Some "paused") ~runtime_blocker_summary:None)
@@ -31,10 +27,21 @@ let test_a_blocker_summary_follows_the_reason () =
     (summary ~reason:(Some "runtime_blocked")
        ~runtime_blocker_summary:(Some "every candidate refused"))
 
-(* A blocker with no reason of its own is still the row's reading. *)
-let test_a_blocker_alone_is_the_reading () =
-  check string "the keeper and its blocker" "lane-smith: keepalive lost"
+(* A blocker with no reason of its own keeps the parentheses it has beside a
+   reason, so the row still says which reading it is. *)
+let test_a_blocker_alone_keeps_its_parentheses () =
+  check string "the keeper and its blocker" "lane-smith (keepalive lost)"
     (summary ~reason:None ~runtime_blocker_summary:(Some "keepalive lost"))
+
+(* The two readings never print the same way: "x: paused" is a reason and
+   "x (paused)" is a blocker summary. *)
+let test_a_reason_and_a_blocker_are_told_apart () =
+  let as_reason = summary ~reason:(Some "paused") ~runtime_blocker_summary:None in
+  let as_blocker = summary ~reason:None ~runtime_blocker_summary:(Some "paused") in
+  check bool
+    (Printf.sprintf "%S and %S differ" as_reason as_blocker)
+    false
+    (String.equal as_reason as_blocker)
 
 (* And where there is neither, the phrase is all the row has to say. *)
 let test_a_row_with_nothing_else_keeps_the_phrase () =
@@ -62,8 +69,10 @@ let () =
             test_a_row_says_which_keeper_and_why
         ; test_case "a blocker summary follows the reason" `Quick
             test_a_blocker_summary_follows_the_reason
-        ; test_case "a blocker alone is the reading" `Quick
-            test_a_blocker_alone_is_the_reading
+        ; test_case "a blocker alone keeps its parentheses" `Quick
+            test_a_blocker_alone_keeps_its_parentheses
+        ; test_case "a reason and a blocker are told apart" `Quick
+            test_a_reason_and_a_blocker_are_told_apart
         ; test_case "a row with nothing else keeps the phrase" `Quick
             test_a_row_with_nothing_else_keeps_the_phrase
         ; test_case "a row with a reason does not repeat the panel" `Quick

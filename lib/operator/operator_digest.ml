@@ -117,21 +117,18 @@ let keeper_attention_severity ~reason ~runtime_blocker_class =
   | _, Some _ -> Sev_bad
   | _ -> Sev_warn
 
-(* Every item in this projection needs operator attention -- that is what the
-   projection is -- and every surface that draws one says so above the list.
-   Spelled on the row as well, the words cost twenty-seven cells of a row that
-   has forty-one for its reading, so on the live fleet five of six rows read
-   "<keeper> needs operator attention: paus\xe2\x80\xa6" and the reason, which is
-   the one thing the operator acts on, was the half that was cut. The row says
-   which keeper and why; the list it sits in says the rest.
-
-   The phrase stays where it is the whole reading: an item with neither a
-   reason nor a blocker summary has nothing else to say. *)
+(* Which Keeper and why. Every item in this projection needs operator
+   attention, and every surface that draws one titles its list for that, so
+   the row carries only what differs between rows: the Keeper's name, the
+   attention reason after a colon, and the runtime blocker summary in
+   parentheses. The two readings keep their own marks so a row with only one
+   of them still says which it is. An item with neither has nothing else to
+   say, and the phrase is its whole reading. *)
 let keeper_attention_summary ~name ~reason ~runtime_blocker_summary =
   match reason, runtime_blocker_summary with
   | Some reason, Some summary -> Printf.sprintf "%s: %s (%s)" name reason summary
   | Some reason, None -> Printf.sprintf "%s: %s" name reason
-  | None, Some summary -> Printf.sprintf "%s: %s" name summary
+  | None, Some summary -> Printf.sprintf "%s (%s)" name summary
   | None, None -> Printf.sprintf "%s needs operator attention" name
 
 (* Waiting connector messages are read off the event queue, not off the

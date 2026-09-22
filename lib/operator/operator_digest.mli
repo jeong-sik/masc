@@ -29,11 +29,11 @@ val keeper_attention_summary :
   reason:string option ->
   runtime_blocker_summary:string option ->
   string
-(** What one Keeper's attention row says: which Keeper, and why. Every item in
-    this projection needs operator attention and every surface that draws one
-    says so above the list, so the row does not spell it again -- except where
-    there is neither a reason nor a blocker summary, and the phrase is the
-    whole reading. *)
+(** What one Keeper's attention row says: its name, the attention reason after
+    a colon, and the runtime blocker summary in parentheses --
+    ["lane-smith: paused"], ["sangsu: runtime_blocked (every candidate
+    refused)"], ["sangsu (keepalive lost)"]. With neither reading the row is
+    ["<name> needs operator attention"]. *)
 
 val severity_rank : operator_severity -> int
 

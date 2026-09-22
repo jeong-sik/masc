@@ -305,7 +305,10 @@ completion contract's evidence list, attached files - read from the same
 backlog load the list was projected from. `Esc` closes the detail, a second
 `Esc` returns `j`/`k` to the events. Events are windowed against
 both panel columns, so a long event wraps to the width actually available
-rather than the header width.
+rather than the header width. An error event wears the `✗` the chat pane
+uses for a failure, just after the clock; every other level keeps that cell
+for its text. The mark is a shape rather than a colour alone, so it holds
+under `NO_COLOR`.
 
 The tail of the cluster row is what the server reports about its own delivery
 paths: one entry per path, then the queue's pressure and its drop count. It

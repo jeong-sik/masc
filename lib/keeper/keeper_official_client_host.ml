@@ -85,7 +85,19 @@ let user_message text : Agent_core.Types.message =
 (* Official-client adapters own their provider instruction projection. Keep
    dynamic context on that System path rather than copying Agent Core's
    synthetic User-message encoding, while retaining the shared typed identity
-   used by prompt attribution and input-window projection. *)
+   used by prompt attribution and input-window projection.
+
+   The Librarian's working state rides here too, so it reaches the client the
+   way each adapter delivers System text: Claude Code joins it into
+   [--system-prompt] on every turn, a resume included
+   ([Keeper_claude_code_runtime]); Antigravity renders it as a [SYSTEM:]
+   section ahead of the history ([Keeper_antigravity_runtime]). The Agent
+   Core lane sends the same text as a [User] message, which only that lane's
+   wire has. Moving it to [User] here would change when Claude Code delivers
+   it -- into the start prompt's history alone, absent from resumes -- not
+   only what the model reads it as; that is a lane decision to measure, not
+   a role to flip. The text names itself a summary to use as context, not as
+   new instructions ([Keeper_turn_driver_try_provider.working_state_text]). *)
 let extra_system_context_message text : Agent_core.Types.message =
   { role = System
   ; content = [ Text text ]
@@ -383,6 +395,14 @@ type carried_start_front =
   | Turn_start_unknown of { reason : string }
       (** No seed, no lane cut, and the turn start could not be read: the
           range opened on the newest atom alone. *)
+  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
+      (** The Librarian absorbed the history through [absorbed_through] and
+          wrote what the keeper was in the middle of; the range starts there
+          and carries that working state instead of the atoms it summarises. *)
+  | Librarian_progress of { end_atom : int }
+      (** The Librarian read the history through [end_atom] and no working
+          state fits it; the range starts there, and the atoms before it are
+          in the keeper's memory. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -393,12 +413,50 @@ type carried_start =
   ; front : carried_start_front
   }
 
+type librarian_position = Keeper_turn_driver_try_provider.librarian_position
+
+type librarian_front_reader =
+  Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
+
+(* Every official lane takes the reader as an optional argument and applies
+   it to the list it is about to cut; this turns "the caller named none" into
+   "no position for these messages" once, here, rather than in each lane. *)
+let read_librarian_front reader messages =
+  match reader with
+  | None -> Ok Keeper_turn_driver_try_provider.No_position
+  | Some read -> read messages
+;;
+
 let carried_start_front_to_string = function
   | Carried_seed source ->
     Printf.sprintf "carried:%s" (Keeper_carried_front.source_to_string source)
   | Lane_cut -> "lane_cut"
   | Turn_start -> "turn_start"
   | Turn_start_unknown _ -> "turn_start_unknown"
+  (* The same word the Agent Core lane logs for this front
+     ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
+  | Librarian_snapshot _ -> "librarian_snapshot"
+  | Librarian_progress _ -> "librarian_progress"
+;;
+
+let continuity_observation_input ~trace_id ~continuity front =
+  match front, continuity with
+  | Librarian_snapshot { absorbed_through; boundary_line }, _ ->
+    Keeper_continuity_observation.Summarized
+      { trace_id; end_atom = absorbed_through; boundary_line }
+  | Librarian_progress { end_atom }, _ -> Keeper_continuity_observation.Absorbed { trace_id; end_atom }
+  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), None ->
+    Keeper_continuity_observation.Not_applied
+  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _)
+    , Some Keeper_turn_driver_try_provider.Without_snapshot ) ->
+    Keeper_continuity_observation.Without_snapshot
+  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _)
+    , Some
+        ( Keeper_turn_driver_try_provider.Summarized _
+        | Keeper_turn_driver_try_provider.Absorbed _ ) ) ->
+    (* The turn chose a Librarian point and this request did not start
+       there: the seed or the lane's own cut sat past it. *)
+    Keeper_continuity_observation.Not_applied
 ;;
 
 (* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
@@ -432,8 +490,26 @@ let carried_start_front_to_string = function
    store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.
    The composition it drives is a walk over the whole history, so that part is
    offloaded. *)
-let carried_start_range ~keeper_name ~runtime_id ~carried_front_seed ~own_first_atom
-      ~turn_start messages
+(* What a range carries, named where it is decided. [Absorbed_through] holds
+   the working-state text the request sends, so the composition below cannot
+   reach a Librarian front without it. *)
+type range_plan =
+  | Plain of int * carried_start_front
+  | Absorbed_through of
+      { first_atom : int
+      ; absorbed_through : int
+      ; boundary_line : int
+      ; working_state : string
+      }
+
+let carried_start_range
+      ~keeper_name
+      ~runtime_id
+      ~carried_front_seed
+      ~librarian_front
+      ~own_first_atom
+      ~turn_start
+      messages
   =
   let seed_read =
     match carried_front_seed with
@@ -490,32 +566,115 @@ let carried_start_range ~keeper_name ~runtime_id ~carried_front_seed ~own_first_
            history_atom_count;
          None)
   in
-  let first_atom, front =
+  let seedless =
+    match turn_start with
+    | Keeper_carried_front.Turn_boundary { end_atom } ->
+      let turn_start = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
+      if own_first_atom > turn_start then own_first_atom, Lane_cut
+      else turn_start, Turn_start
+    | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+      (* The lane's own cut is a position this lane reached; without one
+         the range opens on the newest atom alone, not on the whole
+         history under a boundary that was never read. *)
+      if own_first_atom > 0 then own_first_atom, Lane_cut
+      else
+        ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
+        , Turn_start_unknown { reason } )
+  in
+  let seed_held =
     match seeded_first_atom with
     | Some (first_atom, source) when first_atom >= own_first_atom ->
-      first_atom, Carried_seed source
-    | Some _ | None ->
-      (match turn_start with
-       | Keeper_carried_front.Turn_boundary { end_atom } ->
-         let turn_start = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
-         if own_first_atom > turn_start then own_first_atom, Lane_cut
-         else turn_start, Turn_start
-       | Keeper_carried_front.Turn_boundary_unknown { reason } ->
-         (* The lane's own cut is a position this lane reached; without one
-            the range opens on the newest atom alone, not on the whole
-            history under a boundary that was never read. *)
-         if own_first_atom > 0 then own_first_atom, Lane_cut
-         else
-           ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
-           , Turn_start_unknown { reason } ))
+      Some (first_atom, Carried_seed source)
+    | Some _ | None -> None
   in
+  let seed_or_lane =
+    match seed_held with
+    | Some held -> held
+    | None -> seedless
+  in
+  (* What a Librarian position has to reach to win: the seed that holds, else
+     the lane's own cut. The turn start is not weighed against it. It is where
+     a request with no absorbed point begins (RFC
+     keeper-context-window-in-tokens §13.4), so a Librarian position behind it
+     still names atoms that nothing else carries or summarises, and they go
+     out. *)
+  let librarian_must_reach =
+    match seed_held with
+    | Some (first_atom, _) -> first_atom
+    | None -> own_first_atom
+  in
+  let absorbed = librarian_front in
+  (* The range and what it must carry, decided together: a front that stands
+     for absorbed atoms cannot be composed without the working state that
+     stands for them. *)
+  let plan =
+    match absorbed with
+    | Keeper_turn_driver_try_provider.Librarian_snapshot
+        (snapshot : Librarian_continuity_snapshot.t)
+      when snapshot.end_atom >= librarian_must_reach ->
+      (* Clamped like every other front: a range always carries the turn it is
+         about to answer. Without this, a Librarian that read through the last
+         completed atom would leave the request with the summary and no turn,
+         which is the view a provider just refused on the Claude Code lane. *)
+      Absorbed_through
+        { first_atom =
+            Keeper_carried_front.clamp ~atom_count:history_atom_count snapshot.end_atom
+        ; absorbed_through = snapshot.end_atom
+        ; boundary_line = snapshot.end_boundary_line
+        ; working_state = Keeper_turn_driver_try_provider.working_state_text snapshot
+        }
+    | Keeper_turn_driver_try_provider.Librarian_progress { end_atom }
+      when end_atom >= librarian_must_reach ->
+      (* The Librarian read through [end_atom] and no working state fits: the
+         atoms before it are in the keeper's memory and nothing stands in for
+         them, as on the Agent Core lane
+         ([Keeper_carried_front.Librarian_progress]). Clamped like every
+         other front, so the range carries the turn it answers. *)
+      Plain
+        ( Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
+        , Librarian_progress { end_atom } )
+    | Keeper_turn_driver_try_provider.Librarian_snapshot _
+    | Keeper_turn_driver_try_provider.Librarian_progress _
+    | Keeper_turn_driver_try_provider.No_position ->
+      let first_atom, front = seed_or_lane in
+      Plain (first_atom, front)
+  in
+  let carried_messages, first_atom, front =
+    match plan with
+    | Absorbed_through { first_atom; absorbed_through; boundary_line; working_state } ->
+      (* The working state stands in front of the range, in the same System
+         place this lane puts every other piece of context it composes; see
+         [extra_system_context_message] for what that place is on each
+         client. *)
+      ( extra_system_context_message working_state :: messages
+      , first_atom
+      , Librarian_snapshot { absorbed_through; boundary_line } )
+    | Plain (first_atom, front) -> messages, first_atom, front
+  in
+  (* The cut is the same for every front. The window's omission preamble
+     goes in whenever the first kept atom cannot open a conversation, working
+     state or not: the working state says what the atoms before the range
+     held, and the preamble says the range opens mid-conversation, which is
+     still true. The Agent Core lane sends both as well. *)
   let projection, transmitted_bytes =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
       Runtime_model_input_tail_window.project_from_atom
         ~measure_message_bytes
         ~first_atom
-        messages)
+        carried_messages)
   in
+  (match plan with
+   | Absorbed_through { first_atom; absorbed_through; _ } when absorbed_through > first_atom ->
+     (* The Librarian read through the turn this request answers. The summary
+        covers it and the atom is sent again, so the request repeats one turn
+        rather than arriving with nothing to answer. *)
+     Log.Keeper.info
+       ~keeper_name
+       "model input carried range keeps the newest atom runtime=%s absorbed_through=%d first_atom=%d"
+       runtime_id
+       absorbed_through
+       first_atom
+   | Absorbed_through _ | Plain _ -> ());
   Log.Keeper.info
     ~keeper_name
     "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \

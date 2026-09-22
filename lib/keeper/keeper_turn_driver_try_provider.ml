@@ -149,6 +149,31 @@ let validate_continuity ~messages = function
     { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
 ;;
 
+type librarian_position =
+  | No_position
+  | Librarian_snapshot of Librarian_continuity_snapshot.t
+  | Librarian_progress of { end_atom : int }
+
+(* The one continuity this turn chose, as a position in the exact list a
+   lane is about to cut. An official client composes its own request from
+   that list more than once in a turn, and the list grows between
+   compositions, so each call checks it against the choice the way the Agent
+   Core branch checks each request ([validate_continuity]). *)
+let librarian_position ~messages continuity =
+  Result.map
+    (fun () ->
+       match continuity with
+       | Summarized { snapshot; _ } -> Librarian_snapshot snapshot
+       | Absorbed { end_atom; _ } -> Librarian_progress { end_atom }
+       | Without_snapshot -> No_position)
+    (validate_continuity ~messages continuity)
+;;
+
+let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
+  "[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
+  ^ snapshot.working_state
+;;
+
 (* Where a request starts, from what the keeper's files say (RFC
    keeper-context-window-in-tokens §13.4, §13.6): a snapshot that fits this
    history, else the Librarian's durable position when it is a place in this
@@ -932,9 +957,7 @@ let compose_carried_model_input
     | Some (Summarized { snapshot; _ }), _ ->
       let working : Agent_core.Types.message =
         { role = Agent_core.Types.User
-        ; content = [ Agent_core.Types.Text
-            ("[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
-             ^ snapshot.working_state) ]
+        ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
         ; name = None; tool_call_id = None
         ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
         }

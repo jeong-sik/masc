@@ -75,16 +75,49 @@ let channel =
   | Error detail -> fail detail
 ;;
 
-let payload ?(prompt = "compare implementations") () : Obligation.accepted_payload =
+let payload ?(prompt = "compare implementations") ?(roster = Fusion_types.preset_roster) ()
+  : Obligation.accepted_payload
+  =
   { keeper_name = "delta"
   ; submitted_by = "delta"
   ; prompt
   ; source_context = None
   ; preset = "council"
   ; web_tools = false
+  ; roster
   ; topology = Fusion_types.Judge_of_judges
   ; channel
   }
+;;
+
+let swapped_roster : Fusion_types.roster =
+  { judge_route = Some "fusion-judge"
+  ; panel_routes = Some [ "stub-http.stub-model"; "claude_code.claude-sonnet-5" ]
+  }
+;;
+
+let roster_t = testable Fusion_types.pp_roster Fusion_types.equal_roster
+
+(* 명단은 전달 약속에 그대로 적혀 되읽히고, 요청 정체성의 일부다: 같은 request id 에
+   명단만 다른 약속은 충돌이다. *)
+let test_roster_roundtrips_and_is_part_of_identity () =
+  with_temp_base (fun base_path _registry ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let request_id = request_id "kmsg-fusion-roster" in
+      ignore
+        (Obligation.prepare ~base_path ~request_id
+           ~payload:(payload ~roster:swapped_roster ()) ~accepted_at:4.0
+         |> expect_ok);
+      let loaded = Obligation.load ~base_path ~request_id |> expect_ok in
+      check roster_t "roster survives the durable record" swapped_roster
+        loaded.payload.roster;
+      match
+        Obligation.prepare ~base_path ~request_id ~payload:(payload ()) ~accepted_at:4.0
+      with
+      | Error (Obligation.Identity_conflict _) -> ()
+      | Error error -> fail (Obligation.error_to_string error)
+      | Ok _ -> fail "a different roster under the same request id was accepted"))
 ;;
 
 let test_exact_prepare_load_inventory_remove () =
@@ -175,7 +208,7 @@ let test_startup_recovery_projects_canonical_terminal () =
           | Ok request_id ->
             (match
                Obligation.prepare ~base_path ~request_id
-                 ~payload:(payload ~prompt ()) ~accepted_at:3.0
+                 ~payload:(payload ~prompt ~roster:swapped_roster ()) ~accepted_at:3.0
              with
              | Ok (Obligation.Prepared _ | Obligation.Already_present _) -> Ok ()
              | Error error -> Error (Obligation.error_to_string error))
@@ -226,6 +259,12 @@ let test_startup_recovery_projects_canonical_terminal () =
                         error.detail)
                 |> String.concat " | "));
         check int "nothing retained" 0 report.pending;
+        (* 재시작 복원은 실행 기록을 전달 약속의 명단으로 다시 연다. *)
+        (match Fusion_run_registry.get registry ~run_id:request_id_wire with
+         | Some run ->
+           check roster_t "restart recovery registers the run with its roster"
+             swapped_roster run.roster
+         | None -> fail "startup projection did not register the run");
         let request_id = request_id request_id_wire in
         (match Obligation.load ~base_path ~request_id with
          | Error (Obligation.Not_found _) -> ()
@@ -405,7 +444,9 @@ let () =
   run
     "fusion delivery obligation"
     [ ( "store"
-      , [ test_case "exact prepare/load/inventory/remove" `Quick
+      , [ test_case "roster roundtrips and is part of the identity" `Quick
+            test_roster_roundtrips_and_is_part_of_identity
+        ; test_case "exact prepare/load/inventory/remove" `Quick
             test_exact_prepare_load_inventory_remove
         ; test_case "corrupt peer is quarantined locally" `Quick
             test_corrupt_peer_is_quarantined_locally

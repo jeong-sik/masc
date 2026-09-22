@@ -488,12 +488,26 @@ type fusion_trigger =
   | Harness_eval
 [@@deriving yojson, show, eq]
 
+type roster =
+  { judge_route : string option
+  ; panel_routes : string list option
+  }
+[@@deriving yojson, show, eq]
+
+let preset_roster = { judge_route = None; panel_routes = None }
+
+let route_name text =
+  let route = String.trim text in
+  if String.equal route "" then None else Some route
+;;
+
 type fusion_request =
   { run_id : string
   ; keeper : string
   ; prompt : string
   ; preset : string
   ; web_tools : bool
+  ; roster : roster
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
   }
@@ -503,12 +517,14 @@ type deny_reason =
   | Disabled
   | Preset_unknown of string
   | Depth_exceeded
+  | Roster_invalid of string
 [@@deriving yojson, show, eq]
 
 let deny_reason_label = function
   | Disabled -> "disabled"
   | Preset_unknown _ -> "preset_unknown"
   | Depth_exceeded -> "depth_exceeded"
+  | Roster_invalid _ -> "roster_invalid"
 
 type gate_decision =
   | Allow of fusion_request

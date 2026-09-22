@@ -13,11 +13,17 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
     Fusion_metrics.record_invocation ~topology `Denied;
     Compute_denied reason
   | Fusion_types.Allow req ->
-    (match Fusion_policy.find_preset policy req.Fusion_types.preset with
-       | None ->
-         Fusion_metrics.record_invocation ~topology `Denied;
-         Compute_denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
-     | Some vp ->
+    (* 요청의 명단을 얹은 preset 을 이 실행의 모든 자리(panel, judge, 1차 judge)가
+       쓴다. masc_fusion 도구는 제출할 때 같은 함수로 검사하고, bin/fusion_run 처럼
+       이 함수를 바로 부르는 쪽은 여기서 처음 검사받는다. *)
+    (match
+       Fusion_policy.effective_preset ~policy ~preset:req.Fusion_types.preset
+         ~roster:req.Fusion_types.roster
+     with
+     | Error reason ->
+       Fusion_metrics.record_invocation ~topology `Denied;
+       Compute_denied reason
+     | Ok vp ->
           let preset = Fusion_policy.Validated_preset.preset vp in
           let tool_trace_mutex = Stdlib.Mutex.create () in
           let tool_traces = ref [] in

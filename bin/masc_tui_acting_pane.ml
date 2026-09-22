@@ -11,8 +11,8 @@ module Reading = Masc.Tui_decode
    and both token parts: [~ network_read · 3+ calls] and
    [■ 123 calls · in 999.9k · out 999.9k] at exactly 36. No slack: labelling
    the parts spent the five cells the old [999.9k+999.9k tok] left over, and
-   anything added to a settled reading now has to take width from somewhere
-   else. [test_widest_settled_reading_fits_whole] is what says so. The age of the newest
+   anything added to a done reading now has to take width from somewhere
+   else. [test_widest_done_reading_fits_whole] is what says so. The age of the newest
    event is one fact and sits on the focus header, not here. *)
 let border_cells = 1
 let mark_cells = 2
@@ -435,7 +435,7 @@ let record_glyph = function
    the next -- without it the state word and a tool name ran together;
    "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
    "999.9k" 6 under a 9-cell "tok/turn". Widening one has to narrow another,
-   and [test_widest_settled_reading_fits_whole] fails when the sum drifts. *)
+   and [test_widest_done_reading_fits_whole] fails when the sum drifts. *)
 let state_cells = 10
 let tool_cells = 12
 let calls_cells = 5

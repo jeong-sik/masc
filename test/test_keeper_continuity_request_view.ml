@@ -504,6 +504,47 @@ let test_an_unusable_snapshot_starts_without_it () =
    | _ -> fail "a snapshot that fits was not used")
 ;;
 
+(* The official-client lanes take the turn's one continuity choice as a
+   position in the list they cut (#37619 review). The purge shape -- a
+   snapshot that no longer fits, a read position that does -- gives those
+   lanes the read position, as it gives the Agent Core lane; a fitting
+   snapshot gives its working state; a list that no longer holds what the
+   choice covered is an error, and the lane refuses its request with it. *)
+let test_official_lanes_take_the_same_choice () =
+  let snapshot, lines = capture_source source in
+  let moved = [pinned; text T.User "Start over on the docs"; text T.Assistant "Docs drafted.";
+               text T.User "Review the docs"] in
+  let digest_at = Window.atom_opening_digest moved in
+  let chosen =
+    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:moved
+      ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines)
+      ~progress:(fun () ->
+        Ok (Some (progress ~trace_id ~end_atom:2 ~last_atom_digest:(Option.get (digest_at 1)))))
+  in
+  (match Driver.librarian_position ~messages:moved chosen with
+   | Ok (Driver.Librarian_progress {end_atom = 2}) -> ()
+   | Ok _ -> fail "the purge shape did not hand the official lane the read position"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let current = source @ [text T.User "Continue the review"] in
+  let fitting =
+    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:current
+      ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress:(fun () -> Ok None)
+  in
+  (match Driver.librarian_position ~messages:current fitting with
+   | Ok (Driver.Librarian_snapshot chosen_snapshot) ->
+     check int "the snapshot's end" snapshot.Snapshot.end_atom chosen_snapshot.Snapshot.end_atom
+   | Ok _ -> fail "a fitting snapshot did not reach the official lane"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let rewritten = List.map (fun (m : T.message) ->
+    if m = text T.Assistant "The build passed." then text T.Assistant "Rewritten reply" else m) current in
+  (match Driver.librarian_position ~messages:rewritten fitting with
+   | Error _ -> ()
+   | Ok _ -> fail "a list that no longer holds the covered messages kept the Librarian front");
+  (match Driver.librarian_position ~messages:current Driver.without_snapshot with
+   | Ok Driver.No_position -> ()
+   | Ok _ | Error _ -> fail "no absorbed point was not handed over as no position")
+;;
+
 (* A snapshot the Librarian is rewriting from atom 0 is not used until its
    end reaches its target: used now, it would move the start back and send
    what lies after its end again. An ordinary snapshot behind the position is
@@ -557,5 +598,7 @@ let () = run "continuity request projection"
                  test_absorbed_history_starts_at_the_librarians_position;
                test_case "an unusable snapshot starts without it" `Quick
                  test_an_unusable_snapshot_starts_without_it;
+               test_case "official lanes take the same choice" `Quick
+                 test_official_lanes_take_the_same_choice;
                test_case "a rewriting snapshot waits for its target" `Quick
                  test_a_rewriting_snapshot_waits_for_its_target]]

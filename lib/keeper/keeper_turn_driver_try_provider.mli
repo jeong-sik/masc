@@ -90,6 +90,37 @@ val validate_continuity :
 (** Check immutable covered messages again before each request. No source bytes
     are reserialized; a changed prefix refuses the request. *)
 
+(** Where the chosen continuity puts a lane's range, for the official-client
+    lanes that cut their own start seed. *)
+type librarian_position =
+  | No_position
+      (** No absorbed point: no snapshot or position fits this history
+          ({!without_snapshot}). The lane's seed, its own cut, or the turn
+          start decides. *)
+  | Librarian_snapshot of Librarian_continuity_snapshot.t
+      (** A snapshot fits: the atoms before its end are summarised by its
+          working state, which is carried in their place. *)
+  | Librarian_progress of { end_atom : int }
+      (** No snapshot fits, and the Librarian's read position does: the atoms
+          before [end_atom] are in the keeper's memory, and nothing is
+          carried in their place. *)
+
+val librarian_position :
+  messages:Agent_core.Types.message list ->
+  continuity ->
+  (librarian_position, Agent_core.Error.t) result
+(** The continuity the turn chose ({!continuity_for_request}) as a position
+    in [messages], the list a lane is about to cut. [Error] when that list no
+    longer holds what the choice covered ({!validate_continuity}), the same
+    error that refuses an Agent Core request; the lane refuses its request
+    with it. *)
+
+val working_state_text : Librarian_continuity_snapshot.t -> string
+(** The text a request carries in place of the atoms a fitting snapshot
+    covers: its working state under a label saying it is a summary to use as
+    context, not new instructions. Every lane that carries a working state
+    sends this text. *)
+
 val continuity_for_request :
   keeper_name:string ->
   trace_id:string ->

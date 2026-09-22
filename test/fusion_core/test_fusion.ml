@@ -52,7 +52,15 @@ let base_policy : Fusion_policy.t =
 
 let req ?(preset = "trio") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call)
     ?(web_tools = false) () : fusion_request =
-  { run_id = "r1"; keeper = "k"; prompt = "p"; preset; web_tools; depth; trigger }
+  { run_id = "r1"
+  ; keeper = "k"
+  ; prompt = "p"
+  ; preset
+  ; web_tools
+  ; roster = preset_roster
+  ; depth
+  ; trigger
+  }
 
 let decide ?(policy = base_policy) r = Fusion_policy.decide ~policy r
 
@@ -1664,6 +1672,128 @@ let test_tool_trace_merge_caps_with_explicit_drops () =
     (List.length merged.observed_actors)
 ;;
 
+(* --- 실행별 명단 (RFC fusion-seat-routes §2.4): Fusion_policy.with_roster --- *)
+
+let roster ?judge ?panel () = { judge_route = judge; panel_routes = panel }
+
+let with_roster_ok label p r =
+  match Fusion_policy.with_roster p r with
+  | Ok vp -> raw vp
+  | Error invalid ->
+    Alcotest.failf "%s: expected Ok, got %s" label
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let test_roster_preset_roster_keeps_preset () =
+  let p = mk_preset "keep" in
+  Alcotest.check preset_t "preset_roster leaves the preset as it is" p
+    (with_roster_ok "preset_roster" p preset_roster)
+
+let test_roster_judge_override () =
+  let p = mk_preset ~judges:[ base_judge; { base_judge with Fusion_policy.jmodel = "jm2" } ] "j" in
+  Alcotest.check preset_t "only the judge seat moves"
+    { p with Fusion_policy.judge = "fusion-judge" }
+    (with_roster_ok "judge override" p (roster ~judge:"fusion-judge" ()))
+
+(* 새 panel 은 라벨 없는 그룹 하나이고 설정은 첫 그룹에서 온다. 둘째 그룹의 설정이
+   섞이지 않고, 1차 judge 명단과 min_answered 는 그대로다. *)
+let test_roster_panel_override_takes_first_group_settings () =
+  let first : Fusion_policy.panel_group =
+    { models = [ "a"; "b" ]
+    ; label = "skeptic"
+    ; system_prompt = "first group prompt"
+    ; web_tools = true
+    ; max_output_tokens = Some 700
+    ; timeout_s = Some 45.0
+    }
+  in
+  let second : Fusion_policy.panel_group =
+    { models = [ "c" ]
+    ; label = "builder"
+    ; system_prompt = "second group prompt"
+    ; web_tools = false
+    ; max_output_tokens = Some 300
+    ; timeout_s = Some 10.0
+    }
+  in
+  let judges = [ base_judge; { base_judge with Fusion_policy.jmodel = "jm2" } ] in
+  let p = mk_preset ~panels:[ first; second ] ~judges ~min_answered:2 "two-groups" in
+  Alcotest.check preset_t "one unlabelled group built from the first group"
+    { p with
+      Fusion_policy.panels =
+        [ { first with Fusion_policy.models = [ "lane-x"; "runtime.y" ]; label = "" } ]
+    }
+    (with_roster_ok "panel override" p (roster ~panel:[ "lane-x"; "runtime.y" ] ()))
+
+let test_roster_min_answered_above_new_panel () =
+  (* base_group has 3 seats, so min_answered = 3 is valid for the preset itself. *)
+  match
+    Fusion_policy.with_roster (mk_preset ~min_answered:3 "quorum") (roster ~panel:[ "x" ] ())
+  with
+  | Error (Fusion_policy.Validated_preset.Min_answered_above_max 3) -> ()
+  | Ok _ -> Alcotest.fail "a panel smaller than min_answered must be rejected, not clamped"
+  | Error invalid ->
+    Alcotest.failf "expected Min_answered_above_max 3, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let test_roster_duplicate_route () =
+  match Fusion_policy.with_roster (mk_preset "dup") (roster ~panel:[ "x"; "x" ] ()) with
+  | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
+  | Ok _ -> Alcotest.fail "the same route twice must be rejected"
+  | Error invalid ->
+    Alcotest.failf "expected Duplicate_panelist x, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+(* A route read from a tool argument or a CLI flag passes through
+   [route_name]. Without it two spellings of one route become two seats, and
+   the duplicate check above never sees them as the same. *)
+let test_route_name_reads_one_name_per_route () =
+  Alcotest.(check (option string)) "padding is not part of the name" (Some "sonnet")
+    (route_name "  sonnet ");
+  Alcotest.(check (option string)) "a tab counts as padding" (Some "a.b") (route_name "\ta.b\n");
+  Alcotest.(check (option string)) "blank is no route" None (route_name "   ");
+  Alcotest.(check (option string)) "empty is no route" None (route_name "");
+  Alcotest.(check (option string)) "inner spaces stay" (Some "a b") (route_name " a b ");
+  match
+    Fusion_policy.with_roster (mk_preset "pad")
+      (roster
+         ~panel:
+           (List.filter_map route_name [ " x"; "x " ])
+         ())
+  with
+  | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
+  | Ok _ -> Alcotest.fail "two spellings of one route must collide as one seat"
+  | Error invalid ->
+    Alcotest.failf "expected Duplicate_panelist x, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let test_roster_empty_panel () =
+  match Fusion_policy.with_roster (mk_preset "empty") (roster ~panel:[] ()) with
+  | Error Fusion_policy.Validated_preset.No_panel_models -> ()
+  | Ok _ -> Alcotest.fail "an empty panel is a roster, not the absence of one"
+  | Error invalid ->
+    Alcotest.failf "expected No_panel_models, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let deny_reason_t = Alcotest.testable pp_deny_reason equal_deny_reason
+
+let test_effective_preset_typed_denials () =
+  let effective preset r =
+    Fusion_policy.effective_preset ~policy:base_policy ~preset ~roster:r
+    |> Result.map raw
+  in
+  (match effective "nope" preset_roster with
+   | Error reason ->
+     Alcotest.check deny_reason_t "unknown preset" (Preset_unknown "nope") reason
+   | Ok _ -> Alcotest.fail "unknown preset must be denied");
+  (match effective "trio" (roster ~panel:[] ()) with
+   | Error (Roster_invalid _) -> ()
+   | Error reason ->
+     Alcotest.failf "expected Roster_invalid, got %s" (show_deny_reason reason)
+   | Ok _ -> Alcotest.fail "an invalid roster must be denied");
+  match effective "trio" (roster ~judge:"fusion-judge" ()) with
+  | Ok p -> Alcotest.(check string) "effective judge" "fusion-judge" p.Fusion_policy.judge
+  | Error reason -> Alcotest.failf "valid roster denied: %s" (show_deny_reason reason)
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -1779,6 +1909,21 @@ let () =
             test_deliberation_evidence_roundtrip
         ; Alcotest.test_case "tool trace cap records drops" `Quick
             test_tool_trace_merge_caps_with_explicit_drops
+        ] )
+    ; ( "roster"
+      , [ Alcotest.test_case "preset_roster keeps the preset" `Quick
+            test_roster_preset_roster_keeps_preset
+        ; Alcotest.test_case "judge override" `Quick test_roster_judge_override
+        ; Alcotest.test_case "panel override takes first group settings" `Quick
+            test_roster_panel_override_takes_first_group_settings
+        ; Alcotest.test_case "min_answered above new panel" `Quick
+            test_roster_min_answered_above_new_panel
+        ; Alcotest.test_case "duplicate route" `Quick test_roster_duplicate_route
+        ; Alcotest.test_case "route_name reads one name per route" `Quick
+            test_route_name_reads_one_name_per_route
+        ; Alcotest.test_case "empty panel" `Quick test_roster_empty_panel
+        ; Alcotest.test_case "effective preset typed denials" `Quick
+            test_effective_preset_typed_denials
         ] )
     ; ( "panel_guard"
       , [ Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered

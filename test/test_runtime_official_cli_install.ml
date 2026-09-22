@@ -4,7 +4,7 @@
    ~/.local/bin/claude as a link into a versioned directory -- and sets PATH
    for the process, so what is checked is the file system, not a mock. *)
 open Alcotest
-module Install = Masc.Runtime_official_cli_install
+module Install = Runtime_official_cli_install
 
 let executable path =
   Out_channel.with_open_text path (fun oc -> output_string oc "#!/bin/sh\necho fixture\n");
@@ -87,6 +87,25 @@ let test_a_path_is_answered_as_given () =
     (Install.locate Install.Claude ~command:(Filename.concat home "missing/claude"))
 ;;
 
+(* A shell reads "." against the directory it is in; masc spawns from a
+   keeper's own directory, where the same entry names somewhere else. *)
+let test_a_relative_path_entry_is_not_searched () =
+  with_home @@ fun home ->
+  let here = Filename.concat home "here" in
+  Fs_compat.mkdir_p here;
+  executable (Filename.concat here "claude");
+  let cwd = Sys.getcwd () in
+  Sys.chdir here;
+  Fun.protect ~finally:(fun () -> Sys.chdir cwd) @@ fun () ->
+  with_path [ "."; "bin" ] @@ fun () ->
+  check (option string) "a relative entry is no place to spawn from" None
+    (Install.locate Install.Claude ~command:"claude");
+  with_path [ here ] @@ fun () ->
+  check (option string) "the same directory, named absolutely"
+    (Some (Filename.concat here "claude"))
+    (Install.locate Install.Claude ~command:"claude")
+;;
+
 let test_a_file_nobody_can_run_is_not_found () =
   with_home @@ fun home ->
   Fs_compat.mkdir_p (Filename.concat home ".local/bin");
@@ -131,6 +150,8 @@ let () =
         ; test_case "a custom name is not looked for in the vendor directory" `Quick
             test_a_custom_name_is_not_looked_for_in_the_vendor_directory
         ; test_case "a path is answered as given" `Quick test_a_path_is_answered_as_given
+        ; test_case "a relative PATH entry is not searched" `Quick
+            test_a_relative_path_entry_is_not_searched
         ; test_case "a file nobody can run is not found" `Quick
             test_a_file_nobody_can_run_is_not_found
         ; test_case "CODEX_INSTALL_DIR replaces the vendor directory" `Quick

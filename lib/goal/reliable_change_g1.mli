@@ -36,6 +36,7 @@ type reported_usage =
 type usage_observation =
   | Usage_reported of reported_usage
   | Usage_missing of string
+  | Usage_malformed of Yojson.Safe.t
 
 type phase_timestamps =
   { queue_started_at : float option

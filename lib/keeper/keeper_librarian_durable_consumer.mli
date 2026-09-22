@@ -33,7 +33,10 @@ type error =
   | Keeper_meta_unreadable of string
   | Boundary_log_unreadable of string
   | Progress_unreadable of Keeper_librarian_progress.read_error
-  | Checkpoint_unreadable of Keeper_checkpoint_store.checkpoint_load_error
+  | Checkpoint_unreadable of
+      { trace_id : string
+      ; error : Keeper_checkpoint_store.checkpoint_load_error
+      }
   | Position_in_other_trace of Keeper_librarian_progress.position
   | Position_not_in_history of Keeper_librarian_progress.position
       (** The position names no atom of the current checkpoint and no restart
@@ -126,9 +129,15 @@ val consume_one
     [boundary_lines_seen] and starts from atom zero: the resulting [end_atom]
     may equal or precede the old one. When metadata moves to another trace,
     an available prior checkpoint is drained first. Once it is exhausted, or
-    when owner/session removal made it unavailable, the current trace's own
-    fresh/restart boundary authorizes the transition instead of leaving the
-    old cursor as a permanent stop.
+    when owner/session removal made it unavailable, the traces that started
+    after it are read in the order their fresh/restart boundary appears in the
+    log, each from atom zero, up to the current trace; a trace with nothing to
+    read is passed, and so is one whose checkpoint holds a version this build
+    supersedes, because no turn rewrites a retired trace's checkpoint and
+    stopping there would stop every trace after it. Any other unreadable
+    checkpoint stops the pass and names its trace. The counterpart lower bound stays at the prior position's
+    boundary across that move. With no started trace to move to, the old
+    cursor stays and the pass reports [Position_in_other_trace].
 
     Under the progress store's single-writer contract, a fixed boundary
     snapshot and checkpoint therefore cannot select the same range again

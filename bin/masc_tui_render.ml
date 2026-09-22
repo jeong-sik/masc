@@ -2037,10 +2037,24 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
+  (* What the board holds behind this page: the census over the whole board,
+     or over the hearth being read when one is narrowed, since the listing
+     itself is narrowed server-side. A hearth the census has not counted
+     leaves the page to speak for itself. *)
+  let holding =
+    match state.board_hearth with
+    | Some hearth -> List.assoc_opt hearth state.board_hearths
+    | None ->
+        (match state.board_hearths with
+         | [] -> None
+         | census ->
+             Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
+  in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
     (match state.board_posts, board_list_page state ~error:board_list_error with
-     | _ :: _, _ | [], Page_empty -> Printf.sprintf "(%d)" count
+     | _ :: _, _ | [], Page_empty ->
+         board_list_count_text ~loaded:count ~holding
      | [], (Page_unread | Page_failed) ->
          title_missing_reading ~error:board_list_error)
     hearth timestamp
@@ -8588,7 +8602,8 @@ let render_harness_list (state : state) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view ^ link_hint));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false state.view ^ link_hint));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 (* Which goals the judged task serves, and what those goals are aiming at.
@@ -8774,10 +8789,14 @@ let render_harness_detail (state : state) verdict =
     end
   in
   Buffer.add_string buf
+    (* The key table, not a literal. This row was written out here, and what
+       it left out was the pair that answers a ruling -- [y / x] -- on the one
+       screen that exists for reading a ruling in full. It also left out
+       [[ / ]], which the dispatcher answers here and only here. *)
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf
-            "j/k:scroll  PgUp/PgDn:page  Left / Esc:list  Y:copy task  r:refresh  %s"
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true Masc_tui_types.Harness)
             position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf

@@ -204,7 +204,7 @@ let failure_detail ~runtime_id = function
 
 (* 세 어댑터 모두 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
    증거에서 "CLI 가 시간 안에 답을 못 냈다" 가 provider 실패와 구분되지 않는다 —
-   HTTP 쪽 [Fusion_panel.outcome_of_result] 가 두 timeout 갈래를 [Timeout] 으로
+   HTTP 쪽 [Fusion_panel.attempt_of_result] 가 두 timeout 갈래를 [Timeout] 으로
    올리는 것과 같은 규칙을 여기에도 적용한다. *)
 let panel_failure ~runtime_id = function
   | Setup_failure failure -> failure

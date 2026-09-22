@@ -53,12 +53,20 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     토큰 소비 전 실패(빌드/실행/provider 에러)는 [Fusion_types.zero_usage]를 싣는다. 이로써
     호출자(refine degrade 경로)가 파싱 실패한 심판의 비용을 0으로 버리지 않는다.
 
-    [judge_model]이 공식 클라이언트 런타임(Claude Code·Codex·Antigravity)이면 Agent 를
-    빌드하지 않고 {!Fusion_official_client.run_panelist}로 한 턴을 돌린다. [base_dir]는
-    그 클라이언트가 spawn 되는 디렉터리다. 출력 계약(프롬프트 지시 + strict 파서)과
-    [timeout_s] 우선순위는 HTTP 심판과 같다. 이 경로는 토큰 회계가 없어 usage 가
-    [Fusion_types.zero_usage]이고, [max_tokens]와 [web_tools]를 실을 곳이 없으며,
-    도구 기록은 [Official_client_uninstrumented] gap 으로 남는다. *)
+    [judge_model]은 자리에 적힌 경로 이름이다 ({!Fusion_seat.resolve}: lane 이름 또는
+    런타임 id). 후보를 차례로 시도하고 처음 파싱을 통과한 종합에서 멈춘다. 빌드·실행·
+    빈 응답·파싱 실패는 모두 다음 후보로 넘어가고, 전부 실패하면 마지막 실패를
+    돌려준다. usage 는 답한 시도와 실패한 시도가 쓴 토큰의 합이다. 경로를 못 풀면
+    [Unknown_route] / [Route_unavailable] 이고 후보를 시도하지 않는다.
+
+    공식 클라이언트 후보(Claude Code·Codex·Antigravity)는 Agent 를 빌드하지 않고
+    {!Fusion_official_client.run_panelist}로 한 턴을 돈다. [base_dir]는 그 클라이언트가
+    spawn 되는 디렉터리다. 출력 계약과 [timeout_s] 우선순위는 HTTP 후보와 같다. 이
+    후보는 토큰 회계가 없어 usage 가 0 이고, [max_tokens]와 [web_tools]를 실을 곳이
+    없으며, 도구 기록은 [Official_client_uninstrumented] gap 으로 남는다.
+
+    [seat_route]를 주면 이 자리의 경로 기록(누가 답했고 누구를 거쳤나)을 한 번 보낸다.
+    [judge_role]이 자리 정체성이다. *)
 val run
   :  base_dir:string
   -> sw:Eio.Switch.t
@@ -72,6 +80,7 @@ val run
   -> web_tools:bool
   -> ?tool_trace:
        (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+  -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
      , Fusion_types.judge_failure * Fusion_types.usage )
@@ -106,6 +115,7 @@ val run_refine
   -> web_tools:bool
   -> ?tool_trace:
        (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+  -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
      , Fusion_types.judge_failure * Fusion_types.usage )
@@ -149,6 +159,7 @@ val run_meta
   -> web_tools:bool
   -> ?tool_trace:
        (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+  -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
      , Fusion_types.judge_failure * Fusion_types.usage )

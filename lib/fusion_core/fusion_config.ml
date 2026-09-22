@@ -22,6 +22,38 @@ type config_error =
   | Toml_type_error of string
 [@@deriving show, eq]
 
+let config_error_message = function
+  | Empty_presets -> "[fusion] is enabled but declares no preset"
+  | No_panel_models preset -> Printf.sprintf "preset %s has no panel seat" preset
+  | Empty_panels preset ->
+    Printf.sprintf "preset %s declares panels = [] with no group" preset
+  | Conflicting_panel_grammar preset ->
+    Printf.sprintf "preset %s declares both panel = [...] and [[panels]] groups" preset
+  | Duplicate_panelist (preset, id) ->
+    Printf.sprintf "preset %s has two panel seats named %s" preset id
+  | Missing_prompt preset ->
+    Printf.sprintf "preset %s is missing panel_system_prompt or judge_system_prompt" preset
+  | Missing_judge_model preset -> Printf.sprintf "preset %s has no judge" preset
+  | Invalid_staged_judge_group_size size ->
+    Printf.sprintf "staged_judge_group_size %d is below %d" size
+      Fusion_policy.min_staged_judge_group_size
+  | Invalid_max_output_tokens (preset, tokens) ->
+    Printf.sprintf "preset %s has an output token budget %d that is not positive" preset
+      tokens
+  | Invalid_timeout_s (preset, seconds) ->
+    Printf.sprintf "preset %s has a timeout %g that is not a finite positive number"
+      preset seconds
+  | Missing_default_preset name ->
+    Printf.sprintf "default_preset %S names no preset" name
+  | Judge_panel_prompt_missing preset ->
+    Printf.sprintf "preset %s has a first judge without system_prompt" preset
+  | Duplicate_judge (preset, id) ->
+    Printf.sprintf "preset %s has two first judges named %s" preset id
+  | Invalid_min_answered (preset, value) ->
+    Printf.sprintf "preset %s min_answered %d is outside 1 to its panel seat count" preset
+      value
+  | Toml_type_error detail -> "[fusion] has a field of the wrong type: " ^ detail
+
 let disabled : Fusion_policy.t =
   { enabled = false
   ; default_preset = ""

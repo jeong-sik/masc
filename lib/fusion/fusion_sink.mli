@@ -76,6 +76,8 @@ val emit
   -> judges:Fusion_types.judge_outcome list
   -> judge_usage:Fusion_types.usage
   -> tool_trace:Fusion_types.tool_trace
+  -> seat_routes:Fusion_types.seat_route list
+       (** 자리마다 누가 답했고 그 전에 누가 실패했는지. meta_json [seat_routes]. *)
   -> (unit, string) result
 
 (** RFC-0266: 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
@@ -119,6 +121,9 @@ type delivery_failure =
       ; reason : string
       }
   | Evidence_unavailable
+  | Evidence_unreadable of string
+      (** 증거는 있지만 이 버전의 [deliberation_evidence]로 읽히지 않는다. 종결 기록은
+          바뀌지 않으므로 다시 읽어도 같다. payload 는 디코더의 문장이다. *)
 
 (** registry/대시보드가 읽는 안정 wire 라벨. *)
 val delivery_failure_code : delivery_failure -> string

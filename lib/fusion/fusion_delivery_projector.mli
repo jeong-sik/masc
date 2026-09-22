@@ -8,7 +8,6 @@ type projection_error =
   | Non_durable_settlement
   | Ambiguous_settlement
   | Nonterminal_status of Keeper_msg_async.request_status
-  | Evidence_invalid of string
   | Projection_failed of string
   | Obligation_removal_failed of Fusion_delivery_obligation.error
 

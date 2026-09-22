@@ -119,8 +119,8 @@ status: reference
   판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
   뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
   다른 뜻이다** — 코드가 `candidate`라는 한 단어를 두 곳에 쓴다. 여기서는 판정 대상
-  게시물이고, 런타임 쪽(`Runtime_candidate_backpressure.candidate`)은 lane이 시도할
-  실행 후보다.
+  게시물이고, 런타임 쪽(`Runtime_candidate_backpressure.candidate`)은 runtime 후보
+  순서가 시도할 실행 후보다.
   → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli)
 
 **Keeper Cycle**
@@ -232,7 +232,7 @@ status: reference
   요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
   `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
   합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
-  않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
+  않는다. 클라이언트 턴 합계도 runtime 후보 순서를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Caller Scope**
 : 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값
@@ -295,17 +295,28 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다. 이
-  개념의 화면 이름은 **Runtime Candidate Order**다 — TUI help와 상태 줄은
-  "lane" 대신 이 이름으로 읽힌다.
+: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. `Exact_lane_run_registry.lane`
+  의 생성자 넷(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`)이
+  `all_lanes`로 열거된다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
+  Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
+  → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+
+**Runtime Candidate Order (런타임 후보 순서)**
+: Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
+  `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
+  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다.
+  `[runtime].media_failover`(vision fleet)와
+  exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
+  런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (Runtime Lane)과 다른 것이다 — Runtime Lane은 Keeper turn이 Runtime 후보를
-  시도할 순서이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
-  실행했는지의 투영이다. 두 축을 함께 갖는다:
+  (고정 실행 경로) 생성자 넷에 `Runtime.verifier_exact_lane_id`("Verifier")를
+  더한 다섯 lane을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
+  경로이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
+  실행했는지의 관찰이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
     `Standalone_degraded`·`Standalone_no_retained_observation`·
     `Standalone_unavailable`.
@@ -473,7 +484,7 @@ status: reference
   `Route_unavailable` typed 실패다. 배포 preset 의 자리 이름은 같은 파일이 선언한 lane
   이나 `[provider.model]` 바인딩이어야 하며, 아니면 첫 실행이 아니라 빌드에서 잡힌다.
   용어집 `Exact-output route`(Librarian 같은 단독 모델 작업의 목적별 실행 경로)와 다른
-  층이다 — 이쪽은 Fusion 자리의 failover 후보 순서를 지목한다.
+  층이다 — 이쪽은 Fusion 자리의 runtime 후보 순서를 지목한다.
   → [Fusion_seat](../../lib/fusion/fusion_seat.mli)
 
 **Fusion Roster (명단)**

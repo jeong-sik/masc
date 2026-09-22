@@ -10,9 +10,11 @@
   (`masc_tui_keys.ml`), the picker's status line on the chat pane and in the
   route editor (`masc_tui_render.ml`), and the in-row status of a keeper whose
   turn moved to its next runtime candidate
-  (`masc_tui_keeper_chat_transcript.ml`). The `(no runtime lanes configured)`
+  (`masc_tui_keeper_chat_transcript.ml`). The runtime detail panel's
+  `Failover Chain:` label now reads `Candidate Chain:`, matching the
+  `Head Candidate:` label beside it (`masc_tui_render.ml`). The `(no runtime lanes configured)`
   empty state and the `pick a runtime lane` help now say "runtime candidate
-  order", matching the glossary's Lane definition; the shipped
+  order", matching the glossary's Runtime Candidate Order entry; the shipped
   `config/runtime.toml` section comment says "Runtime candidate orders" (#37918).
   The `[runtime].media_failover` key, which orders the vision fleet and is a
   different mechanism, is unchanged — its screen strings keep the key name,

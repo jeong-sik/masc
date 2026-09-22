@@ -1136,13 +1136,22 @@ type harness_snapshot = {
 }
 
 (** One task waiting on a verdict, as the verification surface lists it. *)
+type verification_ask =
+  | Asks_completion
+  | Asks_cancellation of string
+      (** The case the producer made for stopping the Task, which is what an
+          operator decides on. *)
+(** What a request asks the authority to answer. The queue sends no [intent]
+    field; a completion is written with no [cancellation_reason] at all, which
+    is how the producer marks the difference. *)
+
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
-  vr_intent : Masc_domain.verification_intent option;
+  vr_ask : verification_ask;
       (** Which verdict the row waits on, when the server joined the backlog
           (the awaiting view): a completion, or a cancellation that only an
           operator's verdict clears. [None] in the history view, which has

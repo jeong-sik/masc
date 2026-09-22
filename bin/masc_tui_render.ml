@@ -8031,11 +8031,19 @@ let render_verification_list (state : state) =
             ^ Render_schedule.verification_row ~submitter_width ~title_width
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
+                  (* Which question this row asks. It read an [intent] field
+                     the queue has never sent, so the column was blank on
+                     every row ever drawn while the answer sat beside it in
+                     the claim. *)
+                  (* The domain's own words, which also fit the column:
+                     "cancellation" folds to "ca\xe2\x80\xa6ation" in eight
+                     cells. *)
                 ; vrow_verdict =
-                    (match r.vr_intent with
-                     | Some intent ->
-                         Masc_domain.verification_intent_to_string intent
-                     | None -> "")
+                    Masc_domain.verification_intent_to_string
+                      (match r.vr_ask with
+                       | Masc.Tui_decode.Asks_completion ->
+                           Masc_domain.Complete_task
+                       | Asks_cancellation _ -> Masc_domain.Cancel_task)
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -8171,17 +8179,24 @@ let verification_detail_lines ~width
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
   ; field "Waits on"
-      (match request.vr_intent with
-       | Some Masc_domain.Cancel_task ->
+      (match request.vr_ask with
+       | Masc.Tui_decode.Asks_cancellation _ ->
            "cancel -- only an operator's verdict clears it"
-       | Some Masc_domain.Complete_task -> "complete"
-       | None -> "not joined (history view)")
+       | Asks_completion -> "complete")
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)
   ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
+  (* The case for stopping the Task, which is the whole of what an operator
+     decides on a cancellation: the artifacts and evidence below answer a
+     completion, and a stop is not asking about them. Wrapped, because the
+     reason is prose and a cut one argues nothing. *)
+  @ (match request.vr_ask with
+     | Masc.Tui_decode.Asks_completion -> []
+     | Asks_cancellation reason ->
+         wrapped_block "WHY IT SHOULD STOP" reason @ [ (Ansi.dim, "") ])
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
      Their three fields were literals in the producer -- "normal", "" and "" --
      so the three rows read the same on every request this pane has ever

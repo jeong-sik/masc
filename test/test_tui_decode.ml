@@ -2045,20 +2045,25 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
+(* The queue's shape. A completion carries no [cancellation_reason] key at
+   all, which is how the producer marks it; a stop carries the case it makes. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) ?(intent = `String "complete") () =
+    ?(evidence_error = `Null) ?cancellation_reason () =
   `Assoc
-    [ ("request_id", `String "vr-1")
-    ; ("task_id", `String "task-470")
-    ; ("task_title", `String "wire the approval gate")
-    ; ("created_at", `String "2026-08-23T09:00:00Z")
-    ; ("submitted_by", `String "keeper.one")
-    ; ("intent", intent)
-    ; ("completion_contract", `List [ `String "tests pass" ])
-    ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
-    ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
-    ; ("evidence_projection_error", evidence_error)
-    ]
+    ([ ("request_id", `String "vr-1")
+     ; ("task_id", `String "task-470")
+     ; ("task_title", `String "wire the approval gate")
+     ; ("created_at", `String "2026-08-23T09:00:00Z")
+     ; ("submitted_by", `String "keeper.one")
+     ; ("completion_contract", `List [ `String "tests pass" ])
+     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
+     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
+     ; ("evidence_projection_error", evidence_error)
+     ]
+    @
+    match cancellation_reason with
+    | None -> []
+    | Some reason -> [ ("cancellation_reason", `String reason) ])
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
     ?(truncated = false) ?(unresolved = []) ?backlog_error ?backlog_recovery
@@ -6369,40 +6374,28 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
    an operator, so reading it as a completion hid the one row that needed
    the operator most. [null] is the history view, and a name outside the
    pair is refused rather than read as either. *)
+(* The row says which question it asks. It read an [intent] field the queue has
+   never sent -- neither the awaiting view nor the history view carries one --
+   so the column was blank on every row and the detail pane told every reader
+   the row was "not joined (history view)". The claim beside it says which:
+   a completion is written with no reason field at all. *)
 let test_decode_verification_reads_which_verdict_the_row_waits_on () =
   let decode json =
     match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> Ok r
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r
     | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Error err
-  in
-  let intent_of json =
-    match decode json with
-    | Ok r -> r.Tui_decode.vr_intent
     | Error err -> Alcotest.failf "decode failed: %s" err
   in
-  Alcotest.(check bool) "a cancel row waits on a cancel verdict" true
-    (intent_of
+  let ask json = (decode json).Tui_decode.vr_ask in
+  Alcotest.(check bool) "a stop carries the case it makes" true
+    (ask
        (verification_snapshot_json
-          [ verification_request_json ~intent:(`String "cancel") () ])
-     = Some Masc_domain.Cancel_task);
-  Alcotest.(check bool) "a complete row waits on a completion" true
-    (intent_of
-       (verification_snapshot_json [ verification_request_json () ])
-     = Some Masc_domain.Complete_task);
-  Alcotest.(check bool) "the history view carries no intent" true
-    (intent_of
-       (verification_snapshot_json
-          [ verification_request_json ~intent:`Null () ])
-     = None);
-  Alcotest.(check bool) "a name outside the pair is refused" true
-    (match
-       decode
-         (verification_snapshot_json
-            [ verification_request_json ~intent:(`String "stop") () ])
-     with
-     | Error _ -> true
-     | Ok _ -> false)
+          [ verification_request_json
+              ~cancellation_reason:"the issue it followed was closed" () ])
+     = Tui_decode.Asks_cancellation "the issue it followed was closed");
+  Alcotest.(check bool) "no reason field at all is a completion" true
+    (ask (verification_snapshot_json [ verification_request_json () ])
+     = Tui_decode.Asks_completion)
 
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could

@@ -2739,12 +2739,24 @@ type harness_snapshot = {
   hs_overview : harness_overview option;
 }
 
+(* What a request asks the authority to answer: finish this Task, or stop it.
+
+   The queue carries no [intent] field -- neither the awaiting view nor the
+   history view has ever sent one -- and does not need to. A completion is
+   written with no [cancellation_reason] at all rather than a null one, so
+   that a reader cannot mistake "not a stop" for "a stop that said nothing"
+   (lib/verification_protocol.ml). The reason a stop carries is the case the
+   operator decides on, so it travels with the ask. *)
+type verification_ask =
+  | Asks_completion
+  | Asks_cancellation of string
+
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
   vr_submitted_by : string;
-  vr_intent : Masc_domain.verification_intent option;
+  vr_ask : verification_ask;
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -5620,14 +5632,11 @@ let decode_verification_request json =
   let* vr_submitted_by = required_string_field json "submitted_by" in
   (* [null] is the history view, which has no backlog join. A name outside
      the pair is refused rather than read as either intent. *)
-  let* vr_intent =
-    let* raw = optional_string_field json "intent" in
-    match raw with
-    | None -> Ok None
-    | Some raw ->
-      (match Masc_domain.verification_intent_of_string raw with
-       | Ok intent -> Ok (Some intent)
-       | Error detail -> Error detail)
+  let* vr_ask =
+    let* reason = optional_string_field json "cancellation_reason" in
+    match reason with
+    | Some reason -> Ok (Asks_cancellation reason)
+    | None -> Ok Asks_completion
   in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
@@ -5644,7 +5653,7 @@ let decode_verification_request json =
     ; vr_task_id
     ; vr_task_title
     ; vr_submitted_by
-    ; vr_intent
+    ; vr_ask
     ; vr_created_at
     ; vr_required_artifacts
     ; vr_submitted_evidence

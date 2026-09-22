@@ -46,7 +46,7 @@ module Flow : sig
 
   val initial : t
   val action_inflight : t -> bool
-  val reserve_refresh : t -> t * generation option
+  val observe : t -> generation
   val begin_action : t -> (t * generation, [ `Already_inflight ]) result
   val finish_action : t -> generation -> t * bool
   val is_current : t -> generation -> bool

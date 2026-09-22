@@ -222,21 +222,27 @@ let test_deny_response_fails_closed () =
     ]
 
 let test_approval_flow_rejects_stale_results () =
-  let flow, old_generation = Projection.Flow.reserve_refresh Projection.Flow.initial in
-  let old_generation = Option.get old_generation in
+  (* [observe] never advances the generation itself (#37461, #37609 review):
+     only [begin_action] does. So an observation taken before an action
+     opens reads a generation the action then supersedes, and observing
+     again while that action is still open reads the action's own
+     generation back -- there is nothing left for a caller to suppress at
+     the [Flow] level; that decision (skip the read while an action is
+     open) lives at each call site via [action_inflight], which the AST
+     checks in [test_tui_http_ast.ml] cover. *)
+  let old_generation = Projection.Flow.observe Projection.Flow.initial in
   let flow, action_generation =
-    match Projection.Flow.begin_action flow with
+    match Projection.Flow.begin_action Projection.Flow.initial with
     | Ok value -> value
     | Error `Already_inflight -> fail "first action unexpectedly in flight"
   in
-  check bool "pre-action refresh is stale" false
+  check bool "pre-action observation is stale" false
     (Projection.Flow.is_current flow old_generation);
   check bool "action generation is current" true
     (Projection.Flow.is_current flow action_generation);
-  let unchanged, refresh = Projection.Flow.reserve_refresh flow in
-  check bool "refresh suppressed during action" true (Option.is_none refresh);
-  check bool "action remains in flight" true
-    (Projection.Flow.action_inflight unchanged);
+  check bool "observing during an open action reads the action's generation"
+    true
+    (Projection.Flow.observe flow = action_generation);
   let unchanged, owned = Projection.Flow.finish_action flow old_generation in
   check bool "stale completion does not own action" false owned;
   check bool "stale completion cannot clear action" true

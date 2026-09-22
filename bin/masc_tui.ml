@@ -1780,7 +1780,7 @@ type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_server_booting of
       { identity : (Tui_decode.server_identity, string) result
-      ; (* The generation [start_http_refresh] reserved before the probe went
+      ; (* The generation [start_http_refresh] observed before the probe went
            out. Carried so the approvals panel learns why its rows are stale,
            the same way a failed refresh tells it. *)
         approval_generation : Approval.Flow.generation option
@@ -2043,15 +2043,20 @@ type async_msg =
       (((string * string) list * (string * string) list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
+      * Approval.Flow.generation
       (** The stance listing replaces the whole yolo set, so a fetch that
           started before an operator armed a gate would put the pre-press
-          answer back. This no longer rides the held-call listing's refresh
-          generation: that counter also advances on every unrelated
-          background poll tick, so a tool-modes fetch racing any poll (not
-          only a press) was dropped even with no press ever armed (#37461).
-          The handler instead re-checks [Approval.Flow.action_inflight] when
-          the answer arrives, which asks the one question this guard needs:
-          is a press still open right now. *)
+          answer back. This no longer rides a generation that every reader
+          advances for itself: that made two unrelated listings invalidate
+          each other, so a tool-modes fetch racing any unrelated background
+          poll (not only a press) was dropped even with no press ever armed
+          (#37461). The generation carried here is only ever advanced by
+          [Approval.Flow.begin_action] (a press), and is observed -- not
+          reserved -- at dispatch time, so [Approval.Flow.is_current] at
+          arrival answers exactly "did a press open since this fetch went
+          out", including one that opened and closed in between (#37609
+          review: a dispatch-time-only [action_inflight] check cannot see
+          that). *)
   | Keeper_tool_mode_set of
       string
       * Masc.Keeper_tool_approval_mode.mode
@@ -3268,9 +3273,13 @@ let launch_keeper_tool_modes_load state ~mailbox =
      press slot directly rather than reserving a shared refresh generation
      -- see [Keeper_tool_modes_loaded]'s doc comment for why sharing that
      counter with the background poll dropped answers no press ever
-     raced (#37461). *)
+     raced (#37461). The generation observed here (not reserved: observing
+     does not advance it) is carried to the arrival handler so a press that
+     opens after this check but before the answer lands is still caught
+     (#37609 review). *)
   if Approval.Flow.action_inflight state.approval_flow then ()
   else
+    let generation = Approval.Flow.observe state.approval_flow in
     let host = server_peer_host in
     let port = state.port in
     let run () =
@@ -3279,7 +3288,7 @@ let launch_keeper_tool_modes_load state ~mailbox =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_tool_modes_loaded result);
+      enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation));
       (* Same trip, because both answer "what did somebody set about this
          Keeper" and a detail pane showing one fresh and one stale would be
          two different moments beside each other. No generation guard: this
@@ -3298,7 +3307,7 @@ let launch_keeper_tool_modes_load state ~mailbox =
              `Stop_daemon)
      | None ->
          enqueue_async mailbox
-           (Keeper_tool_modes_loaded (Error "Eio switch is unavailable")))
+           (Keeper_tool_modes_loaded (Error "Eio switch is unavailable", generation)))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
   (* [begin_action] takes the newest generation, so a stance listing already
@@ -10595,10 +10604,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       !scoped_refresh_followup;
   if not !refresh_inflight then begin
     refresh_inflight := true;
-    let flow, approval_generation =
-      Approval.Flow.reserve_refresh state.approval_flow
+    (* No generation while a press is open: the approvals panel is about to
+       change underneath this fetch, so this round skips tracking it rather
+       than observing a generation a press then immediately supersedes. *)
+    let approval_generation =
+      if Approval.Flow.action_inflight state.approval_flow then None
+      else Some (Approval.Flow.observe state.approval_flow)
     in
-    state.approval_flow <- flow;
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
        below would each wait out a timeout against a process that has not
@@ -10717,12 +10729,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
   if not !refresh_inflight then begin
     refresh_inflight := true;
     let approval_generation =
-      if needs.needs_operator_approvals then begin
-        let flow, generation = Approval.Flow.reserve_refresh state.approval_flow in
-        state.approval_flow <- flow;
-        generation
-      end
-      else None
+      if not needs.needs_operator_approvals then None
+      else if Approval.Flow.action_inflight state.approval_flow then None
+      else Some (Approval.Flow.observe state.approval_flow)
     in
     (* Chat history has its own generation-guarded loader rather than a field
        in the HTTP surface record. It still follows the same delta: entering
@@ -14211,12 +14220,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               following the workspace, which is the looser reading and the one
               an operator would act on. *)
            ())
-  | Keeper_tool_modes_loaded result ->
-      (* A listing that lands while a press is still open describes the
-         stance from before that press. Dropping it is what keeps an armed
-         gate armed on screen; re-checking here (not only at launch) covers
-         a press that opened after this fetch was already on the wire. *)
-      if not (Approval.Flow.action_inflight state.approval_flow) then
+  | Keeper_tool_modes_loaded (result, generation) ->
+      (* A listing whose observed generation a press has since superseded
+         describes the stance from before that press. [is_current] catches
+         a press open right now the same way [action_inflight] did, and
+         also catches one that opened and closed in between (#37609
+         review), which a dispatch-time-only check cannot see. *)
+      if Approval.Flow.is_current state.approval_flow generation then
         (match result with
          | Ok overrides ->
              state.keeper_tool_modes_observed <- true;

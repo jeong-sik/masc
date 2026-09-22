@@ -57,12 +57,18 @@ module Flow = struct
   let initial = { latest = 0; action = None }
   let action_inflight state = Option.is_some state.action
 
-  let reserve_refresh state =
-    match state.action with
-    | Some _ -> state, None
-    | None ->
-        let generation = state.latest + 1 in
-        { latest = generation; action = None }, Some generation
+  (* A listing observes the press generation; it never advances it. Two
+     independent listings used to invalidate each other because each reader
+     used to advance [latest] itself via the removed [reserve_refresh]
+     (#37461, #37609 review): a stance fetch (gen=N) racing an unrelated
+     background poll's own [reserve_refresh] call (gen=N+1) made the stance
+     answer's [is_current] check false even though no press had ever
+     opened. Only [begin_action] moves the generation now, which is the one
+     event a listing needs to be superseded by -- including a press that
+     opens and closes between this call and the reader checking
+     [is_current], which a dispatch-time-only [action_inflight] check
+     cannot see. *)
+  let observe state = state.latest
 
   let begin_action state =
     match state.action with

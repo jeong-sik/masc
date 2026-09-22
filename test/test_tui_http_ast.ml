@@ -881,10 +881,10 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"load_approvals"
      >= 2);
-  check bool "refreshes reserve an approval generation" true
+  check bool "refreshes observe an approval generation" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
-       ~callee:"Approval.Flow.reserve_refresh"
+       ~callee:"Approval.Flow.observe"
      >= 1);
   check bool "actions invalidate older approval generations" true
     (Ast_grep.count_calls
@@ -1556,7 +1556,7 @@ let test_scoped_surface_refresh_does_not_own_connection_status () =
        ~callees:[] ~fields:[ "connection_status" ])
 ;;
 
-let test_gate_stance_listing_checks_a_press_is_not_still_open () =
+let test_gate_stance_listing_observes_without_reserving () =
   let main_path = "bin/masc_tui.ml" in
   (* The stance listing replaces the whole yolo set. Two daemon fibers reach
      it -- a periodic GET and the operator's own POST -- and the network
@@ -1565,25 +1565,34 @@ let test_gate_stance_listing_checks_a_press_is_not_still_open () =
      The next press then computes yolo a second time instead of toggling
      back, which is what makes it visible rather than a flicker.
 
-     This used to ride [Approval.Flow]'s shared refresh generation, the same
-     guard the held-call listing rides. That counter also advances on every
-     unrelated background poll tick, so a fetch racing any poll (not only a
-     press) was dropped even with no press ever armed (#37461). It now asks
-     the one question this guard needs directly -- is a press still open --
-     at launch and again when the answer lands, instead of reserving and
-     matching a generation. *)
-  check int "the stance fetch checks a press is not still open" 1
+     This used to ride [Approval.Flow]'s shared refresh generation via
+     [reserve_refresh], which every reader (this listing and two unrelated
+     background pollers) advanced for itself, so a fetch racing any poll
+     (not only a press) was dropped even with no press ever armed (#37461).
+     Replacing that with a bare [action_inflight] check at both ends fixed
+     that but reopened the case [reserve_refresh] existed for in the first
+     place: a press that opens and closes between dispatch and arrival is
+     invisible to a check that only reads the flag when the answer lands
+     (#37609 review). The fix keeps [action_inflight] at launch (skip
+     dispatching while a press is already open) but observes -- never
+     reserves -- the generation there, and checks [is_current] against it
+     on arrival, so a press that opened in between still supersedes it. *)
+  check int "the stance fetch checks a press is not still open before dispatch" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_modes_load"
        ~callee:"Approval.Flow.action_inflight");
+  check int "the stance fetch observes a generation without reserving one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"launch_keeper_tool_modes_load"
+       ~callee:"Approval.Flow.observe");
   check int "arming a gate opens an action" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_mode_set"
        ~callee:"Approval.Flow.begin_action");
-  check int "a stance listing that lands during an open press is dropped" 1
+  check int "a stance listing whose generation a press has superseded is dropped" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message"
-       ~callee:"Approval.Flow.action_inflight");
+       ~callee:"Approval.Flow.is_current");
   (* Every path that resolves an approval closes the action it opened, and
      closes it with the generation it was handed. There are four such paths
      now and there was one when this line was written; the number is a count
@@ -2931,9 +2940,9 @@ let () =
           `Quick
           test_the_scroll_counts_back_from_a_pinned_row;
         test_case
-          "gate stance listing checks a press is not still open"
+          "gate stance listing observes a generation without reserving one"
           `Quick
-          test_gate_stance_listing_checks_a_press_is_not_still_open;
+          test_gate_stance_listing_observes_without_reserving;
         test_case
           "the screen does not read the server's bind address"
           `Quick

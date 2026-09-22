@@ -8988,9 +8988,12 @@ def message_origin_badge_interaction(
                 f"the full origin row did not put the {description} body on the "
                 f"row below its origin (gap {gap}): {screen_text(bytes(output))!r}"
             )
-        if re.search(rb"\[\d\d:\d\d:\d\d\]", row) is None:
+        # The full row ends on its clock: the name at the left, the clock at
+        # the right edge and a rule between, not "[HH:MM:SS]" ahead of the
+        # name.
+        if re.search(rb"\d\d:\d\d:\d\d\s*$", row) is None:
             raise AssertionError(
-                f"the full {description} origin row carried no timestamp: {row!r}"
+                f"the full {description} origin row did not end on its clock: {row!r}"
             )
     for name in (b"vincent", b"alpha"):
         if b"\x1b[7m" + name not in full_row:

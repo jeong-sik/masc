@@ -1276,15 +1276,23 @@ type keeper_lane_last_outcome = {
   klo_selected_model : string option;
 }
 
+(** The phase conditions that can each put a keeper in the same phase:
+    either health reading makes it failing, and a pending launch is one of
+    the ways it is offline. The other conditions each have a phase of their
+    own, which [kl_phase] already names. *)
+type keeper_lane_conditions = {
+  klc_launch_pending : bool;
+  klc_heartbeat_healthy : bool;
+  klc_turn_healthy : bool;  (** [false] once a turn fails, until one succeeds. *)
+}
+
 type keeper_lane = {
   kl_keeper : string;
   kl_phase : keeper_lane_phase;
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_diagnosis : string option;
-      (** The producer's determining condition, or [None] when no condition
-          currently determines the phase. *)
+  kl_conditions : keeper_lane_conditions;
 }
 
 type keeper_lanes_snapshot = {

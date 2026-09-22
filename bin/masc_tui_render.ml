@@ -4356,6 +4356,26 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ]
 
 
+(* The conditions that share a phase with another: either health reading
+   makes a keeper failing, and a pending launch is one of the ways it is
+   offline. Each of the other conditions has a phase of its own, which the
+   lifecycle word already says, so naming it again would add nothing. *)
+let keeper_lane_phase_causes (conditions : Tui_decode.keeper_lane_conditions) =
+  List.filter_map
+    (fun (holds, words) -> if holds then Some words else None)
+    [ (not conditions.klc_turn_healthy, "last turn failed")
+    ; (not conditions.klc_heartbeat_healthy, "heartbeat failed")
+    ; (conditions.klc_launch_pending, "launch pending")
+    ]
+
+let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
+  let phase =
+    Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+  in
+  match keeper_lane_phase_causes lane.kl_conditions with
+  | [] -> phase
+  | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
+
 let keeper_operations_outcome_text = function
   | None -> "—"
   | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
@@ -4402,8 +4422,7 @@ let keeper_operations_preview (state : state) =
                   ; "  OPERATIONS"
                   ; Ansi.reset
                   ; "  lifecycle "
-                  ; Terminal_text.single_line
-                      (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+                  ; keeper_lane_lifecycle_text lane
                   ; " · turn "
                   ; Terminal_text.single_line
                       (Tui_decode.keeper_lane_turn_phase_to_string
@@ -4412,9 +4431,6 @@ let keeper_operations_preview (state : state) =
                   ; keeper_lane_idle_text lane.kl_idle_seconds
                   ; " · last "
                   ; keeper_operations_outcome_text lane.kl_last_outcome
-                  ; " · "
-                  ; Terminal_text.single_line_or ~default:"no diagnosis"
-                      lane.kl_diagnosis
                   ; target_note
                   ]
             | None ->

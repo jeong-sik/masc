@@ -1641,9 +1641,10 @@ let test_an_official_client_is_refused_on_the_curator_lane () =
          (exact_lane_slots path "workspace_curator_exact"))
 ;;
 
-(* The parser requires [slots] on every lane table, so a lane an official
-   client's append creates is written with an empty one beside it. *)
-let test_a_cli_append_to_an_undeclared_lane_writes_both_keys () =
+(* A lane an official client's append creates declares [cli_slots] alone. The
+   parser reads an absent [slots] as empty, so there is no empty key to write,
+   and an operator reading the file cannot mistake one for an emptied list. *)
+let test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots () =
   with_official_client_runtime_file (fun path ->
     Runtime.append_exact_output_lane_slot ~runtime_config_path:path
       ~lane:Runtime.Board_attention ~slot:"codex.codex" ()
@@ -1651,7 +1652,11 @@ let test_a_cli_append_to_an_undeclared_lane_writes_both_keys () =
     Alcotest.(check (list string)) "the new lane declares no slot"
       [] (exact_lane_slots path "board_attention_exact");
     Alcotest.(check (list string)) "and one CLI slot"
-      [ "codex.codex" ] (exact_lane_cli_slots path "board_attention_exact"))
+      [ "codex.codex" ] (exact_lane_cli_slots path "board_attention_exact");
+    (* The base file declares no exact lane and no [slots] key of its own, and
+       ["cli_slots = ["] does not match a needle that starts at a line. *)
+    Alcotest.(check bool) "no slots key was written" false
+      (string_contains (read_file path) "\nslots = ["))
 ;;
 
 (* [drop] and [move] find a slot in the list that declares it and edit only
@@ -3570,9 +3575,9 @@ let () =
             `Quick
             test_an_exact_append_places_an_official_client_in_cli_slots
         ; Alcotest.test_case
-            "a CLI append to an undeclared lane writes both keys"
+            "a CLI append to an undeclared lane writes only cli_slots"
             `Quick
-            test_a_cli_append_to_an_undeclared_lane_writes_both_keys
+            test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots
         ; Alcotest.test_case
             "an exact drop and move edit the CLI slots"
             `Quick

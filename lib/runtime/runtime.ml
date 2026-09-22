@@ -3687,9 +3687,8 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
   else
     edit_runtime_lanes ?runtime_config_path (fun ~content config ->
       let* () = exact_lane_editable ~content config lane in
-      let declared = exact_lane_decl config lane in
       let slots, cli_slots =
-        match declared with
+        match exact_lane_decl config lane with
         | Some decl -> decl.slot_ids, decl.cli_slot_ids
         | None -> [], []
       in
@@ -3716,15 +3715,6 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
                slot
                lane_id)
         | Cli_slots ->
-          (* A lane table the parser reads must carry [slots], even an empty
-             one, so a lane this append creates gets both keys. *)
-          let content =
-            match declared with
-            | Some _ -> content
-            | None ->
-              Toml_line_editor.edit_table_multiline_array
-                content ~path ~key:"slots" ~values:[]
-          in
           Ok
             (Toml_line_editor.edit_table_multiline_array
                content ~path ~key:"cli_slots" ~values:(cli_slots @ [ slot ])))

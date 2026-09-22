@@ -1026,8 +1026,9 @@ val append_exact_output_lane_slot :
     [cli_slots]; every other id goes to [slots], where the registry admits or
     reports it when it publishes the lane. An official client is refused on
     [Workspace_curator]: that lane walks no CLI tail, and its runs refuse a
-    lane declaring one. A lane table this creates for a CLI
-    slot also gets an empty [slots], which the parser requires. Declared slots
+    lane declaring one. A lane table this creates for a CLI slot declares
+    [cli_slots] alone; the parser reads an absent [slots] as empty. Declared
+    slots
     the exact-output registry did not admit stay in place. Refused, by name,
     when the lane already declares [slot] as a slot or as a CLI slot. Tables
     are created and refused as {!set_exact_output_lane_slots} says. *)

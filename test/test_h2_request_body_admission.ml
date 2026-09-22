@@ -8,7 +8,14 @@ open Alcotest
 
 module Helpers = Server_h2_gateway_helpers
 
-let authority = "localhost:8935"
+(* The request's :authority and the gateway's trust policy name the same
+   listener; a mismatch would make the gateway refuse every request as an
+   untrusted authority. *)
+let listener_host = "localhost"
+
+let listener_port = 8935
+
+let authority = Printf.sprintf "%s:%d" listener_host listener_port
 
 let max_bytes = Masc.Http_server_eio.Request.max_body_bytes
 
@@ -61,8 +68,10 @@ let exchange ~handler ?(headers = []) ~send target =
     H2.Request.create ~scheme:"http" `POST target
       ~headers:(H2.Headers.of_list ((":authority", authority) :: headers))
   in
+  (* h2 holds HEADERS back until the first body write unless told otherwise,
+     and a case that sends no body would never reach the server. *)
   let writer =
-    H2.Client_connection.request client request
+    H2.Client_connection.request client ~flush_headers_immediately:true request
       ~error_handler:(fun _ -> fail "H2 stream error")
       ~response_handler:(fun response reader ->
         status := Some (H2.Status.to_code response.H2.Response.status);
@@ -101,9 +110,14 @@ let exchange ~handler ?(headers = []) ~send target =
   | Some status -> { status; body = Buffer.contents body }
   | None -> fail "the response carried no headers"
 
+(* Closes the writer only once every byte has been handed to the connection.
+   h2 sends END_STREAM for a closed writer whenever its send window is empty,
+   even with bytes still unsent (Respd.flush_request_body), so closing right
+   after the write cut the body at the 65535-byte initial window before the
+   server's SETTINGS could widen it. *)
 let send_whole payload writer =
   H2.Body.Writer.write_string writer payload;
-  H2.Body.Writer.close writer
+  H2.Body.Writer.flush writer (fun _ -> H2.Body.Writer.close writer)
 
 (* Records what the body reader handed over and answers 200, so a case tells a
    delivered body from a refused one and checks how much arrived. *)
@@ -146,6 +160,20 @@ let test_body_at_the_ceiling_is_delivered_whole () =
   check (option int) "every byte reached the callback" (Some max_bytes)
     !delivered
 
+(* The declared-length check and the streamed check are separate branches;
+   this one pins the first at the boundary. *)
+let test_declared_length_at_the_ceiling_is_delivered_whole () =
+  let delivered = ref None in
+  let reply =
+    exchange ~handler:(ceiling_handler delivered)
+      ~headers:[ "content-length", string_of_int max_bytes ]
+      ~send:(send_whole (String.make max_bytes 'x'))
+      "/upload"
+  in
+  check int "admitted" 200 reply.status;
+  check (option int) "every byte reached the callback" (Some max_bytes)
+    !delivered
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then (
@@ -156,8 +184,8 @@ let rec rm_rf path =
 
 let trust_policy () =
   match
-    Server_request_authority.make_trust_policy ~bind_host:"localhost"
-      ~bind_port:8935 ~explicit_base_url:None
+    Server_request_authority.make_trust_policy ~bind_host:listener_host
+      ~bind_port:listener_port ~explicit_base_url:None
   with
   | Ok policy -> policy
   | Error error ->
@@ -254,6 +282,9 @@ let () =
             test_streamed_body_over_the_ceiling_is_refused
         ; test_case "a body at the ceiling is delivered whole" `Quick
             test_body_at_the_ceiling_is_delivered_whole
+        ; test_case "a declared length at the ceiling is delivered whole"
+            `Quick
+            test_declared_length_at_the_ceiling_is_delivered_whole
         ] )
     ; ( "graphql read gate"
       , [ test_case "an unauthenticated POST is refused before its body" `Quick

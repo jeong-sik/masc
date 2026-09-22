@@ -101,7 +101,7 @@ let h2_read_body h2_reqd callback =
     H2.Body.Reader.close body;
     h2_respond_text
       h2_reqd
-      (Printf.sprintf "413 Request Entity Too Large (max %d bytes)" max_bytes)
+      (Http_server_eio.Request.too_large_body max_bytes)
       ~status:`Payload_too_large
   in
   match H2.Request.body_length (H2.Reqd.request h2_reqd) with

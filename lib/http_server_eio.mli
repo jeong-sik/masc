@@ -289,6 +289,10 @@ module Request : sig
       ceiling ([Server_h2_gateway_helpers.h2_read_body]). *)
   val max_body_bytes : int
 
+  (** [too_large_body max_bytes] is the text of the 413 answer given to a
+      body over [max_bytes], on either transport. *)
+  val too_large_body : int -> string
+
   type body_read_error =
     [ `Too_large of int
     | `Internal of exn

@@ -13,8 +13,11 @@ val source_url : client -> string
 (** Where [command] runs from for [client], or [None] when it is nowhere.
     - [command] with a directory part is a path: it is answered as given
       when it is an executable regular file.
-    - Otherwise the first PATH directory holding it, the way the shell finds
-      it, so [masc] runs the same client the operator's terminal runs.
+    - Otherwise the first absolute PATH directory holding it, the way the
+      shell finds it, so [masc] runs the same client the operator's terminal
+      runs. An empty or relative entry is skipped: a shell reads it against
+      the directory it is in, and what is found here is spawned from a
+      keeper's own working directory.
     - Otherwise, when [command] is the client's own name ({!name}), the
       directory the vendor installer writes to: [CODEX_INSTALL_DIR] for Codex
       when set, else [~/.local/bin]. A shell whose PATH does not hold that

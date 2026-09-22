@@ -4818,9 +4818,11 @@ let test_access_failover_preserves_effect_and_caller_authority () =
     candidate_access_errors
 ;;
 
-let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
+let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_terminal () =
   let cases =
-    (access_error_from_http 400, ["first"])
+    (* HTTP 400 carries no machine-readable reason, so the lane walk advances to
+       the next declared candidate (attempt_rejected_should_try_next). *)
+    (access_error_from_http 400, ["first"; "last"])
     :: (Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
           (Runtime_codex_app_server.Invalid_config "bad path"), ["first"])
     :: List.map (fun (_, error) -> error, ["first"; "last"])
@@ -5190,8 +5192,8 @@ let () =
             test_candidate_access_denial_reaches_the_next_declared_runtime;
           Alcotest.test_case "access failover preserves effect and caller authority" `Quick
             test_access_failover_preserves_effect_and_caller_authority;
-          Alcotest.test_case "access exhaustion and bad requests remain terminal" `Quick
-            test_exhausted_access_errors_and_bad_requests_remain_terminal;
+          Alcotest.test_case "access exhaustion rotates and deterministic requests remain terminal" `Quick
+            test_exhausted_access_errors_rotate_and_deterministic_requests_remain_terminal;
           Alcotest.test_case
             "initial lane exhaustion cannot escape declared candidates"
             `Quick

@@ -776,45 +776,32 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
 ;;
 
 (* A lane slot names a runtime binding, so the slots a config declares are its
-   bindings -- the same derivation the server does at boot. *)
-let declared_targets_of_config (config : Runtime_schema.config) =
-  List.filter_map
-    (fun (binding : Runtime_schema.binding) ->
-       match
-         ( List.find_opt
-             (fun (provider : Runtime_schema.provider) ->
-                String.equal provider.id binding.provider_id)
-             config.providers
-         , List.find_opt
-             (fun (model : Runtime_schema.model_spec) ->
-                String.equal model.id binding.model_id)
-             config.models )
-       with
-       | Some provider, Some model ->
-         Some
-           ({ target_ref = Runtime_schema.binding_key binding
-            ; provider_ref = provider.id
-            ; model_id = model.api_name
-            ; enable_thinking = model.thinking_support
-            ; reasoning_effort = model.reasoning_effort
-            ; connect_timeout_s = provider.connect_timeout_s
-            ; body_timeout_s = provider.exact_body_timeout_s
-            ; api_key_env =
-                (match provider.credentials with
-                 | Some (Runtime_schema.Env name) -> Some name
-                 | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
-            }
-            : Exact_output.declared_target)
-       | Some _, None | None, Some _ | None, None -> None)
-    config.bindings
+   bindings. The server's own derivation answers which, and this asks it
+   instead of keeping a second copy beside it: the copy is how a slot came to
+   run on a different wire than the Keeper requests of the same binding
+   (#37674). *)
+let declared_targets_of_config_path ~label path =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let startup_state = Runtime_startup_state.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Runtime_startup_state.set startup_state)
+  @@ fun () ->
+  match Runtime.init_default ~config_path:path with
+  | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
+  (* Loading the bindings is what makes them targets, so a binding this config
+     disables has no slot here -- the same answer the server gives. *)
+  | Ok () -> Server_runtime_bootstrap.For_testing.exact_output_targets_of_runtimes ()
 ;;
 
-let snapshot_of_config ~io ~label (config : Runtime_schema.config) =
+let snapshot_of_config ~io ~label path =
   match
     Exact_output.load_resolver_snapshot
       ~io
       ~target_binding_policy:Exact_output.Exclude_unbound_targets
-      ~catalog:(Exact_output.Embedded_with_targets (declared_targets_of_config config))
+      ~catalog:
+        (Exact_output.Embedded_with_targets (declared_targets_of_config_path ~label path))
       ()
   with
   | Ok snapshot -> snapshot
@@ -831,7 +818,7 @@ let test_repo_seed_wizard_choices_have_an_exact_output_target () =
   match Runtime_toml.parse_file path with
   | Error errors -> failf "repo runtime.toml should parse: %d error(s)" (List.length errors)
   | Ok (cfg : Runtime_schema.config) ->
-    let snapshot = snapshot_of_config ~io:{ getenv = (fun _ -> Ok None) } ~label:"seed wizard" cfg in
+    let snapshot = snapshot_of_config ~io:{ getenv = (fun _ -> Ok None) } ~label:"seed wizard" path in
     let offered =
       List.filter_map
         (fun (provider : Runtime_schema.provider) ->
@@ -1224,6 +1211,21 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
      "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = []\ncli_slots = []\n" with
    | Error _ -> ()
    | Ok _ -> fail "a lane without HTTP or CLI slots must be rejected");
+  let cli_only_without_slots =
+    "[runtime.exact_output_lanes.hitl_auto_judge]\ncli_slots = [\"codex.codex\"]\n"
+  in
+  (match Runtime_toml.parse_string cli_only_without_slots with
+   | Ok config ->
+     (match config.Runtime_schema.exact_output_lane_decls with
+      | [ lane ] ->
+        check (list string) "absent slots means no HTTP slot" [] lane.slot_ids;
+        check (list string) "the CLI slot stands alone" [ "codex.codex" ]
+          lane.cli_slot_ids
+      | _ -> fail "exactly one CLI-only lane must parse")
+   | Error _ -> fail "a lane that declares only cli_slots must parse");
+  (match Runtime_toml.parse_string "[runtime.exact_output_lanes.hitl_auto_judge]\n" with
+   | Error _ -> ()
+   | Ok _ -> fail "a lane table that declares neither list must be rejected");
   let absent = "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [\"slot-a\"]\n" in
   (match Runtime_toml.parse_string absent with
    | Error _ -> fail "a lane without cli_slots must parse"
@@ -1964,9 +1966,8 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
 let test_release_evidence_fixture_lanes_resolve_without_environment_credentials () =
   let fixture_dir = release_evidence_fixture_dir () in
   let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
-  match
-    Runtime_toml.parse_file (Filename.concat fixture_dir "runtime.toml")
-  with
+  let fixture_runtime_path = Filename.concat fixture_dir "runtime.toml" in
+  match Runtime_toml.parse_file fixture_runtime_path with
   | Error errors ->
     failf
       "release-evidence smoke runtime.toml should load: %s"
@@ -1989,7 +1990,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
     (match provider.credentials with
      | Some (Runtime_schema.Inline "release-evidence-loopback") -> ()
      | _ -> fail "release-evidence provider must own its synthetic inline credential");
-    let snapshot = snapshot_of_config ~io ~label:"release-evidence smoke" config in
+    let snapshot = snapshot_of_config ~io ~label:"release-evidence smoke" fixture_runtime_path in
     let default_runtime_id =
       match config.default_runtime_id with
       | Some runtime_id -> runtime_id
@@ -2102,11 +2103,11 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   match Runtime_toml.parse_file runtime_path with
   | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
   | Ok config ->
-    let snapshot = snapshot_of_config ~io ~label:"deployment seed" config in
+    let snapshot = snapshot_of_config ~io ~label:"deployment seed" runtime_path in
     (* Every GLM binding the seed declares has to come up on the public key
        alone; a first install has no coding-plan key. *)
     let single_key_snapshot =
-      snapshot_of_config ~io:single_key_io ~label:"single-key GLM" config
+      snapshot_of_config ~io:single_key_io ~label:"single-key GLM" runtime_path
     in
     List.iter
       (fun (binding : Runtime_schema.binding) ->

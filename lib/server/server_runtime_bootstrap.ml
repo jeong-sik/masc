@@ -395,7 +395,13 @@ let warn_optional_exact_output_lane registry ~lane_id ~feature =
    binding table use the same "<provider>.<model>" id. Restating that binding in
    a second file is how a slot came to point at a declaration nobody had
    written, and how a binding's declared connect timeout stopped reaching the
-   slot that runs on it (#37004). The slots are the bindings. *)
+   slot that runs on it (#37004). The slots are the bindings.
+
+   The binding itself travels, not a list of fields read off it. Handing over a
+   subset left the exact request without the connect deadline (#37004), then
+   without the declared effort (#37326), then on a different wire than the
+   Keeper's own requests (#37674) -- three turns of the same field going
+   missing at this boundary. *)
 let exact_output_targets_of_runtimes () =
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
   (* An exact-output slot resolves against the AGENT_CORE catalog, which speaks
@@ -409,11 +415,15 @@ let exact_output_targets_of_runtimes () =
        | Runtime_execution.Agent_core config ->
          Some
            ({ target_ref = rt.id
-            ; provider_ref = rt.provider.Runtime_schema.id
-            ; model_id = rt.model.Runtime_schema.api_name
-            ; enable_thinking = rt.model.Runtime_schema.thinking_support
-             ; reasoning_effort = config.reasoning_effort
-             ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
+            ; (* [enable_thinking] is a per-turn control the Keeper path sets as
+                 it builds each request, so the binding config carries none yet.
+                 An exact request has one shape and asks once, here, from the
+                 same row the Keeper reads. *)
+              binding =
+                { config with
+                  Llm_provider.Provider_config.enable_thinking =
+                    rt.model.Runtime_schema.thinking_support
+                }
              ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
             ; (* A slot's credential is the one its binding names; the catalog row
                  carries the provider's usual environment name, not this
@@ -499,6 +509,7 @@ let install_domain_pool_references domain_pool =
 
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry
+  let exact_output_targets_of_runtimes = exact_output_targets_of_runtimes
   let install_domain_pool_references = install_domain_pool_references
 end
 

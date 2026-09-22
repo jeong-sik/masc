@@ -21,6 +21,7 @@ type rotate_class =
   | Refusal_body_not_received
   | Generation_repeated
   | Attempt_rejected
+  | Provider_reported_failure
 
 type fence_disposition =
   | Fenced_effect_attempted
@@ -258,6 +259,17 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
      and unchanged by this route; what changes is the class label and that
      the model is known to have answered ([response_observed]). *)
   | Llm_provider.Error.RepeatingGeneration _ -> rotate Generation_repeated
+  (* The provider reported a structured failure of its own for this attempt
+     (a CLI-adapter turn failure, an RPC error, a post-activity context-window
+     report). [Runtime_attempt_fsm.should_try_next] already rotates on every
+     [Http_client.ProviderFailure] kind, the same wire family as
+     [RepeatingGeneration] above; calling this class terminal disagreed with
+     a walk that was already moving on (task-1642, census
+     "provider:reported_error" rotates=true). Unlike the wire-format defects
+     below, the same bytes do not have to arrive again: a different candidate
+     is a different provider attempt that may not repeat this provider's own
+     report. *)
+  | Llm_provider.Error.ProviderReportedError _ -> rotate Provider_reported_failure
   | Llm_provider.Error.MissingApiKey _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidConfig _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidRequest _ -> exhaust_failure Deterministic_request
@@ -277,7 +289,6 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
       ; _
       }
   | Llm_provider.Error.ParseError _
-  | Llm_provider.Error.ProviderReportedError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderTerminal _ ->
     exhaust_failure Provider_integration
@@ -400,6 +411,7 @@ let rotate_class_label = function
   | Attempt_rejected -> "attempt_rejected"
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
+  | Provider_reported_failure -> "provider_reported_failure"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
@@ -471,6 +483,10 @@ let response_observed = function
      | Refusal_body_not_received
      (* the provider refused the request; the body naming why never
         arrived, and a refusal is not an answer. *)
+     | Provider_reported_failure
+     (* the provider reported its own structured failure for this attempt;
+        unlike [Generation_repeated] below, nothing here says the model
+        produced content the turn's input carried into. *)
      | Runtime_exhausted ->
        (* a whole-runtime exhaustion wrapper: it carries no answer. *)
        false
@@ -599,7 +615,8 @@ let route_resumes_on_same_path = function
      | No_progress_truncated
      | Refusal_body_not_received
      | Generation_repeated
-     | Attempt_rejected ->
+     | Attempt_rejected
+     | Provider_reported_failure ->
        (* the credential, the model, the client session or the model's own
           answer: the same path answers the same way after any wait. *)
        false)

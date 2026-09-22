@@ -1005,7 +1005,12 @@ val set_exact_output_lane_slots :
     declare yet gets its table; [lane] is one of the lanes the server runs, so
     that table is read. A lane the file declares other than as its own table
     (inline, or through dotted keys) is refused rather than declared twice, and
-    so is a slot the lane already declares as a CLI slot. *)
+    so is a slot the lane already declares as a CLI slot, and a binding whose
+    provider is an official client, which can only be a CLI slot — on
+    [Workspace_curator], which walks no CLI tail, no list at all. An empty
+    [slots] is this writer's own floor: it names the whole catalog order.
+    Taking the last catalog slot off a lane that keeps a CLI slot is
+    {!drop_exact_output_lane_slot}. *)
 
 val append_exact_output_lane_slot :
   ?runtime_config_path:string ->
@@ -1013,12 +1018,20 @@ val append_exact_output_lane_slot :
   slot:string ->
   unit ->
   (config_commit_receipt, string) result
-(** Add [slot] to the end of [\[runtime.exact_output_lanes.<id>\]].slots as
-    the file declares them, read under the runtime.toml write lock, and commit
-    the result like {!set_exact_output_lane_slots}. Declared slots the
-    exact-output registry did not admit stay in place. Refused, by name, when
-    the lane already declares [slot] as a slot or as a CLI slot. Tables are
-    created and refused as {!set_exact_output_lane_slots} says. *)
+(** Add [slot] to the end of the list of
+    [\[runtime.exact_output_lanes.<id>\]] it belongs in, as the file declares
+    them, read under the runtime.toml write lock, and commit the result like
+    {!set_exact_output_lane_slots}. A binding whose provider is an official
+    client (Codex app-server, Antigravity CLI, Claude Code) goes to
+    [cli_slots]; every other id goes to [slots], where the registry admits or
+    reports it when it publishes the lane. An official client is refused on
+    [Workspace_curator]: that lane walks no CLI tail, and its runs refuse a
+    lane declaring one. A lane table this creates for a CLI slot declares
+    [cli_slots] alone; the parser reads an absent [slots] as empty. Declared
+    slots
+    the exact-output registry did not admit stay in place. Refused, by name,
+    when the lane already declares [slot] as a slot or as a CLI slot. Tables
+    are created and refused as {!set_exact_output_lane_slots} says. *)
 
 type exact_slot_move =
   | Move_slot_up
@@ -1032,13 +1045,14 @@ val drop_exact_output_lane_slot :
   slot:string ->
   unit ->
   (config_commit_receipt, string) result
-(** Take [slot] out of [\[runtime.exact_output_lanes.<id>\]].slots as the file
-    declares them, read under the write lock for the reason
-    {!append_exact_output_lane_slot} gives: the caller names one slot rather
-    than an order rebuilt from the admitted view, so declared slots the
-    registry rejected stay. Refused when the lane declares no such slot,
-    naming what it does declare, and when [slot] is its last one -- a lane
-    that resolves to nothing is not this edit; remove the lane's table. *)
+(** Take [slot] out of whichever of [slots] and [cli_slots] of
+    [\[runtime.exact_output_lanes.<id>\]] declares it, read under the write lock
+    for the reason {!append_exact_output_lane_slot} gives: the caller names one
+    slot rather than an order rebuilt from the admitted view, so declared slots
+    the registry rejected stay. Refused when the lane declares no such slot,
+    naming what it does declare, and when [slot] is the lane's last slot across
+    both lists -- a lane that resolves to nothing is not this edit; remove the
+    lane's table. *)
 
 val move_exact_output_lane_slot :
   ?runtime_config_path:string ->
@@ -1047,10 +1061,11 @@ val move_exact_output_lane_slot :
   move:exact_slot_move ->
   unit ->
   (config_commit_receipt, string) result
-(** Exchange [slot] with its neighbour in the declared order, read under the
-    write lock like {!drop_exact_output_lane_slot}. Refused when the lane
-    declares no such slot, and when the slot is already at the end the move
-    heads for. CLI slots are a separate list and do not move. *)
+(** Exchange [slot] with its neighbour in the declared order of the list that
+    holds it -- [slots] or [cli_slots] -- read under the write lock like
+    {!drop_exact_output_lane_slot}. The two lists do not mix: a slot never moves
+    into the other one. Refused when the lane declares no such slot, and when
+    the slot is already at the end of its list the move heads for. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

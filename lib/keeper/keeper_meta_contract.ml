@@ -398,7 +398,10 @@ let effective_meta_of_profile_defaults
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
-          board_interests = defaults.board_interests;
+          board_interests =
+            (match defaults.board_interests with
+             | [] -> meta.board_interests
+             | interests -> interests);
           max_context_override =
             apply_profile_default_opt defaults.max_context_override
               meta.max_context_override;

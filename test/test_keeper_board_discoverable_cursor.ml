@@ -31,12 +31,19 @@ let with_temp_workspace f =
        f config)
 ;;
 
+(* Every scenario in this file is the owner-cursor scan recording a
+   candidate for an unaddressed (Discoverable) post. #37586 gated that
+   audience on [board_interests <> []] (a Keeper opts in to ambient Board
+   judgment), so a fixture with no declared interest now legitimately
+   routes to [Ignore] instead of [Judge_discoverable] -- these lanes need
+   one to keep exercising the scenario they are named for. *)
 let keeper_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
           [ "name", `String name
           ; "trace_id", `String ("trace-" ^ name)
+          ; "board_interests", `List [ `String "board cursor scenarios" ]
           ])
   with
   | Ok meta -> meta

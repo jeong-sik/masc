@@ -249,6 +249,9 @@ v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·
   openrouter `z-ai/glm-5.3` 의 `repeated_reasoning_cycle`(1건, #36861 과 같은 모양), 6분 만에 끝나고
   verifier 가 0점(1건). 마지막 trial 은 54분·도구 호출 65(중복 10)·$4.17 로 reward 1.0 이다.
   한 task 한 번의 통과이며 head 의 결과가 아니다. 벤치 실행은 이 세션이 하지 않았다.
+  벤치 keeper 는 `render_configs.py` 가 만든 모델 행 하나에 묶이고 `[runtime.lanes]` 가 없어서,
+  "다음 후보는 다른 모델이어야 한다" 는 거절(`error.ml:173`)이 나오면 trial 이 그대로 실패한다.
+  Runtime Candidate Order 는 벤치 arm 어느 것도 지나지 않는다(#37952).
 - HITL·Access Control·Multi Lane·Schedule: 로그의 오류 모양만 봤다(위 "결함 아님" 셋).
   실제 전이·권한 거절·취소 경로는 이번에 읽지 않았다.
 - Skills 재생성: 09-19 기록의 "자동 생산 경로 미구현"(#37633) 이후 새 producer 를 찾지 못했다.

@@ -87,8 +87,9 @@ type prepared =
             so the tail cannot drift from the flow it follows. *)
   ; prompt : string
   ; request : Yojson.Safe.t
-        (** Built from the same material [prompt] was rendered from, so the run
-            record cannot say something the judge did not read. *)
+        (** Built from the same current candidate projection [prompt] was
+            rendered from, so the run record cannot say something the judge
+            did not read. *)
   ; requirement : Exact_output.output_requirement
   }
 
@@ -96,9 +97,9 @@ let message role text =
   Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
-let judge_prompt candidate material =
-  let request =
-    Keeper_board_attention_candidate.singleton_judgment_request candidate material
+let judge_prompt candidate =
+  let* request =
+    Keeper_board_attention_candidate.singleton_judgment_request candidate
   in
   Prompt_registry.render_prompt_template
     Prompt_names.judge_board
@@ -145,16 +146,16 @@ let prepare ~base_path ~keeper_name ~net candidate =
     ), None ->
     Error Network_unavailable
   | ( Keeper_board_attention_candidate.Direct_resumable
-        (Keeper_board_attention_candidate.Resumable_pending pending)
+        (Keeper_board_attention_candidate.Resumable_pending _)
     | Keeper_board_attention_candidate.Requeued_resumable
-        { resumable = Keeper_board_attention_candidate.Resumable_pending pending; _ }
+        { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ }
     ), Some net ->
-    let material = pending.Keeper_board_attention_candidate.material in
-    let request =
-      Keeper_board_attention_candidate.judgment_request candidate material
+    let* request =
+      Keeper_board_attention_candidate.judgment_request candidate
+      |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
     in
     let* prompt =
-      judge_prompt candidate material
+      judge_prompt candidate
       |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
     in
     let messages = [ message Agent_core.Types.User prompt ] in
@@ -517,15 +518,15 @@ let terminal_outcome = function
    Jev said and what the lane then decided are read from one entry. *)
 type jev_first =
   | Jev_off
-      (** No [TYPESAFEAI_API_KEY], [\[typesafeai\] enabled = false], this
+      (** No key in any variable the destinations name, [\[typesafeai\] enabled = false], this
           gate's own [\[typesafeai\] board_attention = false], or the keeper
           is in [\[typesafeai\] excluded_keepers] (the log says which). *)
   | Jev_cli_only
       (** Jev is on, but the lane declares no HTTP slot. Jev is asked only in
           front of the HTTP lane. *)
   | Jev_not_pending
-      (** Jev is on, but the candidate is not [Pending], so there is no
-          material to send. *)
+      (** Jev is on, but the candidate is not [Pending], so it is not eligible
+          for a new judgment. *)
   | Jev_relevant of
       { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; verdict : Keeper_board_attention_judgment.t
@@ -538,7 +539,7 @@ type jev_first =
   | Jev_failed of { reason : string }
 
 let ask_jev ~clock prepared =
-  match Typesafeai_config.board_attention_api_key ~keeper_id:prepared.candidate.keeper_name with
+  match Typesafeai_config.board_attention_destinations ~keeper_id:prepared.candidate.keeper_name with
   | Error Typesafeai_config.Keeper_excluded ->
     (* The record says [off]; this line says why, by name. *)
     Log.Keeper.info
@@ -546,11 +547,11 @@ let ask_jev ~clock prepared =
       "board attention: this keeper is in [typesafeai].excluded_keepers; Jev not asked";
     Jev_off
   | Error
-      ( Typesafeai_config.Lane_disabled | Typesafeai_config.Missing_api_key
+      ( Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
       | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Board_attention_disabled
       | Typesafeai_config.Context_review_disabled | Typesafeai_config.Skill_applicability_disabled ) ->
     Jev_off
-  | Ok api_key ->
+  | Ok destinations ->
     (
       (match prepared.transport with
        | Cli_only _ -> Jev_cli_only
@@ -559,7 +560,7 @@ let ask_jev ~clock prepared =
           | Keeper_board_attention_candidate.Judged _
           | Keeper_board_attention_candidate.Consumed _
           | Keeper_board_attention_candidate.Quarantine _ -> Jev_not_pending
-          | Keeper_board_attention_candidate.Pending { material; _ } ->
+          | Keeper_board_attention_candidate.Pending _ ->
             (* A direct-style Eio request on this keeper's board-attention
                worker fiber: the wait suspends that fiber alone, as the
                [Exact_output] request does, so it delays this candidate's
@@ -567,9 +568,8 @@ let ask_jev ~clock prepared =
             (match
                Typesafeai_board_attention.judge_candidate
                  ~clock
-                 ~api_key
+                 ~destinations
                  ~candidate:prepared.candidate
-                 ~material
                  ()
              with
              | Error reason -> Jev_failed { reason }

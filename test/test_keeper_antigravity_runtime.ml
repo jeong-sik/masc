@@ -873,6 +873,7 @@ let test_spawn_failure_is_pre_dispatch () =
                   in
                   let oversized_attempt =
                     Keeper_antigravity_runtime.run
+                      ~turn_start:0
                       ~accepts_image_input:
                         (Runtime_agent.runtime_accepts_image_input
                            ~runtime:
@@ -911,6 +912,7 @@ let test_spawn_failure_is_pre_dispatch () =
                    | Ok _ -> fail "oversized system prompt override reached the CLI");
                   let attempt =
                     Keeper_antigravity_runtime.run
+                    ~turn_start:0
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
                       ~pre_tool_rejects:(ref [])
@@ -1010,6 +1012,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
                   let reports = ref [] in
                   let attempt =
                     Keeper_antigravity_runtime.run
+                    ~turn_start:0
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
                       ~pre_tool_rejects:(ref [])
@@ -1064,13 +1067,14 @@ let plain_user_message text : Agent_core.Types.message =
 ;;
 
 let capacity_projection ?on_model_input_window_observation ?carried_front_seed
-    ~declared_max_prompt_bytes ~system_prompt ~goal source =
+    ?(turn_start = 0) ~declared_max_prompt_bytes ~system_prompt ~goal source =
   Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
     ~declared_max_prompt_bytes
     ~system_prompt
     ~goal
     ?on_model_input_window_observation
     ?carried_front_seed
+    ~turn_start
     ~keeper_name:"alpha"
     ~runtime_id:"antigravity_subscription.gemini"
     source
@@ -1199,6 +1203,7 @@ let test_appended_gate_reference_is_inside_the_window () =
           ; source = Keeper_carried_front.Turn_record { turn = 40 }
           }
     ; unreadable = None
+    ; boundary_error = None
     }
   in
   match
@@ -1304,6 +1309,7 @@ let seed_read_at ~messages first_atom =
         ; source = Keeper_carried_front.Turn_record { turn = 41 }
         }
   ; unreadable = None
+  ; boundary_error = None
   }
 ;;
 
@@ -1311,7 +1317,7 @@ let encoded_history messages =
   List.map Keeper_official_client_host.encode_history_message messages
 ;;
 
-let agent_core_range ~front messages =
+let agent_core_range ?(turn_start = 0) ~front messages =
   (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
      ~front
@@ -1319,17 +1325,19 @@ let agent_core_range ~front messages =
      ~last_resort:false
      ~base_path:""
      ~demote_before:0
+     ~completed_end_atom:turn_start
      messages)
     .Keeper_turn_driver_try_provider.projection
     .Runtime_model_input_tail_window.messages
 ;;
 
 let project_with_capacity ?on_model_input_window_observation ?carried_front_seed
-    ~capacity messages =
+    ?(turn_start = 0) ~capacity messages =
   match
     capacity_projection
       ?on_model_input_window_observation
       ?carried_front_seed
+      ~turn_start
       ~declared_max_prompt_bytes:(Some capacity)
       ~system_prompt:"system"
       ~goal:"goal"
@@ -1364,12 +1372,24 @@ let test_seeded_start_matches_the_agent_core_range () =
     check int "the reading reports the seven seeded atoms" 7 reading.transmitted_atoms
 ;;
 
-let test_cold_start_is_capacity_bounded_from_the_whole_history () =
+let test_cold_start_with_no_completed_turn_carries_everything () =
   let messages = carried_front_history () in
   let projected = project_with_capacity ~capacity:1_000_000 messages in
-  check (list string) "without a seed the whole fitting history is carried"
+  check (list string) "without a seed and with no completed turn, everything fitting is carried"
     (encoded_history messages)
     (encoded_history projected)
+;;
+
+(* Without a seed on a history with completed turns, the range starts where
+   the last of them ended: the same range the Agent Core path composes for
+   that turn start (RFC keeper-context-window-in-tokens §13.4). *)
+let test_cold_start_begins_at_the_turn_start () =
+  let messages = carried_front_history () in
+  let projected = project_with_capacity ~turn_start:53 ~capacity:1_000_000 messages in
+  check (list string) "without a seed the range starts at the turn start"
+    (encoded_history (agent_core_range ~turn_start:53 ~front:None messages))
+    (encoded_history projected);
+  check int "seven atoms of sixty went" 7 (List.length projected)
 ;;
 
 let test_a_front_from_another_history_is_dropped () =
@@ -1453,9 +1473,13 @@ let () =
               `Quick
               test_seeded_start_matches_the_agent_core_range
           ; test_case
-              "a cold start is bounded from the whole history"
+              "a cold start with no completed turn carries everything"
               `Quick
-              test_cold_start_is_capacity_bounded_from_the_whole_history
+              test_cold_start_with_no_completed_turn_carries_everything
+          ; test_case
+              "a cold start begins at the turn start"
+              `Quick
+              test_cold_start_begins_at_the_turn_start
           ; test_case
               "a front from another history is dropped"
               `Quick

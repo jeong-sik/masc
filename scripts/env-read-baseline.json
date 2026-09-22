@@ -43,7 +43,6 @@
     "lib/shutdown.ml": 1,
     "lib/shutdown_hooks.ml": 1,
     "lib/telemetry_eio.ml": 1,
-    "lib/tool_library.ml": 1,
     "lib/transport_read_model.ml": 1,
     "lib/voice/voice_session_manager.ml": 1,
     "lib/voice_bridge_core/voice_bridge_core.ml": 1,

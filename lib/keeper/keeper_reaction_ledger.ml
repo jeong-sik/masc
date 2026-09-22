@@ -183,7 +183,8 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "board_signal kind=%s author=%s title=%s"
       (match bs.kind with
        | Keeper_event_queue.Post_created -> "post_created"
-       | Keeper_event_queue.Comment_added -> "comment_added"
+       | Keeper_event_queue.Post_updated _ -> "post_updated"
+       | Keeper_event_queue.Comment_added _ -> "comment_added"
        | Keeper_event_queue.Reaction_changed reaction ->
          Printf.sprintf
            "reaction_changed target=%s:%s user=%s emoji=%s active=%b"

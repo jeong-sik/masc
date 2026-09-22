@@ -301,6 +301,7 @@ val for_provider_model_id
   -> model_id:string
   -> capabilities option
 
+
 (** Lookup capabilities for a known model_id.
 
     Checks the globally loaded model catalog first, then the capability

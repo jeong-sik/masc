@@ -65,7 +65,7 @@ type glyph =
   | Call_started  (** [▶] *)
   | Call_returned  (** [✓] *)
   | Turn_boundary  (** [●] *)
-  | Turn_settled  (** [■] *)
+  | Turn_done  (** [■] *)
   | Failure  (** [✗] *)
   | Attention  (** [?] *)
   | Quiet  (** [·] the kinds [Everything] adds *)
@@ -110,6 +110,13 @@ type chunk_tool = {
   ct_duration_ms : float option;
   ct_at : float;  (** receipt clock of the row that named the call *)
   ct_tool_use_id : string option;
+  ct_session_turn : int option;
+      (** The agent session's ordinal of the provider call that asked for
+          this one. The calls one model response asked for share it, as do
+          the calls a composition runs for one of them, and the next response
+          has the next ordinal, so equal neighbours are one response. A CLI
+          lane runs a whole keeper turn as one provider call: all its calls
+          share one. [None] when the frame stated none. *)
   ct_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
       (** The ledger's word for what became of the call. [None] on a call the
           wire plane stood in for: that plane reports no disposition. *)
@@ -136,7 +143,15 @@ type wire_tool = {
   wt_started : float;
   wt_tool : string;
   wt_duration_ms : float option;
+  wt_session_turn : int option;
 }
+
+(** What the agent-core loop last said about this record's provider call:
+    one was asked for, started, or came back. *)
+type turn_marker =
+  | Marker_ready
+  | Marker_started
+  | Marker_completed
 
 type chunk = {
   ck_keeper : string;
@@ -153,6 +168,11 @@ type chunk = {
   ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
   ck_settled : bool;
+  ck_marker : (turn_marker * float) option;
+      (** The newest turn marker and the clock it arrived on. [Marker_started]
+          with nothing after it is a provider call in flight: the model has
+          the turn. A CLI lane sends no markers, so this stays [None] and the
+          pane says nothing about what that keeper is doing between calls. *)
   ck_tokens : int option * int option;
   ck_cost_usd : float option;
   ck_calls : int option;

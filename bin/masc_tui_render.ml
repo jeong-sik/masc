@@ -67,6 +67,7 @@ let acting_pane_target_at ~line =
   else Masc_tui_acting_pane.Target_none
 
 let acting_pane_drawn_cols () = !acting_pane_reserved_cols
+let acting_pane_row_count () = Array.length !acting_pane_row_targets
 let acting_pane_scroll_limit () = !acting_pane_scroll_max
 let set_table_frame enabled = table_frame_enabled := enabled
 
@@ -110,18 +111,18 @@ let keeper_roster_marquee_target (state : state) ~cols =
         else None
     | _ -> None
 
-let acting_pane_columns (state : state) ~terminal_cols =
+let acting_pane_suppressed (state : state) =
   let modal =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open || state.memory_fact_detail_open
   in
-  if modal
-     || Masc_tui_types.on_activity_screen state.view
-     || Option.is_some (browser_lane_on_screen state)
-  then 0
-  else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
-  then Masc_tui_acting_pane.pane_cols
-  else 0
+  modal
+  || Masc_tui_types.on_activity_screen state.view
+  || Option.is_some (browser_lane_on_screen state)
+
+let acting_pane_columns (state : state) ~terminal_cols =
+  if acting_pane_suppressed state then 0
+  else Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols:terminal_cols
 
 (* The runtime picker measures this string to decide its column widths, so the
    format lives beside that arithmetic. *)
@@ -4899,9 +4900,14 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
       wrap (Theme.recede ()) "JEV unavailable: Board lane is CLI-only"
     | Some Tui_decode.Jev_lane_unavailable ->
       wrap (Theme.warn ()) "JEV unavailable: Board lane is not ready"
-    | Some (Tui_decode.Jev_configured { model }) ->
+    | Some (Tui_decode.Jev_configured { destinations }) ->
+      let named (destination : Tui_decode.standalone_lane_jev_destination) =
+        Printf.sprintf "%s (%s)" destination.sljd_destination_uri destination.sljd_model
+      in
       wrap Ansi.reset
-        (Printf.sprintf "JEV CONFIGURED \xc2\xb7 %s" (Terminal_text.single_line model))
+        (Printf.sprintf
+           "JEV CONFIGURED \xc2\xb7 %s"
+           (Terminal_text.single_line (String.concat ", " (List.map named destinations))))
   in
   let run_stats =
     let total = lane.sl_retained_run_count in
@@ -12187,7 +12193,7 @@ let render_acting (state : state) =
             | Acting.Call_started -> (Theme.info ())
             | Acting.Call_returned -> (Theme.ok ())
             | Acting.Turn_boundary -> Ansi.reset
-            | Acting.Turn_settled -> Ansi.bold
+            | Acting.Turn_done -> Ansi.bold
             | Acting.Failure -> (Theme.bad ())
             | Acting.Attention -> (Theme.warn ())
             | Acting.Quiet -> Ansi.dim
@@ -15027,9 +15033,17 @@ let render_context_inspector state =
     Option.value ~default:"no Keeper" state.context_inspector_keeper
     |> Keeper_chat.terminal_safe_text
   in
+  (* What the numbers describe: a reading in flight, or one received some
+     time ago. The pane does not poll, so without the age a reading from
+     before the current turn read as the current turn. *)
   let refreshing =
     if state.context_inspector_loading then Ansi.dim ^ "  refreshing" ^ Ansi.reset
-    else ""
+    else
+      match state.context_inspector_reading, state.context_inspector_read_at with
+      | Some _, Some read_at ->
+          let age = Float.max 0. (Unix.gettimeofday () -. read_at) in
+          Ansi.dim ^ "  read " ^ Masc_tui_message_layout.span_text age ^ " ago" ^ Ansi.reset
+      | Some _, None | None, (Some _ | None) -> ""
   in
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)

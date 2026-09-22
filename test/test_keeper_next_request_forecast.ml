@@ -31,10 +31,11 @@ let seed ~messages first_atom : Keeper_carried_front.seed =
   | Some front_digest -> { first_atom; front_digest; source = Keeper_carried_front.Ledger }
   | None -> Alcotest.fail "the seed's own history has the atom"
 
-let carry ?front ?counted_tokens messages =
+let carry ?front ?(turn_start = 0) ?counted_tokens messages =
   Keeper_next_request_forecast.carry
     ~measure:(Keeper_context_core.message_measurer ())
     ~front
+    ~turn_start
     ~counted_tokens
     messages
 
@@ -81,7 +82,7 @@ let test_a_front_the_history_shrank_under_is_dropped () =
   Alcotest.(check int) "from the first atom" 0 c.first_atom;
   Alcotest.(check int) "all ten" 10 c.kept_atoms;
   Alcotest.(check bool) "the origin says no front" true
-    (c.origin = Keeper_carried_front.Whole_history);
+    (c.origin = Keeper_carried_front.Turn_start { end_atom = 0 });
   Alcotest.(check (option int)) "and no count rides along" None c.counted_tokens
 
 (* The history still has atom 6, but it opens with another message: atoms
@@ -94,15 +95,36 @@ let test_a_front_that_opens_with_another_message_is_dropped () =
   Alcotest.(check int) "from the first atom" 0 c.first_atom;
   Alcotest.(check int) "all twenty" 20 c.kept_atoms;
   Alcotest.(check bool) "the origin says no front" true
-    (c.origin = Keeper_carried_front.Whole_history)
+    (c.origin = Keeper_carried_front.Turn_start { end_atom = 0 })
 
-let test_without_a_front_everything_goes () =
+(* A history with no completed turn has a turn start of 0: everything it
+   has goes, and the origin says that is where the turn starts. *)
+let test_without_a_front_a_fresh_history_goes_whole () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
   let c = carried (carry messages) in
   Alcotest.(check int) "from the first atom" 0 c.first_atom;
   Alcotest.(check int) "all ten" 10 c.kept_atoms;
   Alcotest.(check bool) "the origin says so" true
-    (c.origin = Keeper_carried_front.Whole_history)
+    (c.origin = Keeper_carried_front.Turn_start { end_atom = 0 })
+
+(* No front on a history with completed turns: the range starts where the
+   last of them ended, so only this turn's own atoms go (RFC
+   keeper-context-window-in-tokens §13.4). A dropped front lands there too,
+   not at the oldest atom. *)
+let test_without_a_front_the_range_starts_at_the_turn_start () =
+  let messages = history ~exchanges:5 ~text_bytes:100 in
+  let c = carried (carry ~turn_start:6 messages) in
+  Alcotest.(check int) "from the turn start" 6 c.first_atom;
+  Alcotest.(check int) "this turn's four atoms" 4 c.kept_atoms;
+  Alcotest.(check bool) "the origin names the boundary" true
+    (c.origin = Keeper_carried_front.Turn_start { end_atom = 6 });
+  let long = history ~exchanges:1_600 ~text_bytes:1 in
+  let dropped = carried (carry ~front:(seed ~messages:long 3_100) ~turn_start:6 messages) in
+  Alcotest.(check int) "a dropped front starts over at the turn start, not at 0" 6
+    dropped.first_atom;
+  let past_the_end = carried (carry ~turn_start:40 messages) in
+  Alcotest.(check int) "a boundary past the newest atom still carries that atom" 9
+    past_the_end.first_atom
 
 (* The real forecast entrypoint reads a persisted meta, checkpoint and turn
    store. A recent-row limit for byte-composition readings must not also
@@ -508,7 +530,7 @@ let range ?preamble_bytes ~kept_atoms transmitted_bytes : Keeper_next_request_fo
   ; kept_atoms
   ; transmitted_bytes
   ; preamble_bytes
-  ; origin = Keeper_carried_front.Whole_history
+  ; origin = Keeper_carried_front.Turn_start { end_atom = 0 }
   ; counted_tokens = None
   }
 
@@ -819,8 +841,10 @@ let () =
             test_a_front_the_history_shrank_under_is_dropped
         ; Alcotest.test_case "a front that opens with another message is dropped" `Quick
             test_a_front_that_opens_with_another_message_is_dropped
-        ; Alcotest.test_case "without a front everything goes" `Quick
-            test_without_a_front_everything_goes
+        ; Alcotest.test_case "without a front a fresh history goes whole" `Quick
+            test_without_a_front_a_fresh_history_goes_whole
+        ; Alcotest.test_case "without a front the range starts at the turn start" `Quick
+            test_without_a_front_the_range_starts_at_the_turn_start
         ] )
     ; ( "assembly"
       , [ Alcotest.test_case "the assembly travels prompt, tools, history, wake, then context"

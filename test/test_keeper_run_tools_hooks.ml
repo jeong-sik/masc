@@ -747,6 +747,48 @@ let test_retained_observation_commits_through_production_hook () =
         (row |> member "planned_index" |> to_int))
 ;;
 
+(* The TUI files a turn's frames under the keeper turn its observation
+   names. The hooks already hold that id, so the observation carries it and
+   no consumer recomputes it from [total_turns]. *)
+let test_the_turn_observation_names_its_keeper_turn () =
+  with_temp_base_path @@ fun base_path ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  let hooks = Masc.Keeper_hooks_agent_core.make_hooks
+      ~config:(Masc.Workspace.default_config base_path)
+      ~meta_ref:(ref (make_meta "observation-keeper"))
+      ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~trace_id:"observation-trace" ~keeper_turn_id:2275
+      ~on_after_turn_ordinal:ignore () in
+  let after_turn = match hooks.Agent_core.Hooks.after_turn with
+    | Some hook -> hook | None -> fail "after_turn hook missing" in
+  let response : Agent_core.Types.api_response =
+    { id = "resp-observation"; model = "model"; stop_reason = Agent_core.Types.EndTurn
+    ; content = [ Agent_core.Types.Text "done" ]; usage = None; telemetry = None } in
+  let before = Masc.Sse.current_id () in
+  ignore (after_turn (Agent_core.Hooks.AfterTurn { turn = 0; response; tool_source_map = None }));
+  let observations =
+    Masc.Sse.get_events_after_for_test before
+    |> List.filter_map (fun (delivery : Masc.Sse.delivery) ->
+      match delivery.payload with
+      | `Assoc fields
+        when List.assoc_opt "type" fields = Some (`String "keeper_turn_observation") ->
+        Some fields
+      | _ -> None) in
+  match observations with
+  | [ fields ] ->
+    check (option int) "keeper_turn_id" (Some 2275)
+      (match List.assoc_opt "keeper_turn_id" fields with
+       | Some (`Int keeper_turn_id) -> Some keeper_turn_id
+       | Some _ | None -> None);
+    check (option int) "the session ordinal stays under turn" (Some 0)
+      (match List.assoc_opt "turn" fields with
+       | Some (`Int turn) -> Some turn
+       | Some _ | None -> None)
+  | observations -> failf "expected one observation, got %d" (List.length observations)
+;;
+
 let test_plain_tool_commits_before_hook_returns ~success () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
@@ -1676,6 +1718,9 @@ let () =
     ; ( "retained browser observation"
       , [ test_case "production hook retains roots until durable commit" `Quick
             test_retained_observation_commits_through_production_hook ] )
+    ; ( "turn observation"
+      , [ test_case "the turn observation names its keeper turn" `Quick
+            test_the_turn_observation_names_its_keeper_turn ] )
     ; ( "rejected_tool_calls"
       , [ test_case "autonomous plain success commits before completion" `Quick
             (test_plain_tool_commits_before_hook_returns ~success:true)

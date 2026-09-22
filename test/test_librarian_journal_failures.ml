@@ -80,16 +80,14 @@ let test_failure_round_trips () =
       ~trace_id:"trace-a"
       ~kind:Exact_execution_failure
       ~detail:"provider returned 503"
-      ~snapshot_present:true
-      ~cadence_deferred:true;
+      ~snapshot_present:true;
     match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Ok (Journal_failed entry) ] ->
       check (float 0.0) "recorded_at" 1_700_000_000.0 entry.recorded_at;
       check string "trace_id" "trace-a" entry.trace_id;
       check string "kind" "Exact_execution_failure" (kind_label entry.kind);
       check string "detail" "provider returned 503" entry.detail;
-      check bool "snapshot_present" true entry.snapshot_present;
-      check bool "cadence_deferred" true entry.cadence_deferred
+      check bool "snapshot_present" true entry.snapshot_present
     | [ Ok (Journal_committed _) ] -> fail "a failure decoded as a commit"
     | [ Error reason ] -> fail ("failure line did not decode: " ^ reason)
     | entries ->
@@ -107,8 +105,7 @@ let test_every_kind_round_trips () =
            ~trace_id:(Printf.sprintf "trace-%d" index)
            ~kind
            ~detail:"detail"
-           ~snapshot_present:false
-           ~cadence_deferred:false)
+           ~snapshot_present:false)
       all_kinds;
     let decoded =
       Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:100
@@ -129,7 +126,7 @@ let test_unknown_kind_is_an_error () =
   with_keepers_dir (fun keepers_dir ->
     append_raw
       ~keepers_dir
-      {|{"outcome":"failed","recorded_at":1.0,"trace_id":"t","kind":"quota_exhausted","detail":"d","snapshot_present":true,"cadence_deferred":false}|};
+      {|{"outcome":"failed","recorded_at":1.0,"trace_id":"t","kind":"quota_exhausted","detail":"d","snapshot_present":true}|};
     match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Error reason ] ->
       check
@@ -161,7 +158,7 @@ let test_unknown_outer_field_is_an_error () =
   with_keepers_dir (fun keepers_dir ->
     append_raw
       ~keepers_dir
-      {|{"outcome":"failed","recorded_at":1.0,"trace_id":"t","kind":"unhandled_exception","detail":"d","snapshot_present":false,"cadence_deferred":false,"unexpected":true}|};
+      {|{"outcome":"failed","recorded_at":1.0,"trace_id":"t","kind":"unhandled_exception","detail":"d","snapshot_present":false,"unexpected":true}|};
     match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Error reason ] ->
       check
@@ -183,8 +180,7 @@ let test_one_bad_line_does_not_hide_its_neighbours () =
       ~trace_id:"before"
       ~kind:Domain_output_invalid
       ~detail:"d"
-      ~snapshot_present:true
-      ~cadence_deferred:false;
+      ~snapshot_present:true;
     append_raw ~keepers_dir "{not json";
     Current.append_librarian_failure
       ~keepers_dir
@@ -193,8 +189,7 @@ let test_one_bad_line_does_not_hide_its_neighbours () =
       ~trace_id:"after"
       ~kind:Domain_output_invalid
       ~detail:"d"
-      ~snapshot_present:true
-      ~cadence_deferred:false;
+      ~snapshot_present:true;
     let shape =
       Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
       |> List.map (function
@@ -221,8 +216,7 @@ let test_limit_keeps_the_newest_lines_oldest_first () =
            ~trace_id:(Printf.sprintf "trace-%d" index)
            ~kind:Unhandled_exception
            ~detail:"d"
-           ~snapshot_present:false
-           ~cadence_deferred:false)
+           ~snapshot_present:false)
       [ 1; 2; 3; 4; 5 ];
     let traces =
       Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:2
@@ -244,8 +238,7 @@ let test_non_positive_limit_reads_nothing () =
       ~trace_id:"t"
       ~kind:Unhandled_exception
       ~detail:"d"
-      ~snapshot_present:false
-      ~cadence_deferred:false;
+      ~snapshot_present:false;
     check
       int
       "limit 0 is empty, not unbounded"

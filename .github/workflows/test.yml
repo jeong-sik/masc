@@ -197,8 +197,9 @@ jobs:
       # under, from the directories holding node, pnpm, python3, git, mkdir
       # and bash. Every one but pnpm is on the runner, so the suite failed
       # with "required test command is missing: pnpm" before reaching a
-      # single scenario -- in the only lane that runs it. The version is the
-      # one pr-check.yml and release.yml build the SPA with.
+      # single scenario. pr-check.yml's check job carries the same step for
+      # the pull requests that select this suite. The version is the one
+      # pr-check.yml and release.yml build the SPA with.
       - name: Make pnpm available to the suites that read a dashboard PATH
         run: corepack enable && corepack prepare pnpm@10.31.0 --activate
 

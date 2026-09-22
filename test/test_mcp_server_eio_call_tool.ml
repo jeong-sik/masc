@@ -861,6 +861,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (sse_payload |> U.member "type" |> U.to_string);
       check string "sse keeper name" keeper_name
         (sse_payload |> U.member "name" |> U.to_string);
+      check int "sse keeper turn id, the ledger row's" 1
+        (sse_payload |> U.member "keeper_turn_id" |> U.to_int);
       check string "sse tool name" "tool_execute"
         (sse_payload |> U.member "tool_name" |> U.to_string);
       check string "sse disposition" "failed"

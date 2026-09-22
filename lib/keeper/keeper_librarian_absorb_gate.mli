@@ -7,13 +7,14 @@
     out of the answer's [absorbed] list and stays current; the new claim is
     still applied. The rest are absorbed as the answer said.
 
-    The gate only ever narrows [absorbed]. When the model cannot be asked --
-    no key, the lane or the gate turned off -- the answer is applied as it
-    came, which is what happened before the gate. When it was asked and did
-    not answer -- a transport or decoding failure -- the answer is applied
-    except for what could not have been judged for its size
-    ({!request_bytes_limit}), which stays current: that part of the verdict
-    is the gate's own and does not depend on the model. *)
+    The gate only ever narrows [absorbed]. When the gate is declared off, or
+    the Keeper is excluded, the answer is applied as it came. When the gate is
+    declared on but cannot be asked -- the lane is off, or no destination is
+    armed -- nothing is absorbed and every source stays current. When an
+    enabled judgment fails, only completed positive verdicts authorize
+    absorption; unconfirmed sources stay current. New claims are still
+    applied in every case, so neither misconfiguration nor judgment failure
+    stops the Memory cycle. *)
 
 (** {1 Statements} *)
 
@@ -63,7 +64,7 @@ type judged =
   }
 
 type outcome =
-  | Open of
+  | Failed of
       { reason : string
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
@@ -71,14 +72,11 @@ type outcome =
       ; unjudged : Keeper_memory_os_types.absorbed_statement list
       ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
       }
-      (** the model stopped answering. What the gate had decided by then
-          stays decided: [unjudgeable] (too large to ask,
-          {!request_bytes_limit}) and [left] (a completed answer showed a
-          statement not conveyed) stay current; [absorbed] is the answer's
-          list without them, applied as answered. [conveyed] retains completed
-          positive verdicts separately from fail-open absorptions. [unjudged]
-          includes every source or claim classified as absent before requests,
-          including groups not visited after the failure. *)
+      (** Judgment failed. [absorbed] contains only [conveyed] sources for
+          which every statement was positively answered before the failure.
+          All other sources stay current. [left] records completed negative
+          evidence, [unjudgeable] records oversize inputs, and [unjudged]
+          records missing source/claim identities, including unvisited groups. *)
   | Judged of judged
 
 val conveyed_boundary : float
@@ -131,14 +129,14 @@ val judge
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { endpoint : string
-  ; model : string
+  { destinations : Typesafeai_client.destination_id list
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
-(** [endpoint] is already an observation URL without userinfo, query or
-    fragment. It is not the credential-bearing outbound destination. *)
+(** [destinations] are the armed destinations the request could be walked
+    through, in order and without their keys; [result] names the one that
+    answered and the ones passed over. *)
 
 type run_result =
   | Skipped of

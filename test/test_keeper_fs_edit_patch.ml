@@ -473,6 +473,7 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
              (Masc.Keeper_context_runtime.create
                 ~eio:false
                 ~system_prompt:"test")
+           ~keeper_turn_id:(fun () -> None)
            ()
        in
        let result = handler ~agent_core_invocation:invocation input in

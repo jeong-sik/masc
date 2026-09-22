@@ -14,12 +14,14 @@
     record counts the same history as an Agent Core one — read as
     [total_atoms - transmitted_atoms]; a lane walking to its next candidate
     starts from the range the last answered request carried rather than from
-    the whole history.
-    With neither, the caller has no atom to start from and carries the whole
-    history; the provider judges it, and the turn driver owns the one move a
-    refusal forces, which {!Halved_after_refusal} and
-    {!Evicted_after_refusal} name. These positions belong to the turn and
-    take precedence over an older front in a later candidate's ledger.
+    the oldest atom.
+    With neither, the range starts where the last completed turn on this
+    history ended ({!Turn_start}, RFC keeper-context-window-in-tokens §13.4):
+    this turn's own atoms go out and the atoms before them wait for the
+    Librarian. The turn driver owns the one move a refusal forces, which
+    {!Halved_after_refusal} and {!Evicted_after_refusal} name. These
+    positions belong to the turn and take precedence over an older front in
+    a later candidate's ledger.
 
     A front is a position: the atom index and the digest of the message that
     opens that atom
@@ -53,9 +55,17 @@ type seed =
 type origin =
   | Carried of source  (** The front came from a seed. *)
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
-  | Whole_history
-      (** No front to start from: everything, until the first usage on the
-          pair is counted or a refusal halves the range. *)
+  | Librarian_progress of { end_atom : int }
+      (** The Librarian's durable position: the atoms before [end_atom] are
+          read into memory, and nothing in the request summarizes them. Taken
+          when no saved continuity snapshot fits this history and the
+          position does (RFC keeper-context-window-in-tokens §13.6). *)
+  | Turn_start of { end_atom : int }
+      (** No absorbed point and no seed: the range begins where the last
+          completed turn on this history ended, so only this turn's own
+          atoms go out and the atoms before them wait for the Librarian
+          (§13.4). [end_atom] is 0 on a history with no completed turn,
+          where that is the short history a fresh keeper has. *)
 
 val of_ledger : Keeper_model_input_ledger.t -> seed option
 (** The ledger's front with the digest the ledger recorded for it; [None]
@@ -117,10 +127,15 @@ type seed_read =
         (** [None] when every record read decoded. A seed is looked for among
             the records that did, so [seed = None] with [Some _] here is
             "records unreadable", not "no record". *)
+  ; boundary_error : string option
+        (** A refusal from the turn-boundary store that defines the current
+            history generation. Kept separate from [unreadable], whose count
+            is only for TurnRecord rows. A boundary error admits no seed. *)
   }
 
 val no_seed_read : seed_read
-(** No seed and nothing unreadable: a caller that reads no records. *)
+(** No seed, unreadable record, or boundary error: a caller that reads no
+    records. *)
 
 val seed_read_of_rows
   :  trace_id:string
@@ -134,11 +149,16 @@ val read_seed
   -> keeper_name:string
   -> trace_id:string
   -> seed_read
-(** The last stored response observation on the trace, scanning newest first
-    until a match or the end of the retained store. Unobserved rows do not
-    hide an older seed. Storage order also resolves direct retries that
-    reuse a turn number. Unreadable rows visited before the match are counted;
-    rows older than the match are not read. Reads the record files on the
+(** The last stored response observation in the current history generation,
+    scanning newest first until a match, a different trace, or a turn at or
+    before the latest [History_restarted] boundary. The boundary is expressed
+    in the same [absolute_turn] coordinate as TurnRecord: it is the highest
+    completed turn preceding that restart in file order, never a wall-clock
+    comparison. Unobserved rows do not hide an older seed within that
+    generation. Storage order also resolves direct retries that reuse a turn
+    number. Unreadable rows visited before the match are counted; rows older
+    than the match or generation boundary are not read. A boundary-store read
+    failure returns no seed and is reported in [boundary_error]. Reads on the
     calling fiber; the turn driver calls it once per provider attempt, and
     only while the pair has no ledger. *)
 
@@ -178,5 +198,6 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [halved_after_refusal] or
-    [evicted_after_refusal] with [retry], or [whole_history]. *)
+    [halved_after_refusal] or [evicted_after_refusal] with [retry],
+    [librarian_snapshot] with [end_atom] and [boundary_line], or
+    [turn_start] with [end_atom]. *)

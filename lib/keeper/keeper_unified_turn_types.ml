@@ -205,9 +205,8 @@ let registry_failure_reason_of_internal_error ~detail = function
          })
   | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
-      (* RFC-0159 Phase A: typed [Internal_*] variants are not
-         runtime-exhaustion reasons; they map to opaque
-         internal-error events upstream. *)
+      (* Typed [Internal_*] variants are not runtime-exhaustion reasons; they
+         map to opaque internal-error events upstream. *)
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _

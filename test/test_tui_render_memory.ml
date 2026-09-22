@@ -131,6 +131,75 @@ let test_detail_lines () =
     (contains "Revised from 0" history)
 ;;
 
+(* #37017: a claim written as paragraphs and a list used to reach the pane as
+   one run with a printed \x0A at every break, cut mid-word at the edge. *)
+let multi_line_claim =
+  "The chat pane keeps the model's reply verbatim.\n\n**Why**:\n1. first reason\n\
+   2. second reason\x07 rings"
+
+(* The claim's rows are the ones between the block heading and the first
+   labelled field. The fixed-format rows under it (Origin and Timeline, File
+   SHA) are not wrapped by this change, so a 40-cell bound on them would be a
+   claim about something else. *)
+let claim_rows lines =
+  let plain = List.map Masc_tui_theme.strip_sgr lines in
+  let is_field line =
+    List.exists (fun label -> contains label line) [ "Category:"; "Bound Path:" ]
+  in
+  let rec take = function
+    | [] -> []
+    | line :: rest -> if is_field line then [] else line :: take rest
+  in
+  match plain with [] -> [] | _heading :: body -> take body
+
+let check_claim_rows ~what lines =
+  let raw_rows = claim_rows lines in
+  let rows = List.map String.trim raw_rows in
+  check bool (what ^ ": the claim has rows") true (rows <> []);
+  check bool (what ^ ": no newline is printed as \\x0A") false
+    (List.exists (contains "\\x0A") rows);
+  check bool (what ^ ": each line of the claim is its own row") true
+    (List.mem "**Why**:" rows && List.mem "1. first reason" rows);
+  check bool (what ^ ": the paragraph break stays a blank row") true
+    (List.mem "" rows);
+  check bool (what ^ ": other control bytes are still escaped") true
+    (List.exists (contains "\\x07") rows);
+  List.iter
+    (fun line ->
+      check bool (what ^ ": claim row bounded at 40 cells") true
+        (Layout.display_width line <= 40))
+    raw_rows;
+  List.iter
+    (fun word ->
+      check bool (what ^ ": " ^ word ^ " is not cut at the edge") true
+        (List.exists (contains word) rows))
+    [ "verbatim."; "reply"; "second" ]
+
+let test_detail_keeps_the_claim_line_breaks () =
+  let fact : Decode.memory_fact =
+    { mf_claim = multi_line_claim
+    ; mf_category = "rule"
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-lines-1"
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  check_claim_rows ~what:"fact"
+    (Render_memory.memory_fact_detail_lines ~cols:40 (Types.Memory_row_fact fact));
+  let sfact : Decode.memory_source_fact =
+    { msf_claim = multi_line_claim
+    ; msf_first_seen = 100.0
+    ; msf_path = "config/runtime.toml"
+    ; msf_sha256 = "abc123sha"
+    }
+  in
+  check_claim_rows ~what:"source-bound fact"
+    (Render_memory.memory_fact_detail_lines ~cols:40
+       (Types.Memory_row_source_fact sfact))
+;;
+
 let test_detail_lines_source_and_invalidation () =
   let sfact : Decode.memory_source_fact =
     { msf_claim = "Config specifies runtime ports"
@@ -241,7 +310,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_context_cycle =
-      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None }
+      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
       { Decode.mlh_state = Some "drained"
       ; mlh_detail = None
@@ -315,8 +384,11 @@ let test_render_memory_body_with_keepers () =
   let keeper = {keeper with mkh_context_cycle =
     {mcc_saved = Some {mcf_trace_id = "saved-trace"; mcf_end_atom = 5; mcf_boundary_line = 9};
      mcc_saved_unreadable = false;
+     mcc_synthesis = Some {Masc.Keeper_continuity_observation.observed_at=1000.;
+       trace_id=Some "saved-trace"; state=Masc.Keeper_continuity_observation.Not_committed;
+       range=Some {start_atom=5; end_atom=8; completed_end_atom=12}};
      mcc_prepared = Some {mcp_prepared_at = 1000.; mcp_runtime_id = "fixture-runtime";
-       mcp_input = Decode.Context_summarized {mcf_trace_id = "prepared-trace"; mcf_end_atom = 3; mcf_boundary_line = 6};
+       mcp_input = Decode.Context_absorbed {mcpo_trace_id = "prepared-trace"; mcpo_end_atom = 3};
        mcp_request_bytes = 2048}}} in
   let health : Decode.memory_health_snapshot =
     { mhs_generated_at = 1000.0
@@ -354,9 +426,13 @@ let test_render_memory_body_with_keepers () =
     ~push_divider:(fun () -> incr count)
     ~push_empty:(fun () -> incr count);
   let text = String.concat "\n" !lines in
+  check bool "synthesis stop and unfinished atom range are visible" true
+    (contains "Context synthesis · not_committed · last selected atoms [5,8) / observed completed 12" text);
   check bool "saved context shown independently" true (contains "Context saved · atom 5" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
   check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
+  check bool "an absorbed front names the position and says nothing summarizes it" true
+    (contains "absorbed to atom 3" text && contains "no summary" text);
   check bool "selected row was called" true !selected_called;
   check string "push_selected received stripped string" (Masc_tui_theme.strip_sgr !selected_str) !selected_str;
   check bool "rows rendered" true (!count > 0 && !count <= 20)
@@ -650,9 +726,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
    terminal gave 136 at 140 columns; the title really has 80. *)
 let facts_title_cells ~terminal_cols =
   let pane =
-    if Masc_tui_acting_pane.shown ~hidden:false ~cols:terminal_cols
-    then Masc_tui_acting_pane.pane_cols
-    else 0
+    Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols:terminal_cols
   in
   Masc_tui_frame.inner_width ~cols:(terminal_cols - pane)
 
@@ -1009,6 +1083,8 @@ let () =
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
         ; test_case "detail_lines_source_and_invalidation" `Quick test_detail_lines_source_and_invalidation
+        ; test_case "the detail keeps the claim's line breaks" `Quick
+            test_detail_keeps_the_claim_line_breaks
         ; test_case "every detail block starts its values in one column" `Quick
             test_every_detail_block_starts_its_values_in_one_column
         ] )

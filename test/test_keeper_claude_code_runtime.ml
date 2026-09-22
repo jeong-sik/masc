@@ -36,11 +36,7 @@ let generic_provider_rejection =
 ;;
 
 let prompt_too_long_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
-;;
-
-let prompt_too_long_statusless_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
 ;;
 
 (* CLI 2.1.278 refuses to send when its count reaches the window minus 3000:
@@ -1018,7 +1014,7 @@ let history_uses_current_schema history =
 
 let test_keeper_shrinks_history_after_statusless_context_error
     ?(native_gate=false)
-    ?(overflow_frames = [ prompt_too_long_statusless_result ])
+    ~overflow_frames
     () =
   let base_path = temp_workspace () in
   let first_system_marker = Filename.concat base_path "full-system.txt" in
@@ -1627,6 +1623,7 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
+                    ~turn_start:0
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
                     ~pre_tool_rejects:(ref [])
@@ -2071,12 +2068,13 @@ let seed_read_of records =
         ~trace_id:"trace-1"
         records
   ; unreadable = None
+  ; boundary_error = None
   }
 ;;
 
 (* What the Agent Core path composes for the same front, so the assertion is
    "the same range", not "this many atoms". *)
-let agent_core_range ~front messages =
+let agent_core_range ?(turn_start = 0) ~front messages =
   (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
      ~front
@@ -2084,6 +2082,7 @@ let agent_core_range ~front messages =
      ~last_resort:false
      ~base_path:""
      ~demote_before:0
+     ~completed_end_atom:turn_start
      messages)
     .Keeper_turn_driver_try_provider.projection
     .Runtime_model_input_tail_window.messages
@@ -2099,6 +2098,7 @@ let test_a_start_seed_begins_at_the_carried_front () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
+      ~turn_start:0
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2162,6 +2162,7 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
+      ~turn_start:0
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2184,15 +2185,16 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
          observation.Runtime_model_input_tail_window.transmitted_atoms)
 ;;
 
-(* Cold start: no record on this history names a front, so the range is the
-   whole history and the provider judges it. *)
-let test_a_cold_start_seed_carries_the_whole_history () =
+(* Cold start on a history with no completed turn: no record names a front
+   and the turn start is 0, so everything the history has goes. *)
+let test_a_cold_start_with_no_completed_turn_carries_everything () =
   let observed = ref None in
   let messages = start_seed_history () in
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read_of [])
+      ~turn_start:0
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2207,6 +2209,37 @@ let test_a_cold_start_seed_carries_the_whole_history () =
      | None -> fail "the projection reported no window"
      | Some observation ->
        check int "every atom went" 120
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* No record names a front but the history has completed turns: the range
+   starts where the last of them ended, this turn's own atoms, the same
+   place the Agent Core path starts (RFC keeper-context-window-in-tokens
+   §13.4). *)
+let test_a_cold_start_begins_at_the_turn_start () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read_of [])
+      ~turn_start:112
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~turn_start:112 ~front:None messages))
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "the reading counts the whole history" 120
+         observation.Runtime_model_input_tail_window.total_atoms;
+       check int "and says this turn's eight atoms went" 8
          observation.Runtime_model_input_tail_window.transmitted_atoms)
 ;;
 
@@ -2226,12 +2259,10 @@ let () =
             "Agent Core checkpoint starts official-client turn"
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
-        ; test_case
-            "shrinks history after statusless context error"
-            `Quick
-            (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:false)
         ; test_case "native Gate retains its session across overflow shrink" `Quick
-            (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:true)
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~native_gate:true
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
         ; test_case
             "shrinks history after the CLI's blocking_limit refusal"
             `Quick
@@ -2337,9 +2368,13 @@ let () =
             `Quick
             test_the_declared_ceiling_wins_when_it_cuts_deeper
         ; test_case
-            "a cold start seed carries the whole history"
+            "a cold start with no completed turn carries everything"
             `Quick
-            test_a_cold_start_seed_carries_the_whole_history
+            test_a_cold_start_with_no_completed_turn_carries_everything
+        ; test_case
+            "a cold start begins at the turn start"
+            `Quick
+            test_a_cold_start_begins_at_the_turn_start
         ] )
     ]
 ;;

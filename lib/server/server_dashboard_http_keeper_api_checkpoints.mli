@@ -33,6 +33,18 @@ type purge_report =
   ; tool_results_cleared : int
   }
 
+(** What an applied purge did to the keeper's continuity snapshot
+    ({!Keeper_librarian_continuity.remove}). A preview, a refused apply and
+    a no-op leave it [Snapshot_untouched]. *)
+type continuity_snapshot =
+  | Snapshot_untouched
+  | Snapshot_removed
+  | Snapshot_absent
+  | Snapshot_not_removed of string
+      (** The checkpoint and position are installed; the unlink failed. The
+          next turn starts at the position until the Librarian's next pass
+          replaces the snapshot. *)
+
 type purge_result =
   { keeper : string
   ; trace_id : string
@@ -41,6 +53,7 @@ type purge_result =
   ; backup_path : string option
   ; report : purge_report
   ; warnings : string list
+  ; continuity_snapshot : continuity_snapshot
   }
 
 type purge_error =
@@ -49,7 +62,17 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_librarian_coordinates_present
+  | Purge_librarian_position_unreadable of string
+      (** The Librarian progress file exists and cannot be read. Never taken
+          as "no position": that would let a rewrite pass over what it
+          holds. *)
+  | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
+  | Purge_librarian_cancel_failed of string
+      (** The server-owned lane could not be cancelled before either file was
+          replaced. *)
+  | Purge_librarian_position_not_written of string
+      (** The checkpoint was installed and the position write after it
+          failed. *)
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
@@ -59,10 +82,13 @@ val purge_error_to_string : purge_error -> string
 (** Deterministically preview or apply the fixed checkpoint purge policy.
     Preview is read-only and reports whether apply is currently allowed.
     Apply requires the Keeper to be fully absent from the runtime registry and
-    serializes that check with same-Keeper boot registration. A rewrite that
-    changes the History endpoint is refused while turn-boundary or Librarian
-    progress coordinates exist. The canonical checkpoint is installed only
-    if its exact source reference is unchanged. *)
+    serializes that check with same-Keeper boot registration. A rewrite is
+    refused while the Librarian has atoms left to read
+    ({!Keeper_checkpoint_purge.librarian_rebase}); otherwise apply cancels and
+    awaits the server-owned Librarian lane, installs the checkpoint, writes
+    the rebased position after it, and removes the continuity snapshot, whose
+    numbering the rewrite made stale. The canonical checkpoint is installed
+    only if its exact source reference is unchanged. *)
 val purge_current :
   Workspace.config ->
   keeper_name:string ->

@@ -193,6 +193,8 @@ let test_purge_plan_removes_the_progress_file () =
     (has Shutdown.Keeper_librarian_progress_artifact);
   check bool "plan removes the committed-range receipt" true
     (has Shutdown.Keeper_librarian_range_receipt_artifact);
+  check bool "plan removes an interrupted retraction plan" true
+    (has Shutdown.Keeper_memory_retraction_plan_artifact);
   check bool "plan removes the official-turn position" true
     (has Shutdown.Keeper_librarian_official_progress_artifact);
   check bool "and the log it is a position in" true

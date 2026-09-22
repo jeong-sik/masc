@@ -77,6 +77,21 @@ val composite_live_turn_started_epoch : Yojson.Safe.t -> float option
 val composite_live_turn_last_progress_epoch : Yojson.Safe.t -> float option
 val composite_execution_current_for_runtime_state :
   snapshot:Yojson.Safe.t -> execution:Yojson.Safe.t -> bool
+
+(** The closed set of [runtime_attention.state] wire values. The registry
+    judgment ({!composite_runtime_attention}) yields the first five; the
+    offline fallback for a keeper without a registry entry yields
+    [Attention_paused] or [Attention_offline]. *)
+type runtime_attention_state =
+  | Attention_blocked
+  | Attention_stop_requested
+  | Attention_idle_stale
+  | Attention_stale
+  | Attention_ok
+  | Attention_paused
+  | Attention_offline
+
+val runtime_attention_state_to_wire : runtime_attention_state -> string
 type composite_runtime_attention = {
   cra_is_live : bool;
   cra_fiber_stop_requested : bool;
@@ -90,7 +105,7 @@ type composite_runtime_attention = {
   cra_stale_without_live_turn : bool;
   cra_needs_attention : bool;
   cra_reason : string option;
-  cra_state : string;
+  cra_state : runtime_attention_state;
 }
 val composite_runtime_attention :
   snapshot:Yojson.Safe.t ->

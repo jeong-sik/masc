@@ -102,8 +102,6 @@ module KeeperMemoryOs : sig
       [Invalid] rather than being collapsed into [Disabled]. *)
 
   val recall_enabled : unit -> bool
-  val librarian_cadence_turns : unit -> int
-  val librarian_max_messages : unit -> int
 end
 
 (** {1 Keeper vision tool} *)

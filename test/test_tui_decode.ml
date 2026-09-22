@@ -468,6 +468,59 @@ let test_keeper_calls_require_the_envelope () =
                    ] )
              ])))
 
+(* [Keeper_tool_call_log]'s real durable record never writes a [success]
+   key -- only [wire_outcome], and sometimes [disposition]. A row naming
+   neither carries no success signal and still errors (the case above); a
+   row naming either must decode, or every real keeper's calls detail view
+   is unrenderable (#37461). *)
+let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
+  let row extra =
+    `Assoc
+      ([ "ts", `Float 1.0
+       ; "keeper", `String "largo"
+       ; "tool", `String "Read"
+       ]
+      @ extra)
+  in
+  let snapshot_of extra =
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         [ "keeper", `String "largo"
+         ; "count", `Int 1
+         ; "health", `String "ok"
+         ; "entries", `List [ row extra ]
+         ])
+  in
+  let success_of extra =
+    match snapshot_of extra with
+    | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
+    | Ok snapshot -> (
+      match snapshot.Tui_decode.kcs_entries with
+      | [ call ] -> call.Tui_decode.kc_success
+      | _ -> Alcotest.fail "expected one call")
+  in
+  Alcotest.(check bool) "wire_outcome ok reads as success" true
+    (success_of [ "wire_outcome", `String "ok" ]);
+  Alcotest.(check bool) "wire_outcome error reads as failure" false
+    (success_of [ "wire_outcome", `String "error" ]);
+  (* A wire that says it does not know the outcome is not evidence that the
+     call completed: unlike "ok"/"error" this spelling refuses instead of
+     defaulting to success (Unknown -> Permissive Default is the antipattern
+     the earlier fallback fell into; #37650 review caught it). *)
+  (match snapshot_of [ "wire_outcome", `String "unknown" ] with
+   | Ok _ -> Alcotest.fail "wire_outcome unknown must not decode to a call"
+   | Error detail ->
+     Alcotest.(check string) "the refusal names the unknown wire_outcome"
+       "entries[0]: keeper call wire_outcome is unknown" detail);
+  Alcotest.(check bool) "disposition completed reads as success" true
+    (success_of [ "disposition", `String "completed" ]);
+  Alcotest.(check bool) "disposition failed reads as failure" false
+    (success_of [ "disposition", `String "failed" ]);
+  Alcotest.(check bool) "disposition deferred is not a known failure" true
+    (success_of [ "disposition", `String "deferred" ]);
+  Alcotest.(check bool) "an explicit success still wins over wire_outcome" false
+    (success_of [ "success", `Bool false; "wire_outcome", `String "ok" ])
+
 let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string) "normal clock timestamp, in the zone asked for"
     "04:05:06"
@@ -3380,7 +3433,7 @@ let test_decode_repository_requires_resolved_local_path () =
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
 let empty_memory_context_cycle =
-  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null]
+  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null; "synthesis", `Null]
 
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
@@ -3443,7 +3496,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v6")
+      [ ("schema", `String "keeper.memory_os.current_health.v7")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
         , `List
@@ -3511,17 +3564,48 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
   let prepared = `Assoc ["prepared_at", `Float 1700000000.; "runtime_id", `String "fixture-runtime";
     "input", input; "request_bytes", `Int 2048] in
-  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared] in
+  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared; "synthesis", `Null] in
   let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
+  let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
+    "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
+      "end_atom", `Int 5; "completed_end_atom", `Int 20]] in
+  let with_synthesis = replace_field "synthesis" synthesis cycle in
+  (match Tui_decode.decode_memory_health_snapshot (context_payload with_synthesis) with
+   | Ok snapshot ->
+     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_synthesis with
+      | Some {state=Masc.Keeper_continuity_observation.Not_committed;
+          range=Some {start_atom=3;end_atom=5;completed_end_atom=20};_} -> ()
+      | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun invalid -> Alcotest.(check bool) "invalid synthesis cannot look caught up" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+      (context_payload (replace_field "synthesis" invalid cycle)))))
+    [replace_field "state" (`String "drained") synthesis;
+     replace_field "trace_id" `Null synthesis;
+     replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
   (match Tui_decode.decode_memory_health_snapshot (context_payload cycle) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
       | Some {mcp_input = Tui_decode.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
       | _ -> Alcotest.fail "prepared frontier or bytes lost")
    | Error detail -> Alcotest.fail detail);
+  let position = `Assoc ["trace_id", `String "context-trace"; "end_atom", `Int 7] in
+  let absorbed = `Assoc ["kind", `String "absorbed"; "frontier", position] in
+  (match Tui_decode.decode_memory_health_snapshot
+           (context_payload (replace_field "prepared" (replace_field "input" absorbed prepared) cycle)) with
+   | Ok snapshot ->
+     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
+      | Some {mcp_input = Tui_decode.Context_absorbed {mcpo_trace_id = "context-trace"; mcpo_end_atom = 7}; _} -> ()
+      | _ -> Alcotest.fail "absorbed position lost")
+   | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
     (Result.is_error (Tui_decode.decode_memory_health_snapshot (context_payload invalid))))
-    [ replace_field "saved_read_error" (`String "snapshot_unreadable") cycle
+    [ replace_field "prepared" (replace_field "input" (replace_field "frontier" frontier absorbed) prepared) cycle
+    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null absorbed) prepared) cycle
+    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" position input) prepared) cycle
+    ; replace_field "prepared" (replace_field "input"
+        (replace_field "frontier" (replace_field "end_atom" (`Int 0) position) absorbed) prepared) cycle
+    ; replace_field "saved_read_error" (`String "snapshot_unreadable") cycle
     ; replace_field "saved" (replace_field "end_atom" (`Int (-1)) frontier) cycle
     ; replace_field "prepared" (replace_field "request_bytes" (`Int (-1)) prepared) cycle
     ; replace_field "prepared" (replace_field "prepared_at" (`Float nan) prepared) cycle
@@ -3727,7 +3811,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v6")
+    [ ("schema", `String "keeper.memory_os.current_health.v7")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
       , `List
@@ -4545,30 +4629,49 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
    | Ok (Some Tui_decode.Jev_off) -> ()
    | Ok _ -> Alcotest.fail "off JEV state decoded to the wrong variant"
    | Error detail -> Alcotest.fail detail);
-  let enabled =
+  let destination uri model =
+    `Assoc [ "destination_uri", `String uri; "model", `String model ]
+  in
+  let configured destinations =
     replace_assoc_field "jev"
-      (`Assoc [ "state", `String "configured"; "model", `String "jev-next" ])
+      (`Assoc [ "state", `String "configured"; "destinations", `List destinations ])
       board
   in
-  (match decode_board enabled with
-   | Ok (Some (Tui_decode.Jev_configured { model })) ->
-     Alcotest.(check string) "enabled model" "jev-next" model
+  (* Two servers asked for the same model id stay two rows: the URL is what
+     tells them apart. *)
+  (match
+     decode_board
+       (configured
+          [ destination "https://jev.invalid/v1/systemone" "jev-next"
+          ; destination "https://reserve.invalid/api/v1/systemone" "jev-next"
+          ])
+   with
+   | Ok (Some (Tui_decode.Jev_configured { destinations })) ->
+     Alcotest.(check (list (pair string string))) "armed destinations, in walk order"
+       [ "https://jev.invalid/v1/systemone", "jev-next"
+       ; "https://reserve.invalid/api/v1/systemone", "jev-next"
+       ]
+       (List.map
+          (fun (d : Tui_decode.standalone_lane_jev_destination) ->
+             d.sljd_destination_uri, d.sljd_model)
+          destinations)
    | Ok _ -> Alcotest.fail "enabled JEV state decoded to the wrong variant"
    | Error detail -> Alcotest.fail detail);
   List.iter
-    (fun model ->
-       let blank =
-         replace_assoc_field "jev"
-           (`Assoc [ "state", `String "configured"; "model", `String model ])
-           board
-       in
-       match decode_board blank with
-       | Ok _ -> Alcotest.fail "a blank JEV model decoded"
+    (fun (destinations, expected) ->
+       match decode_board (configured destinations) with
+       | Ok _ -> Alcotest.fail "an empty or blank JEV destination list decoded"
        | Error detail ->
-         Alcotest.(check bool) "blank model fails closed" true
-           (String_util.contains_substring detail
-              "JEV model must be a non-empty string"))
-    [ ""; " \t " ];
+         Alcotest.(check bool) ("fails closed: " ^ expected) true
+           (String_util.contains_substring detail expected))
+    [ [], "JEV destinations must name at least one server"
+    ; ( [ destination "https://jev.invalid/v1/systemone" " \t " ]
+      , "destinations[0]: field 'model' must be a non-blank string" )
+    ; ( [ destination "https://jev.invalid/v1/systemone" "jev-next"; destination "" "jev-next" ]
+      , "destinations[1]: field 'destination_uri' must be a non-blank string" )
+    ; ( [ `Assoc [ "destination_uri", `String "https://jev.invalid/v1/systemone" ] ]
+      , "destinations[0]: missing required field 'model'" )
+    ];
   List.iter
     (fun (state, expected) ->
        let unavailable =
@@ -9949,6 +10052,8 @@ let () =
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick
           test_keeper_calls_require_the_envelope
+      ; Alcotest.test_case "success falls back to wire_outcome or disposition" `Quick
+          test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition
       ; Alcotest.test_case "carries what the call answered" `Quick
           test_keeper_calls_carry_what_the_call_answered
       ] );

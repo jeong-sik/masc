@@ -1062,6 +1062,7 @@ let run_turn
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () -> Keeper_run_tools.prepare_agent_setup
+      ?dynamic_context_for_tools:prompt_ctx.dynamic_context_for_tools
       ?repetition_execution
       ~config
       ~meta
@@ -1201,6 +1202,8 @@ let run_turn
     let history_messages_digest =
       digest_message_texts_as_joined history_messages
     in
+    (* These fingerprints describe the prepared source. Late tool-aware
+       projection is recorded by the actual request blocks and capture. *)
     let context_digest =
       digest_text
         (base_system_prompt ^ turn_system_prompt ^ dynamic_context
@@ -1224,6 +1227,8 @@ let run_turn
                 , `String (digest_text turn_system_prompt) )
               ; ( "dynamic_context_digest"
                 , `String (digest_text dynamic_context) )
+              ; ( "dynamic_context_projection_pending"
+                , `Bool (Option.is_some prompt_ctx.dynamic_context_for_tools) )
               ; ( "temporal_context_digest"
                 , `String (digest_text temporal_context) )
               ; "history_message_count", `Int (List.length history_messages)
@@ -1600,6 +1605,7 @@ let run_turn
                   ~checkpoint:resume_agent_core_checkpoint
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
+                      ~input_policy:meta.input_policy
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
@@ -1651,7 +1657,10 @@ let run_turn
                       ?official_task_reference
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
-                      ?event_bus
+                      ?event_bus:
+                        (Option.map
+                           (Keeper_turn_scope.bus ~keeper_turn_id:manifest_keeper_turn_id)
+                           event_bus)
                       ?trace_link
                       ~on_runtime_attempt:
                         (fun attempt ->

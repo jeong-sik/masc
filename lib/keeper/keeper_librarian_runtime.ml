@@ -8,95 +8,6 @@ let input_trace_id (inp : Keeper_librarian.input) =
   Ids.Turn_ref.trace_id inp.turn_ref
 ;;
 
-let cadence_turns () =
-  Env_config.KeeperMemoryOs.librarian_cadence_turns ()
-;;
-
-let cadence_mu = Eio.Mutex.create ()
-let cadence_counters : (string, string * int) Hashtbl.t = Hashtbl.create 16
-let fresh_counter = -1
-
-let cadence_step ~cadence ~counter =
-  if cadence <= 1
-  then 0, true
-  else if counter < 0
-  then cadence, true
-  else (
-    let next = counter + 1 in
-    if next >= cadence then cadence, true else next, false)
-;;
-
-let cadence_step_keyed ~cadence ~current_trace ~prior =
-  let counter =
-    match prior with
-    | Some (trace, counter) when String.equal trace current_trace -> counter
-    | Some _ | None -> fresh_counter
-  in
-  let updated, due = cadence_step ~cadence ~counter in
-  (current_trace, updated), due
-;;
-
-let cadence_due ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    let prior = Hashtbl.find_opt cadence_counters keeper_id in
-    let value, due =
-      cadence_step_keyed
-        ~cadence:(cadence_turns ())
-        ~current_trace:trace_id
-        ~prior
-    in
-    Hashtbl.replace cadence_counters keeper_id value;
-    due)
-;;
-
-let cadence_record_success ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-let cadence_record_attempt ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-let cadence_counter_entries () =
-  Eio_guard.with_mutex_ro cadence_mu (fun () ->
-    Hashtbl.length cadence_counters)
-;;
-
-let max_messages () =
-  Env_config.KeeperMemoryOs.librarian_max_messages ()
-;;
-
-let prompt_max_messages () =
-  max_messages () * cadence_turns ()
-;;
-
-let select_recent_messages ~max_messages messages =
-  let max_messages = max 0 max_messages in
-  let drop_count = max 0 (List.length messages - max_messages) in
-  let rec drop remaining = function
-    | messages when remaining <= 0 -> messages
-    | [] -> []
-    | _ :: rest -> drop (remaining - 1) rest
-  in
-  drop drop_count messages
-;;
-
-let prompt_input_for_librarian (inp : Keeper_librarian.input) =
-  let max_messages = prompt_max_messages () in
-  { inp with
-    messages =
-      select_recent_messages
-        ~max_messages
-        inp.messages
-  ; counterpart_observations =
-      select_recent_messages
-        ~max_messages
-        inp.counterpart_observations
-  }
-;;
-
 let message role text =
   Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
@@ -268,7 +179,16 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
+(* Completed-history synthesis and pending-input organization own different
+   sources and stores. A continuity pass must neither organize nor publish the
+   live queue; its source is the exact prepared checkpoint interval. *)
+let input_for_continuity continuity (input : Keeper_librarian.input) =
+  match continuity with
+  | None -> input
+  | Some _ -> { input with working_context = Keeper_librarian_context.empty }
+
 let resolve_librarian_prompt ?continuity input =
+  let input = input_for_continuity continuity input in
   let variables = Keeper_librarian.prompt_variables input in
   let variables = match continuity with None -> variables | Some prepared ->
     ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
@@ -282,15 +202,14 @@ let resolve_librarian_prompt ?continuity input =
 ;;
 
 let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
-  let input = prompt_input_for_librarian inp in
   let open Result.Syntax in
   (* One asset, one message: the librarian's role statement lives at the top
      of the selection prompt it is rendered with, so there is no second file
      to keep in step. *)
   let+ prompt =
-    render_librarian_prompt input
+    render_librarian_prompt inp
   in
-  input, prompt
+  inp, prompt
 ;;
 
 let messages_and_input_for_librarian inp =
@@ -323,9 +242,11 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let librarian_output_requirement =
-  Exact_output.make_output_requirement
-    ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+let librarian_output_requirement continuity =
+  let schema = match continuity with
+    | None -> Keeper_structured_output_schema.librarian_current_output_schema
+    | Some _ -> Keeper_structured_output_schema.librarian_continuity_output_schema in
+  Exact_output.make_output_requirement ~schema
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
@@ -344,13 +265,13 @@ let slot_reason_pairs ?(sep = "; ") (unusable : (string * string) list) : string
     (List.map (fun (slot_id, reason) -> slot_id ^ ": " ^ reason) unusable)
 ;;
 
-let project_slot ~(slot : Runtime_exact_output_registry.selected_slot) ~messages :
+let project_slot ~requirement ~(slot : Runtime_exact_output_registry.selected_slot) ~messages :
   slot_projection =
   match
     Exact_output.project_request_body
       ~target:slot.admitted_target
       ~messages
-      librarian_output_requirement
+      requirement
   with
   | Error error -> Slot_unusable (Exact_output.admission_error_reason error)
   | Ok (_ : Exact_output.request_body_projection) -> Slot_admitted
@@ -365,7 +286,7 @@ type preflight_selection =
    slots it is without, or the error naming every refusal when no slot
    projects. An empty ladder reports nothing -- the production caller routes
    an empty slot list to the cli lane before it gets here. *)
-let preflight_slots ~selected_slots ~messages =
+let preflight_slots ~requirement ~selected_slots ~messages =
   match selected_slots with
   | [] -> Ok { selected_slots = []; unusable = [] }
   | (first : Runtime_exact_output_registry.selected_slot) :: _ ->
@@ -373,7 +294,7 @@ let preflight_slots ~selected_slots ~messages =
       List.fold_left
         (fun (selected_slots, unusable)
              (slot : Runtime_exact_output_registry.selected_slot) ->
-           match project_slot ~slot ~messages with
+           match project_slot ~requirement ~slot ~messages with
            | Slot_admitted -> slot :: selected_slots, unusable
            | Slot_unusable reason ->
              selected_slots, (slot.slot_id, reason) :: unusable)
@@ -420,7 +341,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     , resolved.Runtime_exact_output_registry.cli_slots )
 ;;
 
-let prepare_attempt ~selected_slots messages =
+let prepare_attempt ~requirement ~selected_slots messages =
   let open Result.Syntax in
   let* candidates =
     flow_candidates selected_slots
@@ -434,7 +355,7 @@ let prepare_attempt ~selected_slots messages =
             (No_admitted_lane_slots { lane_id = exact_lane_id })))
   | first :: rest ->
     let* snapshot =
-      Exact_output.snapshot_flow ~first ~rest ~messages librarian_output_requirement
+      Exact_output.snapshot_flow ~first ~rest ~messages requirement
       |> Result.map_error (fun error ->
         Exact_setup_failed (Exact_flow_snapshot_failed error))
     in
@@ -457,15 +378,37 @@ let capacity_refused_by_flow = function
   | _ -> false
 ;;
 
+type capacity_refusal =
+  | Input_limit_unknown
+  | Cli_input_limit of Keeper_lane_cli_oneshot.input_capacity
+
 let extraction_capacity_refused = function
-  | Exact_execution_failed error -> error.capacity_refused
+  | Exact_execution_failed error ->
+    if error.capacity_refused then Some Input_limit_unknown else None
   | Cli_slots_exhausted { failures; _ } ->
     (match List.rev failures with
-     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity_refused final
-     | [] -> false)
+     | final :: _ -> Keeper_lane_cli_oneshot.input_capacity final
+       |> Option.map (fun limit -> Cli_input_limit limit)
+     | [] -> None)
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
-  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> false
+  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> None
+;;
+
+let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
+  let open Result.Syntax in
+  let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
+    |> Result.map_error extraction_error_to_string in
+  if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
+  then Ok (Some prepared)
+  else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
+    let input = {input with Keeper_librarian.messages =
+      Keeper_librarian_continuity.messages continuity} in
+    let* material = snd (resolve_librarian_prompt ~continuity input) in
+    let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
+      ~requirement:(librarian_output_requirement (Some continuity)) ~prompt:material.rendered in
+    let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
+    Ok (actual_chars <= capacity.capacity.max_chars))
 ;;
 
 let exact_execution_error error =
@@ -500,7 +443,22 @@ type cli_fallback_failure =
   | Fitted_prompt_unavailable
   | Slot_failures of Keeper_lane_cli_oneshot.failure list
 
+(* A continuity pass must produce both Memory disposition and its saved
+   working state before either may be published. Ordinary Memory extraction
+   has no continuity obligation and still accepts an absent working state. *)
+let validate_selection ?continuity selected_input output =
+  let open Result.Syntax in
+  let* selection = Keeper_librarian.selection_of_json_result selected_input output in
+  match continuity, selection.Keeper_librarian.working_state with
+  | Some _, None ->
+    Error (Keeper_librarian.Working_state_invalid
+      "continuity requires a nonblank working_state")
+  | None, _ | Some _, Some _ -> Ok selection
+;;
+
 let try_cli_slots
+      ~requirement
+      ~continuity
       ~keeper_id
       ~base_path
       ~cli_runner
@@ -520,10 +478,10 @@ let try_cli_slots
             ~base_dir:base_path
             ~cli_slots
             ~system_prompt:""
-            ~requirement:librarian_output_requirement
+            ~requirement
             ~prompt
             ~validate:(fun output ->
-              Keeper_librarian.selection_of_json_result selected_input output
+              validate_selection ?continuity selected_input output
               |> Result.map (fun selection -> selection, output)
               |> Result.map_error Keeper_librarian.parse_error_to_string)
             ~on_failure:(fun failure ->
@@ -549,6 +507,7 @@ let with_cli_failure prior_error = function
 ;;
 
 let execute_exact_output_classified
+      ~continuity
       ?cli_runner
       ~clock
       ~net
@@ -560,12 +519,13 @@ let execute_exact_output_classified
   =
   let open Result.Syntax in
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  let requirement = librarian_output_requirement continuity in
   match selected_slots with
   | [] ->
     (* Registry publication rejects a lane with neither transport, and lane
        resolution rejects a lane with no admitted transport. Keep this final
        classification defensive in case either upstream contract changes. *)
-    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+    (match try_cli_slots ~requirement ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
      | Error No_cli_slots -> Error No_transport_declared
@@ -574,11 +534,11 @@ let execute_exact_output_classified
      | Error Fitted_prompt_unavailable ->
        Error (Cli_prompt_unavailable { prior_error = None }))
   | _ :: _ ->
-  match preflight_slots ~selected_slots ~messages with
+  match preflight_slots ~requirement ~selected_slots ~messages with
   | Error error ->
     (* No API slot can project this request. The independently admitted CLI
        slots still own a chance to answer, just as after API exhaustion. *)
-    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+    (match try_cli_slots ~requirement ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) ->
        Log.Keeper.warn ~keeper_name:keeper_id
@@ -592,11 +552,11 @@ let execute_exact_output_classified
        "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
        exact_lane_id
        (slot_reason_pairs ~sep:", " preflight.unusable));
-  let* attempt = prepare_attempt ~selected_slots:preflight.selected_slots messages in
+  let* attempt = prepare_attempt ~requirement ~selected_slots:preflight.selected_slots messages in
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in
     match
-      Keeper_librarian.selection_of_json_result
+      validate_selection ?continuity
         selected_input
         output.output
     with
@@ -629,6 +589,8 @@ let execute_exact_output_classified
      | Exact_output.Advanceable_candidates_exhausted ->
        (match
           try_cli_slots
+            ~requirement
+            ~continuity
             ~keeper_id
             ~base_path
             ~cli_runner
@@ -655,6 +617,8 @@ let execute_exact_output_classified
     in
     (match
        try_cli_slots
+         ~requirement
+         ~continuity
          ~keeper_id
          ~base_path
          ~cli_runner
@@ -684,7 +648,7 @@ let execute_exact_output_classified
    undiagnosable from disk afterwards. Every failure path routes here so the
    log severity and the recorded line resolve snapshot presence from the same
    read and cannot disagree about one instant. *)
-let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_deferred =
+let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
   let snapshot_absent =
     match
       Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -710,8 +674,7 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_defe
       ~trace_id
       ~kind
       ~detail
-      ~snapshot_present:(not snapshot_absent)
-      ~cadence_deferred)
+      ~snapshot_present:(not snapshot_absent))
 ;;
 
 let current_selection_registry_summary = function
@@ -810,19 +773,7 @@ let context_write_json = function
   | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
 ;;
 
-type trigger = Conversation_completed | Queue_changed | Durable_range
-
 type write_scope = Context_only | Context_and_memory
-
-type input_projection =
-  | Recent_window
-  | Already_selected_range
-
-let input_for_projection projection input =
-  match projection with
-  | Recent_window -> prompt_input_for_librarian input
-  | Already_selected_range -> input
-;;
 
 let commit_continuity ~commit ~observe =
   (* The executor job has its own cancellation scope. Keep its caller alive
@@ -834,12 +785,10 @@ let commit_continuity ~commit ~observe =
 ;;
 
 let run_best_effort
-      ?(trigger = Conversation_completed)
-      ?(input_projection = Recent_window)
       ?(write_scope = Context_and_memory)
       ?continuity
       ?(on_memory_committed = fun () -> ())
-      ?(on_capacity_refused = fun () -> ())
+      ?(on_capacity_refused = fun _ -> ())
       ?(on_continuity_committed = fun _ -> ())
       ?durable_range_id
       ?official_range_id
@@ -851,11 +800,6 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  if
-    (match trigger with
-     | Queue_changed | Durable_range -> true
-     | Conversation_completed -> cadence_due ~keeper_id ~trace_id)
-  then (
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
@@ -868,7 +812,7 @@ let run_best_effort
           | None -> 0
           | Some current -> List.length current.facts
         in
-        let prompt_input = input_for_projection input_projection inp in
+        let prompt_input = input_for_continuity continuity inp in
         let prompt_variables, prompt_material =
           resolve_librarian_prompt ?continuity prompt_input
         in
@@ -940,6 +884,7 @@ let run_best_effort
              in
              let* (selection, exact_output), selected_slot =
                execute_exact_output_classified
+                 ~continuity
                  ?cli_runner
                  ~clock
                  ~net
@@ -953,6 +898,9 @@ let run_best_effort
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
                 Keeper; original sources remain pending throughout. *)
+             (match continuity with
+             | Some _ -> ()
+             | None ->
              let context_review = Keeper_librarian_context_review.run
                ~observe:(fun observation -> observed_context_review := Some observation)
                ~clock ~keeper_id ~input:inp.working_context
@@ -1000,7 +948,7 @@ let run_best_effort
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context commit failed independently of memory: %s" (Printexc.to_string exn)));
+                  "working context commit failed independently of memory: %s" (Printexc.to_string exn))));
              let publish_continuity () =
                match continuity, selection.working_state with
               | None, _ -> ()
@@ -1036,8 +984,10 @@ let run_best_effort
                 never mentions is one it never saw. *)
              (* An absorption the merged claim does not convey is not applied:
                 that memory stays current (RFC-librarian-absorb-gate). The
-                gate only narrows the list; without a key or an answer it is
-                the answer's list. *)
+                gate only narrows the list. A gate switched off, or an
+                excluded Keeper, leaves the answer unchanged; a gate that is
+                on but cannot be asked absorbs nothing; a failed judgment
+                retains unconfirmed originals. *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
@@ -1110,7 +1060,6 @@ let run_best_effort
                ~selected_slot
                Exact_lane_run_registry.Succeeded
                (completed_output ~inp ~exact_output ~absorb_gate snapshot);
-             cadence_record_success ~keeper_id ~trace_id;
              Log.Keeper.info
                ~keeper_name:keeper_id
                "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
@@ -1122,7 +1071,7 @@ let run_best_effort
                 normally. Propagate it here even when no later I/O yields. *)
              Eio.Fiber.check ()
            | Error error ->
-             if extraction_capacity_refused error then on_capacity_refused ();
+             Option.iter on_capacity_refused (extraction_capacity_refused error);
              let detail = extraction_error_to_string error in
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)
@@ -1142,16 +1091,9 @@ let run_best_effort
                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
                ();
-             (* Every failure defers the next pass by the full cadence. The
-                old split re-ran the "safe to retry" classes (setup, prompt
-                render, no-outward-effect execution, snapshot write) on EVERY
-                subsequent turn, because a due pass leaves the counter at the
-                cadence value — but those classes are exactly the ones that
-                tend to persist (an unpublished registry, a broken template),
-                so the lane burned its heaviest prompt each turn for as long
-                as the condition lasted. A three-turn delay on recovery is
-                the cheaper side of that trade. *)
-             cadence_record_attempt ~keeper_id ~trace_id;
+             (* A failed pass leaves the read position where it was; the next
+                signal on this keeper reads the same range again. Nothing here
+                schedules that retry or holds it back. *)
              record_failure
                ~keepers_dir
                ~keeper_id
@@ -1161,8 +1103,7 @@ let run_best_effort
                  (Printf.sprintf
                     "memory os librarian failed lane=%s: %s"
                     exact_lane_id
-                    detail)
-               ~cadence_deferred:true;
+                    detail);
              Eio.Fiber.check ()
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
@@ -1196,9 +1137,6 @@ let run_best_effort
                if not run_completed then
                  complete ~selected_slot Exact_lane_run_registry.Cancelled
                    (completed_output ~inp ~exact_output ~absorb_gate snapshot);
-               (* Cadence follows the Memory commit, even when the remaining
-                  side effects of the pass did not all finish. *)
-               cadence_record_success ~keeper_id ~trace_id;
                Log.Keeper.warn
                  ~keeper_name:keeper_id
                  "memory os librarian cancelled after snapshot commit revision=%d; post-commit work may be incomplete"
@@ -1216,13 +1154,10 @@ let run_best_effort
                  ~detail:
                    (Printf.sprintf
                       "memory os librarian cancelled lane=%s"
-                      exact_lane_id)
-                   (* Cancellation is not the pass declining its own turn, so the
-                      cadence counter remains due. A later turn can schedule a
-                      new pass, but it does not replay this immutable input;
-                      graceful lifecycle boundaries therefore drain accepted
-                      work instead of cancelling it. *)
-                 ~cadence_deferred:false);
+                      exact_lane_id));
+           (* A later signal reads the same position again, but it does not
+              replay this immutable input; graceful lifecycle boundaries
+              therefore drain accepted work instead of cancelling it. *)
            raise exn
          | exn ->
            complete
@@ -1246,7 +1181,6 @@ let run_best_effort
             (Printf.sprintf
                "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
                exact_lane_id)
-          ~cadence_deferred:false
     with
     | Eio.Cancel.Cancelled _ as error -> raise error
     | exn ->
@@ -1264,7 +1198,6 @@ let run_best_effort
              "memory os librarian failed lane=%s: %s"
              exact_lane_id
              (Printexc.to_string exn))
-        ~cadence_deferred:false)
 ;;
 
 module For_testing = struct
@@ -1274,6 +1207,5 @@ module For_testing = struct
   let classified_error_kind = extraction_error_kind
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
-  let input_for_projection = input_for_projection
   let commit_continuity = commit_continuity
 end

@@ -6,6 +6,23 @@ module Librarian = Keeper_librarian
 module Memory = Keeper_memory_os_types
 module Runtime = Keeper_librarian_runtime
 
+let contains ~needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec scan index =
+    if index + n > h
+    then false
+    else String.equal (String.sub haystack index n) needle || scan (index + 1)
+  in
+  n = 0 || scan 0
+;;
+
+let ordinary_requirement =
+  Agent_core.Exact_output.make_output_requirement
+    ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+    ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path
   then
@@ -235,7 +252,6 @@ let test_context_commits_when_memory_store_fails () =
     }
   in
   Runtime.run_best_effort
-    ~trigger:Runtime.Queue_changed
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
   check int "the exact provider ran" 1 (Fixture.post_count server);
   (match Keeper_librarian_context.read ~keepers_dir ~keeper_id with
@@ -342,7 +358,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
     publish [ "librarian-first"; "librarian-bad" ]
   in
   (match
-     Runtime.preflight_slots ~selected_slots ~messages:[ message "one small prompt" ]
+     Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots ~messages:[ message "one small prompt" ]
    with
    | Ok preflight ->
      check (list string)
@@ -351,15 +367,32 @@ let test_excluded_last_slot_preserves_domain_failure () =
        (List.map
           (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
           preflight.Runtime.selected_slots);
-     check (list (pair string string))
+     (* The slot id the run is without, and what that slot refused. The reason
+        is the operator's only account of why a lane is one slot short, so it
+        carries the provider config's own sentence, not just the kind. *)
+     check (list string)
        "the refused slot is reported, not fatal"
-       [ ("librarian-bad", "wire_admission_rejected:target_request_rejected") ]
-       preflight.Runtime.unusable
+       [ "librarian-bad" ]
+       (List.map fst preflight.Runtime.unusable);
+     (match preflight.Runtime.unusable with
+      | [ (_, reason) ] ->
+        check bool
+          "the refusal names its kind"
+          true
+          (String.starts_with
+             ~prefix:"wire_admission_rejected:target_request_rejected("
+             reason);
+        check bool
+          "and carries what the config refused"
+          true
+          (contains ~needle:"masc-exact-fixture-model" reason)
+      | unusable ->
+        failf "expected one refused slot, got %d" (List.length unusable))
    | Error error ->
      fail (Runtime.extraction_error_to_string error));
   with_temp_base "librarian-preflight-execution" @@ fun base_path ->
   (match
-     Runtime.For_testing.execute_exact_output_classified
+     Runtime.For_testing.execute_exact_output_classified ~continuity:None
        ~clock
        ~net
        ~base_path
@@ -381,7 +414,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
      check int "the only usable slot was attempted" 1 (Fixture.post_count first));
   let selected_slots = publish [ "librarian-bad" ] in
   match
-    Runtime.preflight_slots ~selected_slots ~messages:[ message "one small prompt" ]
+    Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots ~messages:[ message "one small prompt" ]
   with
   | Ok _ -> fail "a ladder with no projectable slot passed pre-flight"
   | Error error ->
@@ -400,7 +433,7 @@ let test_an_empty_ladder_reports_nothing () =
       ~role:Agent_core.Types.User
       [ Agent_core.Types.Text "one small prompt" ]
   in
-  match Runtime.preflight_slots ~selected_slots:[] ~messages:[ message ] with
+  match Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots:[] ~messages:[ message ] with
   | Ok preflight ->
     check int "no selected slots" 0 (List.length preflight.Runtime.selected_slots);
     check (list (pair string string)) "nothing to exclude" [] preflight.Runtime.unusable

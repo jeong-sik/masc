@@ -140,7 +140,7 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~front ~counted_tokens messages =
+let carry ~measure ~front ~turn_start ~counted_tokens messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
   let first_atom, origin, counted_tokens =
@@ -150,7 +150,11 @@ let carry ~measure ~front ~counted_tokens messages =
       , Keeper_carried_front.Carried seed.source
       , counted_tokens )
     | Some (Error (Keeper_carried_front.Front_atom_missing | Keeper_carried_front.Front_message_differs))
-    | None -> 0, Keeper_carried_front.Whole_history, None
+    | None ->
+      (* No front: this turn's own atoms, from the end of the last completed
+         turn on this history (RFC keeper-context-window-in-tokens §13.4). *)
+      let first_atom = Keeper_carried_front.clamp ~atom_count turn_start in
+      first_atom, Keeper_carried_front.Turn_start { end_atom = first_atom }, None
   in
   let projection, transmitted_bytes =
     Runtime_model_input_tail_window.project_from_atom
@@ -386,6 +390,7 @@ let candidate
       ~readings
       ~records_read
       ~seed
+      ~turn_start
       ~place
       runtime_id
   =
@@ -420,6 +425,7 @@ let candidate
         (carry
            ~measure:(Keeper_context_core.message_measurer ())
            ~front
+           ~turn_start
            ~counted_tokens
            messages)
   in
@@ -464,6 +470,12 @@ let forecast ~config ~keeper_name =
        let now = Unix.gettimeofday () in
        let records, records_read = records_of_store ~config ~keeper_name in
        let readings = readings_of_records records in
+       (* Where a candidate with no front starts: the end of the last
+          completed turn on this history, as the driver reads it. *)
+       let turn_start =
+         Keeper_turn_driver_try_provider.turn_start
+           ~config ~keeper_name ~trace_id ~messages:history
+       in
        (* Stdlib lazy: private to this synchronous candidate walk, never
           shared across fibers. A valid warm ledger needs no store scan;
           cold candidates share the one read when they need it. *)
@@ -487,6 +499,7 @@ let forecast ~config ~keeper_name =
                     ~readings
                     ~records_read
                     ~seed
+                    ~turn_start
                     ~place:
                       { walks_at
                       ; declared_at = declared_at ~declared runtime_id

@@ -95,6 +95,14 @@ val walk
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
     from "declared and exhausted" by the list it passed in. *)
 
-val input_capacity_refused : failure -> bool
-(** Whether the official client structurally rejected the input size. Diagnostic
-    prose and generic invalid-parameter errors are not capacity evidence. *)
+val prompt_with_schema :
+  requirement:Agent_core.Exact_output.output_requirement -> prompt:string -> string
+(** The exact text submitted by [run], including its schema instructions. *)
+
+type input_capacity =
+  { runtime_id : string
+  ; capacity : Runtime_codex_app_server.input_capacity
+  }
+val input_capacity : failure -> input_capacity option
+(** Server-reported capacity for the failed official-client slot, never inferred
+    from diagnostic prose or generic invalid parameters. *)

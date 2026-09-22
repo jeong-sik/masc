@@ -170,7 +170,7 @@ candidates = ["overflow.sample", "fixture.sample"]
       latest.Turn_record.runtime_profile
   | [] -> fail "the fallback response observation is missing"
 
-let test_the_runtime_demotes_historical_tool_results () =
+let test_historical_tool_results ~completed ~reader_available () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -235,9 +235,21 @@ streaming = false
            })
   in
   let historical_payload = String.make 4000 'z' in
+  (* Atom 0 is the turn the Librarian has read; the completed tool exchange
+     that follows is the one it has not. Only a completed turn the Librarian
+     is behind on reaches the wire at all: with no Librarian position the
+     request starts at the completed boundary (RFC keeper-context-window
+     §13.4), and with one it starts there (§13.6). *)
   let initial_messages : Agent_core.Types.message list =
-    [ { role = Agent_core.Types.Assistant
-      ; content = [ Agent_core.Types.Text "call tool" ]
+    [ { role = Agent_core.Types.User
+      ; content = [ Agent_core.Types.Text "earlier ask, already read by the Librarian" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { role = Agent_core.Types.Assistant
+      ; content = [ Agent_core.Types.ToolUse
+          { id = "call-demote-1"; name = "fixture_tool"; input = `Assoc [] } ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
@@ -258,14 +270,59 @@ streaming = false
       }
     ]
   in
+  let trace_id = "demote-proof-trace" in
+  if completed then (
+    let position = match Keeper_turn_boundaries.position_of_messages initial_messages with
+      | Ok position -> position | Error detail -> fail detail in
+    let record : Keeper_turn_boundaries.record =
+      { recorded_at = 1.; event = Keeper_turn_boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          ; history_at_start = Keeper_turn_boundaries.Fresh_history
+          ; position } } in
+    let keepers_dir = Workspace.keepers_runtime_dir (Workspace.default_config base_path) in
+    (match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"demote-proof" record with
+     | Ok () -> ()
+     | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+    let last_atom_digest =
+      match Runtime_model_input_tail_window.atom_opening_digest initial_messages 0 with
+      | Some digest -> digest
+      | None -> fail "the fixture history opens atom 0" in
+    match Keeper_librarian_progress.write ~keepers_dir ~keeper_id:"demote-proof"
+      { position = { trace_id; end_atom = 1; last_atom_digest }; boundary_lines_seen = 1 } with
+    | Ok () -> ()
+    | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
+  let tools =
+    if not reader_available then [active_tool]
+    else
+      let schema = Keeper_runtime_schemas_toml.artifact_read in
+      let reader = Tool_bridge.agent_core_tool_of_masc_with_execution_env
+        ~base_path
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+        ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+        ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+        (fun _ args ->
+          let execution = Keeper_artifact_read.handle ~base_path ~args in
+          match execution.disposition with
+          | Tool_result.Completed () ->
+            Tool_result.make_ok ~tool_name:schema.name ~start_time:(Time_compat.now ())
+              ?data:execution.data ()
+          | Tool_result.Failed class_ ->
+            Tool_result.make_err ~tool_name:schema.name ~class_
+              ~start_time:(Time_compat.now ()) execution.raw_output
+          | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
+      [active_tool; reader]
+  in
+  let expect_demoted = completed && reader_available in
   let result =
     Keeper_turn_driver.run_named
+      ~input_policy:Keeper_input_policy.Small
+      ~session_id:trace_id
       ~system_prompt:"Demotion fixture."
       ~runtime_id:"fixture.sample"
       ~keeper_name:"demote-proof"
       ~base_path
-      ~tools:[ active_tool ]
-      ~agent_core_tools:[ active_tool ]
+      ~tools
+      ~agent_core_tools:tools
       ~goal:"execute tool"
       ~initial_messages
       ~sw ~net:env#net ()
@@ -276,7 +333,7 @@ streaming = false
   check int "the Keeper completed 2 requests" 2
     (Exact_output_fixture.post_count server);
   let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
-  check bool "historical tool body was demoted and not sent inline" false
+  check bool "historical body is replaced only with completion and reader" (not expect_demoted)
     (String_util.contains_substring second_body historical_payload);
   check bool "current-turn tool body remained verbatim inline" true
     (String_util.contains_substring second_body active_payload);
@@ -293,7 +350,7 @@ streaming = false
       tool_messages
   in
   let historical_content = Yojson.Safe.Util.(member "content" historical_msg |> to_string) in
-  check bool "historical tool message carries blob marker" true
+  check bool "historical tool message carries a retrievable reference only when safe" expect_demoted
     (Tool_output.is_marker historical_content);
   let active_msg =
     List.find
@@ -306,6 +363,10 @@ streaming = false
   check string "current turn tool result is verbatim"
     active_payload
     active_content;
+  if not expect_demoted then
+    check string "unproven or unreadable historical body stays verbatim"
+      historical_payload historical_content
+  else
   let store = Tool_blob_store.create ~base_path in
   (match Tool_output.decode_from_agent_core historical_content with
    | Tool_output.Decoded artifact_ref ->
@@ -324,6 +385,10 @@ let () =
       [ test_case "a large request reaches the peer and a refusal moves the lane" `Quick
           test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane
       ; test_case "the runtime demotes historical tool results" `Quick
-          test_the_runtime_demotes_historical_tool_results
+          (test_historical_tool_results ~completed:true ~reader_available:true)
+      ; test_case "without completion evidence historical bodies stay inline" `Quick
+          (test_historical_tool_results ~completed:false ~reader_available:true)
+      ; test_case "without a reader historical bodies stay inline" `Quick
+          (test_historical_tool_results ~completed:true ~reader_available:false)
       ]
     ]

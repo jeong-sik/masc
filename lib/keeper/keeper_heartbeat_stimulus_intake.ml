@@ -487,7 +487,17 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
          ~id:resolution.approval_id
      with
      | Ok None -> true
-     | Ok (Some _) | Error _ -> false)
+     | Ok (Some _) -> false
+     | Error detail ->
+       (* Not ready, as with an entry still pending, but said aloud: a
+          broken approval store would otherwise hold every HITL resolution
+          out of intake with the same silence as one not yet resolved. *)
+       Log.Keeper.warn
+         "turn entry: HITL resolution held back because the approval store \
+          could not be read approval=%s: %s"
+         resolution.approval_id
+         (Keeper_approval_queue.storage_error_to_string detail);
+       false)
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
@@ -1074,10 +1084,7 @@ let heartbeat_event_intake
       (fun acc (event : Keeper_world_observation.pending_board_event) ->
          if
            List.exists
-             (fun existing ->
-                String.equal
-                  existing.Keeper_world_observation.post_id
-                  event.Keeper_world_observation.post_id)
+             (Keeper_world_observation.same_board_event_identity event)
              acc
          then acc
          else (
@@ -1090,7 +1097,8 @@ let heartbeat_event_intake
                 event.Keeper_world_observation.post_id
                 meta_after_triage.name
             | Keeper_world_observation.Board_post_created
-            | Keeper_world_observation.Board_comment_added
+  | Keeper_world_observation.Board_post_updated
+            | Keeper_world_observation.Board_comment_added _
             | Keeper_world_observation.Board_reaction_changed _
             | Keeper_world_observation.Board_vote_cast _
             | Keeper_world_observation.Fusion_completed

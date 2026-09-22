@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.35.22] - 2026-09-23
+
+> Before you upgrade: read the three items under **Upgrade notes** — TypeSafe AI settings moved into `runtime.toml` (#37453), the renamed configuration failure reason (#37457), and the removed tool-call `success` field (#37487).
+
+*Tag date is provisional and must be updated to the tag commit's UTC date before publishing.*
+
+### Upgrade notes
+
+- TypeSafe AI settings now live in `runtime.toml` under `[typesafeai]`; the previous `MASC_TYPESAFEAI_*` environment variables are no longer read. Only `TYPESAFEAI_API_KEY` stays in the environment (#37453).
+- Operator-facing failure reasons now separate invalid configuration from provider authorization refusal. Tooling that reads the old `preflight_config_error` reason must read the new reasons instead (#37457).
+- Tool-call log rows no longer carry the top-level `success` boolean. Every new row records `wire_outcome` (`unknown` when nothing was observed); tooling that reads `success` should read the typed disposition or `wire_outcome` instead (#37487).
+
+### Added
+
+- DOS graphics sessions now show whether a frame contains visible pixels and support a click action for mouse-driven games (#37402).
+- The librarian preserves committed Memory snapshots and completed-run evidence when cancellation arrives after the commit (#37464).
+- Runtime details now show every provider-supplied probe limitation, so operators can see what a reachability check does not prove (#37346).
+- The runtime lane list now distinguishes declared lanes from one-candidate runtime fallback lanes and hides the latter from the keeper picker (#37475).
+- Large JEV requests over HTTP/2 now flush their complete bodies reliably instead of failing with a protocol error (#37500).
+- Librarian publishing can review received-work context against its source material and explicitly withhold only the derived publication when revision is needed (#37512).
+- Skill reads can include exact JEV applicability advice in the model-visible content, with inspectable advice receipts in the TUI (#37514).
+- The Board read view shows comments in a column beside the post on terminals 120 columns or wider, and keeps the stacked layout on narrower screens (#36821).
+- With wire capture on, each provider request now records how its message list differs from the previous request, so cache misses can be traced to the change that caused them (#36961).
+- The Lanes screen can now remove an exact-lane slot and move it up or down, not only append one; slots the catalog rejected are kept in the file (#37482).
+
+### Changed
+
+- A checkpoint purge now removes the keeper's continuity snapshot along with moving the Librarian position, since the rewrite leaves the snapshot in the old atom numbering; the purge result and the CLI say whether one was removed (#37755).
+- A keeper request with no Librarian snapshot that fits the current history starts at the Librarian's read position when that position is a place in the history, and otherwise, with no seed, at the end of the last completed turn, instead of carrying the whole history; official-client lanes without a seed start at that boundary too. The Memory screen and dashboard show the position-only case as `absorbed`. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734, #37745).
+- The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.
+- The next-request band names the wake line in the same estimated tokens as its other figures instead of bytes.
+- The Context pane's title says how long ago its reading was received; the pane refreshes only by hand, so a reading from before the current turn is no longer indistinguishable from a current one.
+- The Librarian absorb gate no longer applies absorptions unjudged when it is switched on but cannot ask the judgment model (`[typesafeai] enabled = false`, or no armed destination): the sources stay current and the new claims still apply. A gate switched off, or an excluded Keeper, applies the answer as before. Typesafeai gate unavailability now names the declared switch or exclusion before the lane's own state.
+- In the TUI, a queued line sent again, `/run-next`, and Enter before the Keeper's chat control token arrives now only ask for first place in the queue; they no longer cancel the Keeper's running autonomous turn. Stopping a turn stays an explicit act (Esc, `/steer`).
+- A provider response with no text, thinking, or tool call is now settled as an observed response instead of being retried as an unseen server failure (#37206).
+- Gateway readers now document and consistently treat cancellation as an intentional shutdown rather than a connection failure (#37481).
+- The owner-child cancellation marker is retained only after both cancellation paths were verified, making the lifecycle evidence match the runtime tree (#37488).
+- The release workflow now publishes the matching CHANGELOG section as part of the release page body (#37470).
+- OAuth client registrations now read and honor secret expiration, re-registering stale or incomplete confidential clients while preserving public clients (#37496).
+- Thirteen seed capability entries that no consumer read were removed from the shipped `config/runtime.toml`. An existing installation's own `runtime.toml` is untouched and needs no edit (#37491).
+- History lines written for official-client turns (Codex app server, Antigravity, Claude Code) now carry the turn they belong to, record tool observations, and are appended durably (#37521).
+- The librarian now reads official-client turns from those history lines instead of only the turn's final assistant answer (#37527).
+
+### Fixed
+
+- Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
+- The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).
+- The strict runtime-config check now excludes vendored warning policy from MASC's warning gate without weakening MASC source checks (#37315).
+- Raw trace retention now uses the strict TurnRecord format and stops before deleting rows that predate the required response-observed field (#37465).
+- A Keeper whose native session is held for recovery now shows the stored reason and recovery ID in its status instead of a generic invalid-configuration error (#37235).
+- Keepers waiting for explicit session recovery are no longer counted as automatic retries; the Dashboard and TUI show them separately and fleet health reports them as needing operator action (#37236).
+- Remote Keepers now use one resolved workspace for the request boundary, command working directory, and file tools, so the three can no longer disagree (#37325).
+- A turn's decision record now states the degraded-retry result exactly as the execution receipt does, instead of inferring it from a runtime change (#37446).
+
+### Internal
+
+- Added regression coverage for DOS click registration, mutation classification, and the no-machine refusal path (#37489).
+- Added explicit tests for the TUI's GitHub-token text-input ownership while typing (#37502).
+- Removed two unhandled resource-scope callback exceptions and documented the remaining intentional catch points (#37473).
+- Split the gateway cancellation guard's measurement fixtures from the runtime behavior so the guard reports its actual arm set (#37476).
+- Improved release smoke diagnostics to report whether a timed-out boot process was still alive or had already crashed (#37509).
+- Added tests for model identifier properties and catalog lookup (#37026).
+- Edited-test selection now fails when it cannot select a suite, instead of passing silently (#37507).
+- The TUI calls-table test now counts the recorded tool output rather than its digest (#37539).
+
 ## [0.35.21] - 2026-09-21
 
 ### Upgrade notes
@@ -14,6 +79,7 @@
 - Exact output: `[runtime.exact_output_lanes.verifier_exact].slots` takes runtime ids only. A lane name there is a load error naming the entry; it used to load and then fail every judgement, because verification dispatches the slot id itself (#37075).
 - Sandbox: a microVM guest resolves memory and CPU independently. `[keeper] microvm_memory` and `microvm_cpus` win per dimension, followed by the process's `MASC_KEEPER_MICROVM_MEMORY` and `MASC_KEEPER_MICROVM_CPUS`, the workspace `[sandbox] microvm_memory` and `microvm_cpus` in `runtime.toml`, and finally `2g` and `4`. Before this release, a guest without an explicit microVM memory value took `MASC_KEEPER_SANDBOX_MEMORY`, the Docker lane's cap, and an unset CPU count passed no `--cpus`; it now uses those microVM defaults. A running guest of a different size is replaced the next time the keeper's sandbox starts. The memory value takes a unit, `<n>m` or `<n>g` (`512m`, `8g`); a bare number, which the container runtimes read as bytes, is refused, and a value that does not parse stops the guest from starting with the setting named, where it used to be handed to the runtime as written (#36973).
 - TypeSafe AI: the lane's settings move from the environment into the `[typesafeai]` table of `runtime.toml` — `enabled`, `endpoint`, `model`, `board_attention`, `absorb_gate`, and `excluded_keepers` (keepers neither gate ever asks the vendor about; a name that is no keeper is reported at boot). `MASC_TYPESAFEAI_ENABLED`, `MASC_TYPESAFEAI_ENDPOINT`, `MASC_TYPESAFEAI_MODEL`, `MASC_TYPESAFEAI_BOARD_ATTENTION_ENABLED` and `MASC_TYPESAFEAI_ABSORB_GATE_ENABLED` are no longer read; only `TYPESAFEAI_API_KEY` stays in the environment. A deployment that set any of them writes the table instead. A misspelt key in the table is a load error.
+- TypeSafe AI: `[typesafeai]` names its servers in `destinations`, an ordered array of `{ endpoint, model, api_key_env }`. The `endpoint` and `model` keys are gone and are a load error (`unknown [typesafeai] key`); a deployment that set either writes one destination instead, and a table without `destinations` still means TypeSafe's own server with `TYPESAFEAI_API_KEY`. Each destination reads its key from the variable it names, and one whose variable is empty is left out. A request moves to the next destination whenever one does not answer or refuses, whatever the refusal says, because each destination is asked for its own model id and keeps its own limits; a destination left out for lack of a key is reported at boot. OpenRouter's `https://openrouter.ai/api/v1/systemone` with model `~typesafe/jev-latest` and `api_key_env = "OPENROUTER_API_KEY"` works as a second destination. The `missing_api_key` skip reason is now `no_armed_destination`; the standalone-lane Jev readiness JSON carries `destinations` (a list of `{destination_uri, model}`, in walk order) instead of `model`; the absorb gate and context review records list `request.destinations` instead of `request.endpoint` and `request.model`, and a failed evaluation's `failure` is `{kind: "every_destination_refused", attempts: [...]}`. There is no reader for the old shapes.
 - Board attention: set `[typesafeai] enabled = false` if the server's environment carries `TYPESAFEAI_API_KEY` and Board posts should not leave the machine. A non-blank key alone turns on a first pass that, when the `board_attention_exact` lane has an HTTP slot, sends the Board post and the keeper's context to TypeSafe AI's Jev (`https://api.typesafe.ai/v1/systemone`, overridable with `[typesafeai] endpoint`). Without the key nothing changes (#36970).
 - Keeper: the turn-record reset above also covers a second required key. A record now carries `response_observed_model_input`, the runtime paired with the exact window that received a typed provider response, and the decoder requires the key on every record, `null` where a turn received none. A record an earlier release wrote is refused rather than read as though its latest attempted window had been accepted, so the same folders go; rolling back needs the same reset, because the older decoder refuses the key as unknown (#37245).
 - Librarian: the turn-boundary and read-position files move under the selected cluster. `<config-root>/keepers/<keeper>.turn-boundaries.jsonl` and `<keeper>.librarian-progress.json` become `<masc-root>/keepers/<keeper>/turn-boundaries.jsonl` and `librarian-progress.json`, where `<config-root>` is what `MASC_CONFIG_DIR` resolves to and `<masc-root>` is `<base-path>/.masc` or `<base-path>/.masc/clusters/<cluster>` when `MASC_CLUSTER_NAME` names one, one pair per cluster where two clusters sharing `MASC_CONFIG_DIR` wrote one. Nothing reads the old flat files — there is no migration, path branch or compatibility reader — so delete them after the upgrade. Each keeper starts with no recorded boundary and no read position, and `masc-librarian-replay` reports a missing store as a failed read instead of replaying zero keepers (#37181).
@@ -88,6 +154,7 @@
 
 ### Fixed
 
+- Librarian: an offline checkpoint purge moves the Librarian's read position with the checkpoint instead of leaving it against the old numbering (RFC librarian-lifecycle §10-2, #37361). The dashboard action and `masc-checkpoint-purge --apply` refuse the rewrite while the position is short of the history's end or its final digest names another same-length history, and otherwise install the checkpoint and then write the position at the rewritten end, its `boundary_lines_seen` untouched; the preview names the refusal in its warnings. The dashboard cancels and awaits the server-owned Librarian lane before the two writes; the CLI takes the workspace writer lease and refuses while a server holds it. This deliberately replaces the old boundaries-file-presence gate: a boundary log may remain because `boundary_lines_seen` is preserved, while the typed atom position proves whether the rewrite would skip unread history. The old check compared only the checkpoint's final atom, so a rewrite that changed an earlier one was installed and every later read stopped on the mismatch. The `LibrarianRead-purge-trim*` models in `specs/bug-models/` have their code counterparts in `test_keeper_checkpoint_purge.ml`, one test per rule the models measure.
 - Librarian: the keeper memory health surfaces say how far behind each keeper's Librarian is standing (RFC librarian-lifecycle §4.9, invariant I4). Every row carries the state its last pass ended in, the unread turns behind each read position, when the pass took that count, the time the Librarian last wrote the snapshot, and the kind on the journal's last failure. The counters they replace — the lane-busy gauge and the cadence counter — were totals since the server booted, which said whether anything had ever gone wrong and never whether this keeper is behind now. A count that could not be taken is sent as null and printed as `unread ?`, not as zero. The health schema is `keeper.memory_os.current_health.v5`; the TUI Memory header and the dashboard panel read the new shape, and the `librarian_lane_busy` alert becomes `librarian_stopped`.
 - Keeper: the carried front is judged by its atom number and the SHA-256 of the message that opens it, not by the atom count. An attempt that saved one atom fewer no longer throws the front away and sends the whole history, a history of the same length whose last message changed no longer charges usage to atoms the ledger never counted, and a refusal is retried only when eviction actually moved the front (#36955).
 - Keeper: a refusal whose reason MASC cannot classify narrows the carried range like a classified overflow (#36977). The narrowed front lasts into the next turn only when the narrowed request is answered: `Keeper_carried_front.of_records` seeds from `response_observed_model_input`, so a refusal that never received a response leaves the next turn nothing to start from. A refusal that was not about size moves the front the same way, and a front only moves toward the newest atom, so that keeper does not carry the atoms it passed again. To carry them again, stop the server, delete `<keeper>/turn-records` under the selected cluster's root — `<base-path>/.masc`, or `<base-path>/.masc/clusters/<cluster>` when `MASC_CLUSTER_NAME` names one — and start it; that keeper's turn history on the dashboard goes with the records. The next candidate in the same turn starts from the front a refusal moved instead of the whole history (#36986), and the turn records Claude Code, Codex and Antigravity leave are read as fronts (#36997).

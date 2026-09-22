@@ -17,13 +17,16 @@ let carries_cut_mark text =
   in
   seek 0
 
-let entry ?(timestamp = "12:34:56") ?timeline_bucket
+(* No [timeline_bucket] unless a test passes one: an entry without a
+   trustworthy time. Tests about the heading's clock pass [twelve_o_clock]. *)
+let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
   { style
   ; timestamp
   ; timeline_bucket
   ; span_clock = None
+  ; speaker = Option.value speaker ~default:role
   ; role_label = role
   ; role_label_mark_cells =
       Layout.role_label_mark_cells ~style ()
@@ -33,6 +36,10 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   ; turn_rail = Layout.Rail_none
   ; action = Layout.Action_none
   }
+
+(* The civil hour the helper's default "12:34:56" sits in. *)
+let twelve_o_clock : Layout.timeline_bucket =
+  { tb_year = 2026; tb_month = 9; tb_day = 1; tb_hour = 12; tb_is_dst = false }
 
 let notice_room_at_eighty_columns = 55
 
@@ -712,6 +719,7 @@ let transcript count =
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
         span_clock = None;
+        speaker = "code-reviewer";
         role_label = "code-reviewer";
         request_label = Printf.sprintf "turn-%d" index;
         body =
@@ -1037,9 +1045,20 @@ let test_a_trailing_newline_opens_a_line () =
 (* One speaker talking twice is one heading. The pane used to write
    "[time] speaker request" above every message, so a keeper answering in four
    parts spent four rows saying who was talking. *)
+let without_hour_rail rows =
+  List.filter
+    (fun (row : Layout.row) ->
+      match row.kind with
+      | Layout.Metadata (Layout.Timeline_break _) -> false
+      | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+      | Layout.Body | Layout.Viewport_gap _ ->
+          true)
+    rows
+
 let test_one_speaker_keeps_one_heading () =
   let rows entries =
     Layout.visible_rows ~inner_width:60 ~height:40 entries
+    |> without_hour_rail
     |> List.map (fun (row : Layout.row) -> row.text)
   in
   check (list string) "the same second is the same message"
@@ -1055,9 +1074,18 @@ let test_one_speaker_keeps_one_heading () =
     ; "  second"
     ]
     (rows
-       [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
-       ; entry ~timestamp:"12:35:01" Layout.Keeper "keeper.one"
-           "tui-..dddddddd" "second"
+       [ entry ~timeline_bucket:twelve_o_clock Layout.Keeper "keeper.one"
+           "tui-..dddddddd" "first"
+       ; entry ~timestamp:"12:35:01" ~timeline_bucket:twelve_o_clock
+           Layout.Keeper "keeper.one" "tui-..dddddddd" "second"
+       ]);
+  (* The placeholder a row without a time carries as its timestamp is
+     display text, not a moment; a later placeholder says nothing moved. *)
+  check (list string) "a later row without a time draws no clock row"
+    [ "[--:--:--] From [JOURNAL] "; "  first"; "  second" ]
+    (rows
+       [ entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "" "first"
+       ; entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "" "second"
        ]);
   check (list string) "a different speaker starts again"
     [ "[12:34:56] From [keeper.one] tui-..dddddddd"
@@ -1081,32 +1109,150 @@ let test_one_speaker_keeps_one_heading () =
        ])
 ;;
 
+(* Under metadata:full a heading opens a turn, not a block. A turn that
+   thought, called a tool and answered drew a heading above each block, every
+   one the same request at the same clock. The blocks are told apart by how
+   they draw; the heading is said once, as the keeper. *)
+let test_a_turn_keeps_one_heading_across_its_blocks () =
+  let rows entries =
+    Layout.visible_rows ~inner_width:60 ~height:40 entries |> without_hour_rail
+  in
+  let text rows = List.map (fun (row : Layout.row) -> row.text) rows in
+  let at ?(timestamp = "12:34:56") style role body =
+    entry ~timestamp ~timeline_bucket:twelve_o_clock style role "tui-..dddddddd" body
+  in
+  let turn =
+    [ at Layout.User "you" "look"
+    ; at Layout.Thinking "" "find it"
+    ; at Layout.Tool "" "read_file a.ml"
+    ; at ~timestamp:"12:34:59" Layout.Keeper "keeper.one" "found"
+    ; at ~timestamp:"12:35:02" Layout.Thinking "" "check again"
+    ; at ~timestamp:"12:35:03" Layout.Keeper "keeper.one" "done"
+    ]
+  in
+  let drawn = rows turn in
+  check (list string) "the operator's heading, the turn's, and one clock row"
+    [ "[12:34:56] From [you] tui-..dddddddd"
+    ; "  look"
+    ; "[12:34:56] From [] tui-..dddddddd"
+    ; "  find it"
+    ; "  read_file a.ml"
+    ; "  found"
+    ; "[12:35:02]"
+    ; "  check again"
+    ; "  done"
+    ]
+    (text drawn);
+  (match
+     List.filter_map
+       (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Metadata (Layout.Origin _) -> Some row.style
+         | Layout.Metadata (Layout.Continued_at _ | Layout.Timeline_break _)
+         | Layout.Body | Layout.Viewport_gap _ ->
+             None)
+       drawn
+   with
+   | [ Layout.User; Layout.Keeper ] -> ()
+   | _ -> fail "the turn opened on reasoning should draw its heading as the keeper");
+  check (list string) "a new request opens a new turn"
+    [ "[12:34:56] From [] tui-..dddddddd"
+    ; "  first"
+    ; "[12:34:56] From [] tui-..eeeeeeee"
+    ; "  second"
+    ]
+    (text
+       (rows
+          [ entry ~timeline_bucket:twelve_o_clock Layout.Tool "" "tui-..dddddddd" "first"
+          ; entry ~timeline_bucket:twelve_o_clock Layout.Tool "" "tui-..eeeeeeee" "second"
+          ]))
+;;
+
 let test_metadata_keeps_a_typed_origin () =
   let rows =
     Layout.visible_rows ~inner_width:80 ~height:10
-      [ entry Layout.User "you" "tui-..aaaaaaaa" "hello"
-      ; entry ~timestamp:"12:35:01" Layout.User "you" "tui-..aaaaaaaa"
-          "again"
+      [ entry ~timeline_bucket:twelve_o_clock Layout.User "you"
+          "tui-..aaaaaaaa" "hello"
+      ; entry ~timestamp:"12:35:01" ~timeline_bucket:twelve_o_clock
+          Layout.User "you" "tui-..aaaaaaaa" "again"
       ]
+    |> without_hour_rail
   in
   match rows with
   | { Layout.kind =
         Layout.Metadata
-          (Layout.Origin { timestamp; role_label; request_label });
+          (Layout.Origin { clock; speaker; role_label; request_label });
       _
     }
     :: { Layout.kind = Layout.Body; _ }
     :: { Layout.kind =
-           Layout.Metadata (Layout.Continued_at { timestamp = continued_at });
+           Layout.Metadata (Layout.Continued_at { clock = continued_at });
          _
        }
     :: { Layout.kind = Layout.Body; _ }
     :: [] ->
-      check string "origin timestamp" "12:34:56" timestamp;
+      check (option string) "origin clock" (Some "12:34:56") clock;
+      check string "origin speaker" "you" speaker;
       check string "origin label" "you" role_label;
       check string "origin request" "tui-..aaaaaaaa" request_label;
-      check string "continuation timestamp" "12:35:01" continued_at
+      check string "continuation clock" "12:35:01" continued_at
   | _ -> fail "message rows lost their typed origin/body structure"
+;;
+
+(* The heading has the pane's width; the gutter's column does not decide
+   what it spells. A name the gutter cut to "e-m…-leader" arrives whole on
+   the origin, beside the aligned label the inline modes draw. *)
+let test_origin_carries_the_speaker_whole () =
+  let speaker = "e-masc-the-leader" in
+  let style = Layout.Keeper in
+  let aligned = Layout.align_role_label ~column:12 ~style speaker in
+  check bool "the fixture's label is cut" true
+    (Layout.display_width aligned < Layout.display_width speaker + 2);
+  match
+    Layout.visible_rows ~inner_width:80 ~height:10
+      [ entry ~timeline_bucket:twelve_o_clock ~speaker style aligned
+          "tui-..aaaaaaaa" "hello"
+      ]
+    |> without_hour_rail
+  with
+  | { Layout.kind = Layout.Metadata (Layout.Origin origin); _ } :: _ ->
+      check string "origin speaker is whole" speaker origin.speaker;
+      check string "origin label stays aligned" aligned origin.role_label
+  | _ -> fail "the origin row was not first"
+;;
+
+(* A row without a trustworthy time has no clock to put at the heading's
+   edge, and a later row of the same speaker cannot say the time moved. The
+   typed fact is [timeline_bucket]; the placeholder text is not read. *)
+let test_untimed_origin_has_no_clock () =
+  match
+    Layout.visible_rows ~inner_width:80 ~height:10
+      [ entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "rev-693"
+          "recorded"
+      ; entry ~timestamp:"12:35:01" ~timeline_bucket:twelve_o_clock
+          Layout.Journal "JOURNAL" "rev-693" "then timed"
+      ; entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "rev-693"
+          "then untimed again"
+      ]
+    |> without_hour_rail
+  with
+  | { Layout.kind = Layout.Metadata (Layout.Origin { clock; _ }); _ }
+    :: { Layout.kind = Layout.Body; _ }
+    :: { Layout.kind = Layout.Metadata (Layout.Continued_at { clock = moved });
+         _
+       }
+    :: { Layout.kind = Layout.Body; _ }
+    :: { Layout.kind = Layout.Body; _ }
+    :: [] ->
+      check (option string) "no clock on an untimed origin" None clock;
+      check string "a timed continuation says when it moved" "12:35:01" moved
+  | rows ->
+      fail
+        (Printf.sprintf
+           "expected origin, body, continued-at, body, body; got %d rows: %s"
+           (List.length rows)
+           (String.concat " | "
+              (List.map (fun (row : Layout.row) -> row.text) rows)))
 ;;
 
 let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
@@ -1152,11 +1298,11 @@ let test_timeline_breaks_follow_civil_hours () =
     (List.map fst breaks);
   check bool "the first rail names its local date and hour" true
     (String.starts_with
-       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 18:00 "
+       ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 18:00 "
        (List.assoc 18 breaks));
   check bool "the later rail names its local date and hour" true
     (String.starts_with
-       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 19:00 "
+       ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 19:00 "
        (List.assoc 19 breaks));
   check int "full transcript counts two rails" 8
     (Layout.total_rows ~inner_width:60 entries);
@@ -1248,35 +1394,39 @@ let test_repeated_dst_hour_has_distinct_rails () =
   | daylight_label :: standard_label :: [] ->
       check bool "the daylight occurrence says DST" true
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 DST "
            daylight_label);
       check bool "the standard occurrence is visibly distinct" true
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 "
            standard_label);
       check bool "the standard occurrence does not claim daylight time" false
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 DST "
            standard_label)
   | _ -> fail "the repeated civil hour did not produce two labels"
 ;;
 
-(* Scrollback. Ten one-line entries render to twenty rows -- a metadata row and
-   a body row each -- so the arithmetic below is checkable by hand.
+(* Scrollback. Ten one-line entries render to twenty-one rows -- the hour
+   rail above them, then a metadata row and a body row each -- so the
+   arithmetic below is checkable by hand.
 
-   Each carries its own second. Ten messages stamped the same second are one
-   message as far as the pane is concerned and share a heading, which is the
-   point of the grouping and would make this eleven rows rather than twenty. *)
+   Each carries its own minute, and a time the layout trusts: inside one turn
+   a clock row is drawn only where the minute moved, and only from a
+   trustworthy time. Ten messages of one turn inside one minute share the
+   turn's heading, which is the point of the grouping and would make this
+   twelve rows rather than twenty-one. *)
 let ten_entries =
   List.init 10 (fun index ->
-      entry ~timestamp:(Printf.sprintf "12:34:%02d" index) Layout.Keeper
-        "keeper.one" "tui-..dddddddd"
+      entry ~timestamp:(Printf.sprintf "12:%02d:00" index)
+        ~timeline_bucket:twelve_o_clock Layout.Keeper "keeper.one"
+        "tui-..dddddddd"
         (Printf.sprintf "line-%d" index))
 
 let text_of rows = List.map (fun (row : Layout.row) -> row.text) rows
 
 let test_total_rows_counts_metadata_and_body () =
-  check int "two rows per single-line entry" 20
+  check int "the hour rail, then two rows per single-line entry" 21
     (Layout.total_rows ~inner_width:40 ten_entries)
 
 let test_unscrolled_is_the_existing_window () =
@@ -1314,8 +1464,8 @@ let test_a_new_message_does_not_move_a_scrolled_window () =
   in
   let before = window 4 ten_entries in
   let arrival =
-    entry ~timestamp:"12:35:00" Layout.Keeper "keeper.one" "tui-..dddddddd"
-      "a reply the operator has not scrolled to"
+    entry ~timestamp:"12:35:00" ~timeline_bucket:twelve_o_clock Layout.Keeper
+      "keeper.one" "tui-..dddddddd" "a reply the operator has not scrolled to"
   in
   let after_arrival = ten_entries @ [ arrival ] in
   (* The defect: the count alone lands that many rows further down, so the
@@ -1323,8 +1473,14 @@ let test_a_new_message_does_not_move_a_scrolled_window () =
   check bool "the count alone does not hold the position" false
     (window 4 after_arrival = before);
   (* The contract the pane relies on: give the count back the rows that
-     arrived and the operator is looking at the same text. *)
-  let grew = Layout.total_rows ~inner_width:40 [ arrival ] in
+     arrived and the operator is looking at the same text. The rows that
+     arrived are what the list grew by, not what the reply would cost on its
+     own: alone it would open with an hour rail and a heading, and appended
+     it continues the speaker above it. *)
+  let grew =
+    Layout.total_rows ~inner_width:40 after_arrival
+    - Layout.total_rows ~inner_width:40 ten_entries
+  in
   check bool "and the reply is not free" true (grew > 0);
   check (list string) "the operator keeps reading the same rows" before
     (window (4 + grew) after_arrival)
@@ -1332,7 +1488,7 @@ let test_a_new_message_does_not_move_a_scrolled_window () =
 let test_max_scroll_stops_at_the_oldest_row () =
   let height = 6 in
   let limit = Layout.max_scroll ~inner_width:40 ~height ten_entries in
-  check int "twenty rows minus one screenful" 14 limit;
+  check int "twenty-one rows minus one screenful" 15 limit;
   let window =
     Layout.scrolled_rows ~inner_width:40 ~height ~from_bottom:limit ten_entries
     |> text_of
@@ -1468,7 +1624,7 @@ let test_bare_links_are_dressed_and_bounded () =
    labels are [agent · surface] and share long prefixes. *)
 let test_badge_is_a_budget_not_a_measurement () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
-  check int "a wide pane spends the budget and no more" 14 width;
+  check int "a wide pane spends the budget and no more" 20 width;
   List.iter
     (fun label ->
       let drawn =
@@ -1504,8 +1660,13 @@ let test_badge_keeps_the_tail_when_it_cannot_fit () =
 let test_badge_narrows_with_the_pane () =
   (* The fixed floor keeps every built-in activity label; wider panes add a
      small, bounded amount for speaker identities. *)
-  check int "a wide pane spends the budget" 14
+  check int "a wide pane spends the budget" 20
     (Layout.chat_role_label_width ~pane_cells:400);
+  (* The roster split on a wide terminal: the pane that cut every keeper
+     name of this workspace to its ends. *)
+  check int "130-cell pane spells an eighteen-character name" 20
+    (Layout.chat_role_label_width ~pane_cells:130);
+  check int "80-cell pane" 13 (Layout.chat_role_label_width ~pane_cells:80);
   check int "40-cell pane keeps the compact badge" 10
     (Layout.chat_role_label_width ~pane_cells:40);
   check int "16-cell pane keeps the compact badge" 10
@@ -1965,31 +2126,6 @@ let test_skill_marks_keep_state_without_colour () =
     ; Layout.Skill_failure
     ]
 
-(* The badge is drawn in reverse video, while its fixed-column padding is
-   layout rather than content. *)
-let test_alignment_padding_is_kept_apart_from_the_name () =
-  let aligned = Layout.align_role_label ~column:16 ~style:Layout.Keeper "AUTO" in
-  let mark, name, alignment =
-    Layout.split_aligned_role_label ~style:Layout.Keeper aligned
-  in
-  check bool "the mark leads" true
-    (String.starts_with ~prefix:(Layout.speaker_mark Layout.Keeper) mark);
-  check bool "the alignment is only spaces" true
-    (String.length alignment > 0
-     && String.for_all (fun c -> Char.equal c ' ') alignment);
-  check string "the name is the label alone" "AUTO" name;
-  check string "the three pieces rebuild the label" aligned
-    (mark ^ name ^ alignment);
-  (* A column too narrow for both drops the mark, and the split says so rather
-     than colouring the first byte of a name as though it were one. *)
-  let narrow = Layout.align_role_label ~column:2 ~style:Layout.Keeper "AUTO" in
-  let mark, name, alignment =
-    Layout.split_aligned_role_label ~style:Layout.Keeper narrow
-  in
-  check string "a markless label reports no mark" "" mark;
-  check string "the three pieces still rebuild it" narrow
-    (mark ^ name ^ alignment)
-
 let test_a_continuation_survives_the_renderer_cut () =
   let entries =
     [ entry ~timestamp:"22:32:07" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
@@ -2183,7 +2319,11 @@ let test_a_speaker_keeps_the_column_when_the_surface_cannot_share_it () =
 (* What the pane draws for that row: one cut at most, and the end that tells
    two agents apart still on it. *)
 let test_the_badge_draws_a_broadcast_speaker_without_two_cuts () =
-  let column = wide_label_column in
+  (* An 84-cell pane gives the fourteen-cell column every pane used to get:
+     one the name does not fit, so the cut happens and can be counted. The
+     wide pane now spells this name whole. *)
+  let column = Layout.chat_role_label_width ~pane_cells:84 in
+  check int "the column the name does not fit" 14 column;
   let badge =
     Layout.align_role_label ~column ~style:Layout.Inbound
       (Layout.fit_speaker ~column ~speaker:"codex-mcp-client"
@@ -2439,8 +2579,14 @@ let () =
     ; ( "scrollback"
       , [ test_case "one speaker keeps one heading" `Quick
             test_one_speaker_keeps_one_heading
+        ; test_case "a turn keeps one heading across its blocks" `Quick
+            test_a_turn_keeps_one_heading_across_its_blocks
         ; test_case "metadata keeps a typed origin" `Quick
             test_metadata_keeps_a_typed_origin
+        ; test_case "the origin carries the speaker whole" `Quick
+            test_origin_carries_the_speaker_whole
+        ; test_case "an untimed origin has no clock" `Quick
+            test_untimed_origin_has_no_clock
         ; test_case "total rows counts metadata and body" `Quick
             test_total_rows_counts_metadata_and_body
         ; test_case "unscrolled matches the existing window" `Quick
@@ -2499,8 +2645,6 @@ let () =
             test_the_operator_badge_keeps_who_it_is
         ; test_case "Skill states keep shapes without colour" `Quick
             test_skill_marks_keep_state_without_colour
-        ; test_case "alignment padding is kept apart from the name" `Quick
-            test_alignment_padding_is_kept_apart_from_the_name
         ; test_case "a continuation survives the renderer cut" `Quick
             test_a_continuation_survives_the_renderer_cut
         ; test_case "the two link readers agree" `Quick

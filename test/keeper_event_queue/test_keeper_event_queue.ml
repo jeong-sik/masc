@@ -102,7 +102,7 @@ let test_typed_payload_surface () =
     make_stim
       ~payload:
         (Board_signal
-           { kind = Comment_added
+           { kind = Comment_added { comment_id = "c-one"; parent_id = None }
            ; author = "alice"
            ; title = "t"
            ; content = "c"
@@ -114,6 +114,96 @@ let test_typed_payload_surface () =
   assert (is_board_signal board.payload);
   assert (String.equal (payload_kind_label board.payload) "board_signal")
 
+let test_durable_comment_identity () =
+  let module Persistence = Keeper_event_queue_persistence in
+  let rec remove_tree path =
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path
+  in
+  let base_path = Filename.temp_dir "queued-comment-identity" "" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    let board comment_id parent_id =
+      { kind = Comment_added { comment_id; parent_id }; author = "alice";
+        title = "thread"; content = "identical body"; hearth = None; updated_at = Some 1.0 }
+    in
+    let first = make_stim ~payload:(Board_signal (board "c-first" None)) "post" in
+    let second = make_stim ~payload:(Board_signal (board "c-second" None)) "post" in
+    let attention = make_stim ~payload:(Board_attention
+      {candidate_id = "candidate"; signal = board "c-third" (Some "c-first")}) "post" in
+    assert (not (stimulus_identity_equal first second));
+    let persist source =
+      match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name:"reader" source with
+      | Ok result -> result | Error detail -> failwith detail in
+    List.iter (fun source -> assert (persist source = Persistence.Enqueued)) [first; second; attention];
+    assert (persist first = Persistence.Already_present);
+    let loaded = match Persistence.load_result ~base_path ~keeper_name:"reader" with
+      | Ok queue -> queue | Error detail -> failwith detail in
+    let rec drain queue = match dequeue queue with
+      | None -> [] | Some (source, rest) -> source :: drain rest in
+    assert (drain loaded = [first; second; attention]);
+    let payload_json = match stimulus_to_yojson second with
+      | `Assoc fields -> List.assoc "payload" fields | _ -> assert false in
+    let malformed mutate =
+      let json = match stimulus_to_yojson second, payload_json with
+        | `Assoc fields, `Assoc payload ->
+          `Assoc (List.map (fun (key, value) ->
+            key, if key = "payload" then `Assoc (mutate payload) else value) fields)
+        | _ -> assert false in
+      assert (Result.is_error (stimulus_of_yojson json))
+    in
+    malformed (List.remove_assoc "comment_id");
+    malformed (List.remove_assoc "parent_id");
+    malformed (fun fields -> ("comment_id", `String "") :: List.remove_assoc "comment_id" fields);
+    malformed (fun fields -> ("parent_id", `String " ") :: List.remove_assoc "parent_id" fields);
+    malformed (fun fields -> ("comment_id", `String "duplicate") :: fields))
+
+let test_durable_post_edit_identity () =
+  let module Persistence = Keeper_event_queue_persistence in
+  let rec remove_tree path =
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path in
+  let base_path = Filename.temp_dir "queued-post-edit" "" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    let board content_updated_at =
+      {kind=Post_updated {content_updated_at}; author="alice"; title="post";
+       content="edited body"; hearth=None; updated_at=Some 99.} in
+    let first = make_stim ~payload:(Board_signal (board 1.)) "post" in
+    let second = make_stim ~payload:(Board_signal (board 2.)) "post" in
+    let replay = make_stim ~payload:(Board_signal
+      {(board 1.) with updated_at=Some 100.; title="later presentation"}) "post" in
+    let attention time = make_stim ~payload:(Board_attention
+      {candidate_id="candidate"; signal=board time}) "post" in
+    let persist source = match Persistence.enqueue_stimulus_if_absent_result
+      ~base_path ~keeper_name:"reader" source with
+      | Ok result -> result | Error detail -> failwith detail in
+    List.iter (fun source -> assert (persist source = Persistence.Enqueued))
+      [first; second; attention 1.; attention 2.];
+    assert (persist replay = Persistence.Already_present);
+    assert (persist (attention 1.) = Persistence.Already_present);
+    let loaded = match Persistence.load_result ~base_path ~keeper_name:"reader" with
+      | Ok queue -> queue | Error detail -> failwith detail in
+    assert (to_list loaded = [first; second; attention 1.; attention 2.]);
+    List.iter (fun source ->
+      assert (stimulus_of_yojson (stimulus_to_yojson source) = Ok source);
+      let invalid mutate =
+        let json = match stimulus_to_yojson source with
+          | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+              key, if key = "payload" then (match value with
+                | `Assoc payload -> `Assoc (mutate payload) | _ -> assert false)
+              else value) fields)
+          | _ -> assert false in
+        assert (Result.is_error (stimulus_of_yojson json)) in
+      invalid (List.remove_assoc "content_updated_at");
+      List.iter (fun value -> invalid (fun fields ->
+        ("content_updated_at", value) :: List.remove_assoc "content_updated_at" fields))
+        [`Null; `String "1"; `Float nan; `Float infinity; `Float neg_infinity];
+      invalid (fun fields -> ("content_updated_at", `Float 1.) :: fields);
+      invalid (fun fields -> ("extra", `Bool true) :: fields)) [first; attention 1.])
+
 let () =
   test_empty ();
   test_enqueue_dequeue_fifo ();
@@ -123,4 +213,6 @@ let () =
   test_queue_overrides_policy ();
   test_dequeue_only_consumes_enqueued ();
   test_typed_payload_surface ();
+  test_durable_comment_identity ();
+  test_durable_post_edit_identity ();
   print_endline "Keeper_event_queue: all tests passed"

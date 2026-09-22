@@ -75,10 +75,9 @@ type blocker_class =
   | Agent_core_tripwire_violation
   | Agent_core_input_required
   | Internal_unhandled_exception
-    (** RFC-0159 follow-up (task-194): unhandled internal exception escaped the
-        turn driver.  Previously [blocker_class_of_core_error] returned [None]
-        for this variant, so dashboards/operators could not distinguish an
-        unhandled internal failure from a clean turn. *)
+    (** An unhandled internal exception escaped the turn driver. It has its own
+        [blocker_class] so dashboards and operators can tell it from a clean
+        turn. *)
   | Internal_bridge_exception
     (** Internal bridge (AGENT_CORE/stream) exception escaped the turn driver. *)
   | Internal_contract_rejected
@@ -256,6 +255,7 @@ type keeper_meta =
   ; microvm_memory : Keeper_microvm_guest_size.memory option
   ; microvm_cpus : Keeper_microvm_guest_size.cpus option
   ; mention_targets : string list
+  ; board_interests : string list
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string
@@ -268,6 +268,7 @@ type keeper_meta =
         transcript-corruption reset-required paths may write it. [None] while
         paused is a fail-closed unclassified state that requires operator
         action. *)
+  ; input_policy : Keeper_input_policy.t
   ; activation_mode : Keeper_activation_mode.t
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
@@ -389,12 +390,17 @@ let effective_meta_of_profile_defaults
         { meta with
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
+          input_policy = apply_profile_default defaults.input_policy Keeper_input_policy.default;
           activation_mode =
             apply_profile_default defaults.activation_mode meta.activation_mode;
           mention_targets =
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
+          board_interests =
+            (match defaults.board_interests with
+             | [] -> meta.board_interests
+             | interests -> interests);
           max_context_override =
             apply_profile_default_opt defaults.max_context_override
               meta.max_context_override;

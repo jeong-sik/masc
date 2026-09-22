@@ -13,7 +13,7 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v6',
+    schema: 'keeper.memory_os.current_health.v7',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -27,7 +27,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 1,
       removed: 2,
       snapshot_present: true,
-      context_cycle: { saved: null, saved_read_error: null, prepared: null },
+      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
@@ -60,7 +60,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      context_cycle: { saved: null, saved_read_error: null, prepared: null },
+      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
@@ -120,7 +120,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v6',
+    schema: 'keeper.memory_os.current_health.v7',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -134,7 +134,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      context_cycle: { saved: null, saved_read_error: null, prepared: null },
+      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
@@ -203,17 +203,63 @@ describe('fetchKeeperMemoryHealth', () => {
     const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
       input: { kind: 'summarized' as const, frontier: { ...saved, end_atom: 8, boundary_line: 6 } },
       request_bytes: 4096 }
-    payload.keepers[0]!.context_cycle = { saved, saved_read_error: null, prepared }
+    payload.keepers[0]!.context_cycle = { saved, saved_read_error: null, prepared, synthesis: null }
     getMock.mockResolvedValue(payload)
     expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle).toEqual({
-      saved, saved_read_error: null, prepared,
+      saved, saved_read_error: null, prepared, synthesis: null,
     })
+  })
+
+  it('keeps synthesis failure and atom range separate from an ordinary drained consumer', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const synthesis = { observed_at: 1, trace_id: 'trace-a', state: 'not_committed',
+      range: { start_atom: 4, end_atom: 6, completed_end_atom: 20 } }
+    Object.assign(payload.keepers[0]!.context_cycle, { synthesis })
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.synthesis).toEqual(synthesis)
+  })
+
+  it.each([
+    { observed_at: 1, trace_id: 'trace-a', state: 'drained', range: null },
+    { observed_at: 1, trace_id: 'trace-a', state: 'running', range: null },
+    { observed_at: 1, trace_id: null, state: 'running',
+      range: { start_atom: 4, end_atom: 6, completed_end_atom: 20 } },
+  ])('rejects synthesis without valid source evidence: %o', async synthesis => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.context_cycle, { synthesis })
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
+  it('keeps an absorbed request as a position with no boundary line and no summary', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
+      input: { kind: 'absorbed' as const, frontier: { trace_id: 'trace-a', end_atom: 12719 } },
+      request_bytes: 4096 }
+    payload.keepers[0]!.context_cycle = { saved: null, saved_read_error: null, prepared, synthesis: null }
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.prepared).toEqual(prepared)
+  })
+
+  it.each([
+    { kind: 'absorbed', frontier: null },
+    { kind: 'absorbed', frontier: { trace_id: 'trace-a', end_atom: 8, boundary_line: 6 } },
+    { kind: 'absorbed', frontier: { trace_id: 'trace-a', end_atom: 0 } },
+    { kind: 'summarized', frontier: { trace_id: 'trace-a', end_atom: 8 } },
+  ])('rejects a position in the wrong shape for its kind: %o', async input => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!, { context_cycle: {
+      saved: null, saved_read_error: null, synthesis: null,
+      prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5, input },
+    } })
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 
   it('rejects a summarized request without a frontier', async () => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { context_cycle: {
-      saved: null, saved_read_error: null,
+      saved: null, saved_read_error: null, synthesis: null,
       prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5,
         input: { kind: 'summarized', frontier: null } },
     } })
@@ -226,7 +272,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v6')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v7')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,

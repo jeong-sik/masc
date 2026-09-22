@@ -215,9 +215,14 @@ let global =
              keeper, so the column starts hidden; this brings it back on a \
              terminal wide enough to hold it"
   ; b Meta "Ctrl-L"
-      "show or hide the Activity pane: what every keeper is doing right now, and \
-       on its Changes tab the selected keeper's files (press the header to switch)"
-      ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat"
+      "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
+       right now, and on its Changes tab the selected keeper's files (press the header to switch)"
+      ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat; \
+             /activity order turns the order of its calls, /activity scroll moves it"
+  ; b Navigate "Ctrl-W" "focus the Activity pane"
+      ~help:"a cursor lands on its first row; j/k walk the rows a press acts on and scroll past the last, \
+             Enter opens or closes the call under it, Esc or Ctrl-W gives the keys back; \
+             the chat keeps Ctrl-W for its draft until the draft is empty"
   ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"
@@ -454,9 +459,9 @@ let for_surface = function
       ; b Navigate "e" "lane config"
           ~help:
             "open this lane's runtime.exact_output_lanes section in the \
-             preview-checked runtime.toml editor; slots is a required \
-             non-empty catalog-ref array and cli_slots an optional \
-             official-client runtime-id array"
+             preview-checked runtime.toml editor; slots is a catalog-ref array \
+             and cli_slots an official-client runtime-id array, either may be \
+             left out, and the lane needs one slot across the two"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "overview" ~help:"back to Overview"
@@ -496,7 +501,8 @@ let for_surface = function
       ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
       ; board_copy_key
-      ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
+      ; b Navigate "Ctrl-W" "pane"
+          ~help:"cycle the post list, the detail pane, and the Activity pane when it is drawn"
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
@@ -708,7 +714,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
-      ; b Navigate "Ctrl-W" "focus" ~help:"switch between resource list and text"
+      ; b Navigate "Ctrl-W" "focus"
+          ~help:"cycle the resource list, the text, and the Activity pane when it is drawn"
       ; b Navigate "J/K" "scroll text"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while the detail is focused, read the adjacent resource"

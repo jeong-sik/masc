@@ -80,14 +80,30 @@ export interface ContextFrontier {
   end_atom: number
   boundary_line: number
 }
+
+/** The Librarian's durable position: a request started here carries no
+ *  summary of what lies before it, and the position has no boundary line. */
+export interface ContextPosition {
+  trace_id: string
+  end_atom: number
+}
+export interface ContextSynthesis {
+  observed_at: number
+  trace_id: string | null
+  state: 'checking' | 'running' | 'committed' | 'no_source' | 'disabled'
+    | 'source_unavailable' | 'input_unavailable' | 'not_committed' | 'capacity_refused' | 'cancelled'
+  range: { start_atom: number; end_atom: number; completed_end_atom: number } | null
+}
 export interface ContextCycle {
+  synthesis: ContextSynthesis | null
   saved: ContextFrontier | null
   saved_read_error: 'snapshot_unreadable' | null
   prepared: {
     prepared_at: number
     runtime_id: string
     input: { kind: 'summarized'; frontier: ContextFrontier }
-      | { kind: 'uncompressed' | 'not_applied'; frontier: null }
+      | { kind: 'absorbed'; frontier: ContextPosition }
+      | { kind: 'without_snapshot' | 'not_applied'; frontier: null }
     request_bytes: number
   } | null
 }
@@ -120,7 +136,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v6'
+  schema: 'keeper.memory_os.current_health.v7'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -293,13 +309,49 @@ function decodeContextFrontier(raw: unknown): ContextFrontier | null {
   return { trace_id, end_atom, boundary_line }
 }
 
+function decodeContextPosition(raw: unknown): ContextPosition | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['trace_id', 'end_atom'])) return null
+  const trace_id = nonEmptyString(raw.trace_id)
+  const end_atom = nonNegativeInteger(raw.end_atom)
+  if (trace_id === null || end_atom === null || end_atom === 0) return null
+  return { trace_id, end_atom }
+}
+
+function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['observed_at', 'trace_id', 'state', 'range'])) return null
+  const observed_at = finiteNumber(raw.observed_at)
+  const trace_id = raw.trace_id === null ? null : nonEmptyString(raw.trace_id)
+  if (observed_at === null || observed_at < 0 || (raw.trace_id !== null && trace_id === null)) return null
+  const state = raw.state
+  switch (state) {
+    case 'checking': case 'running': case 'committed': case 'no_source': case 'disabled':
+    case 'source_unavailable': case 'input_unavailable': case 'not_committed': case 'capacity_refused': case 'cancelled':
+      break
+    default: return null
+  }
+  let range: ContextSynthesis['range'] = null
+  if (raw.range !== null) {
+    if (!isRecord(raw.range) || !exactKeys(raw.range, ['start_atom', 'end_atom', 'completed_end_atom'])) return null
+    const start_atom = nonNegativeInteger(raw.range.start_atom)
+    const end_atom = nonNegativeInteger(raw.range.end_atom)
+    const completed_end_atom = nonNegativeInteger(raw.range.completed_end_atom)
+    if (start_atom === null || end_atom === null || completed_end_atom === null
+      || end_atom <= start_atom || completed_end_atom < end_atom || trace_id === null) return null
+    range = { start_atom, end_atom, completed_end_atom }
+  }
+  if ((state === 'running' || state === 'committed') && range === null) return null
+  return { observed_at, trace_id, state, range }
+}
+
 function decodeContextCycle(raw: unknown): ContextCycle | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['saved', 'saved_read_error', 'prepared'])) return null
+  if (!isRecord(raw) || !exactKeys(raw, ['saved', 'saved_read_error', 'prepared', 'synthesis'])) return null
   const saved = raw.saved === null ? null : decodeContextFrontier(raw.saved)
   if (raw.saved !== null && saved === null) return null
   if (raw.saved_read_error !== null && raw.saved_read_error !== 'snapshot_unreadable') return null
   if (saved !== null && raw.saved_read_error !== null) return null
-  const result: ContextCycle = { saved, saved_read_error: raw.saved_read_error, prepared: null }
+  const synthesis = raw.synthesis === null ? null : decodeContextSynthesis(raw.synthesis)
+  if (raw.synthesis !== null && synthesis === null) return null
+  const result: ContextCycle = { saved, saved_read_error: raw.saved_read_error, prepared: null, synthesis }
   if (raw.prepared === null) return result
   const p = raw.prepared
   if (!isRecord(p) || !exactKeys(p, ['prepared_at', 'runtime_id', 'input', 'request_bytes'])) return null
@@ -313,7 +365,11 @@ function decodeContextCycle(raw: unknown): ContextCycle | null {
     const frontier = decodeContextFrontier(p.input.frontier)
     if (frontier === null) return null
     input = { kind: 'summarized', frontier }
-  } else if ((p.input.kind === 'uncompressed' || p.input.kind === 'not_applied')
+  } else if (p.input.kind === 'absorbed') {
+    const frontier = decodeContextPosition(p.input.frontier)
+    if (frontier === null) return null
+    input = { kind: 'absorbed', frontier }
+  } else if ((p.input.kind === 'without_snapshot' || p.input.kind === 'not_applied')
     && p.input.frontier === null) {
     input = { kind: p.input.kind, frontier: null }
   } else return null
@@ -454,7 +510,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'totals',
     'alert_summary',
   ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v6') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v7') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

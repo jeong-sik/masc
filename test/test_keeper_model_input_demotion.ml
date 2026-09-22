@@ -710,6 +710,7 @@ let compose ~base_path ~front ~last_resort ~demote_before messages =
     ~last_resort
     ~base_path
     ~demote_before
+    ~completed_end_atom:demote_before
     messages
 ;;
 
@@ -873,10 +874,11 @@ let a_front_the_history_shrank_under_starts_over () =
       ~last_resort:false
       ~base_path:""
       ~demote_before:0
+      ~completed_end_atom:0
       messages
   in
-  Alcotest.(check bool) "the whole history goes" true
-    (composed.Try_provider.origin = Masc.Keeper_carried_front.Whole_history);
+  Alcotest.(check bool) "everything goes, from the turn start at atom 0" true
+    (composed.Try_provider.origin = Masc.Keeper_carried_front.Turn_start { end_atom = 0 });
   Alcotest.(check int) "nothing dropped" 0 composed.Try_provider.projection.Window.dropped_atoms;
   Alcotest.(check bool) "the dropped seed is on record, with the missing atom as its reason" true
     (match composed.Try_provider.outlived_seed with
@@ -902,12 +904,13 @@ let a_front_that_opens_with_another_message_starts_over () =
       ~last_resort:false
       ~base_path:""
       ~demote_before:0
+      ~completed_end_atom:0
       messages
   in
   Alcotest.(check bool) "atom 1 exists" true
     (Option.is_some (Window.atom_opening_digest messages 1));
-  Alcotest.(check bool) "the whole history goes" true
-    (composed.Try_provider.origin = Masc.Keeper_carried_front.Whole_history);
+  Alcotest.(check bool) "everything goes, from the turn start at atom 0" true
+    (composed.Try_provider.origin = Masc.Keeper_carried_front.Turn_start { end_atom = 0 });
   Alcotest.(check int) "nothing dropped" 0 composed.Try_provider.projection.Window.dropped_atoms;
   Alcotest.(check bool) "the dropped seed is on record, with the other message as its reason" true
     (match composed.Try_provider.outlived_seed with

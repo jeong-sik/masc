@@ -54,6 +54,7 @@ let defaults_with_prompt_fields =
   { Keeper_types_profile.empty_keeper_profile_defaults with
     instructions = Some "profile instructions"
   ; mention_targets = [ "profile-target" ]
+  ; board_interests = [ "MASC runtime" ]
   }
 ;;
 
@@ -63,6 +64,7 @@ let defaults_with_prompt_fields =
     { (make_meta ()) with
       instructions = "";
       mention_targets = [];
+      board_interests = [];
     }
   in
   Alcotest.(check (list string))
@@ -188,6 +190,7 @@ let test_nonempty_live_meta_still_reports_profile_override () =
     { (make_meta ()) with
       instructions = "live instructions";
       mention_targets = [ "live-target" ];
+      board_interests = [ "MASC runtime" ];
     }
   in
   Alcotest.(check (list string))

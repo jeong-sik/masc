@@ -60,7 +60,17 @@ val set_table_frame : bool -> unit
     screen, which is this, not from what the next frame would draw. *)
 val acting_pane_drawn_cols : unit -> int
 
+val acting_pane_suppressed : Masc_tui_types.state -> bool
+(** Whether this frame draws no Activity pane whatever the reader chose: a
+    modal covers the whole terminal, and the Activity screen and the Browser
+    Lane already fill their own. The pane's key reads this too, so a press
+    cannot move a choice the reader has no way to see. *)
+
 val acting_pane_target_at : line:int -> Masc_tui_acting_pane.row_target
+
+val acting_pane_row_count : unit -> int
+(** How many rows the last frame drew in the Activity pane: the range
+    [acting_pane_target_at] answers for. Zero when the pane was not drawn. *)
 
 val acting_pane_scroll_limit : unit -> int
 

@@ -82,7 +82,7 @@ let execute ~net ~clock ~base_path ~runner =
   match Runtime.messages_for_librarian selected_input with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->
-    Runtime.For_testing.execute_exact_output_classified
+    Runtime.For_testing.execute_exact_output_classified ~continuity:None
       ~cli_runner:runner
       ~clock
       ~net
@@ -370,15 +370,14 @@ let test_failure_reaches_journal
     incr attempts;
     answer
   in
-  Runtime.run_best_effort ~trigger:Runtime.Queue_changed ~cli_runner:runner
+  Runtime.run_best_effort ~cli_runner:runner
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
   check int "only admitted CLI slots reach the runner" calls !attempts;
   let api_failure = if cli_only then None else Some projection_failure in
   (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
-   | [Ok (Current.Journal_failed { detail; kind = actual_kind; cadence_deferred; _ })] ->
+   | [Ok (Current.Journal_failed { detail; kind = actual_kind; _ })] ->
      check_detail ?api_failure ?cli_failure:failure detail;
-     check bool "journal keeps the original failure kind" true (actual_kind = kind);
-     check bool "failure retains the existing cadence policy" true cadence_deferred
+     check bool "journal keeps the original failure kind" true (actual_kind = kind)
    | _ -> fail "failed pass must write one decodable journal failure");
   let runs = Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
     |> List.filter (fun (run : Exact_lane_run_registry.run) ->
@@ -409,7 +408,7 @@ let test_cli_prompt_drift_is_not_reported_as_no_cli_declaration () =
     Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run"))
   in
   match
-    Runtime.For_testing.execute_exact_output_classified
+    Runtime.For_testing.execute_exact_output_classified ~continuity:None
       ~cli_runner:runner
       ~clock
       ~net
@@ -478,7 +477,7 @@ let test_body_timeout_reaches_http_successor ~with_cli () =
     cli_calls := runtime_id :: !cli_calls;
     Ok (Yojson.Safe.to_string valid_selection_json)
   in
-  Runtime.run_best_effort ~trigger:Runtime.Queue_changed ~cli_runner:runner
+  Runtime.run_best_effort ~cli_runner:runner
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision)
     (input ());
   check int "the incomplete HTTP response was requested once" 1

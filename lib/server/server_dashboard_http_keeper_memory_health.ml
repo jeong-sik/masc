@@ -27,6 +27,7 @@ type context_cycle =
   { saved : Keeper_continuity_observation.frontier option
   ; saved_read_error : string option
   ; prepared : Keeper_continuity_observation.t option
+  ; synthesis : Keeper_continuity_observation.synthesis option
   }
 
 let context_cycle ~config ~keeper_name =
@@ -39,7 +40,8 @@ let context_cycle ~config ~keeper_name =
     | Error _ -> None, Some "snapshot_unreadable"
   in
   { saved; saved_read_error;
-    prepared = Keeper_continuity_observation.latest ~config ~keeper_name }
+    prepared = Keeper_continuity_observation.latest ~config ~keeper_name;
+    synthesis = Keeper_continuity_observation.latest_synthesis ~config ~keeper_name }
 ;;
 
 let context_cycle_to_json cycle =
@@ -48,16 +50,21 @@ let context_cycle_to_json cycle =
       "boundary_line", `Int value.boundary_line] in
   let nullable encode = function None -> `Null | Some value -> encode value in
   let prepared (value : Keeper_continuity_observation.t) =
-    let kind, saved_frontier = match value.input with
-      | Keeper_continuity_observation.Summarized value -> "summarized", Some value
-      | Uncompressed -> "uncompressed", None
-      | Not_applied -> "not_applied", None in
+    (* [frontier] is the boundary a summary covers; the absorbed position has
+       no boundary line, so its shape is the trace and the atom alone. *)
+    let kind, input_frontier = match value.input with
+      | Keeper_continuity_observation.Summarized value -> "summarized", frontier value
+      | Absorbed { trace_id; end_atom } ->
+        "absorbed", `Assoc ["trace_id", `String trace_id; "end_atom", `Int end_atom]
+      | Without_snapshot -> "without_snapshot", `Null
+      | Not_applied -> "not_applied", `Null in
     `Assoc ["prepared_at", `Float value.prepared_at; "runtime_id", `String value.runtime_id;
       "request_bytes", `Int value.request_bytes;
-      "input", `Assoc ["kind", `String kind; "frontier", nullable frontier saved_frontier]] in
+      "input", `Assoc ["kind", `String kind; "frontier", input_frontier]] in
   `Assoc ["saved", nullable frontier cycle.saved;
     "saved_read_error", nullable (fun value -> `String value) cycle.saved_read_error;
-    "prepared", nullable prepared cycle.prepared]
+    "prepared", nullable prepared cycle.prepared;
+    "synthesis", nullable Keeper_continuity_observation.synthesis_to_json cycle.synthesis]
 ;;
 
 type keeper_health =
@@ -584,7 +591,7 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v6"
+    [ "schema", `String "keeper.memory_os.current_health.v7"
     ; "generated_at", `Float generated_at
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"

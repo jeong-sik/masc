@@ -15,7 +15,8 @@ type seed =
 type origin =
   | Carried of source
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
-  | Whole_history
+  | Librarian_progress of { end_atom : int }
+  | Turn_start of { end_atom : int }
 
 let of_ledger (ledger : Keeper_model_input_ledger.t) =
   match ledger.last.ends with
@@ -101,9 +102,10 @@ type unreadable_records =
 type seed_read =
   { seed : seed option
   ; unreadable : unreadable_records option
+  ; boundary_error : string option
   }
 
-let no_seed_read = { seed = None; unreadable = None }
+let no_seed_read = { seed = None; unreadable = None; boundary_error = None }
 
 (* A JSON row that does not decode as a turn record gives no seed, and it is
    counted: "no record" and "records that could not be decoded" are different
@@ -124,30 +126,94 @@ let seed_read_of_rows ~trace_id rows =
       ([], None)
       rows
   in
-  { seed = of_records ~trace_id (List.rev records_rev); unreadable }
+  { seed = of_records ~trace_id (List.rev records_rev)
+  ; unreadable
+  ; boundary_error = None
+  }
+;;
+
+let current_generation_floor ~config ~keeper_name ~trace_id =
+  Result.bind
+    (Keeper_turn_boundaries.read
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name)
+    (fun lines ->
+       let rec loop latest_turn floor = function
+         | [] -> Ok floor
+         | (line, Error error) :: _ ->
+           Error
+             (Printf.sprintf
+                "turn boundary line %d: %s"
+                line
+                (Keeper_turn_boundaries.read_error_to_string error))
+         | ( _,
+             Ok
+               { Keeper_turn_boundaries.event =
+                   Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
+               ; _
+               } )
+           :: rest
+           when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
+           let turn = Ids.Turn_ref.absolute_turn turn_ref in
+           loop
+             (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
+             floor
+             rest
+         | ( _,
+             Ok
+               { Keeper_turn_boundaries.event =
+                   Keeper_turn_boundaries.History_restarted { trace_id = restarted }
+               ; _
+               } )
+           :: rest
+           when String.equal restarted trace_id ->
+           loop latest_turn latest_turn rest
+         | (_, Ok _) :: rest -> loop latest_turn floor rest
+       in
+       loop None None lines)
 ;;
 
 let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  let unreadable = ref None in
-  (* Count observations, not intervening rows. A direct retry may reuse its
-     turn number, so the last stored response is the latest observation.
-     The callback runs newest first; keep the oldest visited refusal as
-     [seed_read_of_rows] does for a chronological input. *)
-  let seeds =
-    Dated_jsonl.collect_matching store 1 ~f:(fun json ->
-      match Turn_record.of_json json with
-      | Ok record -> of_records ~trace_id [ record ]
-      | Error first_reason ->
-        let count =
-          match !unreadable with
-          | None -> 1
-          | Some (seen : unreadable_records) -> seen.count + 1
-        in
-        unreadable := Some { count; first_reason };
-        None)
-  in
-  { seed = List.nth_opt seeds 0; unreadable = !unreadable }
+  match current_generation_floor ~config ~keeper_name ~trace_id with
+  | Error detail ->
+    { seed = None
+    ; unreadable = None
+    ; boundary_error = Some detail
+    }
+  | Ok generation_floor ->
+    let unreadable = ref None in
+    let exception Trace_boundary in
+    (* Count observations, not intervening rows. A direct retry may reuse its
+       turn number, so the last stored response is the latest observation.
+       A different trace is the durable generation boundary; a history
+       restart is the same-trace boundary after an operator clear. *)
+    let seeds =
+      try
+        Dated_jsonl.collect_matching store 1 ~f:(fun json ->
+          match Turn_record.of_json json with
+          | Ok record when not (String.equal record.Turn_record.trace_id trace_id) ->
+            raise_notrace Trace_boundary
+          | Ok record
+            when (match generation_floor with
+                  | Some floor -> record.Turn_record.absolute_turn <= floor
+                  | None -> false) ->
+            raise_notrace Trace_boundary
+          | Ok record -> of_records ~trace_id [ record ]
+          | Error first_reason ->
+            let count =
+              match !unreadable with
+              | None -> 1
+              | Some (seen : unreadable_records) -> seen.count + 1
+            in
+            unreadable := Some { count; first_reason };
+            None)
+      with Trace_boundary -> []
+    in
+    { seed = List.nth_opt seeds 0
+    ; unreadable = !unreadable
+    ; boundary_error = None
+    }
 ;;
 
 type dropped_front =
@@ -193,8 +259,9 @@ let seed_to_json (seed : seed) =
 
 let origin_to_string = function
   | Librarian_snapshot _ -> "librarian_snapshot"
+  | Librarian_progress _ -> "librarian_progress"
   | Carried source -> source_to_string source
-  | Whole_history -> "whole_history"
+  | Turn_start _ -> "turn_start"
 ;;
 
 let origin_to_json = function
@@ -208,5 +275,8 @@ let origin_to_json = function
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
   | Carried (Evicted_after_refusal { retry }) ->
     `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
-  | Whole_history -> `Assoc [ "kind", `String "whole_history" ]
+  | Librarian_progress { end_atom } ->
+    `Assoc [ "kind", `String "librarian_progress"; "end_atom", `Int end_atom ]
+  | Turn_start { end_atom } ->
+    `Assoc [ "kind", `String "turn_start"; "end_atom", `Int end_atom ]
 ;;

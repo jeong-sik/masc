@@ -75,7 +75,6 @@ export type MemoryJournalEntry =
       readonly kind: string
       readonly detail: string
       readonly snapshotPresent: boolean
-      readonly cadenceDeferred: boolean
     }
   // A quarantine is neither a pass that committed nor a pass that failed: the
   // server records it on its own outcome when an undecodable snapshot moves
@@ -254,16 +253,14 @@ function decodeFailed(raw: Record<string, unknown>): MemoryJournalEntry | null {
     'kind',
     'detail',
     'snapshot_present',
-    'cadence_deferred',
   ])) return null
   const recordedAt = asNumber(raw.recorded_at)
   const traceId = exactNonEmptyString(raw.trace_id)
   const kind = exactNonEmptyString(raw.kind)
   const detail = exactNonEmptyString(raw.detail)
   const snapshotPresent = typeof raw.snapshot_present === 'boolean' ? raw.snapshot_present : null
-  const cadenceDeferred = typeof raw.cadence_deferred === 'boolean' ? raw.cadence_deferred : null
   if (recordedAt == null || traceId == null || kind == null || detail == null) return null
-  if (snapshotPresent === null || cadenceDeferred === null) return null
+  if (snapshotPresent === null) return null
   return {
     ok: true,
     outcome: 'failed',
@@ -272,7 +269,6 @@ function decodeFailed(raw: Record<string, unknown>): MemoryJournalEntry | null {
     kind,
     detail,
     snapshotPresent,
-    cadenceDeferred,
   }
 }
 

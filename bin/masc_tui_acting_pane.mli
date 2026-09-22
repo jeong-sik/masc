@@ -19,7 +19,11 @@
     decision survives a resize. *)
 
 val pane_cols : int
-(** The columns the pane takes when it shows. *)
+(** The columns the narrow pane takes. *)
+
+val wide_pane_cols : int
+(** The columns the wide pane takes: the narrow pane's, plus eighteen that
+    go to the fleet row's name column and the call row's age. *)
 
 val reading_cells : int
 (** The cells a fleet row's reading gets, after the mark, the name and the gap.
@@ -32,15 +36,32 @@ val threshold_cols : int
     plus what the roster pane leaves a surface, so the two panes sharing one
     screen leave the surface no narrower than the roster alone would. *)
 
-val shown : hidden:bool -> cols:int -> bool
-(** [hidden] is the reader's answer, [cols] the terminal's. Both must agree. *)
+val wide_threshold_cols : int
+(** The width from which a surface can afford the wide pane: the wide pane
+    plus the same floor {!threshold_cols} leaves. *)
 
-val toggle_hidden : hidden:bool -> cols:int -> bool option
-(** Toggle the reader's preference only where the pane can actually show.
-    [None] below {!threshold_cols} leaves the preference untouched, so a key
-    with no visible effect cannot surprise the reader after a later resize. *)
+(** The reader's answer to how the pane should sit beside a surface. *)
+type layout =
+  | Narrow
+  | Wide
+  | Hidden
 
-val content_cols : hidden:bool -> cols:int -> int
+val drawn_cols : layout:layout -> cols:int -> int
+(** The columns the pane takes beside a terminal [cols] wide: the layout the
+    reader chose when the terminal holds it, the narrow pane when a wide
+    choice meets a terminal that holds only the narrow one, and none when
+    hidden or when not even the narrow pane fits. The choice survives the
+    resize; a wider terminal draws it again. *)
+
+val next_layout : layout:layout -> cols:int -> layout option
+(** Ctrl-L: narrow, wide, hidden, in turn. A terminal that holds the narrow
+    pane but not the wide one goes narrow to hidden. [None] below
+    {!threshold_cols} leaves the choice untouched, so a key with no visible
+    effect cannot surprise the reader after a later resize. *)
+
+val layout_label : layout -> string
+
+val content_cols : layout:layout -> cols:int -> int
 (** What the surface beside the pane lays out against. *)
 
 (** Which of the pane's two readings is up. *)
@@ -61,8 +82,8 @@ type feed =
 (** One keeper as the fleet block draws it. [mark] is the one-cell health
     glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
     colour the caller reads out of the same health. [health] is that same
-    reading. A gone process marks an unsettled feed record with [!]; every
-    other unsettled record wears [~], without asserting a current turn. *)
+    reading. A gone process marks an open feed record with [!]; every
+    other open record wears [~], without asserting a current turn. *)
 type keeper = {
   name : string;
   mark : string;
@@ -204,6 +225,14 @@ type rendering = {
           fits, so a wheel over a short pane moves nothing *)
 }
 
+val next_target_row : targets:row_target array -> row:int -> step:int -> int option
+(** The row a keyboard cursor rests on next: from [row], stepping [step]
+    (1 down, -1 up) through the frame's [targets], the first row a press
+    would act on -- any target but {!Target_none}. [None] when no such row
+    lies that way, or when [step] is zero. [row = -1] with [step = 1] finds
+    the first; the caller then scrolls the pane, since the rows are the
+    frame's and the next call may be below it. *)
+
 val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 (** Exactly [rows] lines, each exactly [cols] display cells once its spans
     are joined: a line that would overflow is cut at the right edge, a short
@@ -221,12 +250,36 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     in that order with an open call's three detail rows under it, then the
     earlier turns. A call row wears the record glyph, or the failure glyph
     when the ledger said the call failed, then two dispatch cells: [&] when
-    it ran in a batch with others, [>] when it returned a deferral.
+    it ran in a batch with others, [>] when it returned a deferral. At
+    {!wide_pane_cols} and wider the call row ends with the call's age since
+    receipt in {!age_text}'s wording, padded to six cells, and the fleet
+    row's name column holds eighteen more cells.
+
+    Under either receipt order, a record whose calls came from more than one
+    model response says how many in the heading ([calls \xc2\xb7 newest first
+    \xc2\xb7 4 responses]) and brackets each response of two or more calls
+    in the call rows' border cell: [\xe2\x94\x8c] beside its first call,
+    [\xe2\x94\x82] beside the calls between, [\xe2\x94\x94] beside its
+    last, plain over the dim edge. A response of one call keeps the edge;
+    the heading's count is what says the record is split. No row is added.
+    A
+    composition's calls sit with the response that asked for the
+    composition. The response is the call's session ordinal, not its
+    planned index. No count and no bracket draw under the two sorts, which
+    interleave responses, for a single response, and when any call states
+    no ordinal.
 
     Recent tab under [Selected_only]: the fleet rows of keepers waiting on
     an approval, then the selected keeper's focus block, windowed like the
-    Changes tab. The focus header names a settled turn by its number alone;
-    an unsettled record spells its state. Under [Whole_fleet], two layouts.
+    Changes tab. The focus header says what the keeper is doing now when the
+    record carries it -- [running <tool> 4s] while a wire call is out,
+    [waiting on model 12s] while a provider call is in flight, [idle 3m] on
+    a finished record -- each with its own clock and, on a finished record,
+    the turn number after it. A record that says none of the three (between
+    a tool's return and the next provider call, or a CLI lane, which sends
+    no turn markers) keeps the older reading: a finished turn by its number
+    alone, every other record spelling its state ([open], [no end, process
+    gone]), and the age of the newest event. Under [Whole_fleet], two layouts.
     At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
     show, a fold line counts the keepers left out, and the focus block takes
@@ -245,12 +298,15 @@ val keeper_state_text :
   approval:string option ->
   Masc_tui_acting.chunk option ->
   span list
-(** The fleet row's recent observation: approval first, then the record's
-    glyph ([~] unsettled, [!] unsettled with the process gone, the settled
-    mark otherwise) and its words: the newest tool and the observed count
-    ([4+ calls], [no calls yet]) before a settle, the settle's count
-    ([12 calls]) and the tokens after. Unknown settled counts stay unknown.
-    No clock: the age of the newest event is on the focus header. *)
+(** The fleet row's recent observation in four fixed columns: the state
+    word ([approval] with the tool, [no events], [open] with the newest
+    tool, [done]), then the call figure ([-] or [2+] observed so far on an
+    open record, [3] or [?] from the end event on a done one) and the token
+    sum on a done one. [no end] would be the word for a gone process, but
+    {!lines} draws no fleet row for an offline keeper, so only a direct
+    caller sees it. No glyph: the row's one-cell mark is the keeper's
+    health, not the record. No clock: the age of the newest event is on the
+    focus header. *)
 
 val tokens_text : int option * int option -> string
 (** Input and output tokens as two parts when both are known
@@ -261,8 +317,9 @@ val tokens_sum_text : int option * int option -> string
 (** The same tokens summed ([74.2k tok]), for a row that cannot afford the
     parts. *)
 
-val legend : string
-(** The legend row, as drawn. *)
+val legend : cols:int -> string
+(** The legend row, as drawn at that width: the column names sit over the
+    fleet row's columns, which start after the name column the width gives. *)
 
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)

@@ -80,13 +80,6 @@ let markdown_body content =
   let _metadata, body = parse_frontmatter content in
   body
 
-(** Parse a list value like [a, b, c] into string list. Reads through
-    {!Frontmatter.list_field}, which also accepts the unbracketed [a, b, c]
-    the other frontmatter readers used to allow; every asset in the tree
-    writes the bracketed form, so nothing already on disk changes meaning. *)
-let parse_list_value s =
-  Frontmatter.list_field { Frontmatter.fields = [ ("v", s) ]; body = "" } "v"
-
 (** {1 Variable Extraction} *)
 
 (** Extract variable names from a template string.
@@ -361,7 +354,7 @@ let registrations_of_file ~dir file =
             in
             let template_variables =
               match List.assoc_opt "template_variables" meta_pairs with
-              | Some v -> parse_list_value v
+              | Some v -> Frontmatter.list_value v
               | None -> []
             in
             (* A group file registers each [### marker] paragraph as
@@ -399,7 +392,7 @@ let registrations_of_file ~dir file =
                     let template_variables =
                       match slot_vars with
                       | None -> []
-                      | Some declared -> parse_list_value ("[" ^ declared ^ "]")
+                      | Some declared -> Frontmatter.list_value declared
                     in
                     let slot_surface, slot_description =
                       match primary_declaration with

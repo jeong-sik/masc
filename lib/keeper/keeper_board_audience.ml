@@ -42,12 +42,12 @@ let of_board_audience = function
 let classify ~visibility signal =
   let board_audience =
     match signal.Board_dispatch.kind with
-    | Board_dispatch.Board_post_created ->
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
       Board.audience_for_post
         ~visibility
         ~title:signal.title
         ~content:signal.content
-    | Board_dispatch.Board_comment_added ->
+    | Board_dispatch.Board_comment_added _ ->
       Board.audience_for_comment ~content:signal.content
     | Board_dispatch.Board_reaction_changed _ ->
       Ok Board.audience_for_reaction
@@ -82,17 +82,25 @@ let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signa
        | Board_signal.Available (Some reason) -> Board_signal.Available (Deliver reason)
        | Board_signal.Available None ->
          (* #27329: a comment classified as [Thread_participants] has no
-            deterministic address for a lane that never touched the thread.
+            deterministic address for a lane that neither owns the post nor authored its direct parent.
             Folding those lanes to [Ignore] starved the attention judge on
             the comment surface — the push path is the only producer of
             comment judgment candidates (the replay scan re-synthesizes
             post_created signals only). Escalate to [Judge_discoverable] so
             the lane records an attention candidate; every other kind keeps
             the [Ignore] fold. *)
-         if signal.Board_dispatch.kind = Board_dispatch.Board_comment_added
-         then Board_signal.Available Judge_discoverable
-         else Board_signal.Available Ignore)
-    | Discoverable -> Board_signal.Available Judge_discoverable
+         (match signal.Board_dispatch.kind with
+          | Board_dispatch.Board_comment_added _ when meta.board_interests <> [] ->
+            Board_signal.Available Judge_discoverable
+          | Board_dispatch.Board_post_created
+          | Board_dispatch.Board_post_updated _
+          | Board_dispatch.Board_comment_added _
+          | Board_dispatch.Board_reaction_changed _
+          | Board_dispatch.Board_vote_cast _ -> Board_signal.Available Ignore))
+    | Discoverable ->
+      if meta.board_interests = []
+      then Board_signal.Available Ignore
+      else Board_signal.Available Judge_discoverable
 ;;
 
 let label = function

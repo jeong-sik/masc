@@ -133,7 +133,7 @@ type judged =
   }
 
 type outcome =
-  | Open of
+  | Failed of
       { reason : string
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
@@ -317,17 +317,6 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
     =
     String.equal a.absorbed b.absorbed && String.equal a.into b.into
   in
-  (* [absorbed] in the answer's order, so the store sees the answer's list
-     minus what the gate took out. *)
-  let answer_without out =
-    List.filter
-      (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
-         not (List.exists (same statement) out))
-      absorbed
-  in
-  let of_verdict (verdict : source_verdict) : Keeper_memory_os_types.absorbed_statement =
-    { Keeper_memory_os_types.absorbed = verdict.memory_id; into = verdict.into }
-  in
   let rec go (acc : judged) = function
     | [] -> Ok acc
     | (group : group) :: rest ->
@@ -414,14 +403,17 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
             absorbed
       }
   | Error (reason, acc) ->
-    (* What the gate had decided stays decided: the unjudgeable of every
-       group, and the sources a completed answer showed not conveyed. The
-       rest is applied as answered. *)
+    (* Only complete positive verdicts authorize removing a source. A
+       failed request leaves unanswered statements and unvisited groups
+       current, without blocking the new claims or completed judgments. *)
     let unjudgeable = List.concat_map (fun (group : group) -> group.unjudgeable) groups in
     let unjudged = List.concat_map (fun (group : group) -> group.unjudged) groups in
-    Open
+    Failed
       { reason
-      ; absorbed = answer_without (unjudgeable @ List.map of_verdict acc.left)
+      ; absorbed = List.filter (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+          List.exists (fun (verdict : source_verdict) ->
+            String.equal statement.absorbed verdict.memory_id
+            && String.equal statement.into verdict.into) acc.conveyed) absorbed
       ; left = acc.left
       ; conveyed = acc.conveyed
       ; unjudged
@@ -434,8 +426,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { endpoint : string
-  ; model : string
+  { destinations : Typesafeai_client.destination_id list
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
@@ -457,11 +448,11 @@ type observation =
 
 let absorbed_of_run = function
   | Skipped { absorbed; _ }
-  | Evaluated { outcome = Open { absorbed; _ }; _ }
+  | Evaluated { outcome = Failed { absorbed; _ }; _ }
   | Evaluated { outcome = Judged { absorbed; _ }; _ } -> absorbed
 ;;
 
-let evaluation_to_yojson { endpoint; model; state; questions; result } =
+let evaluation_to_yojson { destinations; state; questions; result } =
   let response =
     match result with
     | Error failure ->
@@ -488,7 +479,9 @@ let evaluation_to_yojson { endpoint; model; state; questions; result } =
       in
       answers
       @ [ "request_body_sha256", `String evaluated.request_body_sha256
-        ; "destination_uri", `String evaluated.destination_uri
+        ; "destination_uri", `String evaluated.destination.destination_uri
+        ; "requested_model", `String evaluated.destination.model
+        ; "passed_over", `List (List.map Typesafeai_client.attempt_to_yojson evaluated.passed_over)
         ; "usage",
           (match evaluated.response.usage with
            | None -> `Null
@@ -503,8 +496,7 @@ let evaluation_to_yojson { endpoint; model; state; questions; result } =
      body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
     @ [ "request", `Assoc
-          [ "endpoint", `String endpoint
-          ; "model", `String model
+          [ "destinations", `List (List.map Typesafeai_client.destination_id_to_yojson destinations)
           ; "state", state
           ; "questions", `Assoc
               (List.map (fun (id, question) -> id, Typesafeai_types.question_to_yojson question)
@@ -534,8 +526,8 @@ let run_result_to_yojson result =
     | Evaluated { outcome; evaluations } ->
       let status, disposition =
         match outcome with
-        | Open { reason; absorbed; left; conveyed; unjudged; unjudgeable } ->
-          ([ "status", `String "open"; "reason", `String reason ],
+        | Failed { reason; absorbed; left; conveyed; unjudged; unjudgeable } ->
+          ([ "status", `String "failed"; "reason", `String reason ],
            [ "applied_absorptions", absorptions absorbed
            ; "left", verdicts left; "conveyed", verdicts conveyed
            ; "unjudged", absorptions unjudged
@@ -569,25 +561,55 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
   match absorbed with
   | [] -> complete (Skipped { reason = No_absorptions; absorbed })
   | _ :: _ ->
-    (match Typesafeai_config.absorb_gate_api_key ~keeper_id with
-     | Error reason ->
+    (match Typesafeai_config.absorb_gate_destinations ~keeper_id with
+     | Error
+         ((Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded) as reason)
+       ->
+       (* Declared off: the operator chose not to ask, and the answer applies
+          as it came, as it did before the gate existed. *)
        Log.Keeper.info
          ~keeper_name:keeper_id
          "librarian absorb gate off (%s): %d absorption(s) applied as answered"
          (Typesafeai_config.unavailable_reason_to_string reason)
          (List.length absorbed);
        complete (Skipped { reason = Unavailable reason; absorbed })
-     | Ok api_key ->
-       let endpoint = Typesafeai_config.endpoint () in
-       let model = Typesafeai_config.model () in
+     | Error
+         ((Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination) as reason)
+       ->
+       (* Declared on and cannot be asked: the operator meant every absorption
+          to be judged, so none is; the sources stay current and the new
+          claims still apply. Applying the answer here would remove memories
+          from the current snapshot on the strength of a judgment that never
+          ran, which is the one direction this gate exists to close. *)
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "librarian absorb gate declared on but unavailable (%s): %d absorption(s) kept current"
+         (Typesafeai_config.unavailable_reason_to_string reason)
+         (List.length absorbed);
+       complete (Skipped { reason = Unavailable reason; absorbed = [] })
+     | Error
+         ((Typesafeai_config.Board_attention_disabled
+          | Typesafeai_config.Context_review_disabled
+          | Typesafeai_config.Skill_applicability_disabled) as reason)
+       ->
+       (* Another gate's switch: [absorb_gate_destinations] does not produce
+          these. Named rather than caught so a new reason has to be placed;
+          the safe direction is the same as above. *)
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "librarian absorb gate reported another gate's switch (%s): %d absorption(s) kept current"
+         (Typesafeai_config.unavailable_reason_to_string reason)
+         (List.length absorbed);
+       complete (Skipped { reason = Unavailable reason; absorbed = [] })
+     | Ok ((first, rest) as armed) ->
+       let destinations = List.map Typesafeai_client.identify (first :: rest) in
        (* The sha256 of each request body, as the client computed it, so the
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
        let evaluate ~state ~questions =
-         let result = Typesafeai_client.evaluate ?clock ~endpoint ~model ~api_key ~state ~questions () in
-         let endpoint = Typesafeai_client.endpoint_for_observation endpoint in
-         evaluations := { endpoint; model; state; questions; result } :: !evaluations;
+         let result = Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () in
+         evaluations := { destinations; state; questions; result } :: !evaluations;
          publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string
@@ -599,11 +621,11 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
            | Ok evaluated -> Some evaluated.Typesafeai_client.request_body_sha256
            | Error _ -> None) evaluations) in
        (match outcome with
-        | Open { reason; absorbed = applied; left; unjudgeable; _ } ->
+        | Failed { reason; absorbed = applied; left; unjudgeable; _ } ->
           Log.Keeper.warn
             ~keeper_name:keeper_id
-            "librarian absorb gate open: %s; %d of %d absorption(s) applied as answered (%d \
-             kept current: %d too large to judge, %d not conveyed before the failure); \
+            "librarian absorb judgment failed: %s; %d of %d absorption(s) confirmed (%d \
+             kept current, including unconfirmed sources: %d too large to judge, %d not conveyed); \
              requests=%s"
             reason
             (List.length applied)

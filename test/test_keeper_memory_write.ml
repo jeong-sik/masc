@@ -766,7 +766,7 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
       ~args:
         (`Assoc
            [ "query", `String "us-west-1"
-           ; "source", `String "memory"
+           ; "source", `String "current"
            ; "limit", `Int 10
            ])
     |> Yojson.Safe.from_string
@@ -809,7 +809,7 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
       ~args:
         (`Assoc
            [ "query", `String "us-west-1"
-           ; "source", `String "memory"
+           ; "source", `String "current"
            ; "limit", `Int 10
            ])
     |> Yojson.Safe.from_string
@@ -869,7 +869,7 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
       ~args:
         (`Assoc
            [ "query", `String "eu-west-1"
-           ; "source", `String "memory"
+           ; "source", `String "current"
            ; "limit", `Int 10
            ])
     |> Yojson.Safe.from_string
@@ -1251,7 +1251,7 @@ let test_search_filters_exact_substring_without_ranking () =
       ~args:
         (`Assoc
            [ "query", `String "alpha beta"
-           ; "source", `String "memory"
+           ; "source", `String "current"
            ; "limit", `Int 10
            ])
     |> Yojson.Safe.from_string
@@ -1344,7 +1344,7 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
         ~args:
           (`Assoc
              [ "query", `String "workspace"
-             ; "source", `String "memory"
+             ; "source", `String "current"
              ; "limit", `Int 10
              ])
       |> Yojson.Safe.from_string
@@ -1368,7 +1368,7 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
 
 (* The source parser sits behind Safe_ops.json_string, which returns its
    default for both an absent key and a key holding a non-string. Before the
-   fix {"source": ["memory"]} reached Memory while {"source": "memry"} was
+   fix {"source": ["current"]} reached Current while {"source": "currnt"} was
    refused, so a type error was treated more permissively than a value error.
    These pin the parser itself; the handler now feeds it the member directly. *)
 let test_source_parser_accepts_every_supported_value () =
@@ -1384,7 +1384,14 @@ let test_source_parser_rejects_unknown_value () =
   Alcotest.(check bool)
     "misspelled source is not a source"
     true
-    (Runtime.memory_search_source_of_string_opt "memry" = None)
+    (Runtime.memory_search_source_of_string_opt "currnt" = None)
+;;
+
+let test_source_parser_rejects_removed_memory_alias () =
+  Alcotest.(check bool)
+    "the ambiguous memory alias is a hard-cut rejection"
+    true
+    (Runtime.memory_search_source_of_string_opt "memory" = None)
 ;;
 
 let test_source_parser_rejects_json_rendering_of_a_non_string () =
@@ -1392,7 +1399,7 @@ let test_source_parser_rejects_json_rendering_of_a_non_string () =
     "a rendered JSON array is not a source"
     true
     (Runtime.memory_search_source_of_string_opt
-       (Yojson.Safe.to_string (`List [ `String "memory" ]))
+       (Yojson.Safe.to_string (`List [ `String "current" ]))
      = None)
 ;;
 
@@ -1436,7 +1443,7 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
       ~config
       ~meta
       ~ctx_work:(empty_ctx ())
-      ~args:(`Assoc [ "query", `String "anything"; "source", `String "memory" ])
+      ~args:(`Assoc [ "query", `String "anything"; "source", `String "current" ])
   in
   check_failure_class "corrupt store" Tool_result.Dependency_unavailable execution;
   let response =
@@ -1732,9 +1739,9 @@ let test_absorbed_facts_are_searchable () =
          | _ -> None)
        (matches (search "all")));
   Alcotest.(check (list string))
-    "the default search answers with the merged claim, not the rows it absorbed"
+    "current search answers only current facts"
     [ "gamma deploys on friday"; "alpha and beta deploy on tuesday" ]
-    (List.map (string_field "text") (matches (search "memory")));
+    (List.map (string_field "text") (matches (search "current")));
   let search_for query source =
     Runtime.keeper_memory_search_json
       ~config
@@ -1744,9 +1751,27 @@ let test_absorbed_facts_are_searchable () =
     |> Yojson.Safe.from_string
   in
   Alcotest.(check (list string))
-    "a row whose claim does not answer is the only way to what it says and stays"
+    "current scope does not silently recover absorbed originals"
+    [ "gamma deploys on friday" ]
+    (List.map (string_field "text") (matches (search_for "deploys" "current")));
+  let default_current =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String "deploys"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string) "absent source defaults to current" "current"
+    (string_field "source" default_current);
+  Alcotest.(check (list string))
+    "default excludes absorbed originals"
+    [ "gamma deploys on friday" ]
+    (List.map (string_field "text") (matches default_current));
+  Alcotest.(check (list string))
+    "all scope explicitly recovers absorbed originals"
     [ "gamma deploys on friday"; "beta deploys on tuesday"; "alpha deploys on tuesday" ]
-    (List.map (string_field "text") (matches (search_for "deploys" "memory")));
+    (List.map (string_field "text") (matches (search_for "deploys" "all")));
   let channel =
     open_out_gen
       [ Open_wronly; Open_append ]
@@ -1827,11 +1852,11 @@ let test_a_query_of_several_words_is_answered () =
     ; "the alpha service deploys every tuesday"
     ; "tuesday was chosen for alpha after the outage"
     ]
-    (texts (search ~source:"memory" "alpha tuesday"));
+    (texts (search ~source:"all" "alpha tuesday"));
   Alcotest.(check (list string))
     "what the substring rule alone returned is the head of the result"
     [ "alpha tuesday checklist lives in the wiki" ]
-    (texts (search ~limit:1 ~source:"memory" "alpha tuesday"));
+    (texts (search ~limit:1 ~source:"all" "alpha tuesday"));
   Alcotest.(check (list string))
     "word order does not matter, and each store keeps its own order"
     [ "the alpha service deploys every tuesday"
@@ -1839,7 +1864,7 @@ let test_a_query_of_several_words_is_answered () =
     ; "tuesday was chosen for alpha after the outage"
     ; "the alpha tuesday window moved once"
     ]
-    (texts (search ~source:"memory" "tuesday alpha"));
+    (texts (search ~source:"all" "tuesday alpha"));
   Alcotest.(check (list string))
     "the absorbed store answers by the same rule: the row holding the whole \
      query comes before the row written earlier that holds only its words"
@@ -1849,7 +1874,7 @@ let test_a_query_of_several_words_is_answered () =
     "and it is the row holding only the words that the limit cuts"
     [ "the alpha tuesday window moved once" ]
     (texts (search ~limit:1 ~source:"absorbed" "alpha tuesday"));
-  let unanswered = search ~source:"memory" "alpha gamma" in
+  let unanswered = search ~source:"current" "alpha gamma" in
   Alcotest.(check (list string))
     "a word no claim holds leaves the query unanswered"
     []
@@ -1861,8 +1886,8 @@ let test_a_query_of_several_words_is_answered () =
 (* [source=all] applies the match tier before the store order. A weaker current
    fact must not consume [limit] before an exact absorbed or history result.
    Once the tier is equal, the documented current/source-bound/absorbed/history
-   order remains deterministic. The default search does the same over its two
-   stores, without the history. *)
+   order remains deterministic. The default current search does not include
+   either historical store. *)
 let test_all_ranks_complete_queries_before_fragments_across_stores () =
   with_temp_dir
   @@ fun base_path ->
@@ -1960,16 +1985,15 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
     ]
     (search 4);
   Alcotest.(check (list string))
-    "the default search keeps the absorbed complete-query result at limit one"
-    [ "absorbed alpha tuesday exact" ]
-    (search ~source:"memory" 1);
+    "the default current search starts with the first current fragment"
+    [ "ordinary alpha deploys each tuesday" ]
+    (search ~source:"current" 1);
   Alcotest.(check (list string))
-    "and puts its fragment matches after it, without the history"
-    [ "absorbed alpha tuesday exact"
-    ; "ordinary alpha deploys each tuesday"
+    "current scope contains ordinary and source-bound facts only"
+    [ "ordinary alpha deploys each tuesday"
     ; "source alpha deploys each tuesday"
     ]
-    (search ~source:"memory" 4)
+    (search ~source:"current" 4)
 ;;
 
 let test_fragment_contract_is_whitespace_split_substring_matching () =
@@ -1989,7 +2013,7 @@ let test_fragment_contract_is_whitespace_split_substring_matching () =
       ~config
       ~meta
       ~ctx_work:(empty_ctx ())
-      ~args:(`Assoc [ "query", `String query; "source", `String "memory" ])
+      ~args:(`Assoc [ "query", `String query; "source", `String "current" ])
     |> Yojson.Safe.from_string
     |> match_texts
   in
@@ -2019,10 +2043,9 @@ let test_fragment_contract_is_whitespace_split_substring_matching () =
     history_empty
 ;;
 
-(* The absorbed store is one of the two the default search reads and one of
-   the three source=all reads. When it cannot be read at all, source=absorbed
-   fails as a store that did not answer, and the default search and source=all
-   still answer from the current facts and name the store they went without. *)
+(* The absorbed store is read only by source=absorbed and source=all. When it
+   cannot be read, current still answers independently; all answers from the
+   current facts and explicitly names the historical store it went without. *)
 let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
   with_temp_dir
   @@ fun base_path ->
@@ -2051,17 +2074,16 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
   let answered source =
     (search source).Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
-  let default_search = answered "memory" in
+  let default_search = answered "current" in
   (match json_field "matches" default_search with
    | `List [ matched ] ->
-     Alcotest.(check string) "the default search still answers its current fact"
+     Alcotest.(check string) "the current search still answers its current fact"
        "gamma deploys on friday" (string_field "text" matched)
-   | _ -> Alcotest.fail "expected the one current fact from the default search");
-  (match json_field "unavailable_stores" default_search with
-   | `List [ store ] ->
-     Alcotest.(check string) "and names the store it went without" "absorbed_memory"
-       (string_field "store" store)
-   | _ -> Alcotest.fail "expected the default search to name the absorbed store unavailable");
+   | _ -> Alcotest.fail "expected the one fact from the current search");
+  Alcotest.(check bool) "current never touches or reports the absorbed store" true
+    (match default_search with
+     | `Assoc fields -> Option.is_none (List.assoc_opt "unavailable_stores" fields)
+     | _ -> false);
   let all = answered "all" in
   (match json_field "matches" all with
    | `List [ matched ] ->
@@ -2231,7 +2253,7 @@ let test_search_records_a_retrieval_per_ordinary_match () =
       ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
       ~args:
         (`Assoc
-           [ "query", `String query; "source", `String "memory"; "limit", `Int 10 ])
+           [ "query", `String query; "source", `String "current"; "limit", `Int 10 ])
     |> Yojson.Safe.from_string
   in
   let response = search "alpha beta" in
@@ -2545,6 +2567,10 @@ let () =
             "source parser rejects unknown value"
             `Quick
             test_source_parser_rejects_unknown_value
+        ; Alcotest.test_case
+            "source parser rejects removed memory alias"
+            `Quick
+            test_source_parser_rejects_removed_memory_alias
         ; Alcotest.test_case
             "source parser rejects a non-string rendering"
             `Quick

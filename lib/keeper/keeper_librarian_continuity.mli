@@ -2,13 +2,25 @@
     Memory progress and queued-input pockets do not authorize this frontier. *)
 type prepared
 val path : config:Workspace.config -> keeper_name:string -> string
+val path_for_keepers_dir : keepers_dir:string -> keeper_name:string -> string
+
+type removal = Snapshot_removed | Snapshot_absent
+val remove : keepers_dir:string -> keeper_name:string -> (removal, string) result
+(** Unlink the saved snapshot. Taken by the checkpoint purge after it installs
+    a renumbered history: the snapshot's atom numbers and digests belong to the
+    old numbering and are no place in the new one, and the Librarian's next
+    pass writes a fresh one. The read position is not touched; the purge moves
+    it. A snapshot left behind is not read past its numbering either: a turn
+    that finds it does not fit starts at the read position instead. *)
 val read : config:Workspace.config -> keeper_name:string ->
   (Librarian_continuity_snapshot.t option, string) result
 val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->
   (prepared option, string) result
 (** Read boundaries before the locked checkpoint. Supply previous valid state
-    plus the new suffix, or an explicitly captured checkpoint prefix. Pending
-    in-flight atoms are excluded. [None] means no new complete coverage. *)
+    plus the suffix through the next real completed turn. Capacity is a ceiling,
+    not a reason to include later turns. An explicit [end_atom] selects a prefix;
+    an unpublished exact Memory receipt takes precedence over either choice.
+    Pending in-flight atoms are excluded. [None] means no new complete coverage. *)
 val prompt_json : prepared -> Yojson.Safe.t
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
   working_state:string -> (Librarian_continuity_snapshot.t, string) result
@@ -20,7 +32,15 @@ val messages : prepared -> Agent_core.Types.message list
 (** Exact new source atoms, including tool results, supplied to both Memory
     disposition and working-state inference. *)
 val turn_ref : prepared -> Ids.Turn_ref.t
+val start_atom : prepared -> int
+val completed_end_atom : prepared -> int
 val end_atom : prepared -> int
+val fit : fits:(prepared -> (bool, string) result) -> prepared ->
+  (prepared option, string) result
+(** Keep the selected work unit unchanged when it fits. Only an oversized unit
+    is split at whole-atom midpoints, stopping at the first fitting part without
+    growing it back toward the limit. Source bytes and prior state stay intact;
+    an exact Memory recovery range cannot be split. *)
 val narrow : prepared -> prepared option
 (** Retry a refused source at the midpoint between whole atoms. Call only after
     a typed capacity refusal; [None] means one indivisible atom remains, or the exact range already has

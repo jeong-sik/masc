@@ -55,6 +55,7 @@ let agent_id_of_string s =
   | Error _ -> Alcotest.failf "failed to parse agent_id %S" s
 
 let make_post ~id ~author =
+  let created_at = Unix.gettimeofday () in
   { Board.id = post_id_of_string id;
     author = agent_id_of_string author;
     title = "Test post";
@@ -62,7 +63,8 @@ let make_post ~id ~author =
     post_kind = Board.Human_post;
     meta_json = None;
     visibility = Board.Internal;
-    created_at = Unix.gettimeofday ();
+    created_at;
+    content_updated_at = created_at;
     updated_at = Unix.gettimeofday ();
     expires_at = Unix.gettimeofday () +. 3600.0;
     votes_up = 0;

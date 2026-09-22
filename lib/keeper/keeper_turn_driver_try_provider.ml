@@ -48,13 +48,43 @@ type checkpoint_progress =
   | Tool_results_saved
 
 type continuity =
-  | Uncompressed_history
+  | Without_snapshot
   | Summarized of
   { snapshot : Librarian_continuity_snapshot.t
   ; covered_messages : Agent_core.Types.message list
   }
+  | Absorbed of
+  { trace_id : string
+  ; end_atom : int
+  ; last_atom_digest : string
+  }
 
-let uncompressed_history = Uncompressed_history
+let without_snapshot = Without_snapshot
+
+(* The Librarian's durable position, when it is a place in this history: the
+   position names this trace and the atom before it opens with the message
+   the position recorded -- the same test the Librarian's own range selection
+   applies to its position (Keeper_librarian_range, RFC librarian-lifecycle
+   section 4.4 row 5). A position of another trace, past this history, or
+   over a message the history no longer holds at that index is no place here,
+   and the caller falls back as it would with no position at all. *)
+let absorbed_history ~trace_id ~messages (progress : Keeper_librarian_progress.t) =
+  let position = progress.Keeper_librarian_progress.position in
+  let end_atom = position.Keeper_librarian_progress.end_atom in
+  if not (String.equal position.Keeper_librarian_progress.trace_id trace_id) || end_atom < 1
+  then None
+  else (
+    match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
+    | Some opening when String.equal opening position.Keeper_librarian_progress.last_atom_digest ->
+      Some
+        ( end_atom
+        , Absorbed
+            { trace_id
+            ; end_atom
+            ; last_atom_digest = position.Keeper_librarian_progress.last_atom_digest
+            } )
+    | Some _ | None -> None)
+;;
 
 let covered_messages ~end_atom messages =
   let labelled, _ = Runtime_model_input_tail_window.annotate messages in
@@ -64,6 +94,39 @@ let covered_messages ~end_atom messages =
     labelled
 ;;
 
+let completed_history_end ~trace_id ~lines ~messages =
+  Librarian_continuity_snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages
+  |> Result.map (fun range -> range.Keeper_librarian_range.end_atom)
+;;
+
+(* RFC keeper-context-window-in-tokens §13.4: where a request with no
+   absorbed point starts. The end of the last completed turn on this
+   history, verified against it; 0 when the history has no completed turn.
+   A boundary store this process cannot read, or a boundary the history in
+   hand does not match, leaves the start at the oldest atom and says so:
+   the turn goes out rather than not at all, and under the small input
+   policy no completed-turn boundary demotes tool bodies either. *)
+let turn_start ~config ~keeper_name ~trace_id ~messages =
+  match
+    Keeper_turn_boundaries.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  with
+  | Error detail ->
+    Log.Keeper.warn ~keeper_name
+      "turn start unknown, the range starts at the oldest atom: boundary read failed: %s"
+      detail;
+    0
+  | Ok lines ->
+    (match completed_history_end ~trace_id ~lines ~messages with
+     | Ok end_atom -> end_atom
+     | Error Librarian_continuity_snapshot.Uncovered_history -> 0
+     | Error error ->
+       Log.Keeper.warn ~keeper_name
+         "turn start unknown, the range starts at the oldest atom: %s"
+         (Librarian_continuity_snapshot.error_to_string error);
+       0)
+;;
+
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
   Result.map (fun _ ->
     Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
@@ -71,7 +134,13 @@ let prepare_continuity ~trace_id ~lines ~messages snapshot =
 ;;
 
 let validate_continuity ~messages = function
-  | Uncompressed_history -> Ok ()
+  | Without_snapshot -> Ok ()
+  | Absorbed { end_atom; last_atom_digest; _ } ->
+    (match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
+     | Some opening when String.equal opening last_atom_digest -> Ok ()
+     | Some _ | None ->
+       Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+         { field = "librarian.progress"; detail = "Absorbed conversation changed during dispatch" })))
   | Summarized continuity ->
   let current = covered_messages ~end_atom:continuity.snapshot.end_atom messages in
   if List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages
@@ -100,6 +169,8 @@ type try_provider_ctx =
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; continuity : continuity option
+  ; input_policy : Keeper_input_policy.t
+  ; completed_end_atom : int
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
@@ -732,6 +803,7 @@ let last_resort_demotes ~measure_message_bytes ~base_path messages =
 ;;
 
 let compose_carried_model_input
+      ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
@@ -739,6 +811,7 @@ let compose_carried_model_input
       ~last_resort
       ~base_path
       ~demote_before
+      ~completed_end_atom
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
@@ -758,8 +831,10 @@ let compose_carried_model_input
     | None, None -> None, None
   in
   let demote_before =
-    if Option.is_some continuity then 0
-    else if last_resort then history_atom_count else demote_before in
+    match input_policy, continuity with
+    | Keeper_input_policy.Small, _ -> demote_before
+    | Keeper_input_policy.Wide, Some _ -> 0
+    | Wide, None -> if last_resort then history_atom_count else demote_before in
   let planned =
     demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
   in
@@ -777,13 +852,26 @@ let compose_carried_model_input
       in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
-          ~allow_empty_history:true ~measure_message_bytes
+          ~allow_empty_history:true
+          ~history_already_announced:true ~measure_message_bytes
           ~first_atom:snapshot.end_atom
           (working :: planned.Keeper_model_input_demotion.messages)
       in
       projection, transmitted_bytes,
         Keeper_carried_front.Librarian_snapshot
           { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
+    | Some (Absorbed { end_atom; _ }), _ ->
+      (* No summary stands in for the absorbed atoms; the omission preamble
+         says older turns are left out, and an exclusive end at the newest
+         atom -- a Librarian that has read everything, which is the only
+         state a purge leaves it in -- carries no history atom at all. *)
+      let projection, transmitted_bytes =
+        Runtime_model_input_tail_window.project_from_atom
+          ~allow_empty_history:true ~measure_message_bytes
+          ~first_atom:end_atom
+          planned.Keeper_model_input_demotion.messages
+      in
+      projection, transmitted_bytes, Keeper_carried_front.Librarian_progress { end_atom }
     | None, Some (seed : Keeper_carried_front.seed) ->
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
@@ -799,14 +887,22 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | None, None | Some Uncompressed_history, _ ->
+    | None, None | Some Without_snapshot, _ ->
+      (* No absorbed point and no seed (RFC keeper-context-window-in-tokens
+         §13.4): the range begins where the last completed turn on this
+         history ended, clamped so the newest atom always goes. The atoms
+         before it wait for the Librarian's next pass. A history with no
+         completed turn starts at 0, which is everything it has. *)
+      let first_atom =
+        Keeper_carried_front.clamp ~atom_count:history_atom_count completed_end_atom
+      in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
-          ~first_atom:0
+          ~first_atom
           planned.Keeper_model_input_demotion.messages
       in
-      projection, transmitted_bytes, Keeper_carried_front.Whole_history
+      projection, transmitted_bytes, Keeper_carried_front.Turn_start { end_atom = first_atom }
   in
   { planned
   ; projection
@@ -841,6 +937,7 @@ type request_view =
   }
 
 let request_view
+      ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
       ~provider_config
       ~measure_message_bytes
@@ -849,19 +946,21 @@ let request_view
       ~last_resort
       ~base_path
       ~demote_before
+      ~completed_end_atom
       ~materialize
       messages
   =
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ?continuity
+        ~input_policy ?continuity
         ~measure_message_bytes
         ~front
         ~history_digest_at
         ~last_resort
         ~base_path
         ~demote_before
+        ~completed_end_atom
         messages)
   in
   let carried =
@@ -963,9 +1062,6 @@ let bounded_model_input_projection
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
   in
-  (* A position in the durable history, which is what the composition
-     annotates: the messages the turn was seeded with come first. *)
-  let initial_message_index = List.length ctx.initial_messages in
   (* One memo per provider attempt, not per request.  A turn issues one
      projection per provider request — measured on the live wire capture:
      83 requests for turn 12263, 62 for 15638 — and every request re-measures
@@ -993,6 +1089,17 @@ let bounded_model_input_projection
      be thrown away between the attempt's 62 to 83 requests, which is what it
      was before. *)
   let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
+  let store_failure_reported = ref false in
+  let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
+  let references_enabled = match ctx.input_policy, ctx.recovery_view with
+    | Keeper_input_policy.Small, None -> reader_available && ctx.completed_end_atom > 0
+    | _ -> false in
+  let demotion_base_path = if references_enabled then ctx.base_path else "" in
+  Log.Keeper.info ~keeper_name:ctx.keeper_name
+    "input policy runtime=%s selected=%s context_owner=agent_core completed_end_atom=%d blob_reader_available=%b body_externalization_enabled=%b"
+    ctx.runtime_id (Keeper_input_policy.to_string ctx.input_policy)
+    ctx.completed_end_atom reader_available references_enabled;
+
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
@@ -1063,40 +1170,17 @@ let bounded_model_input_projection
        compose with the ordinary boundary again. *)
     let last_resort = !(state.last_resort_armed) in
     state.last_resort_armed := false;
-    let demotion_base_path =
-      (* #27268 A/B kill-switch: an empty base path makes the composition
-         keep every atom verbatim, so the RFC-0363 demotion effect can be
-         measured on and off in one deployment. Default on preserves
-         current behavior. *)
-      if Env_config_core.get_bool ~default:true "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
-      then ctx.base_path
-      else ""
-    in
-    state.last_resort_probe
-    := Some
-         (fun () ->
-            offload_model_input_cpu (fun () ->
-              last_resort_demotes
-                ~measure_message_bytes
-                ~base_path:demotion_base_path
-                messages));
-    (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
-       reasoning over right now is what this turn produced, and
-       [ctx.initial_messages] is exactly the history the turn was seeded
-       with — so everything past it is this turn's own work and stays
-       verbatim, and everything before it was already reported through a
-       receipt or a board post and becomes a readable address. The
-       boundary moves once per turn, so appending a message cannot
-       rewrite the retained prefix. *)
-    let demote_before =
-      offload_model_input_cpu (fun () ->
-        Runtime_model_input_tail_window.first_atom_at_or_after
-          messages
-          ~message_index:initial_message_index)
-    in
+    (* Completed-turn evidence, not attempt seed length, protects unfinished
+       resumed tool work. Capacity refusal does not move this boundary. *)
+    let demote_before = ctx.completed_end_atom in
+    state.last_resort_probe :=
+      (match ctx.input_policy, ctx.continuity with
+       | Keeper_input_policy.Small, _ | _, Some _ -> None
+       | Wide, None -> Some (fun () -> offload_model_input_cpu (fun () ->
+           last_resort_demotes ~measure_message_bytes ~base_path:demotion_base_path messages)));
     let view =
       request_view
-        ?continuity:ctx.continuity
+        ~input_policy:ctx.input_policy ?continuity:ctx.continuity
         ~provider_config
         ~measure_message_bytes
         ~front
@@ -1104,6 +1188,7 @@ let bounded_model_input_projection
         ~last_resort
         ~base_path:demotion_base_path
         ~demote_before
+        ~completed_end_atom:ctx.completed_end_atom
         ~materialize:(fun ~pending messages ->
           (* Blob materialization writes files, so it stays on the owning Eio
              fiber rather than in the CPU domain pool. The store skips writing
@@ -1123,6 +1208,11 @@ let bounded_model_input_projection
               ~pending
               messages
           in
+          if outcome.Keeper_model_input_demotion.reverted > 0 && not !store_failure_reported then (
+            store_failure_reported := true;
+            Log.Keeper.warn ~keeper_name:ctx.keeper_name
+              "input policy kept original tool bodies after externalization failure: count=%d"
+              outcome.reverted);
           outcome.Keeper_model_input_demotion.messages)
         messages
     in
@@ -1181,7 +1271,8 @@ let bounded_model_input_projection
          it did. *)
       if Lazy.is_val cold_seed
       then (
-        match (Lazy.force cold_seed).Keeper_carried_front.unreadable with
+        let read = Lazy.force cold_seed in
+        (match read.Keeper_carried_front.unreadable with
         | Some unreadable ->
           Log.Keeper.warn
             ~keeper_name:ctx.keeper_name
@@ -1190,7 +1281,16 @@ let bounded_model_input_projection
             ctx.runtime_id
             unreadable.Keeper_carried_front.count
             unreadable.Keeper_carried_front.first_reason
-        | None -> ()));
+        | None -> ());
+        Option.iter
+          (fun detail ->
+             Log.Keeper.warn
+               ~keeper_name:ctx.keeper_name
+               "model input carried range seed read refused the turn-boundary store runtime=%s detail=%s"
+               ctx.runtime_id
+               detail)
+          read.Keeper_carried_front.boundary_error);
+      );
     (match composed.outlived_seed with
      | Some (seed, dropped) when not !outlived_reported ->
        outlived_reported := true;
@@ -1500,7 +1600,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        Keeper_continuity_observation.Summarized
                          { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
                            boundary_line = snapshot.end_boundary_line }
-                     | Some Uncompressed_history -> Keeper_continuity_observation.Uncompressed
+                     | Some (Absorbed { trace_id; end_atom; _ }) ->
+                       Keeper_continuity_observation.Absorbed { trace_id; end_atom }
+                     | Some Without_snapshot -> Keeper_continuity_observation.Without_snapshot
                      | None -> Keeper_continuity_observation.Not_applied in
                    if Option.is_some ctx.session_id then
                      Keeper_continuity_observation.record

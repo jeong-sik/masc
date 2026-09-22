@@ -74,7 +74,6 @@ const failed = {
   kind: 'runtime_context_unavailable',
   detail: 'Eio net/clock context unavailable',
   snapshot_present: false,
-  cadence_deferred: false,
 }
 
 function payload(entries: unknown[], undecodable = 0) {

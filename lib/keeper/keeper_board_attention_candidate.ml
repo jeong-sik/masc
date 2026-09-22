@@ -39,20 +39,10 @@ type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-type judgment_material =
-  { post : Board.post
-  ; comments : Board.comment list
-  }
-
-(* 판정에 쓰이는 값은 pending 일 때만 읽힌다 ([Keeper_board_attention_exact_flow]
-   의 [prepare] 가 그 밖의 상태를 [Candidate_not_pending] 으로 거부한다). 그래서
-   후보의 필드가 아니라 이 상태가 들고 있다. 소비하면 같이 사라지고, 사라졌다는
-   사실이 그대로 파일에 쓰인다 — 캐시가 곧 쓰기의 원본이므로 메모리와 저장소가
-   같은 말을 계속 한다. RFC-0424. *)
-type pending_state =
-  { last_delivery_failure : delivery_failure option
-  ; material : judgment_material
-  }
+(* v7 persists the current typed Board signal only. Historical post/comment
+   snapshots are neither identity nor judgment input, so retaining them would
+   make stale context look authoritative. RFC-0424. *)
+type pending_state = { last_delivery_failure : delivery_failure option }
 
 type judged_state =
   { judgment : judgment
@@ -154,25 +144,12 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-(* v6: the judgment request stopped being a stored field. Its [post] and
-   [comments] moved onto the pending state, where the judgment is the only
-   reader, and [keeper_context] became a candidate field because partition
-   identity is read in every status. [candidate_id] and [signal] are gone: they
-   restated the candidate's own fields, and the validator confirmed the two
-   agreed on all 13,297 rows measured 2026-09-06. v5 rows carry the old field and
-   lack the new one, so the decoder refuses them; v5 ledgers are retired at
-   deploy, not read. RFC-0424.
-
-   v5: the persisted post lost its [content] and [score] keys — [content]
-   duplicated [body] byte for byte and [score] restated [votes_up - votes_down],
-   and the decoder refused any row where the two disagreed. v4 rows carry both
-   keys, so the current post decoder refuses them and the identity check they
-   feed can never pass; v4 ledgers are retired at deploy, not read.
-
-   v4: post_created candidate identity became the typed event key
-   (keeper, kind, post_id) — v3 rows hash volatile fields and fail the
-   read-time identity check, so v3 ledgers are retired at deploy, not read. *)
-let schema_version = 6
+(* v7 is a hard cut: pending rows no longer retain Board thread snapshots,
+   [keeper_context] contains only lane identity and normalized interests, and
+   comment identity is the producer-supplied comment id. The deployment
+   preflight rejects a ledger that holds any non-v7 row, so older rows are
+   never decoded as v7. *)
+let schema_version = 7
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"
@@ -213,15 +190,6 @@ let status_of_resumable = function
   | Resumable_pending pending -> Pending pending
   | Resumable_judged judged -> Judged judged
   | Resumable_consumed consumed -> Consumed consumed
-;;
-
-(* 판정 재료를 들고 있는 상태는 pending 과 pending 에서 격리된 것뿐이다. 격리는
-   [prior_status] 를 그대로 보존하므로 재투입되면 그 재료로 판정된다. *)
-let pending_judgment_material = function
-  | Pending pending -> Some pending.material
-  | Quarantine { quarantine = { prior_status = Resumable_pending pending; _ }; _ } ->
-    Some pending.material
-  | Judged _ | Consumed _ | Quarantine _ -> None
 ;;
 
 let delivery_failure_kind_to_string = function
@@ -284,18 +252,28 @@ let queue_vote_to_yojson (vote : Board_dispatch.board_vote_change) =
 
 let signal_kind_to_string = function
   | Board_dispatch.Board_post_created -> "post_created"
-  | Board_dispatch.Board_comment_added -> "comment_added"
+  | Board_dispatch.Board_post_updated _ -> "post_updated"
+  | Board_dispatch.Board_comment_added _ -> "comment_added"
   | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   | Board_dispatch.Board_vote_cast _ -> "vote_cast"
 ;;
 
-(* Candidate rows written before votes became a signal carry exactly the
-   eight keys below, so [vote] is added only on a vote row rather than as a
-   ninth always-present key; [signal_of_yojson] expects it by kind. *)
 let signal_to_yojson (signal : Board_dispatch.board_signal) =
+  let comment_id, parent_id =
+    match signal.kind with
+    | Board_dispatch.Board_comment_added identity ->
+      ( Some (Board.Comment_id.to_string identity.comment_id)
+      , Option.map Board.Comment_id.to_string identity.parent_id )
+    | Board_dispatch.Board_post_created
+    | Board_dispatch.Board_post_updated _
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ -> None, None
+  in
   `Assoc
     ([ "kind", `String (signal_kind_to_string signal.kind)
      ; "post_id", `String signal.post_id
+     ; "comment_id", Json_util.option_to_yojson (fun value -> `String value) comment_id
+     ; "parent_id", Json_util.option_to_yojson (fun value -> `String value) parent_id
      ; "author", `String signal.author
      ; "title", `String signal.title
      ; "content", `String signal.content
@@ -306,52 +284,29 @@ let signal_to_yojson (signal : Board_dispatch.board_signal) =
          | Board_dispatch.Board_reaction_changed reaction ->
            queue_reaction_to_yojson reaction
          | Board_dispatch.Board_post_created
-         | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_post_updated _
+         | Board_dispatch.Board_comment_added _
          | Board_dispatch.Board_vote_cast _ -> `Null )
      ]
      @
      match signal.kind with
+     | Board_dispatch.Board_post_updated { content_updated_at } ->
+       [ "content_updated_at", `Float content_updated_at ]
      | Board_dispatch.Board_vote_cast vote -> [ "vote", queue_vote_to_yojson vote ]
      | Board_dispatch.Board_post_created
-     | Board_dispatch.Board_comment_added
+     | Board_dispatch.Board_comment_added _
      | Board_dispatch.Board_reaction_changed _ -> [])
 ;;
 
-let json_string_list values =
-  `List (List.map (fun value -> `String value) values)
-;;
-
-let canonical_mention_targets (meta : Keeper_meta_contract.keeper_meta) =
-  let targets =
-    if meta.mention_targets = [] then [ meta.name ] else meta.mention_targets
-  in
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | target :: rest ->
-      (match Keeper_identity.Keeper_id.of_string target with
-       | Some id -> loop (Keeper_identity.Keeper_id.to_string id :: acc) rest
-       | None -> Error "keeper mention target must not be empty")
-  in
-  loop [] targets
-;;
+let json_string_list values = `List (List.map (fun value -> `String value) values)
 
 let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
-  match canonical_mention_targets meta with
-  | Error _ as error -> error
-  | Ok mention_targets ->
-    Ok
-      (`Assoc
-         [ "lane_keeper_name", `String meta.name
-         ; "keeper_record_id", Json_util.option_to_yojson Ids.Keeper_id.to_yojson meta.id
-         ; ( "keeper_runtime_uid"
-           , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )
-         ; "instructions", `String meta.instructions
-         ; ( "current_task_id"
-           , Json_util.option_to_yojson
-               (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))
-               meta.current_task_id )
-         ; "mention_keeper_ids", json_string_list mention_targets
-         ])
+  `Assoc
+    [ "lane_keeper_name", `String meta.name
+    ; ( "board_interests"
+      , json_string_list
+          (Keeper_types_profile_toml.normalize_board_interests meta.board_interests) )
+    ]
 ;;
 
 let candidate_id_of_signal ~keeper_name (signal : Board_dispatch.board_signal) =
@@ -368,7 +323,20 @@ let candidate_id_of_signal ~keeper_name (signal : Board_dispatch.board_signal) =
         ; "kind", `String (signal_kind_to_string signal.kind)
         ; "post_id", `String signal.post_id
         ]
-    | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_post_updated { content_updated_at } ->
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "kind", `String "post_updated"
+        ; "post_id", `String signal.post_id
+        ; "content_updated_at", `Float content_updated_at
+        ]
+    | Board_dispatch.Board_comment_added identity ->
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "kind", `String (signal_kind_to_string signal.kind)
+        ; "post_id", `String signal.post_id
+        ; "comment_id", `String (Board.Comment_id.to_string identity.comment_id)
+        ]
     | Board_dispatch.Board_reaction_changed _
     | Board_dispatch.Board_vote_cast _ ->
       `Assoc
@@ -390,70 +358,49 @@ let signal_identity_equal
   match left.kind, right.kind with
   | Board_dispatch.Board_post_created, Board_dispatch.Board_post_created ->
     String.equal left.post_id right.post_id
-  | Board_dispatch.Board_comment_added, Board_dispatch.Board_comment_added ->
-    left = right
+  | Board_dispatch.Board_post_updated left_edit, Board_dispatch.Board_post_updated right_edit ->
+    String.equal left.post_id right.post_id
+    && Float.equal left_edit.content_updated_at right_edit.content_updated_at
+  | ( Board_dispatch.Board_comment_added left_identity
+    , Board_dispatch.Board_comment_added right_identity ) ->
+    String.equal left.post_id right.post_id
+    && String.equal
+         (Board.Comment_id.to_string left_identity.comment_id)
+         (Board.Comment_id.to_string right_identity.comment_id)
   | Board_dispatch.Board_reaction_changed _, Board_dispatch.Board_reaction_changed _ ->
     left = right
   | Board_dispatch.Board_vote_cast _, Board_dispatch.Board_vote_cast _ -> left = right
   | Board_dispatch.Board_post_created,
-    ( Board_dispatch.Board_comment_added
-    | Board_dispatch.Board_reaction_changed _
-    | Board_dispatch.Board_vote_cast _ )
-  | Board_dispatch.Board_comment_added,
-    ( Board_dispatch.Board_post_created
-    | Board_dispatch.Board_reaction_changed _
-    | Board_dispatch.Board_vote_cast _ )
+    ( Board_dispatch.Board_post_updated _ | Board_dispatch.Board_comment_added _
+    | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ )
+  | Board_dispatch.Board_post_updated _,
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added _
+    | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ )
+  | Board_dispatch.Board_comment_added _,
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _
+    | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ )
   | Board_dispatch.Board_reaction_changed _,
-    ( Board_dispatch.Board_post_created
-    | Board_dispatch.Board_comment_added
-    | Board_dispatch.Board_vote_cast _ )
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _
+    | Board_dispatch.Board_comment_added _ | Board_dispatch.Board_vote_cast _ )
   | Board_dispatch.Board_vote_cast _,
-    ( Board_dispatch.Board_post_created
-    | Board_dispatch.Board_comment_added
-    | Board_dispatch.Board_reaction_changed _ ) ->
-    false
-;;
-
-let of_board_evidence
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~recorded_at
-      ~(signal : Board_dispatch.board_signal)
-      ~(post : Board.post)
-      ~(comments : Board.comment list)
-  =
-  match keeper_context_to_yojson meta with
-  | Error _ as error -> error
-  | Ok keeper_context ->
-    let candidate_id = candidate_id_of_signal ~keeper_name:meta.name signal in
-    Ok
-      { candidate_id
-      ; keeper_name = meta.name
-      ; signal
-      ; keeper_context
-      ; recorded_at
-      ; status =
-          Pending { last_delivery_failure = None; material = { post; comments } }
-      }
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _
+    | Board_dispatch.Board_comment_added _ | Board_dispatch.Board_reaction_changed _ ) -> false
 ;;
 
 let of_board_signal
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~recorded_at
+  ~recorded_at
       (signal : Board_dispatch.board_signal)
   =
-  match Board_dispatch.get_post ~post_id:signal.post_id with
-  | Error error ->
-    Board_signal.Unavailable
-      { operation = Board_signal.Get_post; post_id = signal.post_id; error }
-  | Ok post ->
-    (match Board_dispatch.get_comments ~post_id:signal.post_id with
-     | Error error ->
-       Board_signal.Unavailable
-         { operation = Board_signal.Get_comments; post_id = signal.post_id; error }
-     | Ok comments ->
-       (match of_board_evidence ~meta ~recorded_at ~signal ~post ~comments with
-        | Ok candidate -> Board_signal.Available candidate
-        | Error detail -> raise (Candidate_unavailable detail)))
+  let keeper_context = keeper_context_to_yojson meta in
+  let candidate_id = candidate_id_of_signal ~keeper_name:meta.name signal in
+  { candidate_id
+  ; keeper_name = meta.name
+  ; signal
+  ; keeper_context
+  ; recorded_at
+  ; status = Pending { last_delivery_failure = None }
+  }
 ;;
 
 let delivery_failure_to_yojson failure =
@@ -499,18 +446,10 @@ let judgment_to_yojson judgment =
     ]
 ;;
 
-let judgment_material_to_yojson material =
-  `Assoc
-    [ "post", Board.post_to_yojson material.post
-    ; "comments", `List (List.map Board.comment_to_yojson material.comments)
-    ]
-;;
-
 let resumable_status_to_yojson = function
   | Resumable_pending pending ->
     `Assoc
       [ "kind", `String "pending"
-      ; "material", judgment_material_to_yojson pending.material
       ; ( "last_delivery_failure"
         , Json_util.option_to_yojson
             delivery_failure_to_yojson
@@ -944,7 +883,26 @@ let parse_vote json =
 ;;
 
 let signal_base_fields =
-  [ "kind"; "post_id"; "author"; "title"; "content"; "hearth"; "updated_at"; "reaction" ]
+  [ "kind"
+  ; "post_id"
+  ; "comment_id"
+  ; "parent_id"
+  ; "author"
+  ; "title"
+  ; "content"
+  ; "hearth"
+  ; "updated_at"
+  ; "reaction"
+  ]
+;;
+
+let comment_id_of_string ~context raw =
+  match Board.Comment_id.of_string raw with
+  | Error _ -> Error (context ^ " must be a current Board comment id")
+  | Ok comment_id ->
+    if String.equal (Board.Comment_id.to_string comment_id) raw
+    then Ok comment_id
+    else Error (context ^ " must use the canonical Board comment id spelling")
 ;;
 
 let signal_of_yojson json =
@@ -952,35 +910,66 @@ let signal_of_yojson json =
   let* fields = assoc ~context json in
   let* kind_json = field ~context "kind" fields in
   let* kind_raw = string_json ~context:(context ^ ".kind") kind_json in
-  (* A vote row carries the extra [vote] key; every other kind carries exactly
-     the base keys, which is also the shape of rows written before votes became
-     a signal. *)
+  (* Kind-specific fields are required only for the variant that owns them. *)
   let* expected_fields =
     match kind_raw with
     | "vote_cast" -> Ok (signal_base_fields @ [ "vote" ])
+    | "post_updated" -> Ok (signal_base_fields @ [ "content_updated_at" ])
     | "post_created" | "comment_added" | "reaction_changed" -> Ok signal_base_fields
     | value -> Error (Printf.sprintf "unknown Board signal kind %S" value)
   in
   let* () = exact_fields ~context expected_fields fields in
   let* reaction_json = field ~context "reaction" fields in
+  let* post_id_json = field ~context "post_id" fields in
+  let* post_id = string_json ~context:(context ^ ".post_id") post_id_json in
+  let* comment_id_json = field ~context "comment_id" fields in
+  let* comment_id =
+    optional_json (string_json ~context:(context ^ ".comment_id")) comment_id_json
+  in
+  let* parent_id_json = field ~context "parent_id" fields in
+  let* parent_id =
+    optional_json (string_json ~context:(context ^ ".parent_id")) parent_id_json
+  in
+  let no_comment_identity kind =
+    match comment_id, parent_id with
+    | None, None -> Ok kind
+    | _ ->
+      Error (context ^ ".comment_id and .parent_id are only valid for comment_added")
+  in
   let* kind =
     match kind_raw, reaction_json with
-    | "post_created", `Null -> Ok Board_dispatch.Board_post_created
-    | "comment_added", `Null -> Ok Board_dispatch.Board_comment_added
+    | "post_created", `Null -> no_comment_identity Board_dispatch.Board_post_created
+    | "post_updated", `Null ->
+      let* json = field ~context "content_updated_at" fields in
+      let* content_updated_at = finite_float_json ~context:(context ^ ".content_updated_at") json in
+      no_comment_identity (Board_dispatch.Board_post_updated { content_updated_at })
+    | "comment_added", `Null ->
+      (match comment_id with
+       | None -> Error (context ^ ".comment_id is required for comment_added")
+       | Some comment_id ->
+         let* comment_id =
+           comment_id_of_string ~context:(context ^ ".comment_id") comment_id
+         in
+         let* parent_id =
+           match parent_id with
+           | None -> Ok None
+           | Some parent_id ->
+             comment_id_of_string ~context:(context ^ ".parent_id") parent_id
+             |> Result.map Option.some
+         in
+         Ok (Board_dispatch.Board_comment_added { comment_id; parent_id }))
     | "reaction_changed", (`Assoc _ as json) ->
       let* reaction = parse_reaction json in
-      Ok (Board_dispatch.Board_reaction_changed reaction)
+      no_comment_identity (Board_dispatch.Board_reaction_changed reaction)
     | "vote_cast", `Null ->
       let* vote_json = field ~context "vote" fields in
       let* vote = parse_vote vote_json in
-      Ok (Board_dispatch.Board_vote_cast vote)
+      no_comment_identity (Board_dispatch.Board_vote_cast vote)
     | "post_created", _ | "comment_added", _ | "vote_cast", _ ->
       Error "non-reaction Board signal must carry reaction=null"
     | "reaction_changed", _ -> Error "reaction_changed signal requires reaction object"
     | value, _ -> Error (Printf.sprintf "unknown Board signal kind %S" value)
   in
-  let* post_id_json = field ~context "post_id" fields in
-  let* post_id = string_json ~context:(context ^ ".post_id") post_id_json in
   let* author_json = field ~context "author" fields in
   let* author = string_json ~context:(context ^ ".author") author_json in
   let* title_json = field ~context "title" fields in
@@ -997,7 +986,7 @@ let signal_of_yojson json =
       (finite_float_json ~context:(context ^ ".updated_at"))
       updated_at_json
   in
-  Ok
+  let signal =
     { Board_dispatch.kind = kind
     ; post_id
     ; author
@@ -1006,6 +995,8 @@ let signal_of_yojson json =
     ; hearth
     ; updated_at
     }
+  in
+  Ok signal
 ;;
 
 let delivery_failure_of_yojson json =
@@ -1102,36 +1093,6 @@ let judgment_of_yojson json =
   Ok judgment
 ;;
 
-let judgment_material_of_yojson json =
-  let context = "candidate.status.material" in
-  let* fields = assoc ~context json in
-  let* () = exact_fields ~context [ "post"; "comments" ] fields in
-  let* post_json = field ~context "post" fields in
-  let* post =
-    match Board.post_of_yojson post_json with
-    | Some post -> Ok post
-    | None -> Error (context ^ ".post does not match the current Board post schema")
-  in
-  let* comments_json = field ~context "comments" fields in
-  let* comments =
-    match comments_json with
-    | `List values ->
-      List.fold_left
-        (fun result value ->
-           let* decoded = result in
-           match Board.comment_of_yojson value with
-           | Some comment -> Ok (comment :: decoded)
-           | None ->
-             Error
-               (context ^ ".comments[] does not match the current Board comment schema"))
-        (Ok [])
-        values
-      |> Result.map List.rev
-    | _ -> Error (context ^ ".comments must be an array of objects")
-  in
-  Ok { post; comments }
-;;
-
 let resumable_status_of_yojson json =
   let context = "candidate.status" in
   let* fields = assoc ~context json in
@@ -1139,16 +1100,12 @@ let resumable_status_of_yojson json =
   let* kind = string_json ~context:(context ^ ".kind") kind_json in
   match kind with
   | "pending" ->
-    let* () =
-      exact_fields ~context [ "kind"; "material"; "last_delivery_failure" ] fields
-    in
-    let* material_json = field ~context "material" fields in
-    let* material = judgment_material_of_yojson material_json in
+    let* () = exact_fields ~context [ "kind"; "last_delivery_failure" ] fields in
     let* failure_json = field ~context "last_delivery_failure" fields in
     let* last_delivery_failure =
       optional_json delivery_failure_of_yojson failure_json
     in
-    Ok (Resumable_pending { last_delivery_failure; material })
+    Ok (Resumable_pending { last_delivery_failure })
   | "judged" ->
     let* () =
       exact_fields
@@ -1313,33 +1270,20 @@ let string_list_of_yojson ~context = function
   | `List values ->
     List.fold_left
       (fun result value ->
-         let* () = result in
-         let* (_ : string) = string_json ~context value in
-         Ok ())
-      (Ok ())
+         let* decoded = result in
+         let* value = string_json ~context value in
+         Ok (value :: decoded))
+      (Ok [])
       values
+    |> Result.map List.rev
   | _ -> Error (context ^ " must be an array of strings")
 ;;
 
-let optional_string_of_yojson ~context = function
-  | `Null -> Ok ()
-  | value ->
-    let* (_ : string) = string_json ~context value in
-    Ok ()
-;;
-
-let keeper_context_current_fields =
-  [ "lane_keeper_name"
-  ; "keeper_record_id"
-  ; "keeper_runtime_uid"
-  ; "instructions"
-  ; "current_task_id"
-  ; "mention_keeper_ids"
-  ]
+let keeper_context_current_fields = [ "lane_keeper_name"; "board_interests" ]
 ;;
 
 let validate_keeper_context ~keeper_name json =
-  let context = "candidate.judgment_request.keeper_context" in
+  let context = "candidate.keeper_context" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
@@ -1358,82 +1302,69 @@ let validate_keeper_context ~keeper_name json =
     then Ok ()
     else Error (context ^ ".lane_keeper_name does not match candidate keeper_name")
   in
-  let* instructions_json = field ~context "instructions" fields in
-  let* (_ : string) =
-    string_json ~context:(context ^ ".instructions") instructions_json
-  in
-  let* keeper_record_id = field ~context "keeper_record_id" fields in
-  let* () =
-    optional_string_of_yojson
-      ~context:(context ^ ".keeper_record_id")
-      keeper_record_id
-  in
-  let* keeper_runtime_uid = field ~context "keeper_runtime_uid" fields in
-  let* () =
-    optional_string_of_yojson
-      ~context:(context ^ ".keeper_runtime_uid")
-      keeper_runtime_uid
-  in
-  let* current_task_id = field ~context "current_task_id" fields in
-  let* () =
-    optional_string_of_yojson
-      ~context:(context ^ ".current_task_id")
-      current_task_id
-  in
-  let* mention_keeper_ids = field ~context "mention_keeper_ids" fields in
-  let* () =
+  let* interests_json = field ~context "board_interests" fields in
+  let* interests =
     string_list_of_yojson
-      ~context:(context ^ ".mention_keeper_ids")
-      mention_keeper_ids
+      ~context:(context ^ ".board_interests")
+      interests_json
+  in
+  let* () =
+    if interests = Keeper_types_profile_toml.normalize_board_interests interests
+    then Ok ()
+    else Error (context ^ ".board_interests must be normalized")
   in
   let* canonical = Context_key.of_yojson json in
   Ok (Context_key.to_yojson canonical)
 ;;
 
-(* 요청은 저장된 값을 검사해서 얻는 게 아니라 후보와 재료로 만든다. candidate_id
-   와 signal 이 후보에서 오므로 durable 정체성과 달라질 수 없고, 그래서 그 둘이
-   같은지 확인하던 검증이 없다 — 저장된 13,297행 전부에서 같았던 값들이다.
-   RFC-0424. *)
-let judgment_request_fields candidate material =
-  [ "candidate_id", `String candidate.candidate_id
-  ; "signal", signal_to_yojson candidate.signal
-  ; "post", Board.post_to_yojson material.post
-  ; "comments", `List (List.map Board.comment_to_yojson material.comments)
-  ]
+(* 요청은 후보의 현재 signal 과 Keeper 역할만 투영한다. candidate_id 와
+   signal 이 후보에서 오므로 durable 정체성과 달라질 수 없다. 역할은
+   partition identity와 같은 이름 및 정규화된 관심사만 보낸다. *)
+let keeper_role candidate =
+  let context = "candidate.keeper_context" in
+  let* canonical_context =
+    validate_keeper_context
+      ~keeper_name:candidate.keeper_name
+      candidate.keeper_context
+  in
+  let* fields = assoc ~context canonical_context in
+  let* interests_json = field ~context "board_interests" fields in
+  let* interests =
+    string_list_of_yojson
+      ~context:(context ^ ".board_interests")
+      interests_json
+  in
+  Ok
+    (`Assoc
+       [ "name", `String candidate.keeper_name
+       ; "board_interests", json_string_list interests
+       ])
 ;;
 
-let judgment_request candidate material =
+let judgment_item candidate =
   `Assoc
-    (judgment_request_fields candidate material
-     @ [ "keeper_context", candidate.keeper_context ])
-;;
-
-let singleton_judgment_request candidate material =
-  `Assoc
-    [ "keeper_context", candidate.keeper_context
-    ; "items", `List [ `Assoc (judgment_request_fields candidate material) ]
+    [ "candidate_id", `String candidate.candidate_id
+    ; "signal", signal_to_yojson candidate.signal
     ]
 ;;
 
-let validate_judgment_material ~(signal : Board_dispatch.board_signal) material =
-  let context = "candidate.status.material" in
-  let* () = validate_finite_json ~context (judgment_material_to_yojson material) in
-  let* () =
-    if String.equal (Board.Post_id.to_string material.post.id) signal.post_id
-    then Ok ()
-    else Error (context ^ ".post.id does not match durable signal.post_id")
-  in
-  let* () =
-    List.fold_left
-      (fun result (comment : Board.comment) ->
-         let* () = result in
-         if String.equal (Board.Post_id.to_string comment.post_id) signal.post_id
-         then Ok ()
-         else Error (context ^ ".comments[].post_id does not match durable signal.post_id"))
-      (Ok ())
-      material.comments
-  in
-  Ok ()
+let judgment_request candidate =
+  let* role = keeper_role candidate in
+  Ok
+    (`Assoc
+       [ "candidate_id", `String candidate.candidate_id
+       ; "signal", signal_to_yojson candidate.signal
+       ; "keeper_role", role
+       ])
+;;
+
+let singleton_judgment_request candidate =
+  let* role = keeper_role candidate in
+  Ok
+    (`Assoc
+       [ "keeper_role", role
+       ; "items", `List [ judgment_item candidate ]
+       ])
 ;;
 
 let validate_candidate_keeper_context ~keeper_name keeper_context =
@@ -1455,11 +1386,15 @@ let validate_candidate_for_persistence candidate =
       ~keeper_name:candidate.keeper_name
       candidate.keeper_context
   in
+  let expected_id =
+    candidate_id_of_signal
+      ~keeper_name:candidate.keeper_name
+      candidate.signal
+  in
   let* () =
-    match pending_judgment_material candidate.status with
-    | None -> Ok ()
-    | Some material ->
-      validate_judgment_material ~signal:candidate.signal material
+    if String.equal candidate.candidate_id expected_id
+    then Ok ()
+    else Error "candidate_id does not match the exact Keeper and Board signal identity"
   in
   validate_candidate_state candidate
 ;;
@@ -1933,7 +1868,7 @@ let resumable_with_delivery_failure resumable failure =
     (match pending.last_delivery_failure with
      | Some existing when same_delivery_failure existing failure -> resumable
      | Some _ | None ->
-       Resumable_pending { pending with last_delivery_failure = Some failure })
+       Resumable_pending { last_delivery_failure = Some failure })
   | Resumable_judged judged ->
     (match judged.last_delivery_failure with
      | Some existing when same_delivery_failure existing failure -> resumable

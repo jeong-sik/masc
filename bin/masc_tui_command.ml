@@ -20,6 +20,10 @@ type t =
   | Toggle_acting_pane
   | Show_acting_pane_tab of [ `Fleet | `Changes ]
   | Acting_pane_tab_unknown of string
+  | Set_acting_pane_call_order of [ `Next | `Newest | `Oldest | `Longest | `By_tool ]
+  | Acting_pane_call_order_unknown of string
+  | Scroll_acting_pane of [ `Up | `Down | `Top | `By of int ]
+  | Acting_pane_scroll_unknown of string
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Queue of string
@@ -215,8 +219,8 @@ let catalog =
     }
   ; { word = "activity"
     ; aliases = []
-    ; args = "[fleet|changes]"
-    ; summary = "show or hide the Activity pane beside this surface, or show one of its tabs"
+    ; args = "[fleet|changes|order [newest|oldest|longest|tool]|scroll up|down|top|+N|-N]"
+    ; summary = "walk the Activity pane beside this surface narrow, wide, hidden, show one of its tabs, turn the order of its calls, or scroll it"
     }
   ; { word = "preview"
     ; aliases = []
@@ -336,6 +340,33 @@ let parse text =
     | "activity", "" -> Toggle_acting_pane
     | "activity", "fleet" -> Show_acting_pane_tab `Fleet
     | "activity", "changes" -> Show_acting_pane_tab `Changes
+    (* The calls' order used to turn only under a mouse press on their
+       heading, so a terminal that does not report the mouse could not reach
+       it (#37672). The words are the heading's own: "by tool" is also
+       taken as "tool". *)
+    | "activity", arg when String.equal (fst (split_word arg)) "order" -> (
+        match snd (split_word arg) with
+        | "" -> Set_acting_pane_call_order `Next
+        | "newest" -> Set_acting_pane_call_order `Newest
+        | "oldest" -> Set_acting_pane_call_order `Oldest
+        | "longest" -> Set_acting_pane_call_order `Longest
+        | "tool" | "by tool" -> Set_acting_pane_call_order `By_tool
+        | other -> Acting_pane_call_order_unknown other)
+    (* The pane scrolled only under the wheel or a press on its "more" row
+       (#37672). Up and down move one wheel notch; a signed number moves
+       that many rows. *)
+    | "activity", arg when String.equal (fst (split_word arg)) "scroll" -> (
+        match snd (split_word arg) with
+        | "up" -> Scroll_acting_pane `Up
+        | "down" -> Scroll_acting_pane `Down
+        | "top" -> Scroll_acting_pane `Top
+        | word -> (
+            let signed =
+              String.length word > 1 && (word.[0] = '+' || word.[0] = '-')
+            in
+            match (if signed then int_of_string_opt word else None) with
+            | Some rows -> Scroll_acting_pane (`By rows)
+            | None -> Acting_pane_scroll_unknown word))
     | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name

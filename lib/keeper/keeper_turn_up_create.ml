@@ -20,7 +20,7 @@ open Keeper_turn_up_args
    operator learns which of the two happened. Without it a keeper whose
    instructions name a network service is created blocked, and the block first
    shows up as a credential error inside the guest. *)
-let create_response_json ~name ~trace_id ~instructions ~activation_mode
+let create_response_json ~name ~trace_id ~instructions ~activation_mode ~input_policy
     ~max_context_override ~sandbox_profile ~network_mode ~agent_core_env =
   `Assoc
     [ ("name", `String name)
@@ -28,6 +28,7 @@ let create_response_json ~name ~trace_id ~instructions ~activation_mode
     ; ("trace_id", `String trace_id)
     ; ("instructions", `String instructions)
     ; ("activation_mode", Keeper_activation_mode.to_yojson activation_mode)
+    ; ("input_policy", Keeper_input_policy.to_yojson input_policy)
     ; ("max_context_override", Json_util.int_opt_to_json max_context_override)
     ; ("sandbox_profile", `String (sandbox_profile_to_string sandbox_profile))
     ; ("network_mode", `String (network_mode_to_string network_mode))
@@ -61,6 +62,9 @@ let create_keeper ~expected_config_revision (ctx : _ context)
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
+  let input_policy = match p.input_policy_opt, p.profile_defaults.input_policy with
+    | Some policy, _ | None, Some policy -> policy
+    | None, None -> Keeper_input_policy.default in
   let activation_mode =
     Dashboard_utils.first_some p.activation_mode_opt p.profile_defaults.activation_mode
     (* DET-OK: fixed compile-time default, not random or clock-derived. *)
@@ -115,6 +119,11 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                 ~fallback_targets:p.profile_defaults.mention_targets
                 ~name:p.name
             in
+            let board_interests =
+              resolve_board_interests
+                ~board_interests_opt:p.board_interests_opt
+                ~fallback_interests:p.profile_defaults.board_interests
+            in
               let instructions = Option.value ~default:"" p.instructions_opt in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
@@ -146,12 +155,14 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         microvm_memory = p.profile_defaults.microvm_memory;
         microvm_cpus = p.profile_defaults.microvm_cpus;
         mention_targets;
+        board_interests;
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
         paused = false;
         latched_reason = None;
         activation_mode;
+        input_policy;
         current_task_id = None;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
@@ -344,6 +355,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
             ~instructions:meta.instructions
             ~activation_mode:meta.activation_mode
+            ~input_policy:meta.input_policy
             ~max_context_override:meta.max_context_override
             ~sandbox_profile:meta.sandbox_profile
             ~network_mode:meta.network_mode

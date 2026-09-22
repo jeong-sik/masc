@@ -209,17 +209,17 @@ test/test_tools_coverage.ml"
   # test/*.ml.
 
   # config/prompts is the same shape a third time. Every keeper turn is built
-  # from the assembled system prompt, and test_keeper_system_prompt_bytes pins
-  # it byte for byte for fixed inputs; it is the one suite that resolves the
-  # repository's own config/prompts rather than a temp dir it wrote. The 44
-  # other suites that name that directory pin the registry so the build does
-  # not raise inside the dune sandbox, and assert nothing about what ships
-  # there, so mapping them here would spend the whole budget on suites the
-  # change cannot break. The same nightly measured the golden at 4,998 bytes
-  # against an assembled 8,083.
+  # from the assembled system prompt, and test_keeper_system_prompt_blocks
+  # checks that every block of it arrives once, in order, and filled; it is
+  # the one suite that resolves the repository's own config/prompts to check
+  # the assembly rather than a temp dir it wrote. The 44 other suites that
+  # name that directory pin the registry so the build does not raise inside
+  # the dune sandbox, and assert nothing about what ships there, so mapping
+  # them here would spend the whole budget on suites the change cannot
+  # break.
   prompts_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/prompts/' || [ $? -eq 1 ]; } | head -1)
-  prompt_guard="test/test_keeper_system_prompt_bytes.ml"
+  prompt_guard="test/test_keeper_system_prompt_blocks.ml"
 
   # config/themes is the same shape a fourth time, and the only one of the
   # three where the suite is not in doubt. 53 base16 schemes ship out of that
@@ -472,6 +472,27 @@ NAMEDFILES
   named_file_suites=$( { printf '%s\n' "${named_file_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
+  # exactpath candidates: a suite that spells the changed file's exact path,
+  # in either quote style. The file rule above skips a shared basename and
+  # the quoted-literal mapping matches only double quotes; #37396's incident
+  # 4 changed scripts/fixtures/release-evidence/runtime.toml -- a basename
+  # shared with transport-harness -- while test_setup_cli.py opens it with
+  # single quotes, and neither rule reached the suite. An exact path is the
+  # claim the file rule waits for, whatever the basename or the quote.
+  exactpath_candidates=$(printf '%s\n' "${referenced}" | sed -n 's/^exactpath //p')
+  exactpath_suites=""
+  while IFS= read -r candidate; do
+    [ -n "${candidate}" ] || continue
+    case "${candidate}" in
+      *.py) python_suite_is_runnable "${candidate}" || continue ;;
+    esac
+    exactpath_suites=$(printf '%s\n%s\n' "${exactpath_suites}" "${candidate}")
+  done <<EXACTPATHS
+${exactpath_candidates}
+EXACTPATHS
+  exactpath_suites=$( { printf '%s\n' "${exactpath_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
   # [themes_changed] stands beside [assets] here: the tool and prompt triggers
   # ride that variable, which matches config/(prompts|tools|mcp), and a theme
   # is none of those. Left out, a theme-only pull request returned here before
@@ -479,7 +500,7 @@ NAMEDFILES
   if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
     && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
     && [ -z "${declared_suites}" ] && [ -z "${referencing_suites}" ] \
-    && [ -z "${named_file_suites}" ]; then
+    && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -548,6 +569,13 @@ NAMEDFILES
     echo "suites that name a file this pull request edits:"
     printf '%s\n' "${named_file_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${named_file_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${exactpath_suites}" ]; then
+    echo "suites that open a file this pull request edits by exact path:"
+    printf '%s\n' "${exactpath_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${exactpath_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -622,6 +650,44 @@ run_selected() {
 ${sources}
 EOF
 
+  # A suite with a custom bound (the keyboard walk, the only entry today)
+  # runs before anything else, alone and at its own bound. Run
+  # 35685267067 killed it at 202s and 221s -- the budget left after the
+  # build and 17 linked suites had run -- because its 600s bound only ever
+  # shrank to the remainder the rest of the selection left. The walk
+  # measures 261s when healthy (#36343), so it needs the budget's fullest
+  # wallet, not that remainder. Direct-edited-first keeps its meaning among
+  # the default-bound suites; this phase is before every class.
+  local custom_source custom_dir custom_name own limit status
+  while IFS= read -r custom_source; do
+    [ -n "${custom_source}" ] || continue
+    case "${custom_source}" in *.py) ;; *) continue ;; esac
+    [ "$(suite_timeout "${custom_source}")" -eq "${per_suite_timeout}" ] && continue
+    if printf '%s\n' "${known_failures}" | grep -Fxq "${custom_source}"; then
+      continue
+    fi
+    custom_dir=$(dirname "${custom_source}")
+    custom_name=$(basename "${custom_source}" .py)
+    own=$(suite_timeout "${custom_source}")
+    if [ "$(budget_left)" -le 0 ]; then
+      failed="${failed}${custom_dir}/${custom_name} (not run: the step budget ran out)\n"
+      continue
+    fi
+    limit=$(bounded_by_budget "${own}")
+    echo "== ${custom_dir}/${custom_name} (dune rule, bound ${own}s, first)"
+    status=0
+    timeout "${limit}" dune build "@${custom_dir}/runtest-${custom_name}" < /dev/null || status=$?
+    if [ "${status}" -eq 0 ]; then
+      ran=$((ran + 1))
+    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
+      failed="${failed}${custom_dir}/${custom_name} (stopped at the step budget after ${limit}s)\n"
+    else
+      failed="${failed}${custom_dir}/${custom_name} (run)\n"
+    fi
+  done <<EOF
+${sources}
+EOF
+
   local group_sources
   for group_sources in "${direct_group}" "${attributed_group}"; do
     if ! printf '%s\n' "${group_sources}" | grep -q '[^[:space:]]'; then
@@ -651,6 +717,11 @@ EOF
     fi
     case "${source}" in
       *.py)
+        # Custom-bound suites (the walk) already ran in the phase above at
+        # their own bound with the fullest wallet. The batch's limit maths
+        # uses per_suite_timeout, so letting one back in here would both
+        # rerun it and re-hide its bound from the batch's budget.
+        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] || continue
         python_sources[python_count]="${source}"
         python_count=$((python_count + 1))
         [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] \
@@ -1105,8 +1176,8 @@ self_test() {
     "packages/agent_core/lib/dune"
   # Only tool definitions reach the second one; a prompt asset has no first
   # line to fit.
-  check "a prompt asset reaches the asset guard and the prompt golden" \
-    "test/test_keeper_system_prompt_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
+  check "a prompt asset reaches the asset guard and the prompt block check" \
+    "test/test_keeper_system_prompt_blocks.ml test/test_managed_assets_sync_from_binary.ml" \
     "config/prompts/foo.md"
   # And not the asset guard: it runs the real sync, whose domains are Prompts,
   # Tools and Mcp. A scheme is embedded but never synced, so that guard has
@@ -1299,6 +1370,17 @@ FAKE
     runner_check "a parallel wave that spends the budget names every remainder" \
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
+
+  # task-1678: the keyboard walk has a custom 600s bound, but a selection
+  # that also carries linked suites used to reach it with the remainder only
+  # (202s/221s in run 35685267067) and its bound shrank to that. It must run
+  # first, at its own bound, with everything else fitted into what is left.
+  # The stand-in walk (slow_py) sleeps past any small budget, so a pass here
+  # means it was handed its own bound, not the remainder.
+  RUNNER_DIRECT_SOURCES="test/test_slow_py.py" \
+    runner_check "a custom-bound walk runs first and whole, before linked suites" \
+      "" \
+      0 4 test_ok test_ok_too test/test_slow_py.py
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.

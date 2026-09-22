@@ -1038,6 +1038,21 @@ let test_validate_args_keeper_memory_search_rejects_removed_kind () =
   | Error result ->
     assert_policy_validation_payload ~label:"removed memory kind" result
 
+let test_validate_args_keeper_memory_search_rejects_removed_memory_source () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_memory_search_schema
+      ~name:"keeper_memory_search"
+      ~args:(`Assoc [ "query", `String "memory"; "source", `String "memory" ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected removed memory source to be rejected, but it passed: %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    assert_policy_validation_payload ~label:"removed memory search source" result
+
 (* The op enum (derived from Keeper_workspace_op.valid_strings) must accept
    EVERY op the runtime dispatch handles. Guards the regression where the
    enum is hand-listed with only the directory-listing ops, silently
@@ -2518,6 +2533,8 @@ let () =
         test_validate_args_masc_board_list_rejects_unknown_field;
       Alcotest.test_case "keeper_memory_search rejects removed kind" `Quick
         test_validate_args_keeper_memory_search_rejects_removed_kind;
+      Alcotest.test_case "keeper_memory_search rejects removed memory source" `Quick
+        test_validate_args_keeper_memory_search_rejects_removed_memory_source;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects empty args with class" `Quick

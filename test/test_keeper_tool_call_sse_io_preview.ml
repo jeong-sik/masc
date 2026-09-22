@@ -88,6 +88,7 @@ let test_tool_call_event_uses_canonical_disposition () =
   let event =
     Keeper_tools_agent_core_handler_telemetry.keeper_tool_call_event_json
       ~keeper_name:"alpha"
+      ~keeper_turn_id:(Some 2275)
       ~tool_name:"keeper_file_write"
       ~duration_ms:12
       ~disposition:(Tool_result.Deferred ())
@@ -101,7 +102,13 @@ let test_tool_call_event_uses_canonical_disposition () =
   Alcotest.(check (option bool))
     "legacy success bool absent"
     None
-    (bool_member "success" event)
+    (bool_member "success" event);
+  Alcotest.(check (option int))
+    "keeper turn the ledger files the call under"
+    (Some 2275)
+    (match member "keeper_turn_id" event with
+     | `Int keeper_turn_id -> Some keeper_turn_id
+     | _ -> None)
 ;;
 
 let test_agent_core_invocation_fields_preserve_exact_occurrence () =

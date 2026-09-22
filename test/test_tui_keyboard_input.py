@@ -31,6 +31,15 @@ Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None
 HttpResponse = tuple[int, object]
 Needle = bytes | re.Pattern[bytes]
 
+# The composer row redrawn focused: its prompt "› to <keeper>" with nothing
+# after the name but blanks. Unfocused it ends in "(i to write)". The voice
+# keys hint used to be what a step waited for after i, but it is drawn only
+# where speech-to-text is set up, and a fixture without a voice config is the
+# ordinary case.
+COMPOSER_FOCUSED = re.compile(
+    rb"\xe2\x80\xba to [^\s\x1b]+(?=\s|\x1b)(?! *\(i to write\))"
+)
+
 
 class RawHttpResponse:
     """A response the fixture sends byte for byte: its own content type and
@@ -2105,6 +2114,67 @@ def navigate_with_arrows_and_quit(
 # built TUI: 118 drops the column, 122 through 131 draw it, 132 through 176 do
 # not, 180 does.
 KEEPER_RUNTIME_COLUMN_COLUMNS = 126
+
+
+# Ctrl-L walks the Activity pane narrow, wide, hidden. The widths are
+# Masc_tui_acting_pane.pane_cols and wide_pane_cols; 160 columns holds the
+# wide pane (wide_threshold_cols is 150). The pane's header row starts with
+# its one-cell border, so "[Recent]" sits one cell inside the pane's left
+# edge: the pane's width is read off where that header begins.
+ACTING_PANE_CYCLE_COLUMNS = 160
+ACTING_PANE_NARROW_COLUMNS = 56
+ACTING_PANE_WIDE_COLUMNS = 74
+
+
+def acting_pane_header_cell(output: bytearray) -> int:
+    """The cell "[Recent]" starts at on the screen now, or -1 when no pane
+    header is drawn. Cells are counted as code points: the surface beside
+    the pane at this size draws no wide glyph."""
+    for _row, text in sorted(screen_rows(bytes(output)).items()):
+        plain = text.decode("utf-8", "replace")
+        cell = plain.find("[Recent]")
+        if cell >= 0:
+            return cell
+    return -1
+
+
+def acting_pane_ctrl_l_cycle_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=ACTING_PANE_CYCLE_COLUMNS,
+        needle=b"MASC Overview",
+    )
+    drain_until_quiet(process, master_fd, output, cap=4.0)
+
+    def header_for(pane_columns: int) -> int:
+        return ACTING_PANE_CYCLE_COLUMNS - pane_columns + 1
+
+    expected = [
+        ("the pane opens narrow", header_for(ACTING_PANE_NARROW_COLUMNS)),
+        ("one press: wide", header_for(ACTING_PANE_WIDE_COLUMNS)),
+        ("two presses: hidden", -1),
+        ("three presses: narrow again", header_for(ACTING_PANE_NARROW_COLUMNS)),
+    ]
+    for index, (label, cell) in enumerate(expected):
+        if index > 0:
+            write_all(master_fd, output, b"\x0c")
+            drain_until_quiet(process, master_fd, output, cap=4.0)
+        drawn = acting_pane_header_cell(output)
+        if drawn != cell:
+            raise AssertionError(
+                f"{label}: pane header at cell {drawn}, expected {cell}: "
+                f"{screen_text(bytes(output))!r}"
+            )
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
 
 
 def keeper_runtime_phase_and_identity_interaction(
@@ -4752,8 +4822,20 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         # iTerm reports Ctrl-W as CSI-u after the TUI enables keyboard
         # disambiguation. It must reach the same pane binding as legacy 0x17.
         send_and_wait(process, master_fd, output, b"z", b"h/l:pane")
-        # Focus is a caret on the pane title now, not a key list (keys live in
-        # the footer): the same press must move focus, observed by the caret.
+        # The Board cycle has three stops since #37691: list, detail, and the
+        # Activity pane when the frame draws it (it does at 180 columns). From
+        # the detail pane the press puts the pane's cursor on its first row,
+        # painted in reverse video over the whole row; the row it lands on is
+        # the pane's "[Recent]" header. Focus is a caret on the pane title,
+        # not a key list (keys live in the footer), so the next press is
+        # observed by the caret coming back to the list.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[119;5u",
+            re.compile(rb"\x1b\[7m(?:\x1b\[[0-9;]*m)*\[Recent\]"),
+        )
         send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
@@ -5812,8 +5894,36 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
     )
 
 
-ERROR_DETAIL_PREFIX = b"Keeper turn failed: Provider stream parse failed: json decoder"
+ERROR_DETAIL_REASON = (
+    b"Provider stream parse failed: json decoder rejected nested payload "
+    b"at byte 8192; exact terminal detail survives wrapping"
+)
+# The whole row the pane draws for the failure: its badge, then the complete
+# detail, in order. Checked as one phrase so a detail missing its middle, or
+# drawn with its end above its start, does not pass on its two ends.
+ERROR_DETAIL_ROW = b"ERROR Keeper turn failed: " + ERROR_DETAIL_REASON
 ERROR_DETAIL_TAIL = b"exact terminal detail survives wrapping"
+# The tail as it may arrive on the wire: wrapped at any of its spaces, with
+# the row's padding and the next row's cursor move between the words. Where
+# the wrap falls depends on the body width, which the speaker column sets,
+# so a needle that requires the phrase on one row pins the column instead
+# of the detail. The gap between two words is a row's padding and cursor
+# move, or a whole redrawn row when the two arrive in different frames, so
+# it is bounded at a screen's width of bytes rather than a line's.
+ERROR_DETAIL_TAIL_WRAPPED = re.compile(
+    b".{0,4000}?".join(re.escape(word) for word in ERROR_DETAIL_TAIL.split()),
+    re.DOTALL,
+)
+
+
+def unwrapped(plain: bytes) -> bytes:
+    """Screen text with the chat rows' chrome read as blanks -- the turn
+    rail's box-drawing glyphs (U+2500..U+257F) down the left margin -- and
+    every run of blanks (a wrap's padding, the next row's indent) read as
+    one space, so a phrase wrapped across rows compares equal to the
+    phrase."""
+    without_rail = re.sub(rb"\xe2[\x94\x95][\x80-\xbf]", b" ", plain)
+    return re.sub(rb"\s+", b" ", without_rail)
 
 
 def keeper_chat_failed_response(request_body: bytes) -> RawHttpResponse:
@@ -5822,10 +5932,7 @@ def keeper_chat_failed_response(request_body: bytes) -> RawHttpResponse:
     keeper_name = request.get("name")
     run_id = f"keeper-operation-run-{request_id}"
     thread_id = f"keeper:{keeper_name}"
-    reason = (
-        "Provider stream parse failed: json decoder rejected nested payload "
-        "at byte 8192; exact terminal detail survives wrapping"
-    )
+    reason = ERROR_DETAIL_REASON.decode()
     events = [
         {
             "type": "CUSTOM",
@@ -5875,17 +5982,14 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
         failed = send_and_wait(
-            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL
+            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
-        frame = frame_containing(failed, ERROR_DETAIL_TAIL)
-        plain = CSI_RE.sub(b"", frame)
-        for needle in (b"ERROR", ERROR_DETAIL_PREFIX, ERROR_DETAIL_TAIL):
-            if needle not in plain:
-                raise AssertionError(
-                    f"wrapped Keeper error omitted {needle!r}: {frame!r}"
-                )
-        if ERROR_DETAIL_PREFIX + b"\xe2\x80\xa6" in plain:
-            raise AssertionError(f"Keeper error was cell-truncated: {frame!r}")
+        plain = unwrapped(screen_text(bytes(output)))
+        if unwrapped(ERROR_DETAIL_ROW) not in plain:
+            raise AssertionError(
+                "the Keeper error row did not carry its badge and whole detail "
+                f"in order: {plain!r}"
+            )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -6615,7 +6719,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/dashboard/keeper-memory-health"] = (
         200,
         {
-            "schema": "keeper.memory_os.current_health.v6",
+            "schema": "keeper.memory_os.current_health.v7",
             "generated_at": 1787348000.0,
             "keepers": [
                 {
@@ -6634,6 +6738,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "saved": None,
                         "saved_read_error": None,
                         "prepared": None,
+                        "synthesis": None,
                     },
                     "librarian": {
                         "state": "drained",
@@ -6885,7 +6990,6 @@ def memory_journal_backfill_fixture() -> HttpResponse:
             "kind": "backfilled_probe",
             "detail": "older Journal observation",
             "snapshot_present": True,
-            "cadence_deferred": False,
         },
     )
     payload["returned"] = 2
@@ -7060,7 +7164,7 @@ def memory_journal_timeline_interaction(
         ).encode()
         styled_rail = re.compile(
             rb"\x1b\[(?:2|90)m"
-            + "── ".encode()
+            + "┄┄ ".encode()
             + re.escape(hour)
         )
         if styled_rail.search(drawn) is None:
@@ -7070,7 +7174,7 @@ def memory_journal_timeline_interaction(
             )
         bold_rail = re.compile(
             rb"\x1b\[[0-9;]*m\x1b\[1m"
-            + "── ".encode()
+            + "┄┄ ".encode()
             + re.escape(hour)
         )
         if bold_rail.search(drawn) is not None:
@@ -7098,15 +7202,18 @@ def memory_journal_timeline_interaction(
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
-            (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
+            # The reply resumes after the Journal row under a heading of its
+            # own. It carries the turn's request, not the keeper's name: the
+            # breadcrumb already says whose chat this is.
+            (re.compile("●\\s+tui-di".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
         # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
+        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2mtui-di.."). The colored
         # bold arrow/circle glyph checked above is what actually marks the
         # causal role; this only confirms the label itself still renders.
-        for label in (b"YOU", b"alpha"):
+        for label in (b"YOU", b"tui-di"):
             if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
                     f"Direct causal label lost its dim-styled badge {label!r}: "
@@ -7500,6 +7607,12 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
                         "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        # These two keys are a pair. Turn_record.of_json
+                        # defaults a missing usage_scope to
+                        # Usage_scope_unavailable, and /context then omits
+                        # the token count instead of failing loudly (task-1635:
+                        # deleting only usage_scope reproduced "Context
+                        # composition omitted 50.0k / 200.0k tokens").
                         "response_observed_model_input": None,
                         "usage_scope": "per_request",
                         "raw_trace_run_ref": None,
@@ -8911,9 +9024,13 @@ def message_origin_badge_interaction(
     # waited on by the short clock instead -- the one thing neither other stop
     # draws.
     full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    # The pane's own keeper is not named on its full heading -- the
+    # breadcrumb says whose chat this is -- so its row opens on the mark and
+    # goes straight into the rule.
+    keeper_full_heading = "● ─".encode()
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),
-        (keeper_badge, keeper_body, "Keeper"),
+        (keeper_full_heading, keeper_body, "Keeper"),
     ):
         row, gap = origin_screen_shape(output, badge, body)
         if gap != 1:
@@ -8921,16 +9038,23 @@ def message_origin_badge_interaction(
                 f"the full origin row did not put the {description} body on the "
                 f"row below its origin (gap {gap}): {screen_text(bytes(output))!r}"
             )
-        if re.search(rb"\[\d\d:\d\d:\d\d\]", row) is None:
+        # The full row ends on its clock: the name at the left, the clock at
+        # the right edge and a rule between, not "[HH:MM:SS]" ahead of the
+        # name.
+        if re.search(rb"\d\d:\d\d:\d\d\s*$", row) is None:
             raise AssertionError(
-                f"the full {description} origin row carried no timestamp: {row!r}"
+                f"the full {description} origin row did not end on its clock: {row!r}"
             )
-    for name in (b"vincent", b"alpha"):
-        if b"\x1b[7m" + name not in full_row:
-            raise AssertionError(
-                f"chat origin did not keep its reverse-video badge for {name!r}: "
-                f"{full_row!r}"
-            )
+    if b"\x1b[7mvincent" not in full_row:
+        raise AssertionError(
+            f"chat origin did not keep its reverse-video badge for vincent: "
+            f"{full_row!r}"
+        )
+    keeper_heading, _ = origin_screen_shape(output, keeper_full_heading, keeper_body)
+    if b"alpha" in keeper_heading:
+        raise AssertionError(
+            f"the full heading named the pane's own keeper: {keeper_heading!r}"
+        )
     assert_bodies_unwashed(full_row, "the full origin row")
 
     bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")
@@ -14413,6 +14537,11 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper phase and runtime identity",
         interact=keeper_runtime_phase_and_identity_interaction,
         http_fixtures=keeper_runtime_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Ctrl-L walks the Activity pane narrow, wide, hidden",
+        interact=acting_pane_ctrl_l_cycle_interaction,
     )
     run_terminal_scenario(
         executable,

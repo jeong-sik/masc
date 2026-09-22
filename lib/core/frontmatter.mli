@@ -12,18 +12,21 @@ type t =
   ; body : string  (** Everything after the closing delimiter. *)
   }
 
+type block =
+  | Absent  (** The first line is not a delimiter. *)
+  | Unclosed  (** An opening delimiter with no closing one after it. *)
+  | Closed of t
+
+val read : string -> block
+(** Delimiter lines are compared after trimming, so CRLF and trailing spaces
+    read the same as a bare [---]. *)
+
 val parse : string -> t
-(** No opening delimiter means no frontmatter: [fields] is empty and [body] is
-    the whole input. A missing closing delimiter consumes the rest as fields
-    and leaves [body] empty. Delimiter lines are compared after trimming, so
-    CRLF and trailing spaces read the same as a bare [---]. *)
+(** {!read} for a caller that does not need to tell the cases apart: [Absent]
+    and [Unclosed] both answer empty [fields] with the whole input as [body]. *)
 
-val has_frontmatter : string -> bool
-(** Whether the first line is a delimiter, without parsing the rest. *)
-
-val field : t -> string -> string
-(** The value for [name], or [""] when absent. *)
-
-val list_field : t -> string -> string list
-(** [name: \[a, b, c\]] and [name: a, b, c] both split and trim to the same
-    list. An absent or empty value answers [[]]. *)
+val list_value : string -> string list
+(** A field value read as a list: [\[a, b, c\]] and [a, b, c] both split and
+    trim to the same list, and [""] and [\[\]] both answer [[]]. It takes the
+    value, not the field name: the caller has already looked the field up
+    in [fields] and decides what an absent field means. *)

@@ -135,7 +135,11 @@ let dispatch
         }
         ~name
         ~args
-    | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
+    | Mod_library ->
+      Tool_library.dispatch
+        { Tool_library.base_path = config.base_path; agent_name }
+        ~name
+        ~args
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->
       Task.Tool.dispatch_for_keeper

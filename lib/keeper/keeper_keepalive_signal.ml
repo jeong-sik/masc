@@ -382,31 +382,8 @@ let wakeup_keeper ?base_path ?stimulus name =
    here it only picks urgency (explicit targets and broadcasts are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
-let board_signal_stimulus
-      ~(reason : Board_wake.wake_reason)
-      (signal : Board_dispatch.board_signal)
-  =
-  let payload : Keeper_event_queue.stimulus_payload =
-    Keeper_event_queue.Board_signal
-      (Board_wake.board_stimulus_of_board_signal signal)
-  in
-  { Keeper_event_queue.post_id = signal.post_id
-  ; urgency =
-      (match reason with
-       | Board_wake.Explicit_mention | Board_wake.Broadcast ->
-         Keeper_event_queue.Immediate
-       (* A comment on the keeper's own post is a thread event, so it keeps
-          the thread priority. This change's subject is that it wakes at all;
-          raising it to Immediate would be a separate queue decision. *)
-       | Board_wake.Comment_on_self_post
-       | Board_wake.Thread_reply_after_self_comment
-       | Board_wake.Reaction_after_self_activity
-       | Board_wake.Vote_on_self_post
-       | Board_wake.Vote_on_self_comment ->
-         Keeper_event_queue.Normal)
-  ; arrived_at = Time_compat.now ()
-  ; payload
-  }
+let board_signal_stimulus ~reason signal =
+  Board_wake.board_signal_stimulus ~arrived_at:(Time_compat.now ()) ~reason signal
 ;;
 
 let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry) =
@@ -420,54 +397,42 @@ let record_board_attention_candidate
       ~(meta : keeper_meta)
       (signal : Board_dispatch.board_signal)
   =
-  match
+  let candidate =
     Keeper_board_attention_candidate.of_board_signal
       ~meta
       ~recorded_at:(Time_compat.now ())
       signal
+  in
+  match
+    Keeper_board_attention_candidate.record_and_wake
+      ~base_path:config.base_path
+      candidate
   with
-  | Keeper_world_observation_board_signal.Unavailable unavailable ->
+  | Ok acceptance ->
+    let persistence =
+      match acceptance.persistence with
+      | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
+      | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+      ~labels:
+        [ ("keeper", meta.name)
+        ; ("kind", signal_kind_label)
+        ; ("audience", audience_label)
+        ; ("persistence", persistence)
+        ]
+      ()
+  | Error err ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string KeepaliveSignalFailures)
-      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_evidence_read") ]
+      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
       ();
     Log.Keeper.warn
-      "board attention evidence unavailable: keeper=%s post=%s error=%s"
+      "board attention candidate record failed: keeper=%s post=%s error=%s"
       meta.name
       signal.post_id
-      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-  | Keeper_world_observation_board_signal.Available candidate ->
-    (match
-       Keeper_board_attention_candidate.record_and_wake
-         ~base_path:config.base_path
-         candidate
-     with
-     | Ok acceptance ->
-       let persistence =
-         match acceptance.persistence with
-         | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
-         | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
-       in
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-         ~labels:
-           [ ("keeper", meta.name)
-           ; ("kind", signal_kind_label)
-           ; ("audience", audience_label)
-           ; ("persistence", persistence)
-           ]
-         ()
-     | Error err ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string KeepaliveSignalFailures)
-         ~labels:
-           [ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
-         ();
-       Log.Keeper.warn
-         "board attention candidate record failed: keeper=%s post=%s error=%s"
-         meta.name
-         signal.post_id
-         err)
+      err
 ;;
 
 let deliver_addressed_board_signal
@@ -575,7 +540,8 @@ let wakeup_relevant_keeper_for_board_signal
   let signal_kind_label =
     match signal.kind with
     | Board_dispatch.Board_post_created -> "post_created"
-    | Board_dispatch.Board_comment_added -> "comment_added"
+    | Board_dispatch.Board_post_updated _ -> "post_updated"
+    | Board_dispatch.Board_comment_added _ -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
     | Board_dispatch.Board_vote_cast _ -> "vote_cast"
   in
@@ -597,7 +563,8 @@ let wakeup_relevant_keeper_for_board_signal
       (Keeper_board_audience.classification_error_to_string error)
   | Ok audience ->
     (match audience with
-     | Keeper_board_audience.Discoverable ->
+     | Keeper_board_audience.Discoverable
+       when signal.kind = Board_dispatch.Board_post_created ->
        (* An unaddressed post has no immediate wake target. The Keeper owner
           already scans the durable Board with its per-lane cursor and owns
           candidate creation. Repeating that fleet-wide scan in the HTTP
@@ -628,7 +595,7 @@ let wakeup_relevant_keeper_for_board_signal
        let board_ym = Eio_guard.create_yield_meter () in
        List.iter
          (fun (entry : Keeper_registry.registry_entry) ->
-            (match read_meta config entry.name with
+            (match read_effective_meta config entry.name with
              | Error detail ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -682,7 +649,8 @@ let wakeup_relevant_keeper_for_board_signal
          uninitialized_entries
      | ( Keeper_board_audience.Targets _
        | Keeper_board_audience.Broadcast
-       | Keeper_board_audience.Thread_participants ) ->
+       | Keeper_board_audience.Thread_participants
+       | Keeper_board_audience.Discoverable ) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string BoardSignalRoutedTotal)
          ~labels:
@@ -700,7 +668,7 @@ let wakeup_relevant_keeper_for_board_signal
        List.iter
       (fun (entry : Keeper_registry.registry_entry) ->
          (try
-            match read_meta config entry.name with
+            match read_effective_meta config entry.name with
         | Error detail ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -765,15 +733,11 @@ let wakeup_relevant_keeper_for_board_signal
                ()
            | Keeper_world_observation_board_signal.Available
                Keeper_board_audience.Judge_discoverable -> (
-             (* The outer audience match excludes [Discoverable]. A comment
-                signal routed through [Thread_participants] legitimately lands
-                here (#27329): a lane that never touched the thread has no
-                deterministic address, and this push path is the only
-                producer of comment judgment candidates, so the lane records
-                an attention candidate. Every other kind still violates the
-                boundary — keep that fail-visible. *)
+             (* Comments and edits carry their own identity. Persist each
+                live event now; a post cursor is not an edit-event ledger. *)
              match signal.kind with
-             | Board_dispatch.Board_comment_added ->
+             | Board_dispatch.Board_comment_added _
+             | Board_dispatch.Board_post_updated _ ->
                record_board_attention_candidate
                  ~config
                  ~signal_kind_label
@@ -832,7 +796,7 @@ let wakeup_relevant_keeper_for_board_signal
                       | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
                       | Board_wake.Explicit_mention
                       | Board_wake.Comment_on_self_post
-                      | Board_wake.Thread_reply_after_self_comment
+                      | Board_wake.Reply_to_self_comment
                       | Board_wake.Reaction_after_self_activity
                       | Board_wake.Vote_on_self_post
                       | Board_wake.Vote_on_self_comment ->
@@ -931,4 +895,3 @@ let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path keeper_name event
-

@@ -527,6 +527,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
     Masc.Keeper_next_request_forecast.carry
       ~measure:(Masc.Keeper_context_core.message_measurer ())
       ~front:read.Front.seed
+      ~turn_start:0
       ~counted_tokens:None
       next_tick
   in
@@ -537,10 +538,12 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
 let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
   with_turn_record_store @@ fun config store ->
   let records =
-    [ record ~turn:10 ~finish:None (Some (30, 100))
+    [ (* The previous trace is older than this generation. A newer foreign
+         trace would be the boundary and make reading [trace-1] invalid. *)
+      record ~turn:9 ~trace:"another-trace" (Some (1, 100))
+    ; record ~turn:10 ~finish:None (Some (30, 100))
     ; record ~turn:10 (Some (15, 100))
     ; record ~turn:10 ~finish:None ~response_observed:false (Some (5, 100))
-    ; record ~turn:11 ~trace:"another-trace" (Some (1, 100))
     ]
   in
   List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
@@ -573,6 +576,72 @@ let test_read_seed_counts_only_unreadable_rows_visited_before_the_response () =
   | _ -> fail "the two invalid records must be counted"
 ;;
 
+let test_read_seed_stops_at_history_restart () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
+  Masc.Keeper_turn_boundaries.append
+    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+    ~keeper_id:"alpha"
+    { recorded_at = 1.
+    ; event =
+        Masc.Keeper_turn_boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+          ; history_at_start = Masc.Keeper_turn_boundaries.Continued_history
+          ; position = Masc.Keeper_turn_boundaries.Stale_noop
+          }
+    }
+  |> Result.get_ok;
+  Masc.Keeper_turn_boundaries.append
+    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+    ~keeper_id:"alpha"
+    { recorded_at = 2.
+    ; event = Masc.Keeper_turn_boundaries.History_restarted { trace_id = "trace-1" }
+    }
+  |> Result.get_ok;
+  Dated_jsonl.append store
+    (Turn_record.to_json
+       (record ~turn:2 ~finish:None ~response_observed:false None));
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "the pre-clear response is not a seed" true (Option.is_none read.Front.seed)
+;;
+
+let test_read_seed_stops_at_previous_trace () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store `Null;
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~trace:"trace-0" ~turn:9 (Some (30, 100))));
+  Dated_jsonl.append store
+    (Turn_record.to_json
+       (record ~turn:10 ~finish:None ~response_observed:false None));
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "the prior trace does not supply a seed" true (Option.is_none read.Front.seed);
+  check bool "rows older than the trace boundary are not decoded" true
+    (Option.is_none read.Front.unreadable)
+;;
+
+let test_read_seed_keeps_boundary_errors_out_of_the_record_count () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
+  let path =
+    Masc.Keeper_turn_boundaries.path_for_keepers_dir
+      ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+      ~keeper_id:"alpha"
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let output = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output "{not-json\n");
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "an unknown boundary admits no seed" true (Option.is_none read.Front.seed);
+  check bool "no TurnRecord was counted unreadable" true
+    (Option.is_none read.Front.unreadable);
+  check bool "the boundary failure has its own channel" true
+    (Option.is_some read.Front.boundary_error)
+;;
+
 let test_clamp_keeps_the_front_on_an_atom () =
   check int "below zero" 0 (Front.clamp ~atom_count:5 (-2));
   check int "past the newest" 4 (Front.clamp ~atom_count:5 9);
@@ -598,7 +667,9 @@ let test_origin_json_names_its_kind () =
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
   check string "evicted" "evicted_after_refusal"
     (kind (Front.Carried (Front.Evicted_after_refusal { retry = 1 })));
-  check string "whole" "whole_history" (kind Front.Whole_history)
+  check string "turn start" "turn_start" (kind (Front.Turn_start { end_atom = 12 }));
+  check int "and the turn start names its atom" 12
+    Yojson.Safe.Util.(Front.origin_to_json (Front.Turn_start { end_atom = 12 }) |> member "end_atom" |> to_int)
 ;;
 
 let () =
@@ -637,6 +708,12 @@ let () =
             test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn
         ; test_case "only visited unreadable rows are counted" `Quick
             test_read_seed_counts_only_unreadable_rows_visited_before_the_response
+        ; test_case "history restart fences older responses" `Quick
+            test_read_seed_stops_at_history_restart
+        ; test_case "previous trace fences older retained rows" `Quick
+            test_read_seed_stops_at_previous_trace
+        ; test_case "boundary errors are not TurnRecord errors" `Quick
+            test_read_seed_keeps_boundary_errors_out_of_the_record_count
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

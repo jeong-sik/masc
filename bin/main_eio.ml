@@ -2401,6 +2401,14 @@ let keeper_create_mention_target =
   Arg.(
     value & opt_all string [] & info [ "mention-target" ] ~docv:"TOKEN" ~doc)
 
+let keeper_create_board_interest =
+  let doc =
+    "Semantic topic for targetless Board discovery. Repeatable. Omit every \
+     value, or pass none in the editor form, to keep targetless discovery off."
+  in
+  Arg.(
+    value & opt_all string [] & info [ "board-interest" ] ~docv:"TOPIC" ~doc)
+
 let keeper_create_skill =
   let doc =
     "Exact Keeper Skill name to select. Repeatable. Omitted entirely, the \
@@ -2481,6 +2489,7 @@ let keeper_create_flags_term =
         microvm_backend
         remote_endpoint
         mention_targets
+        board_interests
         skill_names
         no_skills
         max_context_override
@@ -2508,6 +2517,7 @@ let keeper_create_flags_term =
         ; microvm_backend
         ; remote_endpoint
         ; mention_targets
+        ; board_interests
         ; skills
         ; max_context_override
         ; activation_mode
@@ -2524,6 +2534,7 @@ let keeper_create_flags_term =
     $ keeper_create_microvm_backend
     $ keeper_create_remote_endpoint
     $ keeper_create_mention_target
+    $ keeper_create_board_interest
     $ keeper_create_skill
     $ keeper_create_no_skills
     $ keeper_create_max_context_override
@@ -2541,6 +2552,7 @@ let keeper_create_flags_are_absent (flags : Masc_cli_keeper_create.flags) =
   && Option.is_none flags.microvm_backend
   && Option.is_none flags.remote_endpoint
   && List.is_empty flags.mention_targets
+  && List.is_empty flags.board_interests
   && Option.is_none flags.skills
   && Option.is_none flags.max_context_override
   && Option.is_none flags.activation_mode

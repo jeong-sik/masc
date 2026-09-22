@@ -898,9 +898,16 @@ type memory_context_frontier = {
   mcf_end_atom : int;
   mcf_boundary_line : int;
 }
+type memory_context_position = {
+  mcpo_trace_id : string;
+  mcpo_end_atom : int;
+}
 type memory_context_input =
   | Context_summarized of memory_context_frontier
-  | Context_uncompressed
+  | Context_absorbed of memory_context_position
+      (** The request started at the Librarian's durable position; nothing
+          summarizes what lies before it. *)
+  | Context_without_snapshot
   | Context_not_applied
 
 type memory_context_prepared = {
@@ -913,6 +920,7 @@ type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
   mcc_prepared : memory_context_prepared option;
+  mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
 
 type memory_keeper_health = {
@@ -1293,9 +1301,16 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev_destination = {
+  sljd_destination_uri : string;
+  sljd_model : string;
+}
+(** One armed Jev destination: the URL it is observed by and the model id it
+    is asked for. Two destinations may share a model id. *)
+
 type standalone_lane_jev =
   | Jev_off
-  | Jev_configured of { model : string }
+  | Jev_configured of { destinations : standalone_lane_jev_destination list }
   | Jev_cli_only
   | Jev_lane_unavailable
 

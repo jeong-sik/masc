@@ -152,9 +152,14 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev_destination = {
+  sljd_destination_uri : string;
+  sljd_model : string;
+}
+
 type standalone_lane_jev =
   | Jev_off
-  | Jev_configured of { model : string }
+  | Jev_configured of { destinations : standalone_lane_jev_destination list }
   | Jev_cli_only
   | Jev_lane_unavailable
 
@@ -2505,9 +2510,14 @@ type memory_context_frontier = {
   mcf_end_atom : int;
   mcf_boundary_line : int;
 }
+type memory_context_position = {
+  mcpo_trace_id : string;
+  mcpo_end_atom : int;
+}
 type memory_context_input =
   | Context_summarized of memory_context_frontier
-  | Context_uncompressed
+  | Context_absorbed of memory_context_position
+  | Context_without_snapshot
   | Context_not_applied
 
 type memory_context_prepared = {
@@ -2520,6 +2530,7 @@ type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
   mcc_prepared : memory_context_prepared option;
+  mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
 
 type memory_keeper_health = {
@@ -4814,7 +4825,7 @@ let decode_memory_alert json =
 let decode_memory_context_cycle keeper_json =
   let* json = required_member keeper_json "context_cycle" in
   let* () = require_exact_object_fields "context cycle"
-    ["saved"; "saved_read_error"; "prepared"] json in
+    ["saved"; "saved_read_error"; "prepared"; "synthesis"] json in
   let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
   let frontier json =
     let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
@@ -4839,11 +4850,18 @@ let decode_memory_context_cycle keeper_json =
     let* () = require_exact_object_fields "context input" ["kind"; "frontier"] input in
     let* kind = required_string_field input "kind" in
     let* value = required_member input "frontier" in
-    let* value = nullable frontier value in
+    let position json =
+      let* () = require_exact_object_fields "context position" ["trace_id"; "end_atom"] json in
+      let* mcpo_trace_id = required_string_field json "trace_id" in
+      let* mcpo_end_atom = required_int_field json "end_atom" in
+      if String.trim mcpo_trace_id = "" || mcpo_end_atom < 1
+      then Error "invalid context position"
+      else Ok {mcpo_trace_id; mcpo_end_atom} in
     let* mcp_input = match kind, value with
-      | "summarized", Some value -> Ok (Context_summarized value)
-      | "uncompressed", None -> Ok Context_uncompressed
-      | "not_applied", None -> Ok Context_not_applied
+      | "summarized", (`Assoc _ as value) -> Result.map (fun value -> Context_summarized value) (frontier value)
+      | "absorbed", (`Assoc _ as value) -> Result.map (fun value -> Context_absorbed value) (position value)
+      | "without_snapshot", `Null -> Ok Context_without_snapshot
+      | "not_applied", `Null -> Ok Context_not_applied
       | _ -> Error "context input kind disagrees with frontier" in
     Ok {mcp_prepared_at; mcp_runtime_id; mcp_request_bytes; mcp_input} in
   let* saved = required_member json "saved" in
@@ -4855,7 +4873,9 @@ let decode_memory_context_cycle keeper_json =
     | _ -> Error "context saved frontier disagrees with read error" in
   let* value = required_member json "prepared" in
   let* mcc_prepared = nullable prepared value in
-  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared}
+  let* value = required_member json "synthesis" in
+  let* mcc_synthesis = nullable Keeper_continuity_observation.synthesis_of_json value in
+  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared; mcc_synthesis}
 
 let decode_memory_keeper_health json =
   let* () =
@@ -5036,7 +5056,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v6"
+    if String.equal schema "keeper.memory_os.current_health.v7"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
@@ -5537,10 +5557,44 @@ let decode_keeper_call json =
   let* kc_at = require_float_field json "ts" in
   let* kc_tool = required_string_field json "tool" in
   let* keeper = required_string_field json "keeper" in
+  (* The durable record stopped always carrying a boolean [success]:
+     [Keeper_tool_call_log]'s `Assoc construction (the one the server
+     actually serves from) writes [wire_outcome] and an optional
+     [disposition], never a [success] key. A real row and every producer
+     built to match it therefore hit the [`Null] arm below unconditionally,
+     so [decode_keeper_call] always errored and the calls detail view never
+     rendered a single keeper's tool calls (#37461). [success] is still read
+     first for any caller that does send it explicitly. Next, [disposition]
+     is decoded through [keeper_call_disposition_of_string] -- the same
+     parse [kc_disposition] below reuses, and already documented as
+     [Tool_result.string_of_disposition]'s inverse -- instead of matching
+     its three spellings a second time in this function. [wire_outcome]
+     (the untyped wire projection -- explicitly not an outcome SSOT per
+     [Tool_result], but the only field several real rows carry) is tried
+     last, and its own ["unknown"] spelling is not folded into success: a
+     wire that says it does not know the outcome is not evidence that the
+     call completed. A row naming none of the three still errors, as
+     before. *)
+  let* disposition = optional_string_field json "disposition" in
+  let* kc_disposition =
+    match disposition with
+    | None -> Ok None
+    | Some raw when String.trim raw = "" -> Ok None
+    | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
+  in
   let* kc_success =
     match member "success" json with
     | `Bool value -> Ok value
-    | `Null -> Error "keeper call has no success field"
+    | `Null -> (
+      match kc_disposition with
+      | Some Keeper_call_completed | Some Keeper_call_deferred -> Ok true
+      | Some Keeper_call_failed -> Ok false
+      | None -> (
+        match member "wire_outcome" json with
+        | `String "ok" -> Ok true
+        | `String "error" -> Ok false
+        | `String "unknown" -> Error "keeper call wire_outcome is unknown"
+        | _ -> Error "keeper call has no success, disposition, or wire_outcome field"))
     | _ -> Error "keeper call success is not a bool"
   in
   let kc_input =
@@ -5614,12 +5668,6 @@ let decode_keeper_call json =
   in
   let* kc_result_bytes = optional_nonnegative_int "result_bytes" in
   let* kc_truncated_to = optional_nonnegative_int "truncated_to" in
-  let* disposition = optional_string_field json "disposition" in
-  let* kc_disposition =
-    match nonblank disposition with
-    | None -> Ok None
-    | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
-  in
   Ok
     ( keeper
     , { kc_at
@@ -6066,6 +6114,17 @@ let decode_standalone_lane_slot_count json =
   let* slsc_count = required_int_field json "count" in
   Ok { slsc_slot_id; slsc_count }
 
+let decode_standalone_lane_jev_destination json =
+  let non_blank key =
+    let* value = required_string_field json key in
+    match String.trim value with
+    | "" -> Error (Printf.sprintf "field '%s' must be a non-blank string" key)
+    | trimmed -> Ok trimmed
+  in
+  let* sljd_destination_uri = non_blank "destination_uri" in
+  let* sljd_model = non_blank "model" in
+  Ok { sljd_destination_uri; sljd_model }
+
 let decode_standalone_lane_jev json =
   let* state = required_string_field json "state" in
   match state with
@@ -6073,11 +6132,14 @@ let decode_standalone_lane_jev json =
   | "cli_only" -> Ok Jev_cli_only
   | "lane_unavailable" -> Ok Jev_lane_unavailable
   | "configured" ->
-    let* model = required_string_field json "model" in
-    let model = String.trim model in
-    if String.equal model ""
-    then Error "standalone lane JEV model must be a non-empty string"
-    else Ok (Jev_configured { model })
+    let* destinations = required_list_field json "destinations" in
+    let* destinations =
+      decode_list "destinations" decode_standalone_lane_jev_destination destinations
+    in
+    (* The server reports [configured] only with an armed destination. *)
+    (match destinations with
+     | [] -> Error "standalone lane JEV destinations must name at least one server"
+     | _ :: _ -> Ok (Jev_configured { destinations }))
   | other -> Error ("standalone lane JEV state: unknown value " ^ other)
 
 let decode_standalone_lane json =

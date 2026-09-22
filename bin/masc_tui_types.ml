@@ -4698,12 +4698,21 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
-  mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
+  (* A promoted message waiting for the server to admit it as Queued, after
+     which run-next asks for first place. Run-next never carries an interrupt
+     token, so nothing about the running turn is kept here. *)
+  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request option;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
      half-sentence waits for typing. *)
   mutable voice_send_on_stop: bool;
+  (* Whether speech-to-text is set up where this TUI runs
+     ([Masc.Voice_bridge.stt_set_up]): read at boot and again whenever the
+     voice config is re-read. An empty draft names the capture keys only
+     then -- to an operator without a transcriber they named a key that
+     refuses. *)
+  mutable voice_stt_set_up: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* The Memory facts list's [Enter] detail: the whole fact text in its own
@@ -4738,6 +4747,11 @@ type state = {
   mutable context_inspector_cancel: (unit -> unit) option;
   mutable context_inspector_reading:
     (string * Masc_tui_context_inspector.reading) option;
+  (* When the reading above was received. The pane refreshes only by hand
+     (open, r, [ and ]), so a reading can be minutes old while the Keeper's
+     turn goes on; the age is drawn beside the title so a reader knows what
+     the numbers describe. [None] until a reading arrives; reset with it. *)
+  mutable context_inspector_read_at: float option;
   mutable context_inspector_tab: Masc_tui_context_inspector.tab;
   mutable context_inspector_cursor: int;
   mutable context_inspector_scroll: int;
@@ -4757,18 +4771,27 @@ type state = {
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
   (* The Activity pane on the right edge costs a surface
-     [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed. Same
-     contract as the roster: hidden is the reader's choice and survives a
-     resize; the width is the terminal's. *)
-  mutable acting_pane_hidden: bool;
+     [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
+     [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
+     hidden is the reader's choice and survives a resize; whether the
+     terminal holds it is the terminal's. *)
+  mutable acting_pane_layout: Masc_tui_acting_pane.layout;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
+  (* The pane's keyboard cursor: the drawn row it rests on while the pane
+     holds the keys (Ctrl-W puts it up, Esc takes it down), [None] when the
+     surface has them. A row of the last frame, the way a press is; the
+     renderer paints that row in reverse video, which NO_COLOR keeps. *)
+  mutable acting_pane_cursor: int option;
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
   (* The order the focus block lists the record's calls in; the heading
-     over them names it and a press on that heading moves to the next. *)
+     over them names it and a press on that heading moves to the next. It
+     opens newest first: a reader glancing at the pane is looking for what
+     the keeper just did, and oldest first put that below the fold on any
+     turn longer than the pane. *)
   mutable acting_pane_call_order: Masc_tui_acting_pane.call_order;
   (* The calls a press opened, by keeper and call key: an opened call draws
      its receipt age, schedule, disposition and the two previews under its
@@ -5204,6 +5227,12 @@ type state = {
   mutable runtime_params_notice: (bool * string) option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
+  (* One per background listing that replaces a whole set: the held-call
+     queue and the tool-mode (YOLO) stances. [approval_flow] says whether a
+     press superseded an answer; these say whether a later fetch of the same
+     listing already landed. *)
+  mutable approvals_order: Masc_tui_operator_projection.Listing_order.t;
+  mutable tool_modes_order: Masc_tui_operator_projection.Listing_order.t;
   (* The list draws each ask on one row; this opens the selected one whole.
      Keyed on the cursor rather than a token so an ask that resolves while it
      is open closes with the row instead of stranding a detail for something
@@ -5823,6 +5852,12 @@ type state = {
   (* Operations whose journal a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: string list;
+  (* Operations a stream frame named while their journal was being read,
+     with the highest journal seq the frames named: the read in flight may
+     have stopped short of that line, so when it lands another read starts
+     from where it stopped -- unless it reached the line, which ends the
+     chain. One entry per operation, however many frames arrived. *)
+  mutable msg_journal_wanted: (string * int option) list;
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
@@ -6139,6 +6174,52 @@ let journal_read_finished state operation_id =
       state.msg_journal_inflight
 ;;
 
+(* The highest seq named wins; a frame with no seq (the settle terminal)
+   never lowers what an earlier frame named. *)
+let journal_read_wanted state operation_id seq =
+  let highest =
+    match List.assoc_opt operation_id state.msg_journal_wanted, seq with
+    | Some (Some held), Some seq -> Some (max held seq)
+    | Some (Some held), None -> Some held
+    | Some None, seq | None, seq -> seq
+  in
+  state.msg_journal_wanted <-
+    (operation_id, highest)
+    :: List.remove_assoc operation_id state.msg_journal_wanted
+;;
+
+type journal_wanted =
+  | Not_wanted
+  | Wanted of { highest_seq : int option }
+
+(* Whether a read was wanted for this operation while one was in flight, and
+   the fact taken: the caller decides the read it stands for, against the
+   seq the frames named. *)
+let take_journal_wanted state operation_id =
+  match List.assoc_opt operation_id state.msg_journal_wanted with
+  | Some highest_seq ->
+      state.msg_journal_wanted <-
+        List.remove_assoc operation_id state.msg_journal_wanted;
+      Wanted { highest_seq }
+  | None -> Not_wanted
+;;
+
+(* The moment a log built from a journal read stands at. The journal's first
+   line (seq 0, the operation's acceptance) is the turn's start; a read that
+   begins there says so itself, and a log created for it takes that rather
+   than the moment the read was asked for -- a stream frame's clock, on the
+   read a frame launched before the history named the turn's first row,
+   which would have aged the turn from the first frame seen and left the
+   span short by everything before it. [fallback] stands where the read did
+   not start at the head. *)
+let journal_log_started_at ~fallback
+    (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  match lines with
+  | { Masc.Keeper_chat_event_log.seq = 0; ts; _ } :: _ -> ts
+  | _ :: _ | [] -> fallback
+;;
+
+
 (* Where a journal read starts for this operation: after what a held log of
    it already has (a cut live stream's partial log, or an earlier read of a
    turn still running), or the whole journal. *)
@@ -6147,6 +6228,69 @@ let journal_resume_position state ~keeper_name operation_id =
   | Some held when not (turn_log_holds_the_turn held) ->
       Masc_tui_keeper_chat_log.resume_position held.tl_log
   | Some _ | None -> Masc.Keeper_chat_event_log.Whole_turn
+;;
+
+(* What a stream frame for an operation asks of the pane.
+
+   The observer feed carries one frame per AG-UI event of every running chat
+   operation, with the journal seq of the event it projects. The pane does
+   not fold the frame: a frame is a projection of a journal line, and the
+   journal is what the pane draws a turn it did not open from (RFC-0412
+   §3.2). Two feeds into one log would have to agree on order -- a frame
+   lost while the observer stream was down, then read from the journal
+   after later frames had landed, would put the turn's words out of order --
+   and the journal alone already carries every line in order. So a frame is
+   the fact that the operation's journal has grown, and the answer is a read
+   from where the log's record of it ends: one round trip behind the token
+   instead of a history load behind it.
+
+   The server sends these frames for operations whose continuation channel
+   is the dashboard -- opened from the dashboard, this TUI or the API. A
+   turn a connector (Discord, Slack, another keeper's queue) opened sends
+   none and stays on the history loads. *)
+type journal_follow =
+  | Follow_nothing
+      (** Not this pane's to read: a request of its own is streaming the
+          operation, the journal was declared unavailable or this credential
+          refused, the turn is over, or the log already holds the seq the
+          frame named. *)
+  | Follow_read of { started_at : float; since_seq : Masc.Keeper_chat_event_log.replay_position }
+  | Follow_read_after_inflight
+      (** A read is in flight; it may stop short of the line the frame
+          announced, so another starts when it lands. *)
+
+let journal_follow_for_frame state ~keeper_name ~operation_id ~seq ~at =
+  let own_request =
+    List.exists
+      (fun entry -> String.equal entry.sent_request.request_id operation_id)
+      state.msg_inflight
+  in
+  let held = settled_log_for_request state ~keeper_name operation_id in
+  if own_request
+     || state.msg_journal_reads_refused
+     || List.exists (String.equal operation_id) state.msg_journal_unavailable
+  then Follow_nothing
+  else
+    match held with
+    | Some held when turn_log_holds_the_turn held -> Follow_nothing
+    | held ->
+        let since_seq = journal_resume_position state ~keeper_name operation_id in
+        let already_held =
+          match seq with
+          | Some seq -> not (Masc.Keeper_chat_event_log.seq_is_after since_seq seq)
+          | None -> false
+        in
+        if already_held then Follow_nothing
+        else if List.exists (String.equal operation_id) state.msg_journal_inflight
+        then Follow_read_after_inflight
+        else
+          Follow_read
+            { started_at =
+                (match held with
+                 | Some held -> turn_log_started_at held
+                 | None -> at)
+            ; since_seq
+            }
 ;;
 
 (* Whether the loaded transcript says this turn is over: the keeper's reply,
@@ -6165,6 +6309,92 @@ let loaded_turn_has_ended state ~keeper_name request_id =
          | Message_skill _ | Message_thinking | Message_memory ->
              false)
        state.msg_loaded
+;;
+
+(* The turns of this keeper the pane can see running but did not open. A TUI
+   started while a turn was running, or a turn another surface opened, has no
+   request of its own to stream from. What it has is the turn's journal
+   (RFC-0412 §3.2): read on every history load from where the last read
+   stopped, folded into a log held beside the settled ones. That log was
+   drawn nowhere -- the pane draws the logs that stand for a finished turn,
+   and a turn still running stands for nothing yet -- so the operator read
+   the turn's text one line at a time off the footer's turn preview while
+   the pane held the whole of it (#36244).
+
+   Observed is: Working, and still able to end. A log a request of this pane
+   is feeding is the live block, not this ([in_flight]); so is a journal log
+   bound to the same execution as the live one -- a batch member's journal
+   carries [Batch_bound], so the two can share an execution while the pane
+   holds only its own request in flight ([is_live], the test the settled
+   blocks apply). A log whose turn the loaded transcript says is over -- a
+   reply or a failure on record ([loaded_turn_has_ended]) -- or whose
+   journal has nothing more to say ([msg_journal_unavailable]: the
+   settle-time failure that is never journaled (#33108), a restart's
+   interruption, a pruned journal) would be drawn as an open block for the
+   rest of the session, beside the committed rows of the same turn; the
+   committed rows stand for such a turn, as they did before observed blocks
+   were drawn. A stream this pane opened and lost -- settled without hearing
+   the end, [msg_live] let go of it ([settle_turn_log]) -- is observed from
+   then on: the journal reads feed that same log in place
+   ([hold_settled_log]), which is how a cut stream's turn is followed to its
+   end. Answered per frame from the same list the settled blocks come from,
+   so a log that comes to hold its turn leaves here the frame it does. *)
+let observed_logs_for_keeper state keeper_name =
+  let in_flight log =
+    List.exists
+      (fun entry ->
+        String.equal entry.sent_request.request_id (turn_log_request_id log))
+      state.msg_inflight
+  in
+  let is_live log =
+    match state.msg_live with
+    | Some live ->
+        String.equal (turn_log_keeper_name live) keeper_name
+        && String.equal (turn_log_execution_id live) (turn_log_execution_id log)
+    | None -> false
+  in
+  let can_still_end log =
+    let request_id = turn_log_request_id log in
+    (not (List.exists (String.equal request_id) state.msg_journal_unavailable))
+    && not (loaded_turn_has_ended state ~keeper_name request_id)
+  in
+  settled_logs_for_keeper state keeper_name
+  |> List.filter (fun log ->
+         (match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+          | Masc_tui_keeper_chat_transcript.Working -> true
+          | Masc_tui_keeper_chat_transcript.Waiting
+          | Masc_tui_keeper_chat_transcript.Stream_ended
+          | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
+              false)
+         && (not (in_flight log))
+         && (not (is_live log))
+         && can_still_end log)
+;;
+
+(* Whether the pane draws an observed turn's reply text itself. The footer's
+   turn preview carries the same text's tail from the turns poll; drawn
+   twice, the newest sentence sat in the pane and again under it. Text only:
+   a turn that has so far only reasoned or called tools has nothing in the
+   pane the preview would repeat. The two are equally fresh because every
+   stream frame of the turn reads its journal ([journal_follow_for_frame]);
+   without that the pane's copy was only as new as the last row appended,
+   and the tail was the fresher of the two. *)
+let observed_turn_text_drawn state keeper_name =
+  List.exists
+    (fun log ->
+      List.exists
+        (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+          match item.drawn with
+          | Masc_tui_keeper_chat_transcript.Drawn_text _
+          | Masc_tui_keeper_chat_transcript.Drawn_reply _ ->
+              true
+          | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+          | Masc_tui_keeper_chat_transcript.Drawn_skill _
+          | Masc_tui_keeper_chat_transcript.Drawn_tools _
+          | Masc_tui_keeper_chat_transcript.Drawn_status _ ->
+              false)
+        (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript))
+    (observed_logs_for_keeper state keeper_name)
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -6745,6 +6975,7 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = None;
   voice_send_on_stop = false;
+  voice_stt_set_up = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -6758,6 +6989,7 @@ let create_state
   context_inspector_generation = 0;
   context_inspector_cancel = None;
   context_inspector_reading = None;
+  context_inspector_read_at = None;
   context_inspector_tab = Masc_tui_context_inspector.Composition;
   context_inspector_cursor = 0;
   context_inspector_scroll = 0;
@@ -6772,10 +7004,11 @@ let create_state
      cost of being wrong here -- whereas the column was drawn on every frame
      whether or not anyone read it. *)
   roster_pane_hidden = true;
-  acting_pane_hidden = false;
+  acting_pane_layout = Masc_tui_acting_pane.Narrow;
   acting_pane_scroll = 0;
+  acting_pane_cursor = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
-  acting_pane_call_order = Masc_tui_acting_pane.Oldest_first;
+  acting_pane_call_order = Masc_tui_acting_pane.Newest_first;
   acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
@@ -6970,6 +7203,8 @@ let create_state
   keeper_gate_modes = [];
   keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
+  approvals_order = Masc_tui_operator_projection.Listing_order.initial;
+  tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;
   approval_detail_open = false;
   approval_detail_scroll = 0;
   approval_cursor = 0;
@@ -7276,6 +7511,7 @@ let create_state
   msg_settled_logs = [];
   msg_journal_unavailable = [];
   msg_journal_inflight = [];
+  msg_journal_wanted = [];
   msg_journal_reads_refused = false;
   msg_scroll_pin_settled = [];
   detail_scroll = 0;
@@ -9687,9 +9923,27 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
   Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
 ;;
 
-(* The hint and Esc read one fact. [keeper_observed_turn] is None while the
+(* Whether Esc has a turn to stop: [keeper_observed_turn] is None while the
    turns poll is failing, and a stale running row kept for display must not
-   offer a stop that Esc would not send. *)
+   offer a stop that Esc would not send. The hint rides the activity row that
+   names the turn ([keeper_message_activity_rows]); it used to be a row of
+   its own under it, with "Enter:send update" beside it that the key footer
+   already says. *)
+let keeper_observed_stop_hint (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> None
+  | Some keeper_name when Option.is_some (working_chat_for_keeper state keeper_name) -> None
+  | Some keeper_name ->
+    match keeper_observed_turn state keeper_name with
+    | None -> None
+    | Some (started_at_unix, _interrupt_token) ->
+      (match keeper_observed_interrupt state keeper_name started_at_unix with
+       | Some _ -> None
+       | None -> Some " · Esc stops it · /queue")
+;;
+
+(* An interrupt of the observed turn under way, or how it ended: a row of
+   its own while it lasts, in the status colour. *)
 let keeper_observed_interrupt_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
@@ -9698,57 +9952,65 @@ let keeper_observed_interrupt_rows (state : state) =
     match keeper_observed_turn state keeper_name with
     | None -> []
     | Some (started_at_unix, _interrupt_token) ->
-      [ (match keeper_observed_interrupt state keeper_name started_at_unix with
-         | Some item ->
-           (match item.oi_status with
+      (match keeper_observed_interrupt state keeper_name started_at_unix with
+       | Some item ->
+         [ (match item.oi_status with
             | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
             | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
             | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
-            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
-         | None ->
-           "Esc: stop and pause queue · Enter:send update · /queue: manage") ]
+            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail) ]
+       | None -> [])
 ;;
 
+(* The status band under the transcript: rows in the shape
+   [Masc_tui_answering.chat_activity_row], lead in the status colour, the
+   rest receded.
+
+   What is not here any more. The admission notice -- "Your message is
+   queued at the server; start time unknown" and its three siblings -- said,
+   arm for arm, what the live progress row already says from the same
+   admission ("WAITING TO START · queued · 2 messages in the keeper's
+   queue", "sent; not accepted yet", "accepted; the run is starting",
+   "accepted; replaying …", [Masc_tui_keeper_chat_transcript.phase_text]).
+   "Current direct conversation · … · in progress" said what that row's
+   "IN PROGRESS" says whenever the row is drawing the same request; it
+   stays only for a working request the live row is not drawing, because a
+   newer line of this pane is queued in front of it. The stop hint rides
+   the row that names the observed turn. On the 2026-09-22 screen the band
+   was five rows, all in the status colour, for two facts: a turn is
+   running, and this pane's line waits behind it. *)
 let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
     let working = working_chat_for_keeper state keeper_name in
+    (* By execution, the test the in-flight rows above the band apply
+       ([render_keeper_message]'s [live_request_id]): a request bound into the
+       live request's batch is the live row's to draw, and asking by request
+       id here drew it twice -- the band's "in progress" beside the live
+       row's WAITING TO START for the same execution. *)
+    let live_draws entry =
+      match state.msg_live with
+      | Some live ->
+        String.equal (turn_log_execution_id live) (turn_log_execution_id entry.log)
+      | None -> false
+    in
     let activity = match working with
+      | Some entry when live_draws entry -> []
       | Some entry ->
-        ["Current direct conversation · "
-         ^ Masc_tui_keeper_chat_projection.terminal_safe_text
-             (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
-         ^ " · in progress"]
-      | None -> Masc_tui_answering.chat_activity
+        [ { Masc_tui_answering.lead = "Current direct conversation"
+          ; rest =
+              " · "
+              ^ Masc_tui_keeper_chat_projection.terminal_safe_text
+                  (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
+              ^ " · in progress"
+          ; keys = "" } ]
+      | None ->
+        Masc_tui_answering.chat_activity ~frame:state.activity_frame
+          ?stop_keys:(keeper_observed_stop_hint state)
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-          state.keeper_turns in
-    let submitted = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        let transcript = live.tl_transcript in
-        (match Masc_tui_keeper_chat_transcript.phase transcript,
-               Masc_tui_keeper_chat_transcript.admission transcript with
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-           let other_turn_observed = Option.is_some working || (state.keeper_turns_error = None
-             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
-               String.equal row.ktr_keeper_name keeper_name
-               && match row.ktr_state with
-                 | Tui_decode.Keeper_turn_running
-                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
-                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
-                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
-               state.keeper_turns) in
-           [if other_turn_observed then
-              "Your message is queued behind this Keeper's current turn; start time unknown"
-            else "Your message is queued at the server; start time unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, None ->
-           ["Your request is awaiting server acceptance; queue position unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
-           ["Your request was accepted; waiting for its first event"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
-           ["Your request already settled; replaying its result"]
-         | _ -> [])
-      | Some _ | None -> []
+          ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
+          state.keeper_turns
     in
     let waiting_items = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
@@ -9757,6 +10019,7 @@ let keeper_message_activity_rows (state : state) =
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
       state.keeper_interactive_waiting in
+    let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []
@@ -9773,11 +10036,11 @@ let keeper_message_activity_rows (state : state) =
           | Next -> ""
         in
         let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
-        [ Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
-            local_count auto_tag intent_str preview ]
+        [ plain (Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
+            local_count auto_tag intent_str preview) ]
     in
-    activity @ submitted @ (if retained then
-      ["Input retained after Esc; /queue resume sends it"]
+    activity @ (if retained then
+      [plain "Input retained after Esc; /queue resume sends it"]
       else []) @ queue_rows
 ;;
 

@@ -570,8 +570,11 @@ let composer_line state ~cols =
        key nobody presses, and the row has space exactly while there is no
        draft to crowd. It goes away once a capture starts, because the meter
        has taken that space and says the same thing louder. *)
+    (* And only where speech-to-text is set up: without a transcriber the
+       keys refuse, and naming them was noise beside every empty draft. *)
     | Composer.Focused, Composer.Ready _
-      when state.voice_capture = None
+      when state.voice_stt_set_up
+           && state.voice_capture = None
            && state.voice_continuous = None
            && Buffer.length state.msg_input = 0 ->
         "  " ^ Masc_tui_keys.voice_keys_hint
@@ -1036,7 +1039,12 @@ let acting_pane_sgr (tone : Masc_tui_acting_pane.tone) =
    back to the page's ground mid-row, so the ground is re-opened after each
    one; the row ends on a full reset so the surface's next row starts on the
    page. Without a palette the ground is [""] and the row draws as before. *)
-let paint_acting_pane_line ~ground (line : Masc_tui_acting_pane.line) =
+let paint_acting_pane_line ?(selected = false) ~ground
+    (line : Masc_tui_acting_pane.line) =
+  (* The cursor row is reverse video over the whole row, re-opened after
+     each span's reset the way the ground is: an attribute, not a colour,
+     so NO_COLOR keeps it. *)
+  let ground = if selected then ground ^ Ansi.reverse else ground in
   let restore = if String.equal ground "" then "" else Ansi.reset ^ ground in
   let close = if String.equal ground "" then "" else Ansi.reset in
   ground
@@ -1089,9 +1097,11 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
      let ground = Theme.side_pane_background () in
      let right = Buffer.create 4096 in
-     List.iter
-       (fun line ->
-          Buffer.add_string right (paint_acting_pane_line ~ground line);
+     let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
+     List.iteri
+       (fun index line ->
+          Buffer.add_string right
+            (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
           Buffer.add_char right '\n')
        rendering.Masc_tui_acting_pane.rows;
      write_two_panes framed ~left_cols:cols ~left ~right

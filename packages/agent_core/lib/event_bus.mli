@@ -261,6 +261,14 @@ val subscription_config
 (** Create a bus. Queue ownership is established by each {!subscribe} call. *)
 val create : unit -> t
 
+(** [with_caller_scope bus scope] is a handle on [bus] for publishing on
+    behalf of [scope]. It shares [bus]'s subscribers, queues and statistics;
+    subscribing through it subscribes to [bus]. An event published through it
+    leaves with [meta.caller_scope = Some scope] unless it already names a
+    scope, which is producer-owned identity and is kept. A scope given here
+    replaces the one the handle had. *)
+val with_caller_scope : t -> Caller_scope.t -> t
+
 (** {2 Filters} *)
 
 (** A total, typed filter description. Arbitrary callbacks are deliberately

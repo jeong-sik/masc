@@ -9,6 +9,7 @@ type flags =
   ; microvm_backend : string option
   ; remote_endpoint : string option
   ; mention_targets : string list
+  ; board_interests : string list
   ; skills : string list option
   ; max_context_override : int option
   ; activation_mode : string option
@@ -121,6 +122,11 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
             | [] -> []
             | targets -> [ "mention_targets", string_list_json targets ]
           in
+          let board_interests =
+            match flags.board_interests with
+            | [] -> []
+            | interests -> [ "board_interests", string_list_json interests ]
+          in
           let skills =
             match flags.skills with
             | None -> []
@@ -146,6 +152,7 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
                  @ microvm_backend
                  @ remote_endpoint
                  @ mention_targets
+                 @ board_interests
                  @ skills
                  @ max_context_override
                  @ activation_mode))))

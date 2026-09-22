@@ -1,5 +1,4 @@
 val default_runtime_id : unit -> string
-val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
 val bool_of_env_opt : string -> bool option
@@ -10,7 +9,6 @@ val float_of_env_default :
   string -> default:float -> min_v:float -> max_v:float -> float
 val validate_name : string -> bool
 val utf8_repair_string : string -> string
-val normalize_prompt_text : max_bytes:int -> string -> string
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
@@ -55,7 +53,9 @@ type keeper_profile_defaults =
   manifest_path : string option;
   instructions : string option;
   activation_mode : Keeper_activation_mode.t option;
+  input_policy : Keeper_input_policy.t option;
   mention_targets : string list;
+  board_interests : string list;
   sandbox_profile :
     Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
@@ -79,6 +79,7 @@ type keeper_profile_defaults =
 val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
+val normalize_board_interests : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
 val first_some : 'a option -> 'a option -> 'a option

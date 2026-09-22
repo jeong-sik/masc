@@ -2993,9 +2993,10 @@ let test_handle_request_resources_read_matrix () =
   write_text_file (Filename.concat library_dir "alpha.md")
     {|---
 title: Alpha Doc
-source: https://example.com/alpha
-verified_by: codex
-date: 2026-03-12
+source: research
+author: codex
+created: 2026-03-12
+updated: 2026-03-12
 tags: [alpha, keeper]
 ---
 Alpha body
@@ -3009,8 +3010,8 @@ Alpha body
       ("masc://messages.json", "application/json", "[");
       ("masc://events.json", "application/json", "[");
       ("masc://worktrees.json", "application/json", "{");
-      ("masc://library", "text/markdown", "Library Index");
-      ("masc://library.json", "application/json", "\"documents\"");
+      ("masc://library", "text/markdown", "`masc://library/alpha` (research)");
+      ("masc://library.json", "application/json", "\"source\":\"research\"");
       ("masc://library/alpha", "text/markdown", "Alpha body");
       ("masc://library/alpha.json", "application/json", "\"Alpha body\"");
     ]

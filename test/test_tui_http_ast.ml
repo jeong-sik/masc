@@ -776,7 +776,8 @@ let test_user_message_background_has_one_render_snapshot () =
   check int "layout receives the captured Chat theme" 1
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
-       ~callee:"cached_chat_markdown" ~arguments:[ "theme", "chat_theme" ]);
+       ~callee:"cached_chat_markdown"
+       ~arguments:[ "theme", "chat_theme"; "link_previews_mode", "link_previews_mode" ]);
   check int "visible drawing receives the captured Chat theme" 1
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
@@ -881,11 +882,15 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"load_approvals"
      >= 2);
-  check bool "refreshes reserve an approval generation" true
+  check bool "refreshes take a numbered approval listing ticket" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
-       ~callee:"Approval.Flow.reserve_refresh"
+       ~callee:"Approval.Listing_order.dispatch"
      >= 1);
+  check int "the held-call listing is admitted in one place" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"apply_approval_observation"
+       ~callee:"Approval.Listing_order.admit");
   check bool "actions invalidate older approval generations" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
@@ -1556,28 +1561,46 @@ let test_scoped_surface_refresh_does_not_own_connection_status () =
        ~callees:[] ~fields:[ "connection_status" ])
 ;;
 
-let test_gate_stance_listing_rides_the_flow_generation () =
+let test_gate_stance_listing_observes_without_reserving () =
   let main_path = "bin/masc_tui.ml" in
   (* The stance listing replaces the whole yolo set. Two daemon fibers reach
      it -- a periodic GET and the operator's own POST -- and the network
      decides which lands first, so a GET that started before the press can
      put the pre-press answer back and the armed gate reads as auto again.
      The next press then computes yolo a second time instead of toggling
-     back, which is what makes it visible rather than a flicker. The held
-     call listing already rides [Approval.Flow]; these four pin the stance
-     listing onto the same guard. *)
-  check int "the stance fetch takes a generation" 1
+     back, which is what makes it visible rather than a flicker.
+
+     This used to ride [Approval.Flow]'s shared refresh generation via
+     [reserve_refresh], which every reader (this listing and two unrelated
+     background pollers) advanced for itself, so a fetch racing any poll
+     (not only a press) was dropped even with no press ever armed (#37461).
+     Replacing that with a bare [action_inflight] check at both ends fixed
+     that but reopened the case [reserve_refresh] existed for in the first
+     place: a press that opens and closes between dispatch and arrival is
+     invisible to a check that only reads the flag when the answer lands
+     (#37609 review). The fix keeps [action_inflight] at launch (skip
+     dispatching while a press is already open) but observes -- never
+     reserves -- the generation there, and checks [is_current] against it
+     on arrival, so a press that opened in between still supersedes it.
+     The ticket that carries that generation also numbers the fetch, since a
+     full and a scoped refresh can each have one out and the older answer may
+     land last; [Listing_order.admit] asks both questions (task-1672). *)
+  check int "the stance fetch checks a press is not still open before dispatch" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_modes_load"
-       ~callee:"Approval.Flow.reserve_refresh");
+       ~callee:"Approval.Flow.action_inflight");
+  check int "the stance fetch takes a numbered ticket without reserving a press" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"launch_keeper_tool_modes_load"
+       ~callee:"Approval.Listing_order.dispatch");
   check int "arming a gate opens an action" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_mode_set"
        ~callee:"Approval.Flow.begin_action");
-  check int "a stale stance listing is dropped" 1
+  check int "a stance listing superseded by a press or a later fetch is dropped" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message"
-       ~callee:"Approval.Flow.is_current");
+       ~callee:"Approval.Listing_order.admit");
   (* Every path that resolves an approval closes the action it opened, and
      closes it with the generation it was handed. There are four such paths
      now and there was one when this line was written; the number is a count
@@ -2925,9 +2948,9 @@ let () =
           `Quick
           test_the_scroll_counts_back_from_a_pinned_row;
         test_case
-          "gate stance listing rides the flow generation"
+          "gate stance listing observes a generation without reserving one"
           `Quick
-          test_gate_stance_listing_rides_the_flow_generation;
+          test_gate_stance_listing_observes_without_reserving;
         test_case
           "the screen does not read the server's bind address"
           `Quick

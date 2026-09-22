@@ -70,24 +70,6 @@ let prepare_exact ~net candidate =
     candidate
 ;;
 
-let post_id_exn raw =
-  match Board.Post_id.of_string raw with
-  | Ok id -> id
-  | Error _ -> Alcotest.failf "invalid Board post id fixture: %s" raw
-;;
-
-let agent_id_exn raw =
-  match Board.Agent_id.of_string raw with
-  | Ok id -> id
-  | Error _ -> Alcotest.failf "invalid Board agent id fixture: %s" raw
-;;
-
-let comment_id_exn raw =
-  match Board.Comment_id.of_string raw with
-  | Ok id -> id
-  | Error _ -> Alcotest.failf "invalid Board comment id fixture: %s" raw
-;;
-
 let signal post_id : Board_dispatch.board_signal =
   { kind = Board_dispatch.Board_post_created
   ; post_id
@@ -96,42 +78,6 @@ let signal post_id : Board_dispatch.board_signal =
   ; content = "Persisted Board evidence"
   ; hearth = Some "hearth-1"
   ; updated_at = Some 42.0
-  }
-;;
-
-let post_of_signal (signal : Board_dispatch.board_signal) : Board.post =
-  { id = post_id_exn signal.post_id
-  ; author = agent_id_exn signal.author
-  ; title = signal.title
-  ; body = signal.content
-  ; post_kind = Board.Human_post
-  ; meta_json = None
-  ; visibility = Board.Public
-  ; created_at = 1.0
-  ; updated_at = Option.value signal.updated_at ~default:1.0
-  ; expires_at = 3601.0
-  ; votes_up = 0
-  ; votes_down = 0
-  ; reply_count = 0
-  ; pinned = false
-  ; hearth = signal.hearth
-  ; thread_id = None
-  ; origin = None
-  }
-;;
-
-let comment_of_signal (signal : Board_dispatch.board_signal) : Board.comment =
-  (* A comment id must have the shape [Comment_id.generate] mints; derive one
-     from the post id so the fixture stays deterministic per post. *)
-  { id = comment_id_exn (Printf.sprintf "c-%032x" (Hashtbl.hash signal.post_id))
-  ; post_id = post_id_exn signal.post_id
-  ; parent_id = None
-  ; author = agent_id_exn "comment-author"
-  ; content = "Canonical Board comment"
-  ; created_at = 2.0
-  ; expires_at = 3602.0
-  ; votes_up = 0
-  ; votes_down = 0
   }
 ;;
 
@@ -146,17 +92,9 @@ let candidate post_id : Candidate.candidate =
   ; keeper_context =
       `Assoc
         [ "lane_keeper_name", `String keeper_name
-        ; "keeper_record_id", `Null
-        ; "keeper_runtime_uid", `Null
-        ; "instructions", `String "continue"
-        ; "current_task_id", `Null
-        ; "mention_keeper_ids", `List [ `String keeper_name ]
+        ; "board_interests", `List [ `String "runtime" ]
         ]
-  ; status =
-      Candidate.Pending
-        { last_delivery_failure = None
-        ; material = { post = post_of_signal signal; comments = [ comment_of_signal signal ] }
-        }
+  ; status = Candidate.Pending { last_delivery_failure = None }
   }
 ;;
 
@@ -527,11 +465,6 @@ let test_missing_lane_is_setup_error_without_dispatch () =
 
 let test_prepare_resumable_status_gate () =
   let pending = candidate "board-attention-gate" in
-  let material =
-    match Candidate.pending_judgment_material pending.Candidate.status with
-    | Some material -> material
-    | None -> Alcotest.fail "pending fixture carries no judgment material"
-  in
   let quarantine : Candidate.quarantine =
     { quarantine_id = "ba-quarantine-gate"
     ; partition_id = "ba-root-gate"
@@ -541,7 +474,7 @@ let test_prepare_resumable_status_gate () =
     ; attempt_provenance = None
     ; quarantined_at = 2.0
     ; prior_status =
-        Candidate.Resumable_pending { last_delivery_failure = None; material }
+        Candidate.Resumable_pending { last_delivery_failure = None }
     }
   in
   let quarantined phase =
@@ -1447,8 +1380,9 @@ let with_jev ~endpoint f =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
     Masc_test_deps.with_typesafeai_policy
       { Runtime_schema.default_typesafeai with
-        lane_endpoint = endpoint
-      ; lane_model = "requested-model"
+        destinations =
+          ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+          , [] )
       }
       f)
 ;;
@@ -1760,12 +1694,6 @@ let test_jev_choice_outside_the_question_is_judged_again () =
 let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
-    let material =
-      match candidate.Candidate.status with
-      | Candidate.Pending { material; _ } -> material
-      | Candidate.Judged _ | Candidate.Consumed _ | Candidate.Quarantine _ ->
-        Alcotest.fail "the candidate fixture is not pending"
-    in
     let jev =
       Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant"))
     in
@@ -1774,9 +1702,13 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
         match
           Typesafeai_board_attention.judge_candidate
             ~clock
-            ~api_key:"test-typesafeai-key"
+            ~destinations:
+              ( { Typesafeai_client.endpoint = jev.base_url
+                 ; model = "requested-model"
+                 ; api_key = "test-typesafeai-key"
+                 }
+              , [] )
             ~candidate
-            ~material
             ()
         with
         | Ok judged -> judged
@@ -1800,14 +1732,25 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
           "the adapter hashes the exact serialized body"
           Digestif.SHA256.(digest_string body |> to_hex)
           judged.provenance.request_body_sha256;
-        let relevance =
-          match Yojson.Safe.from_string body with
+        let request_json = Yojson.Safe.from_string body in
+        let state, relevance =
+          match request_json with
           | `Assoc fields ->
-            (match List.assoc_opt "questions" fields with
-             | Some (`Assoc questions) -> List.assoc_opt "relevance" questions
-             | Some _ | None -> None)
-          | _ -> None
+            ( List.assoc_opt "state" fields
+            , match List.assoc_opt "questions" fields with
+              | Some (`Assoc questions) -> List.assoc_opt "relevance" questions
+              | Some _ | None -> None )
+          | _ -> None, None
         in
+        Alcotest.(check bool)
+          "Jev receives exactly the current signal and projected keeper role"
+          true
+          (state =
+           Some
+             (match Candidate.singleton_judgment_request candidate with
+              | Ok request -> request
+              | Error detail ->
+                Alcotest.failf "candidate request projection failed: %s" detail));
         (match relevance with
          | Some (`Assoc question) ->
            Alcotest.(check (option string))
@@ -1819,7 +1762,21 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
               Alcotest.(check (list string))
                 "the request offers every decision under its label"
                 Judgment.decision_tokens
-                (List.map fst criteria)
+                (List.map fst criteria);
+              Alcotest.(check (option string))
+                "relevant requires the current signal, not capability overlap"
+                (Some
+                   "The current signal itself requires this keeper's concrete attention, review, or action for one of keeper_role.board_interests; general topic or capability overlap alone is insufficient.")
+                (match List.assoc_opt "relevant" criteria with
+                 | Some (`String description) -> Some description
+                 | Some _ | None -> None);
+              Alcotest.(check (option string))
+                "not relevant includes broad interest overlap"
+                (Some
+                   "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act.")
+                (match List.assoc_opt "not_relevant" criteria with
+                 | Some (`String description) -> Some description
+                 | Some _ | None -> None)
             | Some _ | None -> Alcotest.fail "the relevance question has no criteria map")
          | Some _ | None -> Alcotest.fail "the request carries no relevance question")
       | bodies ->

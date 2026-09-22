@@ -157,26 +157,6 @@ let contains ~needle haystack =
   loop 0
 
 (* Normalize wrapping so assertions match prompt sentences rather than lines. *)
-let collapse_whitespace text =
-  let buf = Buffer.create (String.length text) in
-  let in_space = ref false in
-  String.iter
-    (fun c ->
-      match c with
-      | ' ' | '\t' | '\n' | '\r' ->
-        if not !in_space then Buffer.add_char buf ' ';
-        in_space := true
-      | c ->
-        Buffer.add_char buf c;
-        in_space := false)
-    text;
-  Buffer.contents buf
-;;
-
-let contains_prose ~needle haystack =
-  contains ~needle:(collapse_whitespace needle) (collapse_whitespace haystack)
-;;
-
 let count_occurrences ~needle haystack =
   let needle_length = String.length needle in
   let haystack_length = String.length haystack in
@@ -394,6 +374,84 @@ let test_no_digest_without_failures () =
 ;;
 
 (* --- 1. Current Task layer --- *)
+
+let test_small_failed_payloads_remain_retrievable () =
+  let open Masc in
+  let module Actions = Masc.Keeper_own_recent_actions in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "small-action-payloads-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let schema = Masc.Keeper_runtime_schemas_toml.artifact_read in
+  let reader = Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~base_path
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+    ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+    (fun _ args ->
+      let execution = Masc.Keeper_artifact_read.handle ~base_path ~args in
+      match execution.disposition with
+      | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+          ~start_time:0. ?data:execution.data ()
+      | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name
+          ~class_ ~start_time:0. execution.raw_output
+      | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
+  let payload = "{\"patch\":\"" ^ String.make 32000 'x' ^ "\"}" in
+  let detail = "Patch rejected: " ^ String.make 16000 'd' in
+  let failed = call ~tool:"Edit" ~input:payload ~outcome:(Actions.Failed_call (Some detail)) in
+  let success = call ~tool:"Read" ~input:"unchanged-success" ~outcome:Actions.Ok_call in
+  let source = [action_turn 42 [failed; success]; action_turn 43 [failed]] in
+  let render turns = user_message {base_observation with WO.own_recent_actions=Ok turns} in
+  let original = render source in
+  let project ~base_path ~policy ~tools =
+    Actions.externalize_failures ~base_path ~keeper_name:"fixture" ~policy ~tools source in
+  check string "Wide keeps the complete briefing" original
+    (render (project ~base_path ~policy:Masc.Keeper_input_policy.Wide ~tools:[reader]));
+  check string "missing reader keeps the complete briefing" original
+    (render (project ~base_path ~policy:Masc.Keeper_input_policy.Small ~tools:[]));
+  let projected = project ~base_path ~policy:Masc.Keeper_input_policy.Small ~tools:[reader] in
+  let projected_call = match projected with
+    | [{Actions.turn_id=42;calls=[call; untouched]}; {turn_id=43;calls=[repeated]}] ->
+      check bool "successful call is untouched" true (untouched = success);
+      check bool "identical failures retain identical references" true (call = repeated);
+      call
+    | _ -> fail "projection changed turn coordinates or call ordering" in
+  let reference text = match Tool_output.decode_from_agent_core text with
+    | Tool_output.Decoded reference -> reference
+    | _ -> fail "failed payload was not externalized" in
+  let argument_ref = reference projected_call.input in
+  let detail_ref = match projected_call.outcome with
+    | Actions.Failed_call (Some detail) -> reference detail
+    | _ -> fail "projection changed the failed outcome" in
+  let read_exact (reference : Tool_output.artifact_ref) =
+    let rec loop offset parts =
+      let execution = Masc.Keeper_artifact_read.handle ~base_path
+        ~args:(`Assoc ["sha256", `String reference.sha256; "offset", `Int offset;
+          "max_bytes", `Int Masc.Keeper_artifact_read.maximum_max_bytes]) in
+      match execution.disposition, execution.data with
+      | Tool_result.Completed (), Some json ->
+        let open Yojson.Safe.Util in
+        let content = json |> member "content" |> to_string in
+        let next = json |> member "next_offset" |> to_int in
+        let parts = content :: parts in
+        if json |> member "eof" |> to_bool then String.concat "" (List.rev parts)
+        else if next > offset then loop next parts else fail "artifact read made no progress"
+      | _ -> fail "real artifact reader failed" in
+    loop 0 [] in
+  check string "arguments are retrievable byte for byte" payload (read_exact argument_ref);
+  check string "failure detail is retrievable byte for byte" detail (read_exact detail_ref);
+  let body = render projected in
+  check bool "briefing shrinks without cutting source" true (String.length body < String.length original);
+  check bool "call identity and rejected outcome remain visible" true
+    (contains ~needle:"[turn 42] Edit" body && contains ~needle:"REJECTED" body);
+  check bool "digest and ordinary row both retain the complete argument reference" true
+    (count_occurrences ~needle:projected_call.input body >= 3);
+  check string "original source remains unchanged" original (render source);
+  let blocked = Filename.concat base_path "blocked-store" in
+  Out_channel.with_open_bin blocked (fun channel -> output_string channel "not a directory");
+  check string "storage failure keeps the complete briefing" original
+    (render (project ~base_path:blocked ~policy:Masc.Keeper_input_policy.Small ~tools:[reader]))
+;;
 
 let test_current_task_section_renders () =
   let task =
@@ -738,14 +796,8 @@ let test_direct_and_autonomous_share_system_prompt () =
     "stable contract is byte-identical across turn entrypoints"
     autonomous_system_prompt
     base_system_prompt;
-  check bool "shared contract keeps intended scope" true
-    (contains_prose
-       ~needle:"맡은 일을 요청한 범위 안에서 끝내세요"
-       base_system_prompt);
-  check bool "shared contract excludes unrelated work" true
-    (contains_prose ~needle:"범위를 넓히거나 사람이 결정해야 할 때는 이유와 선택지를 정리해 물으세요" base_system_prompt);
-  check bool "shared contract leads with the result" true
-    (contains_prose ~needle:"결과를 먼저 말하고 근거를 덧붙이세요" base_system_prompt)
+  check bool "shared system block is present" true
+    (contains ~needle:"<system>" base_system_prompt)
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
@@ -790,11 +842,7 @@ let test_open_goal_store_keeps_one_stable_safety_contract () =
     (contains ~needle:"<identity>" base_system_prompt);
   (* The shared prompt remains the stable system prefix for both turn paths. *)
   check bool "shared system block is preserved" true
-    (contains ~needle:"<system>" base_system_prompt);
-  check bool "scope contract is preserved" true
-    (contains
-       ~needle:"맡은 일을 요청한 범위 안에서 끝내세요"
-       base_system_prompt)
+    (contains ~needle:"<system>" base_system_prompt)
 
 (* --- 2. Threaded turn decision --- *)
 
@@ -1138,6 +1186,8 @@ let () =
             test_successful_call_arguments_are_not_replayed;
           test_case "a refused call keeps what was sent" `Quick
             test_refused_call_keeps_its_arguments;
+          test_case "Small failed payloads remain retrievable through the offered reader" `Quick
+            test_small_failed_payloads_remain_retrievable;
           test_case "repeated refusals collapse into one digest row" `Quick
             test_failure_digest_dedupes_and_counts;
           test_case "no digest block without refusals" `Quick

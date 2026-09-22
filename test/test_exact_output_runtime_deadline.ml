@@ -50,10 +50,19 @@ let ready target =
 
 let expected_plan ~connect ~body =
   let target : EO.declared_target =
-    { target_ref = "openai-responses.probe"; provider_ref = "openai-responses"; model_id = "gpt-5.6-luna"
-    ; enable_thinking = None; reasoning_effort = None
-    ; connect_timeout_s = connect; body_timeout_s = body
-    ; api_key_env = Some "OPENAI_API_KEY" }
+    { target_ref = "openai-responses.probe"
+    ; binding =
+        Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~provider_id:"openai-responses"
+          ~model_id:"gpt-5.6-luna"
+          ~base_url:"https://api.openai.com"
+          ~request_path:"/v1/responses"
+          ?connect_timeout_s:connect
+          ()
+    ; credential =
+        EO.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
+    ; body_timeout_s = body }
   in
   let snapshot =
     EO.load_resolver_snapshot

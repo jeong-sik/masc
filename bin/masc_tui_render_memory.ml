@@ -140,12 +140,28 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some value ->
         let input = match value.mcp_input with
           | Context_summarized value -> "summary " ^ frontier value
-          | Context_uncompressed -> "full history"
+          | Context_absorbed value ->
+            Printf.sprintf "absorbed to atom %d · trace %s · no summary"
+              value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
+          | Context_without_snapshot -> "no snapshot: this turn only"
           | Context_not_applied -> "saved context not applied" in
         Printf.sprintf "%s · %d request bytes · %s"
           (memory_updated_text (Some value.mcp_prepared_at))
           value.mcp_request_bytes (Terminal_text.single_line value.mcp_runtime_id), input in
-    ["  Context saved · " ^ saved;
+    let synthesis = match cycle.mcc_synthesis with
+      | None -> "not observed since server start"
+      | Some value ->
+        let module O = Masc.Keeper_continuity_observation in
+        let state = match value.state with
+          | O.No_source -> "no new completed source (coverage not inferred)"
+          | state -> O.synthesis_state_to_string state in
+        let range = match value.range with
+          | None -> " · atom range unavailable"
+          | Some range -> Printf.sprintf " · last selected atoms [%d,%d) / observed completed %d"
+              range.start_atom range.end_atom range.completed_end_atom in
+        state ^ range ^ " · " ^ memory_updated_text (Some value.observed_at) in
+    ["  Context synthesis · " ^ synthesis;
+     "  Context saved · " ^ saved;
      "  Request prepared (not provider success) · " ^ prepared;
      "  Context used · " ^ input]
   in
@@ -408,14 +424,23 @@ let detail_label label =
 
 let detail_field label value = "    " ^ detail_label label ^ value
 
+(* A claim is prose a Keeper wrote, often paragraphs and a numbered list. The
+   list rows fold it to one line because a row has one line to give it; the
+   detail pane has the height, so it keeps the claim's own breaks. Each line is
+   escaped on its own -- escaping the whole claim turns every newline into a
+   printed \x0A (#37017) -- and wrapped at spaces, so a word is not cut in two
+   at the pane's edge. A blank line stays a blank row: it is a paragraph break,
+   not an absence. *)
+let detail_claim_lines ~inner_width claim =
+  Message_layout.wrap_body ~max_cells:inner_width
+    ~sanitize:Terminal_text.single_line claim
+  |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+
 let memory_fact_detail_lines ~cols (row : memory_fact_row) =
   let inner_width = max 30 (cols - 6) in
   match row with
   | Memory_row_fact fact ->
-      let claim_lines =
-        Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.mf_claim)
-        |> List.map (fun line -> "    " ^ line)
-      in
+      let claim_lines = detail_claim_lines ~inner_width fact.mf_claim in
       let history =
         Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
           fact.mf_events.mfe_retrieved_count
@@ -445,10 +470,7 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       @ history_lines
       @ [ detail_field "Memory ID:" fact.mf_memory_id ]
   | Memory_row_source_fact fact ->
-      let claim_lines =
-        Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.msf_claim)
-        |> List.map (fun line -> "    " ^ line)
-      in
+      let claim_lines = detail_claim_lines ~inner_width fact.msf_claim in
       [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
       @ [ detail_field "Bound Path:" fact.msf_path

@@ -1,9 +1,10 @@
 # masc Roadmap
 
-> Current package version: v0.35.21
-> Latest changelog entry: v0.35.21 (2026-09-20)
+> Current package version: v0.35.22
+> Latest changelog entry: v0.35.22 (2026-09-23)
+> Release date status: provisional — set it to the tag commit's UTC date before publishing
 > Latest published GitHub release: v0.35.20 (2026-09-17)
-> Updated: 2026-09-20
+> Updated: 2026-09-21
 
 A planning view, not a release promise. The operating model behind it
 (labels, priority, pull-request and release rules) is
@@ -97,7 +98,17 @@ Open `must-do` issues, grouped. Numbers are issues.
 - `1.0.0` does not open until the TUI, the MCP workspace, and release truth
   hold without caveats.
 - `v2.*` tags are audit history only.
-- No tag while `must-do` issues remain open.
+- No `0.y.0` tag while that train's entry-condition issues remain open. The
+  milestone is the list, not the label: an issue blocks the tag when it sits on
+  that train's GitHub milestone (v0.36.0: its open `impact/breaks-continuity`
+  issues). The label states the risk; putting the issue on that milestone is
+  the separate act that makes it block — on 2026-09-21, 11 of the 191 open
+  `impact/breaks-continuity` issues were on it. Other `must-do` issues do not
+  block a tag; they stay ordered by `impact/*` in the backlog. (Before 2026-09-21 this
+  rule read "no tag while `must-do` issues remain open"; with 97 open on that
+  day no tag could satisfy it, so it was never applied.)
+- `0.y.z` tags are date-fixed and scope-variable: the cut date holds and
+  whatever has not passed the gates moves to the next tag.
 - No tag while version truth is broken across `dune-project`, `masc.opam`,
   `ROADMAP.md`, and `CHANGELOG.md`.
 - The backlog is ordered by `impact/*`.

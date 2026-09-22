@@ -11,13 +11,12 @@ type judged =
 
 val judge_candidate :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  api_key:string ->
+  destinations:Typesafeai_config.destinations ->
   candidate:Keeper_board_attention_candidate.candidate ->
-  material:Keeper_board_attention_candidate.judgment_material ->
   unit ->
   (judged, string) result
-(** Evaluates a pending candidate using TypeSafe AI Jev and returns the
-    decision Jev picked, whichever it is; what a decision leads to is the
+(** Evaluates the candidate's current signal using TypeSafe AI Jev and returns
+    the decision Jev picked, whichever it is; what a decision leads to is the
     caller's. The confidence and probabilities Jev reported are kept in the
     verdict's rationale for the record and are not compared against anything.
     Returns [Error reason] if the question's option set is rejected by

@@ -566,7 +566,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         status: 'active',
         runtime_trust: {
           disposition: 'Blocked',
-          operator_disposition: 'pause_human',
+          operator_disposition: 'operator_action_required',
           operator_disposition_reason: 'required_tool_use_unsatisfied',
           needs_attention: true,
           approval: {
@@ -593,7 +593,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
 
     expect(keeper?.trust).toMatchObject({
       disposition: 'Blocked',
-      operator_disposition: 'pause_human',
+      operator_disposition: 'operator_action_required',
       operator_disposition_reason: 'required_tool_use_unsatisfied',
       needs_attention: true,
       approval_state: {

@@ -248,14 +248,16 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     row's name column holds eighteen more cells.
 
     Under either receipt order, a record whose calls came from more than one
-    model response brackets each response in the call rows' border cell:
-    [\xe2\x94\x8c] beside its first call, [\xe2\x94\x82] beside the calls
-    between, [\xe2\x94\x94] beside its last, the three plain over the dim
-    edge, and a dim [\xe2\x94\x80] beside a response of one call, so a
-    record of lone calls still reads as split. No row is added. A
+    model response says how many in the heading ([calls \xc2\xb7 newest first
+    \xc2\xb7 4 responses]) and brackets each response of two or more calls
+    in the call rows' border cell: [\xe2\x94\x8c] beside its first call,
+    [\xe2\x94\x82] beside the calls between, [\xe2\x94\x94] beside its
+    last, plain over the dim edge. A response of one call keeps the edge;
+    the heading's count is what says the record is split. No row is added.
+    A
     composition's calls sit with the response that asked for the
     composition. The response is the call's session ordinal, not its
-    planned index. Call rows keep the plain edge under the two sorts, which
+    planned index. No count and no bracket draw under the two sorts, which
     interleave responses, for a single response, and when any call states
     no ordinal.
 

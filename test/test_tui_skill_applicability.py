@@ -47,6 +47,29 @@ def _row_success(row: dict[str, Any]) -> bool:
     raise KeyError("row has no success, disposition, or wire_outcome field")
 
 
+def _rendered_output(screen: bytes, call_index: int) -> bytes:
+    """The ``output`` field's value as the exact call view wrapped it.
+
+    ``render_keeper_calls`` draws each wrapped chunk of a field on its own
+    row, repeating the ``#N output `` label on every chunk so a two-row
+    viewport never separates a continuation from its field. A value the wrap
+    cut mid-token therefore reads as two rows with the label between them,
+    and ``screen_text`` (rows joined by a newline) never contains the token:
+    the failed row's ``withheld_activation_failure`` straddles a chunk
+    boundary at 180 columns, so a search over the joined rows timed out on a
+    screen that was already showing it. Strip the repeated label and the row
+    padding, then join the chunks with nothing between them, so a token the
+    wrap cut in half reads whole again.
+    """
+    label = b"#%d output " % (call_index + 1)
+    chunks: list[bytes] = []
+    for line in screen.split(b"\n"):
+        stripped = line.lstrip()
+        if stripped.startswith(label):
+            chunks.append(stripped[len(label) :].rstrip())
+    return b"".join(chunks)
+
+
 def run_case(executable: str, row: dict[str, Any]) -> None:
     keeper = cast(str, row["keeper"])
     fixtures = h.keeper_runtime_http_fixtures()
@@ -92,7 +115,7 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
                 b"withheld_activation_failure",
             ]
         )
-        seen = screen
+        seen = _rendered_output(screen, 0)
         # The exact call view wraps persisted output; walk rows instead of
         # assuming the answer is contained in its old 72-byte timeline digest.
         for _ in range(len(str(row["output"])) + 1):
@@ -101,9 +124,16 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
             h.read_available(fd, output)
             start = len(output)
             os.write(fd, b"j")
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
+            # A j at the last row changes nothing, and Frame_presenter.present
+            # writes nothing at all for an unchanged frame -- not even a frame
+            # terminator -- so waiting for FRAME_END here would time out on a
+            # screen that already shows everything. Stop at the bottom.
+            if not h.poll_for_output(
+                process, fd, output, h.FRAME_END, start=start, timeout=3
+            ):
+                break
             h.drain_until_quiet(process, fd, output)
-            seen += b"\n" + h.screen_text(bytes(output))
+            seen += b"\n" + _rendered_output(h.screen_text(bytes(output)), 0)
         for needle in needles:
             if needle not in seen:
                 raise AssertionError(f"Skill call output did not render {needle!r}")

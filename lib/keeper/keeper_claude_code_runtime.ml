@@ -155,17 +155,83 @@ let model_input_projection_for_capacity
           ~turn_start
           messages
       in
+      (* A Librarian front pins a working state the ceiling never measured:
+         [Host.carried_start_range] puts it in front of the atoms it
+         summarises, after the cut above chose [own_first_atom] without it.
+         So on that front the declared window runs once more over what was
+         composed. It drops atoms and never a pinned message: a range the
+         working state pushes past the ceiling loses atoms from its front and
+         keeps the working state, and a ceiling the pinned messages and the
+         newest atom do not fit refuses the request, as Antigravity's window
+         does. Every other front starts at or past the ceiling's own cut and
+         pins nothing new, so its range already fits and is left as cut. *)
+      let* cut, cut_bytes =
+        match capacity_cut, carried.Host.front with
+        | None, _
+        | ( Some _
+          , ( Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start
+            | Host.Turn_start_unknown _ | Host.Librarian_progress _ ) ) ->
+          Ok (carried.Host.projection, carried.Host.transmitted_bytes)
+        | Some _, Host.Librarian_snapshot _ ->
+          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            match
+              Runtime_model_input_tail_window.project_with_drop
+                ~measure_message_bytes:measure_model_input_message_bytes
+                ~capacity_bytes
+                ~reserved_bytes:0
+                carried.Host.messages
+            with
+            | Ok projection ->
+              (* The window numbers the carried list's atoms from 0. A
+                 preamble the range opened on is its first atom: dropped
+                 first, and put back by the window when the new head still
+                 needs one, so it is not a durable atom lost. *)
+              let preamble_dropped =
+                match carried.Host.messages with
+                | head :: _
+                  when Runtime_model_input_tail_window.is_synthetic_preamble head
+                       && projection.Runtime_model_input_tail_window.dropped_atoms > 0 -> 1
+                | _ :: _ | [] -> 0
+              in
+              let durable_dropped =
+                projection.Runtime_model_input_tail_window.dropped_atoms - preamble_dropped
+              in
+              if durable_dropped > 0
+              then
+                Log.Keeper.info
+                  ~keeper_name
+                  "model input declared ceiling cuts the carried range again runtime=%s \
+                   origin=%s dropped_atoms=%d capacity_bytes=%d: the working state is \
+                   pinned and the atoms in front of it go"
+                  runtime_id
+                  (Host.carried_start_front_to_string carried.Host.front)
+                  durable_dropped
+                  capacity_bytes;
+              Ok
+                ( { Runtime_model_input_tail_window.messages =
+                      projection.Runtime_model_input_tail_window.messages
+                  ; dropped_atoms =
+                      carried.Host.projection.Runtime_model_input_tail_window.dropped_atoms
+                      + durable_dropped
+                  ; atom_count = history_atom_count
+                  }
+                , List.fold_left
+                    (fun total message -> total + measure_model_input_message_bytes message)
+                    0
+                    projection.Runtime_model_input_tail_window.messages )
+            | Error error ->
+              Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
+      in
       (* No cut is still a reading: what was carried, reported with the atom
          it starts from. Leaving it silent would put the turn record's absent
          window back for any runtime whose declared cap is unbounded and whose
          seed named no front. A list with no atom has no front to report, and
          [Runtime_model_input_tail_window.observe] reports nothing for it. *)
-      observe_window carried.Host.projection;
+      observe_window cut;
       Option.iter
-        (fun observe ->
-           observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+        (fun observe -> observe carried.Host.front ~transmitted_bytes:cut_bytes)
         on_carried_front;
-      Ok carried.Host.messages
+      Ok cut.Runtime_model_input_tail_window.messages
   in
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->

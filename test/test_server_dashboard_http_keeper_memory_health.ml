@@ -824,8 +824,14 @@ let test_the_continuity_lag_is_measured_or_says_it_cannot_be () =
   let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
   Yojson.Safe.to_file path (S.to_json snapshot);
+  (* The runtime keepers dir, not the config one this handler otherwise reads.
+     Writing through the same wrong root the reader used is what let the first
+     version of this test pass while every live lag came back unmeasured. *)
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  Alcotest.(check bool) "the position lives under a different root than the journal" false
+    (String.equal runtime_keepers_dir keepers_dir);
   let write_position ~trace_id ~end_atom =
-    P.write ~keepers_dir ~keeper_id:keeper_name
+    P.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
       { P.position = { P.trace_id; end_atom; last_atom_digest }
       ; boundary_lines_seen = 1
       }

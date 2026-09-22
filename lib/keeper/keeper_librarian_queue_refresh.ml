@@ -77,6 +77,20 @@ let release_width ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove limited_widths key)
 ;;
 
+(* A pass can report more than once: the walk fails, then recording that
+   failure raises and the handler around it reports the raise. Evidence of
+   size from any report stands; the latest cause is the one logged. *)
+let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committed) =
+  match earlier with
+  | None -> outcome
+  | Some (earlier : Keeper_librarian_runtime.not_committed) ->
+    { outcome with
+      Keeper_librarian_runtime.walk_shows_size =
+        earlier.Keeper_librarian_runtime.walk_shows_size
+        || outcome.Keeper_librarian_runtime.walk_shows_size
+    }
+;;
+
 let last_input_capacity ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt input_capacities key)
@@ -196,42 +210,45 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
         let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
         if !trace_id <> Some current_trace then selected_range := None;
         trace_id := Some current_trace;
+        let settle_no_source = function
+          | P.Drained ->
+            (* §4.3 releases the limit when the backlog is read to its end, and
+               on no other outcome: one narrowed commit does not show that the
+               range which refused now fits. *)
+            release_width ~config ~keeper_name;
+            observe O.No_source
+          | P.Source_unreadable | P.Empty_range ->
+            (* Not evidence that the backlog was read. The checkpoint this
+               trace names is absent, or the prefix asked for sits at the
+               start. Releasing the width here would send the next pass back
+               at the whole backlog, which is the loop this limit exists to
+               stop. *)
+            observe O.No_source
+        in
         match Domain_pool_ref.submit_io_or_inline (fun () ->
           P.prepare_source ~config ~keeper_name ~trace_id:current_trace ()) with
         | Error detail -> report O.Source_unavailable detail
-        | Ok (P.No_source P.Drained) ->
-          (* §4.3 releases the limit when the backlog is read to its end, and
-             on no other outcome: one narrowed commit does not show that the
-             range which refused now fits. *)
-          release_width ~config ~keeper_name;
-          observe O.No_source
-        | Ok (P.No_source (P.Source_unreadable | P.Empty_range)) ->
-          (* Not evidence that the backlog was read. The checkpoint this trace
-             names is absent, or the prefix asked for sits at the start.
-             Releasing the width here would send the next pass back at the
-             whole backlog, which is the loop this limit exists to stop. *)
-          observe O.No_source
+        | Ok (P.No_source no_source) -> settle_no_source no_source
         | Ok (P.Ready prepared) ->
           (match limited_width ~config ~keeper_name ~trace_id:current_trace with
            | None -> attempt meta prepared
            | Some width when P.end_atom prepared - P.start_atom prepared <= width ->
              attempt meta prepared
            | Some width ->
-             (* Cut at the width rather than at the midpoint below it: the
-                unit read is then the width the last refusal left, and the
-                logged number is the number of atoms this pass sends. *)
+             (* Cut at the width: the unit read is then the width the last
+                refusal left, and the logged number is the number of atoms
+                this pass sends. *)
              let end_atom = P.start_atom prepared + width in
              (match Domain_pool_ref.submit_io_or_inline (fun () ->
                 P.prepare_source ~end_atom ~config ~keeper_name
                   ~trace_id:current_trace ()) with
               | Error detail -> report O.Input_unavailable detail
-              | Ok (P.No_source _) ->
-                (* Only a race reaches this: prepare_source honours a pending
-                   Memory receipt over the requested end, so the cut above
-                   answers Ready whenever the first prepare did, unless the
-                   checkpoint changed between the two reads. The range the
-                   first read returned is still a readable unit. *)
-                attempt meta prepared
+              | Ok (P.No_source no_source) ->
+                (* The checkpoint changed between the two reads. Sending the
+                   first read's range would send more than the width, so this
+                   pass settles on what the second read found, as a first read
+                   that found it would. *)
+                settle_no_source no_source
               | Ok (P.Ready one_unit) ->
                 (* completed_end_atom names the last completed turn inside the
                    prepared range: when it equals start_atom the range holds no
@@ -287,19 +304,7 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           cli_limit := Some observed;
           remember_input_capacity ~config ~keeper_name observed;
           capacity := Some observed)
-        ~on_not_committed:(fun outcome ->
-          (* A pass can report more than once -- a walk that failed and then a
-             snapshot that did not commit. Evidence of size from any of them
-             stands; the latest cause is the one logged. *)
-          cause :=
-            Some
-              (match !cause with
-               | None -> outcome
-               | Some earlier ->
-                 { outcome with
-                   Runtime.walk_shows_size =
-                     earlier.Runtime.walk_shows_size || outcome.Runtime.walk_shows_size
-                 }))
+        ~on_not_committed:(fun outcome -> cause := Some (merge_not_committed !cause outcome))
         ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
@@ -464,6 +469,7 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 
 module For_testing = struct
   let limited_width = limited_width
+  let merge_not_committed = merge_not_committed
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit
 end

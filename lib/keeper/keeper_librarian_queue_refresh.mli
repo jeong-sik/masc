@@ -61,6 +61,13 @@ module For_testing : sig
   (** The width a later continuity pass will read at, if a refusal left one
       for this trace. *)
 
+  val merge_not_committed :
+    Keeper_librarian_runtime.not_committed option
+    -> Keeper_librarian_runtime.not_committed
+    -> Keeper_librarian_runtime.not_committed
+  (** How one pass folds the reports it received: the size verdict of any
+      report stands, and the latest detail is kept. *)
+
   val run_continuity : ?cli_runner:Keeper_lane_cli_oneshot.runner ->
     base_path:string -> keeper_name:string -> unit -> unit
   val run_durable_with_commit

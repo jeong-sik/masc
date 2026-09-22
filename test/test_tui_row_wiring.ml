@@ -154,6 +154,28 @@ let test_the_title_does_not_count_another_queue () =
   Alcotest.(check bool) "the filter note it keeps is still read" true
     (reads ~binding_name:"render_approvals" ~fields:[ "aps_hidden_count" ] > 0)
 
+(* The surface's own title, the tab badge and the Overview row answer the
+   same question, so they count the same population. The title counted the
+   approval rows alone: with one open question and no approvals the tab read
+   "Approvals\xc2\xb71" and the screen it opened read "MASC Approvals (0)",
+   with the question block further down the pane. *)
+let test_the_approvals_title_counts_what_the_badge_counts () =
+  Alcotest.(check int) "the title walks the shared pending helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~callee:"approvals_surface_pending"
+     + Ast_grep.count_calls_in_value_binding ~module_path:render
+         ~binding_name:"render_approvals"
+         ~callee:"Masc_tui_types.approvals_surface_pending");
+  (* And names every kind it counted. A total with an unnamed part reads as
+     an arithmetic error on screen. *)
+  Alcotest.(check int) "the four kinds the surface answers" 4
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~literals:[ "held"; "gate"; "op"; "question" ]);
+  Alcotest.(check bool) "the questions come off the asks reading" true
+    (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ] > 0)
+
 (* The Overview summary row wears the same word as the tab badge beside it,
    and for a while they counted different things: the badge walked all three
    approval lists, the row read the confirm queue's own visible count. A
@@ -868,5 +890,7 @@ let () =
             test_no_row_of_a_drawing_loop_walks_a_list
         ; Alcotest.test_case "both strips mark where they are from one value"
             `Quick test_both_strips_mark_where_they_are_from_one_value
+        ; Alcotest.test_case "the Approvals title counts what the badge does"
+            `Quick test_the_approvals_title_counts_what_the_badge_counts
         ] )
     ]

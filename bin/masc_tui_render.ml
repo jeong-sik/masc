@@ -1386,7 +1386,12 @@ let render_approvals (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let count = List.length approvals in
+  (* The same population the tab badge and the Overview row count: the
+     approval rows plus the open questions. This title counted the approval
+     rows alone, so an operator who came here from a badge of 1 was met with
+     "(0)" and had to find the question block further down to learn what the
+     badge had been counting. *)
+  let count = Masc_tui_types.approvals_surface_pending state in
   (* The count is what is on screen. It used to be the pending-confirm queue's
      own visible/total pair, and that queue is one of the three lists this
      screen draws: with seven Gate rows waiting and no confirm entries, the
@@ -1422,6 +1427,14 @@ let render_approvals (state : state) =
      with nothing in them, a bracket inside the parenthesis, and a total the
      one kind that did have rows had already said. With one kind its count is
      the total; with more, the total leads and the kinds follow it. *)
+  (* The questions a Keeper is waiting on are the fourth kind this surface
+     answers, and the only one whose word takes a plural, so it is built
+     beside the three rather than inside their format. *)
+  let question_count =
+    match state.asks_snapshot with
+    | Some snapshot -> List.length (Ask_projection.open_rows snapshot)
+    | None -> 0
+  in
   let count_text =
     let kinds =
       [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
@@ -1433,6 +1446,15 @@ let render_approvals (state : state) =
              else
                Some
                  (Printf.sprintf "%s%d %s%s" style kind_count word Ansi.reset))
+    in
+    let kinds =
+      if question_count = 0 then kinds
+      else
+        kinds
+        @ [ Printf.sprintf "%s%s%s" (Theme.warn ())
+              (Masc_tui_message_layout.count_noun question_count "question")
+              Ansi.reset
+          ]
     in
     match kinds with
     | [] -> string_of_int count

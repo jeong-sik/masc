@@ -2694,11 +2694,9 @@ let runtime_config_write_outcome
        Runtime_exact_output_registry.Committed (`Durability_unconfirmed failure))
 ;;
 
-(* Pure save precondition shared by the writer and the preview endpoint: TOML
-   parse, config materialization, and dispatch-cap validation, with no write and
-   no [set_loaded]. Keeping this as the single source of the precondition means
-   [can_save] previews cannot diverge from what [commit_runtime_config_text]
-   actually enforces. *)
+(* The runtime half of the save precondition: TOML parse, config
+   materialization, and dispatch-cap validation, with no write and no
+   [set_loaded]. [validate_save_text] adds the [fusion] half. *)
 let parse_and_validate_config_text ~config_path content =
   let* () =
     match Skill_source_config.validate_text content with
@@ -2713,22 +2711,52 @@ let parse_and_validate_config_text ~config_path content =
   prepare_degraded_loaded ~config_path parsed
 ;;
 
-(* [fusion] is checked on the write gates only. Boot reads the file through
-   [parse_and_validate_config_text], and a broken [fusion] must not stop every
-   Keeper turn with it; Fusion reports its own section per call. A write, though,
-   must not put a broken [fusion] on disk: one bad save used to refuse every
-   Fusion run until someone edited the file by hand. *)
-let validate_fusion_text content =
-  match Otoml.Parser.from_string content with
-  | exception Otoml.Parse_error (_, detail) ->
-    Error ("runtime config parse failed: " ^ detail)
-  | toml ->
-    (match Fusion_config.of_toml toml with
-     | Ok _ -> Ok ()
-     | Error errors ->
-       Error
-         ("fusion config invalid: "
-          ^ String.concat "; " (List.map Fusion_config.config_error_message errors)))
+(* The [fusion] table as the grammar reads it, printed. Two files whose
+   [fusion] tables print the same hold the same [fusion]. *)
+let fusion_table_text toml =
+  Option.map (fun table -> Otoml.Printer.to_string table) (Otoml.find_opt toml Fun.id [ "fusion" ])
+;;
+
+(* A save must not change [fusion] into a table Fusion cannot load: one bad
+   save refuses every Fusion run until someone edits the file by hand. A save
+   that leaves [fusion] as the file on disk has it is not judged on it, so a
+   table that is already broken does not block a keeper purge or a credential
+   save. A file on disk that cannot be read or parsed counts as having no
+   [fusion], so any [fusion] in the new text is checked. *)
+let validate_fusion_change ~config_path content =
+  let* toml =
+    Result.map_error
+      (fun detail -> "runtime config parse failed: " ^ detail)
+      (Otoml.Parser.from_string_result content)
+  in
+  let on_disk =
+    match load_file_result config_path with
+    | Error _ -> None
+    | Ok text ->
+      (match Otoml.Parser.from_string_result text with
+       | Ok previous -> fusion_table_text previous
+       | Error _ -> None)
+  in
+  if Option.equal String.equal on_disk (fusion_table_text toml)
+  then Ok ()
+  else (
+    match Fusion_config.of_toml toml with
+    | Ok _ -> Ok ()
+    | Error errors ->
+      Error
+        ("fusion config invalid: "
+         ^ String.concat "; " (List.map Fusion_config.config_error_message errors)))
+;;
+
+(* The save precondition, shared by the writer and the preview endpoint, so a
+   [can_save] preview cannot diverge from what [commit_runtime_config_text]
+   enforces. Boot does not come through here: it loads through
+   [load_list_internal], and a broken [fusion] must not stop every Keeper turn
+   with it; Fusion reports its own section per call. *)
+let validate_save_text ~config_path content =
+  let* validated = parse_and_validate_config_text ~config_path content in
+  let* () = validate_fusion_change ~config_path content in
+  Ok validated
 ;;
 
 let commit_runtime_config_text
@@ -2738,9 +2766,8 @@ let commit_runtime_config_text
   =
   let observation = config_observation ~path content in
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
-    parse_and_validate_config_text ~config_path:path content
+    validate_save_text ~config_path:path content
   in
-  let* () = validate_fusion_text content in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
   with
@@ -2852,9 +2879,9 @@ let edit_config_text ?runtime_config_path edit =
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
   let* _loaded, _exact_output_lanes, _degradation, _declared_media_failover =
-    parse_and_validate_config_text ~config_path:path content
+    validate_save_text ~config_path:path content
   in
-  validate_fusion_text content
+  Ok ()
 ;;
 
 module For_testing = struct

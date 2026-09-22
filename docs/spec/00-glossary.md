@@ -280,7 +280,7 @@ status: reference
   그 값이다. TUI 화면은 "runtime candidate order"로 읽는다.
   `[runtime].media_failover`(vision fleet)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
-  런타임 후보 순서와 별개 축이며, 개명되지 않는다.
+  런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Standalone Lane**

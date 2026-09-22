@@ -2537,11 +2537,24 @@ let nothing =
     needs_asks = false;
   }
 
-(* Each datum is read by the one surface that draws it, so a refresh spends a
-   request and a decode on it only while that surface is open. The planning and
+(* Each datum is read by the surfaces that draw it, so a refresh spends a
+   request and a decode on it only while one of them is open. The planning and
    system-log payloads are tens of kilobytes each, and fetching them behind
-   every other surface cost that on every tick for rows nobody was looking at. *)
-let surface_needs : surface -> surface_needs = function
+   every other surface cost that on every tick for rows nobody was looking at.
+
+   [keeper_pane_drawn] is the reading a surface cannot answer for itself: the
+   Keeper pane on the right of the screen draws a health mark per Keeper and
+   is up on every surface but Activity, and behind a modal on none of them.
+   Read from the surface alone, its marks were the unread dash on every
+   screen but Keepers and Metrics, under a count taken from the event feed
+   instead of the roster. The roster is 8.4 KB and answers in about a
+   millisecond, which is what makes this affordable where planning is not. *)
+let rec surface_needs ~keeper_pane_drawn surface =
+  let needs = surface_needs_of_surface surface in
+  if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+  else needs
+
+and surface_needs_of_surface : surface -> surface_needs = function
   | Overview -> { nothing with needs_transport = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -2598,8 +2611,9 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight surface =
-  if scoped_refresh_inflight then nothing else surface_needs surface
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+  if scoped_refresh_inflight then nothing
+  else surface_needs ~keeper_pane_drawn surface
 
 type full_refresh_intent = Cadence | Revalidate
 

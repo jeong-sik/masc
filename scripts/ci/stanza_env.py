@@ -47,6 +47,20 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 # --dir once it has resolved the name.
 DEFAULT_SUITE_DIR = "test"
 
+# The directory-wide env block in test/dune is what keeps a suite off the
+# operator's workspace, off the network, and off Docker. The self-test used to
+# assert the block's key list exactly, so adding any unrelated variable to
+# test/dune -- TYPESAFEAI_API_KEY on 2026-09-19 (#36970) -- turned the self-test
+# red for a reason that had nothing to do with this reader. The invariant is
+# that these pairs are present, not that no others are.
+REQUIRED_DIRECTORY_ENV = [
+    ("MASC_BASE_PATH", ""),
+    ("ZAI_API_KEY", ""),
+    ("TYPESAFEAI_API_KEY", ""),
+    ("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
+    ("MASC_KEEPER_DOCKER_PLAYGROUND", "false"),
+]
+
 # %{dep:PATH} is the only dune variable a value may use. Paths in a stanza are
 # written relative to the stanza's own directory, which is where the targeted
 # runner stands (_build/default/<dir>), so the path passes through unchanged.
@@ -499,15 +513,14 @@ def self_test() -> int:
         check("a profile-scoped env block is refused", "read", "refused")
     except StanzaError:
         check("a profile-scoped env block is refused", "refused", "refused")
+    # The invariant is presence, not exact equality: an unrelated variable
+    # added to test/dune must not turn this red, while a removed or weakened
+    # isolation flag must. Asserting the whole key list did the opposite.
+    directory_vars = directory_env_vars("test")
     check(
         "test/dune's own block still carries the sandbox flags",
-        [key for key, _ in directory_env_vars("test")],
-        [
-            "MASC_BASE_PATH",
-            "ZAI_API_KEY",
-            "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED",
-            "MASC_KEEPER_DOCKER_PLAYGROUND",
-        ],
+        [pair for pair in REQUIRED_DIRECTORY_ENV if pair not in directory_vars],
+        [],
     )
 
     sibling = "(test (name test_spawn) (deps sibling.exe ../config/runtime.toml))"

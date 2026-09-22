@@ -79,6 +79,7 @@ let observer_stream_path = "/mcp?sse_kind=observer"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
+let fusion_config_path = "/api/v1/runtime/config/fusion"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 let msx_frame_path = "/api/v1/msx/frame"
 let msx_press_path = "/api/v1/msx/press"
@@ -157,7 +158,7 @@ let install_operator_token ~base_path ~host ~port =
         Masc_tui_credential.Not_required
     | Masc_tui_credential.No_workspace ->
         operator_token_cell := None;
-        Masc_tui_credential.Unavailable Masc_tui_credential.no_workspace_detail
+        Masc_tui_credential.Workspace_pending
     | Masc_tui_credential.Mint -> (
         match
           Auth_login.mint ~base_path ~host ~port
@@ -173,7 +174,7 @@ let install_operator_token ~base_path ~host ~port =
             Masc_tui_credential.Minted
         | Error err ->
             operator_token_cell := None;
-            Masc_tui_credential.Unavailable
+            Masc_tui_credential.Mint_failed
               (Masc_domain.masc_error_to_string err))
   in
   outcome
@@ -2255,6 +2256,21 @@ let fetch_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port
     ~path:(fusion_runs_path ^ "/" ^ percent_encode_path_segment run_id)
+
+(** GET /api/v1/runtime/config/fusion -- the presets the launch form offers,
+    as the server reads them from runtime.toml. *)
+let fetch_fusion_config ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:fusion_config_path
+
+(** POST /api/v1/keepers/<keeper>/fusion -- start a Fusion run the Keeper
+    owns. Answered through [post_json_outcome]: the server's refusal (a 4xx,
+    its own sentence) is told apart from a request whose fate is unknown. *)
+let post_fusion_launch ~(host : string) ~(port : int) ~(keeper : string)
+    ~(body : Yojson.Safe.t) : post_outcome =
+  post_json_outcome ~host ~port
+    ~path:(Printf.sprintf "/api/v1/keepers/%s/fusion" (percent_encode_path_segment keeper))
+    ~body:(Yojson.Safe.to_string body)
 
 (** Fetch one page of one view of /api/v1/verification/requests.
 

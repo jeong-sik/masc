@@ -63,22 +63,30 @@ type outcome =
   | Held
   | Minted
   | Not_required
-  | Unavailable of string  (** Why no bearer could be obtained. *)
-
-val no_workspace_detail : string
-(** The [Unavailable] detail for a base path with no workspace in it. *)
+  | Workspace_pending
+      (** This base path holds no workspace to mint into. A server answering
+          here makes one, so this client takes the decision again rather than
+          asking the operator for anything. *)
+  | Mint_failed of string
+      (** The workspace is here and would not take a credential. The mint is
+          local file work, so this does not clear itself. *)
 
 val outcome_notice : outcome -> string option
 (** What to tell the operator, or [None] when there is nothing worth saying.
     A fresh mint is worth saying: a server already running rebuilds its
     credential index on a timer, so the first reads after one can still be
     refused, and an operator who is not told will read that as a broken
-    credential. *)
+    credential. {!Workspace_pending} says what is missing and that this client
+    takes it again; it carries no command, because on a first install the
+    state clears itself within a second or two and a command offered there
+    teaches the operator to distrust the line. Only {!Mint_failed} names
+    {!remedy}. *)
 
 val outcome_needs_retry : outcome -> bool
 (** Whether the decision is worth taking again once a server answers at this
-    base path. True only for {!Unavailable}: minting is gated on a workspace
-    that already exists, and on a first install this client runs before any
-    server has made one, so the boot decision is taken against an empty base
-    path. The other outcomes are settled -- a later workspace does not change
-    a bearer already held, already minted, or not required. *)
+    base path. True only for {!Workspace_pending}: minting is gated on a
+    workspace that already exists, and on a first install this client runs
+    before any server has made one, so the boot decision is taken against an
+    empty base path. The other outcomes are settled -- a later workspace does
+    not change a bearer already held, already minted, not required, or a mint
+    that failed against a workspace that was already there. *)

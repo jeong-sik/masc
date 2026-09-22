@@ -166,10 +166,6 @@ let to_yojson report =
 let render_shell report =
   String.concat "\n"
     [
-      Printf.sprintf "export MASC_OPERATOR_AGENT=%s"
-        (single_quote_shell report.agent_name);
-      Printf.sprintf "export MASC_OPERATOR_TOKEN=%s"
-        (single_quote_shell report.bearer_token);
       Printf.sprintf "export %s=%s" report.mcp_token_env_var
         (single_quote_shell report.bearer_token);
       Printf.sprintf "export MASC_DASHBOARD_URL=%s"

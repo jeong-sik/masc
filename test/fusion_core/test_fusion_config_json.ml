@@ -114,6 +114,67 @@ let test_seed_runtime_toml_declares_the_presets_it_names () =
             policy.Fusion_policy.presets))
 ;;
 
+(* The write endpoint takes back exactly what the read endpoint gave. A preset
+   that does not survive the trip could be read in the editor but never saved. *)
+let test_seed_presets_round_trip_through_json () =
+  match repo_root () with
+  | None -> Alcotest.fail "could not locate the repository root from the test cwd"
+  | Some root ->
+    let path = Filename.concat (Filename.concat root "config") "runtime.toml" in
+    (match Fusion_config.of_toml (Otoml.Parser.from_file path) with
+     | Error _ -> Alcotest.fail "the seed config must parse before this check"
+     | Ok policy ->
+       List.iter
+         (fun (validated : Fusion_policy.Validated_preset.t) ->
+            let preset = Fusion_policy.Validated_preset.preset validated in
+            match
+              Fusion_config_json.preset_of_yojson (Fusion_config_json.preset_to_yojson preset)
+            with
+            | Ok decoded ->
+              Alcotest.(check bool)
+                ("preset " ^ preset.Fusion_policy.name ^ " round-trips")
+                true
+                (Fusion_policy.equal_preset preset decoded)
+            | Error detail ->
+              Alcotest.failf "preset %s does not decode: %s" preset.Fusion_policy.name detail)
+         policy.Fusion_policy.presets)
+;;
+
+let test_preset_json_refuses_unknown_and_missing_keys () =
+  let base =
+    match
+      Fusion_config_json.preset_to_yojson
+        { Fusion_policy.name = "p"
+        ; panels =
+            [ { Fusion_policy.models = [ "a.b" ]
+              ; label = ""
+              ; system_prompt = "A."
+              ; web_tools = false
+              ; max_output_tokens = None
+              ; timeout_s = None
+              }
+            ]
+        ; judge = "a.b"
+        ; judge_system_prompt = "J."
+        ; judge_max_output_tokens = None
+        ; judge_timeout_s = None
+        ; judges = []
+        ; min_answered = 1
+        }
+    with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "a preset projects to an object"
+  in
+  let refuses label fields =
+    match Fusion_config_json.preset_of_yojson (`Assoc fields) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s must be refused" label
+  in
+  refuses "an unknown key" (("temperature", `Float 0.2) :: base);
+  refuses "a missing key" (List.remove_assoc "min_answered" base);
+  refuses "a wrong type" (("min_answered", `String "1") :: List.remove_assoc "min_answered" base)
+;;
+
 let () =
   Alcotest.run "fusion_config_json"
     [ ( "to_yojson"
@@ -125,5 +186,11 @@ let () =
             test_seed_runtime_toml_parses
         ; Alcotest.test_case "its default preset is defined" `Quick
             test_seed_runtime_toml_declares_the_presets_it_names
+        ; Alcotest.test_case "its presets round-trip through JSON" `Quick
+            test_seed_presets_round_trip_through_json
+        ] )
+    ; ( "of_yojson"
+      , [ Alcotest.test_case "refuses unknown and missing keys" `Quick
+            test_preset_json_refuses_unknown_and_missing_keys
         ] )
     ]

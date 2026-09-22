@@ -138,9 +138,12 @@ let span_values (line : Pane.line) =
     span.text, tone) line
 
 let test_clipped_header_preserves_spans_and_padding () =
+  (* The count and the feed are two readings now, each carrying the
+     separator that joins it to what is before: a live feed draws no words,
+     so the separator cannot be left hanging off the count. *)
   let prefix =
     [ "│", "dim"; "[Recent]", "accent"; " ", "plain";
-      "Changes", "dim"; " · 4 keepers · ", "dim" ]
+      "Changes", "dim"; " · 4 keepers", "dim" ]
   in
   let reason = "\027[31m한\027[0me\204\129🙂X" in
   let input = { fixture with Pane.feed = Pane.Feed_closed reason } in
@@ -154,15 +157,16 @@ let test_clipped_header_preserves_spans_and_padding () =
     ; 9, [ "│", "dim"; "[Recent]", "accent" ]
     ; 10, [ "│", "dim"; "[Recent]", "accent"; " ", "plain" ]
     ; 17, [ "│", "dim"; "[Recent]", "accent"; " ", "plain"; "Changes", "dim" ]
-    ; 32, prefix
-    ; 45, prefix @ [ "feed closed: \027[31m", "bad" ]
-    ; 46, prefix @ [ "feed closed: \027[31m", "bad"; " ", "plain" ]
-    ; 47, prefix @ [ "feed closed: \027[31m한\027[0m", "bad" ]
-    ; 48, prefix @ [ "feed closed: \027[31m한\027[0me\204\129", "bad" ]
-    ; 49, prefix @ [ "feed closed: \027[31m한\027[0me\204\129", "bad"; " ", "plain" ]
-    ; 50, prefix @ [ "feed closed: \027[31m한\027[0me\204\129🙂", "bad" ]
-    ; 51, prefix @ [ "feed closed: " ^ reason, "bad" ]
-    ; 53, prefix @ [ "feed closed: " ^ reason, "bad"; "  ", "plain" ]
+    ; 29, prefix
+    ; 32, prefix @ [ " · ", "bad" ]
+    ; 45, prefix @ [ " · feed closed: \027[31m", "bad" ]
+    ; 46, prefix @ [ " · feed closed: \027[31m", "bad"; " ", "plain" ]
+    ; 47, prefix @ [ " · feed closed: \027[31m한\027[0m", "bad" ]
+    ; 48, prefix @ [ " · feed closed: \027[31m한\027[0me\204\129", "bad" ]
+    ; 49, prefix @ [ " · feed closed: \027[31m한\027[0me\204\129", "bad"; " ", "plain" ]
+    ; 50, prefix @ [ " · feed closed: \027[31m한\027[0me\204\129🙂", "bad" ]
+    ; 51, prefix @ [ " · feed closed: " ^ reason, "bad" ]
+    ; 53, prefix @ [ " · feed closed: " ^ reason, "bad"; "  ", "plain" ]
     ]
   in
   List.iter (fun (cols, expected) ->
@@ -279,7 +283,7 @@ let test_a_settle_without_a_number_names_no_turn () =
   in
   let texts = List.map text drawn.Pane.rows in
   let header = List.nth texts (last_index_of_in texts "mute") in
-  check bool "settles with its state" true (contains "done" header);
+  check bool "the state word is done" true (contains "done" header);
   check bool "no turn is named" false (contains "turn" header)
 
 (* An offline keeper has no fleet row any more, but the operator can still
@@ -294,7 +298,7 @@ let test_a_gone_keepers_turn_is_not_read_as_running () =
   let header = find_row_in dead_texts "goner" in
   check bool "the focus header says the process is gone" true
     (contains "process gone" header);
-  check bool "and that the turn never settled" true (contains "no end" header);
+  check bool "and that the turn never ended" true (contains "no end" header);
   check bool "the focus block does not say running" false
     (contains "running" header);
   let body = find_row_in dead_texts "Read" in
@@ -578,8 +582,10 @@ let test_header_states_tabs_fleet_and_feed () =
   check bool "the changes tab is named" true (contains "Changes" (nth 0));
   check bool "the changes tab is not the one up" false (contains "[Changes]" (nth 0));
   check bool "counts the fleet" true (contains "4 keepers" (nth 0));
-  check bool "states the live feed" true (contains "live" (nth 0));
-  check bool "the transport is explicit" true (contains "feed live" (nth 0));
+  (* A live feed is what the rows below are evidence of, so the header says
+     nothing about it; a feed that is not delivering is what a reader has to
+     be told. *)
+  check bool "a live feed takes no words" false (contains "feed" (nth 0));
   check bool "cumulative frame counts are omitted" false (contains "events" (nth 0));
   check bool "the legend row is drawn whole" true (contains (Pane.legend ~cols) (nth 1))
 
@@ -817,7 +823,7 @@ let test_changes_header_marks_its_tab () =
   check bool "the changes tab is up" true (contains "[Changes]" header);
   check bool "the fleet tab is named" true (contains "Recent" header);
   check bool "the fleet tab is not the one up" false (contains "[Recent]" header);
-  check bool "the feed still shows" true (contains "feed live" header);
+  check bool "a live feed still takes no words" false (contains "feed" header);
   check string "the header switches the tab" "next-tab"
     (target_text (List.nth changes_drawn.Pane.targets 0));
   check bool "next tab flips" true
@@ -913,18 +919,28 @@ let test_changes_overflow_folds_and_scrolls () =
 
 let test_state_text_reads_each_case () =
   let plain spans = String.concat "" (List.map (fun s -> s.Pane.text) spans) in
+  let reading ?(cols = Pane.pane_cols) ~approval () =
+    plain (Pane.keeper_state_text ~cols ~health:None ~approval None)
+  in
   check bool "approval outranks a running turn" true
-    (contains "approval"
-       (plain (Pane.keeper_state_text ~health:None ~approval:(Some "Write") None)));
+    (contains "approval" (reading ~approval:(Some "Write") ()));
   (* Every reading fills the reading area exactly, blank columns included, so
      a row cannot end early and let the next line's columns sit elsewhere. *)
-  let width spans = Masc_tui_message_layout.display_width (plain spans) in
+  let width text = Masc_tui_message_layout.display_width text in
   check int "a reading with no record still spends every column" Pane.reading_cells
-    (width (Pane.keeper_state_text ~health:None ~approval:None None));
+    (width (reading ~approval:None ()));
   check int "and one waiting on an approval" Pane.reading_cells
-    (width (Pane.keeper_state_text ~health:None ~approval:(Some "Write") None));
+    (width (reading ~approval:(Some "Write") ()));
   check bool "the empty case names the reason" true
-    (contains "no events" (plain (Pane.keeper_state_text ~health:None ~approval:None None)))
+    (contains "no events" (reading ~approval:None ()));
+  (* A tool name past the column is cut with a mark: cut silently it reads
+     as another tool. The wide pane has cells for the names that outgrow the
+     narrow one. *)
+  let long = "masc_msx_press" in
+  check bool "a cut tool name says it was cut" true
+    (contains "\xe2\x80\xa6" (reading ~approval:(Some long) ()));
+  check bool "the wide pane draws it whole" true
+    (contains long (reading ~cols:Pane.wide_pane_cols ~approval:(Some long) ()))
 
 let test_reused_chunks_keep_presentation_inputs_live () =
   let traces = [ "tester", "trace-tester"; "probe", "trace-probe" ] in
@@ -1048,9 +1064,9 @@ let test_tokens_and_ages_are_compact () =
 let test_legend_row_fits_whole () =
   check bool "legend is whole" true (contains (Pane.legend ~cols) (nth 1))
 
-(* A three-digit settle with two large parts is the widest settled reading;
+(* An end event with a three-digit count and two large parts is the widest done reading;
    it fits the pane whole now that no clock shares the row. *)
-let test_widest_settled_reading_fits_whole () =
+let test_widest_done_reading_fits_whole () =
   let event =
     match settled ~at:990. "tester" with
     | Observer.Keeper_turn_complete value ->
@@ -1144,7 +1160,8 @@ let test_beside_the_roster_only_the_selected_keepers_record_draws () =
   in
   let texts = List.map text view.Pane.rows in
   check bool "the header names the tabs" true (contains "[Recent]" (List.nth texts 0));
-  check bool "the header states the feed" true (contains "feed live" (List.nth texts 0));
+  check bool "a live feed takes no words here either" false
+    (contains "feed" (List.nth texts 0));
   check bool "the header does not count the fleet" false (contains "keepers" (List.nth texts 0));
   check bool "the legend stays" true (contains (Pane.legend ~cols) (List.nth texts 1));
   check (list string) "no fleet row" [] (keeper_targets view);
@@ -1172,7 +1189,7 @@ let test_beside_the_roster_keepers_waiting_on_approval_still_draw () =
     (target_text (List.nth view.Pane.targets 6))
 
 (* A sixteen-cell name, a four-digit settled turn and the clock share one
-   row: the number already says the turn settled, so no word is drawn and
+   row: the number already says the turn is done, so no word is drawn and
    the clock stays whole. *)
 let test_focus_header_keeps_its_clock_behind_a_wide_name_and_a_named_turn () =
   let name = "sixteen-charname" in
@@ -1432,6 +1449,58 @@ let call_rows view =
 (* Beside the roster the rows are: header, legend, focus header, calls
    heading, then the calls. *)
 let first_call_row = 4
+
+(* A turn that ran the same tool five times drew five rows saying the same
+   word, in a list about twenty rows long (masc-pro-builder, 2026-09-22).
+   The run is one row that counts it and says what the calls took; the
+   Keeper Calls surface is where each one is read. *)
+let repeated_calls =
+  List.map
+    (fun (index, duration) ->
+      runner_call ~at:(950. +. float_of_int index) ~duration_ms:duration
+        ~id:(Printf.sprintf "exec-%d" index)
+        ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
+        ~input:"{\"cmd\":\"ls\"}" "Execute")
+    [ 0, 2700.; 1, 274.; 2, 1400.; 3, 2900.; 4, 4700. ]
+
+let repeated_input () =
+  (* One other call before the run, so the rows are the other call and the
+     run rather than the run alone. *)
+  let other =
+    runner_call ~at:900. ~duration_ms:5. ~id:"read"
+      ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
+      ~input:"{\"path\":\"lib/a.ml\"}" ~output:"12 lines" "Read"
+  in
+  { (runner_input ()) with
+    Pane.chunks = chunks [ "runner" ] (entries (other :: repeated_calls))
+  }
+
+let run_row view =
+  match List.filter (fun row -> contains "Execute" row) (call_rows view) with
+  | row :: _ -> row
+  | [] -> fail "no Execute row"
+
+let test_a_run_of_one_tool_is_one_counted_row () =
+  let view = Pane.lines ~rows ~cols:Pane.wide_pane_cols ~scroll:0 (repeated_input ()) in
+  check int "the run and the other call are two rows" 2 (List.length (call_rows view));
+  let run = run_row view in
+  check bool ("the run counts its calls: " ^ run) true (contains "Execute \xc3\x975" run);
+  check bool "and says what each took" true
+    (contains "2.7s 274ms 1.4s 2.9s 4.7s" run)
+
+(* Where the durations do not fit, their sum is the one figure a run has,
+   and the count is never dropped to make room -- a row that lost it reads
+   as a single call. The pane is drawn at the width the surface leaves it;
+   this is one a long run outgrows. *)
+let narrow_run_cols = 40
+
+let test_a_narrow_run_says_its_total () =
+  let run =
+    run_row (Pane.lines ~rows ~cols:narrow_run_cols ~scroll:0 (repeated_input ()))
+  in
+  check bool ("the count survives: " ^ run) true (contains "\xc3\x975" run);
+  check bool "the sum stands for the durations" true (contains "12.0s" run);
+  check bool "the list of them is gone" false (contains "274ms" run)
 
 let test_the_call_row_marks_a_batch_and_a_deferral () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 (runner_input ())).Pane.rows in
@@ -1815,7 +1884,7 @@ let test_the_wide_fleet_row_keeps_a_long_name_whole () =
     go 0
   in
   check int "the column names move over by the extra name cells"
-    (leading_spaces (Pane.legend ~cols:Pane.pane_cols) + wide_cols - Pane.pane_cols)
+    (leading_spaces (Pane.legend ~cols:Pane.pane_cols) + Pane.wide_name_extra_cells)
     (leading_spaces (Pane.legend ~cols:wide_cols));
   check bool "the wide legend is drawn whole" true
     (contains (Pane.legend ~cols:wide_cols) (List.nth (texts wide_cols) 1))
@@ -1860,7 +1929,7 @@ let test_a_call_row_names_the_call_a_press_opens () =
 let cursor_targets =
   [| Pane.Target_next_tab
    ; Pane.Target_none
-   ; Pane.Target_keeper "rondo"
+   ; Pane.Target_keeper "pane-fixture-keeper"
    ; Pane.Target_none
    ; Pane.Target_none
    ; Pane.Target_call_order
@@ -1959,6 +2028,10 @@ let () =
     ; ( "calls"
       , [ test_case "the call row marks a batch and a deferral" `Quick
             test_the_call_row_marks_a_batch_and_a_deferral
+        ; test_case "a run of one tool is one counted row" `Quick
+            test_a_run_of_one_tool_is_one_counted_row
+        ; test_case "a narrow run says its total" `Quick
+            test_a_narrow_run_says_its_total
         ; test_case "an opened call draws its facts and previews" `Quick
             test_an_opened_call_draws_its_facts_and_previews
         ; test_case "an opened wire call says what it does not carry" `Quick
@@ -2022,8 +2095,8 @@ let () =
             test_reused_chunks_keep_presentation_inputs_live
         ; test_case "tokens and ages are compact" `Quick test_tokens_and_ages_are_compact
         ; test_case "legend row fits whole" `Quick test_legend_row_fits_whole
-        ; test_case "widest settled reading fits whole" `Quick
-            test_widest_settled_reading_fits_whole
+        ; test_case "widest done reading fits whole" `Quick
+            test_widest_done_reading_fits_whole
         ; test_case "earlier turn row carries its parts and cost and no clock" `Quick
             test_earlier_turn_row_carries_its_parts_and_cost_and_no_clock
         ; test_case "earlier turn row gives up its cost before its parts" `Quick

@@ -206,7 +206,7 @@ let test_fusion_concurrent_reprojections_keep_first_completion () =
   Fun.protect ~finally:(fun () -> remove_if_exists path) (fun () ->
     let registry = F.create ~path () in
     F.register_running registry ~run_id:"fusion-concurrent" ~keeper:"k" ~preset:"p"
-      ~topology:Fusion_types.Simple ~started_at:1.0;
+      ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
     (* Durable append suspends inside the first completion's mutation lock.
        The sibling must derive its timestamp from the completion committed
        there, not from a Running snapshot read before acquiring that lock. *)

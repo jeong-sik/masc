@@ -30,13 +30,19 @@ let render_instruction key vars =
 let build_keeper_system_prompt
     ~instructions ?(keeper_name = "") ?(workspace_root = "")
     ?(constitution = "") () =
-  let custom =
+  (* The keeper's role is the operator's own text; it goes between the role
+     tags as written, with no heading of our own in front of it. *)
+  let role =
     let s = String.trim instructions in
-    if s = "" then ""
-    else
-      "\n"
-      ^ render_instruction Prompt_names.keeper_instructions_custom [ "instructions", s ]
-      ^ "\n"
+    if s = "" then "" else "\n" ^ s ^ "\n"
+  in
+  (* What this world values ([keeper.worldview]). Every keeper in a world reads
+     the same text, so it follows the shared system block. The distribution
+     default says no value system is set and that each keeper's role decides;
+     an operator overrides the slot to give the world one. It always renders:
+     the slot never registers empty, so there is no absent case to branch on. *)
+  let worldview_block =
+    String.trim (render_instruction Prompt_names.keeper_worldview []) ^ "\n\n"
   in
   (* The world's own articles (RFC-0442). Every keeper in a world reads the
      same ones, so this sits ahead of the keeper-specific blocks and the shared
@@ -66,8 +72,7 @@ let build_keeper_system_prompt
       String.trim (render_instruction Prompt_names.keeper_identity
         [ "keeper_name", String_util.escape_xml keeper_name ]) ^ "\n\n"
   in
-  (* The wrapping tags and the custom-instructions heading are slots in
-     keeper.md ([keeper.tags.*], [keeper.instructions.custom]); the newlines
+  (* The wrapping tags are slots in keeper.md ([keeper.tags.*]); the newlines
      between blocks are structure and stay here. *)
   String.concat
     ""
@@ -78,16 +83,17 @@ let build_keeper_system_prompt
     ; "\n"
     ; render_instruction Prompt_names.keeper_tags_system_close []
     ; "\n\n"
-    ; (* ── World-shared block ─────────────────────────────────── *)
-      constitution_block
+    ; (* ── World-shared blocks ────────────────────────────────── *)
+      worldview_block
+    ; constitution_block
     ; (* ── Keeper-specific blocks ─────────────────────────────── *)
       identity_block
     ; workspace_block
-    ; (* Operator instructions. The Goals a keeper can pick up ride the
-         turn's own context, where they change without rewriting the prefix
-         every keeper shares. *)
+    ; (* The keeper's role. The Goals a keeper can pick up ride the turn's
+         own context, where they change without rewriting the prefix every
+         keeper shares. *)
       render_instruction Prompt_names.keeper_tags_instructions_open []
-    ; custom
+    ; role
     ; render_instruction Prompt_names.keeper_tags_instructions_close []
     ]
 ;;

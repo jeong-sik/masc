@@ -860,8 +860,9 @@ val edit_config_text :
 val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Run the raw runtime.toml save precondition — TOML parse, ordered Skill
-    source validation, config materialization, and dispatch-cap validation —
-    without writing or mutating the active registry. Preview endpoints call
+    source validation, config materialization, dispatch-cap validation, and
+    the [\[fusion\]] section — without writing or mutating the active
+    registry. Preview endpoints call
     this so [can_save] reflects the same rejection {!save_config_text}
     enforces. Returns [Ok ()] when the text would be accepted for save;
     [Error msg] with the reason otherwise. *)

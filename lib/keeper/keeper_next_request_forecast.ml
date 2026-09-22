@@ -152,9 +152,17 @@ let carry ~measure ~front ~turn_start ~counted_tokens messages =
     | Some (Error (Keeper_carried_front.Front_atom_missing | Keeper_carried_front.Front_message_differs))
     | None ->
       (* No front: this turn's own atoms, from the end of the last completed
-         turn on this history (RFC keeper-context-window-in-tokens §13.4). *)
-      let first_atom = Keeper_carried_front.clamp ~atom_count turn_start in
-      first_atom, Keeper_carried_front.Turn_start { end_atom = first_atom }, None
+         turn on this history (RFC keeper-context-window-in-tokens §13.4);
+         the newest atom alone when that boundary could not be read. *)
+      (match turn_start with
+       | Keeper_carried_front.Turn_boundary { end_atom } ->
+         ( Keeper_carried_front.clamp ~atom_count end_atom
+         , Keeper_carried_front.Turn_start { end_atom }
+         , None )
+       | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+         ( Keeper_carried_front.newest_atom ~atom_count
+         , Keeper_carried_front.Turn_start_unknown { reason }
+         , None ))
   in
   let projection, transmitted_bytes =
     Runtime_model_input_tail_window.project_from_atom

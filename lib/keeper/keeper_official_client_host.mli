@@ -187,9 +187,16 @@ val invoke_turn_completion_hooks :
     provider-emitted terminal before their durable session is settled. *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
-(** Bytes one message contributes to the start-turn seed budget, in the
-    canonical MASC encoding. At or above what any adapter's own rendering
-    sends, so a budget checked with this cannot be exceeded downstream. *)
+(** Bytes one message occupies in the canonical MASC encoding
+    ({!encode_history_message}), which is what the range this module composes
+    is reported in.
+
+    This is not a ceiling for a lane's own window. Antigravity charges a role
+    label and a separator on top of this per message and charges its preamble
+    whether or not one is inserted, so a range that measures inside a
+    declared max-prompt-bytes here can still be refused there. A lane that has
+    a byte ceiling enforces it with its own measure, at the point the refusal
+    is raised. *)
 
 (** Who named the front of a start seed. *)
 type carried_start_front =
@@ -204,6 +211,26 @@ type carried_start_front =
       (** No seed held and the lane cut nothing later, so the range starts
           where the last completed turn on this history ended: this turn's
           own atoms (RFC keeper-context-window-in-tokens §13.4). *)
+  | Turn_start_unknown of { reason : string }
+      (** No seed, no lane cut, and the turn start could not be read
+          ({!Keeper_carried_front.Turn_boundary_unknown}): the range opened
+          on the newest atom alone. *)
+  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
+      (** The Librarian absorbed this history through [absorbed_through],
+          the end of the completed turn on boundary-log row [boundary_line],
+          and saved what the keeper was in the middle of. The range starts there
+          and carries that working state in place of the atoms it summarises —
+          the front the Agent Core lane already takes
+          ([Keeper_carried_front.Librarian_snapshot]). [first_atom] is that
+          position clamped to the newest atom, so a range that the Librarian
+          read to the end still carries the turn it answers; the two differ
+          only then. *)
+  | Librarian_progress of { end_atom : int }
+      (** No working state fits, and the Librarian read this history through
+          [end_atom]: the range starts there and nothing is carried for the
+          atoms before it, which are in the keeper's memory
+          ([Keeper_carried_front.Librarian_progress] on the Agent Core lane).
+          [first_atom] is that position clamped to the newest atom. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -217,14 +244,54 @@ type carried_start =
   ; front : carried_start_front
   }
 
+(** Where the turn's one continuity choice puts the range, as a position in
+    the messages a lane is about to send
+    ({!Keeper_turn_driver_try_provider.librarian_position}). The choice is
+    made once per turn for every lane
+    ({!Keeper_turn_driver_try_provider.continuity_for_request}); this lane
+    only applies it. A seed is checked against this history on its own
+    ([Keeper_carried_front.for_history]), so a Librarian position that does
+    not fit says nothing about it. *)
+type librarian_position = Keeper_turn_driver_try_provider.librarian_position
+
+type librarian_front_reader =
+  Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
+(** Reads the turn's choice as a position in exactly the messages a lane is
+    about to cut ({!Keeper_turn_driver_try_provider.librarian_position}).
+    [Error] when those messages no longer hold what the choice covered; the
+    lane refuses the request with it, as the Agent Core lane refuses its
+    own. *)
+
+val read_librarian_front
+  :  librarian_front_reader option
+  -> Agent_core.Types.message list
+  -> (librarian_position, Agent_core.Error.t) result
+(** A lane's optional reader applied to its messages, before the range is
+    cut. A lane handed no reader has
+    {!Keeper_turn_driver_try_provider.No_position}. *)
+
 val carried_start_front_to_string : carried_start_front -> string
+
+val continuity_observation_input
+  :  trace_id:string
+  -> continuity:Keeper_turn_driver_try_provider.continuity option
+  -> carried_start_front
+  -> Keeper_continuity_observation.input
+(** What the Memory screen records for a request this lane composed
+    ({!Keeper_continuity_observation}), in the words the Agent Core lane
+    records: [Summarized] when a working state named the front, [Absorbed]
+    when the read position did, [Without_snapshot] when the turn's choice
+    was no absorbed point, and [Not_applied] when the turn made no choice
+    (no trace, or a recovery view) or its choice sat behind the seed or the
+    lane's own cut and so was not applied to this request. *)
 
 val carried_start_range
   :  keeper_name:string
   -> runtime_id:string
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
+  -> librarian_front:librarian_position
   -> own_first_atom:int
-  -> turn_start:int
+  -> turn_start:Keeper_carried_front.turn_start
   -> Agent_core.Types.message list
   -> carried_start
 (** Where an official client's start seed begins
@@ -243,12 +310,32 @@ val carried_start_range
     keeper-context-window-in-tokens §13.4); a history with no completed turn
     has [turn_start] 0.
 
+    [librarian_front] is the turn's continuity choice as a position in these
+    messages, read by the lane ({!read_librarian_front}): a fitting working
+    state ([Librarian_snapshot]), the Librarian's read position alone
+    ([Librarian_progress]), or none. That position wins when it is at or past the seed that
+    holds, or the lane's own cut when no seed holds, so a Librarian that read
+    less than the last request carried never moves the range back.
+    [turn_start] is not weighed against it: it is where a request with no
+    absorbed point begins, so a Librarian position behind it still names
+    atoms nothing else carries, and they go out. A read position alone
+    carries nothing for the atoms before it. The working state goes in
+    front of the range, as
+    extra system context, exactly when a [Librarian_snapshot] position is the
+    one that wins: a position the seed or the lane cut already passed stands for
+    atoms the range is carrying anyway, and summarising those would say twice
+    what the request already says. When it does win, the request grows by
+    those bytes, and they are pinned, so a lane with a byte ceiling of its
+    own has to be ready for a composition that does not fit it.
+
     [own_first_atom] is the front the lane already chose for its own reason
-    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).
-    The range starts at whichever position is later, so neither cut undoes the
-    other; a lane with no cut of its own passes 0. A seed whose index this
-    history does not open with the seed's message is dropped and reported, and
-    the range starts over as with no seed. *)
+    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes). A
+    seed at or past that cut decides, even when it is older than
+    [turn_start]: the range the last answered request carried is this lane's
+    continuity. Without a seed the range starts at the later of the lane's
+    cut and [turn_start]; a lane with no cut of its own passes 0. A seed
+    whose index this history does not open with the seed's message is
+    dropped and reported, and the range starts over as with no seed. *)
 
 val prepare_turn :
   runtime_label:string ->

@@ -302,7 +302,7 @@ let test_prefit_real_continuity ~base_path () =
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~last_resort:false ~base_path
-    ~demote_before:completed_end ~completed_end_atom:completed_end
+    ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
   let wire = view.wire
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in

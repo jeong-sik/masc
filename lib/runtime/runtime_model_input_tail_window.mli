@@ -90,8 +90,8 @@ val atom_opening_digest : Agent_core.Types.message list -> int -> string option
 
     A carried position is this index together with this digest (RFC
     keeper-context-window-in-tokens §10.4): the index alone cannot tell a
-    history whose unsaved tail was dropped from one whose older atoms were
-    purged, and the digest can. Only the opening message is hashed, so a
+    history whose unsaved tail was dropped from one that restarted, or one
+    whose opening message a checkpoint purge rewrote, and the digest can. Only the opening message is hashed, so a
     [Tool] message that later joins the same atom leaves the position as it
     was. The bytes hashed are {!Agent_core.Checkpoint.message_to_json} of
     that message, the durable encoding, so [history] must be the checkpoint

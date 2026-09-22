@@ -53,10 +53,12 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
+  ; me_journal = []
+  ; me_memory_pass = Masc_tui_message_layout.No_pass
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = ""
   ; me_at = at
@@ -78,10 +80,12 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = memory_summary
+  ; me_journal = []
+  ; me_memory_pass = Masc_tui_message_layout.No_pass
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = Printf.sprintf "%.0f" at
   ; me_request_id = request_id
   ; me_at = at
@@ -1627,12 +1631,331 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
 
-(* The origin heading under Ctrl-F's metadata:full. The clock led the row
-   ("[14:08:44]  ● e-m…-leader"), so the first cells of every heading were
-   time-chrome and the name beside them was cut to the gutter's column on a
-   row that had the whole pane. Now: the name whole at the left, the clock at
-   the right edge, a rule between, and a continuation of the same speaker at
-   a later second is the rule and the clock alone. *)
+(* An Execute call under tools:full: how the command ended and what it
+   printed, and nothing of the envelope around them -- where it ran, the
+   sandbox, the capture mode. Output too large to ride inline is named by the
+   artifact that holds it. *)
+let test_an_execute_call_leads_with_its_exit_and_output () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (60, 120);
+    let draw result =
+      let state =
+        Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_hidden <- true;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.msg_tool_visibility <- Tui_types.Tools_full;
+      let calls =
+        `Assoc
+          [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
+          ; ( "entries"
+            , `List
+                [ `Assoc
+                    [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
+                    ; "tool", `String "Execute"
+                    ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
+                    ; "output", `String result; "success", `Bool true
+                    ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
+                    ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
+                    ] ] ) ]
+      in
+      (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
+       | Ok snapshot ->
+           state.keeper_calls_keeper <- Some "alpha";
+           state.keeper_calls <- Some snapshot
+       | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
+      let activity =
+        Masc_tui_keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
+          ~call_id:(Some "call-1") ~tool_name:"Execute"
+          ~args:{|{"argv":["git","log"]}|} ~outcome:Masc_tui_keeper_chat_transcript.Returned
+          ~duration:None ()
+      in
+      state.msg_history <-
+        [ { (chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_tool
+               ~text:"Execute git log" ~at:1_790_053_724. ())
+            with Tui_types.me_keeper_name = "alpha"
+               ; me_tool_block =
+                   Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ]) } ];
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+    in
+    let plain =
+      draw
+        {|{"ok":true,"status":{"kind":"exit","code":0},"cwd":"/p/alpha","output_completeness":"capture_only","output":"9feab5497  fix(test): pass\n272394615  feat(keeper): trim","typed":true,"execution_time_ms":808,"via":"microvm"}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    let screen = String.concat "\n" plain in
+    check bool ("how it ended and how long it ran:\n" ^ screen) true
+      (has "exit 0 \xc2\xb7 808 ms");
+    check bool "each line it printed" true
+      (has "9feab5497  fix(test): pass" && has "272394615  feat(keeper): trim");
+    List.iter
+      (fun member ->
+        check bool (member ^ " is not drawn:\n" ^ screen) false (has member))
+      [ "context"; "output_completeness"; "capture_only"; "microvm"; "/p/alpha" ];
+    let digest = "9f3a12c4d5e6" ^ String.make 52 '0' in
+    let plain =
+      draw
+        (Printf.sprintf
+           {|{"ok":true,"status":{"kind":"exit","code":0},"output_completeness":"complete","output_artifact":{"_blob":{"sha256":%S,"bytes":48213,"mime":"text/plain","preview":"a"}},"typed":true,"execution_time_ms":2400}|}
+           digest)
+    in
+    let screen = String.concat "\n" plain in
+    check bool ("a stored output names its artifact:\n" ^ screen) true
+      (List.exists
+         (Astring.String.is_infix
+            ~affix:"artifact sha256:9f3a12c4d5e6\xe2\x80\xa6 \xc2\xb7 48213 bytes")
+         plain);
+    (* A long output keeps its head; the rest is a count and where to read
+       it whole. *)
+    let printed = String.concat "\\n" (List.init 30 (Printf.sprintf "row %02d")) in
+    let plain =
+      draw
+        (Printf.sprintf
+           {|{"ok":true,"status":{"kind":"exit","code":0},"output":"%s","typed":true,"execution_time_ms":5}|}
+           printed)
+    in
+    let screen = String.concat "\n" plain in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool ("the head is drawn:\n" ^ screen) true (has "row 07");
+    check bool "the rest is not" false (has "row 08");
+    check bool "the fold says how much and where" true
+      (has "\xe2\x80\xa6 +22 lines \xc2\xb7 Keeper Calls (t)"))
+;;
+
+(* A Librarian that keeps failing is named once on the header while it
+   lasts; in summary mode the failures are not rows between the turns. A
+   commit after them ends the run, and the header says nothing. *)
+let test_a_failing_librarian_is_named_on_the_header () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 140);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    let failed at =
+      { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+           ~memory_summary:"Librarian failed \xc2\xb7 exact_execution_failure"
+           ~text:"Librarian failed \xc2\xb7 exact_execution_failure" ~at ())
+        with Tui_types.me_memory_pass =
+               Masc_tui_message_layout.Pass_failed { kind = "exact_execution_failure" } }
+    in
+    let committed at =
+      { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+           ~memory_summary:"Librarian \xc2\xb7 revision 9" ~text:"revision 9" ~at ())
+        with Tui_types.me_memory_pass = Masc_tui_message_layout.Pass_committed }
+    in
+    let said at text =
+      chat_entry ~request_id:(Printf.sprintf "tui-%.0f" at) ~role:Tui_types.Message_keeper
+        ~text ~at ()
+    in
+    let draw history =
+      state.msg_history <- history;
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+    in
+    let at = 1_790_053_724. in
+    let plain =
+      draw
+        [ committed at; said (at +. 10.) "FIRST_TURN"; failed (at +. 20.)
+        ; said (at +. 30.) "SECOND_TURN"; failed (at +. 40.) ]
+    in
+    let screen = String.concat "\n" plain in
+    let saying affix = List.filter (Astring.String.is_infix ~affix) plain in
+    check int ("the header names the run once:\n" ^ screen) 1
+      (List.length (saying "Librarian failing \xc3\x972 since"));
+    check bool "with the server's word for how" true
+      (List.exists (Astring.String.is_infix ~affix:"exact_execution_failure")
+         (saying "Librarian failing"));
+    check (list string) "no failure is a row between the turns" []
+      (saying "Librarian failed");
+    let plain =
+      draw [ failed at; said (at +. 10.) "FIRST_TURN"; committed (at +. 20.) ]
+    in
+    check (list string) "a commit ends the run" []
+      (List.filter (Astring.String.is_infix ~affix:"Librarian failing") plain))
+;;
+
+(* A committed Memory revision under journal:full: the one-line summary, then
+   each fact with its sign and category in a column and the claim wrapped
+   under itself. The fence it replaced wrapped every claim back to the sign's
+   column, so a revision read as one wall of text. *)
+let test_a_journal_revision_draws_its_facts_in_columns () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 72);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    let summary = "Librarian \xc2\xb7 revision 454 \xc2\xb7 +1 \xe2\x88\x920 \xc2\xb7 63 retained" in
+    let claim =
+      "verifier_exact cannot read the GitHub Actions job log, so ancestry alone \
+       never satisfies the ran-on-main contract"
+    in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+             ~text:(summary ^ "\n+ [lesson] " ^ claim) ~at:1_790_053_724. ())
+          with Tui_types.me_memory_summary = Some summary
+             ; me_journal =
+                 [ Masc_tui_message_layout.Journal_fact
+                     { sign = Journal_added; category = "lesson"; tone = Tone_learning; claim } ] } ];
+    let draw visibility =
+      state.msg_memory_visibility <- visibility;
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+    in
+    let full = draw Tui_types.Memory_full in
+    let row_with affix = List.find_opt (Astring.String.is_infix ~affix) full in
+    (match row_with "+ lesson  verifier_exact", row_with "the ran-on-main contract" with
+     | Some first, Some wrapped ->
+         let column row affix =
+           match Astring.String.find_sub ~sub:affix row with
+           | Some index -> Masc_tui_message_layout.display_width (String.sub row 0 index)
+           | None -> -1
+         in
+         check int "the wrapped claim starts under the claim, not under the sign"
+           (column first "verifier_exact")
+           (column wrapped "the ran-on-main")
+     | _ -> fail ("the fact did not draw in columns: " ^ String.concat "\n" full));
+    (* The summary wraps at this width; its head is what the row opens on. *)
+    check bool "the summary heads the revision" true
+      (Option.is_some (row_with "Librarian \xc2\xb7 revision 454"));
+    check bool "no bracketed category from the old fence" false
+      (Option.is_some (row_with "[lesson]"));
+    let summarised = draw Tui_types.Memory_summary in
+    check bool "the summary mode draws the one line alone" false
+      (List.exists (Astring.String.is_infix ~affix:"verifier_exact") summarised))
+;;
+
+(* A keeper's turn heading is its mark, the rule and the clock. It drew the
+   request id after the mark, and since #37754 took the name away that id
+   inherited the mark's bold colour. The id groups the rows of a turn, which
+   the rows already show; the mark's style ends at the mark. *)
+let test_a_nameless_heading_is_the_mark_and_the_rule () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 96);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_row;
+    let request = "tui-01a0c788-43a7" in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:request ~role:Tui_types.Message_keeper
+             ~text:"REPLY" ~at:1_790_053_724. ())
+          with Tui_types.me_keeper_name = "alpha" } ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let lines = frame.Masc_tui_frame_presenter.lines in
+    check bool "no row spells the request id" false
+      (List.exists (Astring.String.is_infix ~affix:request) lines);
+    let mark = "\xe2\x97\x8f" in
+    match
+      List.find_opt
+        (fun line ->
+          String.starts_with ~prefix:mark (String.trim (Masc_tui_theme.strip_sgr line)))
+        lines
+    with
+    | None -> fail "no heading opens the turn"
+    | Some line -> (
+        match
+          Astring.String.find_sub ~sub:mark line,
+          Astring.String.find_sub ~sub:Masc_tui_theme.Box.h line
+        with
+        | Some at_mark, Some at_rule when at_mark < at_rule ->
+            let between = String.sub line at_mark (at_rule - at_mark) in
+            check bool "the mark's style ends before the rule" true
+              (Astring.String.is_infix ~affix:"\027[0m" between
+               || not (String.contains between '\027'))
+        | _ -> fail ("the heading does not run from its mark into a rule: " ^ String.escaped line)))
+;;
+
+(* A line someone else wrote is set apart from the operator and the keeper
+   talking by a bar down its left edge and a two-cell step (RFC
+   chat-turn-rail-and-side-lanes §4.6), at any width. *)
+let test_an_arrival_reads_behind_a_bar () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"tui-01a0c788-0001"
+             ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
+             ~text:"OPERATOR_ASKS" ~at:1_790_053_724. ())
+          with Tui_types.me_keeper_name = "alpha" }
+      ; { (chat_entry ~request_id:"tui-01a0c788-0002"
+             ~role:
+               (Tui_types.Message_user
+                  (Tui_types.Sent_by_other { speaker = "pangyo"; surface = None }))
+             ~text:"ARRIVAL_SAYS" ~at:1_790_053_784. ())
+          with Tui_types.me_keeper_name = "alpha" } ];
+    let row_of cols needle =
+      set_size (40, cols);
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+      match List.find_opt (Astring.String.is_infix ~affix:needle) plain with
+      | Some row -> row
+      | None -> fail (needle ^ " was not drawn: " ^ String.concat "\n" plain)
+    in
+    let bar = "\xe2\x96\x8e" in
+    List.iter
+      (fun cols ->
+        check bool "the arrival reads behind the bar" true
+          (Astring.String.is_infix ~affix:(bar ^ "ARRIVAL_SAYS") (row_of cols "ARRIVAL_SAYS"));
+        check bool "the operator draws no bar" false
+          (Astring.String.is_infix ~affix:bar (row_of cols "OPERATOR_ASKS")))
+      [ 140; 90 ])
+;;
+
+(* The origin heading under Ctrl-F's metadata:full: the name whole at the
+   left, the clock at the right edge, a rule between. The pane's own keeper
+   is not named on its headings -- the breadcrumb says whose chat it is -- so
+   its turn opens on the mark and the rule, and a later minute of the same
+   turn is the rule and the clock alone. *)
 let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -1642,9 +1965,10 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
     | Changed _ | Unchanged _ -> ()
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
-    let rows, cols = 40, 100 in
+    let rows, cols = 40, 96 in
     set_size (rows, cols);
-    let keeper = "e-masc-the-leader-of-this-workspace" in
+    let keeper = "goo-yang-bong" in
+    let other = "e-masc-the-leader-of-this-workspace" in
     let state =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
@@ -1657,60 +1981,91 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
       let t = Unix.localtime at in
       Printf.sprintf "%02d:%02d:%02d" t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
     in
-    let keeper_row ~at text =
-      { (chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_keeper
+    let request = "tui-01a0c788-43a7" in
+    let inbound_row ~speaker ~request_id ~at text =
+      { (chat_entry ~request_id
+           ~role:
+             (Tui_types.Message_user
+                (Tui_types.Sent_by_other { speaker; surface = None }))
            ~text ~at ())
         with Tui_types.me_keeper_name = keeper }
     in
-    state.msg_history <- [ keeper_row ~at "FIRST_PART"; keeper_row ~at:(at +. 7.) "SECOND_PART" ];
+    let keeper_row ~at text =
+      { (chat_entry ~request_id:request ~role:Tui_types.Message_keeper ~text ~at ())
+        with Tui_types.me_keeper_name = keeper }
+    in
+    (* A minute and seven seconds later: inside one turn the clock row is
+       drawn where the minute moved. *)
+    let later = at +. 67. in
+    state.msg_history <-
+      [ inbound_row ~speaker:other ~request_id:"tui-01a0c788-0000" ~at "ASKED";
+        keeper_row ~at "FIRST_PART";
+        keeper_row ~at:later "SECOND_PART" ];
     let frame, _ = Masc_tui_render_chat.render_keeper_message state in
     let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
     let inner = Masc_tui_ansi.framed_inner_width cols in
-    (* The breadcrumb above the pane names the keeper too; the heading is
-       the row that names it and ends on the clock. *)
+    let heading_ending_on clock =
+      List.filter
+        (fun line -> Astring.String.is_suffix ~affix:clock (String.trim line))
+        plain
+      |> List.map String.trim
+    in
+    (* The breadcrumb above the pane names the keepers too; the heading is
+       the row that names one and ends on the clock. *)
     let trimmed =
       match
-        List.find_opt
-          (fun line ->
-            Astring.String.is_infix ~affix:keeper line
-            && Astring.String.is_suffix ~affix:(clock_of at) (String.trim line))
-          plain
+        List.find_opt (Astring.String.is_infix ~affix:other) (heading_ending_on (clock_of at))
       with
-      | Some line -> String.trim line
-      | None -> fail ("no heading spells the keeper's name whole: " ^ String.concat "\n" plain)
+      | Some line -> line
+      | None -> fail ("no heading spells the sender's name whole: " ^ String.concat "\n" plain)
     in
     check bool "the heading does not open on the clock" false
       (String.starts_with ~prefix:"[" trimmed);
+    (* The arrival steps in and draws its bar; the trim takes the step and
+       the space in front of the bar, and the rule still runs to the clock at
+       the pane's edge. *)
+    let arrival_step = Masc_tui_message_layout.inbound_indent_cells in
+    let arrival_blank = arrival_step + 1 in
     check int "the rule fills the row to the clock" inner
-      (Masc_tui_message_layout.display_width trimmed);
+      (arrival_blank + Masc_tui_message_layout.display_width trimmed);
     check bool "the name and the clock are joined by a rule" true
       (Astring.String.is_infix ~affix:(Masc_tui_theme.Box.h ^ " " ^ clock_of at) trimmed);
-    let continued = clock_of (at +. 7.) in
+    let own =
+      match
+        List.find_opt
+          (String.starts_with ~prefix:"\xe2\x97\x8f")
+          (heading_ending_on (clock_of at))
+      with
+      | Some line -> line
+      | None -> fail ("no heading opens the keeper's turn: " ^ String.concat "\n" plain)
+    in
+    check bool "the pane's own keeper is not named on its heading" false
+      (Astring.String.is_infix ~affix:keeper own);
+    check bool "no heading spells a request id" false
+      (List.exists (Astring.String.is_infix ~affix:request) (heading_ending_on (clock_of at)));
+    check bool "the mark runs straight into the rule" true
+      (String.starts_with ~prefix:("\xe2\x97\x8f " ^ Masc_tui_theme.Box.h) own);
     let continuation =
-      match List.find_opt (fun line -> Astring.String.is_suffix ~affix:continued (String.trim line)) plain with
-      | Some line -> String.trim line
-      | None -> fail ("no row says when the same speaker went on: " ^ String.concat "\n" plain)
+      match heading_ending_on (clock_of later) with
+      | [ line ] -> line
+      | lines ->
+          fail
+            (Printf.sprintf "expected one row saying when the turn went on, got %d: %s"
+               (List.length lines) (String.concat "\n" plain))
     in
     check bool "a continuation is the rule and the clock alone" true
-      (String.starts_with ~prefix:Masc_tui_theme.Box.h continuation
-       && not (Astring.String.is_infix ~affix:keeper continuation));
+      (String.starts_with ~prefix:Masc_tui_theme.Box.h continuation);
     check int "a continuation also fills the row" inner
       (Masc_tui_message_layout.display_width continuation);
     (* A lead one cell short of the room has no cell for a rule and still
        fills the row: the clock stays in the column every other heading
-       puts it in. The lead is mark, space, name, " · " and the request id
-       (17 cells here), so the name is sized to land at room - 1. *)
+       puts it in. The lead is mark, space and name, so the name is sized to
+       land at room - 1. *)
     let clock_cells = String.length (clock_of at) + 1 in
     let room = inner - clock_cells in
-    let request = "tui-01a0c788-43a7" in
-    let exact = String.make (room - 1 - (2 + 3 + String.length request)) 'k' in
-    (* The pane shows its target keeper's rows, and a keeper row is labelled
-       with its keeper's name: the name under test is the target. *)
-    state.msg_target_keeper_name <- Some exact;
-    state.msg_history <-
-      [ { (chat_entry ~request_id:request ~role:Tui_types.Message_keeper
-             ~text:"EXACT_BODY" ~at ())
-          with Tui_types.me_keeper_name = exact } ];
+    let bar_cells = Masc_tui_message_layout.display_width " \xe2\x96\x8e" in
+    let exact = String.make (room - 1 - 2 - arrival_step - bar_cells) 'k' in
+    state.msg_history <- [ inbound_row ~speaker:exact ~request_id:request ~at "EXACT_BODY" ];
     let frame, _ = Masc_tui_render_chat.render_keeper_message state in
     let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
     (match
@@ -1722,11 +2077,10 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
      with
      | Some line ->
          check int "a lead one short of the room still fills the row" inner
-           (Masc_tui_message_layout.display_width (String.trim line))
+           (arrival_blank + Masc_tui_message_layout.display_width (String.trim line))
      | None -> fail "no heading spells the exact-width name");
-    (* A lane with no name -- a tool block -- draws its request after the
-       mark, not a dot with nothing on its left. *)
-    state.msg_target_keeper_name <- Some keeper;
+    (* A turn that opens on a tool block draws the keeper's mark and the
+       rule: no name, no dot with nothing on its left. *)
     state.msg_history <-
       [ { (chat_entry ~request_id:request ~role:Tui_types.Message_tool
              ~text:"read_file a.ml" ~at ())
@@ -1740,10 +2094,43 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
      with
      | Some line ->
          check bool "no dot with an empty name on its left" false
-           (Astring.String.is_infix ~affix:"  \xc2\xb7 " line);
-         check bool "the request follows the mark" true
-           (Astring.String.is_infix ~affix:(" " ^ request) line)
+           (Astring.String.is_infix ~affix:"\xc2\xb7" line);
+         check bool "the mark runs straight into the rule" true
+           (String.starts_with ~prefix:("\xe2\x97\x8f " ^ Masc_tui_theme.Box.h)
+              (String.trim line))
      | None -> fail "no heading for the tool row"))
+;;
+
+(* A folded reasoning block is one short row: the count and the key. It was
+   a 61-cell sentence drawn once a round, the widest row of a turn that
+   reasons between every call. *)
+let test_a_folded_reasoning_block_is_the_count_and_the_key () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 100);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+    state.msg_history <-
+      [ chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_thinking
+          ~text:"read the caller\n\nthen the test\ncheck main" ~at:1_790_053_724. () ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "the count of lines with text and the key" true
+      (has "Reasoning \xc2\xb7 3 lines folded \xc2\xb7 Ctrl-R");
+    check bool "no sentence about how to expand it" false (has "/thinking");
+    check bool "the reasoning itself stays folded" false (has "then the test"))
 ;;
 
 (* A turn this pane did not open -- a TUI restarted mid-turn, a turn another
@@ -3318,6 +3705,18 @@ let () =
             test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
+        ; test_case "a journal revision draws its facts in columns" `Quick
+            test_a_journal_revision_draws_its_facts_in_columns
+        ; test_case "a failing librarian is named on the header" `Quick
+            test_a_failing_librarian_is_named_on_the_header
+        ; test_case "a folded reasoning block is the count and the key" `Quick
+            test_a_folded_reasoning_block_is_the_count_and_the_key
+        ; test_case "an arrival reads behind a bar" `Quick
+            test_an_arrival_reads_behind_a_bar
+        ; test_case "an execute call leads with its exit and output" `Quick
+            test_an_execute_call_leads_with_its_exit_and_output
+        ; test_case "a nameless heading is the mark and the rule" `Quick
+            test_a_nameless_heading_is_the_mark_and_the_rule
         ; test_case "the origin heading spells the name and ends on the clock" `Quick
             test_origin_row_heading_spells_the_name_and_ends_on_the_clock
         ; test_case "an observed running turn is drawn from its journal" `Quick

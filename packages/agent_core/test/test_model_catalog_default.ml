@@ -36,6 +36,7 @@ let subscription_model_rows =
   ; "gpt-5.6-sol", "gpt-5.6-sol"
   ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
+  ; "gpt-5.5", "gpt-5.5"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
   ; "gemini-3.7-flash-medium", "gemini-3.7-flash"
@@ -83,6 +84,14 @@ let subscription_model_efforts =
   ; Some "openai-responses", "gpt-5.6-terra", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; Some "openai-responses", "gpt-5.6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+    (* The codex lane clamps a binding's effort to the bare row
+       (Keeper_official_client_host.clamp_reasoning_effort_to_catalog). Without
+       "max" here a codex max binding went out as xhigh, and gpt-5.5 fell to the
+       "gpt-5" row, which sent xhigh as high. The codex CLI lists low..max for
+       sol and terra and low..xhigh for gpt-5.5 (models_cache.json, 2026-09-22). *)
+  ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-5.5", [ "low"; "medium"; "high"; "xhigh" ]
   ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]
@@ -519,8 +528,9 @@ let test_glm_vision_rows_agree () =
 
 (* Every number here was read from OpenRouter's own GET /api/v1/models
    metadata or measured on the wire on 2026-09-10
-   (evidence/task-openrouter-support/). Provider-scoped lookup is an exact id
-   match, so each row is asserted on its own rather than through a prefix. *)
+   (evidence/task-openrouter-support/) or 2026-09-22
+   (evidence/task-openrouter-new-models/). Provider-scoped lookup is an exact
+   id match, so each row is asserted on its own rather than through a prefix. *)
 let openrouter_rows =
   (* id, context, max output, input $/1M, output $/1M, image input *)
   [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None
@@ -536,6 +546,15 @@ let openrouter_rows =
   ; "deepseek/deepseek-v4-flash", 1_048_576, 384_000, 0.088606, 0.177212, Some false
   ; "deepseek/deepseek-v4-pro", 1_048_576, 384_000, 0.95526, 1.91052, Some false
   ; "qwen/qwen3.8-max-0902", 1_000_000, 131_072, 2.0, 6.0, None
+  ; "anthropic/claude-fable-5.1", 1_000_000, 128_000, 10.0, 50.0, None
+  ; "anthropic/claude-haiku-4.5", 200_000, 64_000, 1.0, 5.0, None
+  ; "openai/gpt-6-astra", 1_050_000, 128_000, 10.0, 50.0, None
+  ; "openai/gpt-5.6-terra", 1_050_000, 128_000, 2.0, 12.0, None
+  ; "openai/gpt-5.6-luna", 1_050_000, 128_000, 0.2, 1.2, None
+  ; "google/gemini-3.1-pro-preview", 1_048_576, 65_536, 2.0, 12.0, None
+  ; "x-ai/grok-4.7", 500_000, 450_000, 1.6, 4.8, None
+  ; "qwen/qwen3.8-flash", 1_000_000, 131_072, 0.15, 0.47, None
+  ; "z-ai/glm-5.3-flashx", 1_048_576, 131_072, 0.37, 1.25, None
   ]
 ;;
 
@@ -618,6 +637,25 @@ let test_openrouter_rows_lower_contradicted_base_claims () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter overrides"
   in
   let entries = Model_catalog.model_entries catalog in
+  List.iter
+    (fun model_id ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option bool)
+         (model_id ^ " refuses required tool choice")
+         (Some false)
+         entry.supports_required_tool_choice;
+       check
+         (option bool)
+         (model_id ^ " refuses named tool choice")
+         (Some false)
+         entry.supports_named_tool_choice)
+    [ "anthropic/claude-fable-5.1"; "qwen/qwen3.8-flash" ];
+  check
+    (option bool)
+    "glm-5.3-flashx is not offered structured_outputs"
+    (Some false)
+    (openrouter_entry entries "z-ai/glm-5.3-flashx").supports_structured_output;
   let qwen = openrouter_entry entries "qwen/qwen3.8-max-0902" in
   check
     (option bool)
@@ -656,6 +694,11 @@ let openrouter_effort_ladders =
     ; "z-ai/glm-5.3"
     ; "z-ai/glm-5.3-flash"
     ; "qwen/qwen3.8-max-0902"
+    ; "anthropic/claude-fable-5.1"
+    ; "openai/gpt-6-astra"
+    ; "google/gemini-3.1-pro-preview"
+    ; "x-ai/grok-4.7"
+    ; "z-ai/glm-5.3-flashx"
     ]
   @ List.map
       (fun model_id -> model_id, with_disable)
@@ -667,6 +710,10 @@ let openrouter_effort_ladders =
       ; "deepseek/deepseek-v4-flash"
       ; "deepseek/deepseek-v4.1-flash"
       ; "deepseek/deepseek-v4-pro"
+      ; "anthropic/claude-haiku-4.5"
+      ; "openai/gpt-5.6-terra"
+      ; "openai/gpt-5.6-luna"
+      ; "qwen/qwen3.8-flash"
       ]
 ;;
 
@@ -677,8 +724,12 @@ let test_openrouter_rows_declare_their_measured_effort_ladder () =
   let entries = Model_catalog.model_entries catalog in
   check
     int
-    "every OpenRouter row has a measured ladder"
-    (List.length openrouter_rows)
+    "every OpenRouter row in the catalog has a measured ladder"
+    (List.length
+       (List.filter
+          (fun (entry : Model_catalog.model_entry) ->
+             entry.provider_name = Some "openrouter")
+          entries))
     (List.length openrouter_effort_ladders);
   List.iter
     (fun (model_id, expected) ->

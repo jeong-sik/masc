@@ -35,7 +35,7 @@ let yojson_int j k =
 
 let test_register_then_query () =
   let t = R.create () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"balanced" ~topology:Fusion_types.Simple ~started_at:10.0;
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"balanced" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:10.0;
   (match R.get t ~run_id:"r1" with
    | Some run ->
      check string "keeper" "k" run.R.keeper;
@@ -51,13 +51,13 @@ let test_register_then_query () =
 
 let test_mark_completed () =
   let t = R.create () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"deep" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   (match R.get t ~run_id:"r1" with
    | Some run -> check (option bool) "completed successfully" (Some true) (status_succeeded run.R.status)
    | None -> fail "run should still be tracked after completion");
   (* a failed completion remains visible, not dropped *)
-  R.register_running t ~run_id:"r2" ~keeper:"k" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:2.0;
+  R.register_running t ~run_id:"r2" ~keeper:"k" ~preset:"deep" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:2.0;
   R.mark_completed t ~run_id:"r2"
     ~outcome:(R.Failed { reason = "judge failed"; code = "judge_failed" });
   match R.get t ~run_id:"r2" with
@@ -74,7 +74,7 @@ let test_mark_completed () =
    whether the run is finalized or leaks. [Exit] therefore faithfully stands in
    for that raise. [~finalize_first] is exactly the fix vs the bug. *)
 let simulate_failure_path ~finalize_first t ~run_id =
-  R.register_running t ~run_id ~keeper:"k" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:3.0;
+  R.register_running t ~run_id ~keeper:"k" ~preset:"deep" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:3.0;
   try
     if finalize_first
     then
@@ -117,7 +117,7 @@ let test_mark_unknown_is_noop () =
 let test_progress_is_typed_and_terminal_safe () =
   let t = R.create () in
   R.register_running t ~run_id:"r-progress" ~keeper:"k" ~preset:"trio"
-    ~topology:Fusion_types.Simple ~started_at:4.0;
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:4.0;
   R.mark_progress t ~run_id:"r-progress"
     ~progress:(R.Progress_judge_running { expected = 3; answered = 2; failed = 1 });
   (match R.get t ~run_id:"r-progress" with
@@ -169,8 +169,8 @@ let test_decision_preview_bound () =
 
 let test_list_newest_first () =
   let t = R.create () in
-  R.register_running t ~run_id:"old" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
-  R.register_running t ~run_id:"new" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:9.0;
+  R.register_running t ~run_id:"old" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"new" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:9.0;
   match R.list_runs t with
   | first :: _ -> check string "newest started_at first" "new" first.R.run_id
   | [] -> fail "expected runs"
@@ -180,10 +180,10 @@ let test_list_newest_first () =
    evicted while the newest are kept (newest-first retention). *)
 let test_prune_keeps_running_and_recent () =
   let t = R.create () in
-  R.register_running t ~run_id:"active" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1000.0;
+  R.register_running t ~run_id:"active" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1000.0;
   for i = 0 to 99 do
     let id = Printf.sprintf "c%d" i in
-    R.register_running t ~run_id:id ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:(float_of_int i);
+    R.register_running t ~run_id:id ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:(float_of_int i);
     R.mark_completed t ~run_id:id ~outcome:R.Succeeded
   done;
   (* the Running run is never evicted *)
@@ -212,7 +212,7 @@ let test_status_label () =
    between the HTTP list, the SSE delta, and the tool is caught at the source. *)
 let test_run_to_yojson_shape () =
   let t = R.create () in
-  R.register_running t ~run_id:"r-ser" ~keeper:"kx" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:42.0;
+  R.register_running t ~run_id:"r-ser" ~keeper:"kx" ~preset:"deep" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:42.0;
   R.mark_completed t ~run_id:"r-ser"
     ~outcome:
       (R.Failed
@@ -241,7 +241,7 @@ let test_run_to_yojson_shape () =
 (* 성공 run에는 error/failure_code 필드가 없어야 한다(additive-only 계약). *)
 let test_run_to_yojson_success_has_no_failure_fields () =
   let t = R.create () in
-  R.register_running t ~run_id:"r-ok" ~keeper:"kx" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"r-ok" ~keeper:"kx" ~preset:"deep" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r-ok" ~outcome:R.Succeeded;
   match R.get t ~run_id:"r-ok" with
   | None -> fail "run must be present"
@@ -255,7 +255,7 @@ let test_run_to_yojson_success_has_no_failure_fields () =
 let test_run_to_yojson_progress_and_summary () =
   let t = R.create () in
   R.register_running t ~run_id:"r-rich" ~keeper:"kx" ~preset:"trio"
-    ~topology:Fusion_types.Simple ~started_at:5.0;
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:5.0;
   R.mark_progress t ~run_id:"r-rich"
     ~progress:(R.Progress_computed { expected = 3; answered = 2; failed = 1 });
   let running = Option.get (R.get t ~run_id:"r-rich") |> R.run_to_yojson in

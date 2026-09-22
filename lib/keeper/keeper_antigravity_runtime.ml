@@ -89,18 +89,17 @@ let extra_system_context_messages messages =
     messages
 ;;
 
-let prompt_label key =
-  let prompt = Prompt_registry.get_prompt key in
-  if String.trim prompt = "" then invalid_arg ("missing required Antigravity prompt: " ^ key)
-  else String.trim prompt ^ "\n"
+(* A keeper turn cannot start without its labels; the missing asset is a
+   packaging fault, raised where the turn is framed. *)
+let required_label = function
+  | Ok label -> label
+  | Error message -> invalid_arg message
 
 let system_instructions_label () =
-  prompt_label Prompt_names.keeper_antigravity_system_instructions_label
+  required_label (Antigravity_input_frame.system_instructions_label ())
 
-let current_goal_label () =
-  prompt_label Prompt_names.keeper_antigravity_current_goal_label
-
-let prompt_section_separator = "\n\n"
+let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
+let prompt_section_separator = Antigravity_input_frame.section_separator
 
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
   String.length (history_role_label message.role)
@@ -121,29 +120,57 @@ let prompt_section_framing_reserved_bytes () =
    a source-only atom is transmitted context, but cannot become a front that
    a later checkpoint history is expected to open. *)
 let bounded_history_projection ~capacity_bytes ~reserved_bytes
-    ?on_model_input_window_observation ?carried_front_seed ~turn_start ~keeper_name
-    ~runtime_id source_projection
+    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
+    ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
+  let* librarian_front = Host.read_librarian_front librarian_front history_messages in
   let carried =
     Host.carried_start_range
       ~keeper_name
       ~runtime_id
       ~carried_front_seed
+      ~librarian_front
       ~own_first_atom:0
       ~turn_start
       history_messages
   in
+  Option.iter
+    (fun observe -> observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+    on_carried_front;
   let* projected_messages =
     match source_projection with
     | None -> Ok carried.Host.messages
     | Some project -> project carried.Host.messages
   in
+  (* The window drops atoms, never a pinned message, so the pinned messages
+     alone -- the hooks' system context, a working state the Librarian front
+     carries, the preamble -- exceeding what the fixed sections leave refuses
+     the request for every front. Composing once more without the working
+     state would save at most its few kilobytes and hide, for that one band,
+     a request the operator has to make room for: the next turn's pinned
+     messages meet the same ceiling.
+
+     A Librarian snapshot front refuses one band earlier: when the working
+     state is pinned and the window still cannot keep the newest atom.
+     [Host.carried_start_range] clamps every range so it carries the turn it
+     is about to answer, and what would go out here instead is the working
+     state with nothing to answer -- a summary of atoms the request no longer
+     holds. Every other front keeps the empty history: that is the ceiling
+     saying it cannot hold one atom of this conversation, and the goal and
+     system prompt still go out, which is what the Claude Code lane's shrink
+     floor composes on purpose. *)
+  let allow_empty_history =
+    match carried.Host.front with
+    | Host.Librarian_snapshot _ -> false
+    | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start
+    | Host.Turn_start_unknown _ | Host.Librarian_progress _ -> true
+  in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
     match
       Runtime_model_input_tail_window.project_with_drop
-        ~allow_empty_history:true
+        ~allow_empty_history
         ~measure_message_bytes:measure_model_input_message_bytes
         ~capacity_bytes
         ~reserved_bytes
@@ -153,6 +180,9 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
       let carried_atoms =
         carried.Host.projection.atom_count - carried.Host.projection.dropped_atoms
       in
+      (* Still clamped: a front other than the snapshot keeps the empty
+         history, and its drop then counts the preamble and every atom the
+         carried range never held. *)
       let durable_dropped = Int.min projection.dropped_atoms carried_atoms in
       let transmitted_atoms = carried_atoms - durable_dropped in
       Option.iter
@@ -177,7 +207,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
     ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
-    ~turn_start ~keeper_name ~runtime_id source_projection
+    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id source_projection
   =
   match declared_max_prompt_bytes with
   | None ->
@@ -208,6 +238,8 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
               ~reserved_bytes
               ?on_model_input_window_observation
               ?carried_front_seed
+              ?librarian_front
+              ?on_carried_front
               ~turn_start
               ~keeper_name
               ~runtime_id
@@ -382,6 +414,8 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
+    ~librarian_front
+    ~on_carried_front
     ~turn_start
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -538,6 +572,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~goal
             ?on_model_input_window_observation
             ?carried_front_seed
+            ?librarian_front
+            ?on_carried_front
             ~turn_start
             ~keeper_name
             ~runtime_id
@@ -1164,6 +1200,8 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
@@ -1185,6 +1223,8 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed
+        ~librarian_front
+        ~on_carried_front
         ~turn_start
     ~pre_tool_rejects
         ~base_path
@@ -1227,4 +1267,5 @@ module For_testing = struct
     + prompt_section_framing_reserved_bytes ()
   ;;
 
+  let measure_model_input_message_bytes = measure_model_input_message_bytes
 end

@@ -596,8 +596,9 @@ def self_test() -> int:
     )
     check("glob and alias deps stay with dune's runtest action", deps, ["../lib"])
 
-    # test/dune's test_keeper_system_prompt_bytes carries (deps (source_tree
-    # %{workspace_root}/config/prompts) %{workspace_root}/test/fixtures/...).
+    # test/dune's test_keeper_system_prompt_blocks carries (deps (source_tree
+    # %{workspace_root}/config/prompts)); the synthetic stanza below adds a
+    # file dep so both shapes are covered.
     # The source_tree branch used to pass the directory through unread, so a
     # dispatch naming that suite built test/%{workspace_root}/config/prompts
     # and dune failed the whole targeted build before any suite ran.

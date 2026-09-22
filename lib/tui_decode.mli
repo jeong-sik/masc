@@ -1642,6 +1642,28 @@ type fusion_tool_trace =
   ; ftt_events : fusion_tool_event list
   }
 
+(** One seat's route through its candidates (the sink's [seat_routes] array):
+    who was tried, who answered. A panel seat is its panelist id; a judge seat
+    is its topology role and identity, read back through the same closed role
+    set the tool actors use. *)
+type fusion_seat =
+  | Fusion_panel_seat of string
+  | Fusion_judge_seat of { fs_role : fusion_judge_role; fs_identity : string }
+
+type fusion_seat_attempt =
+  { fsa_runtime : string
+  ; fsa_code : string
+  ; fsa_detail : string
+  }
+
+type fusion_seat_route =
+  { fsr_seat : fusion_seat
+  ; fsr_route : string
+  ; fsr_answered_by : string option
+        (** [None]: every candidate failed, or the route did not resolve. *)
+  ; fsr_failed_attempts : fusion_seat_attempt list
+  }
+
 type fusion_evidence = {
   fe_post_id : string;
   fe_title : string;
@@ -1650,6 +1672,11 @@ type fusion_evidence = {
   fe_judge : fusion_judge;
   fe_judges : fusion_judge_node list;
   fe_tool_trace : fusion_tool_trace;
+  fe_seat_routes : fusion_seat_route list option;
+      (** [None] when the post's meta carries no [seat_routes] key, which is
+          how a post written before seats were recorded reads; the detail
+          draws no block for it. An empty list is a post that carries the key
+          with no seat in it. *)
 }
 
 type fusion_evidence_status =
@@ -1690,6 +1717,23 @@ val decode_fusion_detail : Yojson.Safe.t -> (fusion_detail, string) result
     whose typed origin is exactly [source=fusion] and whose [fusion_run_id]
     matches the registry row. [pending] and [absent] require [post:null], and
     only a running row may be pending. Panel array order is retained. *)
+
+(** What the Fusion launch form offers, read from
+    [GET /api/v1/runtime/config/fusion]: whether Fusion is enabled, the preset
+    names, and the preset the tool applies when the request names none. *)
+type fusion_launch_options =
+  { flo_enabled : bool
+  ; flo_default_preset : string
+  ; flo_presets : string list
+  }
+
+val decode_fusion_launch_options :
+  Yojson.Safe.t -> (fusion_launch_options, string) result
+
+val decode_fusion_launch_receipt : Yojson.Safe.t -> (string, string) result
+(** The [run_id] a 2xx answer to [POST /api/v1/keepers/<keeper>/fusion]
+    carries. A refusal is a 4xx and is reported by the transport, so a 2xx
+    body with [ok:false] is an unknown shape, not a refusal. *)
 
 (** One tool call a keeper is holding for an operator's answer, from
     [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server

@@ -38,7 +38,9 @@
 
    Usage: dune exec bin/fusion_run.exe -- [--base PATH] [--preset NAME] <prompt...>
    Base path: --base wins; else MASC_BASE_PATH (via Config_dir_resolver); else
-   the run fails. --preset defaults to policy.default_preset. *)
+   the run fails. --preset defaults to policy.default_preset. With --topology,
+   --judge ROUTE and --panel ROUTE (repeatable) swap the judge seat and the panel
+   roster for this run, exactly as masc_fusion's judge/panel arguments do. *)
 
 (* ── pretty printers (exhaustive: fusion_types are closed sums by design) ── *)
 
@@ -56,6 +58,8 @@ let string_of_failure (f : Fusion_types.panel_failure) : string =
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid_max_output_tokens: %d" n
   | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid_timeout_s: %g" s
+  | Fusion_types.Unknown_route route -> "unknown_route: " ^ route
+  | Fusion_types.Route_unavailable detail -> "route_unavailable: " ^ detail
 
 let string_of_decision (d : Fusion_types.judge_decision) : string =
   match d with
@@ -109,10 +113,11 @@ let first_some (f : 'a -> 'b option) (xs : 'a list) : 'b option =
    This debug CLI does not account for error-path usage (the orchestrator does),
    so the [Error] usage carried by [Fusion_judge.run] is dropped here, keeping
    the existing [(.. , string) result] contract for the print helpers below. *)
-let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
+let synthesize ~base_path ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
     ~(panel : Fusion_types.panel_outcome list)
   : (Fusion_types.judge_synthesis * Fusion_types.usage, string) result =
   Masc.Fusion_judge.run
+    ~base_dir:base_path
     ~sw
     ~net
     ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -169,13 +174,15 @@ let judge_role_label : Fusion_types.judge_role -> string = function
    [Fusion_orchestrator.compute] 를 그대로 호출해 실제 분기를 태우고 증거를
    덤프한다. sink/wake 는 타지 않는다 — 그 구간은
    도구 경로가 소유하며, 여기서 흉내내면 durable 상태에 쓰는 측정 하네스가 된다. *)
-let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt ~web_tools =
+let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt ~web_tools
+      ~roster =
   let request : Fusion_types.fusion_request =
     { run_id = "fusion-run-cli"
     ; keeper = "cli"
     ; prompt
     ; preset = preset_name
     ; web_tools
+    ; roster
     ; depth = Fusion_types.Fusion_depth.Top
     ; trigger = Fusion_types.Explicit_tool_call
     }
@@ -186,7 +193,11 @@ let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt 
       ~request ()
   with
   | Masc.Fusion_orchestrator.Compute_denied reason ->
-    Printf.printf "DENIED: %s\n" (Fusion_types.deny_reason_label reason);
+    (match reason with
+     | Fusion_types.Roster_invalid detail ->
+       Printf.printf "DENIED: %s: %s\n" (Fusion_types.deny_reason_label reason) detail
+     | Fusion_types.Disabled | Fusion_types.Preset_unknown _ | Fusion_types.Depth_exceeded ->
+       Printf.printf "DENIED: %s\n" (Fusion_types.deny_reason_label reason));
     exit 1
   | Masc.Fusion_orchestrator.Computed evidence ->
     let elapsed = Unix.gettimeofday () -. t0 in
@@ -223,6 +234,21 @@ let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt 
               | Some e -> Printf.sprintf " (after %.1fs)" e
               | None -> ""))
       evidence.judges;
+    Printf.printf "seat routes: %d\n" (List.length evidence.seat_routes);
+    List.iter
+      (fun (route : Fusion_types.seat_route) ->
+         let seat =
+           match route.seat with
+           | Fusion_types.Panel_seat identity -> "panel " ^ identity
+           | Fusion_types.Judge_seat role -> "judge " ^ judge_role_label role
+         in
+         Printf.printf "  %-44s route=%s answered_by=%s tried=[%s]\n" seat route.route
+           (Option.value route.answered_by ~default:"-")
+           (String.concat ", "
+              (List.map
+                 (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+                 route.failed_attempts)))
+      evidence.seat_routes;
     (match evidence.judge with
      | Ok synthesis ->
        Printf.printf "\nRESOLVED: %s\n"
@@ -329,7 +355,7 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
   let self_moa_answer, self_moa_judge_in, self_moa_judge_out =
     match
       print_judge_arm ~tag:"self-moa"
-        (synthesize ~sw ~net ~preset ~prompt ~panel:sc_panel)
+        (synthesize ~base_path ~sw ~net ~preset ~prompt ~panel:sc_panel)
     with
     | Ok values -> values
     | Error msg ->
@@ -348,7 +374,7 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
   let fusion_answer, fusion_judge_in, fusion_judge_out =
     match
       print_judge_arm ~tag:"fusion"
-        (synthesize ~sw ~net ~preset ~prompt ~panel:fusion_panel)
+        (synthesize ~base_path ~sw ~net ~preset ~prompt ~panel:fusion_panel)
     with
     | Ok values -> values
     | Error msg ->
@@ -413,11 +439,18 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
     exit 1)
 
 (* ── entry point ── *)
+let usage_line =
+  "usage: fusion_run [--base PATH] [--preset NAME] [--topology TOPO] [--web-tools] \
+   [--judge ROUTE] [--panel ROUTE]... [--] <prompt...>"
+;;
+
 let () =
   let base = ref None in
   let preset_override = ref None in
   let topology_override = ref None in
   let web_tools = ref false in
+  let judge_route = ref None in
+  let panel_routes_rev = ref [] in
   let prompt_parts = ref [] in
   let rec parse = function
     | [] -> Ok ()
@@ -442,6 +475,23 @@ let () =
     | "--web-tools" :: rest ->
       web_tools := true;
       parse rest
+    (* The tool path reads a route through [Fusion_types.route_name], so the
+       flags do too: " sonnet" and "sonnet" name one route, and a panel that
+       spelled both would carry two seats for it. *)
+    | "--judge" :: v :: rest ->
+      (match Fusion_types.route_name v with
+       | None -> Error "--judge needs a route name"
+       | Some route ->
+         judge_route := Some route;
+         parse rest)
+    | [ "--judge" ] -> Error "missing value for --judge"
+    | "--panel" :: v :: rest ->
+      (match Fusion_types.route_name v with
+       | None -> Error "--panel needs a route name"
+       | Some route ->
+         panel_routes_rev := route :: !panel_routes_rev;
+         parse rest)
+    | [ "--panel" ] -> Error "missing value for --panel"
     | "--" :: rest ->
       prompt_parts := List.rev_append rest !prompt_parts;
       Ok ()
@@ -455,13 +505,27 @@ let () =
    | Ok () -> ()
    | Error msg ->
      Printf.eprintf "fusion_run: %s\n" msg;
-     prerr_endline
-       "usage: fusion_run [--base PATH] [--preset NAME] [--topology TOPO] [--web-tools] [--] <prompt...>";
+     prerr_endline usage_line;
      exit 2);
   let prompt = String.concat " " (List.rev !prompt_parts) in
+  (* --panel 을 한 번도 주지 않으면 preset 의 panel 명단을 쓴다. 준 순서가 자리 순서다. *)
+  let roster : Fusion_types.roster =
+    { judge_route = !judge_route
+    ; panel_routes =
+        (match !panel_routes_rev with
+         | [] -> None
+         | routes -> Some (List.rev routes))
+    }
+  in
+  (* 명단 바꾸기는 실제 심의 경로(--topology)에만 있다. 비교 하네스는 preset 의 명단으로
+     arm 을 만들므로, 받고도 쓰지 않는 대신 거절한다. *)
+  if (not (Fusion_types.equal_roster roster Fusion_types.preset_roster))
+     && Option.is_none !topology_override
+  then (
+    prerr_endline "fusion_run: --judge and --panel need --topology";
+    exit 2);
   if String.trim prompt = "" then (
-    prerr_endline
-       "usage: fusion_run [--base PATH] [--preset NAME] [--topology TOPO] [--web-tools] [--] <prompt...>";
+    prerr_endline usage_line;
     exit 2);
   (* Base path: explicit --base wins; else the workspace base the server uses
      (MASC_BASE_PATH via Host_config, surfaced by Config_dir_resolver). We do
@@ -533,5 +597,5 @@ let () =
        (match !topology_override with
         | Some topology ->
           run_deliberation ~sw ~net ~base_path ~policy ~topology
-            ~preset_name:preset.Fusion_policy.name ~prompt ~web_tools:!web_tools
+            ~preset_name:preset.Fusion_policy.name ~prompt ~web_tools:!web_tools ~roster
         | None -> run_harness ~sw ~net ~base_path ~policy ~preset ~prompt ~config_path))

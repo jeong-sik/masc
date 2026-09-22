@@ -232,18 +232,6 @@ let capture_status_of_string = function
   | _ -> None
 ;;
 
-(* Whether a capture here would reach a transcriber: the arms of
-   [transcribe_audio] below that refuse before any endpoint is asked, read as
-   a fact instead of an error. A config that exists and does not parse counts
-   as set up -- the operator configured voice, and the capture they ask for is
-   what says why it cannot run ([capture_config]). *)
-let stt_set_up () =
-  match Voice_config.load_detailed () with
-  | Error (Voice_config.Invalid _) -> true
-  | Error Voice_config.Not_configured | Ok { Voice_config.stt = None; _ } -> false
-  | Ok { Voice_config.stt = Some stt; _ } -> available_stt_endpoints stt <> []
-;;
-
 let transcribe_audio ~audio_file ?language_code () =
   match Voice_config.load_detailed () with
   | Error (Voice_config.Invalid msg) ->

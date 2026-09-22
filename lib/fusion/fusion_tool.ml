@@ -16,14 +16,22 @@ type compute_runner =
   -> unit
   -> Fusion_orchestrator.compute_outcome
 
+(* 거절 라벨 옆에 붙일 사람이 읽는 사유. 라벨만으로 뜻이 다 전해지는 갈래는 [None]. *)
+let deny_detail = function
+  | Fusion_types.Roster_invalid detail -> Some detail
+  | Fusion_types.Disabled | Fusion_types.Preset_unknown _ | Fusion_types.Depth_exceeded ->
+    None
+;;
+
 let worker_result ~compute ~net ~policy ~topology ~request_id ~keeper ~prompt
-      ~preset ~web_tools request_sw =
+      ~preset ~web_tools ~roster request_sw =
   let request : Fusion_types.fusion_request =
     { run_id = request_id
     ; keeper
     ; prompt
     ; preset
     ; web_tools
+    ; roster
     ; depth = Fusion_types.Fusion_depth.Top
     ; trigger = Fusion_types.Explicit_tool_call
     }
@@ -35,9 +43,89 @@ let worker_result ~compute ~net ~policy ~topology ~request_id ~keeper ~prompt
   | Fusion_orchestrator.Compute_denied reason ->
     Keeper_types_profile.tool_result_error_data ~class_:Tool_result.Workflow_rejection
       (`Assoc
-         [ "error", `String "fusion_compute_denied"
-         ; "reason", `String (Fusion_types.deny_reason_label reason)
-         ])
+         ([ "error", `String "fusion_compute_denied"
+          ; "reason", `String (Fusion_types.deny_reason_label reason)
+          ]
+          @ (match deny_detail reason with
+             | None -> []
+             | Some detail -> [ "detail", `String detail ])))
+;;
+
+(* 실행별 명단 인자 (RFC fusion-seat-routes §2.4). 키가 없으면 preset 의 그 칸을
+   그대로 쓴다. 키가 있으면 값이 경로 이름이어야 하고, 틀린 모양은 없는 것으로 읽지
+   않고 거절한다. 경로 이름은 앞뒤 공백을 뗀 값으로 적는다. *)
+let judge_arg_error =
+  "judge must be a non-empty route name (a [runtime.lanes] lane or a runtime id)"
+;;
+
+let panel_arg_error =
+  "panel must be a non-empty list of non-empty route names ([runtime.lanes] lanes or runtime ids)"
+;;
+
+let route_name = function
+  | `String value -> Fusion_types.route_name value
+  | _ -> None
+;;
+
+let roster_of_args args : (Fusion_types.roster, string) result =
+  let judge_route =
+    match Json_util.assoc_member_opt "judge" args with
+    | None -> Ok None
+    | Some json ->
+      (match route_name json with
+       | Some route -> Ok (Some route)
+       | None -> Error judge_arg_error)
+  in
+  let panel_routes =
+    match Json_util.assoc_member_opt "panel" args with
+    | None -> Ok None
+    | Some (`List (_ :: _ as items)) ->
+      let routes = List.filter_map route_name items in
+      if List.compare_lengths routes items = 0 then Ok (Some routes) else Error panel_arg_error
+    | Some _ -> Error panel_arg_error
+  in
+  match judge_route, panel_routes with
+  | Ok judge_route, Ok panel_routes -> Ok { Fusion_types.judge_route; panel_routes }
+  | Error message, _ | Ok _, Error message -> Error message
+;;
+
+(* 명단이 적은 경로 이름을 제출할 때 모두 풀어 본다. 실행 중에도 자리마다 다시 풀지만,
+   못 푸는 이름으로 실행을 만들면 모든 자리가 같은 이유로 실패한 기록만 남는다. *)
+let first_unresolved_route (roster : Fusion_types.roster) =
+  Option.to_list roster.judge_route @ List.concat (Option.to_list roster.panel_routes)
+  |> List.find_map (fun route ->
+    match Fusion_seat.resolve route with
+    | Ok _ -> None
+    | Error failure -> Some (route, failure))
+;;
+
+let route_failure_fields route = function
+  | Fusion_seat.Unknown_route _ ->
+    [ ( "error"
+      , `String
+          (Printf.sprintf "route %S is neither a [runtime.lanes] lane nor a runtime id"
+             route) )
+    ; "reason", `String "unknown_route"
+    ; "route", `String route
+    ]
+  | Fusion_seat.Route_unavailable detail ->
+    [ ( "error"
+      , `String
+          (Printf.sprintf "route %S names a runtime whose catalog entry is missing: %s"
+             route detail) )
+    ; "reason", `String "route_unavailable"
+    ; "route", `String route
+    ]
+;;
+
+let denied_result ~tool_name reason =
+  status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+    ([ "status", `String "denied"
+     ; "reason", `String (Fusion_types.deny_reason_label reason)
+     ]
+     @ (match deny_detail reason with
+        | None -> []
+        | Some detail -> [ "error", `String detail ]))
 ;;
 
 let submit_error_result ~tool_name error =
@@ -82,13 +170,22 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
                (String.concat ", " Fusion_types.all_fusion_topology_strings)) )
       ]
   | false, Some topology ->
-    (match Fusion_policy.decide_top_level ~policy ~preset with
-     | Error reason ->
+    (match roster_of_args args with
+     | Error message ->
        status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
-         [ "status", `String "denied"
-         ; "reason", `String (Fusion_types.deny_reason_label reason)
-         ]
+         [ "error", `String message ]
+     | Ok roster ->
+    match Fusion_policy.decide_top_level ~policy ~preset with
+     | Error reason -> denied_result ~tool_name reason
      | Ok () ->
+    match first_unresolved_route roster with
+     | Some (route, failure) ->
+       status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+         (route_failure_fields route failure)
+     | None ->
+    match Fusion_policy.effective_preset ~policy ~preset ~roster with
+     | Error reason -> denied_result ~tool_name reason
+     | Ok _ ->
        let channel =
          Option.value continuation_channel
            ~default:(Keeper_continuation_channel.unrouted "no originating connector")
@@ -100,6 +197,7 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
          ; source_context
          ; preset
          ; web_tools
+         ; roster
          ; topology
          ; channel
          }
@@ -119,7 +217,7 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
                 Keeper_chat_delivery_identity.Request_id.to_string obligation.request_id
               in
               Fusion_run_registry.register_running registry ~run_id ~keeper ~preset
-                ~topology ~started_at:obligation.accepted_at;
+                ~roster ~topology ~started_at:obligation.accepted_at;
               Fusion_sink.broadcast_run_status ~registry ~run_id;
               Ok ())
        in
@@ -130,7 +228,7 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
            ~background_sw:sw ~base_path:base_dir ~caller:keeper ~keeper_name:keeper
            ~f:(fun ~request_id request_sw ->
              worker_result ~compute ~net ~policy ~topology ~request_id ~keeper
-               ~prompt ~preset ~web_tools request_sw)
+               ~prompt ~preset ~web_tools ~roster request_sw)
            ()
        with
        | Error error -> submit_error_result ~tool_name error

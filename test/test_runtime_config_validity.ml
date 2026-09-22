@@ -562,9 +562,10 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
     ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
-(* runtime id -> the OpenRouter wire id it dispatches. Twelve ids probed live
-   on 2026-09-10 (evidence/task-openrouter-support/PROBE-SUMMARY.md). The
-   generic binding test below already requires every seed runtime to resolve a
+(* runtime id -> the OpenRouter wire id it dispatches. The ids were probed
+   live on 2026-09-10 (evidence/task-openrouter-support/PROBE-SUMMARY.md) and
+   2026-09-22 (evidence/task-openrouter-new-models/SUMMARY.md). The generic
+   binding test below already requires every seed runtime to resolve a
    catalog row; what this pins is the OpenRouter-specific half the generic
    check cannot see. *)
 let openrouter_seed_runtimes =
@@ -581,6 +582,16 @@ let openrouter_seed_runtimes =
   ; "openrouter.openrouter-deepseek-v4-1-flash", "deepseek/deepseek-v4.1-flash"
   ; "openrouter.openrouter-deepseek-v4-pro", "deepseek/deepseek-v4-pro"
   ; "openrouter.openrouter-qwen3-8-max", "qwen/qwen3.8-max-0902"
+  ; "openrouter.openrouter-claude-fable-5-1", "anthropic/claude-fable-5.1"
+  ; "openrouter.openrouter-claude-haiku-4-5", "anthropic/claude-haiku-4.5"
+  ; "openrouter.openrouter-gpt-6-astra", "openai/gpt-6-astra"
+  ; "openrouter.openrouter-gpt-5-6-terra", "openai/gpt-5.6-terra"
+  ; "openrouter.openrouter-gpt-5-6-luna", "openai/gpt-5.6-luna"
+  ; "openrouter.openrouter-gemini-3-1-pro", "google/gemini-3.1-pro-preview"
+  ; "openrouter.openrouter-grok-4-7", "x-ai/grok-4.7"
+  ; "openrouter.openrouter-minimax-m3", "minimax/minimax-m3"
+  ; "openrouter.openrouter-qwen3-8-flash", "qwen/qwen3.8-flash"
+  ; "openrouter.openrouter-glm-5-3-flashx", "z-ai/glm-5.3-flashx"
   ]
 
 let test_openrouter_seed_runtimes_are_dispatchable () =

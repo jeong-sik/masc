@@ -111,7 +111,7 @@ trace 하나에 atom 이 112개 쌓여 있고, 사람이 rondo 에게 말을 걸
 
 ```mermaid
 flowchart TD
-  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Ledger, response-observed Turn_record, Whole_history 순으로 복원한다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
+  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Ledger, response-observed Turn_record, Halved_after_refusal, Evicted_after_refusal 순으로 복원한다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
   B --> C["finalize: checkpoint 저장<br/>librarian_messages 는 checkpoint 의 메시지 전부"]
   C --> D{"librarian_config_state 가 Enabled 인가"}
   D -->|"아니오"| X0["끝. 기록 없음"]

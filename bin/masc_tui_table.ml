@@ -58,7 +58,7 @@ let used_width cells =
    column. An identifier cut at the head reads as a different identifier and a
    number cut at either end is a wrong number, so both ends stay and the middle
    folds. A sentence is the other way round: it is read from the front, and the
-   Board's "Verify: run-eâ¦9e327af211400cba719b59128]" spent its cells
+   Board's "Verify: run-e\xe2\x80\xa69e327af211400cba719b59128]" spent its cells
    on a hex tail while the subject of the post was the half that folded.
 
    Only a reading that overruns its column is folded. [fit_middle] pads a short

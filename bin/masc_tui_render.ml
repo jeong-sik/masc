@@ -11449,7 +11449,7 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision fleet is called in (the vision fleet runs on the Runtime Candidate Order for media)";
+         "  [runtime].media_failover — the Runtime Candidate Order for the vision fleet";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
@@ -11478,7 +11478,7 @@ let render_runtime (state : state) =
               Printf.sprintf "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_media_failover ->
-              "  adding to the vision fleet [runtime].media_failover — the vision fleet runs on the Runtime Candidate Order for media — j/k move, Enter append, e cancel"
+              "  adding to [runtime].media_failover, the Runtime Candidate Order for the vision fleet — j/k move, Enter append, e cancel"
           | Masc_tui_types.Pick_route_default ->
               (* Replaces rather than appends, and the row it replaces is
                  marked "(already a candidate)" in the choices below. *)

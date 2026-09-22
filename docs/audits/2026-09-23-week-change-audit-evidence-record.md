@@ -69,6 +69,19 @@ TUI 경로를 커밋 단위로 다시 읽었다.
   → [#37919](https://github.com/jeong-sik/masc/issues/37919)
 - Board attention 후보·파티션·워커에 주간 5 커밋(v7 hard cut → #37586 → #37668 → #37693 → #37641)이 "정체된 후보" 계열
   증상으로 몰렸다. #37668 은 `Settled -> Ready` 전이를 `_` 없이 명시해 FSM 규칙은 지켰다. 다음 회차에 또 나오면 근본을 본다.
+- Librarian·Memory 핵심 경로(별도 에이전트, 코드로 확인): 문자열 분류·stub·이름만 있는 `Ok ()` 는 0. 남은 것은 닫힌 variant 위의
+  `_` 셋과 근거 없는 상수 둘이다 — `keeper_librarian_continuity.ml:173` (`R.selection` 5개 중 3개를 "바닥 모름" 으로),
+  `keeper_librarian_queue_refresh.ml:141` (`pass_end` 6개 중 5개를 한 갈래로), `librarian_continuity_snapshot.ml:167`
+  (`R.selection` 4개를 `source_range` 로); `keeper_librarian_absorb_gate.ml:6` `min_statement_chars = 20`,
+  `keeper_checkpoint_purge.ml:13` `keep_recent_messages = 20`. 셋은 모두 "모르면 보수적으로" 방향이라 오늘 동작은 안전하지만
+  새 생성자가 조용히 그 갈래로 떨어진다. → [#37922](https://github.com/jeong-sik/masc/issues/37922)
+  좋은 반례: `keeper_librarian_absorb_gate.ml:574-606` 은 게이트 불가를 이름 있는 세 묶음으로 나누고 원문을 남기는 쪽으로 틀린다.
+  fix 사슬 둘 더: absorb gate 의 "판정이 안 돌았으면 원문을 버리지 않는다" 6 커밋(#37369→#37409→#37432→#37464→#37630→#37708),
+  연속성 스냅숏 재작성 11 커밋(09-21~22, #37564→…→#37795). 09-15 의 Memory 쓰기 실패 문장 4 커밋, 09-20 의 Memory 검색·철회 4 커밋.
+- 도메인 결합(Glossary 의 부분집합 질문): Librarian 은 Task 를 안다(`keeper_librarian.ml:28,222`, `keeper_librarian_queue_refresh.ml:401-402`
+  가 `Task_goals` 를 만든다) 와 Board 를 안다(`keeper_memory_os_types.ml:424-576` 등이 Board 글·댓글 참조를 기억의 출처로 담는다).
+  Board 참조는 데이터 출처라 결합이 아니다. `Task_goals` 는 Librarian 이 Task 도메인 타입을 조립하는 것이라, 호출자가 목표를
+  값으로 넘기면 Librarian 은 Task 를 몰라도 된다. Schedule·TUI 참조는 없다. 분리는 제안이며 이 기록에서 결정하지 않는다.
 - Runtime Failover 경로 8개 파일·89 커밋(별도 에이전트, 코드로 확인): 문자열 분류·stub·permissive default 0.
   `keeper_runtime_failure_route.ml` 은 커밋이 많았는데도 전부 exhaustive match 와 근거 주석이다.
   남은 것 넷 — `retry.ml:55-56` 의 `529`·`500..599` 에 출처 주석이 없다(529 는 Anthropic 의 overloaded 상태).

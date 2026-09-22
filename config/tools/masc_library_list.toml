@@ -2,7 +2,7 @@ name = "masc_library_list"
 description = """
 List every document in the agent knowledge library.
 
-Each row carries title, source, author, created date, and tags; a document whose frontmatter does not read is listed by filename with the reason. Use when browsing available knowledge or checking if a topic is already documented. Pair with masc_library_read to fetch a specific document or masc_library_search to query by content."""
+Each row carries title, source, author, created date, and tags; one whose header does not read is listed by filename and reason. Pair with masc_library_read to fetch one or masc_library_search to query by content."""
 
 # Held back from the request until the model asks for it by name.
 # 2026-08-25..08-31 across the fleet: called 3 times in 3 turns, 293 bytes of
@@ -15,7 +15,7 @@ defer_loading = true
 # those. The catalog row above names the MCP surface's masc_library_* names.
 [keeper_projection]
 description = """
-List all documents in the agent knowledge library with title, source, \
-author, created date, and tags; a document whose frontmatter does not read \
-is listed by filename with the reason. Use keeper_library_read to fetch a \
-document or keeper_library_search to query by content."""
+Lists the agent knowledge library with title, source, author, created \
+date, and tags; one whose header does not read is listed by filename and \
+reason. Use keeper_library_read to fetch one or keeper_library_search to \
+query by content."""

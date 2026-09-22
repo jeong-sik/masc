@@ -496,7 +496,7 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
          "turn entry: HITL resolution held back because the approval store \
           could not be read approval=%s: %s"
          resolution.approval_id
-         detail;
+         (Keeper_approval_queue.storage_error_to_string detail);
        false)
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _

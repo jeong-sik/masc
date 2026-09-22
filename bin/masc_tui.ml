@@ -2287,6 +2287,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
               | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
               | _ -> []);
           me_memory_summary = None;
+          me_journal = [];
           me_gate = None;
           me_submitted_at = submitted_at;
           (* Session rows carry no tool or skill block: a turn's calls are
@@ -7137,7 +7138,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   in
   let memory_summary =
     match row.Keeper_chat_history.kind with
-    | Keeper_chat_history.Memory_activity { summary } -> summary
+    | Keeper_chat_history.Memory_activity { summary; journal = _ } -> summary
     | Keeper_chat_history.Gate_activity _
     | Keeper_chat_history.Addressed_to_keeper _
     | Keeper_chat_history.Said_by_keeper
@@ -7283,6 +7284,29 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
         memory_summary
+  ; me_journal =
+      (let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:false in
+       match row.Keeper_chat_history.kind with
+       | Keeper_chat_history.Memory_activity { journal; summary = _ } ->
+           List.map
+             (function
+               | Masc_tui_message_layout.Journal_fact { sign; category; tone; claim } ->
+                   Masc_tui_message_layout.Journal_fact
+                     { sign; category = safe category; tone; claim = safe claim }
+               | Masc_tui_message_layout.Journal_drop { memory_id; reason } ->
+                   Masc_tui_message_layout.Journal_drop
+                     { memory_id = safe memory_id; reason = safe reason })
+             journal
+       | Keeper_chat_history.Gate_activity _
+       | Keeper_chat_history.Addressed_to_keeper _
+       | Keeper_chat_history.Said_by_keeper
+       | Keeper_chat_history.Autonomous_reply
+       | Keeper_chat_history.Delivery_failed _
+       | Keeper_chat_history.Tool_calls _
+       | Keeper_chat_history.Skill_activity _
+       | Keeper_chat_history.Reasoning _
+       | Keeper_chat_history.Fusion_conclusion _ ->
+           [])
   ; me_gate = gate
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
@@ -8247,6 +8271,7 @@ let chat_notice state ~keeper_name ~role text =
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
               me_image = Masc_tui_image_preview.No_image;
               me_memory_summary = None;
+              me_journal = [];
               me_gate = None;
               me_submitted_at = None;
               me_tool_block = None;

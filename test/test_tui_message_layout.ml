@@ -32,6 +32,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
       Layout.role_label_mark_cells ~style ()
   ; request_label
   ; body
+  ; journal = []
   ; markdown_source
   ; turn_rail = Layout.Rail_none
   ; action = Layout.Action_none
@@ -728,6 +729,7 @@ let transcript count =
              than once at the widths this test uses"
             index;
         role_label_mark_cells = 0;
+        journal = [];
         markdown_source = Layout.Markdown_streaming;
         turn_rail = Layout.Rail_none;
         action = Layout.Action_none;
@@ -1346,6 +1348,47 @@ let test_repeated_dst_hour_has_distinct_rails () =
            ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 DST "
            standard_label)
   | _ -> fail "the repeated civil hour did not produce two labels"
+;;
+
+(* A Memory journal revision in two columns. The sign and category sit at
+   the left, padded to the widest category of the revision, and a claim that
+   wraps comes back under itself rather than under the sign -- the wall of
+   text the fence drew had every wrapped row start where the sign did. *)
+let test_journal_rows_hang_the_claim_under_itself () =
+  let text rows =
+    List.map (fun pieces -> String.concat "" (List.map fst pieces)) rows
+  in
+  let lines =
+    [ Layout.Journal_fact
+        { sign = Layout.Journal_added; category = "lesson"; tone = Layout.Tone_learning;
+          claim = "verifier_exact cannot read the job log from a sandbox" }
+    ; Layout.Journal_fact
+        { sign = Layout.Journal_removed; category = "blocker"; tone = Layout.Tone_blocker;
+          claim = "pnpm is missing" }
+    ; Layout.Journal_drop { memory_id = "sha256:0cfb"; reason = "stale" }
+    ]
+  in
+  check (list string) "the claim column holds its wrap, a blank row between lines"
+    [ "+ lesson   verifier_exact cannot read"
+    ; "           the job log from a sandbox"
+    ; ""
+    ; "\xe2\x88\x92 blocker  pnpm is missing"
+    ; ""
+    ; "  drop     sha256:0cfb \xe2\x80\x94 stale"
+    ]
+    (text (Layout.journal_rows ~width:38 lines));
+  (* Where the claim's column would be narrower than the lead beside it the
+     hang costs more than it gives, so the claim wraps at the whole width
+     under its lead. *)
+  check (list string) "a narrow pane gives the claim the whole width"
+    [ "+ lesson  "; "verifier_exact"; "cannot read the"; "job log from a"; "sandbox" ]
+    (text (Layout.journal_rows ~width:16 [ List.hd lines ]));
+  match Layout.journal_rows ~width:38 lines with
+  | ((_, Layout.Journal_piece_sign Layout.Journal_added)
+     :: _ :: (_, Layout.Journal_piece_category Layout.Tone_learning) :: _)
+    :: _ ->
+      ()
+  | _ -> fail "the first row should open on its sign and its category's tone"
 ;;
 
 (* Scrollback. Ten one-line entries render to twenty-one rows -- the hour
@@ -2518,7 +2561,9 @@ let () =
             test_a_trailing_newline_opens_a_line
         ] )
     ; ( "scrollback"
-      , [ test_case "one speaker keeps one heading" `Quick
+      , [ test_case "journal rows hang the claim under itself" `Quick
+            test_journal_rows_hang_the_claim_under_itself
+        ; test_case "one speaker keeps one heading" `Quick
             test_one_speaker_keeps_one_heading
         ; test_case "metadata keeps a typed origin" `Quick
             test_metadata_keeps_a_typed_origin

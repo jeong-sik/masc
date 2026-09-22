@@ -3551,6 +3551,8 @@
  (modules test_tui_keeper_chat_history)
  (libraries
   masc_tui_image_preview
+  ; The journal lines are the layout's typed values, matched by constructor.
+  masc_tui_message_layout
   alcotest
   masc
   ; The fenced-row fixtures are built by the producer's own encoder, so the

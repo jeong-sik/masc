@@ -70,7 +70,10 @@ type kind =
       ; tool : string option
       ; summary : string option
       }
-  | Memory_activity of { summary : string option }
+  | Memory_activity of
+      { summary : string option
+      ; journal : Masc_tui_message_layout.journal_line list
+      }
   | Fusion_conclusion of fusion_conclusion
 
 and fusion_conclusion =
@@ -557,12 +560,22 @@ let list_field (fields : (string * Yojson.Safe.t) list) name =
   | Some (`List values) -> Some values
   | Some _ | None -> None
 
-let memory_fact_line marker (json : Yojson.Safe.t) =
+let memory_fact_line sign (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
       (match string_field fields "category", string_field fields "claim" with
        | Some category, Some claim ->
-           Some (Printf.sprintf "%s [%s] %s" marker category claim)
+           let tone =
+             match Masc.Keeper_memory_os_types.category_of_string category with
+             | Some Code_change -> Masc_tui_message_layout.Tone_code_change
+             | Some (Lesson | Validated_approach) -> Tone_learning
+             | Some (Preference | Goal | Constraint) -> Tone_intent
+             | Some Blocker -> Tone_blocker
+             (* A category a newer producer added reads as a fact until this
+                build is taught it; its word is still drawn as sent. *)
+             | Some Fact | None -> Tone_fact
+           in
+           Some (Masc_tui_message_layout.Journal_fact { sign; category; tone; claim })
        | Some _, None | None, Some _ | None, None -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 
@@ -571,9 +584,18 @@ let memory_drop_line (json : Yojson.Safe.t) =
   | `Assoc fields ->
       (match string_field fields "memory_id", string_field fields "reason" with
        | Some memory_id, Some reason ->
-           Some (Printf.sprintf "drop %s \xe2\x80\x94 %s" memory_id reason)
+           Some (Masc_tui_message_layout.Journal_drop { memory_id; reason })
        | Some _, None | None, Some _ | None, None -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+(* The plain-text form of a journal line, for what reads the row as text:
+   link detection, copying, a search. The pane draws the typed line. *)
+let journal_line_text = function
+  | Masc_tui_message_layout.Journal_fact { sign; category; claim; tone = _ } ->
+      Printf.sprintf "%s [%s] %s"
+        (Masc_tui_message_layout.journal_sign_text sign) category claim
+  | Masc_tui_message_layout.Journal_drop { memory_id; reason } ->
+      Printf.sprintf "drop %s \xe2\x80\x94 %s" memory_id reason
 
 let memory_source_label (fields : (string * Yojson.Safe.t) list) =
   match List.assoc_opt "source" fields with
@@ -623,8 +645,12 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
          int_field change "retained"
        with
        | Some added, Some removed, Some retained ->
-           let added_lines = List.map (memory_fact_line "+") added in
-           let removed_lines = List.map (memory_fact_line "-") removed in
+           let added_lines =
+             List.map (memory_fact_line Masc_tui_message_layout.Journal_added) added
+           in
+           let removed_lines =
+             List.map (memory_fact_line Masc_tui_message_layout.Journal_removed) removed
+           in
            let dropped_lines =
              match list_field fields "dropped" with
              | None -> Some []
@@ -639,22 +665,24 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
            else
              Option.map
                (fun dropped_lines ->
-                  (* One header line, then the change as a diff fence. The
-                     per-fact wording used to repeat "now in current memory" on
-                     every line; the header says once what the state is now,
-                     and inside the fence a [+] or [-] says which way each fact
-                     went. The fence also takes these lines out of markdown's
-                     list grammar -- the reason the renderer used to escape a
-                     leading [+], an escape nothing ever consumed, so readers
-                     saw a literal backslash. *)
+                  (* One header line, then the lines typed. The per-fact
+                     wording used to repeat "now in current memory" on every
+                     line; the header says once what the state is now, and
+                     each line's sign says which way its fact went. The counts
+                     read as the signs the lines below carry. *)
                   let summary =
                     Printf.sprintf
-                      "%s committed current memory revision %d \xc2\xb7 now %d added, %d removed, %d retained"
+                      "%s \xc2\xb7 revision %d \xc2\xb7 +%d \xe2\x88\x92%d \xc2\xb7 %d retained"
                       (memory_source_label fields)
                       revision
                       (List.length added)
                       (List.length removed)
                       retained
+                  in
+                  let journal =
+                    List.filter_map Fun.id added_lines
+                    @ List.filter_map Fun.id removed_lines
+                    @ dropped_lines
                   in
                   { at
                   ; structural_id =
@@ -662,19 +690,11 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                   ; turn_sequence = None
                   ; turn_id = None
                   ; operation_id = None
-                  ; kind = Memory_activity { summary = Some summary }
+                  ; kind = Memory_activity { summary = Some summary; journal }
                   ; attachments = []
                   ; text =
-                      (let change_lines =
-                         List.filter_map Fun.id added_lines
-                         @ List.filter_map Fun.id removed_lines
-                         @ dropped_lines
-                       in
-                       String.concat "\n"
-                         (match change_lines with
-                          | [] -> [ summary ]
-                          | lines ->
-                            (summary :: "```memory" :: lines) @ [ "```" ]))
+                      String.concat "\n"
+                        (summary :: List.map journal_line_text journal)
                   })
                dropped_lines
        | Some _, Some _, None | Some _, None, _ | None, _, _ -> None)
@@ -702,7 +722,7 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
         ; turn_sequence = None
         ; turn_id = None
         ; operation_id = None
-        ; kind = Memory_activity { summary = Some summary }
+        ; kind = Memory_activity { summary = Some summary; journal = [] }
         ; attachments = []
         ; text =
             Printf.sprintf "%s\n%s\nsnapshot present: %s"
@@ -729,7 +749,7 @@ let memory_row_of_json = function
                 ; turn_sequence = None
                 ; turn_id = None
                 ; operation_id = None
-                ; kind = Memory_activity { summary = Some summary }
+                ; kind = Memory_activity { summary = Some summary; journal = [] }
                 ; text = summary
                 ; attachments = []
                 }
@@ -1404,7 +1424,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              other, never filed under Memory where it would hide. *)
           let kind =
             match List.assoc_opt "approval_lifecycle" fields with
-            | None -> Some (Memory_activity { summary = None })
+            | None -> Some (Memory_activity { summary = None; journal = [] })
             | Some (`Assoc lifecycle) -> (
               let approval_id =
                 match string_field lifecycle "approval_id" with

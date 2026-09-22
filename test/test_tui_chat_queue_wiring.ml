@@ -53,6 +53,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
+  ; me_journal = []
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
@@ -78,6 +79,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = memory_summary
+  ; me_journal = []
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
@@ -1625,6 +1627,66 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       Tui_types.turn_log_add_journaled entry.log replay;
       check_output "overlapping replay")
       [None; Some "provider failed"; Some "operator interrupted the turn"])
+;;
+
+(* A committed Memory revision under journal:full: the one-line summary, then
+   each fact with its sign and category in a column and the claim wrapped
+   under itself. The fence it replaced wrapped every claim back to the sign's
+   column, so a revision read as one wall of text. *)
+let test_a_journal_revision_draws_its_facts_in_columns () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 72);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    let summary = "Librarian \xc2\xb7 revision 454 \xc2\xb7 +1 \xe2\x88\x920 \xc2\xb7 63 retained" in
+    let claim =
+      "verifier_exact cannot read the GitHub Actions job log, so ancestry alone \
+       never satisfies the ran-on-main contract"
+    in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+             ~text:(summary ^ "\n+ [lesson] " ^ claim) ~at:1_790_053_724. ())
+          with Tui_types.me_memory_summary = Some summary
+             ; me_journal =
+                 [ Masc_tui_message_layout.Journal_fact
+                     { sign = Journal_added; category = "lesson"; tone = Tone_learning; claim } ] } ];
+    let draw visibility =
+      state.msg_memory_visibility <- visibility;
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+    in
+    let full = draw Tui_types.Memory_full in
+    let row_with affix = List.find_opt (Astring.String.is_infix ~affix) full in
+    (match row_with "+ lesson  verifier_exact", row_with "the ran-on-main contract" with
+     | Some first, Some wrapped ->
+         let column row affix =
+           match Astring.String.find_sub ~sub:affix row with
+           | Some index -> Masc_tui_message_layout.display_width (String.sub row 0 index)
+           | None -> -1
+         in
+         check int "the wrapped claim starts under the claim, not under the sign"
+           (column first "verifier_exact")
+           (column wrapped "the ran-on-main")
+     | _ -> fail ("the fact did not draw in columns: " ^ String.concat "\n" full));
+    (* The summary wraps at this width; its head is what the row opens on. *)
+    check bool "the summary heads the revision" true
+      (Option.is_some (row_with "Librarian \xc2\xb7 revision 454"));
+    check bool "no bracketed category from the old fence" false
+      (Option.is_some (row_with "[lesson]"));
+    let summarised = draw Tui_types.Memory_summary in
+    check bool "the summary mode draws the one line alone" false
+      (List.exists (Astring.String.is_infix ~affix:"verifier_exact") summarised))
 ;;
 
 (* The origin heading under Ctrl-F's metadata:full. The clock led the row
@@ -3318,6 +3380,8 @@ let () =
             test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
+        ; test_case "a journal revision draws its facts in columns" `Quick
+            test_a_journal_revision_draws_its_facts_in_columns
         ; test_case "the origin heading spells the name and ends on the clock" `Quick
             test_origin_row_heading_spells_the_name_and_ends_on_the_clock
         ; test_case "an observed running turn is drawn from its journal" `Quick

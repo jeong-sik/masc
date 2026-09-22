@@ -3465,6 +3465,7 @@
  (modules test_tui_chat_rows_memo)
  (libraries masc_tui_image_preview
   alcotest
+  masc_tui_message_layout
   masc
   masc.masc_types
   masc_tui_keeper_chat_live
@@ -3481,7 +3482,8 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
+  masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_text_input_target)
@@ -3633,7 +3635,7 @@
 (test
  (name test_tui_memory_fold)
  (modules test_tui_memory_fold)
- (libraries masc_tui_image_preview alcotest masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_gate_text)

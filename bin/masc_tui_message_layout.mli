@@ -145,6 +145,18 @@ type journal_line =
       { sign : journal_sign; category : string; tone : journal_tone; claim : string }
   | Journal_drop of { memory_id : string; reason : string }
 
+(** What a row says about the Librarian's pass over the journal. A run of
+    failed passes is one state the chat header names while it lasts, not a
+    row between every pair of turns. *)
+type memory_pass =
+  | Pass_committed  (** The pass committed a revision. *)
+  | Pass_failed of { kind : string }
+      (** The pass failed; [kind] is the server's word for how. *)
+  | No_pass
+      (** Every row that reports no pass: a journal entry that could not be
+          read, a neutral system row sharing the Memory lane, and every row
+          outside it. *)
+
 type entry = {
   style : style;
   timestamp : string;

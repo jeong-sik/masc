@@ -73,6 +73,7 @@ type kind =
   | Memory_activity of
       { summary : string option
       ; journal : Masc_tui_message_layout.journal_line list
+      ; pass : Masc_tui_message_layout.memory_pass
       }
   | Fusion_conclusion of fusion_conclusion
 
@@ -690,7 +691,12 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                   ; turn_sequence = None
                   ; turn_id = None
                   ; operation_id = None
-                  ; kind = Memory_activity { summary = Some summary; journal }
+                  ; kind =
+                      Memory_activity
+                        { summary = Some summary
+                        ; journal
+                        ; pass = Masc_tui_message_layout.Pass_committed
+                        }
                   ; attachments = []
                   ; text =
                       String.concat "\n"
@@ -722,7 +728,12 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
         ; turn_sequence = None
         ; turn_id = None
         ; operation_id = None
-        ; kind = Memory_activity { summary = Some summary; journal = [] }
+        ; kind =
+            Memory_activity
+              { summary = Some summary
+              ; journal = []
+              ; pass = Masc_tui_message_layout.Pass_failed { kind }
+              }
         ; attachments = []
         ; text =
             Printf.sprintf "%s\n%s\nsnapshot present: %s"
@@ -749,7 +760,12 @@ let memory_row_of_json = function
                 ; turn_sequence = None
                 ; turn_id = None
                 ; operation_id = None
-                ; kind = Memory_activity { summary = Some summary; journal = [] }
+                ; kind =
+                    Memory_activity
+                      { summary = Some summary
+                      ; journal = []
+                      ; pass = Masc_tui_message_layout.No_pass
+                      }
                 ; text = summary
                 ; attachments = []
                 }
@@ -1424,7 +1440,13 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              other, never filed under Memory where it would hide. *)
           let kind =
             match List.assoc_opt "approval_lifecycle" fields with
-            | None -> Some (Memory_activity { summary = None; journal = [] })
+            | None ->
+                Some
+                  (Memory_activity
+                     { summary = None
+                     ; journal = []
+                     ; pass = Masc_tui_message_layout.No_pass
+                     })
             | Some (`Assoc lifecycle) -> (
               let approval_id =
                 match string_field lifecycle "approval_id" with

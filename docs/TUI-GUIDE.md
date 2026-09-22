@@ -720,6 +720,13 @@ cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
+A failed Librarian pass is not a row in summary mode. While the passes after
+the last commit keep failing, the header's second row names the run once, in
+every journal mode: `Librarian failing ×5 since 14:02:13 ·
+exact_execution_failure` - how many in a row, when the first was recorded,
+and the server's word for how the newest failed. The next commit ends it.
+`journal:full` still draws every failed pass as a row of its own.
+
 Under `journal:full` a committed revision draws its summary, then each fact
 in two columns: the sign and category at the left, padded to the revision's
 widest category, and the claim wrapped under itself. A blank row separates

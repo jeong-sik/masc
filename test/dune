@@ -3551,6 +3551,8 @@
  (modules test_tui_keeper_chat_history)
  (libraries
   masc_tui_image_preview
+  ; The journal lines are the layout's typed values, matched by constructor.
+  masc_tui_message_layout
   alcotest
   masc
   ; The fenced-row fixtures are built by the producer's own encoder, so the
@@ -5264,11 +5266,10 @@
  (libraries alcotest yojson masc masc_test_deps))
 
 (test
- (name test_keeper_system_prompt_bytes)
- (modules test_keeper_system_prompt_bytes)
+ (name test_keeper_system_prompt_blocks)
+ (modules test_keeper_system_prompt_blocks)
  (deps
-  (source_tree %{workspace_root}/config/prompts)
-  %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
+  (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc_test_deps))
 
 (include stanzas/test_librarian_journal_failures.inc)

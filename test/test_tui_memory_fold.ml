@@ -14,6 +14,7 @@ let entry ?summary role text =
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = summary
+  ; me_journal = []
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
@@ -26,7 +27,7 @@ let entry ?summary role text =
 
 let journal n =
   entry ~summary:(Printf.sprintf "memory rev %d" n) Types.Message_memory
-    (Printf.sprintf "Memory write committed current memory revision %d" n)
+    (Printf.sprintf "Memory write \xc2\xb7 revision %d" n)
 
 let said text = entry Types.Message_keeper text
 

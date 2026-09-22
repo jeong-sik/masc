@@ -7189,7 +7189,7 @@ def memory_journal_timeline_interaction(
         ordered = (
             hour,
             b"direct turn before Librarian",
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
             b"direct turn after Librarian",
         )
         positions = [screen_row_of(rows, needle) for needle in ordered]
@@ -7202,15 +7202,18 @@ def memory_journal_timeline_interaction(
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
-            (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
+            # The reply resumes after the Journal row under a heading of its
+            # own. It carries the turn's request, not the keeper's name: the
+            # breadcrumb already says whose chat this is.
+            (re.compile("●\\s+tui-di".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
         # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
+        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2mtui-di.."). The colored
         # bold arrow/circle glyph checked above is what actually marks the
         # causal role; this only confirms the label itself still renders.
-        for label in (b"YOU", b"alpha"):
+        for label in (b"YOU", b"tui-di"):
             if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
                     f"Direct causal label lost its dim-styled badge {label!r}: "
@@ -7252,13 +7255,13 @@ def memory_journal_timeline_interaction(
             process,
             master_fd,
             output,
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
             start=start,
             timeout=5.0,
         )
         last_row_end = output.find(
-            b"Librarian committed current memory revision 9", start
-        ) + len(b"Librarian committed current memory revision 9")
+            b"Librarian \xc2\xb7 revision 9", start
+        ) + len(b"Librarian \xc2\xb7 revision 9")
         wait_for_output(
             process,
             master_fd,
@@ -7270,7 +7273,7 @@ def memory_journal_timeline_interaction(
         frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
         resting = frame_containing(
             bytes(output[start:frame_end]),
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
         )
         plain_resting = CSI_RE.sub(b"", resting)
         assert_monotonic_direct_turn(bytes(output))
@@ -7344,31 +7347,33 @@ def memory_journal_timeline_interaction(
             raise AssertionError(
                 f"Memory timeline did not draw its parallel dotted rail: {visible!r}"
             )
-        # The kind tag carries its own colour, so SGR lands between the
-        # bracket, the word inside it, and the text after it. A flat byte
-        # needle spanning that boundary cannot match a coloured tag -- the two
-        # below were written while the tag was drawn in the body's colour.
+        # Each fact is its sign, its category in a column padded to the
+        # revision's widest, and the claim. The sign and the category carry
+        # their own colours, so SGR lands between the pieces; a flat byte
+        # needle spanning a boundary cannot match a coloured one.
         tag = rb"(?:\x1b\[[0-9;]*m)*"
         for needle in (
             re.compile(
-                rb"\[" + tag + rb"fact" + tag + rb"\]" + tag
-                + rb" the Runtime probe shares"
+                rb"\+" + tag + rb" " + tag + rb"fact" + tag + rb" +" + tag
+                + rb"the Runtime probe shares"
             ),
             b"one provider endpoint",
-            re.compile(rb"\[" + tag + rb"constraint" + tag + rb"\]" + tag + rb" probe"),
+            re.compile(
+                "\u2212".encode() + tag + rb" " + tag + rb"constraint" + tag
+                + rb" +" + tag + rb"probe"
+            ),
             b"every model separately",
-            b"drop memory-old-probe-rule",
+            re.compile(rb"drop" + tag + rb" +" + tag + rb"memory-old-probe-rule"),
             b"superseded by provider grouping",
         ):
             if find_needle(visible, needle) < 0:
                 raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
 
-        # The changed facts ride a ```diff fence, which is what colours the two
-        # directions and keeps a leading + out of markdown's list grammar. The
-        # renderer used to escape that + instead, and nothing consumed the
-        # escape, so every changed fact reached the pane behind a literal
-        # backslash. Asserted on the drawn bytes because that is where it
-        # showed: the decoder was honest the whole time.
+        # The changed facts are drawn from typed lines, never through
+        # markdown, so a leading + cannot be read as a list item. The renderer
+        # once escaped that + instead, and nothing consumed the escape, so
+        # every changed fact reached the pane behind a literal backslash.
+        # Asserted on the drawn bytes because that is where it showed.
         for escaped in (b"\\+ ", b"\\- "):
             if escaped in visible:
                 raise AssertionError(
@@ -7407,7 +7412,7 @@ def memory_journal_timeline_interaction(
             process, master_fd, output, b"\x1b[<64;5;5M", reading_back
         )
         scrolled_frame = frame_containing(scrolled, reading_back)
-        anchor = b"Librarian committed current memory revision 9"
+        anchor = b"Librarian \xc2\xb7 revision 9"
         if anchor not in CSI_RE.sub(b"", scrolled_frame):
             raise AssertionError(
                 f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
@@ -7456,7 +7461,7 @@ def memory_journal_timeline_interaction(
             send_and_wait(process, master_fd, output, b"\x0e", b"journal:off"),
             b"journal:off",
         )
-        if b"Librarian committed current memory revision 9" in hidden:
+        if b"Librarian \xc2\xb7 revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
         # ... and hidden -> summary, the resting default.
@@ -7466,9 +7471,9 @@ def memory_journal_timeline_interaction(
                 master_fd,
                 output,
                 b"\x0e",
-                b"Librarian committed current memory revision 9",
+                b"Librarian \xc2\xb7 revision 9",
             ),
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
         )
         if b"journal:off" in restored:
             raise AssertionError(f"Restored Memory timeline stayed off: {restored!r}")
@@ -9021,9 +9026,13 @@ def message_origin_badge_interaction(
     # waited on by the short clock instead -- the one thing neither other stop
     # draws.
     full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    # The pane's own keeper is not named on its full heading -- the
+    # breadcrumb says whose chat this is -- so its row opens on the mark and
+    # goes straight into the rule.
+    keeper_full_heading = "● ─".encode()
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),
-        (keeper_badge, keeper_body, "Keeper"),
+        (keeper_full_heading, keeper_body, "Keeper"),
     ):
         row, gap = origin_screen_shape(output, badge, body)
         if gap != 1:
@@ -9038,12 +9047,16 @@ def message_origin_badge_interaction(
             raise AssertionError(
                 f"the full {description} origin row did not end on its clock: {row!r}"
             )
-    for name in (b"vincent", b"alpha"):
-        if b"\x1b[7m" + name not in full_row:
-            raise AssertionError(
-                f"chat origin did not keep its reverse-video badge for {name!r}: "
-                f"{full_row!r}"
-            )
+    if b"\x1b[7mvincent" not in full_row:
+        raise AssertionError(
+            f"chat origin did not keep its reverse-video badge for vincent: "
+            f"{full_row!r}"
+        )
+    keeper_heading, _ = origin_screen_shape(output, keeper_full_heading, keeper_body)
+    if b"alpha" in keeper_heading:
+        raise AssertionError(
+            f"the full heading named the pane's own keeper: {keeper_heading!r}"
+        )
     assert_bodies_unwashed(full_row, "the full origin row")
 
     bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")

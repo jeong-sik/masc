@@ -498,7 +498,8 @@ For prompts, there are only three places to tell apart.
 
 | What you want to change | Where to edit |
 |---|---|
-| How every Keeper works, verifies, and writes | `keeper` in the prompt editor |
+| How this world works, the same for every Keeper | `keeper` in the prompt editor |
+| What this world values | `keeper.worldview` in the prompt editor |
 | One Keeper's role | `instructions` in `.masc/config/keepers/<name>.toml` |
 | The detailed procedure for one tool | That skill |
 

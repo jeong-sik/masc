@@ -92,6 +92,20 @@ type timeline_bucket = {
   tb_is_dst : bool;
 }
 
+type journal_sign = Journal_added | Journal_removed
+
+type journal_tone =
+  | Tone_code_change
+  | Tone_learning
+  | Tone_intent
+  | Tone_blocker
+  | Tone_fact
+
+type journal_line =
+  | Journal_fact of
+      { sign : journal_sign; category : string; tone : journal_tone; claim : string }
+  | Journal_drop of { memory_id : string; reason : string }
+
 type entry = {
   style : style;
   timestamp : string;
@@ -110,6 +124,7 @@ type entry = {
   role_label_mark_cells : int;
   request_label : string;
   body : string;
+  journal : journal_line list;
   markdown_source : markdown_source;
   turn_rail : turn_rail;
   action : row_action;
@@ -1091,6 +1106,93 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
+type journal_piece =
+  | Journal_piece_sign of journal_sign
+  | Journal_piece_category of journal_tone
+  | Journal_piece_claim
+  | Journal_piece_drop
+  | Journal_piece_space
+
+(* Between the category column and the claim: one cell would let a short
+   category read as the claim's first word. *)
+let journal_column_gap = 2
+
+(* A drop has no category; this stands in the category column. *)
+let journal_drop_label = "drop"
+
+let journal_sign_text = function
+  | Journal_added -> "+"
+  | Journal_removed -> "\xe2\x88\x92"
+
+(* A revision's lines in two columns: the sign and category at the left,
+   padded to the widest category among them, and the claim wrapped under
+   itself. A blank row between lines, since each one is a paragraph read on
+   its own. Where the claim's column would be narrower than the lead beside
+   it, the claim wraps at the full width under its lead instead. *)
+let journal_rows ~width lines =
+  let width = max 1 width in
+  let label = function
+    | Journal_fact { category; _ } -> category
+    | Journal_drop _ -> journal_drop_label
+  in
+  let sign_cells = display_width (journal_sign_text Journal_removed) in
+  let label_cells =
+    List.fold_left (fun widest line -> max widest (display_width (label line))) 0 lines
+  in
+  let lead_cells = sign_cells + 1 + label_cells + journal_column_gap in
+  let claim_cells = width - lead_cells in
+  let hangs = claim_cells >= lead_cells in
+  let rows_of_line line =
+    let sign, label_piece, text, text_piece =
+      match line with
+      | Journal_fact { sign; tone; claim; category = _ } ->
+          ( (journal_sign_text sign, Journal_piece_sign sign)
+          , Journal_piece_category tone
+          , claim
+          , Journal_piece_claim )
+      | Journal_drop { memory_id; reason } ->
+          ( (String.make sign_cells ' ', Journal_piece_space)
+          , Journal_piece_drop
+          , memory_id ^ " \xe2\x80\x94 " ^ reason
+          , Journal_piece_drop )
+    in
+    let label_text = label line in
+    let pad =
+      String.make (label_cells - display_width label_text + journal_column_gap) ' '
+    in
+    let lead =
+      [ sign; (" ", Journal_piece_space); (label_text, label_piece);
+        (pad, Journal_piece_space) ]
+    in
+    if hangs then
+      let indent = (String.make lead_cells ' ', Journal_piece_space) in
+      match wrap_words ~max_cells:claim_cells text with
+      | [] -> [ lead ]
+      | first :: rest ->
+          (lead @ [ (first, text_piece) ])
+          :: List.map (fun chunk -> [ indent; (chunk, text_piece) ]) rest
+    else
+      lead :: List.map (fun chunk -> [ (chunk, text_piece) ]) (wrap_words ~max_cells:width text)
+  in
+  let rec join = function
+    | [] -> []
+    | [ rows ] -> rows
+    | rows :: rest -> rows @ ([] :: join rest)
+  in
+  join (List.map rows_of_line lines)
+
+(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
+   width on a row of their own; in a margin they are paid for once per message.
+   Text that is not a clock of that shape is left as it is rather than cut
+   blind. *)
+let short_clock timestamp =
+  if
+    String.length timestamp = 8
+    && Char.equal timestamp.[2] ':'
+    && Char.equal timestamp.[5] ':'
+  then String.sub timestamp 0 5
+  else timestamp
+
 (* Consecutive messages from one speaker share a heading. Repeating
    "[time] speaker request" on each of them spent a row per message saying who
    was talking, and a keeper answering in four parts said it four times.
@@ -1119,14 +1221,39 @@ let continues_previous ~(previous : entry option) (entry : entry) =
    [timestamp] is display text, not a time. A heading without a clock draws
    nothing in the clock's place; a continuation that cannot say when it
    moved has no row to draw. *)
+(* Who a row speaks for inside one request. A keeper's reply and the work it
+   did to get there -- reasoning, tool calls, skills -- are one voice, the
+   turn's. Everyone else in the request speaks for themselves: the operator
+   who asked, a keeper writing in, the server's status, the pane's own
+   notes. *)
+let speaks_for_turn = function
+  | Keeper | Tool | Skill _ | Thinking -> true
+  | User | Inbound | Status | Local | Journal | Error -> false
+
+(* Under [Origin_row] a heading opens a turn, not a block. A turn that thought,
+   called a tool and answered, eight rounds over, drew a heading above each of
+   its twenty-three blocks -- the same request, the same clock, the same name
+   -- and the blocks it separated were already told apart by how they draw:
+   reasoning dim, tool calls on their rail, the reply in plain text. *)
+let continues_turn ~(previous : entry) (entry : entry) =
+  (not (String.equal entry.request_label ""))
+  && String.equal previous.request_label entry.request_label
+  && speaks_for_turn previous.style
+  && speaks_for_turn entry.style
+
 let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
   let clock =
     match entry.timeline_bucket with
     | Some _ -> Some entry.timestamp
     | None -> None
   in
+  let within_turn =
+    match previous with
+    | Some previous -> continues_turn ~previous entry
+    | None -> false
+  in
   let metadata =
-    if not (continues_previous ~previous entry) then
+    if not (within_turn || continues_previous ~previous entry) then
       Some
         ( Origin
             { clock;
@@ -1139,6 +1266,14 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
     else
       match clock, previous with
       | None, _ -> None
+      (* Inside a turn the clock is the minute, the unit the inline margin
+         already counts in: seconds between a call and the reasoning after it
+         are the turn working, not a pause worth a row. *)
+      | Some _, Some previous
+        when within_turn
+             && String.equal (short_clock previous.timestamp)
+                  (short_clock entry.timestamp) ->
+          None
       | Some _, Some previous
         when String.equal previous.timestamp entry.timestamp ->
           None
@@ -1150,7 +1285,10 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
   | Some (metadata, text) ->
     let fitted, _, _ = cell_prefix text inner_width in
     Some
-      { style = entry.style
+      { style =
+          (* The heading stands for the whole turn, so it draws as the keeper
+             speaking whichever block the turn happened to open with. *)
+          (if speaks_for_turn entry.style then Keeper else entry.style)
       ; kind = Metadata metadata
       ; shade = Shade_none
       ; text = fitted
@@ -1235,10 +1373,6 @@ let wrap_body ?markdown ~max_cells ~sanitize text =
    [rows_of_entry] has always floored it at. *)
 let min_body_cells = 4
 
-(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
-   width on a row of their own; in a margin they are paid for once per message.
-   Text that is not a clock of that shape is left as it is rather than cut
-   blind. *)
 (* Every row's clock takes the same cells. A settled row says "23:38" and the
    streaming turn says "live", and the gutter's width is what the body's width
    is taken from, so one cell of difference wrapped the live body differently
@@ -1249,14 +1383,6 @@ let pad_clock text =
   let cells = display_width text in
   if cells >= chat_clock_column then text
   else String.make (chat_clock_column - cells) ' ' ^ text
-
-let short_clock timestamp =
-  if
-    String.length timestamp = 8
-    && Char.equal timestamp.[2] ':'
-    && Char.equal timestamp.[5] ':'
-  then String.sub timestamp 0 5
-  else timestamp
 
 (* [Origin_row] leaves the origin on a row of its own. The other two fold it
    into the body's left margin, which buys back a row per message -- eight
@@ -1418,8 +1544,17 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     match markdown with
     | Some render -> render ~entry ~width:body_width
     | None ->
-        entry.body |> String.split_on_char '\n'
-        |> List.concat_map (split_cells ~max_cells:body_width)
+        let journal =
+          match entry.journal with
+          | [] -> []
+          | lines ->
+              "" :: List.map
+                (fun pieces -> String.concat "" (List.map fst pieces))
+                (journal_rows ~width:body_width lines)
+        in
+        (entry.body |> String.split_on_char '\n'
+         |> List.concat_map (split_cells ~max_cells:body_width))
+        @ journal
   in
   let body_chunks =
     let rec drop_empty = function

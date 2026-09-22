@@ -146,6 +146,37 @@ let chat_body_with_previews ~preview ~mode ~(entry : Message_layout.entry) ~widt
              | [] -> body
              | _ -> body ^ "\n" ^ String.concat "\n" cards))
 
+(* A journal revision's lines, in the columns [Message_layout.journal_rows]
+   cut. Two questions, two channels: the sign keeps the diff colours, since
+   arrived and left is what it has always said, and the category takes a
+   colour grouped by what a reader does about it rather than one hue per word
+   -- eight hues is a legend to memorise, and the theme has measured contrast
+   for the ones already in it. A drop is dim: the reason a fact was let go is
+   not the change itself. The claim keeps the body's own colour. *)
+let chat_journal_rows ~(context : Chat_theme.body_context) ~width lines =
+  let palette = chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+  let span_of : Message_layout.journal_piece -> string * string = function
+    | Journal_piece_sign Journal_added -> palette.code_diff_added
+    | Journal_piece_sign Journal_removed -> palette.code_diff_removed
+    | Journal_piece_category Tone_code_change -> palette.code_type
+    | Journal_piece_category Tone_learning -> palette.code_keyword
+    | Journal_piece_category Tone_intent -> palette.code_string
+    | Journal_piece_category Tone_blocker -> palette.code_number
+    (* The default kind and the most common: colouring the majority says
+       nothing about it. *)
+    | Journal_piece_category Tone_fact | Journal_piece_claim | Journal_piece_space ->
+        ("", "")
+    | Journal_piece_drop -> palette.code_comment
+  in
+  Message_layout.journal_rows ~width lines
+  |> List.map (fun pieces ->
+         String.concat ""
+           (List.map
+              (fun (text, piece) ->
+                let opening, closing = span_of piece in
+                if String.equal opening "" then text else opening ^ text ^ closing)
+              pieces))
+
 let cached_chat_markdown ~link_previews_mode ~theme =
   (* One render closure serves measurement and drawing. Metadata arriving
      between them belongs to the next frame, not a second height for this one. *)
@@ -162,6 +193,12 @@ let cached_chat_markdown ~link_previews_mode ~theme =
   let body = chat_body_with_previews ~preview ~mode:link_previews_mode ~entry ~width in
   let context = Chat_theme.body_context theme entry.style in
   let palette_generation = context.palette_generation in
+  let journal =
+    match entry.journal with
+    | [] -> []
+    | lines -> "" :: chat_journal_rows ~context ~width lines
+  in
+  let body_rows =
   match entry.markdown_source with
   | Message_layout.Markdown_stable
       { keeper_name; request_id; observed_at; entry_index } ->
@@ -196,6 +233,8 @@ let cached_chat_markdown ~link_previews_mode ~theme =
         ~text:body
   | Message_layout.Markdown_streaming ->
       chat_markdown ~context ~width body
+  in
+  body_rows @ journal
 
 
 (* Conversation colour names the source, not the prose. A keeper can return a
@@ -595,7 +634,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           request_label
         else " \xc2\xb7 " ^ request_label
       in
-      let plain = mark ^ " " ^ speaker ^ request in
+      (* A keeper's own row without a request id has neither, and the mark
+         then stands alone before the rule instead of two spaces. *)
+      let gap =
+        if String.equal speaker "" && String.equal request "" then "" else " "
+      in
+      let plain = mark ^ gap ^ speaker ^ request in
       let styled =
         match row.style with
         | Message_layout.Tool | Message_layout.Thinking ->
@@ -611,8 +655,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
               if String.equal speaker "" then ""
               else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
             in
-            Printf.sprintf "%s%s%s %s%s%s%s" (Chat_theme.origin row.style)
-              Ansi.bold mark badge Ansi.dim request Ansi.reset
+            Printf.sprintf "%s%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
+              Ansi.bold mark gap badge Ansi.dim request Ansi.reset
       in
       origin_heading buf cols ~plain ~styled ~clock
 
@@ -1379,12 +1423,30 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               Message_layout.Skill (skill_tone_of_state state)
           | Message_thinking -> Message_layout.Thinking
         in
-        let speaker = grouped_role_label in
+        (* The [Origin_row] heading names whoever the pane does not already.
+           This pane is the keeper's own, so its replies carry no name there:
+           the breadcrumb says whose chat it is, and a turn used to say it
+           once per block. An autonomous turn still says who asked -- nobody
+           -- where it opens. The inline gutter keeps the name. *)
+        let speaker =
+          match message.me_role with
+          | Message_keeper -> ""
+          | Message_autonomous -> (
+              match edge with
+              | Masc_tui_types.Turn_opens | Masc_tui_types.Turn_alone ->
+                  grouped_role_label
+              | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
+              | Masc_tui_types.Turn_outside ->
+                  "")
+          | Message_user _ | Message_status | Message_local | Message_memory
+          | Message_error | Message_tool | Message_skill _ | Message_thinking ->
+              grouped_role_label
+        in
         (* One column for every speaker so the [timestamp] speaker request
            rows line up down the pane, whatever name each row carries. *)
         let role_label =
           Message_layout.align_role_label ~column:role_label_column ~style
-            speaker
+            grouped_role_label
         in
         let body =
           match message.me_role with
@@ -1418,7 +1480,14 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               (* Summary uses the producer's typed compact projection. Hidden
                  rows never reach this arm (the layout filter removed them),
                  and a neutral system row with no projection remains whole. *)
-              | Memory_full | Memory_hidden -> message.me_text
+              | Memory_hidden -> message.me_text
+              (* A revision with typed lines draws its header here and the
+                 lines under it in columns ([journal] below); the plain text
+                 would draw them twice. *)
+              | Memory_full -> (
+                  match message.me_journal, message.me_memory_summary with
+                  | _ :: _, Some summary -> summary
+                  | [], _ | _ :: _, None -> message.me_text)
               | Memory_summary -> (
                   (* A summarised row is a cut row, so it says which key
                      uncuts it. What that key does is the footer's line,
@@ -1458,6 +1527,15 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
              request_label =
                Keeper_chat.compact_request_id message.me_request_id;
              body;
+             journal =
+               (match message.me_role, state.msg_memory_visibility with
+                | Message_memory, Memory_full -> message.me_journal
+                | Message_memory, (Memory_summary | Memory_hidden)
+                | ( ( Message_user _ | Message_keeper | Message_autonomous
+                    | Message_status | Message_local | Message_error
+                    | Message_tool | Message_skill _ | Message_thinking ),
+                    _ ) ->
+                    []);
              markdown_source =
                Message_layout.Markdown_stable
                  { keeper_name = message.me_keeper_name;
@@ -1569,6 +1647,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
          Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
      ; request_label = ""
      ; body = note ^ "\n" ^ Terminal_text.single_line body
+     ; journal = []
      ; markdown_source = Message_layout.Markdown_streaming
      ; turn_rail = Message_layout.Rail_none
      ; action = Message_layout.Action_none
@@ -2284,7 +2363,7 @@ let render_keeper_message (state : state) =
                       Some (Printf.sprintf "%s→%s" start finish)
                   | None -> Some (Printf.sprintf "%s→" start)
                 in
-                let entry style role_label body =
+                let entry ?(speaker : string option) style role_label body =
                   (* One alignment, on the label the row actually carries.
                      Aligning the continuation mark and then aligning the
                      result again pays the badge's width twice, so the second
@@ -2294,7 +2373,7 @@ let render_keeper_message (state : state) =
                        timestamp = keeper_message_clock started_at;
                        timeline_bucket;
                        span_clock;
-                       speaker = role_label;
+                       speaker = Option.value speaker ~default:role_label;
                        role_label =
                          Message_layout.align_role_label
                            ~column:role_label_column
@@ -2306,6 +2385,7 @@ let render_keeper_message (state : state) =
                            ~column:role_label_column ~style ();
                        request_label;
                        body;
+                       journal = [];
                        markdown_source;
                        turn_rail =
                          turn_rail_of ~siding:None
@@ -2350,7 +2430,10 @@ let render_keeper_message (state : state) =
                             skill))
                 | Keeper_chat_transcript.Drawn_text text
                 | Keeper_chat_transcript.Drawn_reply text ->
-                    entry Message_layout.Keeper (label keeper_label) (annotate_body text)
+                    (* No name on the heading, as on the committed rows:
+                       this is the keeper's own pane. *)
+                    entry ~speaker:(label "") Message_layout.Keeper
+                      (label keeper_label) (annotate_body text)
                 | Keeper_chat_transcript.Drawn_status text ->
                     entry Message_layout.Status (label "STATUS") text)
              (Keeper_chat_transcript.drawn transcript)

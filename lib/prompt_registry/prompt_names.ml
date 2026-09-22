@@ -104,9 +104,10 @@ let mcp_tool_help_doc_ref_row = "mcp.tool_help.doc_ref_row"
 let keeper_workspace = "keeper.workspace"
 let keeper_identity = "keeper.identity"
 
-(* System-prompt assembly pieces: the operator-instructions block and the
-   structural tags that wrap the shared prefix and the instructions. *)
-let keeper_instructions_custom = "keeper.instructions.custom"
+(* System-prompt assembly pieces: the operator's worldview, the world's own
+   articles, and the structural tags that wrap the shared prefix and the
+   keeper's role. *)
+let keeper_worldview = "keeper.worldview"
 let keeper_constitution = "keeper.constitution"
 let keeper_tags_system_open = "keeper.tags.system_open"
 let keeper_tags_system_close = "keeper.tags.system_close"

@@ -194,9 +194,13 @@ val make_health_json :
     execution snapshot's live [executable_keeper_fiber_count]. It reports
     [blocked] when autoboot-enabled keepers exist but no executable fiber
     remains, and [degraded] when live executable capacity is below
-    [target_reaction_capacity_count]. Phase-derived running, failing, and
-    recovering fields remain observations and do not determine status, blocker,
-    operator action, or dashboard live capacity.
+    [target_reaction_capacity_count]. Phase counts do not determine executable
+    capacity. This builder supplies the registry phase snapshot. Current typed
+    [Turn_configuration_error] and [Official_client_recovery_required] causes on
+    non-paused Failing entries also require operator action, including manual
+    Keepers outside the autoboot set. Existing blocked-health and blocker
+    precedence rules still apply. [configuration_blocked_*] and
+    [all_target_keepers_configuration_blocked] describe autoboot targets.
     [paused_autoboot_enabled_keeper_count] keeps operator-paused autoboot
     keepers visible without counting them as reaction-capacity targets.
 

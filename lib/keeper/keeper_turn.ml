@@ -772,7 +772,7 @@ let run_keeper_invocation_turn_admitted_inner
                  the last production split between direct and autonomous
                  Keeper behavior. Channel-specific input remains below in
                  [dynamic_context] and the persisted user message. *)
-              { system_prompt = base_system_prompt; dynamic_context }
+              { system_prompt = base_system_prompt; dynamic_context; dynamic_context_for_tools = None }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

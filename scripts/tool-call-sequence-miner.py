@@ -19,7 +19,10 @@ from typing import Any, Sequence, assert_never
 
 
 SCHEMA_VERSION = "masc.tool-call-sequence-miner/v1"
-VALID_RECORD_KINDS = {"tool_call", "composition_run"}
+# Keeper_tool_call_log.record_kind: lifecycle rows are opening/progress
+# markers, not physical calls or turn boundaries. Only tool_call rows take
+# part in adjacency; their explicit runtime identity still separates turns.
+VALID_RECORD_KINDS = {"tool_call", "composition_run", "lifecycle_event"}
 VALID_DISPOSITIONS = {"completed", "deferred", "failed"}
 VALID_EXECUTION_MODES = {"serial", "concurrent"}
 

@@ -977,6 +977,100 @@ let test_intervening_trace_without_checkpoint_is_passed () =
   | Ok _ -> fail "a trace without a checkpoint stopped the walk"
 ;;
 
+let overwrite_checkpoint config ~trace_id contents =
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  (match Fs_compat.save_file_atomic path contents with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  session_dir
+;;
+
+(* A trace in between whose checkpoint holds a version this build supersedes.
+   No turn runs on a trace the keeper has left, so nothing rewrites that file:
+   the walk passes it, and the current trace is still read in the same pass. *)
+let test_superseded_intervening_checkpoint_is_passed () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-superseded-a" in
+  let trace_b = "trace-superseded-b" in
+  let trace_c = "trace-superseded-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  let older =
+    { (checkpoint ~trace_id:trace_b [ message "b" ] 1) with
+      Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version - 1
+    }
+  in
+  let session_dir_b =
+    overwrite_checkpoint
+      config
+      ~trace_id:trace_b
+      (Yojson.Safe.to_string (Agent_core.Checkpoint.to_json older))
+  in
+  (* Positive control, as [damage_checkpoint] does: the real store calls this
+     superseded, not damaged. *)
+  (match Store.load_agent_core ~session_dir:session_dir_b ~session_id:trace_b with
+   | Error (Store.Superseded_version _) -> ()
+   | Error error ->
+     failf "superseded fixture: %s" (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "superseded checkpoint unexpectedly loaded");
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  let carried = ref [] in
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+        carried := text_markers input;
+        true)
+  with
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "the current trace is reached" trace_c progress.position.trace_id;
+    check (list string) "only the current trace is read" [ "c" ] !carried
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "a superseded checkpoint stopped the walk"
+;;
+
+(* A damaged checkpoint in between is not passed. A newer binary or an
+   operator can still make that file readable, so the pass does not walk past
+   the turns it holds: it stops and names the trace. *)
+let test_corrupt_intervening_checkpoint_stops_the_pass () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-corrupt-a" in
+  let trace_b = "trace-corrupt-b" in
+  let trace_c = "trace-corrupt-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  let session_dir_b = overwrite_checkpoint config ~trace_id:trace_b "{" in
+  (match Store.load_agent_core ~session_dir:session_dir_b ~session_id:trace_b with
+   | Error (Store.Parse_error _) -> ()
+   | Error error ->
+     failf "damaged fixture: %s" (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "damaged checkpoint unexpectedly loaded");
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+         fail "a damaged trace in between reached commit")
+   with
+   | Error (Consumer.Checkpoint_unreadable { trace_id; error = Store.Parse_error _ }) ->
+     check string "the error names the trace it could not read" trace_b trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "a damaged trace in between was walked past");
+  match read_progress config with
+  | Some progress ->
+    check
+      string
+      "the position stays on the trace before it"
+      trace_a
+      progress.position.trace_id
+  | None -> fail "the stopped pass removed progress"
+;;
+
 let test_failed_long_range_retries_only_oldest_cut_point () =
   with_workspace @@ fun config ->
   let trace_id = "trace-bounded-retry" in
@@ -1552,7 +1646,7 @@ let test_new_completed_cut_still_reads_checkpoint () =
     (current @ [message "next completed"]);
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "corrupt checkpoint called commit") with
-  | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "new completed cut skipped checkpoint validation"
 ;;
@@ -1566,7 +1660,7 @@ let test_unseen_restart_still_reads_checkpoint () =
    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "unreadable restart called commit") with
-  | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "unseen restart skipped checkpoint validation"
 ;;
@@ -2006,7 +2100,7 @@ let test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms () =
     match Consumer.consume_one ~config ~keeper_name
         ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
           fail "corrupt atom checkpoint reached commit") with
-    | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+    | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
     | Error error -> fail (Consumer.error_to_string error)
     | Ok _ -> fail "new atom boundary did not reopen checkpoint"
   in
@@ -2355,6 +2449,10 @@ let () =
             test_intervening_trace_is_read_before_the_current_trace
         ; test_case "trace in between without checkpoint is passed" `Quick
             test_intervening_trace_without_checkpoint_is_passed
+        ; test_case "superseded checkpoint in between is passed" `Quick
+            test_superseded_intervening_checkpoint_is_passed
+        ; test_case "damaged checkpoint in between stops the pass" `Quick
+            test_corrupt_intervening_checkpoint_stops_the_pass
         ; test_case "failed growing range retries oldest cut" `Quick
             test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick

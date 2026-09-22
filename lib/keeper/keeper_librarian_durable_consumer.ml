@@ -22,7 +22,10 @@ type error =
   | Keeper_meta_unreadable of string
   | Boundary_log_unreadable of string
   | Progress_unreadable of P.read_error
-  | Checkpoint_unreadable of Keeper_checkpoint_store.checkpoint_load_error
+  | Checkpoint_unreadable of
+      { trace_id : string
+      ; error : Keeper_checkpoint_store.checkpoint_load_error
+      }
   | Position_in_other_trace of P.position
   | Position_not_in_history of P.position
   | Range_stopped of R.stop
@@ -79,9 +82,11 @@ let error_to_string = function
   | Keeper_meta_unreadable detail -> "keeper metadata is unreadable: " ^ detail
   | Boundary_log_unreadable detail -> "turn-boundary log is unreadable: " ^ detail
   | Progress_unreadable error -> P.read_error_to_string error
-  | Checkpoint_unreadable error ->
-    "checkpoint is unreadable: "
-    ^ Keeper_checkpoint_store.checkpoint_load_error_to_string error
+  | Checkpoint_unreadable { trace_id; error } ->
+    Printf.sprintf
+      "checkpoint of trace=%s is unreadable: %s"
+      trace_id
+      (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
   | Position_in_other_trace position ->
     Printf.sprintf
       "librarian position belongs to trace=%s end_atom=%d"
@@ -155,11 +160,22 @@ let started_trace (written : B.record) =
 ;;
 
 (* Row 1b (#37362). The traces that started after [trace_id], in the order
-   their first start line appears in the log, up to and including
-   [current_trace_id]. Only a trace that states its own start can be read from
-   atom zero, so a trace without a start line is not listed. A [trace_id]
-   with no start line of its own is older than the log, so every trace that
-   has one came after it. *)
+   their first start line appears in the log. The list ends at
+   [current_trace_id] when that trace states a start of its own; when it does
+   not, every started trace after [trace_id] is listed and the walk ends by
+   keeping the old position, which is the fail-closed answer for a
+   continued-only log. Only a trace that states its own start can be read from
+   atom zero, so a trace without a start line is not listed. A [trace_id] with
+   no start line of its own is older than the log, so every trace that has one
+   came after it.
+
+   The walk reopens the checkpoint of every trace it passes on each round.
+   Nothing here remembers what was passed, because the only cheap and
+   stateless answer -- the boundary lines -- is what [R.may_have_unread]
+   already reads before a checkpoint is opened. A keeper parked on a retired
+   trace with several dead traces after it therefore pays one checkpoint read
+   per dead trace per round, until a trace with something to read moves the
+   position past them. *)
 let traces_started_after ~trace_id ~current_trace_id lines =
   let started_in_order =
     List.fold_left
@@ -192,6 +208,30 @@ let traces_started_after ~trace_id ~current_trace_id lines =
       else started :: up_to_current rest
   in
   up_to_current later
+;;
+
+(* Whether a checkpoint error on a trace the keeper has left is one that no
+   later turn can clear. No turn runs on a retired trace, so nothing rewrites
+   its checkpoint (keeper_checkpoint_store.ml says the same of the save path:
+   reporting a superseded canonical as unreadable "made every save fail the
+   same way forever, because nothing ever replaced the file"). An error that
+   cannot clear would stop the pass on that trace for good, and with it every
+   trace after it, so it is passed instead.
+
+   Only the version this build supersedes is that error: the file holds turns
+   this build will not read, and for a retired trace no newer file replaces
+   it. The others are not passed. A parse error is an older binary reading a
+   newer workspace as often as it is damage, a store or IO failure can be a
+   disk that comes back, and an agent-core failure is neither classified here;
+   a deploy or an operator makes those readable, so the pass keeps saying what
+   it cannot read instead of walking past turns it could have read. *)
+let retired_checkpoint_never_becomes_readable = function
+  | Keeper_checkpoint_store.Superseded_version _ -> true
+  | Keeper_checkpoint_store.Not_found
+  | Keeper_checkpoint_store.Store_error _
+  | Keeper_checkpoint_store.Parse_error _
+  | Keeper_checkpoint_store.Io_error _
+  | Keeper_checkpoint_store.Agent_core_error _ -> false
 ;;
 
 let range_id_for_selection
@@ -562,7 +602,8 @@ let unread_turns ~config ~keeper_name =
       else match load_current_checkpoint ~config ~trace_id:current_trace_id with
       | Error Keeper_checkpoint_store.Not_found when Option.is_none positions.progress ->
         Ok (Some 0)
-      | Error error -> Error (Checkpoint_unreadable error)
+      | Error error ->
+        Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
       | Ok checkpoint ->
         Ok
           (R.unread_turns
@@ -629,7 +670,7 @@ let consume_one_with_extent
     else match load_checkpoint trace_id, progress with
     | Error Keeper_checkpoint_store.Not_found, None ->
       Ok (trace_id, None, [], R.Nothing_to_read)
-    | Error error, _ -> Error (Checkpoint_unreadable error)
+    | Error error, _ -> Error (Checkpoint_unreadable { trace_id; error })
     | Ok checkpoint, progress ->
       let messages = checkpoint.Agent_core.Checkpoint.messages in
       Ok (trace_id, progress, messages, R.select ~trace_id ~lines ~progress ~messages extent)
@@ -639,19 +680,34 @@ let consume_one_with_extent
      saw them start (#37362): a trace with nothing to read is passed, and the
      current trace ends the walk. With no started trace to move to, the old
      position stays authoritative. *)
+  let say_passed_trace ~trace_id error =
+    Log.Keeper.warn
+      ~keeper_name
+      "librarian hand-off passes trace=%s: %s; the keeper has left that trace, \
+       so nothing rewrites its checkpoint and its turns stay unread"
+      trace_id
+      (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  in
   let after_prior (previous : P.t) =
     let rec walk = function
       | [] -> Error (Position_in_other_trace previous.P.position)
       | trace_id :: later ->
-        let* ((_, _, _, selection) as chosen) = trace_selection trace_id in
-        (match selection with
-         | R.Nothing_to_read when not (String.equal trace_id current_trace_id) ->
+        (match trace_selection trace_id with
+         | Error (Checkpoint_unreadable { trace_id = _; error })
+           when (not (String.equal trace_id current_trace_id))
+                && retired_checkpoint_never_becomes_readable error ->
+           say_passed_trace ~trace_id error;
            walk later
-         | R.Nothing_to_read
-         | R.Read _
-         | R.Baseline _
-         | R.Position_in_other_trace _
-         | R.Stop _ -> Ok chosen)
+         | Error error -> Error error
+         | Ok ((_, _, _, selection) as chosen) ->
+           (match selection with
+            | R.Nothing_to_read when not (String.equal trace_id current_trace_id) ->
+              walk later
+            | R.Nothing_to_read
+            | R.Read _
+            | R.Baseline _
+            | R.Position_in_other_trace _
+            | R.Stop _ -> Ok chosen))
     in
     walk
       (traces_started_after
@@ -692,7 +748,14 @@ let consume_one_with_extent
        | Error Keeper_checkpoint_store.Not_found ->
          (* A removed owner/session cannot finish its old trace. *)
          Result.map (with_counterpart (Some previous)) (after_prior previous)
-       | Error error -> Error (Checkpoint_unreadable error))
+       | Error error ->
+         (* The trace the position names is retired too, so it takes the same
+            decision as a trace the walk opens. *)
+         if retired_checkpoint_never_becomes_readable error
+         then (
+           say_passed_trace ~trace_id:position.trace_id error;
+           Result.map (with_counterpart (Some previous)) (after_prior previous))
+         else Error (Checkpoint_unreadable { trace_id = position.trace_id; error }))
     | None -> Result.map (with_counterpart None) (trace_selection current_trace_id)
     | Some current ->
       Result.map
@@ -993,15 +1056,26 @@ let consume_one_with_extent
       let* current, expected_revision =
         current_memory ~keepers_dir:memory_keepers_dir ~keeper_name
       in
+      (* A bound carried from the trace before this one can sit after this
+         range's end when the wall clock went backwards between the two
+         traces. The window is then empty by reading, not by repair: a row
+         inside it is read by the next range, whose lower bound is this
+         range's end. Within one trace the same shape says the position and
+         the boundary disagree, and still stops the pass. *)
+      let carried_from_another_trace =
+        match counterpart_progress with
+        | None -> false
+        | Some { P.position; _ } -> not (String.equal position.P.trace_id trace_id)
+      in
       let* () =
         match after with
-        | Some after when after > ended_at ->
+        | Some after when after > ended_at && not carried_from_another_trace ->
           Error (Counterpart_interval_non_monotone { after; before = ended_at })
         | None | Some _ -> Ok ()
       in
       let* counterpart_observations =
         match after with
-        | Some after when Float.equal after ended_at -> Ok []
+        | Some after when after >= ended_at -> Ok []
         | None | Some _ ->
           Keeper_librarian_input_sources.counterpart_observations_between_offloaded
             ~base_dir:config.Workspace.base_path

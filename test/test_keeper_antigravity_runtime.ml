@@ -1675,12 +1675,10 @@ let test_a_working_state_that_fits_the_cut_goes () =
     (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
-(* The window numbers what it is handed from atom 0, and a range that opens
-   on an assistant turn is handed with the omission preamble in front. That
-   preamble is the first atom the window drops, and it is no durable atom:
-   the reading must count only the history's atoms that went out, or its
-   front names the atom after the one sent and the next request's seed
-   starts one atom late. *)
+(* A range that opens on an assistant turn is composed with the omission
+   preamble in front, and the preamble is no durable atom. The reading must
+   count only the history's atoms that went out, or its front names the atom
+   after the one sent and the next request's seed starts one atom late. *)
 let test_a_dropped_preamble_is_not_a_durable_atom () =
   let history =
     List.init 40 (fun index ->

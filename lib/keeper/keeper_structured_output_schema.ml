@@ -49,8 +49,14 @@ let librarian_claim_schema =
     ; Keeper_librarian.wire_field_category, enum_schema category_tokens
     ; Keeper_memory_os_types.wire_field_board_post_id, nullable_string_schema
     ; Keeper_memory_os_types.wire_field_board_comment_id, nullable_string_schema
-    ; Keeper_memory_os_types.wire_field_supersedes, nullable_string_schema
-    ; Keeper_memory_os_types.wire_field_absorbs, string_array_schema
+    ; Keeper_memory_os_types.wire_field_supersedes, `Assoc
+        [ "type", `List [`String "string"; `String "null"]
+        ; "description", `String
+            "Correction of a current memory: copy its short ID here and also into dropped. Use null when this claim does not correct a memory. Do not put this ID in absorbs." ]
+    ; Keeper_memory_os_types.wire_field_absorbs, `Assoc
+        [ "type", `String "array"; "items", string_schema
+        ; "description", `String
+            "Short IDs of current memories whose still-valid knowledge this claim consolidates. Do not request separate deletion: never also list these IDs in dropped or supersedes. Each ID belongs to only one new claim. Use [] when consolidating none." ]
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -58,18 +64,22 @@ let librarian_claim_schema =
 
 let librarian_dropped_schema =
   let fields =
-    [ Keeper_librarian.wire_field_memory_id, string_schema
+    [ Keeper_librarian.wire_field_memory_id, `Assoc
+        [ "type", `String "string"
+        ; "description", `String
+            "Short ID of a current memory to delete or correct. Corrected IDs also appear in a new claim's supersedes. IDs consolidated through absorbs must not appear here." ]
     ; Keeper_librarian.wire_field_reason, string_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let librarian_current_output_schema =
+let librarian_output_schema ~working_state =
   let fields =
     [ ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
     ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
+    ; "working_state", working_state
     ; "working_contexts", array_schema (object_schema
         ~required:["merge_contexts"; "sources"; "context"; "next_steps"]
         [ "merge_contexts", string_array_schema
@@ -80,6 +90,15 @@ let librarian_current_output_schema =
     ]
   in
   object_schema ~required:(List.map fst fields) fields
+;;
+
+let librarian_current_output_schema =
+  librarian_output_schema ~working_state:nullable_string_schema
+;;
+
+let librarian_continuity_output_schema =
+  librarian_output_schema
+    ~working_state:(`Assoc ["type", `String "string"; "minLength", `Int 1])
 ;;
 
 let board_attention_judgment_batch_output_schema =

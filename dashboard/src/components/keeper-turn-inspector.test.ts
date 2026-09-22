@@ -115,7 +115,7 @@ function toolCallsForTurn(): ToolCallsResponse {
         tool: 'masc_board_post_get',
         input: { post_id: 'p-1' },
         output: 'ok',
-        success: true,
+        wire_outcome: 'ok',
         duration_ms: 54,
         trace_id: 'trace-active',
         session_id: 'trace-active',

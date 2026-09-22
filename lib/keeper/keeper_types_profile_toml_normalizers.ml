@@ -19,6 +19,10 @@ let normalize_name_list items =
   |> List.filter (fun item -> item <> "")
   |> dedupe_keep_order
 
+let normalize_board_interests items =
+  normalize_name_list items |> List.sort_uniq String.compare
+;;
+
 let normalize_name_list_opt items =
   match normalize_name_list items with
   | [] -> None

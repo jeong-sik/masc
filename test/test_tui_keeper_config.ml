@@ -12,6 +12,7 @@ let observed =
         }
       },
       "activation_mode": "autonomous",
+      "input_policy": "small",
       "max_context_override": null,
       "sandbox_profile": "docker",
       "network_mode": "none",
@@ -19,7 +20,7 @@ let observed =
       "prompt": {"instructions": "be exact"},
       "execution": {"selected_runtime_id": "codex_subscription.gpt-5.6-sol"},
       "skills": {"names": null},
-      "workspace": {"mention_targets": ["@alpha"]},
+      "workspace": {"mention_targets": ["@alpha"], "board_interests": []},
       "sources": {
         "has_live_override": true,
         "override_fields": ["runtime_id"],
@@ -38,7 +39,9 @@ let test_editor_starts_from_observed_values () =
   Alcotest.(check (list string)) "editable keys"
     [ "runtime_id"
     ; "mention_targets"
+    ; "board_interests"
     ; "activation_mode"
+    ; "input_policy"
     ; "max_context_override"
     ; "sandbox_profile"
     ; "network_mode"
@@ -70,6 +73,15 @@ let test_patch_contains_only_changed_fields () =
       Alcotest.(check string) "one changed field"
         {|{"expected_config_revision":{"manifest":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runtime_assignment":{"state":"runtime_config_present","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","assignment":{"state":"assigned","runtime_id":"codex_subscription.gpt-5.6-sol"}}},"activation_mode":"manual"}|}
         (Yojson.Safe.to_string patch)
+
+let test_input_policy_patch () =
+  match patch_of_edit ~before:observed ~after:(`Assoc ["input_policy", `String "wide"]) with
+  | Error detail -> Alcotest.fail detail
+  | Ok patch ->
+      Alcotest.(check string) "policy change is editable" "wide"
+        (Yojson.Safe.Util.member "input_policy" patch |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "capacity remains unchanged" false
+        (List.mem "max_context_override" (assoc_keys patch))
 
 let test_deleted_field_means_unchanged () =
   match patch_of_edit ~before:observed ~after:(`Assoc []) with
@@ -214,9 +226,11 @@ let test_every_row_says_whether_e_reaches_it () =
       Alcotest.(check string) label (name expected) (name actual))
     [ "Runtime", `Editable
     ; "Activation", `Editable
+    ; "Context policy", `Editable
     ; "Context override", `Editable
     ; "Sandbox / network", `Editable
     ; "Mention targets", `Editable
+    ; "Board interests", `Editable
     ; "Skills", `Editable
       (* the rows inside the settings block that [e] does not reach *)
     ; "Config revision", `Read_only
@@ -567,7 +581,8 @@ let test_runtime_config_warning_names_its_authority () =
 let () =
   Alcotest.run "tui keeper config"
     [ ( "projection"
-      , [ Alcotest.test_case "observed editor stem" `Quick
+      , [ Alcotest.test_case "input policy patch" `Quick test_input_policy_patch
+        ; Alcotest.test_case "observed editor stem" `Quick
             test_editor_starts_from_observed_values
         ; Alcotest.test_case "changed-only patch" `Quick
             test_patch_contains_only_changed_fields

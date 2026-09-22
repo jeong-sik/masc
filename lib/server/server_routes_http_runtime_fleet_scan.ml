@@ -413,6 +413,7 @@ type keeper_phase_snapshot =
   ; running_names : string list
   ; recovering_names : string list
   ; configuration_blocked_names : string list
+  ; official_client_recovery_required_names : string list
   ; phase_values : (string * Keeper_state_machine.phase) list
   ; phase_details : (string * keeper_phase_detail) list
   }
@@ -455,15 +456,25 @@ let keeper_phase_snapshot ?base_path () =
               true
             | _ -> false
           in
+          let requires_session_recovery =
+            match entry.phase, entry.last_failure_reason with
+            | ( Keeper_state_machine.Failing
+              , Some (Keeper_registry.Official_client_recovery_required _) )
+              when capacity_eligible -> true
+            | _ -> false
+          in
           (* Phase inventory is not execution truth. Executability is projected
              separately through the shared closed owner-execution ADT. A
-             terminal configuration blocker is failing but not recovering: an
-             operator must change configuration before another turn can make
-             progress. *)
+             configuration or session recovery cause is failing but not
+             recovering: another turn with the same configuration/session
+             cannot resolve that cause. A failing entry with no reason falls
+             through to recovering, so producers must not drop an actionable
+             cause when its backing store is unreadable. *)
           let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing
-              when capacity_eligible && not is_configuration_blocked ->
+              when capacity_eligible && not is_configuration_blocked
+                   && not requires_session_recovery ->
               true
             | _ -> false
           in
@@ -479,6 +490,11 @@ let keeper_phase_snapshot ?base_path () =
             then entry.name :: acc.configuration_blocked_names
             else acc.configuration_blocked_names
           in
+          let official_client_recovery_required_names =
+            if requires_session_recovery
+            then entry.name :: acc.official_client_recovery_required_names
+            else acc.official_client_recovery_required_names
+          in
           match entry.phase with
           | Keeper_state_machine.Running when capacity_eligible ->
             {
@@ -487,6 +503,7 @@ let keeper_phase_snapshot ?base_path () =
               running_names = entry.name :: acc.running_names;
               recovering_names;
               configuration_blocked_names;
+              official_client_recovery_required_names;
             }
           | Keeper_state_machine.Running ->
             acc
@@ -497,6 +514,7 @@ let keeper_phase_snapshot ?base_path () =
                 { counts with failing = counts.failing + 1; recovering };
               recovering_names;
               configuration_blocked_names;
+              official_client_recovery_required_names;
             }
           | Keeper_state_machine.Failing ->
             acc
@@ -512,6 +530,7 @@ let keeper_phase_snapshot ?base_path () =
          running_names = [];
          recovering_names = [];
          configuration_blocked_names = [];
+         official_client_recovery_required_names = [];
          phase_values = [];
          phase_details = [];
        }
@@ -522,6 +541,8 @@ let keeper_phase_snapshot ?base_path () =
     recovering_names = sorted_unique_strings snapshot.recovering_names;
     configuration_blocked_names =
       sorted_unique_strings snapshot.configuration_blocked_names;
+    official_client_recovery_required_names =
+      sorted_unique_strings snapshot.official_client_recovery_required_names;
     phase_values =
       List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_values;
     phase_details =
@@ -1228,12 +1249,13 @@ let keeper_fleet_safety_health_json
     | Some snapshot -> snapshot.recovering_names
     | None -> []
   in
+  let is_autoboot_target name =
+    List.exists (String.equal name) autoboot_scan.autoboot_names
+  in
   let configuration_blocked_names =
     match phase_snapshot with
     | Some snapshot ->
-      List.filter
-        (fun name -> List.exists (String.equal name) autoboot_scan.autoboot_names)
-        snapshot.configuration_blocked_names
+      List.filter is_autoboot_target snapshot.configuration_blocked_names
     | None -> []
   in
   let configuration_blocked_count = List.length configuration_blocked_names in
@@ -1243,15 +1265,41 @@ let keeper_fleet_safety_health_json
      a configuration-blocked keeper outside it (manual activation, booted on
      request) is invisible there while still counting in failing. This pair
      names every Failing keeper whose reason is Turn_configuration_error,
-     which with the recovering count partitions the failing count exactly. *)
+     which with recovering and official-client session recovery partitions
+     the failing count exactly. *)
   let turn_configuration_error_names =
     match phase_snapshot with
     | Some snapshot -> snapshot.configuration_blocked_names
     | None -> []
   in
   let turn_configuration_error_count = List.length turn_configuration_error_names in
+  let official_client_recovery_required_names =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.official_client_recovery_required_names
+    | None -> []
+  in
+  let official_client_recovery_required_count =
+    List.length official_client_recovery_required_names
+  in
+  let target_official_client_recovery_required_names =
+    List.filter is_autoboot_target official_client_recovery_required_names
+  in
   let all_target_keepers_configuration_blocked =
     target_count > 0 && configuration_blocked_count >= target_count
+  in
+  (* The public recovery count is deliberately unscoped so that it partitions
+     [phase_counts.failing] with the other two failure classes and also reports
+     manual Keepers. Fleet admission is an autoboot question, however. Use the
+     target-scoped subset here and combine both non-retryable causes: a fleet
+     split between configuration errors and held session recovery is just as
+     blocked as a fleet whose targets all share either one cause. *)
+  let operator_blocked_target_count =
+    sorted_unique_strings
+      (configuration_blocked_names @ target_official_client_recovery_required_names)
+    |> List.length
+  in
+  let all_target_keepers_operator_blocked =
+    target_count > 0 && operator_blocked_target_count >= target_count
   in
   let active_task_owner_scan =
     match current_server_state_opt () with
@@ -1317,8 +1365,9 @@ let keeper_fleet_safety_health_json
   in
   let status =
     if no_executable_keeper_fibers then "blocked"
-    else if all_target_keepers_configuration_blocked then "blocked"
-    else if configuration_blocked_count > 0 then "degraded"
+    else if all_target_keepers_operator_blocked then "blocked"
+    else if turn_configuration_error_count > 0 then "degraded"
+    else if official_client_recovery_required_count > 0 then "degraded"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
     else if backlog_observation_degraded then "degraded"
@@ -1330,7 +1379,9 @@ let keeper_fleet_safety_health_json
   let blocker =
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
-    else if configuration_blocked_count > 0 then Some "turn_configuration_error"
+    else if turn_configuration_error_count > 0 then Some "turn_configuration_error"
+    else if official_client_recovery_required_count > 0
+    then Some "official_client_recovery_required"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if active_task_owner_without_executable_fiber
     then Some "active_task_owner_without_executable_fiber"
@@ -1362,6 +1413,9 @@ let keeper_fleet_safety_health_json
     ; "recovering_keeper_fiber_count", `Int phase_counts.recovering
     ; ( "recovering_keeper_names"
       , `List (List.map (fun name -> `String name) recovering_names) )
+    ; "official_client_recovery_required_keeper_count", `Int official_client_recovery_required_count
+    ; ( "official_client_recovery_required_keeper_names"
+      , `List (List.map (fun name -> `String name) official_client_recovery_required_names) )
     ; "configuration_blocked_keeper_count", `Int configuration_blocked_count
     ; ( "configuration_blocked_keeper_names"
       , `List (List.map (fun name -> `String name) configuration_blocked_names) )
@@ -1456,7 +1510,8 @@ let keeper_fleet_safety_health_json
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers
-           || configuration_blocked_count > 0
+           || turn_configuration_error_count > 0
+           || official_client_recovery_required_count > 0
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked
            || active_task_owner_without_executable_fiber

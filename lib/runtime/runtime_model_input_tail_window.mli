@@ -325,7 +325,9 @@ val project_target
     and why the request passes the target. Never raises. *)
 
 val project_from_atom
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  :  ?allow_empty_history:bool
+  -> ?history_already_announced:bool
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> first_atom:int
   -> Agent_core.Types.message list
   -> projection * int
@@ -335,8 +337,12 @@ val project_from_atom
     view's measured bytes, as [target_projection.transmitted_bytes] counts
     them. [first_atom] is a position {!annotate} assigns, oldest first from
     0; below 0 it is the whole history, and at or past the newest atom it is
-    the newest atom alone, so the view always carries the turn. Never
-    raises. *)
+    the newest atom alone by default. [allow_empty_history=true] permits an
+    exclusive end at [atom_count] after the caller has preserved that prefix.
+    [history_already_announced=true] means the caller supplies the saved summary:
+    an empty suffix needs no omission preamble. A non-User suffix still gets
+    the opening preamble required by its message role.
+    Never raises. *)
 
 val is_synthetic_preamble : Agent_core.Types.message -> bool
 (** Whether a message is the constant preamble the cut prepends when the

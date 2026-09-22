@@ -152,6 +152,31 @@ let api_invalid_request_unknown_model =
        ; reason = Agent_core.Retry.Unknown_invalid_request
        })
 
+(* A 404 the provider answers for a model it does not serve. [Retry.classify_error]
+   reads the status as [NotFound] and [Keeper_runtime_failure_route] routes it to
+   [Model_unavailable]; the walk must rotate on it rather than stop on the
+   candidate whose model does not exist. Both constructors carry the same fact:
+   the HTTP classifier produces [Api (NotFound _)], the official clients produce
+   [Provider (NotFound _)]. *)
+let api_not_found =
+  Agent_core.Error.Api
+    (Agent_core.Retry.NotFound { message = "model not found" })
+
+let provider_not_found =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.NotFound
+       { provider = "ollama_cloud"; detail = "model not found" })
+
+(* A credential the binding was given and its provider refuses. The failure
+   route names both a same-turn rotation ([Auth_failed]), like the 404 above. *)
+let api_auth_error =
+  Agent_core.Error.Api (Agent_core.Retry.AuthError { message = "invalid api key" })
+
+let provider_authorization_error =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.AuthorizationError
+       { provider = "claude_code"; detail = "not authorized for this model" })
+
 let api_attempt_rejected =
   Agent_core.Provider_failure_attribution.core_error_of_http_error
     (Llm_provider.Http_client.AcceptRejected
@@ -226,6 +251,10 @@ let census_rows =
   ; "api:context_overflow", api_context_overflow, 9
   ; "internal:remote_command_failed", internal_remote_command_failed, 4
   ; "api:invalid_request", api_invalid_request_unknown_model, 2
+  ; "api:not_found", api_not_found, 0
+  ; "provider:not_found", provider_not_found, 0
+  ; "api:auth_error", api_auth_error, 0
+  ; "provider:authorization_error", provider_authorization_error, 0
   ; "api:attempt_rejected", api_attempt_rejected, 0
   ; "api:invalid_request_vendor_400", api_invalid_request_vendor_400, 0
   ; "api:turn_budget_timeout", api_turn_budget_timeout, 0
@@ -299,9 +328,13 @@ let expected_rotation =
   ; "provider:reported_error", true
   ; "api:context_overflow", true
   ; "internal:remote_command_failed", false
-  ; "api:invalid_request", false
+  ; "api:invalid_request", true
+  ; "api:not_found", true
+  ; "provider:not_found", true
+  ; "api:auth_error", true
+  ; "provider:authorization_error", true
   ; "api:attempt_rejected", true
-  ; "api:invalid_request_vendor_400", false
+  ; "api:invalid_request_vendor_400", true
   ; "api:turn_budget_timeout", true
   ; "provider:parse_error", false
   ; "provider:unknown_variant", false
@@ -345,11 +378,114 @@ let test_census_and_baseline_agree_on_rows () =
     census_labels
     baseline_labels
 
+(* The failure route and the walk read the same error, in two places. For the
+   classes below the route says a different runtime is tried in this turn,
+   which is a statement about the walk, so the walk has to reach the second
+   candidate. The other rotate classes make no claim this two-candidate walk
+   can check: a resumable CLI session moves to a recovery lane rather than to
+   the next declared candidate, filtered candidates and an exhausted runtime
+   describe a whole walk rather than one failure, and the no-progress classes
+   pass through the caller's accept-no-progress admission. The match is
+   exhaustive so a new [rotate_class] does not compile until it takes a side. *)
+let route_says_this_walk_rotates = function
+  | Keeper_runtime_failure_route.Rotate_now
+      { rotate =
+          ( Keeper_runtime_failure_route.Auth_failed
+          | Keeper_runtime_failure_route.Model_unavailable
+          | Keeper_runtime_failure_route.Refusal_body_not_received
+          | Keeper_runtime_failure_route.Generation_repeated
+          | Keeper_runtime_failure_route.Attempt_rejected )
+      } -> true
+  | Keeper_runtime_failure_route.Rotate_now
+      { rotate =
+          ( Keeper_runtime_failure_route.Resumable_cli_session
+          | Keeper_runtime_failure_route.Candidates_filtered
+          | Keeper_runtime_failure_route.Runtime_exhausted
+          | Keeper_runtime_failure_route.No_progress_empty
+          | Keeper_runtime_failure_route.No_progress_thinking_only
+          | Keeper_runtime_failure_route.No_progress_truncated )
+      }
+  | Keeper_runtime_failure_route.Retry_after_observed _
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> false
+
+let route_of error =
+  Keeper_runtime_failure_route.route_of_error
+    ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+    error
+
+let test_walk_rotates_where_the_route_says_it_does () =
+  let claimed =
+    List.filter
+      (fun (_label, error, _count) -> route_says_this_walk_rotates (route_of error))
+      census_rows
+  in
+  (* The rows this test exists for. Without them in [claimed] the loop below
+     passes by checking nothing. *)
+  List.iter
+    (fun label ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s is routed as a same-turn rotation" label)
+        true
+        (List.exists (fun (claimed_label, _, _) -> String.equal claimed_label label) claimed))
+    [ "api:auth_error"
+    ; "provider:authorization_error"
+    ; "api:not_found"
+    ; "provider:not_found"
+    ];
+  List.iter
+    (fun (label, error, _count) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s: the route rotates, so the walk reaches the second candidate" label)
+        true
+        (rotates error))
+    claimed
+
+let test_request_refusal_preserves_retry_authority () =
+  let refusal = Agent_core.Error.Api
+      (Agent_core.Retry.classify_error ~retry_after_header:None ~status:400
+        ~body:{|{"error":"The prompt is too long: 1054907, model maximum context length: 1048576 (ref: measured-refusal)"}|}) in
+  (match refusal with
+   | Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+       {reason=Agent_core.Retry.Unknown_invalid_request; _}) -> ()
+   | _ -> Alcotest.fail "provider prose was reclassified as capacity");
+  List.iter (fun (label, allow_retry, effect_disposition, expected) ->
+    let attempts = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"request-refusal" ~runtime_id_of:Fun.id
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> allow_retry)
+      ~emit_runtime_manifest:emit_manifest_ignored
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [runtime_id];
+        ( (if candidate = first_candidate then Error refusal else Ok runtime_id)
+        , None, effect_disposition, Masc.Keeper_attempt_dispatch.Dispatched ))
+      [first_candidate; second_candidate] in
+    Alcotest.(check int) (label ^ " candidate attempts") expected (List.length !attempts);
+    Alcotest.(check bool) (label ^ " served by next candidate") (expected = 2)
+      (result = Ok second_candidate))
+    [ "safe refusal", true, Masc.Keeper_provider_attempt_effect.No_effect_observed, 2
+    ; "caller forbids retry", false, Masc.Keeper_provider_attempt_effect.No_effect_observed, 1
+    ; "effect already attempted", true, Masc.Keeper_provider_attempt_effect.Effect_attempted, 1
+    ; "effect unknown", true, Masc.Keeper_provider_attempt_effect.Observation_unavailable, 1 ];
+  let attempts = ref 0 in
+  let result = Driver.For_testing.attempt_runtime_candidates
+    ~runtime_id:"all-refused" ~runtime_id_of:Fun.id
+    ~emit_runtime_manifest:emit_manifest_ignored
+    ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+      incr attempts;
+      (Error refusal, None, Masc.Keeper_provider_attempt_effect.No_effect_observed,
+       Masc.Keeper_attempt_dispatch.Dispatched))
+    [first_candidate; second_candidate] in
+  Alcotest.(check int) "each declared candidate is tried once" 2 !attempts;
+  Alcotest.(check bool) "last refusal keeps its original typed cause" true
+    (result = Error refusal)
+
 let () =
   Alcotest.run
     "keeper_rotation_eligibility_census"
     [ ( "census"
-      , [ Alcotest.test_case "report" `Quick test_census_report
+      , [ Alcotest.test_case "request refusal respects effect and caller authority" `Quick
+            test_request_refusal_preserves_retry_authority
+        ; Alcotest.test_case "report" `Quick test_census_report
         ; Alcotest.test_case
             "rows match baseline"
             `Quick
@@ -358,5 +494,9 @@ let () =
             "rotation matches measured baseline"
             `Quick
             test_rotation_matches_baseline
+        ; Alcotest.test_case
+            "the walk rotates where the failure route says it does"
+            `Quick
+            test_walk_rotates_where_the_route_says_it_does
         ] )
     ]

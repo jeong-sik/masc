@@ -63,19 +63,36 @@ let identity_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
 ;;
 
-(* Whether this install already has a client for a provider, and never which
-   one. A screen showing the list needs to know that an app is on file --
-   otherwise an operator retypes one they already entered -- and has no use
-   for the id or the secret. A directory that cannot be read reports as
-   nothing on file, because the alternative is a screen that refuses to draw
-   over a question it is not asking. *)
-let has_client ~base_path ~provider =
+(* What this install knows about the client a login would use, and never which
+   client it is. These states must stay distinct: a lapsed registration is
+   renewed automatically by the next login, while [none] means there is no
+   app to reuse, and an unreadable store must not invite an operator to write
+   over credentials that may still be there. An app the operator typed in is
+   written with an expiry of zero, so it remains [on_file]. *)
+type client_state =
+  | Client_on_file
+  | Client_lapsed
+  | Client_none
+  | Client_problem of string
+
+let client_state ~base_path ~provider ~now =
   match Store.load ~dir:(identity_dir ~base_path) ~provider with
-  | Ok (Some _) -> true
-  | Ok None | Error _ -> false
+  | Ok (Some credentials) when Store.secret_expired credentials ~now ->
+    Client_lapsed
+  | Ok (Some _) -> Client_on_file
+  | Ok None -> Client_none
+  | Error problem -> Client_problem problem
 ;;
 
-let declarations_json ~base_path =
+let client_state_to_json = function
+  | Client_on_file -> `Assoc [ "kind", `String "on_file" ]
+  | Client_lapsed -> `Assoc [ "kind", `String "lapsed" ]
+  | Client_none -> `Assoc [ "kind", `String "none" ]
+  | Client_problem problem ->
+    `Assoc [ "kind", `String "problem"; "problem", `String problem ]
+;;
+
+let declarations_json ~base_path ~now =
   `List
     (List.map
        (function
@@ -83,7 +100,8 @@ let declarations_json ~base_path =
            `Assoc
              [ "id", `String provider.Provider.id
              ; "label", `String provider.Provider.label
-             ; "has_client", `Bool (has_client ~base_path ~provider)
+             ; ( "client_state"
+               , client_state ~base_path ~provider ~now |> client_state_to_json )
              ]
          | Declarations.Unreadable { id; problem } ->
            `Assoc [ "id", `String id; "problem", `String problem ])

@@ -205,7 +205,7 @@ let test_walk_advances_and_keeps_every_failure_in_order () =
     let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       if String.equal runtime_id official_client_runtime
       then Ok {|{"verdict":"pass"}|}
-      else Error "spawn failed"
+      else Error (Masc.Fusion_official_client.Setup_failure (Provider_error "spawn failed"))
     in
     (* Both ids classify as official clients only when configured; the walk
        still records the refusal of the unknown one and advances. *)
@@ -235,7 +235,7 @@ let test_walk_advances_and_keeps_every_failure_in_order () =
 
 let test_walk_exhaustion_returns_every_failure () =
   with_runtime (fun () ->
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Error "quota" in
+    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Error (Masc.Fusion_official_client.Setup_failure (Provider_error "quota")) in
     match
       Cli_oneshot.walk ~validate:Result.ok ~on_failure:ignore
         ~runner
@@ -249,10 +249,11 @@ let test_walk_exhaustion_returns_every_failure () =
     | Ok _ -> fail "every slot must fail"
     | Error [ first; second ] ->
       (match first, second with
-       | ( Cli_oneshot.Execution_failed { runtime_id = first_id; detail }
+       | ( Cli_oneshot.Execution_failed { runtime_id = first_id; cause }
          , Cli_oneshot.Not_an_official_client { runtime_id = second_id } ) ->
          check string "first failure is the runner's" official_client_runtime first_id;
-         check string "runner detail is kept" "quota" detail;
+         check bool "runner cause is kept" true
+           (cause = Masc.Fusion_official_client.Setup_failure (Provider_error "quota"));
          check string "second failure is the refusal" "nope.not-configured" second_id
        | _ -> fail "failures must keep walk order and class")
     | Error failures -> failf "expected two failures, got %d" (List.length failures))

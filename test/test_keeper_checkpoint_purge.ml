@@ -439,33 +439,207 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_core.Checkpoint.turn_count
 
-let test_librarian_coordinates_block_endpoint_rewrite () =
-  let before = (checkpoint_fixture ()).Agent_core.Checkpoint.messages in
-  let after = [ text_message Types.User "retained" ] in
-  let invalidates coordinates_present rewritten =
-    match
-      Purge.rewrite_invalidates_librarian_coordinates
-        ~coordinates_present
-        ~before
-        ~after:rewritten
-    with
-    | Ok invalidates -> invalidates
-    | Error detail -> Alcotest.fail detail
-  in
-  Alcotest.(check bool)
-    "tracked endpoint rewrite is refused"
-    true
-    (invalidates true after);
-  Alcotest.(check bool)
-    "untracked rewrite remains available"
-    false
-    (invalidates false after);
-  Alcotest.(check bool)
-    "tracked stable endpoint remains available"
-    false
-    (invalidates true before)
+(* RFC librarian-lifecycle §10-2. Each case is the code counterpart of one
+   model in [specs/bug-models/LibrarianRead-purge-trim*.cfg]: the model says
+   what a purge that ignores the rule loses, the case says the rule here
+   refuses or moves the position the way the surviving model does. *)
+module Progress = Masc.Keeper_librarian_progress
+module Boundaries = Masc.Keeper_turn_boundaries
+module Range = Masc.Keeper_librarian_range
+module Window = Runtime_model_input_tail_window
+
+let fixture_trace = (checkpoint_fixture ()).Agent_core.Checkpoint.session_id
+let fixture_boundary_lines_seen = 7
+
+let rewritten_fixture () =
+  let checkpoint = checkpoint_fixture () in
+  match Purge.purge ~config:no_tail_config checkpoint with
+  | Error _ -> Alcotest.fail "checkpoint purge failed"
+  | Ok (purged, _) -> checkpoint.messages, purged.Agent_core.Checkpoint.messages
 ;;
 
+let atom_count messages = snd (Window.annotate messages)
+
+let atom_position messages =
+  match Boundaries.position_of_messages messages with
+  | Ok (Boundaries.Atom_history { end_atom; last_atom_digest }) -> end_atom, last_atom_digest
+  | Ok _ -> Alcotest.fail "fixture history has no atoms"
+  | Error detail -> Alcotest.fail detail
+;;
+
+(* A position [end_atom] atoms into [messages], as a round would have written
+   it: the digest is the opening of atom [end_atom - 1]. *)
+let progress_at ?(trace_id = fixture_trace) messages ~end_atom : Progress.t =
+  let last_atom_digest =
+    match Window.atom_opening_digest messages (end_atom - 1) with
+    | Some digest -> digest
+    | None -> Alcotest.failf "fixture history has no atom %d" (end_atom - 1)
+  in
+  { position = { trace_id; end_atom; last_atom_digest }
+  ; boundary_lines_seen = fixture_boundary_lines_seen
+  }
+;;
+
+let rebase ?(trace_id = fixture_trace) ~progress ~before ~after () =
+  Purge.librarian_rebase ~progress ~trace_id ~before ~after
+;;
+
+(* The fixture rewritten with its position at the end: the messages before
+   and after, the position given, and the pair the rebase answered. *)
+let rebased_at_end () =
+  let before, after = rewritten_fixture () in
+  let progress = progress_at before ~end_atom:(atom_count before) in
+  match rebase ~progress:(Some progress) ~before ~after () with
+  | Ok (Purge.Rebased { before = moved_from; after = moved_to }) ->
+    before, after, progress, moved_from, moved_to
+  | Ok Purge.No_progress -> Alcotest.fail "a position was given and none came back"
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+;;
+
+(* [LibrarianRead-purge-trim-buggy.cfg] loses an atom because the purge
+   keeps the position; [-by-turns-buggy.cfg] loses one because it asks
+   whether every turn ended, while a turn that saved and died leaves an atom
+   no line names. The rule asks about atoms and never reads the log: an
+   atom short of the end refuses, whatever the log says. *)
+let test_librarian_rebase_refuses_unread_atoms () =
+  let before, after = rewritten_fixture () in
+  let count = atom_count before in
+  let progress = progress_at before ~end_atom:(count - 1) in
+  match rebase ~progress:(Some progress) ~before ~after () with
+  | Error (Purge.Unread_atoms_present { end_atom; atom_count }) ->
+    Alcotest.(check int) "the position that refused" (count - 1) end_atom;
+    Alcotest.(check int) "against the history's atoms" count atom_count
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a rewrite over an unread atom was allowed"
+;;
+
+(* [LibrarianRead-purge-trim-at-end.cfg]: at the end, the position moves to
+   the end of the rewritten history. *)
+let test_librarian_rebase_moves_the_position_to_the_rewritten_end () =
+  let _before, after, progress, moved_from, moved_to = rebased_at_end () in
+  let end_atom, last_atom_digest = atom_position after in
+  Alcotest.(check bool) "the rebase hands back the position it moved" true
+    (moved_from == progress);
+  Alcotest.(check int) "end_atom is the rewritten end" end_atom
+    moved_to.position.end_atom;
+  Alcotest.(check string) "the digest opens the rewritten last atom" last_atom_digest
+    moved_to.position.last_atom_digest;
+  Alcotest.(check string) "the trace is unchanged" fixture_trace
+    moved_to.position.trace_id
+;;
+
+(* [LibrarianRead-purge-trim-counting-lines-buggy.cfg] loses an atom because
+   the purge raises the counted lines to the log's length and swallows a
+   restart line no round has seen. The count is not the purge's to set. *)
+let test_librarian_rebase_keeps_boundary_lines_seen () =
+  let _before, _after, _progress, _moved_from, moved_to = rebased_at_end () in
+  Alcotest.(check int) "boundary_lines_seen is untouched" fixture_boundary_lines_seen
+    moved_to.boundary_lines_seen
+;;
+
+(* [LibrarianRead-purge-trim-at-end-live.cfg]: the old end line stays in the
+   log after the purge. Against the rebased position it is not a cut point
+   (its end_atom is past the rewritten history), so the next round has
+   nothing to read and does not stop; against the old position the same
+   round stops on the mismatch, which is why a rewrite is never installed
+   without its rebase. *)
+let test_librarian_rebase_leaves_nothing_to_read () =
+  let before, after, old_progress, _moved_from, moved_to = rebased_at_end () in
+  let old_end_line =
+    match Boundaries.position_of_messages before with
+    | Ok position ->
+      { Boundaries.recorded_at = 100.0
+      ; event =
+          Boundaries.Turn_ended
+            { turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:1
+            ; history_at_start = Boundaries.Continued_history
+            ; position
+            }
+      }
+    | Error detail -> Alcotest.fail detail
+  in
+  let select progress =
+    Range.select
+      ~trace_id:fixture_trace
+      ~lines:[ 1, Ok old_end_line ]
+      ~progress:(Some progress)
+      ~messages:after
+      Range.All_unread
+  in
+  (match select moved_to with
+   | Range.Nothing_to_read -> ()
+   | Range.Read _ | Range.Baseline _ | Range.Position_in_other_trace _ ->
+     Alcotest.fail "the rebased position found something to read in a fully read history"
+   | Range.Stop _ -> Alcotest.fail "the rebased position stopped the round");
+  match select old_progress with
+  | Range.Stop (Range.Position_mismatch { atom_count = rewritten_atoms; _ }) ->
+    Alcotest.(check int) "the old position is past the rewritten history"
+      (atom_count after) rewritten_atoms
+  | Range.Stop (Range.Unreadable_line _) -> Alcotest.fail "the old end line was refused"
+  | Range.Nothing_to_read | Range.Read _ | Range.Baseline _ | Range.Position_in_other_trace _ ->
+    Alcotest.fail "the old position did not stop on the rewritten history"
+;;
+
+let test_librarian_rebase_without_a_position () =
+  let before, after = rewritten_fixture () in
+  match rebase ~progress:None ~before ~after () with
+  | Ok Purge.No_progress -> ()
+  | Ok (Purge.Rebased _) -> Alcotest.fail "no position was given and one came back"
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+;;
+
+let test_librarian_rebase_refuses_another_trace () =
+  let before, after = rewritten_fixture () in
+  let progress = progress_at ~trace_id:"trace-other" before ~end_atom:(atom_count before) in
+  match rebase ~progress:(Some progress) ~before ~after () with
+  | Error (Purge.Position_in_other_trace trace_id) ->
+    Alcotest.(check string) "names the position's trace" "trace-other" trace_id
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a position of another trace was moved"
+;;
+
+let test_librarian_rebase_refuses_a_position_beyond_the_history () =
+  let before, after = rewritten_fixture () in
+  let count = atom_count before in
+  (* A position one past the end, with the digest a round would have left at
+     the real end: the digest is not what refuses here. *)
+  let at_end = progress_at before ~end_atom:count in
+  let progress = { at_end with position = { at_end.position with end_atom = count + 1 } } in
+  match rebase ~progress:(Some progress) ~before ~after () with
+  | Error (Purge.Position_beyond_history { end_atom; atom_count }) ->
+    Alcotest.(check int) "the position that refused" (count + 1) end_atom;
+    Alcotest.(check int) "against the history's atoms" count atom_count
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a position past the history was moved"
+;;
+
+let test_librarian_rebase_refuses_another_history_at_the_same_end () =
+  let before, after = rewritten_fixture () in
+  let count = atom_count before in
+  let at_end = progress_at before ~end_atom:count in
+  let held = "another-history-digest" in
+  let progress =
+    { at_end with
+      position = { at_end.position with last_atom_digest = held }
+    }
+  in
+  let _, history = atom_position before in
+  match rebase ~progress:(Some progress) ~before ~after () with
+  | Error (Purge.Position_in_other_history digests) ->
+    Alcotest.(check string) "names the held digest" held digests.held;
+    Alcotest.(check string) "names the checkpoint digest" history digests.history
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a position from another same-length history was moved"
+;;
+
+let test_librarian_rebase_refuses_a_rewrite_with_no_atoms () =
+  let before, _after = rewritten_fixture () in
+  let progress = progress_at before ~end_atom:(atom_count before) in
+  match rebase ~progress:(Some progress) ~before ~after:[] () with
+  | Error Purge.Rewrite_leaves_no_atoms -> ()
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a position was moved into a history with no atom"
+;;
 
 let rec workspace_contents dir =
   Sys.readdir dir
@@ -513,8 +687,26 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
        | Error detail -> Alcotest.failf "fixture checkpoint: %s" detail);
       let original = In_channel.with_open_bin checkpoint_path In_channel.input_all in
       let before = workspace_contents owner_root in
-      let runtime_entries = Sys.readdir runtime_root |> Array.to_list in
-      let run_cli ?(from_cwd = false) args =
+      let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+      let write_progress ~end_atom =
+        match
+          Progress.write
+            ~keepers_dir:runtime_keepers_dir
+            ~keeper_id:checkpoint.agent_name
+            (progress_at checkpoint.messages ~end_atom)
+        with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (Progress.write_error_to_string error)
+      in
+      let read_progress () =
+        match
+          Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:checkpoint.agent_name
+        with
+        | Ok (Some progress) -> progress
+        | Ok None -> Alcotest.fail "the Librarian position is gone"
+        | Error error -> Alcotest.fail (Progress.read_error_to_string error)
+      in
+      let run_cli ?(from_cwd = false) ?(exit_code = 0) args =
         let runtime_base_path =
           Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit base_path)
         in
@@ -523,7 +715,12 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
           |> Config_dir_resolver.absolute_path
         in
         let child_env =
-          [ "HOME=" ^ owner_root; "XDG_CONFIG_HOME=" ^ owner_root ]
+          [ "HOME=" ^ owner_root
+          ; "XDG_CONFIG_HOME=" ^ owner_root
+            (* [--apply] takes the workspace writer lease; its file goes
+               under the test's own root, not the machine's temp dir. *)
+          ; "MASC_BASE_PATH_LEASE_DIR=" ^ owner_root
+          ]
           @ (if from_cwd then [] else [ "MASC_BASE_PATH=" ^ runtime_base_path ])
           @ (match cluster_name with
              | None -> []
@@ -533,6 +730,7 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
           Eio.Process.parse_out
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
             ~env:(Array.of_list child_env)
+            ~is_success:(Int.equal exit_code)
             (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
             ([ executable
              ; "--trace"; checkpoint.session_id; "--keep-recent"; "0"
@@ -541,7 +739,12 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
         Alcotest.(check bool) "CLI reports the producer checkpoint" true
           (List.mem ("checkpoint: " ^ checkpoint_path)
              (String.split_on_char '\n' output));
-        print_string output
+        print_string output;
+        output
+      in
+      let run_cli ?from_cwd ?exit_code args =
+        let (_ : string) = run_cli ?from_cwd ?exit_code args in
+        ()
       in
       run_cli [ "--base"; base_path ];
       Alcotest.(check (list (pair string (option string))))
@@ -555,10 +758,22 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
       Alcotest.(check (list (pair string (option string))))
         "no base or recorded default uses current workspace without writes"
         before (workspace_contents owner_root);
+      (* RFC librarian-lifecycle §10-2 at the CLI: a position short of the
+         end refuses the apply and writes nothing; a position at the end is
+         moved to the rewritten end after the checkpoint is installed. *)
+      let atoms = atom_count checkpoint.messages in
+      write_progress ~end_atom:(atoms - 1);
+      let before_refused = workspace_contents owner_root in
+      run_cli ~exit_code:1 [ "--base"; base_path; "--apply" ];
+      Alcotest.(check (list (pair string (option string))))
+        "a refused apply writes nothing"
+        before_refused (workspace_contents owner_root);
+      write_progress ~end_atom:atoms;
       run_cli [ "--base"; base_path; "--apply" ];
       let backup_dirs =
         Sys.readdir runtime_root |> Array.to_list
-        |> List.filter (fun name -> not (List.mem name runtime_entries))
+        |> List.filter (String.starts_with
+             ~prefix:("backups-checkpoint-purge-" ^ checkpoint.session_id ^ "-"))
       in
       let backup_dir = match backup_dirs with
         | [ name ] -> Filename.concat runtime_root name
@@ -577,7 +792,12 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
            Alcotest.(check int) "apply preserves turn watermark" checkpoint.turn_count
              purged.turn_count;
            Alcotest.(check string) "apply preserves session identity" checkpoint.session_id
-             purged.session_id))
+             purged.session_id;
+           let moved = read_progress () in
+           Alcotest.(check int) "apply moves the Librarian position to the rewritten end"
+             (atom_count purged.messages) moved.position.end_atom;
+           Alcotest.(check int) "apply leaves boundary_lines_seen alone"
+             fixture_boundary_lines_seen moved.boundary_lines_seen))
 
 let () =
   Alcotest.run
@@ -651,10 +871,44 @@ let () =
             "checkpoint fields pass through"
             `Quick
             test_checkpoint_fields_pass_through
-        ; Alcotest.test_case
-            "Librarian coordinates block endpoint rewrite"
+        ] )
+    ; ( "librarian rebase (RFC librarian-lifecycle §10-2)"
+      , [ Alcotest.test_case
+            "librarian_rebase_refuses_unread_atoms"
             `Quick
-            test_librarian_coordinates_block_endpoint_rewrite
+            test_librarian_rebase_refuses_unread_atoms
+        ; Alcotest.test_case
+            "librarian_rebase_moves_the_position_to_the_rewritten_end"
+            `Quick
+            test_librarian_rebase_moves_the_position_to_the_rewritten_end
+        ; Alcotest.test_case
+            "librarian_rebase_keeps_boundary_lines_seen"
+            `Quick
+            test_librarian_rebase_keeps_boundary_lines_seen
+        ; Alcotest.test_case
+            "librarian_rebase_leaves_nothing_to_read"
+            `Quick
+            test_librarian_rebase_leaves_nothing_to_read
+        ; Alcotest.test_case
+            "librarian_rebase_without_a_position"
+            `Quick
+            test_librarian_rebase_without_a_position
+        ; Alcotest.test_case
+            "librarian_rebase_refuses_another_trace"
+            `Quick
+            test_librarian_rebase_refuses_another_trace
+        ; Alcotest.test_case
+            "librarian_rebase_refuses_a_position_beyond_the_history"
+            `Quick
+            test_librarian_rebase_refuses_a_position_beyond_the_history
+        ; Alcotest.test_case
+            "librarian_rebase_refuses_another_history_at_the_same_end"
+            `Quick
+            test_librarian_rebase_refuses_another_history_at_the_same_end
+        ; Alcotest.test_case
+            "librarian_rebase_refuses_a_rewrite_with_no_atoms"
+            `Quick
+            test_librarian_rebase_refuses_a_rewrite_with_no_atoms
         ] )
     ; ( "cli"
       , [ Alcotest.test_case "default cluster: workspace dry-run and apply" `Quick

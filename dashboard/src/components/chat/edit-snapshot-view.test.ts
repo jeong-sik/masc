@@ -38,7 +38,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.unstubAllGlobals() })
 const ref = { _blob: { sha256: 'a'.repeat(64), bytes: 3 } }
 const receipt: ToolCallEntry = {
-  ts: 1, keeper: 'writer', tool: 'Edit', success: true, duration_ms: 3,
+  ts: 1, keeper: 'writer', tool: 'Edit', wire_outcome: 'ok', duration_ms: 3,
   input: {}, route_evidence: { descriptor_id: 'agent.edit_file' },
   output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1,
     edit_snapshots: { status: 'stored', before: ref, after: ref } }),

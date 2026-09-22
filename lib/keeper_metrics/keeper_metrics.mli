@@ -121,7 +121,6 @@ type t =
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
-  | MemoryLaneRejectedDraining
   | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight
@@ -191,6 +190,7 @@ type t =
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
   | TurnBoundaryFailures
+  | HistoryFragmentFailures
 
 val to_string : t -> string
 

@@ -19,6 +19,11 @@ type lane_configuration =
                 boot-time WARN was the only signal before this field, so an
                 operator could not tell "configured single" from "configured
                 double, one silently dropped" (lane audit W4). *)
+      ; declared_slots : string list
+            (** [slots] in the order the file writes them, admitted or not.
+                The two lists above are an admission reading: once a sibling
+                was rejected they cannot be put back in file order, and the
+                slot editor moves and drops by position. *)
       ; admission_error : string option
       }
   | Unconfigured of string

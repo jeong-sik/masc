@@ -80,7 +80,7 @@ let build_separated () : KAR.turn_prompt =
       turn_instructions_text ]
   in
   let dynamic_context = String.concat "\n\n" soft_parts in
-  { system_prompt = base_system_prompt; dynamic_context }
+  { system_prompt = base_system_prompt; dynamic_context; dynamic_context_for_tools = None }
 
 (* Comparison fixture with every segment in one string. *)
 let build_combined () : string =

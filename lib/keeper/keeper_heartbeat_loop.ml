@@ -536,6 +536,7 @@ let failure_reason_after_turn_status ~turn_fail_count current =
         | Keeper_registry.Stale_termination_storm _
         | Keeper_registry.Provider_runtime_error _
         | Keeper_registry.Turn_configuration_error _
+        | Keeper_registry.Official_client_recovery_required _
         | Keeper_registry.Fiber_unresolved _
         | Keeper_registry.Exception _
         | Keeper_registry.Turn_overflow_failure

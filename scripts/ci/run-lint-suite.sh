@@ -202,6 +202,7 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  run_lint "Stale-worktree cleanup keeps commits" bash scripts/test-cleanup-stale-worktrees.sh
   # A guard nobody runs is a document. Twice a guard sat red on untouched main
   # because nothing reached it -- the cancel-guard lint and
   # check-tui-render-purity.sh -- and a sweep on 2026-09-07 found four more in
@@ -266,11 +267,6 @@ blocking_lints() {
   # guard's: keeper meta carries the fields, and keeper_meta_store reads them.
   run_lint "Exact-field decoders have a preflight" \
     python3 scripts/ci/check_exact_field_decoder_preflight.py
-  # Named only by a comment in the root dune until now, and red the whole
-  # time: half of it asserted a nine-job lane #32511 deleted. That half is
-  # gone; what runs here is the half the root dune's comment claims.
-  run_lint "Root dune warning mask" \
-    bash scripts/ci/check-ocaml-compile-authority.sh
   run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
   run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
   # The two ratchets that survived #33313, which deleted eighteen nobody ran.

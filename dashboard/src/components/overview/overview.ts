@@ -1593,6 +1593,10 @@ function OverviewDomainSection({
           <div class="ov-fleet-stat"><span class=${`v ${stats.hot > 0 ? 'bad' : ''}`}>${stats.hot}</span><span class="k">압박</span></div>
           <div class="ov-fleet-stat"><span class="v">${stats.total}</span><span class="k">전체</span></div>
         </div>
+        <div class="ov-stat-row" data-testid="fleet-stat-session-recovery-required">
+          <span class="k">세션 복구 필요</span>
+          <span class=${`v ${(fleet?.sessionRecoveryRequired ?? 0) > 0 ? 'warn' : ''}`}>${fleetCountText(fleet?.sessionRecoveryRequired)}</span>
+        </div>
         ${keeperQueueSummary.hasProjection
           ? html`
               <div class="ov-stat-row" data-testid="fleet-queue-storage">

@@ -29,13 +29,38 @@ let tool_correction_lost_kind = "tool_correction_lost"
 let accept_rejected_kind = "accept_rejected"
 let terminal_effect_failed_kind = "terminal_effect_failed"
 
-(* Not exported: the five above are, because [test_keeper_terminal_reason_typed]
-   names them in its wire corpus. These two are not in that corpus -- it is
-   checked against a frozen string-policy oracle that predates the typed
-   enumeration and would read a new wire as [Unknown] -- so exporting them
-   would be surface nothing reads. *)
+(* The official-client recovery kind also feeds the receipt's typed terminal
+   reason and operator reason, so those consumers share this producer-owned
+   spelling. The remaining two kinds have no such consumer policy yet. *)
+let official_client_recovery_required_kind = "official_client_recovery_required"
 let host_stopped_turn_kind = "host_stopped_turn"
 let runtime_connection_closed_kind = "runtime_connection_closed"
+
+(** Why the durable official-client session refuses a new local claim.
+    This is distinct from the effect disposition of a provider attempt. *)
+type official_client_input_rejection =
+  | Bootstrap_floor_exceeded
+  | Effect_fenced
+
+type official_client_recovery = {
+  runtime_id : string;
+  recovery_id : string;
+  reason : official_client_input_rejection;
+}
+
+let official_client_input_rejection_to_string = function
+  | Bootstrap_floor_exceeded -> "bootstrap_floor_exceeded"
+  | Effect_fenced -> "effect_fenced"
+
+let official_client_input_rejection_of_string = function
+  | "bootstrap_floor_exceeded" -> Some Bootstrap_floor_exceeded
+  | "effect_fenced" -> Some Effect_fenced
+  | _ -> None
+
+let official_client_recovery_summary { runtime_id; recovery_id; reason } =
+  Printf.sprintf
+    "Official-client session for runtime %s requires recovery %s (%s); local claim refused before provider dispatch."
+    runtime_id recovery_id (official_client_input_rejection_to_string reason)
 
 type provider_rejection = {
   provider_label : string;
@@ -267,6 +292,7 @@ type fenced_cause =
   | Fenced_core of Keeper_request_failure_core.t
 
 and masc_internal_error =
+  | Official_client_recovery_required of official_client_recovery
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
@@ -447,6 +473,13 @@ let rec fenced_cause_to_json = function
       ]
 
 and masc_internal_error_to_json = function
+  | Official_client_recovery_required { runtime_id; recovery_id; reason } ->
+    `Assoc
+      [ "kind", `String official_client_recovery_required_kind
+      ; "runtime_id", `String runtime_id
+      ; "recovery_id", `String recovery_id
+      ; "reason", `String (official_client_input_rejection_to_string reason)
+      ]
   | Runtime_exhausted { runtime_id; reason } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -620,6 +653,8 @@ let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
   && response_shape = Some Accept_response_thinking_only
 
 let summary_of_masc_internal_error = function
+  | Official_client_recovery_required recovery ->
+    Some (official_client_recovery_summary recovery)
   | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
       let retry_after_suffix =
         match retry_after with
@@ -728,6 +763,7 @@ let summary_of_masc_internal_error = function
   | Gate_replay_repair_required _ -> None
 
 type wire_kind =
+  | Wire_official_client_recovery_required
   | Wire_runtime_exhausted
   | Wire_capacity_backpressure
   | Wire_resumable_cli_session
@@ -745,6 +781,7 @@ type wire_kind =
   | Wire_gate_replay_repair_required
 
 let wire_kind_of_masc_internal_error = function
+  | Official_client_recovery_required _ -> Wire_official_client_recovery_required
   | Runtime_exhausted _ -> Wire_runtime_exhausted
   | Capacity_backpressure _ -> Wire_capacity_backpressure
   | Resumable_cli_session _ -> Wire_resumable_cli_session
@@ -762,6 +799,7 @@ let wire_kind_of_masc_internal_error = function
   | Gate_replay_repair_required _ -> Wire_gate_replay_repair_required
 
 let wire_kind_to_string = function
+  | Wire_official_client_recovery_required -> official_client_recovery_required_kind
   | Wire_runtime_exhausted -> "runtime_exhausted"
   | Wire_capacity_backpressure -> capacity_backpressure_kind
   | Wire_resumable_cli_session -> "resumable_cli_session"
@@ -782,7 +820,8 @@ let wire_kind_to_string = function
    repeating the strings, so encoder and decoder cannot spell a kind
    differently. *)
 let all_wire_kinds =
-  [ Wire_runtime_exhausted
+  [ Wire_official_client_recovery_required
+  ; Wire_runtime_exhausted
   ; Wire_capacity_backpressure
   ; Wire_resumable_cli_session
   ; Wire_accept_rejected
@@ -819,6 +858,7 @@ let kind_of_masc_internal_error error =
 ;;
 
 let runtime_id_of_masc_internal_error = function
+  | Official_client_recovery_required { runtime_id; _ }
   | Runtime_exhausted { runtime_id; _ }
   | Capacity_backpressure { runtime_id; _ }
   | Resumable_cli_session { runtime_id; _ }
@@ -895,6 +935,7 @@ let accept_no_progress_retry_kind = function
       } ->
     Some `Truncated_no_progress
   | Accept_rejected _
+  | Official_client_recovery_required _
   | Runtime_exhausted _
   | Capacity_backpressure _
   | Resumable_cli_session _
@@ -1167,6 +1208,18 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
                 Tool_correction_lost
                   { runtime_id; effect_disposition; reject_count; cause })
              (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind official_client_recovery_required_kind
+             && exact_fields [ "kind"; "runtime_id"; "recovery_id"; "reason" ] fields ->
+        (match string_opt_of_assoc "runtime_id" json,
+               string_opt_of_assoc "recovery_id" json,
+               string_opt_of_assoc "reason" json with
+         | Some runtime_id, Some recovery_id, Some reason
+           when String.trim runtime_id <> "" && String.trim recovery_id <> "" ->
+           Option.map
+             (fun reason -> Official_client_recovery_required { runtime_id; recovery_id; reason })
+             (official_client_input_rejection_of_string reason)
          | _ -> None)
       | Some (`String kind)
         when String.equal kind host_stopped_turn_kind

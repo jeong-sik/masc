@@ -161,6 +161,19 @@ type table_removal =
           removes only a table that has its own header. *)
 
 val remove_table : string -> path:string -> table_removal
+
+type table_rename =
+  | Table_renamed of string
+  | Table_rename_absent
+  | Table_rename_conflict
+
+val rename_table : string -> path:string -> to_path:string -> table_rename
+(** Rewrite the header of the standard table at [path] to name [to_path],
+    leaving its body and the comments around it untouched. [Table_rename_absent]
+    when the file has no such header -- an inline or dotted declaration has
+    none to rewrite -- and [Table_rename_conflict] when it already declares
+    [to_path], which renaming onto would declare the same table twice and fail
+    the whole load. *)
 (** Drop the standard table [[path]]: its header, its body, and any table named
     under its path. Comments above the header and a comment block documenting
     the next header stay where they are, for the reasons

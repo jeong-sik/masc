@@ -19,7 +19,9 @@ type editable_field =
 let editable_fields =
   [ Direct ("runtime_id", [ "execution"; "selected_runtime_id" ])
   ; Direct ("mention_targets", [ "workspace"; "mention_targets" ])
+  ; Direct ("board_interests", [ "workspace"; "board_interests" ])
   ; Direct ("activation_mode", [ "activation_mode" ])
+  ; Direct ("input_policy", [ "input_policy" ])
   ; Direct ("max_context_override", [ "max_context_override" ])
   ; Direct ("sandbox_profile", [ "sandbox_profile" ])
   ; Direct ("network_mode", [ "network_mode" ])
@@ -470,6 +472,11 @@ let view_lines ~sanitize json =
   ; editable_value_row "Runtime"
       (fun () -> string_value (at [ "execution"; "selected_runtime_id" ]))
   ; editable_value_row "Activation" (fun () -> string_value (at [ "activation_mode" ]))
+  ; editable_value_row "Context policy" (fun () ->
+      match at [ "input_policy" ] with
+      | Some (`String "small") -> "Small (Agent Core)"
+      | Some (`String "wide") -> "Wide (Agent Core)"
+      | value -> string_value value)
   ; editable_value_row "Context override"
       (fun () -> int_override_value (at [ "max_context_override" ]))
   ; editable_value_row "Sandbox / network"
@@ -479,6 +486,11 @@ let view_lines ~sanitize json =
           (string_value (at [ "network_mode" ])))
   ; editable_value_row "Mention targets"
       (fun () -> string_list_value (at [ "workspace"; "mention_targets" ]))
+  ; editable_value_row "Board interests"
+      (fun () ->
+        match at [ "workspace"; "board_interests" ] with
+        | Some (`List []) -> "Targetless discovery off"
+        | value -> string_list_value value)
   ; editable_value_row "Skills"
       (fun () -> skill_selection_value (at [ "skills"; "names" ]))
   ; ""

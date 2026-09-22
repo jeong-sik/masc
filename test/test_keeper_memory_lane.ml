@@ -7,12 +7,9 @@
 module Lane = Masc.Keeper_memory_lane
 module Keeper_lane = Masc.Keeper_lane
 module Librarian_runtime = Masc.Keeper_librarian_runtime
-module Memory_current = Masc.Keeper_memory_os_current
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
 module Queue_refresh = Masc.Keeper_librarian_queue_refresh
 module Queue_signal = Masc.Keeper_librarian_queue_signal
-
-let initial_eio_context = Eio_context.snapshot_state ()
 
 exception Test_boom
 exception Cancel_lane_test
@@ -56,15 +53,13 @@ let run_post_turn
     ~meta
     ~turn
     ~agent_core_turn_count:1
-    ~tool_observations:[]
-    ~librarian_messages:[]
     ~checkpoint_owner
     ~post_turn_t0:(Time_compat.now ())
     ~inference_telemetry:None
     ()
 ;;
 
-let test_checkpoint_owner_selects_one_librarian_producer () =
+let test_either_checkpoint_owner_wakes_the_durable_consumer () =
   Lane.For_testing.reset ();
   let root = temp_dir "test-post-turn-owner-" in
   let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
@@ -132,16 +127,12 @@ let test_checkpoint_owner_selects_one_librarian_producer () =
          (List.rev !wakes);
        let official_name = "official-client-owner" in
        let official_meta = make_meta official_name in
-       (match
-          Lane.drain_and_join_librarian
+       Alcotest.(check (option int))
+         "official-client lane has no work before its first turn"
+         None
+         (Lane.For_testing.pending
             ~base_path:config.base_path
-            ~keeper_name:official_name
-        with
-        | Ok Lane.No_librarian_work -> ()
-        | Ok Lane.Librarian_drained ->
-          Alcotest.fail "empty official-client lane reported completed work"
-        | Error error ->
-         Alcotest.fail (Lane.librarian_drain_error_to_string error));
+            ~keeper_name:official_name);
        run_post_turn
          ~checkpoint_owner:Runtime_execution.Official_client
          ~config
@@ -149,8 +140,8 @@ let test_checkpoint_owner_selects_one_librarian_producer () =
          ~turn:1;
        Unix.putenv env_key "false";
        Alcotest.(check bool)
-         "official client retains direct evidence"
-         true
+         "official client hands over no direct evidence"
+         false
          (Queue_refresh.For_testing.attempt_remembered
             ~base_path:config.base_path
             ~keeper_name:official_name
@@ -160,8 +151,8 @@ let test_checkpoint_owner_selects_one_librarian_producer () =
             ~sources_changed:false
             ~trigger:Librarian_runtime.Queue_changed);
        Alcotest.(check (list (pair string string)))
-         "official client does not emit a durable wake"
-         [ config.base_path, core_name ]
+         "official client emits one durable wake as well"
+         [ config.base_path, core_name; config.base_path, official_name ]
          (List.rev !wakes))
 ;;
 
@@ -178,8 +169,6 @@ let test_inline_when_uninitialized () =
   | Lane.Submitted -> Alcotest.fail "expected Ran_inline, got Submitted"
   | Lane.Coalesced -> Alcotest.fail "expected Ran_inline, got Coalesced"
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
-  | Lane.Rejected_draining ->
-    Alcotest.fail "expected Ran_inline, got Rejected_draining"
 ;;
 
 (* A raising unit in the inline path is contained and returns Ran_inline. *)
@@ -193,35 +182,6 @@ let test_inline_contains_raise () =
   | Lane.Submitted -> Alcotest.fail "expected Ran_inline, got Submitted"
   | Lane.Coalesced -> Alcotest.fail "expected Ran_inline, got Coalesced"
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
-  | Lane.Rejected_draining ->
-    Alcotest.fail "expected Ran_inline, got Rejected_draining"
-;;
-
-(* The startup inline fallback is still behind the lifecycle fence. A failed
-   launch closes Librarian admission before the long-lived executor switch is
-   installed, so falling back to inline execution must not reopen it. *)
-let test_inline_rejects_draining_lifecycle () =
-  Lane.For_testing.reset ();
-  let ran = ref false in
-  (match
-     Lane.drain_and_join_librarian
-       ~base_path
-       ~keeper_name:"inline-draining"
-   with
-   | Ok Lane.No_librarian_work -> ()
-   | Ok Lane.Librarian_drained ->
-     Alcotest.fail "empty inline drain reported completed work"
-   | Error error -> Alcotest.fail (Lane.librarian_drain_error_to_string error));
-  (match
-     Lane.submit
-       ~base_path
-       ~keeper_name:"inline-draining"
-       (fun () -> ran := true)
-   with
-   | Lane.Rejected_draining -> ()
-   | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
-     Alcotest.fail "inline fallback bypassed the lifecycle fence");
-  Alcotest.(check bool) "draining inline unit did not run" false !ran
 ;;
 
 (* Two units for the same keeper run one after another: the second only starts
@@ -435,16 +395,12 @@ let test_releases_on_cancel () =
           | Lane.Submitted -> ()
           | Lane.Coalesced -> Alcotest.fail "first cancel unit unexpectedly coalesced"
           | Lane.Ran_inline -> Alcotest.fail "cancel test unexpectedly ran inline"
-          | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped"
-          | Lane.Rejected_draining ->
-            Alcotest.fail "cancel test unexpectedly crossed a drain boundary");
+          | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped");
          (match latest with
           | Lane.Submitted -> ()
           | Lane.Coalesced -> Alcotest.fail "first latest unit unexpectedly coalesced"
           | Lane.Ran_inline -> Alcotest.fail "latest cancel unit unexpectedly ran inline"
-          | Lane.Dropped -> Alcotest.fail "latest cancel unit unexpectedly dropped"
-          | Lane.Rejected_draining ->
-            Alcotest.fail "latest cancel unit unexpectedly crossed a drain boundary");
+          | Lane.Dropped -> Alcotest.fail "latest cancel unit unexpectedly dropped");
          Eio.Promise.await started;
          Eio.Switch.fail sw Cancel_lane_test))
    with
@@ -456,195 +412,14 @@ let test_releases_on_cancel () =
   | None -> Alcotest.fail "keeper entry missing after cancel"
 ;;
 
-let test_keeper_shutdown_drains_and_joins_librarian () =
+(* A Keeper purge is the one thing that stops a unit early (RFC
+   librarian-lifecycle section 8). It cancels the running unit, waits until
+   the lane has exited, and leaves no fence behind: the next submission is
+   accepted and runs. *)
+let test_purge_cancels_running_unit_and_leaves_no_fence () =
   Lane.For_testing.reset ();
   let cancelled = ref false in
-  let current_completed = ref false in
-  let latest_completed = ref false in
-  let raced_after_drain_ran = ref false in
-  let reopened_completed = ref false in
-  Eio_main.run (fun _env ->
-    Eio.Switch.run (fun sw ->
-      Lane.init ~sw;
-      let started, set_started = Eio.Promise.create () in
-      let release, set_release = Eio.Promise.create () in
-      let submitted =
-        Lane.submit
-          ~base_path
-          ~keeper_name:"shutdown-owner"
-          (fun () ->
-             Eio.Promise.resolve set_started ();
-             try
-               Eio.Promise.await release;
-               current_completed := true
-             with
-             | Eio.Cancel.Cancelled _ as exn ->
-               cancelled := true;
-               raise exn)
-      in
-      (match submitted with
-       | Lane.Submitted -> ()
-       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
-       | Lane.Rejected_draining ->
-         Alcotest.fail "shutdown Librarian was not submitted");
-      Eio.Promise.await started;
-      (match
-         Lane.submit
-           ~base_path
-           ~keeper_name:"shutdown-owner"
-           (fun () -> latest_completed := true)
-       with
-       | Lane.Submitted -> ()
-       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
-       | Lane.Rejected_draining ->
-         Alcotest.fail "latest Librarian unit was not submitted");
-      let joined, set_joined = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
-        Eio.Promise.resolve
-          set_joined
-          (Lane.drain_and_join_librarian
-             ~base_path
-             ~keeper_name:"shutdown-owner"));
-      Eio.Fiber.yield ();
-      (match
-         Lane.submit
-           ~base_path
-           ~keeper_name:"shutdown-owner"
-           (fun () -> raced_after_drain_ran := true)
-       with
-       | Lane.Rejected_draining -> ()
-       | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
-         Alcotest.fail "post-drain submission crossed the lifecycle boundary");
-      (match Lane.begin_librarian_lifecycle ~base_path ~keeper_name:"shutdown-owner" with
-       | Error Lane.Librarian_drain_still_active -> ()
-       | Ok () -> Alcotest.fail "new lifecycle opened while the prior drain was active");
-      Alcotest.(check bool)
-        "join waits for the accepted current unit"
-        true
-        (Option.is_none (Eio.Promise.peek joined));
-      Alcotest.(check bool) "provider scope was not cancelled" false !cancelled;
-      Eio.Promise.resolve set_release ();
-      (match Eio.Promise.await joined with
-       | Ok Lane.Librarian_drained -> ()
-       | Ok Lane.No_librarian_work -> Alcotest.fail "shutdown missed active Librarian"
-       | Error error -> Alcotest.fail (Lane.librarian_drain_error_to_string error));
-      Alcotest.(check bool) "current unit completed" true !current_completed;
-      Alcotest.(check bool) "accepted latest unit completed" true !latest_completed;
-      Alcotest.(check bool)
-        "racing post-drain unit did not run"
-        false
-        !raced_after_drain_ran;
-      Alcotest.(check bool) "provider scope stayed uncancelled" false !cancelled;
-      Alcotest.(check (option int))
-        "terminal join drained all Librarian work"
-        (Some 0)
-        (Lane.For_testing.pending
-           ~base_path
-           ~keeper_name:"shutdown-owner");
-      (match
-         Lane.submit
-           ~base_path
-           ~keeper_name:"shutdown-owner"
-           (fun () -> Alcotest.fail "closed lifecycle accepted later work")
-       with
-       | Lane.Rejected_draining -> ()
-       | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
-         Alcotest.fail "terminal drain fence reopened without a new lifecycle");
-      (match Lane.begin_librarian_lifecycle ~base_path ~keeper_name:"shutdown-owner" with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail (Lane.lifecycle_open_error_to_string error));
-      let reopened_done, set_reopened_done = Eio.Promise.create () in
-      (match
-         Lane.submit
-           ~base_path
-           ~keeper_name:"shutdown-owner"
-           (fun () ->
-              reopened_completed := true;
-              Eio.Promise.resolve set_reopened_done ())
-       with
-       | Lane.Submitted -> ()
-       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
-       | Lane.Rejected_draining ->
-         Alcotest.fail "new lifecycle could not submit Librarian work");
-      Eio.Promise.await reopened_done;
-      Alcotest.(check bool) "new lifecycle work completed" true !reopened_completed))
-;;
-
-let test_empty_drain_fences_late_submission () =
-  Lane.For_testing.reset ();
-  let late_ran = ref false in
-  Eio_main.run (fun _env ->
-    Eio.Switch.run (fun sw ->
-      Lane.init ~sw;
-      (match
-         Lane.drain_and_join_librarian
-           ~base_path
-           ~keeper_name:"empty-drain-owner"
-       with
-       | Ok Lane.No_librarian_work -> ()
-       | Ok Lane.Librarian_drained ->
-         Alcotest.fail "empty drain reported completed work"
-       | Error error ->
-         Alcotest.fail (Lane.librarian_drain_error_to_string error));
-      (match
-         Lane.submit
-           ~base_path
-           ~keeper_name:"empty-drain-owner"
-           (fun () -> late_ran := true)
-       with
-       | Lane.Rejected_draining -> ()
-       | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
-         Alcotest.fail "empty drain left no lifecycle fence");
-      Alcotest.(check bool) "late empty-drain unit did not run" false !late_ran))
-;;
-
-let test_drain_reports_parent_cancellation () =
-  Lane.For_testing.reset ();
-  Eio_main.run (fun _env ->
-    Eio.Switch.run (fun _root_sw ->
-      (try
-         Eio.Switch.run (fun executor_sw ->
-           Lane.init ~sw:executor_sw;
-           let started, set_started = Eio.Promise.create () in
-           let never, _set_never = Eio.Promise.create () in
-           (match
-              Lane.submit
-                ~base_path
-                ~keeper_name:"cancelled-drain-owner"
-                (fun () ->
-                   Eio.Promise.resolve set_started ();
-                   Eio.Promise.await never)
-            with
-            | Lane.Submitted -> ()
-            | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
-           | Lane.Rejected_draining ->
-              Alcotest.fail "cancellation fixture was not submitted");
-           Eio.Promise.await started;
-           Eio.Switch.fail executor_sw Cancel_lane_test)
-       with
-       | Cancel_lane_test -> ());
-      (* The owner and its cleanup have already finished. Shutdown must still
-         observe that exact terminal receipt instead of treating the detached
-         entry as ownerless success. *)
-      match
-        Lane.drain_and_join_librarian
-          ~base_path
-          ~keeper_name:"cancelled-drain-owner"
-      with
-      | Error (Lane.Librarian_interrupted (Keeper_lane.Cancelled_by_parent _)) -> ()
-      | Error error ->
-        Alcotest.failf
-          "unexpected typed drain error: %s"
-          (Lane.librarian_drain_error_to_string error)
-      | Ok Lane.No_librarian_work ->
-        Alcotest.fail "cancelled active drain was reported as no work"
-      | Ok Lane.Librarian_drained ->
-        Alcotest.fail "parent-cancelled drain was reported as completed"))
-;;
-
-let test_abort_cancels_without_joining_provider_work () =
-  Lane.For_testing.reset ();
-  let cancelled = ref false in
+  let after_purge_ran = ref false in
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
@@ -653,7 +428,7 @@ let test_abort_cancels_without_joining_provider_work () =
       (match
          Lane.submit
            ~base_path
-           ~keeper_name:"crashed-owner"
+           ~keeper_name:"purged-owner"
            (fun () ->
               Eio.Promise.resolve set_started ();
               try Eio.Promise.await never with
@@ -662,33 +437,146 @@ let test_abort_cancels_without_joining_provider_work () =
                 raise exn)
        with
        | Lane.Submitted -> ()
-       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
-       | Lane.Rejected_draining ->
-         Alcotest.fail "crash-abort Librarian was not submitted");
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+         Alcotest.fail "purge fixture was not submitted");
       Eio.Promise.await started;
-      (match Lane.abort_librarian ~base_path ~keeper_name:"crashed-owner" with
-       | Ok Lane.Librarian_abort_requested
-       | Ok Lane.Librarian_abort_already_in_progress -> ()
-       | Ok Lane.Librarian_abort_idle ->
-         Alcotest.fail "active crash-abort Librarian was reported idle"
-       | Ok (Lane.Librarian_abort_already_exited _) ->
-         Alcotest.fail "active crash-abort Librarian had already exited"
-       | Ok (Lane.Librarian_abort_committed_with_failure exn) ->
-         Alcotest.failf
-           "crash-abort cancellation callback failed: %s"
-           (Printexc.to_string exn)
-       | Error error -> Alcotest.fail (Lane.librarian_abort_error_to_string error));
-      match Lane.drain_and_join_librarian ~base_path ~keeper_name:"crashed-owner" with
-      | Error (Lane.Librarian_interrupted Keeper_lane.Shutdown_requested) ->
-        Alcotest.(check bool) "provider work was cancelled" true !cancelled
-      | Error error ->
-        Alcotest.failf
-          "unexpected crash-abort receipt: %s"
-          (Lane.librarian_drain_error_to_string error)
-      | Ok Lane.No_librarian_work ->
-        Alcotest.fail "crash-abort lost the exact owner receipt"
-      | Ok Lane.Librarian_drained ->
-        Alcotest.fail "cancelled crash-abort work was reported drained"))
+      (match
+         Lane.cancel_and_await_librarian ~base_path ~keeper_name:"purged-owner"
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail (Lane.purge_cancel_error_to_string error));
+      Alcotest.(check bool) "the running unit was cancelled" true !cancelled;
+      Alcotest.(check (option int))
+        "purge left no pending work"
+        (Some 0)
+        (Lane.For_testing.pending ~base_path ~keeper_name:"purged-owner");
+      let finished, set_finished = Eio.Promise.create () in
+      (match
+         Lane.submit
+           ~base_path
+           ~keeper_name:"purged-owner"
+           (fun () ->
+              after_purge_ran := true;
+              Eio.Promise.resolve set_finished ())
+       with
+       | Lane.Submitted -> ()
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+         Alcotest.fail "submission after purge was not accepted");
+      Eio.Promise.await finished;
+      Alcotest.(check bool) "a unit submitted after purge runs" true !after_purge_ran))
+;;
+
+(* Real lane cancellation must be followed by deletion under the same
+   exclusion; a second purge cannot release the first one's ownership. *)
+let test_purge_bracket_excludes_late_wakes () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "false") @@ fun () ->
+  Lane.For_testing.reset ();
+  let keeper_name = "purge-bracket" in
+  let root = temp_dir "purge-bracket-" in
+  Fun.protect ~finally:(fun () -> remove_tree root) (fun () ->
+    Eio_main.run @@ fun env ->
+    Masc_test_deps.init_eio_clock env;
+    Eio.Switch.run @@ fun sw ->
+    Lane.init ~sw;
+    let config = Masc.Workspace.default_config base_path in
+    let started, start = Eio.Promise.create () in
+    let never, _ = Eio.Promise.create () in
+    let cancelled = ref false in
+    ignore (Lane.submit ~base_path ~keeper_name (fun () ->
+      Eio.Promise.resolve start ();
+      try Eio.Promise.await never with Eio.Cancel.Cancelled _ as exn ->
+        cancelled := true;
+        Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+          ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+            Alcotest.fail "disabled observer reached model");
+        raise exn));
+    Eio.Promise.await started;
+    (match Domain.join (Domain.spawn (fun () ->
+       Eio_main.run (fun _env ->
+         Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+           Alcotest.fail "wrong-domain purge entered deletion")))) with
+     | Error Lane.Purge_cancel_wrong_domain -> ()
+     | _ -> Alcotest.fail "wrong-domain cancellation was not refused");
+    let deleting, begin_delete = Eio.Promise.create () in
+    let release, finish_delete = Eio.Promise.create () in
+    let path = Filename.concat root "progress" in
+    Out_channel.with_open_bin path (fun oc -> output_string oc "old");
+    let purge = Eio.Fiber.fork_promise ~sw (fun () ->
+      Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+        Alcotest.(check bool) "old work exited before deletion" true !cancelled;
+        Alcotest.(check bool) "old work published its final observation" true
+          (Option.is_some (Queue_refresh.last_measurement ~config ~keeper_name));
+        Queue_refresh.forget_measurement ~config ~keeper_name;
+        Sys.remove path;
+        Eio.Promise.resolve begin_delete ();
+        Eio.Promise.await release)) in
+    Eio.Promise.await deleting;
+    (match Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+       Alcotest.fail "concurrent purge entered deletion") with
+     | Error Lane.Purge_already_in_progress -> ()
+     | _ -> Alcotest.fail "concurrent purge was not refused");
+    (match Lane.submit ~base_path ~keeper_name (fun () ->
+       Out_channel.with_open_bin path (fun oc -> output_string oc "late")) with
+     | Lane.Dropped -> ()
+     | _ -> Alcotest.fail "late wake crossed purge exclusion");
+    Eio.Fiber.yield ();
+    Alcotest.(check bool) "late wake did not recreate deleted progress" false (Sys.file_exists path);
+    Alcotest.(check bool) "old observation cleared after quiescence" true
+      (Option.is_none (Queue_refresh.last_measurement ~config ~keeper_name));
+    Eio.Promise.resolve finish_delete ();
+    (match Eio.Promise.await purge with
+     | Ok (Ok ()) -> ()
+     | _ -> Alcotest.fail "purge did not finish");
+    (match Lane.submit ~base_path ~keeper_name (fun () ->
+       Out_channel.with_open_bin path (fun oc -> output_string oc "new")) with
+     | Lane.Submitted -> ()
+     | _ -> Alcotest.fail "purge exclusion remained after deletion");
+    Lane.For_testing.await_idle ~base_path ~keeper_name;
+    Alcotest.(check bool) "new identity can write after purge" true (Sys.file_exists path))
+;;
+
+let test_purge_bracket_releases_on_failure_and_cancellation () =
+  Lane.For_testing.reset ();
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  Lane.init ~sw;
+  let keeper_name = "purge-failure" in
+  (match Lane.with_librarian_purge ~base_path ~keeper_name (fun () -> Error "delete failed") with
+   | Ok (Error "delete failed") -> ()
+   | _ -> Alcotest.fail "deletion result was changed");
+  (match Lane.with_librarian_purge ~base_path ~keeper_name (fun () -> raise Test_boom) with
+   | exception Test_boom -> ()
+   | _ -> Alcotest.fail "deletion exception was swallowed");
+  let entered, enter = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let purge = Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun cc ->
+      Lane.with_librarian_purge ~base_path ~keeper_name (fun () ->
+        Eio.Promise.resolve enter cc;
+        Eio.Promise.await never))) in
+  let cc = Eio.Promise.await entered in
+  Eio.Cancel.cancel cc Cancel_lane_test;
+  (match Eio.Promise.await purge with
+   | Error (Eio.Cancel.Cancelled _) -> ()
+   | _ -> Alcotest.fail "purge cancellation was swallowed");
+  let ran = ref false in
+  (match Lane.submit ~base_path ~keeper_name (fun () -> ran := true) with
+   | Lane.Submitted -> ()
+   | _ -> Alcotest.fail "failed purge left an exclusion behind");
+  Lane.For_testing.await_idle ~base_path ~keeper_name;
+  Alcotest.(check bool) "lane accepts after failed/cancelled deletion" true !ran
+;;
+
+(* A cancellation lookup for an unused keeper creates no entry. *)
+let test_purge_with_nothing_running_returns_at_once () =
+  Lane.For_testing.reset ();
+  (match Lane.cancel_and_await_librarian ~base_path ~keeper_name:"never-ran" with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Lane.purge_cancel_error_to_string error));
+  Alcotest.(check (option int))
+    "purge did not create a lane entry"
+    None
+    (Lane.For_testing.pending ~base_path ~keeper_name:"never-ran")
 ;;
 
 (* Submitting against a finished executor switch must not leak the pending
@@ -714,383 +602,22 @@ let test_finished_switch_drops_without_leak () =
    | Lane.Dropped -> ()
    | Lane.Submitted -> Alcotest.fail "expected Dropped, got Submitted"
    | Lane.Coalesced -> Alcotest.fail "expected Dropped, got Coalesced"
-   | Lane.Ran_inline -> Alcotest.fail "expected Dropped, got Ran_inline"
-   | Lane.Rejected_draining ->
-     Alcotest.fail "expected Dropped, got Rejected_draining");
+   | Lane.Ran_inline -> Alcotest.fail "expected Dropped, got Ran_inline");
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 ->
-    let drain () =
-      Eio_main.run (fun _env ->
-        Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1")
-    in
-    (match drain () with
-     | Error (Lane.Librarian_interrupted (Keeper_lane.Failed _)) -> ()
-     | Error error ->
-       Alcotest.failf
-         "finished-switch drain returned an unexpected error: %s"
-         (Lane.librarian_drain_error_to_string error)
-     | Ok Lane.No_librarian_work ->
-       Alcotest.fail "finished-switch drop lost its terminal owner receipt"
-     | Ok Lane.Librarian_drained ->
-       Alcotest.fail "finished-switch drop was reported as completed");
-    (match Lane.begin_librarian_lifecycle ~base_path ~keeper_name:"k1" with
+    (* The dropped unit's lane already exited, so a purge has nothing to wait
+       for and must not hang on it. *)
+    (match
+       Eio_main.run (fun _env ->
+         Lane.cancel_and_await_librarian ~base_path ~keeper_name:"k1")
+     with
      | Ok () -> ()
      | Error error ->
-       Alcotest.fail
-         ("finished-switch receipt prevented lifecycle reopen: "
-          ^ Lane.lifecycle_open_error_to_string error));
-    (match drain () with
-     | Ok Lane.No_librarian_work -> ()
-     | Ok Lane.Librarian_drained ->
-       Alcotest.fail "reopened empty lifecycle retained stale completed work"
-     | Error error ->
        Alcotest.failf
-         "reopened lifecycle retained stale owner receipt: %s"
-         (Lane.librarian_drain_error_to_string error))
+         "finished-switch drop blocked a purge: %s"
+         (Lane.purge_cancel_error_to_string error))
   | Some n -> Alcotest.failf "pending leaked after finished switch submit: %d" n
   | None -> Alcotest.fail "keeper entry missing after finished switch submit"
-;;
-
-let test_accepting_reopen_clears_exited_owner_receipt () =
-  Lane.For_testing.reset ();
-  let finished_sw = ref None in
-  Eio_main.run (fun _env ->
-    Eio.Switch.run (fun sw ->
-      Lane.init ~sw;
-      finished_sw := Some sw));
-  let sw =
-    match !finished_sw with
-    | Some sw -> sw
-    | None -> Alcotest.fail "missing captured switch"
-  in
-  Lane.init ~sw;
-  (match Lane.submit ~base_path ~keeper_name:"accepting-reopen" (fun () -> raise Test_boom) with
-   | Lane.Dropped -> ()
-   | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline
-   | Lane.Rejected_draining ->
-     Alcotest.fail "finished executor did not drop the Librarian unit");
-  (* Reopen before a drain can change [Accepting] to [Draining]. This exact
-     ordering used to carry the prior failed receipt into the new lifecycle. *)
-  (match
-     Lane.begin_librarian_lifecycle
-       ~base_path
-       ~keeper_name:"accepting-reopen"
-   with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Lane.lifecycle_open_error_to_string error));
-  match
-    Lane.drain_and_join_librarian
-      ~base_path
-      ~keeper_name:"accepting-reopen"
-  with
-  | Ok Lane.No_librarian_work -> ()
-  | Ok Lane.Librarian_drained ->
-    Alcotest.fail "reopened lifecycle inherited completed prior work"
-  | Error error ->
-    Alcotest.failf
-      "reopened accepting lifecycle inherited stale owner receipt: %s"
-      (Lane.librarian_drain_error_to_string error)
-;;
-
-(* The Librarian setting is live while lane work is asynchronous. The
-   post-turn entrypoint must reject OFF/INVALID before submission, then fence
-   an already queued ON unit again before snapshot I/O when the setting changes
-   while it waits behind an in-flight unit. *)
-let test_post_turn_librarian_live_config_boundaries () =
-  Lane.For_testing.reset ();
-  let root = temp_dir "test-post-turn-librarian-gate-" in
-  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
-  let previous_env = Sys.getenv_opt env_key in
-  Fun.protect
-    ~finally:(fun () ->
-      (match previous_env with
-       | Some value -> Unix.putenv env_key value
-       | None -> Unix.putenv env_key "");
-      Config_dir_resolver.reset ();
-      Lane.For_testing.reset ();
-      remove_tree root)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Masc_test_deps.init_eio_clock env;
-      let config = Masc.Workspace.default_config root in
-      ignore (Masc.Workspace.init config ~agent_name:None);
-      Config_dir_resolver.reset ();
-      let failure_metric =
-        Keeper_metrics.(to_string MemoryOsLibrarianFailures)
-      in
-      let failures_before =
-        Masc.Otel_metric_store.metric_total failure_metric |> int_of_float
-      in
-      let cadence_entries_before =
-        Librarian_runtime.cadence_counter_entries ()
-      in
-      let expect_no_admission ~value ~keeper_name ~turn =
-        Unix.putenv env_key value;
-        let meta = make_meta keeper_name in
-        run_post_turn
-          ~checkpoint_owner:Runtime_execution.Official_client
-          ~config
-          ~meta
-          ~turn;
-        match
-          Lane.For_testing.pending
-            ~base_path:config.base_path
-            ~keeper_name
-        with
-        | None -> ()
-        | Some pending ->
-          Alcotest.failf
-            "config=%s created Librarian lane pending=%d"
-            value
-            pending
-      in
-      expect_no_admission ~value:"false" ~keeper_name:"gateoff" ~turn:1;
-      expect_no_admission ~value:"invalid" ~keeper_name:"gateinvalid" ~turn:2;
-      let expect_queued_fence ~poison_snapshot ~terminal_value ~keeper_name ~turn =
-        Lane.For_testing.reset ();
-        Eio.Switch.run @@ fun sw ->
-        Masc_test_deps.init_eio_clock ~sw env;
-        Lane.init ~sw;
-        let meta = make_meta keeper_name in
-        let keepers_dir =
-          Config_dir_resolver.keepers_dir_for_base_path
-            ~base_path:config.base_path
-        in
-        if poison_snapshot
-        then (
-          Fs_compat.mkdir_p keepers_dir;
-          Unix.mkdir
-            (Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
-            0o755);
-        Unix.putenv env_key "true";
-        let started, set_started = Eio.Promise.create () in
-        let release, set_release = Eio.Promise.create () in
-        let blocker =
-          Lane.submit
-            ~base_path:config.base_path
-            ~keeper_name
-            (fun () ->
-               Eio.Promise.resolve set_started ();
-               Eio.Promise.await release)
-        in
-        (match blocker with
-         | Lane.Submitted -> ()
-         | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
-         | Lane.Rejected_draining ->
-           Alcotest.fail "Librarian blocker was not submitted");
-        Eio.Promise.await started;
-        run_post_turn
-          ~checkpoint_owner:Runtime_execution.Official_client
-          ~config
-          ~meta
-          ~turn;
-        Alcotest.(check (option int))
-          "one running plus one queued Librarian unit"
-          (Some 2)
-          (Lane.For_testing.pending
-             ~base_path:config.base_path
-             ~keeper_name
-);
-        Unix.putenv env_key terminal_value;
-        Eio.Promise.resolve set_release ()
-      in
-      expect_queued_fence
-        ~poison_snapshot:true
-        ~terminal_value:"false"
-        ~keeper_name:"queuedoff"
-        ~turn:3;
-      expect_queued_fence
-        ~poison_snapshot:false
-        ~terminal_value:"invalid"
-        ~keeper_name:"queuedinvalid"
-        ~turn:4;
-      Alcotest.(check int)
-        "fenced work did not read invalid snapshots or emit failures"
-        failures_before
-        (Masc.Otel_metric_store.metric_total failure_metric |> int_of_float);
-      Alcotest.(check int)
-        "fenced work did not advance Librarian cadence"
-        cadence_entries_before
-        (Librarian_runtime.cadence_counter_entries ()))
-;;
-
-(* A drain that exceeds its timeout must report [Librarian_drain_timed_out]
-   instead of blocking keeper termination forever inside [Eio.Cancel.protect],
-   where no outer cancellation can interrupt the join (issue #33576). *)
-let test_drain_reports_timeout_when_owner_never_exits () =
-  Lane.For_testing.reset ();
-  let result = ref None in
-  Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      Eio_context.with_test_env
-        ~net:(Eio.Stdenv.net env)
-        ~clock:(Eio.Stdenv.clock env)
-        ~mono_clock:(Eio.Stdenv.mono_clock env)
-        ~sw
-        @@ fun () ->
-      Lane.init ~sw;
-      Lane.For_testing.set_drain_timeout_sec 0.3;
-      let started, set_started = Eio.Promise.create () in
-      (* Keep the resolver: after the drain reports its timeout we release the
-         parked unit so [Eio.Switch.run] is not blocked by it at teardown. *)
-      let park, release_park = Eio.Promise.create () in
-      (match
-         Lane.submit ~base_path ~keeper_name:"hung-owner" (fun () ->
-             Eio.Promise.resolve set_started ();
-             Eio.Promise.await park)
-       with
-       | Lane.Submitted -> ()
-       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
-       | Lane.Rejected_draining ->
-         Alcotest.fail "hung-owner unit was not submitted");
-      Eio.Promise.await started;
-      (* Mirror finish_lifecycle: the join runs inside Cancel.protect, so an
-         outer [with_timeout_exn] cannot cancel it (issue #33576). A regression
-         here therefore hangs until the test runner's own timeout kills it —
-         that is the failure mode this cap exists to remove. *)
-      Eio.Cancel.protect (fun () ->
-          result :=
-            Some
-              (Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
-                   Lane.drain_and_join_librarian
-                     ~base_path
-                     ~keeper_name:"hung-owner")));
-      Eio.Promise.resolve release_park ()));
-  match !result with
-  | None -> Alcotest.fail "drain never returned"
-  | Some (Error (Lane.Librarian_drain_timed_out seconds)) ->
-    Alcotest.(check (float 1e-6)) "cap elapsed" 0.3 seconds
-  | Some (Error error) ->
-    Alcotest.failf
-      "expected drain timeout, got: %s"
-      (Lane.librarian_drain_error_to_string error)
-  | Some (Ok Lane.No_librarian_work) ->
-    Alcotest.fail "drain lost the hung owner entirely"
-  | Some (Ok Lane.Librarian_drained) ->
-    Alcotest.fail "hung owner was reported as drained"
-;;
-
-let with_remembered_post_turn keeper_name f =
-  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
-  let module Refresh = Masc.Keeper_librarian_queue_refresh in
-  let root = temp_dir "test-librarian-pending-input-" in
-  let previous_fs = Fs_compat.get_fs_opt () in
-  let previous_context = Eio_context.snapshot_state () in
-  Lane.For_testing.reset ();
-  Eio_context.restore_state initial_eio_context;
-  Fun.protect
-    ~finally:(fun () ->
-      Eio_context.restore_state previous_context;
-      (match previous_fs with
-       | None -> Fs_compat.clear_fs ()
-       | Some fs -> Fs_compat.set_fs fs);
-      Config_dir_resolver.reset ();
-      Lane.For_testing.reset ();
-      remove_tree root)
-    (fun () ->
-      Masc_test_deps.with_process_env "MASC_CONFIG_DIR" None @@ fun () ->
-      Masc_test_deps.with_process_env
-        Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Masc_test_deps.init_eio_clock env;
-      (* A real runtime entry records Runtime_context_unavailable and returns
-         normally. No provider call or fake Memory reader is needed. *)
-      Alcotest.(check bool) "fixture has no provider network context" true
-        (Option.is_none (Eio_context.get_net_opt ()));
-      let config = Masc.Workspace.default_config root in
-      ignore (Masc.Workspace.init config ~agent_name:None);
-      Config_dir_resolver.reset ();
-      let meta = make_meta keeper_name in
-      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-      let keepers_dir =
-        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-      in
-      (match Memory_current.replace ~keepers_dir ~keeper_id:keeper_name
-          ~expected_revision:None ~now:200.
-          ~source:{ kind = Memory_current.Explicit_write; trace_id }
-          ~facts:[] () with
-       | Ok _ -> ()
-       | Error detail -> Alcotest.fail detail);
-      let snapshot_path =
-        Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
-      in
-      let valid_snapshot = Fs_compat.load_file snapshot_path in
-      run_post_turn ~checkpoint_owner:Runtime_execution.Official_client ~config ~meta ~turn:1;
-      let attempt () =
-        Refresh.For_testing.attempt_remembered
-             ~base_path:config.base_path ~keeper_name ~trace_id ~meta
-             ~sources_changed:false ~trigger:Librarian_runtime.Queue_changed
-      in
-      let runtime_entries () =
-        Memory_current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:10
-        |> List.filter (function
-          | Ok (Memory_current.Journal_failed
-                  { kind = Memory_current.Runtime_context_unavailable; _ }) -> true
-          | Ok _ -> false
-          | Error detail -> Alcotest.fail detail)
-        |> List.length
-      in
-      Alcotest.(check int) "no runtime entry during submission" 0 (runtime_entries ());
-      f ~config ~meta ~keepers_dir ~snapshot_path ~valid_snapshot ~attempt ~runtime_entries)
-;;
-
-let test_snapshot_read_failure_keeps_remembered_turn_pending () =
-  let keeper_name = "snapshot-read-retry" in
-  with_remembered_post_turn keeper_name
-    (fun ~config:_ ~meta:_ ~keepers_dir ~snapshot_path ~valid_snapshot ~attempt ~runtime_entries ->
-      Fs_compat.save_file snapshot_path "{ invalid snapshot\n";
-      Alcotest.(check bool) "actual snapshot decoder rejects the fixture" true
-        (Result.is_error
-           (Memory_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name));
-      Alcotest.(check bool) "remembered input remains available" true (attempt ());
-      Alcotest.(check int) "read failure did not enter runtime" 0 (runtime_entries ());
-      Fs_compat.save_file snapshot_path valid_snapshot;
-      Alcotest.(check bool) "remembered input remains available" true (attempt ());
-      Alcotest.(check int) "unchanged external wake enters after repair" 1 (runtime_entries ());
-      Alcotest.(check bool) "remembered input remains available" true (attempt ());
-      Alcotest.(check int) "runtime normal return suppresses unchanged wake" 1 (runtime_entries ()))
-;;
-
-let test_live_config_refusal_keeps_remembered_turn_pending value () =
-  with_remembered_post_turn ("config-retry-" ^ value)
-    (fun ~config:_ ~meta:_ ~keepers_dir:_ ~snapshot_path:_ ~valid_snapshot:_ ~attempt ~runtime_entries ->
-      Unix.putenv Env_config.KeeperMemoryOs.librarian_env_key value;
-      Alcotest.(check bool) "remembered input remains available" true (attempt ());
-      Alcotest.(check int) "live setting refused runtime entry" 0 (runtime_entries ());
-      Unix.putenv Env_config.KeeperMemoryOs.librarian_env_key "true";
-      Alcotest.(check bool) "remembered input remains available" true (attempt ());
-      Alcotest.(check int) "unchanged external wake enters after enabling" 1 (runtime_entries ());
-      Alcotest.(check bool) "remembered input remains available" true (attempt ());
-      Alcotest.(check int) "entered callback is not duplicated" 1 (runtime_entries ()))
-;;
-
-let test_handoff_read_failure_keeps_official_input_pending () =
-  let keeper_name = "handoff-snapshot-read-retry" in
-  with_remembered_post_turn keeper_name
-    (fun ~config ~meta ~keepers_dir ~snapshot_path ~valid_snapshot ~attempt ~runtime_entries ->
-      Fs_compat.save_file snapshot_path "{ invalid snapshot\n";
-      Alcotest.(check bool) "actual snapshot decoder rejects the handoff fixture" true
-        (Result.is_error
-           (Memory_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name));
-      let wakes = ref [] in
-      Fun.protect
-        ~finally:(fun () -> Queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ()))
-        (fun () ->
-          Queue_signal.install (fun ~base_path ~keeper_name ->
-            wakes := (base_path, keeper_name) :: !wakes);
-          run_post_turn ~checkpoint_owner:Runtime_execution.Masc_agent_core
-            ~config ~meta ~turn:2;
-          Alcotest.(check (list (pair string string))) "handoff requests the existing queue wake"
-            [config.base_path, keeper_name] (List.rev !wakes));
-      Alcotest.(check bool) "first wake handles pending official input" true (attempt ());
-      Alcotest.(check int) "decoder refusal does not enter runtime" 0 (runtime_entries ());
-      Fs_compat.save_file snapshot_path valid_snapshot;
-      Alcotest.(check bool) "unchanged wake retains official input after repair" true (attempt ());
-      Alcotest.(check int) "repaired handoff enters runtime once" 1 (runtime_entries ());
-      Alcotest.(check bool) "entered handoff retires official input" false (attempt ());
-      Alcotest.(check int) "retired input is not replayed" 1 (runtime_entries ()))
 ;;
 
 (* A queue signal may replace the pending post-turn closure even when source
@@ -1202,11 +729,130 @@ let test_remembered_turn_uses_current_policy () =
   | _ -> Alcotest.fail "current policy was not delivered with completed evidence"
 ;;
 
+let test_durable_drain_publishes_scoped_health () =
+  let root = temp_dir "test-durable-health-" in
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  let prior = Sys.getenv_opt env_key in
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv env_key (Option.value ~default:"" prior);
+    Config_dir_resolver.reset ();
+    remove_tree root)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Masc_test_deps.init_eio_clock env;
+      let config = Masc.Workspace.default_config root in
+      ignore (Masc.Workspace.init config ~agent_name:None);
+      Config_dir_resolver.reset ();
+      let keeper_name = "health-observed" in
+      let run () = Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+        ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+          Alcotest.fail "empty history must not call the model") in
+      let observed () =
+        match Queue_refresh.last_measurement ~config ~keeper_name with
+        | Some value -> value
+        | None -> Alcotest.fail "durable drain did not publish an observation"
+      in
+      Unix.putenv env_key "false";
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Off, None -> ()
+       | _ -> Alcotest.fail "disabled drain must not measure lag");
+      Unix.putenv env_key "true";
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Stopped Masc.Keeper_librarian_durable_consumer.Keeper_meta_absent, None -> ()
+       | _ -> Alcotest.fail "missing metadata must replace the old observation");
+      (* Effective metadata requires both its runtime snapshot and declaration.
+         Create the real profile before asking the durable reader to use it. *)
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:root in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+        (fun oc -> Printf.fprintf oc
+          "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+          keeper_name "test durable health" "docker");
+      Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+      (match Masc.Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Drained, Some { atoms = 0; official = 0 } -> ()
+       | _ -> Alcotest.fail "empty real source must publish drained with zero lag");
+      let other = Masc.Workspace.default_config (Filename.concat root "other-runtime") in
+      Alcotest.(check bool) "same name in another runtime has no borrowed observation" true
+        (Option.is_none (Queue_refresh.last_measurement ~config:other ~keeper_name));
+      Unix.putenv env_key "false";
+      run ();
+      (match (observed ()).last_pass, (observed ()).unread with
+       | Queue_refresh.Off, None -> ()
+       | _ -> Alcotest.fail "off must replace the earlier successful count"))
+;;
+
+(* RFC librarian-lifecycle stage 4, item 2: the boot scan submits the durable
+   catch-up for the Keepers autoboot did not launch. *)
+let test_boot_catchup_names_only_the_unlaunched () =
+  Alcotest.(check (list string))
+    "persisted order kept, launched removed"
+    [ "a"; "c" ]
+    (Queue_refresh.unlaunched_keeper_names
+       ~persisted:[ "a"; "b"; "c" ]
+       ~launched:[ "b"; "not-persisted" ]);
+  Alcotest.(check (list string))
+    "nothing launched: every persisted Keeper"
+    [ "a"; "b" ]
+    (Queue_refresh.unlaunched_keeper_names ~persisted:[ "a"; "b" ] ~launched:[]);
+  Alcotest.(check (list string))
+    "nothing persisted: nobody"
+    []
+    (Queue_refresh.unlaunched_keeper_names ~persisted:[] ~launched:[ "a" ])
+;;
+
+let test_boot_catchup_submits_one_unit_per_unlaunched_keeper () =
+  Lane.For_testing.reset ();
+  let root = temp_dir "test-boot-catchup-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Lane.For_testing.reset ();
+      remove_tree root)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc_test_deps.init_eio_clock env;
+       let config = Masc.Workspace.default_config root in
+       ignore (Masc.Workspace.init config ~agent_name:None);
+       Config_dir_resolver.reset ();
+       Eio.Switch.run @@ fun sw ->
+       Lane.init ~sw;
+       let submitted =
+         Queue_refresh.submit_durable_for_unlaunched
+           ~base_path:root
+           ~persisted:[ "a"; "b"; "c" ]
+           ~launched:[ "b" ]
+       in
+       Alcotest.(check (list string))
+         "submitted for the unlaunched"
+         [ "a"; "c" ]
+         submitted;
+       (* A unit that finds nothing unread ends at once, so the entry, not
+          the count, is the evidence that a submission reached the lane. *)
+       let reached_lane name =
+         Option.is_some (Lane.For_testing.pending ~base_path:root ~keeper_name:name)
+       in
+       Alcotest.(check bool) "a reached the lane" true (reached_lane "a");
+       Alcotest.(check bool) "b was launched: nothing submitted" false (reached_lane "b");
+       Alcotest.(check bool) "c reached the lane" true (reached_lane "c");
+       Lane.For_testing.await_idle ~base_path:root ~keeper_name:"a";
+       Lane.For_testing.await_idle ~base_path:root ~keeper_name:"c")
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
     [ ( "lane"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "durable drain publishes scoped health" `Quick
+            test_durable_drain_publishes_scoped_health
+        ; Alcotest.test_case
             "queue coalescing preserves completed-turn evidence"
             `Quick test_queue_coalescing_preserves_completed_turn
         ; Alcotest.test_case
@@ -1216,9 +862,9 @@ let () =
             "remembered turn replacement and cancellation"
             `Quick test_remembered_turn_replacement_and_cancellation
         ; Alcotest.test_case
-            "checkpoint owner selects one Librarian producer"
+            "either checkpoint owner wakes the durable consumer"
             `Quick
-            test_checkpoint_owner_selects_one_librarian_producer
+            test_either_checkpoint_owner_wakes_the_durable_consumer
         ; Alcotest.test_case
             "inline when uninitialized"
             `Quick
@@ -1227,10 +873,6 @@ let () =
             "inline contains raise"
             `Quick
             test_inline_contains_raise
-        ; Alcotest.test_case
-            "inline rejects draining lifecycle"
-            `Quick
-            test_inline_rejects_draining_lifecycle
         ; Alcotest.test_case
             "serializes within keeper"
             `Quick
@@ -1246,45 +888,31 @@ let () =
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
         ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
         ; Alcotest.test_case
-            "Keeper shutdown drains and joins Librarian"
+            "purge cancels the running unit and leaves no fence"
             `Quick
-            test_keeper_shutdown_drains_and_joins_librarian
+            test_purge_cancels_running_unit_and_leaves_no_fence
         ; Alcotest.test_case
-            "drain reports parent cancellation"
-            `Quick
-            test_drain_reports_parent_cancellation
+            "purge bracket excludes late wakes and concurrent purge"
+            `Quick test_purge_bracket_excludes_late_wakes
         ; Alcotest.test_case
-            "drain reports timeout when owner never exits"
-            `Quick
-            test_drain_reports_timeout_when_owner_never_exits
+            "purge bracket releases on failure and cancellation"
+            `Quick test_purge_bracket_releases_on_failure_and_cancellation
         ; Alcotest.test_case
-            "crash abort cancels without joining provider work"
+            "purge with nothing running returns at once"
             `Quick
-            test_abort_cancels_without_joining_provider_work
+            test_purge_with_nothing_running_returns_at_once
         ; Alcotest.test_case
-            "empty drain fences late submission"
+            "boot catch-up names only the unlaunched"
             `Quick
-            test_empty_drain_fences_late_submission
+            test_boot_catchup_names_only_the_unlaunched
+        ; Alcotest.test_case
+            "boot catch-up submits one unit per unlaunched keeper"
+            `Quick
+            test_boot_catchup_submits_one_unit_per_unlaunched_keeper
         ; Alcotest.test_case
             "finished switch drops without leak"
             `Quick
             test_finished_switch_drops_without_leak
-        ; Alcotest.test_case
-            "accepting reopen clears exited owner receipt"
-            `Quick
-            test_accepting_reopen_clears_exited_owner_receipt
-        ; Alcotest.test_case "snapshot read refusal preserves pending input" `Quick
-            test_snapshot_read_failure_keeps_remembered_turn_pending
-        ; Alcotest.test_case "disabled config preserves pending input" `Quick
-            (test_live_config_refusal_keeps_remembered_turn_pending "false")
-        ; Alcotest.test_case "invalid config preserves pending input" `Quick
-            (test_live_config_refusal_keeps_remembered_turn_pending "invalid")
-        ; Alcotest.test_case "handoff decoder refusal preserves official input" `Quick
-            test_handoff_read_failure_keeps_official_input_pending
-        ; Alcotest.test_case
-            "post-turn Librarian live config boundaries"
-            `Quick
-            test_post_turn_librarian_live_config_boundaries
         ] )
     ]
 ;;

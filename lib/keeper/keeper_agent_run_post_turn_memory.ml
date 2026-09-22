@@ -96,106 +96,20 @@ let run
   ~(meta : Keeper_meta_contract.keeper_meta)
   ~turn
   ~agent_core_turn_count
-  ~tool_observations
-  ~librarian_messages
   ~checkpoint_owner
   ~post_turn_t0
   ~inference_telemetry
   ()
   =
-  (* LLM Librarian extraction runs on this Keeper's memory lane (RFC-0257),
-     detached from the turn lane. Meta/config are immutable snapshots, so using
-     them after the turn returns does not race a later turn. *)
-  (* The librarian toggle is owned at this admission boundary. Disabled or
-     invalid configuration must not submit a lane unit, read the current
-     snapshot, advance cadence, or emit Librarian runtime failures. *)
-  let submit_librarian_if_enabled () =
-    match Env_config.KeeperMemoryOs.librarian_config_state () with
-    | Disabled | Invalid -> ()
-    | Enabled ->
-      let keepers_dir =
-        Config_dir_resolver.keepers_dir_for_base_path
-          ~base_path:config.Workspace.base_path
-      in
-      let run_admitted_librarian ~(live_meta : Keeper_meta_contract.keeper_meta) trigger =
-        (* Durable chat is the typed source for direct input. Connector
-           attention is also read from its producer-owned store so a
-           best-effort ambient chat append cannot erase the actor evidence.
-           Both reads are bounded and fenced before this turn's post-turn
-           timestamp; identity is never recovered from checkpoint prose. *)
-        let counterpart_observations =
-          counterpart_observations_before_offloaded
-            ~base_dir:config.Workspace.base_path
-            ~keeper_name:meta.name
-            ~before:post_turn_t0
-        in
-        match
-          Domain_pool_ref.submit_io_or_inline (fun () ->
-            Keeper_memory_os_current.read_for_keepers_dir
-              ~keepers_dir
-              ~keeper_id:meta.name)
-        with
-        | Error detail ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string MemoryOsLibrarianFailures)
-            ~labels:[ "keeper", meta.name; "site", "memory_os_current_read" ]
-            ();
-          Log.Keeper.warn
-            ~keeper_name:meta.name
-            "memory os librarian skipped: current snapshot unavailable: %s"
-            detail;
-          Keeper_librarian_queue_refresh.Not_entered
-        | Ok current ->
-          let current_selection, expected_revision =
-            match current with
-            | None -> None, None
-            | Some snapshot ->
-              Some { Keeper_librarian.facts = snapshot.facts }, Some snapshot.revision
-          in
-          let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-          let librarian_input : Keeper_librarian.input =
-            { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-            ; goal_context = goal_context_for_task ~config live_meta.current_task_id
-            ; keeper_instructions = live_meta.instructions
-            ; current = current_selection
-            ; working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
-                Keeper_librarian_context_io.capture
-                  ~base_path:config.Workspace.base_path ~keepers_dir ~keeper_name:meta.name)
-            ; messages = librarian_messages
-            ; tool_observations
-            ; counterpart_observations
-            }
-          in
-          Keeper_librarian_runtime.run_best_effort ~trigger
-            ~base_path:config.Workspace.base_path
-            ~keepers_dir
-            ~keeper_id:meta.name
-            ~expected_revision
-            librarian_input;
-          Keeper_librarian_queue_refresh.Entered
-      in
-      let librarian_series ~meta:live_meta trigger =
-        (* Submission is asynchronous. Re-check the same live SSOT at the
-           execution boundary so an ON -> OFF/INVALID change while queued
-           remains a real kill switch before snapshot I/O or provider work. *)
-        match Env_config.KeeperMemoryOs.librarian_config_state () with
-        | Disabled | Invalid -> Keeper_librarian_queue_refresh.Not_entered
-        | Enabled -> run_admitted_librarian ~live_meta trigger
-      in
-      Keeper_librarian_queue_refresh.remember_turn
-        ~base_path:config.Workspace.base_path ~keeper_name:meta.name
-        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) librarian_series;
-      let (_ : Keeper_memory_lane.outcome) =
-        Keeper_memory_lane.submit
-          ~base_path:config.Workspace.base_path
-          ~keeper_name:meta.name
-          (fun () -> Keeper_librarian_queue_refresh.run_completed_turn
-            ~base_path:config.Workspace.base_path ~keeper_name:meta.name)
-      in
-      ()
-  in
+  (* Both kinds of turn leave their record on disk before this runs -- the
+     checkpoint and its end line for an Agent-Core turn, the history fragments
+     and an end line for an official-client turn -- and the durable consumer
+     reads both from there. The turn hands over nothing else: a remembered
+     closure would be a second copy of what the log already says. The
+     librarian toggle is owned at this admission boundary: disabled or invalid
+     configuration wakes nothing. *)
   (match checkpoint_owner with
-   | Runtime_execution.Masc_agent_core ->
+   | Runtime_execution.Masc_agent_core | Runtime_execution.Official_client ->
      Keeper_librarian_queue_refresh.forget_turn
        ~base_path:config.Workspace.base_path
        ~keeper_name:meta.name;
@@ -204,8 +118,7 @@ let run
       | Enabled ->
         Keeper_librarian_queue_signal.changed
           ~base_path:config.Workspace.base_path
-          ~keeper_name:meta.name)
-   | Runtime_execution.Official_client -> submit_librarian_if_enabled ());
+          ~keeper_name:meta.name));
   (* Post-turn timing evidence is logged to decisions.jsonl. The keyword
      recall eval that used to ride along here was removed: it was called
      with an empty user message, so it short-circuited to a constant

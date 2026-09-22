@@ -40,5 +40,7 @@ val aggregate :
     source-metadata envelope and the canonical
     [dashboard_surface] tag. Typed deferred records are reported in
     [deferred] and excluded from settled success/failure rates.
-    Records without an integer [result_bytes] are malformed: they are
-    counted in [malformed] and excluded from every other figure. *)
+    Readable records whose wire outcome is [unknown] or absent are reported in
+    [unsettled] and excluded from those rates. Records without an integer
+    [result_bytes], or with an unknown/wrong-typed disposition or wire token,
+    are counted in [malformed] and excluded from every other figure. *)

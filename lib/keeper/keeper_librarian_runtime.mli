@@ -38,7 +38,8 @@ type preflight_selection =
   }
 
 val preflight_slots
-  :  selected_slots:Runtime_exact_output_registry.selected_slot list
+  :  requirement:Agent_core.Exact_output.output_requirement
+  -> selected_slots:Runtime_exact_output_registry.selected_slot list
   -> messages:Agent_core.Types.message list
   -> (preflight_selection, extraction_error) result
 (** The pre-flight over the ladder: the selected slots whose request projected
@@ -58,17 +59,39 @@ val preflight_slots
     names its journal kind. *)
 type trigger = Conversation_completed | Queue_changed | Durable_range
 
+type write_scope = Context_only | Context_and_memory
+(** The caller names the evidence's purpose. A queue-source organization pass
+    writes only working Context; remembered conversation and durable ranges
+    retain Memory processing regardless of the wake-up trigger. *)
+
 type input_projection =
   | Recent_window
   | Already_selected_range
 
+type capacity_refusal =
+  | Input_limit_unknown
+  | Cli_input_limit of Keeper_lane_cli_oneshot.input_capacity
+
+val fit_continuity :
+  capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
+  input:Keeper_librarian.input -> Keeper_librarian_continuity.prepared ->
+  (Keeper_librarian_continuity.prepared option, string) result
+(** Fit the complete rendered CLI prompt to a reported character limit while its
+    runtime remains declared in the lane. Returns [None] if no safe source fits.
+    Does not dispatch a provider or change Memory receipts. *)
+
 val run_best_effort
   :  ?trigger:trigger
   -> ?input_projection:input_projection
+  -> ?write_scope:write_scope
+  -> ?continuity:Keeper_librarian_continuity.prepared
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
+  -> ?on_capacity_refused:(capacity_refusal -> unit)
+  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
+  -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
        (** Injectable effect edge for the cli lane-slot fallback walked after
            catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
@@ -84,18 +107,24 @@ val run_best_effort
     consumer passes [Already_selected_range], because applying the retired
     recent-message window again would drop the front of the selected range.
     [on_memory_committed] runs only after the current Memory OS snapshot write
-    succeeds. [durable_range_id] is committed through the Memory store's WAL
+    succeeds. [durable_range_id] and [official_range_id] are committed through the Memory store's WAL
     sidecar, so a durable consumer can recover a later progress-file failure
     without submitting the completed-turn range again. *)
 
 module For_testing : sig
+  val commit_continuity
+    : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)
+    -> observe:((Librarian_continuity_snapshot.t, string) result -> unit)
+    -> unit
+
   type classified_error
 
   val classified_error_detail : classified_error -> string
   val classified_error_kind : classified_error -> Keeper_memory_os_current.librarian_failure_kind
 
   val execute_exact_output_classified
-    :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+    :  continuity:Keeper_librarian_continuity.prepared option
+    -> ?cli_runner:Keeper_lane_cli_oneshot.runner
     -> clock:_ Eio.Time.clock
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> base_path:string

@@ -11,7 +11,7 @@
 - 날짜(ISO8601): 2026-09-23T00:40:00+09:00
 - 작성자: Claude (세션 eec06d72)
 - 결정 ID: week-change-audit-20260923
-- 적용 대상: MASC main `7092e232bd`~`a7517b0ebb`, `~/me/.masc` 운영 파일, system log 2026-09-22
+- 적용 대상: MASC main `7092e232bd`~`a7517b0ebb`, `<base-path>/.masc` 운영 파일(라이브 store, `MASC_BASE_PATH` 로 지정), system log 2026-09-22
 - 결정 상태: 추적 필요
 
 ## 기간과 변경 흐름
@@ -253,7 +253,7 @@ v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·
 
 ## 근거
 
-- Evidence: 위 PR/이슈, `~/me/.masc/logs/system_log_2026-09-22.jsonl`, `gh pr checks`,
+- Evidence: 위 PR/이슈, `<base-path>/.masc/logs/system_log_2026-09-22.jsonl`, `gh pr checks`,
   `git log origin/main --since=2026-09-15T00:00:00+09:00`, `stat -f %SB`(파일 생성 시각)
 - Timestamp: 2026-09-23T00:40:00+09:00
 - Confidence: High(로그 집계·PR CI), Medium(tick 표의 "닫힘" 판정은 §4.3/§4.11 문서와 실측 하루 기준), Low(재시작 비용의 하루 밖 일반화)

@@ -54,7 +54,7 @@ type context_cycle =
   ; synthesis : Keeper_continuity_observation.synthesis option
   }
 
-let context_cycle ~config ~keepers_dir ~keeper_name =
+let context_cycle ~config ~keeper_name =
   let saved, saved_read_error, rewriting_through =
     match Keeper_librarian_continuity.read ~config ~keeper_name with
     | Ok None -> None, None, None
@@ -65,8 +65,17 @@ let context_cycle ~config ~keepers_dir ~keeper_name =
       , snapshot.catch_up_end_atom )
     | Error _ -> None, Some "snapshot_unreadable", None
   in
+  (* The position lives under the runtime keepers dir, next to the snapshot
+     read above, not under the config keepers dir this handler's other
+     stores use. Read from the config dir this was [Ok None] for every
+     keeper and the screen said nothing had been read (#37870 fixed the
+     same read in [continuity_unread_atoms]). *)
   let read_position, read_position_read_error =
-    match Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name with
+    match
+      Keeper_librarian_progress.read
+        ~keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name
+    with
     | Ok None -> None, None
     | Ok (Some progress) -> Some progress.position.end_atom, None
     | Error _ -> None, Some "progress_unreadable"
@@ -342,7 +351,7 @@ let source_health ~keepers_dir keeper_id =
 ;;
 let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
-  let context_cycle = context_cycle ~config ~keepers_dir ~keeper_name:keeper_id in
+  let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
   let librarian ~snapshot =
     librarian_health ~config ~keepers_dir keeper_id ~snapshot
       ~continuity_saved:context_cycle.saved

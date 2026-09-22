@@ -802,7 +802,14 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   Yojson.Safe.to_file path (S.to_json snapshot);
   (* The Librarian read past its own cut: the durable round moved while the
      continuity round did not commit. *)
-  P.write ~keepers_dir ~keeper_id:keeper_name
+  (* Written where the Librarian writes it: the runtime keepers dir, not the
+     config dir the journal and snapshots sit in. The first version of this
+     test wrote through the same wrong root the handler read, and passed
+     while every live position came back absent. *)
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  Alcotest.(check bool) "the position lives under a different root than the journal" false
+    (String.equal runtime_keepers_dir keepers_dir);
+  P.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
     {P.position = {trace_id; end_atom = 12887; last_atom_digest = String.make 64 'a'};
      boundary_lines_seen = 385}
   |> Result.map_error P.write_error_to_string |> get;

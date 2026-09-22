@@ -70,12 +70,21 @@ let attempt_rejected_should_try_next = function
              | Agent_core.Retry.Refusal_body_not_received )
          ; _
          }) -> true
+  (* A candidate can reject this request without a machine-readable reason.
+     Keep that reason unknown: do not infer overflow from provider prose or
+     discard unsummarized source. Once candidate-local recovery has ended,
+     another declared candidate may accept the same semantic input. The
+     driver's caller and effect-disposition checks still authorize rotation. *)
   | Agent_core.Error.Api
       (Agent_core.Retry.InvalidRequest
          { reason =
-             ( Agent_core.Retry.Json_parse_error
-             | Agent_core.Retry.Request_body_refused_by_provider _
-             | Agent_core.Retry.Unknown_invalid_request )
+             ( Agent_core.Retry.Unknown_invalid_request
+             | Agent_core.Retry.Request_body_refused_by_provider _ )
+         ; _
+         }) -> true
+  | Agent_core.Error.Api
+      (Agent_core.Retry.InvalidRequest
+         { reason = Agent_core.Retry.Json_parse_error
          ; _
          })
   | Agent_core.Error.Api

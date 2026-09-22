@@ -241,7 +241,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_context_cycle =
-      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None }
+      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
       { Decode.mlh_state = Some "drained"
       ; mlh_detail = None
@@ -315,6 +315,9 @@ let test_render_memory_body_with_keepers () =
   let keeper = {keeper with mkh_context_cycle =
     {mcc_saved = Some {mcf_trace_id = "saved-trace"; mcf_end_atom = 5; mcf_boundary_line = 9};
      mcc_saved_unreadable = false;
+     mcc_synthesis = Some {Masc.Keeper_continuity_observation.observed_at=1000.;
+       trace_id=Some "saved-trace"; state=Masc.Keeper_continuity_observation.Not_committed;
+       range=Some {start_atom=5; end_atom=8; completed_end_atom=12}};
      mcc_prepared = Some {mcp_prepared_at = 1000.; mcp_runtime_id = "fixture-runtime";
        mcp_input = Decode.Context_summarized {mcf_trace_id = "prepared-trace"; mcf_end_atom = 3; mcf_boundary_line = 6};
        mcp_request_bytes = 2048}}} in
@@ -354,6 +357,8 @@ let test_render_memory_body_with_keepers () =
     ~push_divider:(fun () -> incr count)
     ~push_empty:(fun () -> incr count);
   let text = String.concat "\n" !lines in
+  check bool "synthesis stop and unfinished atom range are visible" true
+    (contains "Context synthesis · not_committed · last selected atoms [5,8) / observed completed 12" text);
   check bool "saved context shown independently" true (contains "Context saved · atom 5" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
   check bool "serialized request bytes shown" true (contains "2048 request bytes" text);

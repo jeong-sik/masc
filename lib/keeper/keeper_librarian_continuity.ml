@@ -93,6 +93,8 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
         Ok (Some {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread})
 let messages prepared = prepared.unread
 let turn_ref prepared = prepared.covering_cut.cut_turn_ref
+let start_atom prepared = prepared.start_atom
+let completed_end_atom prepared = prepared.range.end_atom
 let end_atom prepared = prepared.end_atom
 let narrow prepared =
   let count = prepared.end_atom - prepared.start_atom in

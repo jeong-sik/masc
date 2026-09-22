@@ -109,12 +109,44 @@ let forget_measurement ~config ~keeper_name =
 
 let last_input_capacity ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
-  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt input_capacities key)
+  match Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt input_capacities key) with
+  | Some capacity -> Some capacity
+  | None ->
+    let loaded =
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_librarian_input_capacity.load
+          ~keepers_dir:(Workspace.keepers_runtime_dir config)
+          ~keeper_id:keeper_name)
+    in
+    (match loaded with
+     | Ok (Some capacity) ->
+       Stdlib.Mutex.protect measurements_mu (fun () ->
+         Hashtbl.replace input_capacities key capacity);
+       Some capacity
+     | Ok None -> None
+     | Error detail ->
+       Log.Keeper.warn ~keeper_name
+         "persisted Librarian input capacity ignored: %s" detail;
+       None)
 ;;
 
 let remember_input_capacity ~config ~keeper_name capacity =
   let key = measurement_key ~config ~keeper_name in
-  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity)
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity);
+  (match
+     Domain_pool_ref.submit_io_or_inline (fun () ->
+       Keeper_librarian_input_capacity.save
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
+         ~keeper_id:keeper_name
+         { runtime_id = capacity.runtime_id
+         ; actual_chars = capacity.capacity.actual_chars
+         ; max_chars = capacity.capacity.max_chars
+         })
+   with
+   | Ok () -> ()
+   | Error detail ->
+     Log.Keeper.warn ~keeper_name
+       "Librarian input capacity could not be persisted: %s" detail)
 ;;
 
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =

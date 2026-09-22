@@ -21,11 +21,14 @@ type entry =
         from a model being able to generate parallel tool calls. *)
   ; serves_bare_rows : bool
     (** The provider is the vendor's own endpoint for the models the catalog
-        describes with bare rows (rows without [provider_name]), so a config
-        that names it reads those rows, by prefix, wherever no row is scoped to
-        it. Missing declarations are false. A provider that reaches the same
-        ids through other weights, another window or a renamed id must leave it
-        false: the bare row would describe a model it does not serve. *)
+        describes with bare rows (rows without [provider_name]). Capability
+        resolution for a config that names it then reads those rows, by
+        prefix, wherever no row is scoped to it
+        ({!Capabilities.for_provider_model_id}). Missing declarations are
+        false, and the provider's base answers instead. This decides
+        capability resolution only: pricing and the Anthropic thinking control
+        fall back to bare rows for every provider whatever it declares, and the
+        wizard and exact-output lookups read scoped rows only (#37935). *)
   }
 
 val parse_entry : Otoml.t -> (entry, string) result

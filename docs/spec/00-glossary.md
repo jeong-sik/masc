@@ -259,9 +259,10 @@ status: reference
 
 **Accepted Reasoning Efforts (받는 노력 집합)**
 : 한 provider·모델이 받는 노력의 부분집합. `Capabilities.t`의
-  `accepted_reasoning_efforts`가 싣고, 모델 행이 아니라 provider base에 산다 —
-  provider가 자기 추론 모델 전체에 사다리 하나를 선언하고, 모델이 빠진 단계는
-  거절이 아니라 아래 단계로 내려서 처리하기 때문이다(xAI가 그렇다). 선언이
+  `accepted_reasoning_efforts`가 싣는다. 사다리를 어디에 두는지는 벤더가
+  어떻게 공개하느냐를 따른다. 모델마다 따로 공개하면 모델 행에 두고(Claude,
+  GPT-5.6), provider가 자기 추론 모델 전체에 사다리 하나를 선언하고 모델이
+  빠진 단계를 아래 단계로 내려 처리하면 provider base에 둔다(xAI). 선언이
   없으면(`None`) 닫힌 실패다.
   → [Capabilities.accepted_reasoning_efforts](../../packages/agent_core/lib/llm_provider/capabilities.mli)
 

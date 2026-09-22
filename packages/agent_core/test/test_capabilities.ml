@@ -131,22 +131,29 @@ let test_claude_provider_reads_claude_bare_rows () =
       ~provider_label
       ~model_id
   in
+  (* What claude answered for every model before: its base. Comparing with the
+     bare lookup instead would read the same function on both sides. *)
+  let claude_base =
+    match lookup "claude" "no-such-model" with
+    | Some base -> base
+    | None -> fail "provider claude has no base capabilities"
+  in
   List.iter
     (fun model_id ->
-       match lookup "claude" model_id, Capabilities.for_model_id_catalog model_id with
-       | None, _ -> fail (model_id ^ ": provider claude has no capabilities")
-       | _, None -> fail (model_id ^ ": no bare row")
-       | Some via_provider, Some bare ->
+       match lookup "claude" model_id with
+       | None -> fail (model_id ^ ": provider claude has no capabilities")
+       | Some via_provider ->
          check
            bool
            (model_id ^ ": the ladder is declared")
            true
            (Option.is_some via_provider.Capabilities.accepted_reasoning_efforts);
          check
-           (option (list string))
-           (model_id ^ ": claude reads the bare row's ladder")
-           (accepted_reasoning_effort_strings bare)
-           (accepted_reasoning_effort_strings via_provider))
+           bool
+           (model_id ^ ": the window is the model row's, not the base's")
+           true
+           (via_provider.Capabilities.max_context_tokens
+            <> claude_base.Capabilities.max_context_tokens))
     [ "claude-fable-5"; "claude-fable-5-20260901"; "claude-opus-5"; "claude-sonnet-5" ];
   match lookup "deepseek-anthropic" "claude-fable-5", lookup "deepseek-anthropic" "no-such-model" with
   | Some named, Some unknown ->

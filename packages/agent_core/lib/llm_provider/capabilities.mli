@@ -287,8 +287,12 @@ val for_model_id_catalog : string -> capabilities option
     declares a base, so it always answered and the bare row was unreachable:
     44 of the catalog's 125 bare rows could not be read by an anonymous config
     of their own wire (#34301). With [allow_bare_fallback] false -- a config
-    that named a [provider_id] -- the order is unchanged, because a bare row
-    must not answer for a scoped provider whose base deliberately differs.
+    that named a [provider_id] -- a bare row answers only when that provider
+    declares [serves_bare_rows], being the vendor's own endpoint for the models
+    the bare rows describe. That read is catalog-only and skips the capability
+    manifest (#37849). For any other provider the order is unchanged, because a
+    bare row must not answer for a scoped provider whose base deliberately
+    differs.
 
     [wire] is the caller's resolved {!Provider_kind.t}, supplied when it knows
     one. It selects the base a matched row is laid over for a provider whose

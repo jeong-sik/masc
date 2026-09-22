@@ -75,8 +75,16 @@ thinking-control-format = "reasoning-effort"|}
 ;;
 
 (* The other answer, and the one the rest of the seed's ollama_cloud rows
-   give: no depth named, the provider's own default carries the request. *)
-let rides_provider_default = "reasoning-uncontrolled = true"
+   give: no depth named, the provider's own default carries the request. The
+   pairing is the seed's own (config/runtime.toml [models.deepseek-v4-flash]):
+   a row that states this stance also states that its request axis carries no
+   thinking control, because the effort field is the only one this wire has
+   and the row is declining to use it. *)
+let rides_provider_default =
+  {|reasoning-uncontrolled = true
+[models.deepseek-flash.capabilities]
+thinking-control-format = "none"|}
+;;
 
 let with_runtime f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->

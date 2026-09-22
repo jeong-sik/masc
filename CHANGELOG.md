@@ -1,10 +1,8 @@
 # Changelog
 
-## [0.35.22] - 2026-09-23
+## [0.35.22] - 2026-09-22
 
 > Before you upgrade: read the three items under **Upgrade notes** — TypeSafe AI settings moved into `runtime.toml` (#37453), the renamed configuration failure reason (#37457), and the removed tool-call `success` field (#37487).
-
-*Tag date is provisional and must be updated to the tag commit's UTC date before publishing.*
 
 ### Upgrade notes
 

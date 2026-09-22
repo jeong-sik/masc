@@ -31,8 +31,8 @@ val keeper_attention_summary :
   string
 (** What one Keeper's attention row says: its name, the attention reason after
     a colon, and the runtime blocker summary in parentheses --
-    ["lane-smith: paused"], ["sangsu: runtime_blocked (every candidate
-    refused)"], ["sangsu (keepalive lost)"]. With neither reading the row is
+    ["lane-smith: paused"], ["yeongsu: runtime_blocked (every candidate
+    refused)"], ["yeongsu (keepalive lost)"]. With neither reading the row is
     ["<name> needs operator attention"]. *)
 
 val severity_rank : operator_severity -> int

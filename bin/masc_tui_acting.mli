@@ -65,7 +65,7 @@ type glyph =
   | Call_started  (** [▶] *)
   | Call_returned  (** [✓] *)
   | Turn_boundary  (** [●] *)
-  | Turn_settled  (** [■] *)
+  | Turn_done  (** [■] *)
   | Failure  (** [✗] *)
   | Attention  (** [?] *)
   | Quiet  (** [·] the kinds [Everything] adds *)

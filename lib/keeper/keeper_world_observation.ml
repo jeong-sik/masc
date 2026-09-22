@@ -1328,11 +1328,13 @@ let collect_board_events_with_cursor_policy
                raise (Keeper_board_attention_candidate.Candidate_unavailable detail));
            Ok None
          | Board_signal.Available (Board_audience.Deliver _) ->
-           let observation = Board_signal.board_observation_of_board_stimulus
-               ~post_id:signal.post_id (Board_signal.board_stimulus_of_board_signal signal) in
-           Result.map Option.some
+           Result.bind
+             (Board_signal.board_observation_of_board_stimulus
+                ~post_id:signal.post_id
+                (Board_signal.board_stimulus_of_board_signal signal))
              (pending_board_event_of_board_observation ~meta
-                ~arrived_at:(Time_compat.now ()) observation))
+                ~arrived_at:(Time_compat.now ()))
+           |> Result.map Option.some)
     in
     let events_of_post (p : Board.post) =
       let post_id = Board.Post_id.to_string p.id in

@@ -5106,7 +5106,7 @@
 (test
  (name test_tui_chat_activity)
  (modules test_tui_chat_activity)
- (libraries alcotest masc_tui_types masc_tui_keeper_chat_live
+ (libraries alcotest astring masc_tui_answering masc_tui_types masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue))
 
 (test

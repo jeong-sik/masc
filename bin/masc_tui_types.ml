@@ -4707,6 +4707,12 @@ type state = {
      in the draft either way, and that draft is also where a spoken
      half-sentence waits for typing. *)
   mutable voice_send_on_stop: bool;
+  (* Whether speech-to-text is set up where this TUI runs
+     ([Masc.Voice_bridge.stt_set_up]): read at boot and again whenever the
+     voice config is re-read. An empty draft names the capture keys only
+     then -- to an operator without a transcriber they named a key that
+     refuses. *)
+  mutable voice_stt_set_up: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* The Memory facts list's [Enter] detail: the whole fact text in its own
@@ -6969,6 +6975,7 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = None;
   voice_send_on_stop = false;
+  voice_stt_set_up = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -9916,9 +9923,27 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
   Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
 ;;
 
-(* The hint and Esc read one fact. [keeper_observed_turn] is None while the
+(* Whether Esc has a turn to stop: [keeper_observed_turn] is None while the
    turns poll is failing, and a stale running row kept for display must not
-   offer a stop that Esc would not send. *)
+   offer a stop that Esc would not send. The hint rides the activity row that
+   names the turn ([keeper_message_activity_rows]); it used to be a row of
+   its own under it, with "Enter:send update" beside it that the key footer
+   already says. *)
+let keeper_observed_stop_hint (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> None
+  | Some keeper_name when Option.is_some (working_chat_for_keeper state keeper_name) -> None
+  | Some keeper_name ->
+    match keeper_observed_turn state keeper_name with
+    | None -> None
+    | Some (started_at_unix, _interrupt_token) ->
+      (match keeper_observed_interrupt state keeper_name started_at_unix with
+       | Some _ -> None
+       | None -> Some " · Esc stops it · /queue")
+;;
+
+(* An interrupt of the observed turn under way, or how it ended: a row of
+   its own while it lasts, in the status colour. *)
 let keeper_observed_interrupt_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
@@ -9927,58 +9952,64 @@ let keeper_observed_interrupt_rows (state : state) =
     match keeper_observed_turn state keeper_name with
     | None -> []
     | Some (started_at_unix, _interrupt_token) ->
-      [ (match keeper_observed_interrupt state keeper_name started_at_unix with
-         | Some item ->
-           (match item.oi_status with
+      (match keeper_observed_interrupt state keeper_name started_at_unix with
+       | Some item ->
+         [ (match item.oi_status with
             | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
             | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
             | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
-            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
-         | None ->
-           "Esc: stop and pause queue · Enter:send update · /queue: manage") ]
+            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail) ]
+       | None -> [])
 ;;
 
+(* The status band under the transcript: rows in the shape
+   [Masc_tui_answering.chat_activity_row], lead in the status colour, the
+   rest receded.
+
+   What is not here any more. The admission notice -- "Your message is
+   queued at the server; start time unknown" and its three siblings -- said,
+   arm for arm, what the live progress row already says from the same
+   admission ("WAITING TO START · queued · 2 messages in the keeper's
+   queue", "sent; not accepted yet", "accepted; the run is starting",
+   "accepted; replaying …", [Masc_tui_keeper_chat_transcript.phase_text]).
+   "Current direct conversation · … · in progress" said what that row's
+   "IN PROGRESS" says whenever the row is drawing the same request; it
+   stays only for a working request the live row is not drawing, because a
+   newer line of this pane is queued in front of it. The stop hint rides
+   the row that names the observed turn. On the 2026-09-22 screen the band
+   was five rows, all in the status colour, for two facts: a turn is
+   running, and this pane's line waits behind it. *)
 let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
     let working = working_chat_for_keeper state keeper_name in
+    let live_draws entry =
+      match state.msg_live with
+      | Some live ->
+        String.equal (turn_log_request_id live) entry.sent_request.request_id
+      | None -> false
+    in
     let activity = match working with
+      | Some entry when live_draws entry -> []
       | Some entry ->
-        ["Current direct conversation · "
-         ^ Masc_tui_keeper_chat_projection.terminal_safe_text
-             (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
-         ^ " · in progress"]
-      | None -> Masc_tui_answering.chat_activity
-          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-          ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
-          state.keeper_turns in
-    let submitted = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        let transcript = live.tl_transcript in
-        (match Masc_tui_keeper_chat_transcript.phase transcript,
-               Masc_tui_keeper_chat_transcript.admission transcript with
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-           let other_turn_observed = Option.is_some working || (state.keeper_turns_error = None
-             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
-               String.equal row.ktr_keeper_name keeper_name
-               && match row.ktr_state with
-                 | Tui_decode.Keeper_turn_running
-                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
-                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
-                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
-               state.keeper_turns) in
-           [if other_turn_observed then
-              "Your message is queued behind this Keeper's current turn; start time unknown"
-            else "Your message is queued at the server; start time unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, None ->
-           ["Your request is awaiting server acceptance; queue position unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
-           ["Your request was accepted; waiting for its first event"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
-           ["Your request already settled; replaying its result"]
-         | _ -> [])
-      | Some _ | None -> []
+        [ { Masc_tui_answering.lead = "Current direct conversation"
+          ; rest =
+              " · "
+              ^ Masc_tui_keeper_chat_projection.terminal_safe_text
+                  (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
+              ^ " · in progress" } ]
+      | None ->
+        let rows =
+          Masc_tui_answering.chat_activity ~frame:state.activity_frame
+            ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+            ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
+            state.keeper_turns
+        in
+        (match keeper_observed_stop_hint state, rows with
+         | Some hint, first :: rest ->
+           { first with Masc_tui_answering.rest = first.Masc_tui_answering.rest ^ hint } :: rest
+         | Some _, [] | None, _ -> rows)
     in
     let waiting_items = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
@@ -9987,6 +10018,7 @@ let keeper_message_activity_rows (state : state) =
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
       state.keeper_interactive_waiting in
+    let plain text = { Masc_tui_answering.lead = text; rest = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []
@@ -10003,11 +10035,11 @@ let keeper_message_activity_rows (state : state) =
           | Next -> ""
         in
         let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
-        [ Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
-            local_count auto_tag intent_str preview ]
+        [ plain (Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
+            local_count auto_tag intent_str preview) ]
     in
-    activity @ submitted @ (if retained then
-      ["Input retained after Esc; /queue resume sends it"]
+    activity @ (if retained then
+      [plain "Input retained after Esc; /queue resume sends it"]
       else []) @ queue_rows
 ;;
 

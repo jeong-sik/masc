@@ -757,13 +757,20 @@ let input_cursor_column ~terminal_cols ~input =
    The badge used to be 16 cells whatever the terminal was, so a
    [codex-mcp-client] read as [codex-mcp-clien…] on a 200-column screen with
    the room to spell it. The width is a fixed pane-derived budget, never below
-   10 so the built-in activity labels remain legible, and
-   never past 14: the built-in activity labels still read whole beside their
+   10 so the built-in activity labels remain legible, and never past the
+   budget below: the built-in activity labels still read whole beside their
    marks, while an opaque long speaker name yields its middle instead of
-   reserving empty cells on every body row. *)
+   reserving empty cells on every body row.
+
+   A sixth of the pane, capped. At a tenth capped at 14 a 130-cell pane --
+   the roster split on a wide terminal -- gave the badge 13 cells, and every
+   keeper of this workspace longer than eleven characters was cut to its
+   ends ("e-m…-leader", "tui…veloper") on every row it spoke. A sixth gives
+   that pane the cap, which spells an eighteen-character name whole beside
+   its mark; an 80-cell pane pays three more cells than before. *)
 let chat_role_label_column = 10
 
-let chat_role_label_share = 10
+let chat_role_label_share = 6
 
 (* A budget, not a measurement of what happens to be loaded.
    Measuring the widest label on the pane tied body width to the message
@@ -776,7 +783,7 @@ let chat_role_label_share = 10
    ("keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent"), so the
    badge took a quarter of the pane and gave it back one message later.
    Fixed, the body keeps its width and only a resize re-wraps. *)
-let chat_role_label_budget = 14
+let chat_role_label_budget = 20
 
 let chat_role_label_width ~pane_cells =
   max chat_role_label_column
@@ -1177,12 +1184,16 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
           bucket.tb_month bucket.tb_day bucket.tb_hour
         ^ (if bucket.tb_is_dst then " DST" else "")
       in
-      let lead = "\xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in
+      (* Triple-dash (U+2504), not the solid line: the origin heading under
+         [Origin_row] now ends in a solid rule to its clock, and two solid
+         rules a row apart read as one kind of break. This pane already
+         tells kinds apart by texture -- the journal siding is dashed, an
+         arrival's is solid -- so the hour keeps the dashed one: the time
+         moved, not the speaker. *)
+      let dash = "\xe2\x94\x84" in
+      let lead = dash ^ dash ^ " " ^ label ^ " " in
       let rule_cells = max 0 (inner_width - display_width lead) in
-      let rule =
-        String.concat ""
-          (List.init rule_cells (fun _ -> "\xe2\x94\x80"))
-      in
+      let rule = String.concat "" (List.init rule_cells (fun _ -> dash)) in
       let text, _, _ = cell_prefix (lead ^ rule) inner_width in
       Some
         { style = entry.style

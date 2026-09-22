@@ -31,6 +31,15 @@ Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None
 HttpResponse = tuple[int, object]
 Needle = bytes | re.Pattern[bytes]
 
+# The composer row redrawn focused: its prompt "› to <keeper>" with nothing
+# after the name but blanks. Unfocused it ends in "(i to write)". The voice
+# keys hint used to be what a step waited for after i, but it is drawn only
+# where speech-to-text is set up, and a fixture without a voice config is the
+# ordinary case.
+COMPOSER_FOCUSED = re.compile(
+    rb"\xe2\x80\xba to [^\s\x1b]+(?=\s|\x1b)(?! *\(i to write\))"
+)
+
 
 class RawHttpResponse:
     """A response the fixture sends byte for byte: its own content type and
@@ -4813,8 +4822,20 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         # iTerm reports Ctrl-W as CSI-u after the TUI enables keyboard
         # disambiguation. It must reach the same pane binding as legacy 0x17.
         send_and_wait(process, master_fd, output, b"z", b"h/l:pane")
-        # Focus is a caret on the pane title now, not a key list (keys live in
-        # the footer): the same press must move focus, observed by the caret.
+        # The Board cycle has three stops since #37691: list, detail, and the
+        # Activity pane when the frame draws it (it does at 180 columns). From
+        # the detail pane the press puts the pane's cursor on its first row,
+        # painted in reverse video over the whole row; the row it lands on is
+        # the pane's "[Recent]" header. Focus is a caret on the pane title,
+        # not a key list (keys live in the footer), so the next press is
+        # observed by the caret coming back to the list.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[119;5u",
+            re.compile(rb"\x1b\[7m(?:\x1b\[[0-9;]*m)*\[Recent\]"),
+        )
         send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
@@ -5875,6 +5896,25 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
 
 ERROR_DETAIL_PREFIX = b"Keeper turn failed: Provider stream parse failed: json decoder"
 ERROR_DETAIL_TAIL = b"exact terminal detail survives wrapping"
+# The tail as it may arrive on the wire: wrapped at any of its spaces, with
+# the row's padding and the next row's cursor move between the words. Where
+# the wrap falls depends on the body width, which the speaker column sets,
+# so a needle that requires the phrase on one row pins the column instead
+# of the detail.
+ERROR_DETAIL_TAIL_WRAPPED = re.compile(
+    b".{0,400}?".join(re.escape(word) for word in ERROR_DETAIL_TAIL.split()),
+    re.DOTALL,
+)
+
+
+def unwrapped(plain: bytes) -> bytes:
+    """Screen text with the chat rows' chrome read as blanks -- the turn
+    rail's box-drawing glyphs (U+2500..U+257F) down the left margin -- and
+    every run of blanks (a wrap's padding, the next row's indent) read as
+    one space, so a phrase wrapped across rows compares equal to the
+    phrase."""
+    without_rail = re.sub(rb"\xe2[\x94\x95][\x80-\xbf]", b" ", plain)
+    return re.sub(rb"\s+", b" ", without_rail)
 
 
 def keeper_chat_failed_response(request_body: bytes) -> RawHttpResponse:
@@ -5936,17 +5976,16 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
         failed = send_and_wait(
-            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL
+            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
-        frame = frame_containing(failed, ERROR_DETAIL_TAIL)
-        plain = CSI_RE.sub(b"", frame)
+        plain = unwrapped(screen_text(bytes(output)))
         for needle in (b"ERROR", ERROR_DETAIL_PREFIX, ERROR_DETAIL_TAIL):
-            if needle not in plain:
+            if unwrapped(needle) not in plain:
                 raise AssertionError(
-                    f"wrapped Keeper error omitted {needle!r}: {frame!r}"
+                    f"wrapped Keeper error omitted {needle!r}: {failed!r}"
                 )
-        if ERROR_DETAIL_PREFIX + b"\xe2\x80\xa6" in plain:
-            raise AssertionError(f"Keeper error was cell-truncated: {frame!r}")
+        if unwrapped(ERROR_DETAIL_PREFIX) + b"\xe2\x80\xa6" in plain:
+            raise AssertionError(f"Keeper error was cell-truncated: {failed!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -7121,7 +7160,7 @@ def memory_journal_timeline_interaction(
         ).encode()
         styled_rail = re.compile(
             rb"\x1b\[(?:2|90)m"
-            + "── ".encode()
+            + "┄┄ ".encode()
             + re.escape(hour)
         )
         if styled_rail.search(drawn) is None:
@@ -7131,7 +7170,7 @@ def memory_journal_timeline_interaction(
             )
         bold_rail = re.compile(
             rb"\x1b\[[0-9;]*m\x1b\[1m"
-            + "── ".encode()
+            + "┄┄ ".encode()
             + re.escape(hour)
         )
         if bold_rail.search(drawn) is not None:
@@ -8988,9 +9027,12 @@ def message_origin_badge_interaction(
                 f"the full origin row did not put the {description} body on the "
                 f"row below its origin (gap {gap}): {screen_text(bytes(output))!r}"
             )
-        if re.search(rb"\[\d\d:\d\d:\d\d\]", row) is None:
+        # The full row ends on its clock: the name at the left, the clock at
+        # the right edge and a rule between, not "[HH:MM:SS]" ahead of the
+        # name.
+        if re.search(rb"\d\d:\d\d:\d\d\s*$", row) is None:
             raise AssertionError(
-                f"the full {description} origin row carried no timestamp: {row!r}"
+                f"the full {description} origin row did not end on its clock: {row!r}"
             )
     for name in (b"vincent", b"alpha"):
         if b"\x1b[7m" + name not in full_row:

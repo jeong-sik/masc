@@ -562,13 +562,45 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
   | [] -> complete (Skipped { reason = No_absorptions; absorbed })
   | _ :: _ ->
     (match Typesafeai_config.absorb_gate_destinations ~keeper_id with
-     | Error reason ->
+     | Error
+         ((Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded) as reason)
+       ->
+       (* Declared off: the operator chose not to ask, and the answer applies
+          as it came, as it did before the gate existed. *)
        Log.Keeper.info
          ~keeper_name:keeper_id
          "librarian absorb gate off (%s): %d absorption(s) applied as answered"
          (Typesafeai_config.unavailable_reason_to_string reason)
          (List.length absorbed);
        complete (Skipped { reason = Unavailable reason; absorbed })
+     | Error
+         ((Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination) as reason)
+       ->
+       (* Declared on and cannot be asked: the operator meant every absorption
+          to be judged, so none is; the sources stay current and the new
+          claims still apply. Applying the answer here would remove memories
+          from the current snapshot on the strength of a judgment that never
+          ran, which is the one direction this gate exists to close. *)
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "librarian absorb gate declared on but unavailable (%s): %d absorption(s) kept current"
+         (Typesafeai_config.unavailable_reason_to_string reason)
+         (List.length absorbed);
+       complete (Skipped { reason = Unavailable reason; absorbed = [] })
+     | Error
+         ((Typesafeai_config.Board_attention_disabled
+          | Typesafeai_config.Context_review_disabled
+          | Typesafeai_config.Skill_applicability_disabled) as reason)
+       ->
+       (* Another gate's switch: [absorb_gate_destinations] does not produce
+          these. Named rather than caught so a new reason has to be placed;
+          the safe direction is the same as above. *)
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "librarian absorb gate reported another gate's switch (%s): %d absorption(s) kept current"
+         (Typesafeai_config.unavailable_reason_to_string reason)
+         (List.length absorbed);
+       complete (Skipped { reason = Unavailable reason; absorbed = [] })
      | Ok ((first, rest) as armed) ->
        let destinations = List.map Typesafeai_client.identify (first :: rest) in
        (* The sha256 of each request body, as the client computed it, so the

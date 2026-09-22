@@ -420,6 +420,9 @@ let origin_heading buf cols ~plain ~styled ~clock =
     if lead_cells <= room then styled, lead_cells else fit_width plain room, room
   in
   let rule_cells = room - lead_cells - 1 in
+  (* A lead one cell short of the room leaves no cell for a rule but still
+     owes the space: without it the row summed to one less than the frame
+     and the clock sat a cell left of every other heading's. *)
   let rule =
     if rule_cells >= 1 then
       Printf.sprintf "%s%s%s%s"
@@ -427,6 +430,7 @@ let origin_heading buf cols ~plain ~styled ~clock =
         recede
         (draw_hline (if String.equal lead "" then rule_cells + 1 else rule_cells))
         Ansi.reset
+    else if rule_cells = 0 && not (String.equal lead "") then " "
     else ""
   in
   let tail =
@@ -581,8 +585,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
          column for the inline modes, and this row has the pane. A name the
          gutter cut to "e-m…-leader" is spelled whole here. *)
       let mark = Message_layout.speaker_mark row.style in
+      (* The dot separates a name from a request; a lane with no name (the
+         tool and reasoning blocks carry an empty label) draws the request
+         alone after its mark rather than a dot with nothing on its left. *)
       let request =
-        if String.equal request_label "" then ""
+        if String.equal request_label "" || String.equal speaker "" then
+          request_label
         else " \xc2\xb7 " ^ request_label
       in
       let plain = mark ^ " " ^ speaker ^ request in
@@ -596,10 +604,13 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             (* The mark keeps its colour and stays out of the badge, the way
                the inline gutter already draws it, so the two origin modes
                agree about what a speaker mark looks like. The reverse span
-               covers only the name. *)
-            Printf.sprintf "%s%s%s %s%s%s%s%s%s" (Chat_theme.origin row.style)
-              Ansi.bold mark Ansi.reverse speaker Ansi.reset Ansi.dim request
-              Ansi.reset
+               covers only the name, and an empty name gets no span. *)
+            let badge =
+              if String.equal speaker "" then ""
+              else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
+            in
+            Printf.sprintf "%s%s%s %s%s%s%s" (Chat_theme.origin row.style)
+              Ansi.bold mark badge Ansi.dim request Ansi.reset
       in
       origin_heading buf cols ~plain ~styled ~clock
 
@@ -2697,9 +2708,14 @@ let render_keeper_message (state : state) =
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)))
            others);
+    (* The lead -- the mark, the lane, the age -- in the status colour; the
+       detail after it receded. Drawn whole in the status colour, five rows of
+       band read as five warnings and none stood out. *)
     List.iter
-      (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-        ("  " ^ text))
+      (fun (row : Masc_tui_answering.chat_activity_row) ->
+        box_line chat_buf chat_cols
+          (Printf.sprintf "  %s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
+             (Theme.recede ()) row.rest Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);
@@ -2998,9 +3014,14 @@ let render_keeper_message (state : state) =
        [Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail]
        and the draft row was a bare prompt. The hint sits after the caret, so
        the caret column does not move, and it goes while a capture or
-       continuous mode runs, because the footer's meter says it louder. *)
+       continuous mode runs, because the footer's meter says it louder.
+
+       Only where speech-to-text is set up. Without a transcriber the keys it
+       names refuse, and the sentence sat beside every empty draft of every
+       operator who never set voice up. *)
     let voice_hint =
       if String.equal input ""
+         && state.voice_stt_set_up
          && state.keeper_message_focus = Right_pane
          && Option.is_none state.voice_capture
          && Option.is_none state.voice_continuous

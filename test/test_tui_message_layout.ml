@@ -1239,11 +1239,11 @@ let test_timeline_breaks_follow_civil_hours () =
     (List.map fst breaks);
   check bool "the first rail names its local date and hour" true
     (String.starts_with
-       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 18:00 "
+       ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 18:00 "
        (List.assoc 18 breaks));
   check bool "the later rail names its local date and hour" true
     (String.starts_with
-       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 19:00 "
+       ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 19:00 "
        (List.assoc 19 breaks));
   check int "full transcript counts two rails" 8
     (Layout.total_rows ~inner_width:60 entries);
@@ -1335,15 +1335,15 @@ let test_repeated_dst_hour_has_distinct_rails () =
   | daylight_label :: standard_label :: [] ->
       check bool "the daylight occurrence says DST" true
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 DST "
            daylight_label);
       check bool "the standard occurrence is visibly distinct" true
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 "
            standard_label);
       check bool "the standard occurrence does not claim daylight time" false
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 DST "
            standard_label)
   | _ -> fail "the repeated civil hour did not produce two labels"
 ;;
@@ -1565,7 +1565,7 @@ let test_bare_links_are_dressed_and_bounded () =
    labels are [agent · surface] and share long prefixes. *)
 let test_badge_is_a_budget_not_a_measurement () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
-  check int "a wide pane spends the budget and no more" 14 width;
+  check int "a wide pane spends the budget and no more" 20 width;
   List.iter
     (fun label ->
       let drawn =
@@ -1601,8 +1601,13 @@ let test_badge_keeps_the_tail_when_it_cannot_fit () =
 let test_badge_narrows_with_the_pane () =
   (* The fixed floor keeps every built-in activity label; wider panes add a
      small, bounded amount for speaker identities. *)
-  check int "a wide pane spends the budget" 14
+  check int "a wide pane spends the budget" 20
     (Layout.chat_role_label_width ~pane_cells:400);
+  (* The roster split on a wide terminal: the pane that cut every keeper
+     name of this workspace to its ends. *)
+  check int "130-cell pane spells an eighteen-character name" 20
+    (Layout.chat_role_label_width ~pane_cells:130);
+  check int "80-cell pane" 13 (Layout.chat_role_label_width ~pane_cells:80);
   check int "40-cell pane keeps the compact badge" 10
     (Layout.chat_role_label_width ~pane_cells:40);
   check int "16-cell pane keeps the compact badge" 10
@@ -2255,7 +2260,11 @@ let test_a_speaker_keeps_the_column_when_the_surface_cannot_share_it () =
 (* What the pane draws for that row: one cut at most, and the end that tells
    two agents apart still on it. *)
 let test_the_badge_draws_a_broadcast_speaker_without_two_cuts () =
-  let column = wide_label_column in
+  (* An 84-cell pane gives the fourteen-cell column every pane used to get:
+     one the name does not fit, so the cut happens and can be counted. The
+     wide pane now spells this name whole. *)
+  let column = Layout.chat_role_label_width ~pane_cells:84 in
+  check int "the column the name does not fit" 14 column;
   let badge =
     Layout.align_role_label ~column ~style:Layout.Inbound
       (Layout.fit_speaker ~column ~speaker:"codex-mcp-client"

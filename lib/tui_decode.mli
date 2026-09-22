@@ -900,7 +900,7 @@ type memory_context_frontier = {
 }
 type memory_context_input =
   | Context_summarized of memory_context_frontier
-  | Context_uncompressed
+  | Context_without_snapshot
   | Context_not_applied
 
 type memory_context_prepared = {

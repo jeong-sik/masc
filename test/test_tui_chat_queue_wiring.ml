@@ -1695,7 +1695,55 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
       (String.starts_with ~prefix:Masc_tui_theme.Box.h continuation
        && not (Astring.String.is_infix ~affix:keeper continuation));
     check int "a continuation also fills the row" inner
-      (Masc_tui_message_layout.display_width continuation))
+      (Masc_tui_message_layout.display_width continuation);
+    (* A lead one cell short of the room has no cell for a rule and still
+       fills the row: the clock stays in the column every other heading
+       puts it in. The lead is mark, space, name, " · " and the request id
+       (17 cells here), so the name is sized to land at room - 1. *)
+    let clock_cells = String.length (clock_of at) + 1 in
+    let room = inner - clock_cells in
+    let request = "tui-01a0c788-43a7" in
+    let exact = String.make (room - 1 - (2 + 3 + String.length request)) 'k' in
+    (* The pane shows its target keeper's rows, and a keeper row is labelled
+       with its keeper's name: the name under test is the target. *)
+    state.msg_target_keeper_name <- Some exact;
+    state.msg_history <-
+      [ { (chat_entry ~request_id:request ~role:Tui_types.Message_keeper
+             ~text:"EXACT_BODY" ~at ())
+          with Tui_types.me_keeper_name = exact } ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    (match
+       List.find_opt
+         (fun line ->
+           Astring.String.is_infix ~affix:exact line
+           && Astring.String.is_suffix ~affix:(clock_of at) (String.trim line))
+         plain
+     with
+     | Some line ->
+         check int "a lead one short of the room still fills the row" inner
+           (Masc_tui_message_layout.display_width (String.trim line))
+     | None -> fail "no heading spells the exact-width name");
+    (* A lane with no name -- a tool block -- draws its request after the
+       mark, not a dot with nothing on its left. *)
+    state.msg_target_keeper_name <- Some keeper;
+    state.msg_history <-
+      [ { (chat_entry ~request_id:request ~role:Tui_types.Message_tool
+             ~text:"read_file a.ml" ~at ())
+          with Tui_types.me_keeper_name = keeper } ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    (match
+       List.find_opt
+         (fun line -> Astring.String.is_suffix ~affix:(clock_of at) (String.trim line))
+         plain
+     with
+     | Some line ->
+         check bool "no dot with an empty name on its left" false
+           (Astring.String.is_infix ~affix:"  \xc2\xb7 " line);
+         check bool "the request follows the mark" true
+           (Astring.String.is_infix ~affix:(" " ^ request) line)
+     | None -> fail "no heading for the tool row"))
 ;;
 
 (* A turn this pane did not open -- a TUI restarted mid-turn, a turn another
@@ -1757,8 +1805,8 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
       (count "said" running_screen);
     check int "the footer does not repeat the tail as Latest output" 0
       (count "Latest output" running_screen);
-    check bool "the footer still says a turn is running" true
-      (Astring.String.is_infix ~affix:"chat_operation turn" running_screen);
+    check bool "the footer still says a turn is running, by lane and age" true
+      (Astring.String.is_infix ~affix:"chat_operation \xc2\xb7 " running_screen);
     check int "the turn's rail has not closed" 0
       (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
          running_screen);

@@ -505,6 +505,7 @@ type planning_backlog = {
   pb_todo : int;
   pb_claimed : int;
   pb_running : int;
+  pb_awaiting_verification : int;
   pb_done : int;
   pb_cancelled : int;
 }
@@ -1934,9 +1935,19 @@ let decode_planning_backlog json =
   let* pb_todo = required_int_field json "todo" in
   let* pb_claimed = required_int_field json "claimed" in
   let* pb_running = required_int_field json "in_progress" in
+  let* pb_awaiting_verification =
+    required_int_field json "awaiting_verification"
+  in
   let* pb_done = required_int_field json "done" in
   let* pb_cancelled = required_int_field json "cancelled" in
-  Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
+  Ok
+    { pb_todo
+    ; pb_claimed
+    ; pb_running
+    ; pb_awaiting_verification
+    ; pb_done
+    ; pb_cancelled
+    }
 
 type system_log_level =
   | System_debug

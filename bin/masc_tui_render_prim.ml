@@ -2110,6 +2110,13 @@ let planning_backlog_counts (backlog : planning_backlog) =
      [in_progress], and so does the CLI's own tally. This row was the only
      place that renamed it, so one state read as two on one screen. *)
   ; ("in_progress", backlog.pb_running, progress_active ^ " in_progress")
+  (* Work that is finished and waiting on a verifier, which is the queue the
+     Task Review tab counts on this same surface. It sat inside [in_progress],
+     so the row said twenty-one were being worked while seven of them were
+     waiting for a reader. *)
+  ; ( "awaiting_verification"
+    , backlog.pb_awaiting_verification
+    , progress_active ^ " awaiting_verification" )
   ; ("done", backlog.pb_done, progress_done ^ " done")
   ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
   ]

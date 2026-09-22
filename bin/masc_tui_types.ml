@@ -1927,6 +1927,7 @@ type planning_backlog = Tui_decode.planning_backlog
   pb_todo: int;
   pb_claimed: int;
   pb_running: int;
+  pb_awaiting_verification: int;
   pb_done: int;
   pb_cancelled: int;
 }

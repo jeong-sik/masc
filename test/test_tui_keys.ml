@@ -1979,8 +1979,8 @@ let planning_state () =
           ; pr_dropped = 0
           }
       ; pl_backlog =
-          { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_done = 0
-          ; pb_cancelled = 0 }
+          { pb_todo = 0; pb_claimed = 0; pb_running = 0
+          ; pb_awaiting_verification = 0; pb_done = 0; pb_cancelled = 0 }
       (* This surface's key tests are about the rows the cursor walks, and the
          history lines sit above the divider outside them. Empty keeps the
          fixture about that. *)

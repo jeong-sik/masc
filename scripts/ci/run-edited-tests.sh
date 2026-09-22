@@ -901,7 +901,8 @@ ENVS
   # edited rules remain their own earlier execution class, and a rule with a
   # custom timeout stays on the one-at-a-time path below. Selection and the
   # fail-closed step budget are unchanged.
-    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then      local python_targets=()
+    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then
+      local python_targets=()
       i=0
       while [ "${i}" -lt "${python_count}" ]; do
         source=${python_sources[i]}

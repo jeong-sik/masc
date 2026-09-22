@@ -60,8 +60,9 @@ let expected_plan ~connect ~body =
           ~request_path:"/v1/responses"
           ?connect_timeout_s:connect
           ()
-    ; body_timeout_s = body
-    ; api_key_env = Some "OPENAI_API_KEY" }
+    ; credential =
+        EO.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
+    ; body_timeout_s = body }
   in
   let snapshot =
     EO.load_resolver_snapshot

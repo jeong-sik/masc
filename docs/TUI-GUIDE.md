@@ -598,6 +598,9 @@ drawn rather than attributed by file position.
 
 ### Keeper message
 
+The pane's five regions, what draws each, and what the transcript draws for
+a live, an observed and a settled turn: [`diagrams/tui-chat-pane-anatomy.html`](diagrams/tui-chat-pane-anatomy.html).
+
 `c` (or `m`) from the roster or detail. Sends to the keeper over
 `POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
 runs in the background, so refresh and navigation stay responsive while the

@@ -1110,23 +1110,17 @@ let pending_board_event_of_stimulus
   =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal bs ->
-    Result.map
-      (fun ev -> Some ev)
-      (pending_board_event_of_board_observation
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_observation_of_board_stimulus
-            ~post_id:stimulus.post_id
-            bs))
+    Result.bind
+      (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
+      (pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at)
+    |> Result.map Option.some
   | Keeper_event_queue.Board_attention attention ->
-    Result.map
-      (fun ev -> Some ev)
-      (pending_board_event_of_board_observation
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_observation_of_board_stimulus
-            ~post_id:stimulus.post_id
-            attention.signal))
+    Result.bind
+      (Board_signal.board_observation_of_board_stimulus
+         ~post_id:stimulus.post_id
+         attention.signal)
+      (pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at)
+    |> Result.map Option.some
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
   | Keeper_event_queue.Schedule_due sw ->

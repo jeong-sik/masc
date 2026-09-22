@@ -24,6 +24,6 @@
     work can address the architectural cycle as one unit (RFC candidate:
     generated SSOT via dune rule or lazy late-binding registration). *)
 
-let memory_search_source_enum_strings = [ "memory"; "absorbed"; "history"; "all" ]
+let memory_search_source_enum_strings = [ "current"; "absorbed"; "history"; "all" ]
 
 let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]

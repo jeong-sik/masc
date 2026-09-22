@@ -142,7 +142,7 @@ let test_prior_art_bounds_every_search () =
     let memory = input_of calls "memory" in
     let board = input_of calls "board" in
     check string "library gets the query" "EACCES" (string_member "query" (input_of calls "library"));
-    check string "memory searches durable facts" "memory" (string_member "source" memory);
+    check string "memory searches current facts" "current" (string_member "source" memory);
     check bool "memory names its limit" true
       (Yojson.Safe.Util.member "limit" memory <> `Null);
     check bool "board names its limit" true (Yojson.Safe.Util.member "limit" board <> `Null);

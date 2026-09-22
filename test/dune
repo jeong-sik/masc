@@ -6629,6 +6629,8 @@
 
 (include stanzas/test_keeper_librarian_continuity.inc)
 
+(include stanzas/test_keeper_continuity_cancel_recovery.inc)
+
 (include stanzas/test_keeper_continuity_dispatch.inc)
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)

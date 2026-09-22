@@ -399,38 +399,56 @@ let cause_is_not_about_size (cause : Exact_output.execution_error_cause) =
    whole walk is what makes the verdict independent of the order the slots
    were tried: the last slot's cause alone gave opposite answers for the same
    set of causes. *)
-let flow_evidence_and_final_cause = function
+
+(* A candidate the flow turned away before dispatch never reached a provider,
+   but the reason it was turned away is typed, so it answers the same question
+   the refusals do. [Input_capacity] is the projected request not fitting the
+   slot's declared window, which is exactly what reading less addresses. The
+   two that name the slot rather than the request -- it is not available, or
+   its contract cannot carry this output -- are as true of a smaller range.
+   The remaining three do not say, and RFC-librarian-lifecycle §4.3 reads what
+   it does not know toward progress, which is reading less. *)
+let rejection_is_not_about_size rejection =
+  match Exact_output.candidate_rejection_disposition rejection with
+  | Runtime_slot_unavailable | Output_requirement_rejected -> true
+  | Input_capacity _ | Runtime_contract_rejected | Input_contract_rejected
+  | Request_preparation_failed -> false
+;;
+
+let advance_is_not_about_size (receipt : Exact_output.flow_advance_receipt) =
+  match receipt.failed with
+  | Exact_output.Flow_advance_execution_failed { cause; _ } -> cause_is_not_about_size cause
+  | Exact_output.Flow_advance_candidate_rejected rejection ->
+    rejection_is_not_about_size rejection
+;;
+
+(* The evidence every constructor carries, and the verdict on the failure
+   that ended the walk when there is one: an exhausted ladder ends on a
+   rejection, a failed execution on a provider cause, and the rest end before
+   either exists. *)
+let flow_evidence_and_final_verdict = function
   | Exact_output.Flow_attempt_already_started evidence -> evidence, None
   | Exact_output.Flow_attempt_start_failed { evidence; _ }
   | Exact_output.Flow_measurement_start_failed { evidence; _ }
   | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
   | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ }
   | Exact_output.Flow_before_dispatch_callback_failed { evidence; _ }
-  | Exact_output.Flow_before_advance_callback_failed { evidence; _ }
-  | Exact_output.Flow_candidates_exhausted { evidence; _ } -> evidence, None
+  | Exact_output.Flow_before_advance_callback_failed { evidence; _ } -> evidence, None
+  | Exact_output.Flow_candidates_exhausted { evidence; rejection } ->
+    evidence, Some (rejection_is_not_about_size rejection)
   | Exact_output.Flow_exact_execution_failed { evidence; cause; _ } ->
-    evidence, Some cause.Exact_output.cause
-;;
-
-(* A candidate the flow turned away before dispatch never reached a provider,
-   and [Input_capacity] is among the reasons it can be turned away for, so it
-   is not evidence that a smaller range would have fared the same. *)
-let advance_is_not_about_size (receipt : Exact_output.flow_advance_receipt) =
-  match receipt.failed with
-  | Exact_output.Flow_advance_execution_failed { cause; _ } -> cause_is_not_about_size cause
-  | Exact_output.Flow_advance_candidate_rejected _ -> false
+    evidence, Some (cause_is_not_about_size cause.Exact_output.cause)
 ;;
 
 let walk_was_never_about_size_flow error =
-  let evidence, final_cause = flow_evidence_and_final_cause error in
+  let evidence, final = flow_evidence_and_final_verdict error in
   let advances = evidence.Exact_output.advances in
-  let final = Option.to_list final_cause in
   (* No failure at all means nothing was observed to wait on, so the pass
      reads less rather than holding the whole range for a reason it cannot
      name. *)
-  (advances <> [] || final <> [])
+  (advances <> [] || Option.is_some final)
   && List.for_all advance_is_not_about_size advances
-  && List.for_all cause_is_not_about_size final
+  && Option.value final ~default:true
 ;;
 
 (* What a pass that reached a provider and did not commit hands back: the

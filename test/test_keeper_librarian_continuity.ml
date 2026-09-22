@@ -564,7 +564,16 @@ let narrowing_fixture ~slot_count ~answer f =
   let pass () =
     Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity ~base_path ~keeper_name () in
   let coverage () = Option.map (fun (s : S.t) -> s.end_atom) (P.read ~config ~keeper_name |> get) in
-  f ~bodies ~pass ~coverage
+  (* Take the checkpoint away for one pass. prepare then answers with no
+     source without the backlog having been read, which is the outcome the
+     width must survive. *)
+  let hide_source body =
+    let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+    let hidden = session_dir ^ ".hidden" in
+    Sys.rename session_dir hidden;
+    Fun.protect ~finally:(fun () -> Sys.rename hidden session_dir) body
+  in
+  f ~bodies ~pass ~coverage ~hide_source
 
 let narrowing_ceiling = 65_000
 let accepted_answer =
@@ -579,7 +588,7 @@ let test_refused_width_carries_to_the_next_pass () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
   pass ();
   check (option int) "a refused source commits nothing" None (coverage ());
   check int "the refused pass sends one request and does not retry in place" 1
@@ -597,13 +606,32 @@ let test_refused_width_carries_to_the_next_pass () =
 let test_a_refusal_that_is_not_about_size_keeps_the_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index _body -> `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
   pass ();
   pass ();
   check int "each pass sends one request" 2 (List.length !bodies);
   check bool "a quota refusal leaves the source the size it was" true
     (List.nth !bodies 0 = List.nth !bodies 1);
   check (option int) "nothing is committed" None (coverage ())
+
+let test_an_unreadable_source_keeps_the_width () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      if String.length body > narrowing_ceiling
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies ~pass ~coverage ~hide_source ->
+  pass ();
+  check (option int) "the first pass is refused and commits nothing" None (coverage ());
+  (* prepare answers Ok None both for a drained backlog and for a checkpoint
+     it cannot read. Releasing the width on the second would send the pass
+     after it back at the whole backlog, which is the loop this fixes. *)
+  hide_source (fun () -> pass ());
+  check int "a source it cannot read sends no request" 1 (List.length !bodies);
+  pass ();
+  check bool "the width survived the unreadable pass" true
+    (List.nth !bodies 1 <= narrowing_ceiling);
+  check (option int) "and the source is read to its end" (Some 4) (coverage ())
 
 let test_a_size_refusal_anywhere_in_the_walk_narrows () =
   narrowing_fixture ~slot_count:2
@@ -615,7 +643,7 @@ let test_a_size_refusal_anywhere_in_the_walk_narrows () =
       if index = 0
       then `Request_entity_too_large, refused "invalid_request_error"
       else `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
   pass ();
   check int "the walk tried both slots" 2 (List.length !bodies);
   pass ();
@@ -632,6 +660,7 @@ let () = run "production continuity pair"
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
     test_case "a refusal that is not about size keeps the width" `Quick test_a_refusal_that_is_not_about_size_keeps_the_width;
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
+    test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
     test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;

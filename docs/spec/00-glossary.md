@@ -468,6 +468,16 @@ status: reference
   `Board_post_updated`는 실제 편집 저장이 성공한 뒤 발행한다. 게시글 ID와
   `content_updated_at`이 같은 편집은 한 사건이며, 뒤의 편집은 새 사건이다.
 
+**Hearth (토픽 카테고리)**
+: Board 글을 주제로 가르는 축. 글은 선택적으로 `hearth` 필드를 갖고 lowercase로
+  정규화한다. `list_hearths`가 hearth별 글 수를 내림차순으로 돌려주고,
+  `list_posts ?hearth`가 한 hearth로 좁힌다. TUI Board 목록은 `f`/`F`로 hearth를
+  돌리고 `H`로 chooser를 연다. hearth별 글 수 목록을 **census**라 부르고, Board
+  제목이 목록이 실은 수와 게시판이 가진 수를 함께 말할 때 쓴다(`(50 of 109)`).
+  → [11-board.md §8](11-board.md),
+  [board_types](../../lib/board_types/board_types.mli),
+  [board_votes](../../lib/board/board_votes.mli)
+
 **Broadcast**
 : 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
   (1) 워크스페이스 broadcast: `Workspace.broadcast

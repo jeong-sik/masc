@@ -542,6 +542,52 @@ let%test "the router's ladder carries every level it maps, and no off value" =
          ]
 ;;
 
+(* xAI publishes one effort ladder for the reasoning models it serves:
+   ["low"], ["medium"], ["high"] (the default) and ["xhigh"], and states that
+   reasoning cannot be disabled
+   (https://docs.x.ai/developers/model-capabilities/text/reasoning, checked
+   2026-09-22). A level a given model lacks is downgraded rather than refused —
+   ["xhigh"] on grok-4.5 is treated as ["high"] — so the whole ladder is a
+   property of the provider and belongs here, not on a model row.
+
+   [None_] is left out because the wire cannot express it: xAI's only thinking
+   control is [reasoning_effort], and [None_] is how an explicit disable
+   travels on that wire ([Reasoning_effort.under_explicit_toggle]). Declaring
+   it would promise a thinking-free reply the provider does not give. [Minimal]
+   and [Max] are absent because xAI documents neither.
+
+   This is why the row no longer shares [openai_compat_chat_extended_capabilities]
+   with ["mistral"]: the two were one preset only because neither had been
+   checked, and xAI's ladder is now measured while Mistral's is not. *)
+let xai_capabilities =
+  { openai_compat_chat_extended_capabilities with
+    accepted_reasoning_efforts =
+      Some
+        [ Reasoning_effort.Low
+        ; Reasoning_effort.Medium
+        ; Reasoning_effort.High
+        ; Reasoning_effort.XHigh
+        ]
+  }
+;;
+
+let%test "xai's ladder is the four documented levels, with no off value" =
+  match xai_capabilities.accepted_reasoning_efforts with
+  | None -> false
+  | Some accepted ->
+    (* The omission of [None_] is the decision: xAI cannot disable reasoning,
+       so a disable request must be refused here rather than sent as a level
+       the provider would map back to thinking. *)
+    (not (List.mem Reasoning_effort.None_ accepted))
+    && List.for_all
+         (fun effort -> List.mem effort accepted)
+         [ Reasoning_effort.Low
+         ; Reasoning_effort.Medium
+         ; Reasoning_effort.High
+         ; Reasoning_effort.XHigh
+         ]
+;;
+
 let mimo_capabilities =
   { openai_compat_chat_capabilities with
     max_context_tokens = Some 1_000_000
@@ -823,7 +869,8 @@ let capabilities_for_provider_label label =
      | "openai_compat_chat_extended" | "openai_chat_extended" ->
        Some openai_compat_chat_extended_capabilities
      | "openrouter" -> Some openrouter_capabilities
-     | "xai" | "mistral" -> Some openai_compat_chat_extended_capabilities
+     | "xai" -> Some xai_capabilities
+     | "mistral" -> Some openai_compat_chat_extended_capabilities
      | "cohere" -> Some openai_compat_chat_capabilities
      | "mimo" -> Some mimo_capabilities
      | "ollama_cloud" -> Some ollama_cloud_capabilities

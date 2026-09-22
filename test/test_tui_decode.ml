@@ -1047,12 +1047,13 @@ let test_decode_planning_snapshot_rejects_running_alias () =
 
 (* The shape the server actually sent while a keeper was failing to start,
    trimmed to the fields the TUI reads. *)
-let fleet_safety_json ?(missing = true) () =
+let fleet_safety_json ?(missing = true)
+    ?(blocker = "reaction_capacity_below_target") () =
   `Assoc
     [ ( "keeper_fleet_safety"
       , `Assoc
           ([ "status", `String "degraded"
-           ; "blocker", `String "reaction_capacity_below_target"
+           ; "blocker", `String blocker
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
            ; "running_keeper_fiber_count", `Int 8
@@ -1087,8 +1088,11 @@ let test_decode_fleet_safety_carries_both_name_lists () =
   | Error err -> Alcotest.fail err
   | Ok fleet ->
       Alcotest.(check string) "status" "degraded" fleet.fs_status;
-      Alcotest.(check (option string)) "blocker"
-        (Some "reaction_capacity_below_target") fleet.fs_blocker;
+      Alcotest.(check bool) "the blocker is read as the reason it names" true
+        (fleet.fs_blocker
+         = Some
+             (Tui_decode.Blocker
+                Keeper_fleet_blocker.Reaction_capacity_below_target));
       Alcotest.(check bool) "operator must act" true
         fleet.fs_operator_action_required;
       Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
@@ -1134,6 +1138,20 @@ let test_decode_fleet_safety_requires_session_recovery_fields () =
       [ "official_client_recovery_required_keeper_count"
       ; "official_client_recovery_required_keeper_names" ]
   | _ -> Alcotest.fail "fleet fixture must be an object"
+
+(* A newer server can name a reason this build has no constructor for. The
+   header still has something to say, so the name is kept rather than read as
+   no blocker at all. *)
+let test_decode_fleet_safety_keeps_an_unknown_blocker_by_name () =
+  match
+    Tui_decode.decode_fleet_safety
+      (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ())
+  with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check bool) "the unknown name is kept" true
+        (fleet.fs_blocker
+         = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
 
 let test_decode_fleet_safety_with_nothing_missing () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
@@ -10435,6 +10453,8 @@ let () =
           test_decode_fleet_safety_carries_both_name_lists;
         Alcotest.test_case "session recovery fields are required" `Quick
           test_decode_fleet_safety_requires_session_recovery_fields;
+        Alcotest.test_case "an unknown blocker is kept by name" `Quick
+          test_decode_fleet_safety_keeps_an_unknown_blocker_by_name;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick
           test_decode_fleet_safety_with_nothing_missing;
         Alcotest.test_case "a body without the section is refused" `Quick

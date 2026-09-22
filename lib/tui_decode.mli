@@ -2003,9 +2003,16 @@ val decode_runtime_resolved :
 (** Decode the shared resolved-runtime document once, then project its runtime
     catalogue and keeper assignments for the picker, both in server order. *)
 
+(** The fleet scan's [blocker], read as the reason it names. A name this
+    build does not know is kept by name: a newer server's reason is still a
+    reason, and is drawn as the server wrote it rather than dropped. *)
+type fleet_blocker =
+  | Blocker of Keeper_fleet_blocker.t
+  | Unrecognised_blocker of string
+
 type fleet_safety = {
   fs_status : string;
-  fs_blocker : string option;
+  fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
   fs_running_count : int;

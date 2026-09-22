@@ -567,9 +567,13 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+type fleet_blocker =
+  | Blocker of Keeper_fleet_blocker.t
+  | Unrecognised_blocker of string
+
 type fleet_safety = {
   fs_status : string;
-  fs_blocker : string option;
+  fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
   fs_running_count : int;
@@ -9124,7 +9128,14 @@ let decode_lane_run_detail json =
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   let* fs_status = required_string_field section "status" in
-  let* fs_blocker = optional_string_field section "blocker" in
+  let* fs_blocker =
+    Result.map
+      (Option.map (fun name ->
+           match Keeper_fleet_blocker.of_wire_name name with
+           | Some blocker -> Blocker blocker
+           | None -> Unrecognised_blocker name))
+      (optional_string_field section "blocker")
+  in
   let* fs_operator_action_required =
     match member "operator_action_required" section with
     | `Bool value -> Ok value

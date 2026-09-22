@@ -37,6 +37,33 @@
 fix 가 515건으로 절반을 넘고, 같은 파일(`keeper_turn_driver_try_provider.ml`)이 7일 중 5일
 상위에 있다. 이 파일이 이 주의 회귀 위험 중심이다.
 
+## 이 주에 더해진 코드의 신호 검사
+
+`git diff 20cc8a689c..origin/main` 의 `.ml` 추가 줄(테스트 제외) 58,681줄을 다음 신호로 훑었다
+(`lib/`, `bin/`, `packages/`). 별도 탐색 에이전트 셋이 Board·Task·Goal·HITL·Access·Lane·Schedule·Skills 와
+TUI 경로를 커밋 단위로 다시 읽었다.
+
+| 신호 | 건수 | 판정 |
+|---|---|---|
+| 문자열/부분 문자열 분류(`String.starts_with` 등) | 14 | 전부 경로·파일명 접두어, Memory 검색의 부분 일치, JSON `kind` 태그 해독. 공급자 오류 문장을 읽는 곳은 없다 |
+| 새 `| _ ->` 갈래 | 236 (핵심 경로 79) | 대부분 JSON 해독기의 `Error "invalid …"` 와 화면 키 분기. 눈에 띄는 것 하나: `lib/keeper/hitl_summary_worker.ml:1520,1530` 이 typed `cause` 위에서 `_` 로 나머지를 `handle_flow_error` 에 보낸다. 주석이 "두 생성자만 온다" 고 말하지만 컴파일러가 아니라 주석이 지키는 불변식이다 |
+| stub·`failwith "unimplemented"`·`assert false` | 0 | — |
+| `max_int` 류 감시값 | 8 | 넘침 보호·해시·화면 끝 스크롤. 한 곳은 위 넘침 절의 Codex 시작 용량 |
+| 근거 주석 없는 세 자리 이상 상수 | 64 후보, 실제 2 | `keeper_next_request_forecast.ml:340` `recent_records_read = 200`(진단 표본, 실측 없음), `keeper_projection_change.ml:134` memo 128 |
+
+에이전트가 찾고 코드로 확인한 것:
+
+- `lib/keeper/keeper_librarian_absorb_gate.ml:146` `conveyed_boundary = 0.5` — JEV Noul 확률을 우리가 잘라 "전달됨"을 정한다.
+  판단을 문턱으로 근사하는 자리. JEV 는 Choice 답도 준다. → [#37915](https://github.com/jeong-sik/masc/issues/37915)
+- `lib/goal/reliable_change_g1.ml:1178` — 깨진 `usage` 값을 빈 객체로 바꿔 계속 읽는다(#36845). 손상이 "usage 없음"으로
+  보인다. → [#37916](https://github.com/jeong-sik/masc/issues/37916)
+- Skills: 반복 해결법에서 Skill 을 만드는 producer 는 이 주에도 없다. 커밋은 전부 사람이 쓴 초안을 검증·발행하는 경로다.
+- 같은 날 fix 사슬: `lib/completion_authority_wakeup.ml` 09-15 에 4건(#36461·#36500·#36552·#36555),
+  `lib/browser_lane_launcher.ml` 09-15 에 3건(#36481·#36516·#36537), `keeper_board_attention_exact_flow.ml` 주간 8건(순차 롤아웃).
+  둘째 fix 에서 근본을 봤는지는 이 기록에서 판정하지 않는다.
+- Access Control: 권한을 읽고 Error/None 에서 계속 진행하는 곳(fail-open)은 대상 경로에서 찾지 못했다.
+- `7db9e2fefe` 의 v7 hard cut 은 v6 를 테스트로 거절하고 호환 층을 남기지 않았다.
+
 ## 이번 세션에서 찾은 결함과 조치
 
 | 결함 | 조치 | 확인한 증거 | 남은 증거 |

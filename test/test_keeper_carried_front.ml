@@ -649,16 +649,6 @@ let ring_cursor () =
   | [] -> -1
 ;;
 
-let contains ~needle haystack =
-  let hn = String.length haystack and nn = String.length needle in
-  let rec go i =
-    if i + nn > hn then false
-    else if String.equal (String.sub haystack i nn) needle then true
-    else go (i + 1)
-  in
-  go 0
-;;
-
 (* The WARN lines one report writes on [keeper]'s log, oldest first. *)
 let warnings_reported ~keeper read =
   let cursor = ring_cursor () in
@@ -666,6 +656,7 @@ let warnings_reported ~keeper read =
   Log.Ring.recent ~since_seq:cursor ~order:`Oldest_first ()
   |> List.filter (fun (entry : Log.Ring.entry) ->
     Option.equal String.equal entry.Log.Ring.keeper_name (Some keeper)
+    && String.equal entry.Log.Ring.module_name "Keeper"
     && (match entry.Log.Ring.level with
         | Log.Warn -> true
         | Log.Debug | Log.Info | Log.Error -> false))
@@ -695,9 +686,9 @@ let test_a_seed_read_reports_each_failure_once () =
    with
    | [ entry ] ->
      check bool "the boundary line carries the store's detail" true
-       (contains ~needle:"turn boundary line 3: fixture" entry.Log.Ring.message);
+       (Astring.String.is_infix ~affix:"turn boundary line 3: fixture" entry.Log.Ring.message);
      check bool "and the runtime whose request it started" true
-       (contains ~needle:"glm" entry.Log.Ring.message)
+       (Astring.String.is_infix ~affix:"glm" entry.Log.Ring.message)
    | other -> failf "expected one boundary line, got %d" (List.length other));
   check int "both failures write a line each" 2
     (List.length

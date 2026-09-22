@@ -7121,7 +7121,7 @@ def memory_journal_timeline_interaction(
         ).encode()
         styled_rail = re.compile(
             rb"\x1b\[(?:2|90)m"
-            + "── ".encode()
+            + "┄┄ ".encode()
             + re.escape(hour)
         )
         if styled_rail.search(drawn) is None:
@@ -7131,7 +7131,7 @@ def memory_journal_timeline_interaction(
             )
         bold_rail = re.compile(
             rb"\x1b\[[0-9;]*m\x1b\[1m"
-            + "── ".encode()
+            + "┄┄ ".encode()
             + re.escape(hour)
         )
         if bold_rail.search(drawn) is not None:

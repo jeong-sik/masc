@@ -1809,11 +1809,10 @@ let test_a_nameless_heading_is_the_mark_and_the_rule () =
         | _ -> fail ("the heading does not run from its mark into a rule: " ^ String.escaped line)))
 ;;
 
-(* A line someone else wrote reads in its own column on a wide pane, apart
-   from the operator and the keeper talking (RFC chat-turn-rail-and-side-lanes
-   §4.6); on a pane narrower than a 100-column terminal it stays in the one
-   column. *)
-let test_an_arrival_reads_in_its_own_column () =
+(* A line someone else wrote is set apart from the operator and the keeper
+   talking by a bar down its left edge and a two-cell step (RFC
+   chat-turn-rail-and-side-lanes §4.6), at any width. *)
+let test_an_arrival_reads_behind_a_bar () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
   let set_size size =
@@ -1839,38 +1838,29 @@ let test_an_arrival_reads_in_its_own_column () =
                   (Tui_types.Sent_by_other { speaker = "pangyo"; surface = None }))
              ~text:"ARRIVAL_SAYS" ~at:1_790_053_784. ())
           with Tui_types.me_keeper_name = "alpha" } ];
-    let column_of cols needle =
+    let row_of cols needle =
       set_size (40, cols);
       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
       let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
-      match
-        List.find_map
-          (fun line ->
-            Option.map
-              (fun index -> Masc_tui_message_layout.display_width (String.sub line 0 index))
-              (Astring.String.find_sub ~sub:needle line))
-          plain
-      with
-      | Some column -> column
+      match List.find_opt (Astring.String.is_infix ~affix:needle) plain with
+      | Some row -> row
       | None -> fail (needle ^ " was not drawn: " ^ String.concat "\n" plain)
     in
-    let inner = Masc_tui_ansi.framed_inner_width 140 in
-    check bool "on a wide pane the arrival starts past a third of it" true
-      (column_of 140 "ARRIVAL_SAYS" >= inner / 3);
-    check bool "the operator stays at the left" true
-      (column_of 140 "OPERATOR_ASKS" < inner / 3);
-    check bool "on a narrow pane the arrival stays in the one column" true
-      (column_of 90 "ARRIVAL_SAYS" = column_of 90 "OPERATOR_ASKS"))
+    let bar = "\xe2\x96\x8e" in
+    List.iter
+      (fun cols ->
+        check bool "the arrival reads behind the bar" true
+          (Astring.String.is_infix ~affix:(bar ^ "ARRIVAL_SAYS") (row_of cols "ARRIVAL_SAYS"));
+        check bool "the operator draws no bar" false
+          (Astring.String.is_infix ~affix:bar (row_of cols "OPERATOR_ASKS")))
+      [ 140; 90 ])
 ;;
 
-(* The origin heading under Ctrl-F's metadata:full. The clock led the row
-   ("[14:08:44]  ● e-m…-leader"), so the first cells of every heading were
-   time-chrome and the name beside them was cut to the gutter's column on a
-   row that had the whole pane. Now: the name whole at the left, the clock at
-   the right edge, a rule between. The pane's own keeper is not named on its
-   headings -- the breadcrumb says whose chat it is -- so its turn opens on the
-   mark and the request, and a later minute of the same turn is the rule and
-   the clock alone. *)
+(* The origin heading under Ctrl-F's metadata:full: the name whole at the
+   left, the clock at the right edge, a rule between. The pane's own keeper
+   is not named on its headings -- the breadcrumb says whose chat it is -- so
+   its turn opens on the mark and the rule, and a later minute of the same
+   turn is the rule and the clock alone. *)
 let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -1880,9 +1870,6 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
     | Changed _ | Unchanged _ -> ()
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
-    (* Narrower than the pane at which a line someone else wrote takes a
-       column of its own (RFC chat-turn-rail-and-side-lanes §4.6), so the
-       heading's geometry here is the whole pane's. *)
     let rows, cols = 40, 96 in
     set_size (rows, cols);
     let keeper = "goo-yang-bong" in
@@ -1939,8 +1926,13 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
     in
     check bool "the heading does not open on the clock" false
       (String.starts_with ~prefix:"[" trimmed);
+    (* The arrival steps in and draws its bar; the trim takes the step and
+       the space in front of the bar, and the rule still runs to the clock at
+       the pane's edge. *)
+    let arrival_step = Masc_tui_message_layout.inbound_indent_cells in
+    let arrival_blank = arrival_step + 1 in
     check int "the rule fills the row to the clock" inner
-      (Masc_tui_message_layout.display_width trimmed);
+      (arrival_blank + Masc_tui_message_layout.display_width trimmed);
     check bool "the name and the clock are joined by a rule" true
       (Astring.String.is_infix ~affix:(Masc_tui_theme.Box.h ^ " " ^ clock_of at) trimmed);
     let own =
@@ -1976,7 +1968,8 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
        land at room - 1. *)
     let clock_cells = String.length (clock_of at) + 1 in
     let room = inner - clock_cells in
-    let exact = String.make (room - 1 - 2) 'k' in
+    let bar_cells = Masc_tui_message_layout.display_width " \xe2\x96\x8e" in
+    let exact = String.make (room - 1 - 2 - arrival_step - bar_cells) 'k' in
     state.msg_history <- [ inbound_row ~speaker:exact ~request_id:request ~at "EXACT_BODY" ];
     let frame, _ = Masc_tui_render_chat.render_keeper_message state in
     let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
@@ -1989,7 +1982,7 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
      with
      | Some line ->
          check int "a lead one short of the room still fills the row" inner
-           (Masc_tui_message_layout.display_width (String.trim line))
+           (arrival_blank + Masc_tui_message_layout.display_width (String.trim line))
      | None -> fail "no heading spells the exact-width name");
     (* A turn that opens on a tool block draws the keeper's mark and the
        rule: no name, no dot with nothing on its left. *)
@@ -3621,8 +3614,8 @@ let () =
             test_a_journal_revision_draws_its_facts_in_columns
         ; test_case "a folded reasoning block is the count and the key" `Quick
             test_a_folded_reasoning_block_is_the_count_and_the_key
-        ; test_case "an arrival reads in its own column" `Quick
-            test_an_arrival_reads_in_its_own_column
+        ; test_case "an arrival reads behind a bar" `Quick
+            test_an_arrival_reads_behind_a_bar
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
         ; test_case "a nameless heading is the mark and the rule" `Quick

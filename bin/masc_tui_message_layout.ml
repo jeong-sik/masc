@@ -1525,31 +1525,22 @@ let origin_gutter ~origin ~previous ~inner_width entry =
           (fit_width continued (display_width filled), rail_cells, rail_cells, 0)
       else Some (filled, rail_cells, label_at, clock_cells)
 
-(* A line someone else wrote reads in a column of its own beside the
-   conversation (RFC chat-turn-rail-and-side-lanes §4.6), on a pane wide
-   enough to hold two. Ninety-six is a 100-column terminal's inner width: the
-   frame's border and padding take four. Narrower, the right column's body
-   would hold a few words a row, and the split would cost more reading than it
-   saves. *)
-let inbound_split_min_inner_cells = 96
+(* A line someone else wrote steps in from the conversation, and the renderer
+   draws a bar in its sender's colour down its left edge (RFC
+   chat-turn-rail-and-side-lanes §4.6). Two cells set it apart without making
+   a long arrival wrap narrower than the rows around it. *)
+let inbound_indent_cells = 2
 
-(* The column starts a third of the way in: the conversation keeps the left
-   two thirds' worth of rhythm and the arrival still has most of the width. *)
-let inbound_indent_share = 3
-
-let inbound_indent ~inner_width (entry : entry) =
+let inbound_indent (entry : entry) =
   match entry.style with
-  | Inbound when inner_width >= inbound_split_min_inner_cells ->
-      inner_width / inbound_indent_share
-  | Inbound | User | Keeper | Status | Local | Journal | Error | Tool | Skill _
-  | Thinking ->
-      0
+  | Inbound -> inbound_indent_cells
+  | User | Keeper | Status | Local | Journal | Error | Tool | Skill _ | Thinking -> 0
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   (* Everything after the indent is laid out in the column that is left, so
      the origin, the heading and the body fit the column rather than the
      pane. *)
-  let indent = inbound_indent ~inner_width entry in
+  let indent = inbound_indent entry in
   let pane_width = inner_width in
   let inner_width = pane_width - indent in
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in

@@ -109,18 +109,22 @@ let test_board_interests_survive_an_empty_profile_default () =
     | Error detail -> Alcotest.fail detail
   in
   let meta = { (base_meta ()) with board_interests = [ "thread review" ] } in
-  let overlaid = effective Keeper_types_profile.empty_keeper_profile_defaults meta in
+  (* [effective_meta_of_profile_defaults] rejects an unresolved sandbox
+     profile before it ever reaches board_interests (Ok sandbox_profile
+     guard), so every defaults value needs one, same as
+     test_config_writes_are_dropped above. *)
+  let defaults_with_profile board_interests =
+    { Keeper_types_profile.empty_keeper_profile_defaults with
+      sandbox_profile = Some Keeper_types_profile.Docker
+    ; board_interests
+    }
+  in
+  let overlaid = effective (defaults_with_profile []) meta in
   Alcotest.(check (list string))
     "an empty profile default does not clear an existing board_interests"
     [ "thread review" ]
     overlaid.board_interests;
-  let replaced =
-    effective
-      { Keeper_types_profile.empty_keeper_profile_defaults with
-        board_interests = [ "release" ]
-      }
-      meta
-  in
+  let replaced = effective (defaults_with_profile [ "release" ]) meta in
   Alcotest.(check (list string))
     "a profile-declared board_interests still overrides"
     [ "release" ]

@@ -324,34 +324,9 @@ export function isTurnTerminalFailureCode(code: string | null | undefined): bool
 }
 
 
-/** Korean labels for `execution.operator_disposition`. Backend emits 8
- *  closed-sum values via
- *  `Keeper_execution_receipt.operator_disposition_kind_to_string`
- *  (lib/keeper/keeper_execution_receipt.ml:401-410). Kept separate
- *  from `STATE_DISPLAY_NAMES` to avoid collision on generic tokens
- *  like `unknown` / `skipped` that other axes also emit. */
-const OPERATOR_DISPOSITION_LABELS: Record<string, string> = {
-  pass: '진행',
-  pause_human: '운영자 일시정지',
-  alert_exhausted: '경보 소진',
-  fail_open_next_runtime: '다음 runtime 로 fail-open',
-  pass_next_model: '다음 모델로 진행',
-  user_cancelled: '사용자 취소',
-  skipped: '건너뜀',
-  unknown: '미상',
-}
-
-export function operatorDispositionLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return OPERATOR_DISPOSITION_LABELS[value] ?? value
-}
-
 /** Korean labels for `execution.operator_disposition_reason`. Backend
  *  emits closed-sum values via
- *  `Keeper_execution_receipt.operator_disposition_reason_to_string`. Paired with
- *  {!operatorDispositionLabel} at every emit site — same atomic
- *  coverage as the attention_reason / next_human_action pair fixed
- *  by #16355. */
+ *  `Keeper_execution_receipt.operator_disposition_reason_to_string`. */
 const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   healthy: '정상',
   runtime_exhausted: '런타임 후보 소진',
@@ -389,9 +364,7 @@ export function operatorDispositionReasonLabel(
  *  `Keeper_execution_receipt.runtime_outcome_to_string`
  *  (lib/keeper/keeper_execution_receipt.ml:144-149). Kept separate
  *  from `STATE_DISPLAY_NAMES` because `completed` and
- *  `not_observed` are generic tokens other axes may emit (same
- *  isolation pattern as TOOL_CONTRACT_LABELS in #16374 and
- *  OPERATOR_DISPOSITION_LABELS in #16377). */
+ *  `not_observed` are generic tokens other axes may emit. */
 const RUNTIME_OUTCOME_LABELS: Record<string, string> = {
   passed_to_next_model: '다음 모델로 진행',
   completed: '완료',
@@ -415,9 +388,8 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
  *    (`api_error_server:<http_status>` is parameterized).
  *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
- *  `completed` / `healthy` are also emitted by other axes (same isolation
- *  pattern as TOOL_CONTRACT_LABELS in #16374). Parameterized codes fall
- *  through to a prefix match below before the raw fallback. */
+ *  `completed` / `healthy` are also emitted by other axes. Parameterized
+ *  codes fall through to a prefix match below before the raw fallback. */
 const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   // Keeper_turn_terminal_code.to_wire
   healthy: '정상',

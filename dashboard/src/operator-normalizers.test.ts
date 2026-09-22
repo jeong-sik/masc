@@ -227,7 +227,7 @@ describe('normalizeOperatorSnapshot', () => {
           status: 'paused',
           runtime_trust: {
             needs_attention: true,
-            operator_disposition: 'pause_human',
+            operator_disposition: 'operator_action_required',
             execution: {
               provider_selected_model: 'provider:runtime-lane',
             },
@@ -244,7 +244,7 @@ describe('normalizeOperatorSnapshot', () => {
 
     expect(result.keepers[0]?.runtime_trust).toMatchObject({
       needs_attention: true,
-      operator_disposition: 'pause_human',
+      operator_disposition: 'operator_action_required',
       execution_summary: {
         provider_selected_model: 'provider:runtime-lane',
       },

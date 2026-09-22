@@ -339,6 +339,18 @@ status: reference
   `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
+**Keeper Health Reading (Keeper 건강 판독)**
+: Keepers 명단이 한 Keeper의 상태를 읽는 닫힌 네 값(`Tui_decode.keeper_health_reading`).
+  `Health_running`(Phase Running이고 turn이 하나 이상 기록됨)·`Health_idle`(Phase
+  Running, 아직 turn 없음)·`Health_failing`(Phase Failing — keepalive는 turn을 계속
+  돌리지만 그 turn들이 실패한다)·`Health_offline`(keepalive가 돌지 않아 turn을 받지
+  못함). 좁은 칸은 글자 대신 mark 하나로 그린다 — `●` healthy·`!` failing·`·` idle·
+  `×` offline, 그리고 사람이 멈춘 `○` paused와 명단을 읽지 못한 `-` unread. mark는
+  health label 문자열이 아니라 이 variant를 match해 고르므로, 새 health 어휘가
+  생기면 조용히 healthy로 읽히는 대신 컴파일 오류가 난다.
+  → [masc_tui_keeper_mark.mli](../../bin/masc_tui_keeper_mark.mli),
+  [tui_decode.mli](../../lib/tui_decode.mli)
+
 **Reasoning Effort (추론 노력)**
 : OpenAI 호환 wire가 싣는 추론 노력의 정규 typed 값. `Reasoning_effort.t`가
   유일한 SSOT이고 일곱 단계다 — `None_`·`Minimal`·`Low`·`Medium`·`High`·

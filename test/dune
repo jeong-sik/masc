@@ -6611,6 +6611,7 @@
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
 
+(include stanzas/test_exact_output_admission_refusal_reason.inc)
 (include stanzas/test_exact_output_binding_wire.inc)
 
 (rule

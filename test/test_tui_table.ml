@@ -96,6 +96,37 @@ let test_an_overlong_reading_folds_rather_than_pushes () =
   check bool "the cut is marked rather than silent" true
     (contains "\xe2\x80\xa6" (Table.row cells))
 
+(* An identifier and a sentence give way at different ends. Both ends of an
+   identifier decide which one it is; a sentence is read from the front, and
+   the Board row "Verify: run-e\xe2\x80\xa69e327af211400cba719b59128]" spent its
+   column on a hex tail while the subject of the post was the half that folded. *)
+let test_a_column_chooses_which_end_gives_way () =
+  let title = "Verify: run-exact-output-lane-board-attention-9e327af211400cba" in
+  let folded fold =
+    Table.row [ Table.cell ~fold ~header:"TITLE" ~width:24 title ]
+  in
+  let middle = folded Table.Fold_middle in
+  let tail = folded Table.Fold_tail in
+  check bool "the middle fold keeps the tail" true
+    (contains "9e327af211400cba" middle);
+  check bool "the middle fold loses the subject" false
+    (contains "Verify: run-exact" middle);
+  check bool "the tail fold keeps the subject" true
+    (contains "Verify: run-exact" tail);
+  check bool "the tail fold loses the tail" false
+    (contains "9e327af211400cba" tail);
+  check int "and both stay in the column" (width middle) (width tail);
+  check bool "both mark the cut" true
+    (contains "\xe2\x80\xa6" middle && contains "\xe2\x80\xa6" tail)
+
+(* Nothing passes a fold at most call sites, and an identifier is the reading
+   that must not lose an end. *)
+let test_a_column_that_says_nothing_keeps_both_ends () =
+  let id = "run-exact-output-lane-board-attention" in
+  let row = Table.row [ Table.cell ~header:"ID" ~width:16 id ] in
+  check bool "the head is drawn" true (contains "run-" row);
+  check bool "and so is the tail" true (contains "attention" row)
+
 (* A screen that hides a column at narrow widths drops it from the description,
    and the header loses it with the rows rather than naming a column nothing
    fills. *)
@@ -164,6 +195,10 @@ let () =
             test_alignment_reaches_the_header
         ; test_case "an overlong reading folds rather than pushes" `Quick
             test_an_overlong_reading_folds_rather_than_pushes
+        ; test_case "a column chooses which end gives way" `Quick
+            test_a_column_chooses_which_end_gives_way
+        ; test_case "a column that says nothing keeps both ends" `Quick
+            test_a_column_that_says_nothing_keeps_both_ends
         ; test_case "a dropped column leaves both lines" `Quick
             test_a_dropped_column_leaves_both_lines
         ; test_case "a styled cell occupies no extra cells" `Quick

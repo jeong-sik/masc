@@ -10,10 +10,21 @@ type align =
   | Left
   | Right
 
+type fold =
+  | Fold_middle
+  | Fold_tail
+      (** Which part of a reading gives way when it is wider than its column.
+          {!Fold_middle} keeps both ends -- an identifier cut at the head reads
+          as a different identifier, and a number cut at either end is a wrong
+          number. {!Fold_tail} keeps the head, which is how a sentence is read:
+          a post's title spent its cells on a hex tail while its subject was
+          the half that folded. *)
+
 type cell = private {
   header : string;
   width : int;
   align : align;
+  fold : fold;
   value : string;
   style : string;
 }
@@ -22,9 +33,16 @@ type cell = private {
     assembled without a header and a width -- the pairing is the point. *)
 
 val cell :
-  ?align:align -> ?style:string -> header:string -> width:int -> string -> cell
+  ?align:align ->
+  ?fold:fold ->
+  ?style:string ->
+  header:string ->
+  width:int ->
+  string ->
+  cell
 (** [cell ~header ~width value] describes one column carrying [value].
-    [align] defaults to {!Left}; numbers usually want {!Right}.
+    [align] defaults to {!Left}; numbers usually want {!Right}. [fold] defaults
+    to {!Fold_middle}; a column carrying a sentence wants {!Fold_tail}.
 
     [style] dresses this cell's reading and nothing else -- an ANSI prefix the
     caller owns, closed after the cell. It is how one deviating reading is
@@ -51,7 +69,7 @@ val header_row : cell list -> string
 
 val row : ?close:string -> cell list -> string
 (** One row's readings, laid out on the same cells as {!header_row}. A reading
-    past its width folds in the middle; it never widens its column, so a row is
+    past its width folds where its column says; it never widens its column, so a row is
     exactly as wide as the header above it whatever it carries -- styled cells
     included, since the escapes occupy no display cells.
 

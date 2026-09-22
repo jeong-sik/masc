@@ -18,16 +18,22 @@ type align =
   | Left
   | Right
 
+type fold =
+  | Fold_middle
+  | Fold_tail
+
 type cell = {
   header : string;
   width : int;
   align : align;
+  fold : fold;
   value : string;
   style : string;
 }
 
-let cell ?(align = Left) ?(style = "") ~header ~width value =
-  { header; width; align; value; style }
+let cell ?(align = Left) ?(fold = Fold_middle) ?(style = "") ~header ~width
+    value =
+  { header; width; align; fold; value; style }
 
 (* A cell's dress closes back to the row's own, not to a bare reset: a reset
    would strip the dimming or the selection band the caller wrapped the whole
@@ -48,9 +54,12 @@ let used_width cells =
   List.fold_left (fun total cell -> total + cell.width) 0 cells
   + (cell_gap * max 0 (List.length cells - 1))
 
-(* Folded in the middle rather than cut at one end: an identifier cut at the
-   head reads as a different identifier, and a number cut at either end is a
-   wrong number where a folded one is visibly incomplete.
+(* Where a reading gives way is the column's own fact, not one rule for every
+   column. An identifier cut at the head reads as a different identifier and a
+   number cut at either end is a wrong number, so both ends stay and the middle
+   folds. A sentence is the other way round: it is read from the front, and the
+   Board's "Verify: run-eâ¦9e327af211400cba719b59128]" spent its cells
+   on a hex tail while the subject of the post was the half that folded.
 
    Only a reading that overruns its column is folded. [fit_middle] pads a short
    reading out to the column on the left, which left no slack for this to place
@@ -59,7 +68,10 @@ let used_width cells =
 let pad cell text =
   let fitted =
     if Masc_tui_message_layout.display_width text <= cell.width then text
-    else Masc_tui_message_layout.fit_middle cell.width text
+    else
+      match cell.fold with
+      | Fold_middle -> Masc_tui_message_layout.fit_middle cell.width text
+      | Fold_tail -> Masc_tui_message_layout.fit_width text cell.width
   in
   let slack =
     max 0 (cell.width - Masc_tui_message_layout.display_width fitted)

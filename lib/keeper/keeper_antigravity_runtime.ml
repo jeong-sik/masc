@@ -120,25 +120,37 @@ let prompt_section_framing_reserved_bytes () =
    a source-only atom is transmitted context, but cannot become a front that
    a later checkpoint history is expected to open. *)
 let bounded_history_projection ~capacity_bytes ~reserved_bytes
-    ?on_model_input_window_observation ?carried_front_seed ~turn_start ~keeper_name
-    ~runtime_id source_projection
+    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
+    ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
+  let* librarian_front = Host.read_librarian_front librarian_front history_messages in
   let carried =
     Host.carried_start_range
       ~keeper_name
       ~runtime_id
       ~carried_front_seed
+      ~librarian_front
       ~own_first_atom:0
       ~turn_start
       history_messages
   in
+  Option.iter
+    (fun observe -> observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+    on_carried_front;
   let* projected_messages =
     match source_projection with
     | None -> Ok carried.Host.messages
     | Some project -> project carried.Host.messages
   in
+  (* The window drops atoms, never a pinned message, so it refuses only when
+     the pinned messages alone -- the hooks' system context, a working state
+     the Librarian front carries, the preamble -- exceed what the fixed
+     sections leave. That refusal is final for every front. Composing once
+     more without the working state would save at most its few kilobytes and
+     hide, for that one band, a request the operator has to make room for:
+     the next turn's pinned messages meet the same ceiling. *)
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
     match
       Runtime_model_input_tail_window.project_with_drop
@@ -176,7 +188,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
     ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
-    ~turn_start ~keeper_name ~runtime_id source_projection
+    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id source_projection
   =
   match declared_max_prompt_bytes with
   | None ->
@@ -207,6 +219,8 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
               ~reserved_bytes
               ?on_model_input_window_observation
               ?carried_front_seed
+              ?librarian_front
+              ?on_carried_front
               ~turn_start
               ~keeper_name
               ~runtime_id
@@ -381,6 +395,8 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
+    ~librarian_front
+    ~on_carried_front
     ~turn_start
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -537,6 +553,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~goal
             ?on_model_input_window_observation
             ?carried_front_seed
+            ?librarian_front
+            ?on_carried_front
             ~turn_start
             ~keeper_name
             ~runtime_id
@@ -1163,6 +1181,8 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
@@ -1184,6 +1204,8 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed
+        ~librarian_front
+        ~on_carried_front
         ~turn_start
     ~pre_tool_rejects
         ~base_path

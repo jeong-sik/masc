@@ -504,9 +504,12 @@ status: reference
   `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
   Message로 열릴 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 실리고 그 앞을
   요약하지 않는다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
-  Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`이 0이면 두 경우다 —
-  끝난 turn이 없는 새 Keeper의 짧은 History 전체이거나, 경계 저장소를 못 읽었거나
-  경계가 이 History와 맞지 않을 때(purge 직후처럼)다. 뒤의 경우는 긴 History 전체다.
+  Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`은 그 경계 자체를 적는다 —
+  범위가 열린 Atom이 아니라 turn-boundary 저장소가 말하는 완료 경계다. 그래서 경계가
+  가장 새 Atom과 같거나 그보다 뒤여도(옛 번호로 남은 경계) 그 값을 그대로 적고, 범위가
+  어디서 열릴지는 clamp가 정한다. `end_atom`이 0이면 두 경우다 — 끝난 turn이 없는 새
+  Keeper의 짧은 History 전체이거나, 경계 저장소를 못 읽었거나 경계가 이 History를 덮지
+  않을 때다. 뒤의 경우는 긴 History 전체다.
 
   저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
   지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.

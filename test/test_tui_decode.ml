@@ -1051,12 +1051,13 @@ let test_decode_planning_snapshot_rejects_running_alias () =
 
 (* The shape the server actually sent while a keeper was failing to start,
    trimmed to the fields the TUI reads. *)
-let fleet_safety_json ?(missing = true) () =
+let fleet_safety_json ?(missing = true)
+    ?(blocker = "reaction_capacity_below_target") () =
   `Assoc
     [ ( "keeper_fleet_safety"
       , `Assoc
           ([ "status", `String "degraded"
-           ; "blocker", `String "reaction_capacity_below_target"
+           ; "blocker", `String blocker
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
            ; "running_keeper_fiber_count", `Int 8
@@ -1091,8 +1092,11 @@ let test_decode_fleet_safety_carries_both_name_lists () =
   | Error err -> Alcotest.fail err
   | Ok fleet ->
       Alcotest.(check string) "status" "degraded" fleet.fs_status;
-      Alcotest.(check (option string)) "blocker"
-        (Some "reaction_capacity_below_target") fleet.fs_blocker;
+      Alcotest.(check bool) "the blocker is read as the reason it names" true
+        (fleet.fs_blocker
+         = Some
+             (Tui_decode.Blocker
+                Keeper_fleet_blocker.Reaction_capacity_below_target));
       Alcotest.(check bool) "operator must act" true
         fleet.fs_operator_action_required;
       Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
@@ -1139,6 +1143,20 @@ let test_decode_fleet_safety_requires_session_recovery_fields () =
       ; "official_client_recovery_required_keeper_names" ]
   | _ -> Alcotest.fail "fleet fixture must be an object"
 
+(* A newer server can name a reason this build has no constructor for. The
+   header still has something to say, so the name is kept rather than read as
+   no blocker at all. *)
+let test_decode_fleet_safety_keeps_an_unknown_blocker_by_name () =
+  match
+    Tui_decode.decode_fleet_safety
+      (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ())
+  with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check bool) "the unknown name is kept" true
+        (fleet.fs_blocker
+         = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
+
 let test_decode_fleet_safety_with_nothing_missing () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
   | Error err -> Alcotest.fail err
@@ -1167,6 +1185,7 @@ let metrics_common_fields ~kind ~channel =
 
 type usage_fixture =
   | Usage_trusted
+  | Usage_unpriced
   | Usage_untrusted
   | Usage_missing
   | Usage_mixed
@@ -1215,6 +1234,20 @@ let usage_fields = function
           ]
       , `Null
       , "missing"
+      , [] )
+  | Usage_unpriced ->
+      ( `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Int 12
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 22
+          ; "usage_trust", `String "trusted"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Null
+      , "trusted"
       , [] )
   | Usage_mixed ->
       ( `Assoc
@@ -1316,6 +1349,39 @@ let test_decode_current_turn_metrics () =
         entry.le_work_kind
   | Error err -> Alcotest.fail err
 
+(* Every turn row a live keeper wrote on 2026-09-23 carries the five counters
+   and no cost: the providers behind them price nothing, and the producer
+   writes the cost only where the provider's sample carried one
+   ([Keeper_unified_metrics_snapshot]'s [cost_json]). Read as a half-written
+   observation, those rows are dropped, and the Keeper pane's day reads as no
+   turns at all. *)
+let test_a_turn_priced_by_no_provider_is_still_a_turn () =
+  match
+    Tui_decode.decode_log_entry (current_turn_metrics ~usage:Usage_unpriced ())
+  with
+  | Error err -> Alcotest.failf "the live row shape was refused: %s" err
+  | Ok entry ->
+      Alcotest.(check bool) "turn kind" true
+        (entry.le_kind = Tui_decode.Log_turn);
+      Alcotest.(check (option int)) "input tokens" (Some 10)
+        entry.le_input_tokens;
+      Alcotest.(check (option int)) "output tokens" (Some 12)
+        entry.le_output_tokens;
+      Alcotest.(check (option (float 0.001))) "no cost was reported" None
+        entry.le_cost_usd
+
+(* The other way round is a row no producer writes: the cost comes off the
+   same sample as the counters. *)
+let test_a_cost_without_counters_is_refused () =
+  let priced_without_counters =
+    set_field "cost_usd" (`Float 0.25) (current_turn_metrics ~usage:Usage_missing ())
+  in
+  match Tui_decode.decode_log_entry priced_without_counters with
+  | Ok _ -> Alcotest.fail "a cost with no counters to price has to be refused"
+  | Error detail ->
+      Alcotest.(check string) "the refusal says what is missing"
+        "usage cost_usd without the counters it would price" detail
+
 let test_decode_current_turn_variants () =
   List.iter
     (fun (channel, expected_channel) ->
@@ -1363,10 +1429,9 @@ let test_decode_current_turn_variants () =
         (Some 12) entry.le_output_tokens
   | Error err -> Alcotest.fail err
 
-(* The six values are required fields carrying nullable values, so a row can
-   arrive with some of them null and the rest filled -- which is the branch 75
-   of 200 rows in a live keeper's log landed on, 37% of the window. The refusal
-   now says which side of the line each value fell on. *)
+(* The five counters are required fields carrying nullable values, so a row
+   can arrive with some of them null and the rest filled. The refusal says
+   which side of the line each value fell on. *)
 let test_a_row_with_some_values_null_names_them () =
   let null_in_usage key json =
     match json with
@@ -1387,8 +1452,8 @@ let test_a_row_with_some_values_null_names_them () =
    | Error detail ->
        Alcotest.(check string) "the refusal names the one that is null first"
          "usage unset=[total_tokens] set=[input_tokens, output_tokens, \
-          cache_creation_tokens, cache_read_tokens, cost_usd] is not one \
-          current atomic observation"
+          cache_creation_tokens, cache_read_tokens] is not one current atomic \
+          observation"
          detail);
   match
     Tui_decode.decode_log_entry
@@ -4432,17 +4497,24 @@ let test_decode_project_changes_keeps_project_scope () =
 
 (* Keeper lane rows. Shape is the light projection the TUI reads from
    [GET /api/v1/keepers/composite]. *)
+let lane_conditions_json ?(launch_pending = false) ?(heartbeat_healthy = true)
+    ?(turn_healthy = true) () =
+  `Assoc
+    [ "launch_pending", `Bool launch_pending
+    ; "heartbeat_healthy", `Bool heartbeat_healthy
+    ; "turn_healthy", `Bool turn_healthy
+    ]
+
 let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
     ?(idle_seconds = 75) ?(last_outcome = `Null)
-    ?(diagnosis = `String "running_fiber_alive") keeper =
+    ?(conditions = lane_conditions_json ()) keeper =
   `Assoc
     [ "keeper", `String keeper
     ; "phase", `String phase
     ; "turn_phase", `String turn_phase
     ; "idle_seconds", `Int idle_seconds
     ; "last_outcome", last_outcome
-    ; ( "phase_diagnosis"
-      , `Assoc [ "determining_condition", diagnosis ] )
+    ; "phase_diagnosis", `Assoc [ "conditions", conditions ]
     ]
 
 let keeper_lanes_json lanes =
@@ -4520,7 +4592,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
       (keeper_lanes_json
          [ keeper_lane_json ~last_outcome "alpha"
          ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
-             ~diagnosis:`Null "beta"
+             ~conditions:(lane_conditions_json ~turn_healthy:false ()) "beta"
          ])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -4549,8 +4621,12 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
             | Tui_decode.Lane_turn_unknown raw ->
                 Alcotest.(check string) "unknown turn" "future_turn" raw
             | _ -> Alcotest.fail "future turn was folded into a known turn");
-           Alcotest.(check (option string)) "no determining condition" None
-             beta.kl_diagnosis
+           Alcotest.(check bool) "alpha's last turn is healthy" true
+             alpha.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's last turn failed" false
+             beta.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's heartbeat is healthy" true
+             beta.kl_conditions.Tui_decode.klc_heartbeat_healthy
        | lanes ->
            Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
 
@@ -4561,7 +4637,7 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       ; "phase", `String "running"
       ; "turn_phase", `String "idle"
       ; "last_outcome", `Null
-      ; "phase_diagnosis", `Assoc [ "determining_condition", `Null ]
+      ; "phase_diagnosis", `Assoc [ "conditions", lane_conditions_json () ]
       ]
   in
   match
@@ -4571,6 +4647,29 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
   | Error detail ->
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+
+(* A reading of no conditions is not a healthy keeper. Each of the three
+   decides what the operations line says about the phase, so a lane without
+   one is refused rather than drawn as if the keeper were fine. *)
+let test_decode_keeper_lanes_requires_the_phase_conditions () =
+  List.iter
+    (fun field ->
+      let conditions =
+        match lane_conditions_json () with
+        | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+        | json -> json
+      in
+      match
+        Tui_decode.decode_keeper_lanes_snapshot
+          (keeper_lanes_json [ keeper_lane_json ~conditions "alpha" ])
+      with
+      | Ok _ -> Alcotest.failf "a lane without %s decoded" field
+      | Error detail ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%S names %s" detail field)
+            true
+            (Astring.String.is_infix ~affix:field detail))
+    [ "launch_pending"; "heartbeat_healthy"; "turn_healthy" ]
 
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
@@ -10233,6 +10332,8 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+        Alcotest.test_case "a lane without its phase conditions is refused" `Quick
+          test_decode_keeper_lanes_requires_the_phase_conditions;
         Alcotest.test_case "every known phase decodes to its own constructor"
           `Quick
           test_every_known_phase_decodes_to_its_own_constructor;
@@ -10439,6 +10540,8 @@ let () =
           test_decode_fleet_safety_carries_both_name_lists;
         Alcotest.test_case "session recovery fields are required" `Quick
           test_decode_fleet_safety_requires_session_recovery_fields;
+        Alcotest.test_case "an unknown blocker is kept by name" `Quick
+          test_decode_fleet_safety_keeps_an_unknown_blocker_by_name;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick
           test_decode_fleet_safety_with_nothing_missing;
         Alcotest.test_case "a body without the section is refused" `Quick
@@ -10483,6 +10586,10 @@ let () =
           test_decode_current_turn_variants;
         Alcotest.test_case "current heartbeat contract" `Quick
           test_decode_current_heartbeat_metrics;
+        Alcotest.test_case "a turn priced by no provider is still a turn" `Quick
+          test_a_turn_priced_by_no_provider_is_still_a_turn;
+        Alcotest.test_case "a cost without counters is refused" `Quick
+          test_a_cost_without_counters_is_refused;
         Alcotest.test_case "a row with some values null names them" `Quick
           test_a_row_with_some_values_null_names_them;
         Alcotest.test_case "retired and unknown rows fail closed" `Quick

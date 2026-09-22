@@ -15,10 +15,12 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   let h2_respond_auth_error error =
-    let status = Server_auth.http_status_of_auth_error error in
+    let status, body =
+      Server_auth.auth_refusal_response ~protocol:"h2" ~path error
+    in
     h2_respond_json
       h2_reqd
-      (Server_auth.auth_error_json error)
+      body
       ~status:(status :> H2.Status.t)
       ~extra_headers:(Server_auth.auth_error_headers ~status ~cors)
   in

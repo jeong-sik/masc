@@ -611,6 +611,14 @@
  (wrapped false)
  (modules masc_tui_exit_signals))
 
+;; Why a session ended, in the vocabulary the exit line is written in. Own
+;; library so the normal/abnormal split and the one-row flattening run under a
+;; test with no terminal.
+(library
+ (name masc_tui_exit_reason)
+ (wrapped false)
+ (modules masc_tui_exit_reason))
+
 ;; The exit-time tcsetattr on a descriptor that is no longer a terminal:
 ;; ENOTTY and EIO mean the terminal is gone and the rest of the at_exit chain
 ;; still runs; any other refusal propagates. Own library so the rule runs
@@ -864,6 +872,12 @@
  ; observed column drawn where the row has no room for it.
  (modules masc_tui_lane_table)
  (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_fleet_line)
+ (wrapped false)
+ (modules masc_tui_fleet_line)
+ (libraries masc masc_tui_ansi))
 
 (library
  (name masc_tui_table)
@@ -1496,6 +1510,7 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  masc_tui_fleet_line
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit
@@ -1548,6 +1563,7 @@
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals
+  masc_tui_exit_reason
   masc_tui_terminal_restore
   masc.runtime
   masc.keeper_registry

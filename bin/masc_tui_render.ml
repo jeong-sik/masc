@@ -619,8 +619,18 @@ let render_overview (state : state) =
           if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
           else ""
         in
-        Printf.sprintf "%s[%s]%s %s%s"
+        (* After the clock, so the clock column stays one column down the
+           panel and only the rows that carry a mark give up its two cells. *)
+        let mark =
+          match Masc_tui_types.overview_event_mark e with
+          | None -> ""
+          | Some glyph ->
+              Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
+                Ansi.reset
+        in
+        Printf.sprintf "%s[%s]%s %s%s%s"
           Ansi.dim e.timestamp Ansi.reset
+          mark
           (Terminal_text.single_line e.content)
           tail
     in
@@ -4346,6 +4356,26 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ]
 
 
+(* The conditions that share a phase with another: either health reading
+   makes a keeper failing, and a pending launch is one of the ways it is
+   offline. Each of the other conditions has a phase of its own, which the
+   lifecycle word already says, so naming it again would add nothing. *)
+let keeper_lane_phase_causes (conditions : Tui_decode.keeper_lane_conditions) =
+  List.filter_map
+    (fun (holds, words) -> if holds then Some words else None)
+    [ (not conditions.klc_turn_healthy, "last turn failed")
+    ; (not conditions.klc_heartbeat_healthy, "heartbeat failed")
+    ; (conditions.klc_launch_pending, "launch pending")
+    ]
+
+let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
+  let phase =
+    Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+  in
+  match keeper_lane_phase_causes lane.kl_conditions with
+  | [] -> phase
+  | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
+
 let keeper_operations_outcome_text = function
   | None -> "—"
   | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
@@ -4392,8 +4422,7 @@ let keeper_operations_preview (state : state) =
                   ; "  OPERATIONS"
                   ; Ansi.reset
                   ; "  lifecycle "
-                  ; Terminal_text.single_line
-                      (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+                  ; keeper_lane_lifecycle_text lane
                   ; " · turn "
                   ; Terminal_text.single_line
                       (Tui_decode.keeper_lane_turn_phase_to_string
@@ -4402,9 +4431,6 @@ let keeper_operations_preview (state : state) =
                   ; keeper_lane_idle_text lane.kl_idle_seconds
                   ; " · last "
                   ; keeper_operations_outcome_text lane.kl_last_outcome
-                  ; " · "
-                  ; Terminal_text.single_line_or ~default:"no diagnosis"
-                      lane.kl_diagnosis
                   ; target_note
                   ]
             | None ->
@@ -4489,7 +4515,9 @@ let render_keeper_list (state : state) =
          else (Theme.warn ())
        in
        let blocker =
-         match fleet.fs_blocker with None -> "" | Some b -> "   blocker: " ^ b
+         match Masc_tui_fleet_line.blocker_text fleet with
+         | None -> ""
+         | Some text -> "   " ^ text
        in
        box_line buf cols
          (Printf.sprintf
@@ -4499,20 +4527,8 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* The phase snapshot partitions failing keepers into recovering,
-          configuration errors and explicit official-client session recovery.
-          Every failing Keeper belongs to exactly one class, so these three
-          counts sum to the displayed failing count. The latter two require
-          action beyond repeating the same turn. *)
        let failing_entry =
-         if fleet.fs_failing_count = 0 then []
-         else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
-               fleet.fs_failing_count
-               fleet.fs_recovering_count
-               fleet.fs_turn_configuration_error_count
-               fleet.fs_official_client_recovery_required_count
-           ]
+         Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
        let counts =
          failing_entry
@@ -6801,7 +6817,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
             activity.Keeper_activity.aw_output_tokens);
        add_row "Cost:"
-         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+         (match activity.Keeper_activity.aw_cost_usd with
+          | Some cost -> Printf.sprintf "$%.4f" cost
+          | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
        add_row "Tool Calls:"
          (string_of_int activity.Keeper_activity.aw_tool_calls);
        add_row "Top Tools:"
@@ -8773,19 +8791,6 @@ let render_harness (state : state) =
        | None -> render_harness_list state)
   | Some _, None | None, _ -> render_harness_list state
 
-let fusion_run_stage_compact = function
-  | Fusion_stage_accepted -> "accepted"
-  | Fusion_stage_panel { frs_expected } ->
-      Printf.sprintf "panel(%d)" frs_expected
-  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_completed -> "completed"
-  | Fusion_stage_failed -> "failed"
-
 (* What became of the selected run, in one row under the list. It opened
    with "Flow: Question → Panel → Judge → Evidence" on every run: the four
    stops are the same for every run and say nothing about this one, the
@@ -8955,11 +8960,8 @@ let render_fusion_list (state : state) =
               Ansi.reverse ^ ">" ^ Ansi.reset else " " in
           box_line buf cols (marker ^ " " ^ line)
       | Some (Tui_decode.Fusion_retained_run run) ->
-          let status = fusion_run_status_to_string run.fur_status in
           let state_text =
-            match run.fur_status with
-            | Fusion_running -> fusion_run_stage_compact run.fur_stage
-            | Fusion_completed | Fusion_failed _ -> status
+            fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
           in
           let line =
             Render_schedule.fusion_row columns

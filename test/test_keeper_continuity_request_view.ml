@@ -49,7 +49,9 @@ let wire (view : Driver.request_view) = match view.wire with
 ;;
 
 let without_working_state messages =
-  let is_working (m : T.message) = m.metadata = T.Extra_system_context_provenance.metadata in
+  let is_working (m : T.message) =
+    m.metadata = Runtime_model_input_tail_window.working_state_metadata
+  in
   let working, rest = List.partition is_working messages in
   (match working with
    | [m] ->

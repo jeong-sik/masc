@@ -321,7 +321,7 @@ let test_prefit_real_continuity ~base_path () =
   let wire = view.wire
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in
   let summaries, suffix = List.partition (fun (message : Agent_core.Types.message) ->
-    message.metadata = Agent_core.Types.Extra_system_context_provenance.metadata) wire in
+    message.metadata = Runtime_model_input_tail_window.working_state_metadata) wire in
   Alcotest.(check int) "next request contains exactly one saved working state" 1 (List.length summaries);
   Alcotest.(check bool) "next request preserves unfinished user and tool exchange exactly" true
     (List.equal Agent_core.Types.Message_value.equal pending suffix);

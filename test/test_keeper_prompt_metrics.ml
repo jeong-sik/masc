@@ -383,6 +383,45 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
      |> message_texts)
 ;;
 
+(* The Librarian working state opens a summarized range under its own tag
+   (Runtime_model_input_tail_window). It is provider content, not the per-turn
+   context carrier, so it stays and the carrier count is unchanged. *)
+let test_provider_content_messages_keeps_the_working_state () =
+  let working_state =
+    { (message "[Librarian working state] summary") with
+      metadata = Runtime_model_input_tail_window.working_state_metadata
+    }
+  in
+  let history = [ message "history"; message "current user" ] in
+  let prompt_context = prompt_carrier "[system context] dynamic and memory blocks" in
+  let message_texts result =
+    Result.to_option result
+    |> Option.map
+         (List.map (fun (message : Agent_core.Types.message) ->
+            Agent_core.Types.text_of_content message.Agent_core.Types.content))
+  in
+  let with_carrier = (working_state :: history) @ [ prompt_context ] in
+  check
+    (option (list string))
+    "the working state stays and the one carrier is removed"
+    (Some [ "[Librarian working state] summary"; "history"; "current user" ])
+    (KAPM.provider_content_messages
+       ~prompt_context_present:true
+       ~projection_input:with_carrier
+       ~projected_messages:with_carrier
+     |> message_texts);
+  let without_carrier = working_state :: history in
+  check
+    (option (list string))
+    "a working state with no carrier is not a carrier the hook never announced"
+    (Some [ "[Librarian working state] summary"; "history"; "current user" ])
+    (KAPM.provider_content_messages
+       ~prompt_context_present:false
+       ~projection_input:without_carrier
+       ~projected_messages:without_carrier
+     |> message_texts)
+;;
+
 let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
   let plain = message "[system context] same text without typed identity" in
   let marked = prompt_carrier "typed prompt context" in
@@ -719,6 +758,8 @@ let () =
             test_ctx_composition_splits_final_provider_input_bytes;
           test_case "removes typed prompt carrier" `Quick
             test_provider_content_messages_removes_typed_prompt_carrier;
+          test_case "keeps the working state under its own tag" `Quick
+            test_provider_content_messages_keeps_the_working_state;
           test_case "rejects prompt carrier mismatch" `Quick
             test_provider_content_messages_rejects_prompt_carrier_mismatch;
           test_case

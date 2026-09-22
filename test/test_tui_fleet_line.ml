@@ -1,0 +1,140 @@
+open Alcotest
+module Tui_decode = Masc.Tui_decode
+module Keeper_fleet_blocker = Masc.Keeper_fleet_blocker
+
+let fleet ?blocker ?(failing = 0) ?(retrying = 0) ?(config_blocked = 0)
+    ?(session_recovery = 0) () : Tui_decode.fleet_safety =
+  { fs_status = "ok"
+  ; fs_blocker = blocker
+  ; fs_operator_action_required = false
+  ; fs_bootable_count = 12
+  ; fs_running_count = 11
+  ; fs_executable_count = 12
+  ; fs_failing_count = failing
+  ; fs_recovering_count = retrying
+  ; fs_turn_configuration_error_count = config_blocked
+  ; fs_official_client_recovery_required_count = session_recovery
+  ; fs_paused_count = 3
+  ; fs_target_reaction_capacity = 12
+  ; fs_reaction_capacity_shortfall = 0
+  ; fs_bootable_names = []
+  ; fs_running_names = []
+  ; fs_executable_names = []
+  ; fs_turn_configuration_error_names = []
+  ; fs_official_client_recovery_required_names = []
+  ; fs_active_task_owner_without_fiber_count = 0
+  ; fs_completion_authority_pending_count = 0
+  }
+
+let known blocker = Tui_decode.Blocker blocker
+let blocker_text = Masc_tui_fleet_line.blocker_text
+let failing_text = Masc_tui_fleet_line.failing_text
+
+(* The fleet scan and the TUI read one list, so a name the server writes is a
+   name the TUI reads back as the same reason. *)
+let test_every_blocker_reads_back_from_its_wire_name () =
+  List.iter
+    (fun blocker ->
+      let name = Keeper_fleet_blocker.wire_name blocker in
+      check bool (name ^ " reads back") true
+        (Keeper_fleet_blocker.of_wire_name name = Some blocker))
+    Keeper_fleet_blocker.all
+
+let test_no_two_blockers_share_a_wire_name () =
+  let names = List.map Keeper_fleet_blocker.wire_name Keeper_fleet_blocker.all in
+  check int "one name per reason" (List.length names)
+    (List.length (List.sort_uniq String.compare names))
+
+(* These spellings are the /health contract. The type decides who spells
+   them, not what they are. *)
+let test_the_wire_names_are_the_fleet_scans () =
+  check (list string) "the fleet scan's blocker names"
+    [ "keeper_bootstrap_disabled"
+    ; "no_executable_keeper_fibers"
+    ; "turn_configuration_error"
+    ; "official_client_recovery_required"
+    ; "reaction_capacity_below_target"
+    ; "active_task_owner_without_executable_fiber"
+    ; "durable_paused_autoboot_enabled"
+    ]
+    (List.map Keeper_fleet_blocker.wire_name Keeper_fleet_blocker.all)
+
+(* The counts line below says [paused 3]; the header names the reason in the
+   same words and leaves the number to that line. *)
+let test_a_blocker_is_named_in_the_counts_lines_words () =
+  check (option string) "a durable pause" (Some "autoboot keepers paused")
+    (blocker_text
+       (fleet ~blocker:(known Keeper_fleet_blocker.Durable_paused_autoboot_enabled)
+          ()));
+  check (option string) "a configuration error" (Some "config-blocked keepers")
+    (blocker_text
+       (fleet ~blocker:(known Keeper_fleet_blocker.Turn_configuration_error)
+          ~failing:1 ~config_blocked:1 ()))
+
+(* Every reason is said in words, and no two reasons say the same thing. *)
+let test_every_known_blocker_is_said_in_words () =
+  let texts =
+    List.map
+      (fun blocker ->
+        let name = Keeper_fleet_blocker.wire_name blocker in
+        match blocker_text (fleet ~blocker:(known blocker) ()) with
+        | None -> fail (name ^ " drew nothing")
+        | Some text ->
+            check bool
+              (Printf.sprintf "%S is not the identifier %s" text name)
+              false
+              (String.contains text '_');
+            text)
+      Keeper_fleet_blocker.all
+  in
+  check int "one phrase per reason" (List.length texts)
+    (List.length (List.sort_uniq String.compare texts))
+
+let test_an_unknown_blocker_is_drawn_by_name () =
+  check (option string) "the server's own name"
+    (Some "blocker: lane_capacity_withdrawn")
+    (blocker_text
+       (fleet ~blocker:(Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn")
+          ()))
+
+let test_no_blocker_draws_nothing () =
+  check (option string) "no blocker" None (blocker_text (fleet ()))
+
+(* A class that holds no failing Keeper says nothing about this fleet. *)
+let test_failing_names_only_the_classes_that_hold_a_keeper () =
+  check (option string) "one class" (Some "failing 2 (retrying 2)")
+    (failing_text (fleet ~failing:2 ~retrying:2 ()));
+  check (option string) "two classes"
+    (Some "failing 3 (retrying 1 \xc2\xb7 session-recovery-required 2)")
+    (failing_text (fleet ~failing:3 ~retrying:1 ~session_recovery:2 ()))
+
+let test_nothing_failing_draws_nothing () =
+  check (option string) "no failing" None (failing_text (fleet ()))
+
+let () =
+  run "tui fleet line"
+    [ ( "blocker names"
+      , [ test_case "every blocker reads back from its wire name" `Quick
+            test_every_blocker_reads_back_from_its_wire_name
+        ; test_case "no two blockers share a wire name" `Quick
+            test_no_two_blockers_share_a_wire_name
+        ; test_case "the wire names are the fleet scan's" `Quick
+            test_the_wire_names_are_the_fleet_scans
+        ] )
+    ; ( "blocker words"
+      , [ test_case "a blocker is named in the counts line's words" `Quick
+            test_a_blocker_is_named_in_the_counts_lines_words
+        ; test_case "every known blocker is said in words" `Quick
+            test_every_known_blocker_is_said_in_words
+        ; test_case "an unknown blocker is drawn by name" `Quick
+            test_an_unknown_blocker_is_drawn_by_name
+        ; test_case "no blocker draws nothing" `Quick
+            test_no_blocker_draws_nothing
+        ] )
+    ; ( "failing"
+      , [ test_case "names only the classes that hold a keeper" `Quick
+            test_failing_names_only_the_classes_that_hold_a_keeper
+        ; test_case "nothing failing draws nothing" `Quick
+            test_nothing_failing_draws_nothing
+        ] )
+    ]

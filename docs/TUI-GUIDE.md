@@ -244,6 +244,40 @@ only while the pane has room to show. Below 110 columns it reports the width
 requirement and leaves the preference unchanged, so resizing wider cannot
 reveal a hidden toggle that had no visible effect when it was pressed.
 
+### The Activity pane
+
+`Ctrl-L` walks the pane on the right of every surface through narrow, wide
+and hidden. Its `[Recent]` tab is what each keeper is doing now, one row
+each:
+
+```
+ [Recent] Changes · 11 keepers (5 offline)
+                    state     tool          calls   tokens
+ ● ocaml-agent-ic   open      tool_execute    16+
+ ● pr-updater       done                        10   72.3k
+ ● jazz-developer   no events
+```
+
+The mark is the keeper's health, as on the roster. `state` is the record the
+feed has: `open` (no end event yet), `done`, `no end` (the process is gone,
+so no end will come), `approval` (waiting on you), or `no events`. An open
+record names the tool it is in and counts the calls seen *so far*, which is
+what the `+` says: the feed may have started mid-turn. A done record carries
+the turn's calls and its tokens, in and out summed. A name longer than its
+column is cut with `…`; the wide pane has cells for the ones that outgrow
+the narrow one. The header says the feed only when it is not delivering
+(`no feed`, `feed opening`, `feed closed: …`).
+
+Under a rule, the selected keeper's own record: its state and the age of its
+newest event, then its calls, newest first (`o` turns the order). A run of
+the same tool is one row that counts it and says what the calls took
+(`Execute ×5 · 2.7s 274ms 1.4s 2.9s 4.7s`, or their sum where that does not
+fit); the Keeper Calls surface (`t`) reads each call one by one. `Enter` or
+a press on a call opens its facts, input and output; on an earlier turn's
+row it opens that keeper's calls surface.
+
+The `Changes` tab lists the files this keeper's calls wrote, newest first.
+
 ## Surfaces
 
 ### Overview

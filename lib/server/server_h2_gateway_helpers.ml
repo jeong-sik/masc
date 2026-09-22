@@ -89,14 +89,34 @@ let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
   H2.Body.Writer.close writer
 
+(* The ceiling is the one HTTP/1 applies, so a route admits the same bodies
+   whichever transport the client negotiated. A declared length over it is
+   refused before any byte is read; a streamed body is refused at the chunk
+   that crosses it. Closing the reader makes h2 drop the DATA frames still
+   arriving on this stream instead of buffering them. *)
 let h2_read_body h2_reqd callback =
   let body = H2.Reqd.request_body h2_reqd in
-  let buf = Http_body_buffer.create 4096 in
-  let rec read_loop () =
-    H2.Body.Reader.schedule_read body
-      ~on_eof:(fun () -> callback (Http_body_buffer.contents buf))
-      ~on_read:(fun bigstring ~off ~len ->
-        Http_body_buffer.add_bigstring buf bigstring ~off ~len;
-        read_loop ())
+  let max_bytes = Http_server_eio.Request.max_body_bytes in
+  let respond_too_large () =
+    H2.Body.Reader.close body;
+    h2_respond_text
+      h2_reqd
+      (Printf.sprintf "413 Request Entity Too Large (max %d bytes)" max_bytes)
+      ~status:`Payload_too_large
   in
-  read_loop ()
+  match H2.Request.body_length (H2.Reqd.request h2_reqd) with
+  | `Fixed declared when Int64.compare declared (Int64.of_int max_bytes) > 0 ->
+    respond_too_large ()
+  | `Fixed _ | `Unknown | `Error `Bad_request ->
+    let buf = Http_body_buffer.create 4096 in
+    let rec read_loop () =
+      H2.Body.Reader.schedule_read body
+        ~on_eof:(fun () -> callback (Http_body_buffer.contents buf))
+        ~on_read:(fun bigstring ~off ~len ->
+          if Http_body_buffer.length buf + len > max_bytes
+          then respond_too_large ()
+          else (
+            Http_body_buffer.add_bigstring buf bigstring ~off ~len;
+            read_loop ()))
+    in
+    read_loop ()

@@ -43,3 +43,6 @@ val h2_respond_empty :
   H2.Reqd.t -> unit
 
 val h2_read_body : H2.Reqd.t -> (string -> unit) -> unit
+(** Reads the request body and hands it to the callback at end of stream.
+    A body over [Http_server_eio.Request.max_body_bytes], the HTTP/1 ceiling,
+    is answered with 413 and the callback never runs. *)

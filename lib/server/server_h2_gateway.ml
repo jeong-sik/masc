@@ -904,9 +904,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let csp_header = ("content-security-policy", graphql_csp_header nonce) in
             h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors))
 
+      (* The gate runs before the body is read, as on H1 where [with_read_auth]
+         wraps [handle_post_graphql]; otherwise a client that will be refused
+         still gets the server to buffer its whole body first. *)
       | `POST, "/graphql" ->
-          h2_read_body h2_reqd (fun body_str ->
-            with_h2_read_auth h2_reqd (fun state ->
+          with_h2_read_auth h2_reqd (fun state ->
+            h2_read_body h2_reqd (fun body_str ->
               let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
               h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))

@@ -282,6 +282,13 @@ end
     [`Payload_too_large] before the handler is invoked. *)
 module Request : sig
 
+  (** Effective max body size, resolved at module-load time
+      from [MASC_MAX_BODY_BYTES], falling back to
+      [default_max_body_bytes].  Restart required for env
+      changes.  The HTTP/2 gateway reads bodies under the same
+      ceiling ([Server_h2_gateway_helpers.h2_read_body]). *)
+  val max_body_bytes : int
+
   type body_read_error =
     [ `Too_large of int
     | `Internal of exn

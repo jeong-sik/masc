@@ -28,13 +28,21 @@ let test_message_names_both () =
 (* The emit itself, not just the pure helpers: a refused request must reach the
    dashboard log ring the operator reads. *)
 let test_log_auth_refusal_emits_line () =
+  (* A fresh test process starts the ring empty with [total = 0], so the first
+     entry pushed here gets seq 0. A [since_seq] cursor of 0 means "strictly
+     newer than 0" and would drop that very entry, so only pass a cursor when
+     the ring already held something. *)
   let baseline =
     match Log.Ring.recent ~limit:1 () with
-    | (entry : Log.Ring.entry) :: _ -> entry.seq
-    | [] -> 0
+    | (entry : Log.Ring.entry) :: _ -> Some entry.seq
+    | [] -> None
   in
   Server_auth.log_auth_refusal ~protocol:"h1" ~path:"/api/v1/keeper/chat" ~status:401;
-  let entries = Log.Ring.recent ~limit:10 ~module_filter:"Auth" ~since_seq:baseline () in
+  let entries =
+    match baseline with
+    | Some seq -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ~since_seq:seq ()
+    | None -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ()
+  in
   let found =
     List.find_opt
       (fun (entry : Log.Ring.entry) ->

@@ -674,6 +674,10 @@ let prompt_too_long_typed_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-413-1","result":"Input is too long for requested model","api_error_status":413,"terminal_reason":"prompt_too_long"}|}
 ;;
 
+let non_overflow_reason_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-api-error","result":"request rejected by the provider","api_error_status":400,"terminal_reason":"api_error"}|}
+;;
+
 let statusless_generic_error_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-nostatus-3","result":"stream closed before completion"}|}
 ;;
@@ -750,6 +754,22 @@ let test_terminal_reason_prompt_too_long_is_typed () =
         (Astring.String.is_infix ~affix:"Input is too long" message)
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "a typed overflow terminal was reported as completion")
+;;
+
+(* Only three terminal_reason values name an overflow. Any other value the
+   CLI states is its verdict too: the turn failed for that reason, and the
+   reason stays on the failure line. *)
+let test_non_overflow_terminal_reason_is_a_turn_failure () =
+  with_fixture [ Emit non_overflow_reason_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
+      check
+        bool
+        "the stated reason stays on the failure line"
+        true
+        (Astring.String.is_infix ~affix:"reason=api_error" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a failed terminal was reported as completion")
 ;;
 
 let test_quota_is_structurally_classified () =
@@ -2051,6 +2071,10 @@ let () =
             "terminal_reason prompt_too_long is typed"
             `Quick
             test_terminal_reason_prompt_too_long_is_typed
+        ; test_case
+            "a non-overflow terminal_reason is a turn failure"
+            `Quick
+            test_non_overflow_terminal_reason_is_a_turn_failure
         ; test_case
             "turn failure reason reaches the log"
             `Quick

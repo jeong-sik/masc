@@ -3,7 +3,6 @@ module Driver = Masc.Keeper_turn_driver_try_provider
 module Snapshot = Masc.Librarian_continuity_snapshot
 module Boundary = Masc.Keeper_turn_boundaries
 module Front = Masc.Keeper_carried_front
-module Progress = Masc.Keeper_librarian_progress
 module Window = Runtime_model_input_tail_window
 module T = Agent_core.Types
 
@@ -155,67 +154,6 @@ let test_uncompressed_history_ignores_old_front_and_demotion () =
    | Ok () -> () | Error _ -> fail "uncompressed path borrowed stale prefix obligations")
 ;;
 
-let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
-  { position = { Progress.trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 1 }
-;;
-
-let absorbed_view continuity messages =
-  Driver.For_testing.request_view ~continuity ~provider_config ~measure_message_bytes:measure
-    ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:false
-    ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
-    ~materialize:(fun ~pending:_ _ -> fail "absorbed history entered demotion") messages
-;;
-
-(* A saved continuity snapshot that no longer fits, and a Librarian position
-   that does: the request starts at the position, nothing summarizes what
-   lies before it, and a position of another trace, over a message this
-   history does not hold, or past its end is no front at all. *)
-let test_absorbed_history_starts_at_the_librarians_position () =
-  let fresh = text T.User "Fresh unsummarized work" in
-  let messages = source @ [fresh] @ tool_pair () in
-  let _, atom_count = Window.annotate messages in
-  let digest_at = Window.atom_opening_digest messages in
-  let read_one = progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0)) in
-  let end_atom, continuity = match Driver.absorbed_history ~trace_id ~messages read_one with
-    | Some value -> value | None -> fail "a position that matches this history was refused" in
-  check int "the position is the front" 1 end_atom;
-  let projected = absorbed_view continuity messages in
-  (match projected.composed.origin with
-   | Front.Librarian_progress {end_atom = 1} -> ()
-   | _ -> fail "the request was not attributed to the Librarian's position");
-  check int "the read atom is not sent again" 1 projected.composed.projection.dropped_atoms;
-  let sent = wire projected in
-  check bool "the pinned message stays" true (List.mem pinned sent);
-  check bool "the absorbed atom is gone" false (List.mem (text T.User "Build the patch.") sent);
-  check bool "the unread atom is sent" true (List.mem fresh sent);
-  check bool "no working state is invented" false
-    (List.exists (fun (m : T.message) -> m.metadata = T.Extra_system_context_provenance.metadata) sent);
-  (match Driver.validate_continuity ~messages continuity with
-   | Ok () -> () | Error _ -> fail "the position it was built from failed its own check");
-  let read_all =
-    progress ~trace_id ~end_atom:atom_count ~last_atom_digest:(Option.get (digest_at (atom_count - 1))) in
-  (match Driver.absorbed_history ~trace_id ~messages read_all with
-   | Some (end_atom, at_end) ->
-     check int "a Librarian that read everything stands at the end" atom_count end_atom;
-     let projected = absorbed_view at_end messages in
-     check int "every atom is dropped" atom_count projected.composed.projection.dropped_atoms;
-     check bool "no history atom is on the wire" false (List.mem fresh (wire projected));
-     check bool "the pinned message still is" true (List.mem pinned (wire projected))
-   | None -> fail "a position at the end of this history was refused");
-  check bool "another trace's position is no front" true
-    (Option.is_none (Driver.absorbed_history ~trace_id:"another-trace" ~messages read_one));
-  check bool "a position over a message this history does not hold is no front" true
-    (Option.is_none (Driver.absorbed_history ~trace_id ~messages
-       (progress ~trace_id ~end_atom:1 ~last_atom_digest:"not-the-opening-message")));
-  check bool "a position past this history is no front" true
-    (Option.is_none (Driver.absorbed_history ~trace_id ~messages
-       (progress ~trace_id ~end_atom:(atom_count + 1) ~last_atom_digest:(Option.get (digest_at 0)))));
-  let changed = List.map (fun (m : T.message) ->
-    if m = text T.User "Build the patch." then text T.User "Rewritten under the position" else m) messages in
-  (match Driver.validate_continuity ~messages:changed continuity with
-   | Error _ -> () | Ok () -> fail "a history that changed under the position passed its check")
-;;
-
 let exchange id body =
   [message T.Assistant [T.ToolUse {id; name = "read_file"; input = `Assoc []}];
    { (message T.Tool [T.ToolResult {tool_use_id = id; content = body;
@@ -338,6 +276,4 @@ let () = run "continuity request projection"
                test_case "old front and last resort" `Quick test_old_front_and_last_resort_do_not_drop_unread;
                test_case "all covered" `Quick test_all_covered_keeps_only_working_and_pinned;
                test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
-               test_case "fresh uncompressed history" `Quick test_uncompressed_history_ignores_old_front_and_demotion;
-               test_case "absorbed history starts at the Librarian's position" `Quick
-                 test_absorbed_history_starts_at_the_librarians_position]]
+               test_case "fresh uncompressed history" `Quick test_uncompressed_history_ignores_old_front_and_demotion]]

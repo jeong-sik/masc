@@ -53,12 +53,6 @@ type seed =
 type origin =
   | Carried of source  (** The front came from a seed. *)
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
-  | Librarian_progress of { end_atom : int }
-      (** The Librarian's durable position: the atoms before [end_atom] are
-          read into memory, and nothing in the request summarizes them. Taken
-          when a saved continuity snapshot no longer fits this history and
-          the position does (RFC keeper-context-window-in-tokens section
-          13.6): the alternative was the whole history. *)
   | Whole_history
       (** No front to start from: everything, until the first usage on the
           pair is counted or a refusal halves the range. *)

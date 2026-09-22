@@ -388,7 +388,7 @@ let test_render_memory_body_with_keepers () =
        trace_id=Some "saved-trace"; state=Masc.Keeper_continuity_observation.Not_committed;
        range=Some {start_atom=5; end_atom=8; completed_end_atom=12}};
      mcc_prepared = Some {mcp_prepared_at = 1000.; mcp_runtime_id = "fixture-runtime";
-       mcp_input = Decode.Context_absorbed {mcpo_trace_id = "prepared-trace"; mcpo_end_atom = 3};
+       mcp_input = Decode.Context_summarized {mcf_trace_id = "prepared-trace"; mcf_end_atom = 3; mcf_boundary_line = 6};
        mcp_request_bytes = 2048}}} in
   let health : Decode.memory_health_snapshot =
     { mhs_generated_at = 1000.0
@@ -431,8 +431,6 @@ let test_render_memory_body_with_keepers () =
   check bool "saved context shown independently" true (contains "Context saved · atom 5" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
   check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
-  check bool "an absorbed front names the position and says nothing summarizes it" true
-    (contains "absorbed to atom 3" text && contains "no summary" text);
   check bool "selected row was called" true !selected_called;
   check string "push_selected received stripped string" (Masc_tui_theme.strip_sgr !selected_str) !selected_str;
   check bool "rows rendered" true (!count > 0 && !count <= 20)

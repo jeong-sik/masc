@@ -80,13 +80,6 @@ export interface ContextFrontier {
   end_atom: number
   boundary_line: number
 }
-
-/** The Librarian's durable position: a request started here carries no
- *  summary of what lies before it, and the position has no boundary line. */
-export interface ContextPosition {
-  trace_id: string
-  end_atom: number
-}
 export interface ContextSynthesis {
   observed_at: number
   trace_id: string | null
@@ -102,7 +95,6 @@ export interface ContextCycle {
     prepared_at: number
     runtime_id: string
     input: { kind: 'summarized'; frontier: ContextFrontier }
-      | { kind: 'absorbed'; frontier: ContextPosition }
       | { kind: 'uncompressed' | 'not_applied'; frontier: null }
     request_bytes: number
   } | null
@@ -309,14 +301,6 @@ function decodeContextFrontier(raw: unknown): ContextFrontier | null {
   return { trace_id, end_atom, boundary_line }
 }
 
-function decodeContextPosition(raw: unknown): ContextPosition | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['trace_id', 'end_atom'])) return null
-  const trace_id = nonEmptyString(raw.trace_id)
-  const end_atom = nonNegativeInteger(raw.end_atom)
-  if (trace_id === null || end_atom === null || end_atom === 0) return null
-  return { trace_id, end_atom }
-}
-
 function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
   if (!isRecord(raw) || !exactKeys(raw, ['observed_at', 'trace_id', 'state', 'range'])) return null
   const observed_at = finiteNumber(raw.observed_at)
@@ -365,10 +349,6 @@ function decodeContextCycle(raw: unknown): ContextCycle | null {
     const frontier = decodeContextFrontier(p.input.frontier)
     if (frontier === null) return null
     input = { kind: 'summarized', frontier }
-  } else if (p.input.kind === 'absorbed') {
-    const frontier = decodeContextPosition(p.input.frontier)
-    if (frontier === null) return null
-    input = { kind: 'absorbed', frontier }
   } else if ((p.input.kind === 'uncompressed' || p.input.kind === 'not_applied')
     && p.input.frontier === null) {
     input = { kind: p.input.kind, frontier: null }

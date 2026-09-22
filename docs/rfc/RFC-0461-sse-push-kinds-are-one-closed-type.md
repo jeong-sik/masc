@@ -7,16 +7,21 @@ updated: 2026-09-23
 author: dancer + claude
 supersedes: []
 superseded_by: null
-related: ["toml-as-declarative-system-and-vocabulary-authority"]
+related: ["0004", "toml-as-declarative-system-and-vocabulary-authority"]
 ---
 
 # RFC-0461: SSE 알림 종류는 닫힌 타입 하나다
 
 ## 0. 결정
 
-1. 서버가 SSE 로 보내는 알림 종류를 OCaml 닫힌 variant 하나(`Sse_push_kind.t`)로
-   정한다. 각 종류는 wire 이름과 **누가 한 일인가**(키퍼의 행동 / 서버의 상태 알림 /
-   측정값)를 같이 가진다.
+RFC-0004 는 SSE 의 `type` 구분자를 "각 경계에서 닫힌 어휘"로 두고, `Sse_event`
+라이브러리(`lib/sse_event`, `masc.sse_event`)를 SSE 계약의 주인으로 정했다. 코드는
+아직 그렇지 않다. `type` 은 보내는 곳마다 문자열 리터럴이다(§1). 이 RFC 는 그 원칙을
+`type` 에 대해 구현하는 방법을 정한다.
+
+1. 서버가 SSE 로 보내는 알림 종류를 `Sse_event` 안의 닫힌 variant 하나
+   (`Sse_event.Push_kind.t`)로 정한다. 각 종류는 wire 이름과 **누가 한 일인가**
+   (키퍼의 행동 / 서버의 상태 알림 / 측정값)를 같이 가진다.
 2. 보내는 쪽은 `"type"` 문자열을 직접 쓰지 않고 이 타입으로 프레임을 만든다.
 3. TUI 는 종류마다 해석 갈래를 하나씩 더하지 않는다. 이 타입으로 이름을 해석하고,
    "누가 한 일인가"로 Activity 필터를 정한다. payload 를 읽어야 하는 종류만 전용
@@ -69,7 +74,7 @@ exhaustive match 일곱 곳, `masc_tui.ml` 두 곳, `masc_tui_render.ml` 한 곳
 ## 3. 설계
 
 ```ocaml
-(* lib/sse_push_kind.mli *)
+(* lib/sse_event/sse_event.mli 의 Push_kind *)
 type actor =
   | Keeper_act    (* 키퍼가 한 일: turns · actions 에 보인다 *)
   | Server_state  (* 서버가 상태가 바뀌었다고 알림: everything 에만 *)
@@ -92,7 +97,7 @@ val frame : t -> (string * Yojson.Safe.t) list -> Yojson.Safe.t
 
 - `wire_name`, `actor` 는 생성자마다 한 줄인 exhaustive match 다. 종류를 더하면
   컴파일러가 두 곳을 다 요구한다.
-- 보내는 쪽 42 줄은 `Sse.broadcast (Sse_push_kind.frame kind fields)` 로 바뀐다.
+- 보내는 쪽 42 줄은 `Sse.broadcast (Sse_event.Push_kind.frame kind fields)` 로 바뀐다.
   `"type", `String "…"` 리터럴은 `lib` 에서 SSE 프레임에 남지 않는다.
 - `Dashboard_event_slices` 는 이 타입을 키로 삼는다. slice 와 whole-projection 은
   종류의 또 다른 속성일 뿐이다.
@@ -103,11 +108,11 @@ val frame : t -> (string * Yojson.Safe.t) list -> Yojson.Safe.t
 TUI observer:
 
 ```ocaml
-| Pushed of { kind : Masc.Sse_push_kind.t; at : float }
+| Pushed of { kind : Sse_event.Push_kind.t; at : float }
 ```
 
 payload 를 읽을 필요가 없는 종류는 전부 이 한 생성자로 온다. `Masc_tui_acting.visible`
-은 `Sse_push_kind.actor kind` 로 정한다. `Keeper_heartbeat`, `Keeper_tool_call` 처럼
+은 `Sse_event.Push_kind.actor kind` 로 정한다. `Keeper_heartbeat`, `Keeper_tool_call` 처럼
 payload 를 읽는 종류는 지금의 전용 생성자를 그대로 둔다.
 
 #37891 의 `Internal_agent_runs_changed` 생성자와 `Internal_agent_runs_event` 모듈은
@@ -117,7 +122,7 @@ Phase 2 에서 `Pushed { kind = Internal_agent_runs_changed }` 로 흡수된다.
 
 | 단계 | 내용 | 끝났다는 기준 |
 |---|---|---|
-| 1 | `Sse_push_kind` 모듈. 지금 보내는 종류 전부와 `actor` | `all` 이 `rg` 로 찾은 리터럴 집합과 같다는 테스트 |
+| 1 | `Sse_event.Push_kind` 모듈. 지금 보내는 종류 전부와 `actor` | `all` 이 `rg` 로 찾은 리터럴 집합과 같다는 테스트 |
 | 2 | 보내는 쪽 42 줄을 `frame` 으로 | `lib` 의 SSE 프레임에 `"type"` 리터럴 0 개 (ast-grep 가드) |
 | 3 | TUI `Pushed` 생성자와 `actor` 기준 필터 | 서버의 `all` 을 전부 넣어도 `Observer.Other` 가 0 개인 테스트 |
 | 4 | 대시보드 `FIXED_SSE_EVENT_TYPES` 를 `all` 에서 만든 목록과 비교 | TOML RFC 의 `sse_events` 를 이 타입에서 생성하거나 대조 |
@@ -127,18 +132,26 @@ Phase 2 에서 `Pushed { kind = Internal_agent_runs_changed }` 로 흡수된다.
 ## 5. 검증
 
 - 라이브: 현재 서버에 붙인 TUI 의 Activity `turns` 에 `?` 줄이 0 개.
-- 테스트: `Sse_push_kind.all` 의 모든 종류를 `frame` → observer 로 흘렸을 때 `Other` 가
+- 테스트: `Sse_event.Push_kind.all` 의 모든 종류를 `frame` → observer 로 흘렸을 때 `Other` 가
   나오지 않는다. `actor` 가 `Keeper_act` 인 것만 `turns` 에 보인다.
 - 가드: `lib/**/*.ml` 에서 `Sse.broadcast` 인자에 `"type"` 문자열 리터럴이 있으면 실패.
 
-## 6. 하지 않는 것
+## 6. RFC-0004 와의 관계
+
+- RFC-0004 가 원칙(정확한 계약, 닫힌 구분자, `Sse_event` 소유)을 정한다. 이 RFC 는
+  그중 `type` 구분자를 한 타입으로 만드는 구체적 방법이다.
+- payload 는 계속 RFC-0004 대로 `Sse_event` 의 ATD 타입(`agent_failed_payload` 등)이
+  맡는다. `Push_kind` 는 종류와 행위자만 가진다.
+- RFC-0004 의 검증 목록에 "`lib` 의 SSE 프레임에 `type` 리터럴 0 개" 가드가 더해진다.
+
+## 7. 하지 않는 것
 
 - 모르는 이름을 숨기지 않는다. 새 서버와 옛 TUI 조합에서는 지금처럼 `?` 로 보인다.
 - payload 스키마를 이 RFC 에서 정하지 않는다. 종류와 행위자만 정한다.
 - TOML 어휘 RFC 를 대체하지 않는다. OCaml 쪽 권위를 이 타입으로 두고, TOML 목록은
   여기서 만들거나 대조하는 쪽으로 이어진다.
 
-## 7. 열린 질문
+## 8. 열린 질문
 
 - `post_created`, `comment_added` 는 키퍼가 할 수도, 운영자가 할 수도 있다. `actor` 를
   종류로 정할지, 프레임의 필드(작성자)로 정할지 정해야 한다.

@@ -713,6 +713,21 @@ cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
+Under `journal:full` a committed revision draws its summary, then each fact
+in two columns: the sign and category at the left, padded to the revision's
+widest category, and the claim wrapped under itself. A blank row separates
+the facts; a pane too narrow for the claim column wraps the claim under its
+lead at the full width.
+
+```
+◈ JOURNAL  ┊ Librarian · revision 454 · +2 −1 · 63 retained
+           ┊
+           ┊ + lesson   verifier_exact cannot read the job log,
+           ┊            so ancestry alone never satisfies …
+           ┊
+           ┊ − blocker  pr-check.yml has no pnpm step …
+```
+
 The folded tool row retains exact outcome counts and ends with
 `Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
 actual batch/concurrent scheduling, exact served input/output, and the hidden

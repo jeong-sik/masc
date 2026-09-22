@@ -457,6 +457,10 @@ type msg_entry = {
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
           recover this boundary by splitting display text. *)
+  me_journal: Masc_tui_message_layout.journal_line list;
+      (** A committed Memory journal revision's lines, typed and made
+          terminal-safe, for the pane to draw in columns. Empty on every other
+          row; [me_text] says the same in plain text. *)
   me_gate: gate_step option;
       (** The typed approval step behind a Gate status row. Carried so a run
           of steps can be folded back into the one approval they describe;

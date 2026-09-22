@@ -316,7 +316,7 @@ let test_roles_map_to_what_the_pane_draws () =
     (List.map (fun r -> r.History.text) decoded.History.rows);
   (match (List.nth decoded.History.rows 3).History.kind with
    | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary } ->
+   | History.Memory_activity { summary; journal = _ } ->
        check (option string) "a neutral system row stays whole" None summary
    | History.Addressed_to_keeper _ | History.Said_by_keeper
    | History.Autonomous_reply | History.Delivery_failed _
@@ -1571,37 +1571,98 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
         (Option.is_some row.structural_id);
       (match row.kind with
        | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary } ->
+   | History.Memory_activity { summary; journal } ->
            check (option string) "typed summary is producer-built"
              (Some
-                "Librarian committed current memory revision 7 \xc2\xb7 now 1 added, 1 removed, 3 retained")
-             summary
+                "Librarian \xc2\xb7 revision 7 \xc2\xb7 +1 \xe2\x88\x921 \xc2\xb7 3 retained")
+             summary;
+           (* Typed, so the pane draws the columns without reading text back
+              to find where the category ends. *)
+           check bool "the lines arrive typed, added then removed then dropped" true
+             (match journal with
+              | [ Masc_tui_message_layout.Journal_fact
+                    { sign = Journal_added; category = "fact"; tone = Tone_fact;
+                      claim = "the probe uses HTTP/2" }
+                ; Journal_fact
+                    { sign = Journal_removed; category = "constraint";
+                      tone = Tone_intent; claim = "use the old endpoint" }
+                ; Journal_drop
+                    { memory_id = "memory-old";
+                      reason = "superseded by live evidence" } ] ->
+                  true
+              | _ -> false)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
        | History.Reasoning _ | History.Fusion_conclusion _ ->
            fail "journal row lost its Memory activity type");
-      List.iter
-        (fun needle ->
-           check bool needle true (contains row.text needle))
-        [ "Librarian committed current memory revision 7"
-        ; "now 1 added, 1 removed, 3 retained"
-          (* The change is a diff fence. That is what colours the two
-             directions, and what keeps a leading [+] out of markdown's list
-             grammar -- the renderer used to escape it and nothing consumed
-             the escape, so a backslash reached the pane. *)
-        (* The journal is fenced as [memory], not [diff]: the sign says whether
-           a fact arrived or left and the category takes a colour of its own,
-           which two diff colours could not carry. Changed in #30921; this
-           expectation was left behind because a pull request runs no checks. *)
-        ; "```memory"
+      (* The text says the same for readers of text; there is no fence left
+         for a lexer to read the category back out of. *)
+      check (list string) "the plain text is the summary, then a line each"
+        [ "Librarian \xc2\xb7 revision 7 \xc2\xb7 +1 \xe2\x88\x921 \xc2\xb7 3 retained"
         ; "+ [fact] the probe uses HTTP/2"
-        ; "- [constraint] use the old endpoint"
+        ; "\xe2\x88\x92 [constraint] use the old endpoint"
         ; "drop memory-old \xe2\x80\x94 superseded by live evidence"
         ]
+        (String.split_on_char '\n' row.text)
   | Ok decoded ->
       failf "expected one decoded memory row, got %d/%d"
         (List.length decoded.rows) decoded.dropped
+;;
+
+(* Eight categories and five colours, grouped by what a reader does about a
+   fact, because eight hues is a legend to memorise. The group is read off the
+   producer's closed category sum, so what matters is that the groups stay
+   apart and that a category this build was not taught reads as a fact rather
+   than borrowing a colour that would say something about it. *)
+let test_memory_categories_group_by_what_they_ask () =
+  let tone_of category =
+    let payload =
+      `Assoc
+        [ ( "entries"
+          , `List
+              [ `Assoc
+                  [ "ok", `Bool true
+                  ; "outcome", `String "committed"
+                  ; "recorded_at", `Float 1_700_000_010.0
+                  ; "revision", `Int 1
+                  ; "source", `Assoc [ "kind", `String "librarian" ]
+                  ; ( "change"
+                    , `Assoc
+                        [ ( "added"
+                          , `List
+                              [ `Assoc
+                                  [ "category", `String category
+                                  ; "claim", `String "a claim"
+                                  ]
+                              ] )
+                        ; "removed", `List []
+                        ; "retained", `Int 0
+                        ] )
+                  ]
+              ] )
+        ]
+    in
+    match History.memory_rows_of_json payload with
+    | Ok
+        { History.rows =
+            [ { kind =
+                  History.Memory_activity
+                    { journal = [ Masc_tui_message_layout.Journal_fact { tone; _ } ]; _ }
+              ; _ } ]
+        ; dropped = 0 } ->
+        tone
+    | Ok _ | Error _ -> failf "no typed fact for category %s" category
+  in
+  let same a b = tone_of a = tone_of b in
+  check bool "a lesson and an approach read alike" true
+    (same "lesson" "validated_approach");
+  check bool "a preference, a goal and a constraint read alike" true
+    (same "preference" "goal" && same "goal" "constraint");
+  check bool "a code change is not a lesson" false (same "code_change" "lesson");
+  check bool "a blocker is not a preference" false (same "blocker" "preference");
+  check bool "an unknown category reads as a fact" true
+    (same "some_new_category" "fact")
 ;;
 
 let test_memory_failure_keeps_kind_and_detail () =
@@ -1627,7 +1688,7 @@ let test_memory_failure_keeps_kind_and_detail () =
         (Option.is_some row.structural_id);
       (match row.kind with
        | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary } ->
+   | History.Memory_activity { summary; journal = _ } ->
            check (option string) "failure summary omits the detail body"
              (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary
        | History.Addressed_to_keeper _ | History.Said_by_keeper
@@ -2172,6 +2233,8 @@ let () =
             test_memory_commit_names_added_removed_and_drop_reason
         ; test_case "failure keeps kind and detail" `Quick
             test_memory_failure_keeps_kind_and_detail
+        ; test_case "categories group by what they ask" `Quick
+            test_memory_categories_group_by_what_they_ask
         ; test_case "producer prepend keeps structural identities" `Quick
             test_memory_identity_survives_a_producer_prepend
         ; test_case "failed identity includes trace id" `Quick

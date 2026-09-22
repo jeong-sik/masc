@@ -146,6 +146,37 @@ let chat_body_with_previews ~preview ~mode ~(entry : Message_layout.entry) ~widt
              | [] -> body
              | _ -> body ^ "\n" ^ String.concat "\n" cards))
 
+(* A journal revision's lines, in the columns [Message_layout.journal_rows]
+   cut. Two questions, two channels: the sign keeps the diff colours, since
+   arrived and left is what it has always said, and the category takes a
+   colour grouped by what a reader does about it rather than one hue per word
+   -- eight hues is a legend to memorise, and the theme has measured contrast
+   for the ones already in it. A drop is dim: the reason a fact was let go is
+   not the change itself. The claim keeps the body's own colour. *)
+let chat_journal_rows ~(context : Chat_theme.body_context) ~width lines =
+  let palette = chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+  let span_of : Message_layout.journal_piece -> string * string = function
+    | Journal_piece_sign Journal_added -> palette.code_diff_added
+    | Journal_piece_sign Journal_removed -> palette.code_diff_removed
+    | Journal_piece_category Tone_code_change -> palette.code_type
+    | Journal_piece_category Tone_learning -> palette.code_keyword
+    | Journal_piece_category Tone_intent -> palette.code_string
+    | Journal_piece_category Tone_blocker -> palette.code_number
+    (* The default kind and the most common: colouring the majority says
+       nothing about it. *)
+    | Journal_piece_category Tone_fact | Journal_piece_claim | Journal_piece_space ->
+        ("", "")
+    | Journal_piece_drop -> palette.code_comment
+  in
+  Message_layout.journal_rows ~width lines
+  |> List.map (fun pieces ->
+         String.concat ""
+           (List.map
+              (fun (text, piece) ->
+                let opening, closing = span_of piece in
+                if String.equal opening "" then text else opening ^ text ^ closing)
+              pieces))
+
 let cached_chat_markdown ~link_previews_mode ~theme =
   (* One render closure serves measurement and drawing. Metadata arriving
      between them belongs to the next frame, not a second height for this one. *)
@@ -162,6 +193,12 @@ let cached_chat_markdown ~link_previews_mode ~theme =
   let body = chat_body_with_previews ~preview ~mode:link_previews_mode ~entry ~width in
   let context = Chat_theme.body_context theme entry.style in
   let palette_generation = context.palette_generation in
+  let journal =
+    match entry.journal with
+    | [] -> []
+    | lines -> "" :: chat_journal_rows ~context ~width lines
+  in
+  let body_rows =
   match entry.markdown_source with
   | Message_layout.Markdown_stable
       { keeper_name; request_id; observed_at; entry_index } ->
@@ -196,6 +233,8 @@ let cached_chat_markdown ~link_previews_mode ~theme =
         ~text:body
   | Message_layout.Markdown_streaming ->
       chat_markdown ~context ~width body
+  in
+  body_rows @ journal
 
 
 (* Conversation colour names the source, not the prose. A keeper can return a
@@ -1399,7 +1438,14 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               (* Summary uses the producer's typed compact projection. Hidden
                  rows never reach this arm (the layout filter removed them),
                  and a neutral system row with no projection remains whole. *)
-              | Memory_full | Memory_hidden -> message.me_text
+              | Memory_hidden -> message.me_text
+              (* A revision with typed lines draws its header here and the
+                 lines under it in columns ([journal] below); the plain text
+                 would draw them twice. *)
+              | Memory_full -> (
+                  match message.me_journal, message.me_memory_summary with
+                  | _ :: _, Some summary -> summary
+                  | [], _ | _ :: _, None -> message.me_text)
               | Memory_summary -> (
                   (* A summarised row is a cut row, so it says which key
                      uncuts it. What that key does is the footer's line,
@@ -1439,6 +1485,15 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
              request_label =
                Keeper_chat.compact_request_id message.me_request_id;
              body;
+             journal =
+               (match message.me_role, state.msg_memory_visibility with
+                | Message_memory, Memory_full -> message.me_journal
+                | Message_memory, (Memory_summary | Memory_hidden)
+                | ( ( Message_user _ | Message_keeper | Message_autonomous
+                    | Message_status | Message_local | Message_error
+                    | Message_tool | Message_skill _ | Message_thinking ),
+                    _ ) ->
+                    []);
              markdown_source =
                Message_layout.Markdown_stable
                  { keeper_name = message.me_keeper_name;
@@ -1550,6 +1605,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
          Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
      ; request_label = ""
      ; body = note ^ "\n" ^ Terminal_text.single_line body
+     ; journal = []
      ; markdown_source = Message_layout.Markdown_streaming
      ; turn_rail = Message_layout.Rail_none
      ; action = Message_layout.Action_none
@@ -2287,6 +2343,7 @@ let render_keeper_message (state : state) =
                            ~column:role_label_column ~style ();
                        request_label;
                        body;
+                       journal = [];
                        markdown_source;
                        turn_rail =
                          turn_rail_of ~siding:None

@@ -29,6 +29,7 @@ let entry ?gate role text =
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
+  ; me_journal = []
   ; me_gate = gate
   ; me_submitted_at = None
   ; me_tool_block = None

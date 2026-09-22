@@ -321,6 +321,43 @@ let tool_trace_meta (trace : Fusion_types.tool_trace) =
     ; "events", `List (List.map tool_trace_event_meta trace.events)
     ]
 
+(* 자리 경로 한 줄을 board meta_json [seat_routes] 배열 원소로 (RFC fusion-seat-routes
+   §2.3). 자리 결과(답·종합)는 [panel]/[judges] 가 나르고, 이 줄은 누가 답했고 그 전에
+   누가 실패했는지만 더한다. *)
+let seat_fields = function
+  | Fusion_types.Panel_seat identity -> [ "phase", `String "panel"; "seat", `String identity ]
+  | Fusion_types.Judge_seat role ->
+    let kind, identity = judge_role_projection role in
+    [ "phase", `String "judge"; "judge_role", `String kind; "seat", `String identity ]
+
+let attempt_failure_fields = function
+  | Fusion_types.Panel_attempt_failed failure ->
+    [ "code", `String (Fusion_agent_core.panel_failure_code failure)
+    ; "detail", `String (Fusion_agent_core.panel_failure_text failure)
+    ]
+  | Fusion_types.Judge_attempt_failed failure ->
+    [ "code", `String (Fusion_types.judge_failure_tag failure)
+    ; "detail", `String (Fusion_types.judge_failure_text failure)
+    ]
+
+let seat_route_meta (route : Fusion_types.seat_route) : Yojson.Safe.t =
+  `Assoc
+    (seat_fields route.seat
+     @ [ "route", `String route.route
+       ; ( "answered_by"
+         , match route.answered_by with
+           | Some runtime -> `String runtime
+           | None -> `Null )
+       ; ( "failed_attempts"
+         , `List
+             (List.map
+                (fun (attempt : Fusion_types.seat_attempt) ->
+                   `Assoc
+                     (("runtime", `String attempt.attempt_runtime)
+                      :: attempt_failure_fields attempt.attempt_failure))
+                route.failed_attempts) )
+       ])
+
 (* 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로 (RFC-0284). panel_meta와
    동형: [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별 실측 usage,
    [Judge_failed] → role/identity + status="failed" + error + 노드별 실측 usage(RFC-0284 E:
@@ -514,7 +551,8 @@ let delivery_key_of_run_id run_id =
 ;;
 
 let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
-      ~judge_usage ~(tool_trace : Fusion_types.tool_trace) :
+      ~judge_usage ~(tool_trace : Fusion_types.tool_trace)
+      ~(seat_routes : Fusion_types.seat_route list) :
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
@@ -590,6 +628,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
                 키는 canonical로 ADDITIVE 유지(구 프론트/디스크 reader 호환) — 제거는
                 후속 마이그레이션. 대시보드는 이 배열 shape로 위상 구조를 렌더한다. *)
            ; ("judges", `List (List.map judge_node_meta judges))
+           ; ("seat_routes", `List (List.map seat_route_meta seat_routes))
            ; ( "observed_usage"
              , `Assoc
                  [ ("input_tokens", `Int total_usage.Fusion_types.input_tokens)

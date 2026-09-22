@@ -93,33 +93,28 @@ let test_external_output_contract_covers_parser_wire_fields () =
    실패 모드 자체가 존재하지 않는다. *)
 let test_panel_outcome_accepts_free_text () =
   match
-    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
-      ~model:"provider.model"
+    Fusion_panel.For_testing.attempt_of_result ~model:"provider.model"
       (Ok (response_with_text "  Eio is production-ready for most new projects.  "))
   with
-  | Fusion_types.Answered { model; answer; usage } ->
-    check string "panel identity preserved" "panel-a" model;
+  | Ok (answer, usage) ->
     check string "free text is the answer, trimmed"
       "Eio is production-ready for most new projects." answer;
     check usage_t "missing provider usage defaults to zero" Fusion_types.zero_usage
       usage
-  | Fusion_types.Failed failure ->
+  | Error (failure, _usage) ->
     fail ("expected free-text answer, got failure: "
-          ^ Fusion_types.show_panel_error failure)
+          ^ Fusion_types.show_panel_failure failure)
 
 let test_panel_outcome_rejects_empty_answer () =
   match
-    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
-      ~model:"provider.model"
+    Fusion_panel.For_testing.attempt_of_result ~model:"provider.model"
       (Ok (response_with_text "   "))
   with
-  | Fusion_types.Failed
-      { failed_model = "panel-a"; reason = Fusion_types.Empty_response detail } ->
+  | Error (Fusion_types.Empty_response detail, _usage) ->
     check bool "empty response detail is retained" true (String.length detail > 0)
-  | other ->
-    fail
-      ("expected empty answer failure, got: "
-       ^ Fusion_types.show_panel_outcome other)
+  | Error (other, _usage) ->
+    fail ("expected empty answer failure, got: " ^ Fusion_types.show_panel_failure other)
+  | Ok (answer, _usage) -> fail ("expected empty answer failure, got answer: " ^ answer)
 
 (* per-agent HTTP 타임아웃은 typed [Timeout]으로 분류된다 — to_string 직렬화로
    [Provider_error]에 뭉개지면 외곽 붕괴(전 패널 Timeout)와 개별 타임아웃을 board
@@ -130,13 +125,12 @@ let test_panel_outcome_types_per_agent_timeout () =
       (Agent_core.Retry.Timeout { message = "120s"; phase = None })
   in
   match
-    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
-      ~model:"provider.model" (Error timeout_error)
+    Fusion_panel.For_testing.attempt_of_result ~model:"provider.model" (Error timeout_error)
   with
-  | Fusion_types.Failed { failed_model = "panel-a"; reason = Fusion_types.Timeout } ->
-    ()
-  | other ->
-    fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_outcome other)
+  | Error (Fusion_types.Timeout, _usage) -> ()
+  | Error (other, _usage) ->
+    fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_failure other)
+  | Ok (answer, _usage) -> fail ("expected typed Timeout, got answer: " ^ answer)
 
 (* provider-level 타임아웃도 typed [Timeout]으로 분류된다. connect_timeout(비스트리밍 sync
    경로가 본문 전체를 바운드, detail "timeout phase=http_operation")은
@@ -153,20 +147,19 @@ let test_panel_outcome_types_provider_timeout () =
          })
   in
   match
-    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
-      ~model:"provider.model" (Error timeout_error)
+    Fusion_panel.For_testing.attempt_of_result ~model:"provider.model" (Error timeout_error)
   with
-  | Fusion_types.Failed
-      { failed_model = "panel-a"; reason = Fusion_types.Timeout as reason } ->
+  | Error ((Fusion_types.Timeout as reason), _usage) ->
     check string "reason_code surfaces as timeout" "timeout"
       (Fusion_agent_core.panel_failure_code reason)
-  | other ->
-    fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_outcome other)
+  | Error (other, _usage) ->
+    fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_failure other)
+  | Ok (answer, _usage) -> fail ("expected typed Timeout, got answer: " ^ answer)
 
 (* 심판 분류기도 두 타임아웃 variant([Api (Retry.Timeout _)] 외곽 래퍼 +
    [Provider (Llm_provider.Error.Timeout _)] provider-level)를 [Timeout]으로 매핑하고,
    비-타임아웃 provider 오류는 [Provider_error]로 보존한다 —
-   [Fusion_panel.outcome_of_result]와 대칭. 과분류(모든 provider 오류를 Timeout으로)를
+   [Fusion_panel.attempt_of_result]와 대칭. 과분류(모든 provider 오류를 Timeout으로)를
    막기 위해 5xx가 provider_error로 남는지도 핀한다. *)
 let test_judge_failure_classifies_timeouts () =
   let classify e =

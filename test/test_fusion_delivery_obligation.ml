@@ -166,6 +166,7 @@ let test_startup_recovery_projects_canonical_terminal () =
           ; judges = []
           ; judge_usage = Fusion_types.zero_usage
           ; tool_trace = Fusion_types.empty_tool_trace
+          ; seat_routes = []
           }
         in
         let on_accepted request_id =

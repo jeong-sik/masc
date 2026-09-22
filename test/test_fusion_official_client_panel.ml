@@ -48,6 +48,18 @@ streaming = true
 turn-timeout-s = 0
 
 [claude_code."claude-sonnet-5"]
+
+[models."claude-opus-5"]
+api-name = "claude-opus-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-opus-5"]
+
+[runtime.lanes.fusion-judge]
+candidates = ["claude_code.claude-opus-5", "claude_code.claude-sonnet-5"]
 |}
     claude_cli
 ;;
@@ -61,6 +73,8 @@ let () =
 
 let official_client_runtime = "claude_code.claude-sonnet-5"
 let agent_core_runtime = "stub-http.stub-model"
+let judge_lane = "fusion-judge"
+let judge_lane_first = "claude_code.claude-opus-5"
 
 let write_file ~path ~perm contents =
   let channel = open_out_gen [ Open_creat; Open_trunc; Open_wronly ] perm path in
@@ -311,6 +325,154 @@ let test_client_timeouts_project_to_timeout () =
     (not (String.equal detail (official_client_runtime ^ ": timeout")))
 ;;
 
+(* A stand-in that appends one line per execution, so a test can count how
+   many times the client ran across several candidates. *)
+let appending_cli_script ~log = Printf.sprintf "#!/bin/sh\necho spawned >> '%s'\nexit 0\n" log
+
+let count_lines path =
+  if not (Sys.file_exists path)
+  then 0
+  else (
+    let channel = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in channel)
+      (fun () ->
+         let rec count n =
+           match input_line channel with
+           | _ -> count (n + 1)
+           | exception End_of_file -> n
+         in
+         count 0))
+;;
+
+let with_eio f =
+  Eio_main.run (fun env ->
+    Eio_context.set_env env;
+    Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () -> f ~sw ~net:(Eio.Stdenv.net env))))
+;;
+
+let sample_panel =
+  [ Fusion_types.Answered
+      { model = agent_core_runtime; answer = "pong"; usage = Fusion_types.zero_usage }
+  ]
+;;
+
+let run_single_judge ~base_dir ~route ~on_route =
+  with_eio (fun ~sw ~net ->
+    Masc.Fusion_judge.run
+      ~base_dir
+      ~sw
+      ~net
+      ~judge_system_prompt:"Judge the panel."
+      ~judge_model:route
+      ~question:"ping"
+      ~panel:sample_panel
+      ~web_tools:false
+      ~seat_route:(Fusion_types.Single, on_route)
+      ())
+;;
+
+(* A judge seat naming a lane tries every candidate, in the lane's order, when
+   each one fails. The spawn count is compared with a baseline measured on a
+   one-candidate seat in the same test rather than with an assumed number of
+   processes per candidate. *)
+let test_judge_lane_walks_candidates_in_order () =
+  let base_dir = Filename.temp_dir "fusion-judge-lane" "" in
+  let log = Filename.concat base_dir "spawns" in
+  let claude_cli = Filename.concat base_dir "stub-claude" in
+  write_file ~path:claude_cli ~perm:0o700 (appending_cli_script ~log);
+  with_initialized_runtime ~claude_cli (fun () ->
+    let _baseline = run_single_judge ~base_dir ~route:official_client_runtime ~on_route:ignore in
+    let per_candidate = count_lines log in
+    check bool "a one-candidate seat runs its client" true (per_candidate > 0);
+    let recorded = ref None in
+    let result =
+      run_single_judge ~base_dir ~route:judge_lane ~on_route:(fun route -> recorded := Some route)
+    in
+    check int "both lane candidates ran their client" (3 * per_candidate) (count_lines log);
+    (match result with
+     | Ok _ -> fail "the stub clients emit no result, so no synthesis can come back"
+     | Error _ -> ());
+    match !recorded with
+    | Some
+        { Fusion_types.seat = Fusion_types.Judge_seat Fusion_types.Single
+        ; route
+        ; answered_by = None
+        ; failed_attempts
+        } ->
+      check string "the seat route is the lane name" judge_lane route;
+      check
+        (list string)
+        "candidates are tried in lane order"
+        [ judge_lane_first; official_client_runtime ]
+        (List.map
+           (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+           failed_attempts)
+    | Some other -> failf "unexpected seat route %s" (Fusion_types.show_seat_route other)
+    | None -> fail "the judge seat did not report its route")
+;;
+
+(* A route that names neither a lane nor a runtime fails the seat without an
+   attempt, and says so in the typed reason rather than as a build error. *)
+let test_unknown_route_fails_without_an_attempt () =
+  with_classification_runtime (fun () ->
+    let routes = ref [] in
+    let outcomes =
+      with_eio (fun ~sw ~net ->
+        Masc.Fusion_panel.run
+          ~base_dir:(Filename.get_temp_dir_name ())
+          ~sw
+          ~net
+          ~groups:[ panel_group [ "nope.not-configured" ] ]
+          ~prompt:"ping"
+          ~on_seat_routes:(fun seat_routes -> routes := seat_routes)
+          ())
+    in
+    (match outcomes with
+     | [ Fusion_types.Failed { reason = Fusion_types.Unknown_route "nope.not-configured"; _ } ]
+       -> ()
+     | other ->
+       failf "expected one Unknown_route failure, got [%s]"
+         (String.concat "; " (List.map Fusion_types.show_panel_outcome other)));
+    match !routes with
+    | [ { Fusion_types.route = "nope.not-configured"; answered_by = None; failed_attempts = []; _ } ]
+      -> ()
+    | other ->
+      failf "expected one unattempted seat route, got [%s]"
+        (String.concat "; " (List.map Fusion_types.show_seat_route other)))
+;;
+
+(* The walk stops at the first answer and never calls a later candidate. *)
+let test_walk_stops_at_the_first_answer () =
+  let tried = ref [] in
+  let attempt runtime =
+    tried := runtime :: !tried;
+    if String.equal runtime "b" then Ok "answer" else Error ("failed " ^ runtime)
+  in
+  (match Masc.Fusion_seat.walk { Masc.Fusion_seat.first = "a"; rest = [ "b"; "c" ] } ~attempt with
+   | Masc.Fusion_seat.Answered { answer; runtime; failed } ->
+     check string "the answer is the answering candidate's" "answer" answer;
+     check string "the answering candidate is named" "b" runtime;
+     check (list (pair string string)) "earlier failures are kept" [ "a", "failed a" ] failed
+   | Masc.Fusion_seat.Exhausted _ -> fail "candidate b answers");
+  check (list string) "a later candidate is never tried" [ "a"; "b" ] (List.rev !tried);
+  match
+    Masc.Fusion_seat.walk
+      { Masc.Fusion_seat.first = "a"; rest = [ "b" ] }
+      ~attempt:(fun runtime -> Error runtime)
+  with
+  | Masc.Fusion_seat.Exhausted { last; failed } ->
+    check string "the last failure is the last candidate's" "b" last;
+    check (list (pair string string)) "every attempt is kept in order" [ "a", "a"; "b", "b" ] failed
+  | Masc.Fusion_seat.Answered _ -> fail "no candidate answers"
+;;
+
 (* The message has to name which handle is absent. It did not, and that cost a
    build cycle: publishing Eio_context.set_env in bin/fusion_run left the text
    identical, so the clock being the other half was invisible until the code was
@@ -405,6 +567,20 @@ let () =
             "official-client judge reaches its client"
             `Quick
             test_official_client_judge_reaches_its_client
+        ] )
+    ; ( "seat routes"
+      , [ test_case
+            "judge lane walks candidates in order"
+            `Quick
+            test_judge_lane_walks_candidates_in_order
+        ; test_case
+            "unknown route fails without an attempt"
+            `Quick
+            test_unknown_route_fails_without_an_attempt
+        ; test_case
+            "walk stops at the first answer"
+            `Quick
+            test_walk_stops_at_the_first_answer
         ] )
     ]
 ;;

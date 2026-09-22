@@ -76,6 +76,8 @@ val emit
   -> judges:Fusion_types.judge_outcome list
   -> judge_usage:Fusion_types.usage
   -> tool_trace:Fusion_types.tool_trace
+  -> seat_routes:Fusion_types.seat_route list
+       (** 자리마다 누가 답했고 그 전에 누가 실패했는지. meta_json [seat_routes]. *)
   -> (unit, string) result
 
 (** RFC-0266: 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.

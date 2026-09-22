@@ -473,6 +473,7 @@ let make_hooks
                   timings_int_json (fun (t : Agent_core.Types.inference_timings)
                                      -> t.prompt_n));
                  (key_total_turns, `Int meta.runtime.usage.total_turns);
+                 (key_keeper_turn_id, `Int keeper_turn_id);
                  (key_ts_unix, `Float (Unix.gettimeofday ()));
                ])
          with

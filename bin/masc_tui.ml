@@ -10990,7 +10990,10 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs =
       Masc_tui_types.full_refresh_needs
-        ~scoped_refresh_inflight:!scoped_refresh_inflight state.view
+        ~scoped_refresh_inflight:!scoped_refresh_inflight
+        ~keeper_pane_drawn:
+          (not (Masc_tui_render.acting_pane_suppressed state))
+        state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
        in the surface bundle, so the tick asks for it here. Without this the
@@ -16365,7 +16368,12 @@ let main
      surfaces that read the same things -- a keeper list and a keeper's detail --
      costs no request. Watching from the loop catches every way the surface can
      change, rather than asking each of the places that change it to remember. *)
-  let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
+  let drawn_needs =
+    ref
+      (Masc_tui_types.surface_needs
+         ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         state.view)
+  in
   let input_reader = create_input_reader () in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
@@ -24645,7 +24653,12 @@ and is loaded on demand through keeper_skill.
          it for every Tab made an Overview -> Tools walk spend those requests
          once per distinct [surface_needs] record. A scoped refresh neither
          repeats them nor changes connection status. *)
-      let needed = Masc_tui_types.surface_needs state.view in
+      let needed =
+        Masc_tui_types.surface_needs
+          ~keeper_pane_drawn:
+            (not (Masc_tui_render.acting_pane_suppressed state))
+          state.view
+      in
       if
         needed <> !drawn_needs
         && not !http_refresh_inflight

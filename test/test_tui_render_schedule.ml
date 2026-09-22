@@ -1013,6 +1013,7 @@ let holds needle haystack =
 
 let verification_probe : Schedule.verification_row_values =
   { vrow_task = "task-verify-000000000000001"
+  ; vrow_verdict = "complete"
   ; vrow_submitted_by = "pinewood-pr-jira-checker-and-more"
   ; vrow_evidence = "12/12"
   ; vrow_title = String.concat "" (List.init 12 (fun _ -> "title "))
@@ -1040,6 +1041,7 @@ let test_verification_rows_stay_on_the_header_columns () =
       (width
          (Schedule.verification_row ~submitter_width ~title_width
             { Schedule.vrow_task = ""
+            ; vrow_verdict = ""
             ; vrow_submitted_by = ""
             ; vrow_evidence = ""
             ; vrow_title = ""
@@ -1075,7 +1077,7 @@ let test_verification_names_its_columns_in_capitals () =
   List.iter
     (fun name ->
       check bool (name ^ " names a column") true (holds name header))
-    [ "TASK"; "SUBMITTED BY"; "EVIDENCE"; "TITLE" ];
+    [ "TASK"; "VERDICT"; "SUBMITTED BY"; "EVIDENCE"; "TITLE" ];
   List.iter
     (fun retired ->
       check bool (retired ^ " is gone") false (holds retired header))

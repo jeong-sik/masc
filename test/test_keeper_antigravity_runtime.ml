@@ -1427,6 +1427,60 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
      | Ok _ -> fail "a list the turn's choice no longer describes went out")
 ;;
 
+(* A working state is pinned, so a declared window it does not fit refuses
+   the request. It is not composed again without the working state: the
+   request would go out lighter by a few kilobytes and the next turn would
+   meet the same ceiling. *)
+let test_a_working_state_the_window_cannot_fit_refuses () =
+  let messages = carried_front_history () in
+  let covered = List.filteri (fun index _ -> index < 53) messages in
+  let snapshot =
+    let position =
+      match Keeper_turn_boundaries.position_of_messages covered with
+      | Ok position -> position
+      | Error detail -> fail detail
+    in
+    let line =
+      ( 1
+      , Ok
+          { Keeper_turn_boundaries.recorded_at = 1.
+          ; event =
+              Keeper_turn_boundaries.Turn_ended
+                { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+                ; history_at_start = Keeper_turn_boundaries.Fresh_history
+                ; position
+                }
+          } )
+    in
+    match
+      Librarian_continuity_snapshot.capture ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
+        ~working_state:(String.make 4_000 'w')
+    with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
+  in
+  let librarian_front _ = Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot) in
+  (* Room for the fixed sections and the seven atoms, not for the working
+     state on top of them. *)
+  let capacity =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system" ~goal:"goal"
+    + 2_000
+  in
+  match
+    capacity_projection ~librarian_front ~declared_max_prompt_bytes:(Some capacity)
+      ~system_prompt:"system" ~goal:"goal" None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project messages with
+     | Error _ -> ()
+     | Ok sent ->
+       fail
+         (Printf.sprintf "a working state the window cannot fit went out, or the range went out without it (%d messages)"
+            (List.length sent)))
+;;
+
 let test_a_front_from_another_history_is_dropped () =
   let messages = carried_front_history () in
   let other =
@@ -1519,6 +1573,10 @@ let () =
               "the Librarian front reaches the list and its error refuses"
               `Quick
               test_the_librarian_front_reaches_the_list_and_its_error_refuses
+          ; test_case
+              "a working state the window cannot fit refuses"
+              `Quick
+              test_a_working_state_the_window_cannot_fit_refuses
           ; test_case
               "a front from another history is dropped"
               `Quick

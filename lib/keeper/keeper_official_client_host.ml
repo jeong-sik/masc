@@ -85,7 +85,19 @@ let user_message text : Agent_core.Types.message =
 (* Official-client adapters own their provider instruction projection. Keep
    dynamic context on that System path rather than copying Agent Core's
    synthetic User-message encoding, while retaining the shared typed identity
-   used by prompt attribution and input-window projection. *)
+   used by prompt attribution and input-window projection.
+
+   The Librarian's working state rides here too, so it reaches the client the
+   way each adapter delivers System text: Claude Code joins it into
+   [--system-prompt] on every turn, a resume included
+   ([Keeper_claude_code_runtime]); Antigravity renders it as a [SYSTEM:]
+   section ahead of the history ([Keeper_antigravity_runtime]). The Agent
+   Core lane sends the same text as a [User] message, which only that lane's
+   wire has. Moving it to [User] here would change when Claude Code delivers
+   it -- into the start prompt's history alone, absent from resumes -- not
+   only what the model reads it as; that is a lane decision to measure, not
+   a role to flip. The text names itself a summary to use as context, not as
+   new instructions ([Keeper_turn_driver_try_provider.working_state_text]). *)
 let extra_system_context_message text : Agent_core.Types.message =
   { role = System
   ; content = [ Text text ]
@@ -609,7 +621,9 @@ let carried_start_range
     match plan with
     | Absorbed_through { first_atom; absorbed_through; working_state } ->
       (* The working state stands in front of the range, in the same System
-         place this lane puts every other piece of context it composes. *)
+         place this lane puts every other piece of context it composes; see
+         [extra_system_context_message] for what that place is on each
+         client. *)
       ( extra_system_context_message working_state :: messages
       , first_atom
       , Librarian_snapshot { absorbed_through } )

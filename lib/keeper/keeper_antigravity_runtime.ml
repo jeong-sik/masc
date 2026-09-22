@@ -126,91 +126,62 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
-  (* Composed as a unit so it can be composed again without the Librarian
-     front. The byte window below cannot drop a pinned message, and the
-     working state is pinned, so a range that does not fit is refused rather
-     than trimmed — and this lane's ceiling is the only place that refusal is
-     actually known. Guessing it here would mean keeping a second copy of the
-     window's own accounting (its per-message role label and the preamble it
-     charges whether or not one is inserted), which would be wrong in the same
-     direction it already was. *)
-  let attempt ~librarian_front =
-    let carried =
-      Host.carried_start_range
-        ~keeper_name
-        ~runtime_id
-        ~carried_front_seed
-        ~librarian_front
-        ~own_first_atom:0
-        ~turn_start
-        history_messages
-    in
-    match
-      match source_projection with
-      | None -> Ok carried.Host.messages
-      | Some project -> project carried.Host.messages
-    with
-    | Error error -> Error (`Source error)
-    | Ok projected_messages ->
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        match
-          Runtime_model_input_tail_window.project_with_drop
-            ~allow_empty_history:true
-            ~measure_message_bytes:measure_model_input_message_bytes
-            ~capacity_bytes
-            ~reserved_bytes
-            projected_messages
-        with
-        | Ok projection -> Ok (carried, projection)
-        | Error error -> Error (`Window (carried.Host.front, error)))
-  in
-  let observed (carried, (projection : Runtime_model_input_tail_window.projection)) =
-    let carried_atoms =
-      carried.Host.projection.atom_count - carried.Host.projection.dropped_atoms
-    in
-    let durable_dropped = Int.min projection.dropped_atoms carried_atoms in
-    let transmitted_atoms = carried_atoms - durable_dropped in
-    Option.iter
-      (fun observe ->
-         if transmitted_atoms > 0
-         then
-           Option.iter
-             (fun front_atom_digest ->
-                observe
-                  { Runtime_model_input_tail_window.transmitted_atoms
-                  ; total_atoms = carried.Host.history_atom_count
-                  ; front_atom_digest
-                  })
-             (Runtime_model_input_tail_window.atom_opening_digest
-                history_messages
-                (carried.Host.history_atom_count - transmitted_atoms)))
-      on_model_input_window_observation;
-    Ok projection.messages
-  in
   let* librarian_front = Host.read_librarian_front librarian_front history_messages in
-  match attempt ~librarian_front with
-  | Ok result -> observed result
-  | Error (`Source error) -> Error error
-  | Error (`Window (front, error)) ->
-    (match front with
-     | Host.Librarian_snapshot _ ->
-       Log.Keeper.warn
-         ~keeper_name
-         "model input drops the librarian front runtime=%s: the working state does not \
-          fit the declared window: %s"
-         runtime_id
-         (Runtime_model_input_tail_window.budget_error_to_string error);
-       (match attempt ~librarian_front:Keeper_turn_driver_try_provider.No_position with
-        | Ok result -> observed result
-        | Error (`Source error) -> Error error
-        | Error (`Window (_, error)) ->
-          Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
-     | Host.Librarian_progress _ ->
-       (* No working state rides on these fronts. Composing again without
-          the Librarian would leave the others as they are, or, for a read
-          position, start the range earlier and charge the window more. *)
-       Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
+  let carried =
+    Host.carried_start_range
+      ~keeper_name
+      ~runtime_id
+      ~carried_front_seed
+      ~librarian_front
+      ~own_first_atom:0
+      ~turn_start
+      history_messages
+  in
+  let* projected_messages =
+    match source_projection with
+    | None -> Ok carried.Host.messages
+    | Some project -> project carried.Host.messages
+  in
+  (* The window drops atoms, never a pinned message, so it refuses only when
+     the pinned messages alone -- the hooks' system context, a working state
+     the Librarian front carries, the preamble -- exceed what the fixed
+     sections leave. That refusal is final for every front. Composing once
+     more without the working state would save at most its few kilobytes and
+     hide, for that one band, a request the operator has to make room for:
+     the next turn's pinned messages meet the same ceiling. *)
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    match
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes:measure_model_input_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        projected_messages
+    with
+    | Ok projection ->
+      let carried_atoms =
+        carried.Host.projection.atom_count - carried.Host.projection.dropped_atoms
+      in
+      let durable_dropped = Int.min projection.dropped_atoms carried_atoms in
+      let transmitted_atoms = carried_atoms - durable_dropped in
+      Option.iter
+        (fun observe ->
+           if transmitted_atoms > 0
+           then
+             Option.iter
+               (fun front_atom_digest ->
+                  observe
+                    { Runtime_model_input_tail_window.transmitted_atoms
+                    ; total_atoms = carried.Host.history_atom_count
+                    ; front_atom_digest
+                    })
+               (Runtime_model_input_tail_window.atom_opening_digest
+                  history_messages
+                  (carried.Host.history_atom_count - transmitted_atoms)))
+        on_model_input_window_observation;
+      Ok projection.messages
+    | Error error ->
+      Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes

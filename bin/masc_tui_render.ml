@@ -67,6 +67,7 @@ let acting_pane_target_at ~line =
   else Masc_tui_acting_pane.Target_none
 
 let acting_pane_drawn_cols () = !acting_pane_reserved_cols
+let acting_pane_row_count () = Array.length !acting_pane_row_targets
 let acting_pane_scroll_limit () = !acting_pane_scroll_max
 let set_table_frame enabled = table_frame_enabled := enabled
 

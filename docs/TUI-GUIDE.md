@@ -617,7 +617,6 @@ when chat opened from detail.
    ► YOU · tui-019... ──────────────────────────────────────── 14:35:01
      hello, how are you?
    ● tui-019... ────────────────────────────────────────────── 14:35:03
-     Reasoning · 6 line(s) folded · Ctrl-R or /thinking to expand
    │ ✓ Read a.ml
      ...reply text...
    > type here_

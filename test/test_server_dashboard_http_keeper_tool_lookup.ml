@@ -84,7 +84,7 @@ let row ~keeper ~execution_id ~ts ~output =
     |> Keeper_file_change_evidence.to_yojson
   in
   `Assoc
-    [ "record_kind", `String "tool_call"; "success", `Bool true
+    [ "record_kind", `String "tool_call"; "wire_outcome", `String "ok"
     ; "duration_ms", `Float 3.
     ; "route_evidence", `Assoc [ "descriptor_id", `String "agent.edit_file" ]
     ; "keeper", `String keeper; "execution_id", `String execution_id

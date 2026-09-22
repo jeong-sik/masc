@@ -50,7 +50,7 @@ TypeOK ==
   /\ width \in 0..Backlog
   /\ learned \in 0..Backlog
   /\ refusedAt \in 1..(Backlog + 1)
-  /\ outcome \in {"start", "committed", "refused_size", "refused_other"}
+  /\ outcome \in {"start", "committed", "refused_size", "refused_other", "unreadable"}
 
 Init ==
   /\ unread = Backlog
@@ -66,8 +66,7 @@ Commit ==
   /\ Unit <= Capacity
   /\ unread' = unread - Unit
   /\ width' = IF unread - Unit = 0 THEN 0 ELSE width
-  /\ learned' = IF unread - Unit = 0 THEN 0 ELSE learned
-  /\ UNCHANGED refusedAt
+  /\ UNCHANGED << learned, refusedAt >>
   /\ outcome' = "committed"
 
 (* A refusal a smaller request would avoid. The pass records the narrower
@@ -87,9 +86,17 @@ RefuseOther ==
   /\ UNCHANGED << unread, width, learned, refusedAt >>
   /\ outcome' = "refused_other"
 
+(* A pass that could not read the source at all: the checkpoint the trace
+   names is absent, or the boundary lines do not cover its prefix. The
+   backlog is unknown, not empty, so the width stands. *)
+SourceUnreadable ==
+  /\ unread > 0
+  /\ UNCHANGED << unread, width, learned, refusedAt >>
+  /\ outcome' = "unreadable"
+
 Drained == unread = 0 /\ UNCHANGED vars
 
-Next == Commit \/ RefuseSize \/ RefuseOther \/ Drained
+Next == Commit \/ RefuseSize \/ RefuseOther \/ SourceUnreadable \/ Drained
 
 (* Weak fairness on the two actions that make progress. RefuseOther stays
    enabled throughout and is deliberately not fair: a provider may refuse
@@ -123,7 +130,8 @@ RefuseSizeWithoutCarry ==
   /\ UNCHANGED << unread, width, learned >>
   /\ outcome' = "refused_size"
 
-NextNoCarry == Commit \/ RefuseSizeWithoutCarry \/ RefuseOther \/ Drained
+NextNoCarry ==
+  Commit \/ RefuseSizeWithoutCarry \/ RefuseOther \/ SourceUnreadable \/ Drained
 
 SpecNoCarry ==
   Init /\ [][NextNoCarry]_vars /\ WF_vars(Commit) /\ WF_vars(RefuseSizeWithoutCarry)
@@ -140,7 +148,7 @@ CommitReleasingTheWidth ==
   /\ outcome' = "committed"
 
 NextReleaseOnCommit ==
-  CommitReleasingTheWidth \/ RefuseSize \/ RefuseOther \/ Drained
+  CommitReleasingTheWidth \/ RefuseSize \/ RefuseOther \/ SourceUnreadable \/ Drained
 
 SpecReleaseOnCommit ==
   Init
@@ -158,9 +166,29 @@ RefuseOtherNarrowing ==
   /\ UNCHANGED << unread, refusedAt >>
   /\ outcome' = "refused_other"
 
-NextNarrowOnOther == Commit \/ RefuseSize \/ RefuseOtherNarrowing \/ Drained
+NextNarrowOnOther ==
+  Commit \/ RefuseSize \/ RefuseOtherNarrowing \/ SourceUnreadable \/ Drained
 
 SpecNarrowOnOther ==
   Init /\ [][NextNarrowOnOther]_vars /\ WF_vars(Commit) /\ WF_vars(RefuseSize)
+
+(***************************************************************************)
+(* A source the pass could not read releases the width, as an emptied one   *)
+(* does. The next pass then offers the whole backlog again.                 *)
+(***************************************************************************)
+SourceUnreadableReleasingTheWidth ==
+  /\ unread > 0
+  /\ width' = 0
+  /\ UNCHANGED << unread, learned, refusedAt >>
+  /\ outcome' = "unreadable"
+
+NextReleaseOnUnreadable ==
+  Commit \/ RefuseSize \/ RefuseOther \/ SourceUnreadableReleasingTheWidth \/ Drained
+
+SpecReleaseOnUnreadable ==
+  Init
+  /\ [][NextReleaseOnUnreadable]_vars
+  /\ WF_vars(Commit)
+  /\ WF_vars(RefuseSize)
 
 =============================================================================

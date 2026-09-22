@@ -117,16 +117,19 @@ let keeper_attention_severity ~reason ~runtime_blocker_class =
   | _, Some _ -> Sev_bad
   | _ -> Sev_warn
 
-let keeper_attention_summary ~(meta : Keeper_meta_contract.keeper_meta) ~reason
-    ~runtime_blocker_summary =
+(* Which Keeper and why. Every item in this projection needs operator
+   attention, and every surface that draws one titles its list for that, so
+   the row carries only what differs between rows: the Keeper's name, the
+   attention reason after a colon, and the runtime blocker summary in
+   parentheses. The two readings keep their own marks so a row with only one
+   of them still says which it is. An item with neither has nothing else to
+   say, and the phrase is its whole reading. *)
+let keeper_attention_summary ~name ~reason ~runtime_blocker_summary =
   match reason, runtime_blocker_summary with
-  | Some reason, Some summary ->
-      Printf.sprintf "%s needs operator attention: %s (%s)" meta.name reason summary
-  | Some reason, None ->
-      Printf.sprintf "%s needs operator attention: %s" meta.name reason
-  | None, Some summary ->
-      Printf.sprintf "%s needs operator attention (%s)" meta.name summary
-  | None, None -> Printf.sprintf "%s needs operator attention" meta.name
+  | Some reason, Some summary -> Printf.sprintf "%s: %s (%s)" name reason summary
+  | Some reason, None -> Printf.sprintf "%s: %s" name reason
+  | None, Some summary -> Printf.sprintf "%s (%s)" name summary
+  | None, None -> Printf.sprintf "%s needs operator attention" name
 
 (* Waiting connector messages are read off the event queue, not off the
    attention log. The queue is what makes a Keeper judge a message: a turn
@@ -227,7 +230,8 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
         kind = keeper_attention_kind reason;
         severity;
         summary =
-          keeper_attention_summary ~meta ~reason ~runtime_blocker_summary;
+          keeper_attention_summary ~name:meta.name ~reason
+            ~runtime_blocker_summary;
         target_type = Operator_action_constants.keeper_target_type;
         target_id = Some meta.name;
         actor = Some meta.name;

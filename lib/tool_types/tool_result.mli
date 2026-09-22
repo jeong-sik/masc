@@ -58,6 +58,11 @@ val log_level_of_failure_class : tool_failure_class -> Log.level
 type tool_call_outcome = Ok | Error | Unknown
 
 val string_of_tool_call_outcome : tool_call_outcome -> string
+
+(** Strict wire decoder for a persisted [wire_outcome]; the inverse of
+    {!string_of_tool_call_outcome}. *)
+val tool_call_outcome_of_string : string -> (tool_call_outcome, string) Stdlib.Result.t
+
 val log_level_of_tool_call_outcome : tool_call_outcome -> Log.level
 
 (** Classify a tool failure from an exception raised during execution.
@@ -82,6 +87,31 @@ val string_of_disposition : ('completed, 'deferred, 'failed) disposition -> stri
 (** Strict wire decoder for persisted observation records. *)
 val unit_disposition_of_string
   : string -> ((unit, unit, unit) disposition, string) Stdlib.Result.t
+
+(** How a persisted tool-call record says the call ended. Every reader of the
+    tool-call log classifies a record through {!recorded_call_outcome}.
+
+    The record's execution [disposition] is the authority. [wire_outcome] is
+    read only when the record carries no disposition: a call that did not go
+    through the typed dispatch path records its response outcome alone. A
+    committed effect whose result then failed to reach the model is therefore
+    [Recorded_succeeded] -- the effect happened.
+
+    [Recorded_deferred] stays its own case: the call was accepted but its
+    effect has not happened, so it is neither a success nor a failure.
+
+    [Recorded_unsettled] is a record whose [wire_outcome] is [unknown] or that
+    names neither field: the call has no outcome yet. [Recorded_malformed] is a
+    field of the wrong JSON type or a spelling the strict decoders refuse, or a
+    record that is not an object: producer and reader disagree on the schema. *)
+type recorded_call_outcome =
+  | Recorded_succeeded
+  | Recorded_deferred
+  | Recorded_failed
+  | Recorded_unsettled
+  | Recorded_malformed
+
+val recorded_call_outcome : Yojson.Safe.t -> recorded_call_outcome
 
 (** Payload carried by a completed or deferred tool invocation.  [metadata]
     is an opaque one-way boundary projection; MASC consumers must branch on

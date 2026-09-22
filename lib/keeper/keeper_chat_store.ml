@@ -1919,6 +1919,7 @@ let append_user_message_once
 ;;
 
 type strict_decode_error =
+  | Invalid_surface of string
   | Unknown_speaker_authority of string
   | Missing_speaker_authority
 
@@ -1956,25 +1957,27 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
       | Error _ -> None
     in
     let tool_call_name = opt_string "tool_call_name" in
-    let surface =
+    let surface, surface_error =
       match Json_util.assoc_member_opt "surface" json with
-      | None -> None
+      | None -> None, None
       | Some surface_json -> (
           match Surface_ref.of_json surface_json with
-          | Ok s -> Some s
+          | Ok s -> Some s, None
           | Error detail ->
-              (* Unknown/invalid surface payload: surface it and keep the
-                 row as unscoped chat content. *)
+              (* The permissive reader keeps the row as unscoped chat
+                 content. The strict reader refuses it: a consumer that
+                 moves its cursor past this row would record a connector
+                 message as a direct one. *)
               report_persistence_read_drop
                 ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid surface field: %s" detail);
-              None)
+              None, Some (Invalid_surface detail))
     in
     let conversation_id = opt_string "conversation_id" in
     let external_message_id = opt_string "external_message_id" in
     let workspace_id = opt_string "workspace_id" in
-    let speaker, strict_decode_error =
+    let speaker, speaker_error =
       let speaker_id = opt_string "speaker_id" in
       let speaker_name = opt_string "speaker_name" in
       match opt_string "speaker_authority" with
@@ -2002,6 +2005,11 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
                  ~path:file_path
                  ~detail:"speaker_id/speaker_name without speaker_authority";
                None, Some Missing_speaker_authority)
+    in
+    let strict_decode_error =
+      match surface_error with
+      | Some _ -> surface_error
+      | None -> speaker_error
     in
     let audio =
       match Json_util.assoc_member_opt "audio" json with
@@ -2573,6 +2581,9 @@ let parse_transcript_row_strict ~path ~redaction ~line_no line =
   then `Blank
   else
     match parse_line_decoded ~file_path:path trimmed with
+    | { strict_decode_error = Some (Invalid_surface detail); _ } ->
+      `Unreadable
+        (Printf.sprintf "%s:%d invalid surface field: %s" path line_no detail)
     | { strict_decode_error = Some (Unknown_speaker_authority label); _ } ->
       `Unreadable
         (Printf.sprintf

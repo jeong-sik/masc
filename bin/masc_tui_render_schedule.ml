@@ -346,10 +346,10 @@ let memory_updated_width = 16
 let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
-(* [+12 -23] is 7 cells, and a cell that overruns is cut in the middle: the
-   column drew [+\xe2\x80\xa6 -23] and the added count was gone. Measured on the
-   live fleet (2026-09-22): the widest pair was [+11 -16]. Three digits each
-   keeps a large revision whole. *)
+(* The column carries a pair of counts, and a cell that overruns folds in the
+   middle, which takes the first count. Three digits each keeps a large
+   revision whole; the widest pair on the live fleet (2026-09-22) was
+   [+11 -16]. *)
 let memory_delta_width = 9
 
 type memory_columns = {
@@ -591,7 +591,8 @@ let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
       ~width:system_log_keeper_width values.slog_keeper
   ; Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
       ~width:system_log_category_width values.slog_category
-  ; Table.cell ~header:"MESSAGE" ~width:message_width values.slog_message
+  ; Table.cell ~fold:Table.Fold_tail ~header:"MESSAGE" ~width:message_width
+      values.slog_message
   ]
 
 let system_log_message_width ~inner_width =
@@ -648,7 +649,8 @@ let verification_cells ~submitter_width ~title_width values =
       values.vrow_submitted_by
   ; Table.cell ~header:"EVIDENCE" ~width:verification_evidence_width
       values.vrow_evidence
-  ; Table.cell ~header:"TITLE" ~width:title_width values.vrow_title
+  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      values.vrow_title
   ]
 
 let verification_title_width ~inner_width ~submitter_width =
@@ -845,7 +847,8 @@ let change_cells ?(op_style = "") ?(result_style = "") ~summary_width values =
   ; Table.cell ~style:result_style ~header:"RESULT" ~width:change_result_width
       values.crow_result
   ; Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
-  ; Table.cell ~header:"WHAT" ~width:summary_width values.crow_summary
+  ; Table.cell ~fold:Table.Fold_tail ~header:"WHAT" ~width:summary_width
+      values.crow_summary
   ]
 
 let change_summary_width ~inner_width =
@@ -872,7 +875,10 @@ let change_row ~op_style ~result_style ~summary_width values =
 
 let fusion_time_width = 16
 let fusion_age_width = 7
-let fusion_state_width = 18
+(* A running stage ("recording(3/1)") or how the run ended. A failed run
+   draws its failure code, and the widest the server writes is
+   [evidence_unavailable]. *)
+let fusion_state_width = 20
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12
 
@@ -1054,7 +1060,8 @@ let harness_cells ?(verdict_style = "") ~reason_width values =
       ~width:harness_verdict_width values.hrow_verdict
   ; Table.cell ~header:"EVALUATOR" ~width:harness_evaluator_width
       values.hrow_evaluator
-  ; Table.cell ~header:"REASON" ~width:reason_width values.hrow_reason
+  ; Table.cell ~fold:Table.Fold_tail ~header:"REASON" ~width:reason_width
+      values.hrow_reason
   ]
 
 let harness_reason_width ~inner_width =
@@ -1129,7 +1136,8 @@ let planning_cells ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
       values.prow_priority
   ; Table.cell ~style:open_style ~header:"OPEN" ~width:planning_open_width
       values.prow_open
-  ; Table.cell ~header:"TITLE" ~width:title_width values.prow_title
+  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      values.prow_title
   ; Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
       values.prow_age
   ; Table.cell ~header:"DUE" ~width:planning_due_width values.prow_due
@@ -1225,7 +1233,8 @@ let board_cells ?(styles = board_no_styles) ~title_width values =
       ~width:board_hearth_width values.brow_hearth
   ; Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
       ~width:board_author_width values.brow_author
-  ; Table.cell ~header:"TITLE" ~width:title_width values.brow_title
+  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      values.brow_title
     (* Right, the way Planning's age reads. A span is a number and the two
        screens are read one after the other; left on one and right on the
        other is the drift this description exists to close. *)

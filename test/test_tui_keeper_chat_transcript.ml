@@ -1294,7 +1294,7 @@ let test_runtime_failover_visibility_and_error_attribution () =
   check bool "failover attempt is indicated" true
     (* Second attempt: [attempt_index] is 0-based on the wire and the row
        counts from 1, the way the superseded blocks beside it do. *)
-    (contains ~needle:"failover: waiting on [gpt-4o] (attempt 2)" (progress_text t));
+    (contains ~needle:"runtime candidate: waiting on [gpt-4o] (attempt 2)" (progress_text t));
   check (option string) "current runtime updated to failover" (Some "gpt-4o")
     (Transcript.current_runtime_id t);
   feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];
@@ -1386,7 +1386,7 @@ let test_the_row_names_the_model_phase_between_tool_calls () =
   feed ~now:(origin +. 50.) t
     [ Live.Runtime_attempt_started { runtime_id = Some "gpt-4o"; attempt_index = Some 1 } ];
   check bool "a failover after tools still states the new runtime's silence" true
-    (contains ~needle:"failover: waiting on [gpt-4o] (attempt 2), nothing back for 10s \xc2\xb7 1 tool"
+    (contains ~needle:"runtime candidate: waiting on [gpt-4o] (attempt 2), nothing back for 10s \xc2\xb7 1 tool"
        (progress_text ~now:(origin +. 60.) t))
 
 let test_runtime_identity_separates_configured_and_observed () =

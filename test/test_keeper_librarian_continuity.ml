@@ -507,6 +507,9 @@ let test_rewrite_target_is_the_librarian_position () = with_source @@ fun _env c
   check (option int) "the target is the Librarian's position" (Some 2) first.catch_up_end_atom
 
 
+let narrowing_marks = [ 'a'; 'b'; 'c'; 'd'; 'e'; 'f'; 'g'; 'h' ]
+let narrowing_atom_count = List.length narrowing_marks
+
 (* A Keeper whose continuity snapshot no longer fits its history prepares from
    atom 0, so one pass's source is the whole backlog. These cases pin what a
    refused pass carries to the next one and which refusals must not move it at
@@ -552,9 +555,14 @@ let narrowing_fixture ~slot_count ~answer f =
   (* The rendered prompt carries the same atoms twice -- once as
      conversation_history and once inside the continuity block -- on top of a
      17 kB template, so a unit of n atoms sends roughly 2n * atom + 17 kB.
-     These four are sized so four atoms land well over the ceiling and two
-     well under it, with the template unable to decide either comparison. *)
-  let atoms = List.map (fun mark -> message (String.make 8_000 mark)) [ 'a'; 'b'; 'c'; 'd' ] in
+     These eight are sized so four atoms land well over the ceiling and two
+     well under it, with the template unable to decide either comparison.
+     Eight rather than four so that six remain after the first committed unit:
+     a pass that released the width on a commit would offer those six and be
+     refused, which four atoms could not have shown. *)
+  let atoms =
+    List.map (fun mark -> message (String.make 8_000 mark)) narrowing_marks
+  in
   save atoms;
   boundary ~fresh:true 1 atoms;
   ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
@@ -573,7 +581,9 @@ let narrowing_fixture ~slot_count ~answer f =
     Sys.rename session_dir hidden;
     Fun.protect ~finally:(fun () -> Sys.rename hidden session_dir) body
   in
-  f ~bodies ~pass ~coverage ~hide_source
+  (* What a server restart does to the loop's memory. *)
+  let restart () = Masc.Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name in
+  f ~bodies ~pass ~coverage ~hide_source ~restart ~config
 
 let narrowing_ceiling = 65_000
 let accepted_answer =
@@ -588,25 +598,40 @@ let test_refused_width_carries_to_the_next_pass () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let width () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
   pass ();
   check (option int) "a refused source commits nothing" None (coverage ());
+  check bool "the refusal left a width" true (Option.is_some (width ()));
   check int "the refused pass sends one request and does not retry in place" 1
     (List.length !bodies);
   check bool "the first request carried the whole source" true
     (List.hd !bodies > narrowing_ceiling);
   pass ();
   (* Without the carried width this pass prepares the whole source again and
-     refuses again, exactly as the live Keeper did ninety-six times. *)
-  check bool "the next pass sends a request the target accepts" true
-    (List.nth !bodies 1 <= narrowing_ceiling);
+     is refused again, exactly as the live keeper was ninety-six times. *)
+  check int "the second pass sends one request as well" 2 (List.length !bodies);
+  check bool "and it is smaller than the first" true
+    (List.nth !bodies 1 < List.nth !bodies 0);
+  check (option int) "still over the ceiling, so still nothing commits" None (coverage ());
+  pass ();
+  check bool "the third pass sends a request the target accepts" true
+    (List.nth !bodies 2 <= narrowing_ceiling);
   check (option int) "reading less commits, and the rest follows in the same pass"
-    (Some 4) (coverage ())
+    (Some narrowing_atom_count) (coverage ());
+  check (option int) "reading the backlog to its end releases the width" None (width ());
+  (* Every request after the first commit stayed at the width. A pass that
+     released the width on a commit would have offered the six remaining
+     atoms, which the target refuses. *)
+  check bool "a commit does not release the width" true
+    (List.for_all (fun size -> size <= narrowing_ceiling)
+       (List.filteri (fun index _ -> index >= 2) !bodies))
 
 let test_a_refusal_that_is_not_about_size_keeps_the_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index _body -> `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
   pass ();
   pass ();
   check int "each pass sends one request" 2 (List.length !bodies);
@@ -620,18 +645,84 @@ let test_an_unreadable_source_keeps_the_width () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ~hide_source ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source ~restart:_ ~config:_ ->
   pass ();
   check (option int) "the first pass is refused and commits nothing" None (coverage ());
-  (* prepare answers Ok None both for a drained backlog and for a checkpoint
-     it cannot read. Releasing the width on the second would send the pass
-     after it back at the whole backlog, which is the loop this fixes. *)
+  (* prepare answers with no source both for a backlog read to its end and for
+     a checkpoint it cannot read. Releasing the width on the second would send
+     the pass after it back at the whole backlog, which is the loop this
+     fixes. *)
   hide_source (fun () -> pass ());
   check int "a source it cannot read sends no request" 1 (List.length !bodies);
   pass ();
   check bool "the width survived the unreadable pass" true
-    (List.nth !bodies 1 <= narrowing_ceiling);
-  check (option int) "and the source is read to its end" (Some 4) (coverage ())
+    (List.nth !bodies 1 < List.nth !bodies 0);
+  pass ();
+  check (option int) "and the source is read to its end" (Some narrowing_atom_count) (coverage ())
+
+(* RFC-librarian-lifecycle §4.3 keeps the limit in the loop's memory and
+   accepts that a restart reads everything again. Pinned so that making the
+   width durable is a decision someone takes, not a side effect. *)
+let test_a_restart_forgets_the_width () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      if String.length body > narrowing_ceiling
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart ~config ->
+  let width () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+  pass ();
+  check bool "the refusal left a width" true (Option.is_some (width ()));
+  restart ();
+  check (option int) "a restart forgets it" None (width ());
+  pass ();
+  check int "each pass sends one request" 2 (List.length !bodies);
+  check bool "after a restart the pass offers the whole backlog again" true
+    (List.nth !bodies 1 = List.nth !bodies 0);
+  check (option int) "and is refused again" None (coverage ())
+
+(* A continuity answer that leaves out the working state never reaches
+   publication: validate_selection refuses it as Domain_output_invalid, and
+   RFC-librarian-lifecycle §4.3 counts a refused output among the failures
+   reading less answers. *)
+let answer_without_state =
+  Exact_output_fixture.openai_response
+    (Yojson.Safe.from_string
+       {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|})
+
+let test_an_answer_without_a_working_state_reads_less () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index _body -> `OK, answer_without_state)
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
+  pass ();
+  pass ();
+  check bool "an answer without a working state reads less next time" true
+    (List.nth !bodies 1 < List.nth !bodies 0);
+  check (option int) "and commits no continuity" None (coverage ())
+
+(* The answer validated and only the snapshot failed to land. That is not the
+   range's size, so the width stands. *)
+let test_a_snapshot_that_fails_to_commit_keeps_the_width () =
+  let break_the_commit = ref (fun () -> ()) in
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun index _body ->
+      if index = 0
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else (!break_the_commit (); `OK, accepted_answer))
+  @@ fun ~bodies:_ ~pass ~coverage:_ ~hide_source:_ ~restart:_ ~config ->
+  let width () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+  (* While the model is answering, put a directory where the snapshot is about
+     to be written, so the commit fails on disk after a good answer. It fails
+     in the same branch a CAS the history moved under does. Coverage is not
+     read afterwards: the snapshot path is no longer a file. *)
+  break_the_commit := (fun () -> Fs_compat.mkdir_p (P.path ~config ~keeper_name));
+  pass ();
+  let refused = width () in
+  check bool "the size refusal left a width" true (Option.is_some refused);
+  pass ();
+  check (option int) "a snapshot that failed to commit leaves it where it was" refused (width ())
 
 let test_a_size_refusal_anywhere_in_the_walk_narrows () =
   narrowing_fixture ~slot_count:2
@@ -643,13 +734,50 @@ let test_a_size_refusal_anywhere_in_the_walk_narrows () =
       if index = 0
       then `Request_entity_too_large, refused "invalid_request_error"
       else `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
   pass ();
   check int "the walk tried both slots" 2 (List.length !bodies);
   pass ();
   check bool "a walk holding one size refusal still reads less next time" true
     (List.nth !bodies 2 < List.nth !bodies 0);
   check (option int) "a walk of refusals commits nothing" None (coverage ())
+
+(* An answer the validator refused and a quota refusal, in either order. The
+   refused answer is size evidence wherever the walk met it, so both orders
+   read less. *)
+let walk_of_two ~first ~second =
+  narrowing_fixture ~slot_count:2
+    ~answer:(fun index _body -> if index mod 2 = 0 then first () else second ())
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
+  pass ();
+  check int "the walk tried both slots" 2 (List.length !bodies);
+  pass ();
+  check bool "the next pass reads less" true (List.nth !bodies 2 < List.nth !bodies 0);
+  check (option int) "and nothing is committed" None (coverage ())
+
+let quota () = `Too_many_requests, refused "rate_limit_error"
+let no_state () = `OK, answer_without_state
+
+let test_a_refused_answer_then_a_quota_reads_less () =
+  walk_of_two ~first:no_state ~second:quota
+
+let test_a_quota_then_a_refused_answer_reads_less () =
+  walk_of_two ~first:quota ~second:no_state
+
+let test_reports_in_one_pass_keep_any_size_verdict () =
+  let module R = Masc.Keeper_librarian_runtime in
+  let merge = Masc.Keeper_librarian_queue_refresh.For_testing.merge_not_committed in
+  let report detail walk_shows_size = { R.detail; walk_shows_size } in
+  List.iter
+    (fun (name, earlier, (latest : R.not_committed), expected) ->
+       let merged = merge earlier latest in
+       check bool name expected merged.R.walk_shows_size;
+       check string (name ^ ": the latest detail is logged") latest.R.detail merged.R.detail)
+    [ "one report", None, report "walk" true, true
+    ; "size, then a raise", Some (report "walk" true), report "raise" false, true
+    ; "a raise, then size", Some (report "raise" false), report "walk" true, true
+    ; "no size in either", Some (report "walk" false), report "raise" false, false
+    ]
 
 let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;
@@ -661,6 +789,17 @@ let () = run "production continuity pair"
     test_case "a refusal that is not about size keeps the width" `Quick test_a_refusal_that_is_not_about_size_keeps_the_width;
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
     test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;
+    test_case "a restart forgets the width" `Quick test_a_restart_forgets_the_width;
+    test_case "an answer without a working state reads less" `Quick
+      test_an_answer_without_a_working_state_reads_less;
+    test_case "a snapshot that fails to commit keeps the width" `Quick
+      test_a_snapshot_that_fails_to_commit_keeps_the_width;
+    test_case "a refused answer then a quota reads less" `Quick
+      test_a_refused_answer_then_a_quota_reads_less;
+    test_case "a quota then a refused answer reads less" `Quick
+      test_a_quota_then_a_refused_answer_reads_less;
+    test_case "reports in one pass keep any size verdict" `Quick
+      test_reports_in_one_pass_keep_any_size_verdict;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
     test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;

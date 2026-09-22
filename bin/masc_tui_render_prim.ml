@@ -2341,6 +2341,31 @@ let fusion_run_status_color = function
   | Fusion_completed -> (Theme.ok ())
   | Fusion_failed _ -> (Theme.bad ())
 
+let fusion_run_stage_compact = function
+  | Fusion_stage_accepted -> "accepted"
+  | Fusion_stage_panel { frs_expected } ->
+      Printf.sprintf "panel(%d)" frs_expected
+  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_completed -> "completed"
+  | Fusion_stage_failed -> "failed"
+
+(* A failed run says how it failed: the list is scanned for why runs fail,
+   and a timeout, a provider error and panels that never answered are three
+   different things to go and fix. The code is a tag from the judge's or the
+   delivery's closed set, not a sentence, so it fits the cell; it is drawn in
+   the failure colour, and the line under the table carries the full error for
+   the selected run. *)
+let fusion_run_state_text ~status ~stage =
+  match status with
+  | Fusion_running -> fusion_run_stage_compact stage
+  | Fusion_completed -> fusion_run_status_to_string status
+  | Fusion_failed failure -> Terminal_text.single_line failure.frs_failure_code
+
 
 let fusion_run_progress_text = function
   | Fusion_stage_accepted -> "accepted; waiting for panel dispatch"
@@ -2815,20 +2840,19 @@ let tools_scrolled_for_lines state display_lines =
 (* The two keys this row draws in front of its strip. Named here because the
    row has to count them when it decides what is left for the file it is
    reading, and a second copy of the spelling would drift from this one. *)
+let config_pane_keys = "9:Runtime  p:next  "
+
 (* A file's address said from a directory it is under. The Config panes read
-   one file whose prefix is the server's masc root, the same for every screen
-   in a session, and the Config pane's own identity row names that root; spent
-   in the title beside it, the prefix pushed the reading past the row and the
-   row was cut in the middle -- "/Users/d\xe2\x80\xa6onfig/runtime.toml", where
-   neither end is the file. A path that is not under [root] is returned whole:
-   there the address is the news. *)
+   one file whose prefix is the server's masc root -- the same for every screen
+   in a session, and named on the Config pane's own identity row -- so the
+   title says the path from there and keeps its cells for the part that is
+   this file. A path that is not under [root] is returned whole: there the
+   address is the news. *)
 let path_from_root ~root path =
   let root = if root = "" then "" else root ^ Filename.dir_sep in
   if root <> "" && String.starts_with ~prefix:root path then
     String.sub path (String.length root) (String.length path - String.length root)
   else path
-
-let config_pane_keys = "9:Runtime  p:next  "
 
 let config_pane_tabs (state : state) =
   List.map (fun (pane, label) -> (label, state.config_pane = pane)) config_panes

@@ -119,13 +119,19 @@ type keeper_lane_last_outcome = {
   klo_selected_model : string option;
 }
 
+type keeper_lane_conditions = {
+  klc_launch_pending : bool;
+  klc_heartbeat_healthy : bool;
+  klc_turn_healthy : bool;
+}
+
 type keeper_lane = {
   kl_keeper : string;
   kl_phase : keeper_lane_phase;
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_diagnosis : string option;
+  kl_conditions : keeper_lane_conditions;
 }
 
 type keeper_lanes_snapshot = {
@@ -567,9 +573,13 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+type fleet_blocker =
+  | Blocker of Keeper_fleet_blocker.t
+  | Unrecognised_blocker of string
+
 type fleet_safety = {
   fs_status : string;
-  fs_blocker : string option;
+  fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
   fs_running_count : int;
@@ -1054,6 +1064,13 @@ let decode_turn_mode json =
   | Some mode -> Ok mode
   | None -> Error (Printf.sprintf "unknown current turn mode %S" raw)
 
+(* The five token counters are one observation: the producer reads them off
+   one provider sample and writes all five or none
+   ([Keeper_unified_metrics_snapshot], the [usage_resolution.delta] match).
+   The cost is a separate reading on the same row -- the producer writes it
+   only where the sample carried one -- so a row with five counters and no
+   cost is a turn whose provider priced nothing, not a half-written
+   observation. A cost without the counters is a row no producer writes. *)
 let validate_usage_projection ~input_tokens ~output_tokens
     ~cache_creation_tokens ~cache_read_tokens ~total_tokens ~cost_usd
     ~inner_trust ~inner_anomaly ~inner_reasons ~outer_trust ~outer_reasons =
@@ -1063,15 +1080,13 @@ let validate_usage_projection ~input_tokens ~output_tokens
         output_tokens,
         cache_creation_tokens,
         cache_read_tokens,
-        total_tokens,
-        cost_usd )
+        total_tokens )
     with
     | ( Some input_tokens,
         Some output_tokens,
         Some cache_creation_tokens,
         Some cache_read_tokens,
-        Some total_tokens,
-        Some cost_usd ) ->
+        Some total_tokens ) ->
         if total_tokens <> input_tokens + output_tokens then
           Error "usage total_tokens does not equal input_tokens + output_tokens"
         else
@@ -1080,42 +1095,41 @@ let validate_usage_projection ~input_tokens ~output_tokens
               output_tokens;
               cache_creation_input_tokens = cache_creation_tokens;
               cache_read_input_tokens = cache_read_tokens;
-              cost_usd = Some cost_usd;
+              cost_usd;
             }
           in
           Ok (Keeper_usage_trust.classify ~usage_reported:true ~usage)
-    | None, None, None, None, None, None ->
-        let usage : Agent_core.Types.api_usage =
-          { input_tokens = 0;
-            output_tokens = 0;
-            cache_creation_input_tokens = 0;
-            cache_read_input_tokens = 0;
-            cost_usd = None;
-          }
-        in
-        Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
+    | None, None, None, None, None ->
+        if Option.is_some cost_usd then
+          Error "usage cost_usd without the counters it would price"
+        else
+          let usage : Agent_core.Types.api_usage =
+            { input_tokens = 0;
+              output_tokens = 0;
+              cache_creation_input_tokens = 0;
+              cache_read_input_tokens = 0;
+              cost_usd = None;
+            }
+          in
+          Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
     | _ ->
-        (* Name which of the six are set. The sentence on its own sent a reader
-           to diff the payload against this match by hand, with no way to tell
-           which field the writer left out, and a live keeper's window lands
-           here often enough to matter. Same shape as the field-set refusal in
-           {!require_exact_object_fields}: the groups that decide the verdict
-           are the groups worth printing.
+        (* Name which of the five are set. The sentence on its own sent a
+           reader to diff the payload against this match by hand, with no way
+           to tell which field the writer left out.
 
            The missing names come first because this sentence is read on one
-           cut row, behind the metrics notice and the row number. A writer that
-           fills five of six leaves one name unset and five set, so putting the
-           five first is what pushes the one it skipped off the right edge. How
-           many cells are left here is the frame's measure and not this
-           decoder's: test_tui_metrics_tail draws the notice through the same
-           fit and checks the reason survives. *)
+           cut row, behind the metrics notice and the row number. A writer
+           that fills four of five leaves one name unset and four set, so
+           putting the four first is what pushes the one it skipped off the
+           right edge. How many cells are left here is the frame's measure and
+           not this decoder's: test_tui_metrics_tail draws the notice through
+           the same fit and checks the reason survives. *)
         let named =
           [ ("input_tokens", Option.is_some input_tokens)
           ; ("output_tokens", Option.is_some output_tokens)
           ; ("cache_creation_tokens", Option.is_some cache_creation_tokens)
           ; ("cache_read_tokens", Option.is_some cache_read_tokens)
           ; ("total_tokens", Option.is_some total_tokens)
-          ; ("cost_usd", Option.is_some cost_usd)
           ]
         in
         let names wanted =
@@ -1974,7 +1988,7 @@ type keeper_call = {
   kc_input : string;
   kc_output : string option;
   kc_artifact_refs : Tool_output.artifact_ref list;
-  kc_success : bool;
+  kc_outcome : Tool_result.recorded_call_outcome;
   kc_duration_ms : float option;
   kc_turn : int option;
   kc_task_id : string option;
@@ -5652,24 +5666,10 @@ let decode_keeper_call json =
   let* kc_at = require_float_field json "ts" in
   let* kc_tool = required_string_field json "tool" in
   let* keeper = required_string_field json "keeper" in
-  (* The durable record stopped always carrying a boolean [success]:
-     [Keeper_tool_call_log]'s `Assoc construction (the one the server
-     actually serves from) writes [wire_outcome] and an optional
-     [disposition], never a [success] key. A real row and every producer
-     built to match it therefore hit the [`Null] arm below unconditionally,
-     so [decode_keeper_call] always errored and the calls detail view never
-     rendered a single keeper's tool calls (#37461). [success] is still read
-     first for any caller that does send it explicitly. Next, [disposition]
-     is decoded through [keeper_call_disposition_of_string] -- the same
-     parse [kc_disposition] below reuses, and already documented as
-     [Tool_result.string_of_disposition]'s inverse -- instead of matching
-     its three spellings a second time in this function. [wire_outcome]
-     (the untyped wire projection -- explicitly not an outcome SSOT per
-     [Tool_result], but the only field several real rows carry) is tried
-     last, and its own ["unknown"] spelling is not folded into success: a
-     wire that says it does not know the outcome is not evidence that the
-     call completed. A row naming none of the three still errors, as
-     before. *)
+  (* How the call ended is read by the rule every tool-call log reader shares.
+     A row whose outcome fields do not decode is refused: the producer and
+     this reader disagree on the schema. A row with no outcome yet is kept and
+     says so. *)
   let* disposition = optional_string_field json "disposition" in
   let* kc_disposition =
     match disposition with
@@ -5677,20 +5677,12 @@ let decode_keeper_call json =
     | Some raw when String.trim raw = "" -> Ok None
     | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
   in
-  let* kc_success =
-    match member "success" json with
-    | `Bool value -> Ok value
-    | `Null -> (
-      match kc_disposition with
-      | Some Keeper_call_completed | Some Keeper_call_deferred -> Ok true
-      | Some Keeper_call_failed -> Ok false
-      | None -> (
-        match member "wire_outcome" json with
-        | `String "ok" -> Ok true
-        | `String "error" -> Ok false
-        | `String "unknown" -> Error "keeper call wire_outcome is unknown"
-        | _ -> Error "keeper call has no success, disposition, or wire_outcome field"))
-    | _ -> Error "keeper call success is not a bool"
+  let* kc_outcome =
+    match Tool_result.recorded_call_outcome json with
+    | ( Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
+      | Tool_result.Recorded_failed | Tool_result.Recorded_unsettled ) as outcome ->
+      Ok outcome
+    | Tool_result.Recorded_malformed -> Error "keeper call outcome is malformed"
   in
   let kc_input =
     match member "input" json with
@@ -5770,7 +5762,7 @@ let decode_keeper_call json =
       ; kc_input
       ; kc_output
       ; kc_artifact_refs
-      ; kc_success
+      ; kc_outcome
       ; kc_duration_ms
       ; kc_turn
       ; kc_task_id = string_opt "task_id"
@@ -6149,8 +6141,14 @@ let decode_keeper_lane json =
     | Some bad -> field_type_error "last_outcome" "an object or null" bad
   in
   let* diagnosis = required_object_field json "phase_diagnosis" in
-  let* kl_diagnosis =
-    required_nullable_string_field diagnosis "determining_condition"
+  let* conditions = required_object_field diagnosis "conditions" in
+  let* klc_launch_pending = required_bool_field conditions "launch_pending" in
+  let* klc_heartbeat_healthy =
+    required_bool_field conditions "heartbeat_healthy"
+  in
+  let* klc_turn_healthy = required_bool_field conditions "turn_healthy" in
+  let kl_conditions =
+    { klc_launch_pending; klc_heartbeat_healthy; klc_turn_healthy }
   in
   Ok
     { kl_keeper
@@ -6158,7 +6156,7 @@ let decode_keeper_lane json =
     ; kl_turn_phase
     ; kl_idle_seconds
     ; kl_last_outcome
-    ; kl_diagnosis
+    ; kl_conditions
     }
 
 let decode_keeper_lanes_snapshot json =
@@ -9124,7 +9122,14 @@ let decode_lane_run_detail json =
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   let* fs_status = required_string_field section "status" in
-  let* fs_blocker = optional_string_field section "blocker" in
+  let* fs_blocker =
+    Result.map
+      (Option.map (fun name ->
+           match Keeper_fleet_blocker.of_wire_name name with
+           | Some blocker -> Blocker blocker
+           | None -> Unrecognised_blocker name))
+      (optional_string_field section "blocker")
+  in
   let* fs_operator_action_required =
     match member "operator_action_required" section with
     | `Bool value -> Ok value

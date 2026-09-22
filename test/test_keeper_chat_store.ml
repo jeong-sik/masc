@@ -231,6 +231,47 @@ let test_load_all_result_speaker_authority_contract () =
           detail)
 ;;
 
+(* A connector row whose surface does not decode reads as a direct row. The
+   Librarian's counterpart reader uses [load_all_result] and moves its cursor
+   past what it returns, so that row must stop it rather than be recorded
+   with the wrong channel. *)
+let test_load_all_result_rejects_invalid_surface () =
+  let base_dir = temp_base_path "keeper-chat-store-strict-surface" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-strict-surface" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"id":"valid-surface","role":"user","content":"routed","ts":1.0,"speaker_authority":"external","surface":{"kind":"slack","channel_id":"C1"}}|}
+         ^ "\n"
+         ^ {|{"id":"invalid-surface","role":"user","content":"unrouted","ts":2.0,"speaker_authority":"external","surface":{"kind":"carrier-pigeon"}}|}
+         ^ "\n");
+      (match K.load_all ~base_dir ~keeper_name with
+       | [ routed; unrouted ] ->
+         Alcotest.(check bool)
+           "permissive load keeps the decoded surface"
+           true
+           (Option.is_some routed.K.surface);
+         Alcotest.(check bool)
+           "permissive load keeps the row without a surface"
+           true
+           (Option.is_none unrouted.K.surface)
+       | messages ->
+         Alcotest.failf
+           "permissive load dropped a surface row: got %d"
+           (List.length messages));
+      match K.load_all_result ~base_dir ~keeper_name with
+      | Ok _ -> Alcotest.fail "strict load accepted a surface it could not decode"
+      | Error detail ->
+        Alcotest.(check string)
+          "strict load names the surface row"
+          (Printf.sprintf
+             "%s:2 invalid surface field: unknown surface kind carrier-pigeon"
+             path)
+          detail)
+;;
+
 let roles messages =
   List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
 
@@ -3472,6 +3513,8 @@ let () =
             test_load_all_result_rejects_malformed_row;
           Alcotest.test_case "strict load checks speaker authority" `Quick
             test_load_all_result_speaker_authority_contract;
+          Alcotest.test_case "strict load rejects an undecodable surface" `Quick
+            test_load_all_result_rejects_invalid_surface;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
           Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick

@@ -4,11 +4,9 @@ module Prim = Masc_tui_render_prim
 
 let said ~root path = Prim.path_from_root ~root path
 
-(* The Config panes read one file, and the title row beside the strip was
-   printing its whole address. The prefix is the server's masc root -- the same
-   for every screen in the session, and named in the Config pane's own identity
-   row -- so the row ran past the frame and was cut in the middle:
-   "/Users/d\xe2\x80\xa6onfig/runtime.toml", where neither end is the file. *)
+(* The Config panes read one file whose prefix is the server's masc root --
+   the same for every screen in the session, and named on the Config pane's
+   own identity row -- so the title says the path from there. *)
 let test_a_path_under_the_root_is_said_from_it () =
   check string "the root leaves and the file stays" "config/runtime.toml"
     (said ~root:"/Users/dancer/me/.masc" "/Users/dancer/me/.masc/config/runtime.toml")

@@ -20,7 +20,7 @@ agent completes it through the public MASC command/API/tool surface.
 
 ## 2. The product in one sentence
 
-Give MASC a project, let the active declarative Keeper fleet keep working through typed Runtime slots, and always show what is moving, what is blocked, why, and what happens next. The application-owned system LLM verifier reviews typed completion evidence outside the Keeper lifecycle.
+Give MASC a project, let the active declarative Keeper fleet keep working through typed Runtime candidates, and always show what is moving, what is blocked, why, and what happens next. The application-owned system LLM verifier reviews typed completion evidence outside the Keeper lifecycle.
 
 ## 3. North star
 
@@ -37,7 +37,7 @@ new turn delta
 
 Deterministic code may remove protocol shells, exact duplicates, whitespace, and typed disposable tool mechanics. It must not invent, summarize, or discard semantic meaning.
 
-If an LLM cannot produce a valid semantic update, MASC preserves the source, tries the next declared Runtime slot, reports the reason, and keeps the Keeper alive.
+If an LLM cannot produce a valid semantic update, MASC preserves the source, tries the next declared Runtime candidate, reports the reason, and keeps the Keeper alive.
 
 ## 4. Fresh-state fleet
 
@@ -90,8 +90,8 @@ Partial source evidence does not satisfy this definition.
 | Layer | Owns | Must not own |
 |---|---|---|
 | MASC domain | the question, domain schema, semantic validator, and use of the accepted value | provider names, model quirks, wire dialects, or candidate ranking |
-| Runtime slot | opaque identity plus the declared execution specification | hidden policy inferred from pricing, tier, or past preference |
-| agent core | provider/model resolution, capability facts, vendor wire encoding, strict output parsing, typed transport errors, and frozen-order failover | MASC domain meaning, Task state, Keeper lifecycle, or domain persistence |
+| Runtime candidate | opaque identity plus the declared execution specification | hidden policy inferred from pricing, tier, or past preference |
+| agent core | provider/model resolution, capability facts, vendor wire encoding, strict output parsing, typed transport errors, and frozen candidate order | MASC domain meaning, Task state, Keeper lifecycle, or domain persistence |
 | Dashboard/API | read-only projections of the same MASC domain state and agent core evidence | a second status calculation or mutable execution truth |
 
 For an ordinary LLM judgment, MASC sends input and consumes either an accepted
@@ -147,7 +147,7 @@ the observation is not Keeper liveness evidence.
 Runtime suffix for the next turn; every blocked Keeper must expose that pending
 target and reason.
 
-### B04. Runtime failover
+### B04. Runtime Candidate Order
 
 **Middle-school explanation:** If the first engine fails before producing an accepted answer, try the next compatible engine.
 
@@ -311,18 +311,18 @@ with immediate equality after an activation config POST.
 
 ### Failure Judge
 
-MVP failover does not ask another LLM what an already typed runtime failure means.
+The MVP Runtime Candidate Order does not ask another LLM what an already typed runtime failure means.
 
 The required path is:
 
 ```text
 typed agent core failure
-  -> next declared Runtime slot
+  -> next declared Runtime candidate
   -> visible exhausted reason if none remain
   -> Keeper remains alive
 ```
 
-A future Failure Judge may provide asynchronous postmortem advice. Its result must never gate a turn, Runtime failover, task progress, or Keeper liveness.
+A future Failure Judge may provide asynchronous postmortem advice. Its result must never gate a turn, Runtime Candidate Order, task progress, or Keeper liveness.
 
 ### Generic durable workflow facades
 

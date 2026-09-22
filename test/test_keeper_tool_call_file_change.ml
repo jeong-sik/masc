@@ -15,7 +15,8 @@ module Evidence = Keeper_file_change_evidence
    row carries about thirty more, and listing them here would make the test
    about the writer's schema instead of about what the reader needs. *)
 let row ?(keeper = "fixture-keeper") ?(descriptor_id = "agent.edit_file")
-    ?(target_path = "repos/masc/test/test_ci_run_tests_script.ml") ?(success = true)
+    ?(target_path = "repos/masc/test/test_ci_run_tests_script.ml")
+    ?(outcome_fields = [ ("disposition", `String "completed") ])
     ?(turn = Some 2459) ?(task_id = Some "task-475")
     ?(execution_id = Some "exec-1787533327603-0173") ?line_evidence
     ?(ts = 1787533327.603755) input =
@@ -24,10 +25,10 @@ let row ?(keeper = "fixture-keeper") ?(descriptor_id = "agent.edit_file")
     ([ ("ts", `Float ts)
      ; ("keeper", `String keeper)
      ; ("input", input)
-     ; ("success", `Bool success)
      ; ("route_evidence", `Assoc [ ("descriptor_id", `String descriptor_id) ])
      ; ("action_radius", `Assoc [ ("target_path", `String target_path) ])
     ]
+    @ outcome_fields
     @ optional "turn" (Option.map (fun t -> `Int t) turn)
     @ optional "task_id" (Option.map (fun t -> `String t) task_id)
     @ optional "execution_id" (Option.map (fun id -> `String id) execution_id)
@@ -165,7 +166,7 @@ let test_invalid_file_change_evidence_is_rejected () =
   expect_malformed
     "failed mutation"
     (row
-       ~success:false
+       ~outcome_fields:[ ("disposition", `String "failed") ]
        ~line_evidence:edit_evidence
        (edit_input ~before:"old" ~after:"new" ()));
   expect_malformed
@@ -353,10 +354,37 @@ let test_line_evidence_kind_must_match_the_tool () =
 let test_failed_write_is_still_projected () =
   let change =
     change_of
-      (row ~descriptor_id:"agent.write_file" ~success:false
+      (row ~descriptor_id:"agent.write_file"
+         ~outcome_fields:[ ("disposition", `String "failed") ]
          (`Assoc [ ("content", `String "x") ]))
   in
   check bool "succeeded" false change.Change.succeeded
+;;
+
+(* The outcome is read through [Tool_result.recorded_call_outcome], the rule
+   every tool-call log reader shares. Each row below is one of its cases. *)
+let test_outcome_follows_the_shared_rule () =
+  let write outcome_fields =
+    row ~descriptor_id:"agent.write_file" ~outcome_fields
+      (`Assoc [ ("content", `String "x") ])
+  in
+  check bool "a completed write succeeded" true
+    (change_of (write [ ("disposition", `String "completed") ])).Change.succeeded;
+  check bool "a deferred write has not changed the file yet" false
+    (change_of (write [ ("disposition", `String "deferred") ])).Change.succeeded;
+  check bool "a committed write whose reply failed still succeeded" true
+    (change_of
+       (write [ ("disposition", `String "completed"); ("wire_outcome", `String "error") ]))
+      .Change.succeeded;
+  check bool "a row with only a wire outcome reads it" true
+    (change_of (write [ ("wire_outcome", `String "ok") ])).Change.succeeded;
+  expect_malformed "a row that does not say how the call ended" (write []);
+  expect_malformed "an unknown wire outcome is not an outcome"
+    (write [ ("wire_outcome", `String "unknown") ]);
+  expect_malformed "a disposition of the wrong type"
+    (write [ ("disposition", `Bool true) ]);
+  expect_malformed "a removed success flag alone"
+    (write [ ("success", `Bool true) ])
 ;;
 
 let test_read_is_not_a_change () =
@@ -426,6 +454,7 @@ let test_missing_action_radius_is_unreadable () =
       [ ("ts", `Float 1.)
       ; ("keeper", `String "fixture-keeper")
       ; ("input", edit_input ~before:"a" ~after:"b" ())
+      ; ("disposition", `String "completed")
       ; ("route_evidence", `Assoc [ ("descriptor_id", `String "agent.edit_file") ])
       ]
   in
@@ -724,6 +753,8 @@ let () =
         ; test_case "line evidence kind matches the tool" `Quick
             test_line_evidence_kind_must_match_the_tool
         ; test_case "failed write is projected" `Quick test_failed_write_is_still_projected
+        ; test_case "outcome follows the shared rule" `Quick
+            test_outcome_follows_the_shared_rule
         ] )
     ; ( "not a change"
       , [ test_case "read" `Quick test_read_is_not_a_change

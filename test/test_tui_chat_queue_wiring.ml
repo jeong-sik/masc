@@ -1751,8 +1751,12 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     in
     let running_screen = screen () in
     check int "the question stays" 1 (count "asked" running_screen);
-    check bool "the journal's reply text is in the pane" true
-      (count "said" running_screen >= 1);
+    check bool "the pane draws the turn's text" true
+      (Tui_types.observed_turn_text_drawn state "alpha");
+    check int "the journal's reply text is in the pane once" 1
+      (count "said" running_screen);
+    check int "the footer does not repeat the tail as Latest output" 0
+      (count "Latest output" running_screen);
     check bool "the footer still says a turn is running" true
       (Astring.String.is_infix ~affix:"chat_operation turn" running_screen);
     check int "the turn's rail has not closed" 0

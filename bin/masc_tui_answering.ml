@@ -78,8 +78,13 @@ let duration_text = Masc_tui_message_layout.span_text
 let elapsed_text ~now started_at = duration_text (now -. started_at)
 
 (* The same running turn must remain visible while a submitted chat waits
-   behind it. No ETA can be inferred from the turn's elapsed age. *)
-let chat_activity ~now ~keeper_name ~error rows =
+   behind it. No ETA can be inferred from the turn's elapsed age.
+
+   [text_tail_drawn]: the pane is drawing the turn's reply text itself (an
+   observed turn read from its journal on every stream frame), so the
+   preview's tail of the same text is left out rather than said twice on
+   one screen. *)
+let chat_activity ~now ~keeper_name ~error ~text_tail_drawn rows =
   let stale = match error with None -> [] | Some detail -> ["Activity unavailable: " ^ detail] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
     String.equal row.ktr_keeper_name keeper_name) rows with
@@ -96,6 +101,7 @@ let chat_activity ~now ~keeper_name ~error rows =
           (elapsed_text ~now preview.ktp_updated_at_unix)
     in
     let text = match preview with
+      | Some _ when text_tail_drawn -> []
       | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
         ["Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail]
       | Some _ | None -> []

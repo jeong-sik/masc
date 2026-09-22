@@ -6325,6 +6325,32 @@ let observed_logs_for_keeper state keeper_name =
          && can_still_end log)
 ;;
 
+(* Whether the pane draws an observed turn's reply text itself. The footer's
+   turn preview carries the same text's tail from the turns poll; drawn
+   twice, the newest sentence sat in the pane and again under it. Text only:
+   a turn that has so far only reasoned or called tools has nothing in the
+   pane the preview would repeat. The two are equally fresh because every
+   stream frame of the turn reads its journal ([journal_follow_for_frame]);
+   without that the pane's copy was only as new as the last row appended,
+   and the tail was the fresher of the two. *)
+let observed_turn_text_drawn state keeper_name =
+  List.exists
+    (fun log ->
+      List.exists
+        (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+          match item.drawn with
+          | Masc_tui_keeper_chat_transcript.Drawn_text _
+          | Masc_tui_keeper_chat_transcript.Drawn_reply _ ->
+              true
+          | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+          | Masc_tui_keeper_chat_transcript.Drawn_skill _
+          | Masc_tui_keeper_chat_transcript.Drawn_tools _
+          | Masc_tui_keeper_chat_transcript.Drawn_status _ ->
+              false)
+        (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript))
+    (observed_logs_for_keeper state keeper_name)
+;;
+
 (* Whether a reasoning row is drawn at all under this visibility. The
    committed rows and the log projection ask this one function, so the two
    cannot disagree about whether THINKING is on the screen. *)
@@ -9884,6 +9910,7 @@ let keeper_message_activity_rows (state : state) =
          ^ " · in progress"]
       | None -> Masc_tui_answering.chat_activity
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+          ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
           state.keeper_turns in
     let submitted = match state.msg_live with
       | Some live when String.equal (turn_log_keeper_name live) keeper_name ->

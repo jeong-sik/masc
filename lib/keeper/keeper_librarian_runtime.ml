@@ -1382,4 +1382,5 @@ module For_testing = struct
   let record_failure = record_failure
   let commit_continuity = commit_continuity
   let cause_shows_size = cause_shows_size
+  let cli_failure_shows_size = cli_failure_shows_size
 end

@@ -108,6 +108,9 @@ module For_testing : sig
       asserted cause by cause. A walk reads less when any of its failures
       answers true. *)
 
+  val cli_failure_shows_size : Keeper_lane_cli_oneshot.failure -> bool
+  (** The same verdict for one official-client slot's failure. *)
+
   val commit_continuity
     : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)
     -> observe:((Librarian_continuity_snapshot.t, string) result -> unit)

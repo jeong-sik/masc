@@ -366,6 +366,26 @@ let test_size_verdict_table () =
     ; "frozen request mismatch", E.Frozen_request_mismatch, false
     ]
 
+(* The official-client table. Execution_failed is pinned false on purpose:
+   the client's quota and its input limit arrive in that one constructor, so
+   this process cannot tell them apart, and reading less on a quota storm
+   would walk the width down to one atom. When #37877 gives it typed kinds,
+   this row is the one that has to change. *)
+let test_cli_size_verdict_table () =
+  let module L = Keeper_lane_cli_oneshot in
+  let runtime_id = Fixture.cli_primary_runtime in
+  List.iter
+    (fun (name, failure, expected) ->
+       Alcotest.(check bool) name expected (Runtime.For_testing.cli_failure_shows_size failure))
+    [ "an answer that is not JSON", L.Invalid_json_output { runtime_id; detail = "truncated" }, true
+    ; "an answer the domain refused", L.Invalid_domain_output { runtime_id; detail = "schema" }, true
+    ; "an id this module cannot run", L.Not_an_official_client { runtime_id }, false
+    ; "a client that failed without saying why",
+      L.Execution_failed
+        { runtime_id; cause = Fusion_official_client.Setup_failure (Provider_error "quota") },
+      false
+    ]
+
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -395,7 +415,9 @@ let () =
       ~first_overflow:false ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
     ["size verdict", [Alcotest.test_case "every provider cause, one row each" `Quick
-       test_size_verdict_table];
+       test_size_verdict_table;
+       Alcotest.test_case "every official-client failure, one row each" `Quick
+         test_cli_size_verdict_table];
      "continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
        (test_prefit_real_continuity ~base_path)];
      "actual HTTP outcomes", [

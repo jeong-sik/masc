@@ -142,7 +142,7 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.35.22
+TAG=v0.36.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

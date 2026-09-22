@@ -506,7 +506,17 @@ let test_repositories_show_the_server_resolved_checkout_path () =
        ~fields:[ "rp_resolved_local_path" ]
      > 0);
   Alcotest.(check bool) "and keeps assignment in the selected-row context" true
-    (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0)
+    (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0);
+  (* The status column has room for the word and not for the cause a failed
+     clone or fetch leaves behind, so the cause belongs in the selected row's
+     context. The route wrote it to the wire and nothing read it. *)
+  Alcotest.(check int) "the route names the cause it writes" 1
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:producer
+       ~binding_name:"repository_json" ~literals:[ "error_message" ]);
+  Alcotest.(check int) "and the context asks for it" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"repository_context_lines"
+       ~callee:"Masc.Tui_decode.repository_status_reason")
 
 let test_memory_surface_keeps_the_starvation_axes () =
   (* Starvation depends on ordinary absence and failed Librarian runs, while a

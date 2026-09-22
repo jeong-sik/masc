@@ -202,6 +202,11 @@ type msg_role =
           once before for the same reason, out of the journal lane where they
           interleaved with memory commits. *)
   | Message_error
+      (** A failure the server reported for a request: a message it refused,
+          a delivery that failed, a held call it could not answer. The
+          operator's own steps that fail -- a command missing its argument,
+          an image that would not open -- are not rows; they read on the
+          footer. *)
   | Message_tool
       (** The tool calls of one finished turn, as the row block the live pane
           drew while it ran. The strict stream decode carries no tool

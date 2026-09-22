@@ -312,6 +312,38 @@ flowchart TD
 - **읽기가 실패해도 받은 일 정리는 굶지 않는다.** 읽기 회차가 실패한 뒤에도 받은 일이 바뀌어 있으면 메시지 없는 회차를 돌리고 나서 기다린다. 지금은 받은 일 신호가 cadence 를 건너뛰어 바로 돈다. 그보다 늦어지지 않게 한다.
 - 범위가 비어 있으면 LLM 을 부르지 않고 위치만 옮긴다. 내부 생각을 이력에 남기지 않는 턴(`keeper_replay_checkpoint.ml` 의 `exclude_thought_from_replay`)이 도구를 쓰지 않았으면, 저장할 때 그 턴의 몫이 통째로 빠져 끝이 앞 턴과 같다. 읽을 것이 없는 턴이다.
 - **두 턴 이상을 읽다 실패했으면 가장 오래된 한 턴씩 읽어서 밀린 범위를 모두 비운다.** 좁힌 회차 하나가 성공했다고 곧바로 전부 읽기로 돌아가지 않는다. `Nothing_to_read`가 실제로 확인되거나 `All_unread`가 성공했을 때만 제한을 푼다. 범위가 커서 생긴 실패(모델 한도, 시간 초과, 출력 거절)를 숫자 없이 푸는 방법이다. 실패 표식은 루프의 메모리에만 둔다. 서버가 재시작하면 전부 읽기부터 다시 한다.
+- **연속성 회차도 같은 규칙을 쓴다.** 읽은 위치를 옮기는 durable 회차와, 스냅숏이 덮는 앞부분을 다시 쓰는 연속성 회차는 "회차가 실패했으면 다음엔 얼마나 읽나"라는 한 질문에 답한다. 지금 답이 두 벌이다. durable 쪽은 위 규칙대로 실패 표식을 루프에 두고 가장 오래된 한 턴으로 좁힌다(`keeper_librarian_durable_consumer.ml` 의 `failed_before` 와 `To_first_cut_point`). 연속성 쪽은 표식이 없어 회차마다 넓은 범위에서 다시 시작하고, 한 회차 안에서 범위를 반으로 접다가(`keeper_librarian_continuity.ml` 의 `narrow`), 마지막 걸음의 거절을 용량 거절로 읽지 못하면 로그 없이 끝난다(`keeper_librarian_queue_refresh.ml` 의 `Not_committed` 갈래, 판정은 `keeper_librarian_runtime.ml` 의 `capacity_refused_by_flow`). 두 번째 벌을 지운다.
+
+  durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라, 일시적인 실패에 잘못 좁혀도 비용은 회차 하나이고 성공하면 제한이 풀린다. 한쪽으로만 안전하게 틀리므로 분류가 필요 없다.
+
+  atom 사다리는 다르다. 바닥이 1 atom 이고 소진 전에는 폭을 늘리지 않으므로, 일시적인 실패가 이어지면 폭이 1 로 무너지고 남은 범위만큼의 회차가 든다(goo-yang-bong 이면 약 12,000). "안전한 방향으로만 틀린다"는 같지만 그 비용이 회차 하나가 아니라 O(N) 이다. 실제로 일어나는 일이다 — 2026-09-22 00~05Z 에 `glm-coding` 한 슬롯에서 `rate_limited` 173 건이 여덟 Keeper 에 걸쳐 터졌고 05Z 에 스스로 멎었다. 그래서 사다리에서만 갈래를 본다.
+
+  판정은 마지막 슬롯이 아니라 걸음 전체다. 모든 슬롯이 "기다린다"일 때만 기다리고, 하나라도 "접는다"이면 접는다. 후보 순서에 매이지 않는다. 갈래는 `Exact_output.provider_refusal` 의 exhaustive match 이고 `_` 를 쓰지 않는다. 거절 산문은 읽지 않는다.
+
+  | 갈래 | 한다 | 왜 |
+  |---|---|---|
+  | `Context_overflow` · `Input_capacity` · `Request_body_refused` | 접는다 | 크기 때문이라고 공급자가 말했다 |
+  | `Timeout` | 접는다 | §4.3 이 이미 "범위가 커서 생긴 실패"로 센 셋 중 하나다 |
+  | `Invalid_request` | 접는다 | 이유를 모른다. 모르는 것은 진전을 내는 쪽으로 읽는다 |
+  | `Refusal_body_not_received` | 접는다 | 같은 이유로 모른다 |
+  | `Rate_limited` · `Overloaded` · `Server_error` · `Network_error` | 기다린다 | 요청 자체는 받아들여졌다. 접으면 폭만 잃는다 |
+  | `Auth_failed` · `Authorization_refused` · `Payment_required` · `Not_found` | 기다린다 | 크기와 무관하고 운영자가 고쳐야 풀린다. 접어도 같은 거절이 온다 |
+
+  마지막 줄이 없으면 자격증명 하나가 만료됐을 때 폭이 1 로 무너진다. 일시적인 실패와 원인은 다르지만 접어서 얻는 것이 없다는 점은 같다.
+
+  2026-09-22 goo-yang-bong 라이브. 같은 `librarian-range-commit.json` 안의 영수증 둘이 갈라져 있었다 — durable 은 atom 12,887, 연속성은 7,694 이고 10:38:41Z 이후 움직이지 않았다. 회차마다 `12,756 → 6,378 → 3,189` 을 걷고 끝났으며 시작값이 매번 같다. 좁힌 값을 다음 회차가 모른다. 같은 날 실패 115건에서 `cannot be narrowed safely` 는 0건이다. 사다리를 다 써서 포기한 것이 아니라 한 걸음을 남기고 끊겼다(3,189 atom 이 1,751,800 토큰, 한도 1,048,576). 서버를 다시 띄워도 51초 뒤 같은 세 걸음을 다시 걸었다. 표식이 루프 메모리에만 있다는 위 문장은 연속성 회차에서는 지울 표식조차 없다는 뜻이었다.
+
+- **자를 턴이 없는 구간에서는 atom 절반이 "한 턴" 노릇을 한다.** 공식 클라이언트 턴은 턴 끝 줄에 atom 위치를 남기지 않는다(`No_atom_history`, §4.8). goo-yang-bong 의 턴 끝 줄 159 개 중 134 개가 그것이고, 위치가 붙은 25 개는 모두 atom 12,719 이상이다. 0~12,719 에는 좁힐 때 자를 자리가 하나도 없다. 그 구간에서만 범위를 반으로 접고 바닥은 1 atom 이다. 자를 자리가 있는 구간의 바닥은 위 규칙 그대로 가장 오래된 한 턴이다. 두 바닥은 다르고 섞지 않는다. 바닥에서도 실패하면 보고하고 로그를 남긴 뒤 다음 신호를 기다린다.
+
+  이 사다리가 필요한 경우는 둘뿐이다. 자를 자리가 없는 구간과, 스냅숏을 atom 0 부터 다시 쓰는 회차다. 뒤엣것은 흔하지 않다. #37751 뒤로 purge 는 이 이력에 맞는 연속성 스냅숏이 덮은 앞부분을 바이트 그대로 두므로 `Librarian_continuity_snapshot` 의 `prefix_sha256` 이 살아남는다(`keeper_checkpoint_purge.ml` 의 `fitting_continuity` 갈래, `test_a_fitting_working_state_keeps_its_prefix` 가 고정). 0 부터 다시 쓰게 되는 길은 그 규칙 전에 지워진 이력(2026-09-22 goo-yang-bong 이 그것이다), 이미 이력과 맞지 않던 스냅숏, 이력 세대가 실제로 바뀌는 경우다. 새 도구를 만들지 않는다.
+
+  창 RFC §13.3 은 거절에 범위를 반씩 접는 것을 지웠다. 그 논거 셋 중 무엇이 여기로 옮겨지는지 갈라 적는다. (1) "반으로 접어도 범인이 남고 무관한 대화만 버려진다"는 옮겨지지 않는다. 턴 요청은 접은 만큼을 잃지만, 재구축은 0..N 의 앞부분을 덮는 일이라 접은 만큼이 다음 회차로 미뤄질 뿐이다. (2) "인자에 바이트가 없다"는 절반만 옮겨진다. §13.3 이 그린 그림은 큰 도구 결과 하나가 작은 atom 수천 개 사이에 숨어 접어도 남는 것이었다. Librarian 입력에는 그 범인이 없다 — `keeper_librarian.ml` 의 `text_of_content` 가 도구 호출과 결과를 `[tool use omitted: …]`·`[tool result omitted: …]` 한 줄로 바꾸고, 생각 블록은 버리며, 이미지·문서·소리도 마커다. 남는 것은 글이라 바이트가 atom 수를 대체로 따라간다. 그래도 글 블록의 길이는 고르지 않으므로 접는 자리가 바이트로 정확하지는 않다. 남은 이 빚은 #37207 이 공식 클라이언트 턴의 원문을 durable 로 남겨 자를 자리를 줄 때 갚는다. 그때 이 절의 atom 사다리를 지우고 가장 오래된 한 턴 하나로 합친다. 이것이 이 사다리의 removal target 이다. (3) "한 번 틀릴 때마다 올려 보내고 거절받는다"는 표식이 없앤다. 좁힌 값이 회차를 넘어 남으면 사다리는 한 시작점당 한 번만 걷는다.
+
+- **표식은 커밋이 아니라 소진에서 푼다.** 좁힌 회차 하나가 커밋했다고 전부 읽기로 돌아가지 않는다. 남은 범위가 다 읽혔을 때만 푼다. 커밋마다 풀면 다음 회차가 다시 넓은 범위에서 시작해 같은 사다리를 처음부터 걷는다(#37583).
+
+- **선언된 창으로 한 걸음에 맞추는 길은 지금 없다.** CLI 레인은 한 걸음으로 맞춘다(`Runtime.fit_continuity`, 용량은 `runtime_codex_app_server.mli` 의 `input_capacity = { actual_chars; max_chars }`). 되는 이유는 한도와 우리 측정이 둘 다 글자이기 때문이다. HTTP 공급자는 한도가 토큰(`max-context`)이고 우리 측정은 글자라, 둘을 대려면 글자 대 토큰 비율이 필요하다. 그 비율이 창 RFC §13.2 가 지운 종류의 숫자다. `max-context` 자체는 카탈로그가 소유한 선언된 능력이지만(창 RFC §13.8), 그 단위로 잴 자가 우리에게 없다. 이 길은 공급자가 typed 토큰 측정을 줄 때 열린다 — agent-core 의 `Exact_output_plan.Token_measurement_required` 가 그 자리다. 그런 공급자부터 한 걸음 fit 으로 옮긴다. 거절 산문에서 숫자를 읽어 내지 않는다.
+
+  2026-09-22 확인. `librarian_exact` 가 쓰는 두 공급자는 둘 다 `protocol = "openai-compatible-http"` 다(`<base-path>/.masc/config/runtime.toml` 의 `[providers.glm-coding]` 은 `https://api.z.ai/api/coding/paas/v4`, `[providers.ollama_cloud]` 는 `https://ollama.com/v1`). chat-completions 에는 보내기 전 토큰을 세는 엔드포인트가 없다. `Input_token_count.protocol` 의 갈래는 셋(`Anthropic_messages_count_tokens`, `Openai_responses_input_tokens`, `Gemini_count_tokens`)인데 트리에서 실제로 생성되는 것은 첫째 하나이고 나머지 둘은 생산자가 없다. 그래서 이 레인에는 지금 옮길 자리가 없다.
 - "수시로"는 깨우는 사건을 늘리는 일이다. 깰 때 하는 일은 언제나 위와 같다. 이 RFC 의 범위에서 깨우는 사건은 서버 기동, 턴 끝, 받은 일 변경이다. §7 의 (나)가 턴 도중의 도구 경계를, (다)가 한가할 때를 더한다.
 - 종료 때는 루프를 취소한다. 위치는 저장이 끝난 뒤에만 옮기므로 도중에 끊겨도 잃는 것이 없다. ①(#37536, 2026-09-21) 전에는 앞선 Librarian 작업이 남아 있으면 Keeper 기동이 거절되고(`Librarian_drain_still_active`) Keeper 종료는 30초 join 을 기다렸다. 둘 다 이유가 없어서 ①이 `begin_librarian_lifecycle`·`abort_librarian`·`drain_and_join_librarian` 과 그 호출자(`keeper_supervisor.ml`, `keeper_supervisor_supervise_keepalive.ml`, `keeper_keepalive_launch_transaction.ml`, `keeper_shutdown_prepare_join.ml`)를 걷어냈다.
 - 루프의 몸은 새로 만들지 않는다(2026-09-21 결정, §8). Keeper 별로 직렬이고 서버 스위치에 매달린 실행 줄이 이미 있다 — `Keeper_memory_lane`(`init ~sw` 가 서버 기동 때 한 번). 신호가 오면 그 레인에 회차를 제출하고, 레인은 도는 것 하나와 대기 하나만 두어 이미 와 있는 신호를 곧바로 깨운다. 서버 소유 daemon 을 하나 더 두면 §5 의 "두 번째 실행 줄"이 된다. 바꾸는 것은 그 레인을 누가 쥐는가다: Keeper 생명주기가 쥐던 것(열기·중단·drain)을 떼어 서버만 쥐게 한다. `server_workspace_memory_curator.ml` 의 모양은 빌리지 않는다.
@@ -485,6 +517,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 - 설정이 `Disabled` 나 `Invalid` 면 밀림이 아니라 "꺼짐"으로 보인다. 꺼져 있는 동안에도 Keeper 는 줄을 쌓으므로, 다시 켜면 그 구간을 전부 읽는다.
 - 밀린 턴 수는 끝난 턴(`turn_ended` 줄)만 센다. `history_restarted` 줄은 끝난 턴이 아니므로 세지 않는다. 실패로 끝나 줄이 없는 턴의 조각은 다음 줄의 범위에 들어가므로 읽히기는 하지만 이 숫자에는 안 잡힌다. 지금 이력과 맞지 않는 줄(§4.4 의 2a)도 안 잡힌다.
 - 서버 재시작에 끊긴 회차는 새 설계에서도 registry 에 `server_restarted` 행으로 남는다. 이 RFC 가 고치는 것은 그 행이 아니라, 끊긴 자리에서 이어 읽는 것이다.
+- **밀림은 둘이고 지금 세는 것은 하나다.** I4 가 싣는 값은 durable 회차의 안 읽은 턴 수다(`Keeper_librarian_durable_consumer.unread_turns`). 연속성 회차의 밀림 — 스냅숏이 덮은 끝과 읽은 위치의 차이 — 은 세는 곳이 없다. 두 회차는 따로 밀리므로 한 숫자가 둘을 대신하지 못한다. 2026-09-22 goo-yang-bong 은 durable 12,887 · 연속성 7,694 로 5,193 밀려 있었는데 화면의 값은 0 이었다(같은 날 jazz-developer 777, lane-smith 244, won-chik 28). 창 RFC §13.7 은 "밀림 표시가 창이 그 위치에 기대기 전에 있어야 한다"를 선행 조건으로 걸었고, 창이 기대는 것은 연속성 스냅숏이다. 그래서 연속성 밀림도 같은 자리에 싣는다. 세는 것은 알람이지 고침이 아니다(§4.10).
 
 ### 4.10 읽지 못할 때
 

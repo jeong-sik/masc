@@ -163,8 +163,9 @@ let checkpoint_prefix_range ~trace_id ~lines ~messages =
            end_atom = baseline.position.end_atom;
            last_atom_digest = baseline.position.last_atom_digest})
      | R.Stop error -> Error (Range_stopped error)
-     | _ -> Error Uncovered_history)
-  | _ -> source_range ~trace_id ~lines ~messages
+     | R.Baseline _ | R.Position_in_other_trace _ -> Error Uncovered_history)
+  | R.Read _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ ->
+    source_range ~trace_id ~lines ~messages
 ;;
 
 let prefix_sha256 messages range =

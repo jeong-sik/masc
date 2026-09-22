@@ -79,7 +79,7 @@ status: reference
   기본값은 "따로 정한 가치관이 없다 — 각 Keeper의 역할이 정한다"이다. 슬롯은 항상 렌더된다.
   `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이고, 조항이 없으면 통째로 빠진다.
   `<role>`은 그 Keeper의 `instructions`(Keeper TOML)를 적힌 그대로 감싸며 앞에 제목을
-  붙이지 않는다. 예전 `keeper.instructions.custom` 슬롯은 없어졌다(#37753).
+  붙이지 않는다.
   `keeper.identity`·`keeper.workspace`는 각각 Keeper 이름과 샌드박스 루트를 받는다.
   전체 지도는 [Prompt Map](../PROMPT-MAP.md)을 따른다.
   경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board

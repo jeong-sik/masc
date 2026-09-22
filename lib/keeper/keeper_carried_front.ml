@@ -55,7 +55,7 @@ let composer_to_string = function
    official-client records resent 13 MB per candidate on Agent Core turn 4059,
    after 20 claude_code turns. Preserve that response evidence, subject to the
    same history-position check. *)
-(* A turn that carried its whole history names no front. Its opening atom is
+(* A turn that skipped no atom names no front. Its opening atom is
    the oldest one because nothing was skipped, not because a later turn may
    start there, so reading it as a seed sends the next start back to the
    beginning. [Runtime_execution.Codex_app_server] hands its list over whole

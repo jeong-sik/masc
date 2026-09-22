@@ -881,33 +881,6 @@ let test_unread_prior_trace_finishes_before_current_trace () =
     !carried
 ;;
 
-let record_counterpart_item config ~dedupe_key ~received_at =
-  let surface = Keeper_external_attention.Agent in
-  let item : Keeper_external_attention.item =
-    { event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key
-    ; dedupe_key
-    ; keeper_name
-    ; conversation = { conversation_id = "agent:trace-walk"; surface }
-    ; external_message = None
-    ; source_label = "agent"
-    ; actor =
-        { actor_id = Some "external"
-        ; display_name = Some "External"
-        ; authority = Keeper_chat_store.External
-        }
-    ; urgency = Keeper_external_attention.Ambient
-    ; content_preview = dedupe_key
-    ; content_ref = None
-    ; received_at
-    ; metadata = []
-    }
-  in
-  match Keeper_external_attention.record ~base_path:config.Workspace.base_path item with
-  | `Recorded -> ()
-  | `Duplicate _ -> fail "unexpected duplicate external fixture"
-  | `Error detail -> fail detail
-;;
-
 let counterpart_contents (input : Masc.Keeper_librarian.input) =
   List.map
     (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
@@ -915,27 +888,49 @@ let counterpart_contents (input : Masc.Keeper_librarian.input) =
 ;;
 
 (* #37362. Progress sits on trace A. Trace B finished a turn while nothing
-   read it, then the keeper moved on to trace C. B is read before C, and B's
-   first range does not read again the counterpart evidence A's range already
-   covered. *)
+   read it, then the keeper moved on to trace C. B is read before C. A chat
+   message from before A's boundary was read with A's range, so B's first
+   range, which starts the atoms again from zero, must not read it again.
+   Chat rows take the clock at append time, so the turn ends are placed after
+   it. *)
 let test_intervening_trace_is_read_before_the_current_trace () =
   with_workspace @@ fun config ->
   let trace_a = "trace-walk-a" in
   let trace_b = "trace-walk-b" in
   let trace_c = "trace-walk-c" in
-  record_counterpart_item config ~dedupe_key:"before-a" ~received_at:0.5;
-  establish_progress config ~trace_id:trace_a "a";
-  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
-  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
-  record_counterpart_item config ~dedupe_key:"between-a-b" ~received_at:1.5;
-  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
-  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
-  write_meta config trace_c;
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"before-a"
+    ~speaker
+    ();
+  let a_ended = Time_compat.now () +. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
   let carried = ref [] in
   let commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
     carried := !carried @ [ text_markers input, counterpart_contents input ];
     true
   in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "trace A is read" trace_a progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary
+    config ~trace_id:trace_b ~turn:1 ~recorded_at:(a_ended +. 100.0) [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(a_ended +. 200.0) [ message "c" ];
+  write_meta config trace_c;
   (match Consumer.consume_one ~config ~keeper_name ~commit with
    | Ok (Consumer.Progress_advanced progress) ->
      check string "the trace in between is read first" trace_b progress.position.trace_id
@@ -948,8 +943,8 @@ let test_intervening_trace_is_read_before_the_current_trace () =
    | Ok _ -> fail "the current trace did not follow");
   check
     (list (pair (list string) (list string)))
-    "each trace once in order, counterparts only after the prior boundary"
-    [ [ "b" ], [ "between-a-b" ]; [ "c" ], [] ]
+    "each trace once in order; A's counterpart is not read again"
+    [ [ "a" ], [ "before-a" ]; [ "b" ], []; [ "c" ], [] ]
     !carried
 ;;
 

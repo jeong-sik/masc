@@ -556,6 +556,20 @@ module For_testing : sig
     Keeper_model_input_ledger.t option ref -> unit
   (** Apply this runtime's declared marks to its candidate's working value. *)
 
+  val evict_within_turn :
+    keeper_name:string -> runtime_id:string ->
+    context_marks:Runtime_schema.context_marks option ->
+    turn_first_atom:int ->
+    digest_at:(int -> string option) ->
+    ledger:Keeper_model_input_ledger.t option ref ->
+    demote_from:int option ref -> unit
+  (** The marks judged inside the turn, before a composition after the
+      attempt's first: evict the blocks before [turn_first_atom] down to the
+      low-water mark, and when that leaves the projected total above it, move
+      [demote_from] to the last measured atom count so the turn's own tool
+      results before it go out as markers. A ledger [digest_at] does not hold
+      is left alone and clears [demote_from]. *)
+
   val halve_front :
     digest_at:(int -> string option) option ->
     move_ledger:(first_atom:int -> front_digest:string -> bool) ->

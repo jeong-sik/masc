@@ -27,6 +27,7 @@
 
 ### Changed
 
+- The context marks are now judged before every provider request of a Keeper turn, not only before the first: blocks before the turn in progress leave down to the low-water mark, and when nothing before the turn is left the turn's own aged tool results go out as markers, so a turn of many tool rounds no longer grows from the low-water mark to the provider limit unchecked.
 - A provider response with no text, thinking, or tool call is now settled as an observed response instead of being retried as an unseen server failure (#37206).
 - Gateway readers now document and consistently treat cancellation as an intentional shutdown rather than a connection failure (#37481).
 - The owner-child cancellation marker is retained only after both cancellation paths were verified, making the lifecycle evidence match the runtime tree (#37488).

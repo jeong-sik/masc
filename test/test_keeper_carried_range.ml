@@ -72,7 +72,8 @@ let reason = testable (fun fmt r ->
     (match r with
      | Range.Total_unknown -> "total_unknown"
      | Range.Within_high_water -> "within_high_water"
-     | Range.Nothing_evictable -> "nothing_evictable"))
+     | Range.Nothing_evictable -> "nothing_evictable"
+     | Range.Held_by_turn_floor -> "held_by_turn_floor"))
   ( = )
 ;;
 
@@ -232,6 +233,59 @@ let test_landing_exactly_on_the_low_water_mark_stops () =
   check (option int) "exactly the mark" (Some 450) projected
 ;;
 
+(* Inside a turn the walk is floored at the turn's first atom. The four
+   blocks above with the turn starting at atom 20: the first two lie before
+   the turn and leave (550 off, projected 450), the third is the turn's and
+   stops the walk even though 450 is still above a low-water mark of 100. *)
+let test_within_turn_evicts_only_the_blocks_before_the_turn () =
+  let t = ledger ~total:(Some 1_000) measured_four in
+  let blocks, atoms, tokens, first_atom, projected =
+    evicted (Range.within_turn ~marks:(marks ~high:950 ~low:100) ~turn_first_atom:20 t)
+  in
+  check int "the two blocks before the turn" 2 blocks;
+  check int "twenty atoms" 20 atoms;
+  check (option int) "their tokens" (Some 550) tokens;
+  check int "the front stops at the turn's first atom" 20 first_atom;
+  check (option int) "still above the low-water mark, and that is reported" (Some 450) projected
+;;
+
+(* A block that straddles the turn's first atom is not taken either: with
+   the turn starting at atom 15, only the first block (0..10) leaves. *)
+let test_within_turn_never_takes_a_block_that_reaches_into_the_turn () =
+  let t = ledger ~total:(Some 1_000) measured_four in
+  let blocks, _, tokens, first_atom, projected =
+    evicted (Range.within_turn ~marks:(marks ~high:950 ~low:100) ~turn_first_atom:15 t)
+  in
+  check int "one block" 1 blocks;
+  check (option int) "300 off" (Some 300) tokens;
+  check int "the front stops before the straddling block" 10 first_atom;
+  check (option int) "projected" (Some 700) projected
+;;
+
+let test_within_turn_is_held_when_the_oldest_block_is_the_turns () =
+  let t = ledger ~total:(Some 1_000) measured_four in
+  check reason "held by the turn floor" Range.Held_by_turn_floor
+    (unchanged_reason (Range.within_turn ~marks:(marks ~high:950 ~low:100) ~turn_first_atom:5 t))
+;;
+
+let test_within_turn_leaves_a_total_within_the_high_water_mark () =
+  let t = ledger ~total:(Some 900) measured_four in
+  check reason "within" Range.Within_high_water
+    (unchanged_reason (Range.within_turn ~marks:(marks ~high:1_000 ~low:600) ~turn_first_atom:20 t))
+;;
+
+(* With every block before the turn, the in-turn walk is the turn-boundary
+   walk: down to the low-water mark, the newest block kept. *)
+let test_within_turn_walks_like_the_boundary_when_the_turn_is_newest () =
+  let t = ledger ~total:(Some 1_000) measured_four in
+  let blocks, _, _, first_atom, projected =
+    evicted (Range.within_turn ~marks:(marks ~high:950 ~low:500) ~turn_first_atom:40 t)
+  in
+  check int "two blocks" 2 blocks;
+  check int "front at the third block" 20 first_atom;
+  check (option int) "under the low-water mark" (Some 450) projected
+;;
+
 let test_no_blocks_is_not_evictable () =
   let t = ledger ~total:(Some 1_000) [] in
   check reason "empty" Range.Nothing_evictable
@@ -265,6 +319,18 @@ let () =
         ; test_case "total equal to high water" `Quick test_total_at_the_high_water_mark_is_within
         ; test_case "landing on low water" `Quick test_landing_exactly_on_the_low_water_mark_stops
         ; test_case "no blocks" `Quick test_no_blocks_is_not_evictable
+        ] )
+    ; ( "within a turn"
+      , [ test_case "only the blocks before the turn" `Quick
+            test_within_turn_evicts_only_the_blocks_before_the_turn
+        ; test_case "a straddling block stays" `Quick
+            test_within_turn_never_takes_a_block_that_reaches_into_the_turn
+        ; test_case "held by the turn floor" `Quick
+            test_within_turn_is_held_when_the_oldest_block_is_the_turns
+        ; test_case "within high water" `Quick
+            test_within_turn_leaves_a_total_within_the_high_water_mark
+        ; test_case "turn is newest: boundary walk" `Quick
+            test_within_turn_walks_like_the_boundary_when_the_turn_is_newest
         ] )
     ; ( "after_overflow"
       , [ test_case "no marks: one block" `Quick test_overflow_without_marks_takes_one_block

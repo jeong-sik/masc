@@ -4,6 +4,7 @@ type reason =
   | Total_unknown
   | Within_high_water
   | Nothing_evictable
+  | Held_by_turn_floor
 
 type step =
   | Unchanged of reason
@@ -31,8 +32,20 @@ type walked =
   ; stopped_at : Keeper_model_input_ledger.block option
   }
 
-let walk ~stop ~at_least_one ~(total : int option) (blocks : Keeper_model_input_ledger.block list)
+let walk
+      ?floor
+      ~stop
+      ~at_least_one
+      ~(total : int option)
+      (blocks : Keeper_model_input_ledger.block list)
   =
+  (* [floor] is the first atom of the turn in progress: a block that reaches
+     to or past it is never taken, whatever the total says. *)
+  let reaches_floor (b : Keeper_model_input_ledger.block) =
+    match floor with
+    | Some first_atom -> b.block_end_atom > first_atom
+    | None -> false
+  in
   let rec go ~evicted_blocks ~evicted_atoms ~evicted_tokens ~remaining = function
     | [] -> { evicted_blocks; evicted_atoms; evicted_tokens; remaining; stopped_at = None }
     | [ (last : Keeper_model_input_ledger.block) ] ->
@@ -40,11 +53,12 @@ let walk ~stop ~at_least_one ~(total : int option) (blocks : Keeper_model_input_
     | (b : Keeper_model_input_ledger.block) :: rest ->
       let forced = at_least_one && evicted_blocks = 0 in
       let done_ =
-        match remaining with
-        | Some r -> stop r && not forced
-        | None ->
-          (* No total to walk against: a refusal still takes one block. *)
-          not forced
+        reaches_floor b
+        || (match remaining with
+            | Some r -> stop r && not forced
+            | None ->
+              (* No total to walk against: a refusal still takes one block. *)
+              not forced)
       in
       if done_
       then { evicted_blocks; evicted_atoms; evicted_tokens; remaining; stopped_at = Some b }
@@ -71,11 +85,11 @@ let walk ~stop ~at_least_one ~(total : int option) (blocks : Keeper_model_input_
   go ~evicted_blocks:0 ~evicted_atoms:0 ~evicted_tokens:(Some 0) ~remaining:total blocks
 ;;
 
-let evict ~stop ~at_least_one (ledger : Keeper_model_input_ledger.t) =
+let evict ?floor ~stop ~at_least_one (ledger : Keeper_model_input_ledger.t) =
   match ledger.blocks with
   | [] | [ _ ] -> Unchanged Nothing_evictable
   | blocks ->
-    let w = walk ~stop ~at_least_one ~total:ledger.total_tokens blocks in
+    let w = walk ?floor ~stop ~at_least_one ~total:ledger.total_tokens blocks in
     (match w.stopped_at with
      | Some stopped_at when w.evicted_blocks > 0 ->
        Evicted
@@ -116,6 +130,43 @@ let apply_turn_boundary ~(marks : Runtime_schema.context_marks) ledger =
          "Keeper_carried_range.apply_turn_boundary: eviction did not advance the ledger")
 ;;
 
+let within_turn
+      ~(marks : Runtime_schema.context_marks)
+      ~turn_first_atom
+      (ledger : Keeper_model_input_ledger.t)
+  =
+  match ledger.last.ends, ledger.total_tokens with
+  | Keeper_model_input_ledger.No_atom_carried, (Some _ | None) ->
+    Unchanged Nothing_evictable
+  | Keeper_model_input_ledger.Carried_atoms _, None -> Unchanged Total_unknown
+  | Keeper_model_input_ledger.Carried_atoms _, Some total
+    when total <= marks.high_water_tokens ->
+    Unchanged Within_high_water
+  | Keeper_model_input_ledger.Carried_atoms _, Some _ ->
+    (match ledger.blocks with
+     | (oldest : Keeper_model_input_ledger.block) :: _ :: _
+       when oldest.block_end_atom > turn_first_atom ->
+       Unchanged Held_by_turn_floor
+     | [] | [ _ ] | _ :: _ :: _ ->
+       evict
+         ~floor:turn_first_atom
+         ~stop:(fun remaining -> remaining <= marks.low_water_tokens)
+         ~at_least_one:false
+         ledger)
+;;
+
+let apply_within_turn ~marks ~turn_first_atom ledger =
+  let step = within_turn ~marks ~turn_first_atom ledger in
+  match step with
+  | Unchanged _ -> ledger, step
+  | Evicted { first_atom; front_digest; _ } ->
+    (match Keeper_model_input_ledger.move_front ledger ~first_atom ~front_digest with
+     | Some moved -> moved, step
+     | None ->
+       invalid_arg
+         "Keeper_carried_range.apply_within_turn: eviction did not advance the ledger")
+;;
+
 let after_overflow ~(marks : Runtime_schema.context_marks option) (ledger : Keeper_model_input_ledger.t) =
   match marks, ledger.total_tokens with
   | Some marks, Some _ ->
@@ -132,6 +183,7 @@ let reason_to_string = function
   | Total_unknown -> "total_unknown"
   | Within_high_water -> "within_high_water"
   | Nothing_evictable -> "nothing_evictable"
+  | Held_by_turn_floor -> "held_by_turn_floor"
 ;;
 
 let int_opt = function

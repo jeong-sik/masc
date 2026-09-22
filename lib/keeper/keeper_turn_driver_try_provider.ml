@@ -676,6 +676,15 @@ type attempt_state =
   ; ledger : Keeper_model_input_ledger.t option ref
   ; last_resort_armed : bool ref
   ; last_resort_probe : (unit -> bool) option ref
+  ; demote_from : int option ref
+        (* Where the turn's own tool results start going out as markers, once
+           the marks were passed inside the turn and evicting the blocks
+           before the turn could not bring the projected total under the
+           low-water mark. [None] until then: the ordinary boundary, the
+           completed-turn end, applies. It only ever moves later in the
+           history (the last measured atom count at the time it moves), so
+           the transmitted prefix changes once per crossing, not per
+           request. *)
   }
 
 (* The ledger's session: the history the carried positions belong to. The
@@ -700,6 +709,7 @@ let new_attempt_state (ctx : try_provider_ctx) =
            ~session_id:(ledger_session ctx))
   ; last_resort_armed = ref false
   ; last_resort_probe = ref None
+  ; demote_from = ref None
   }
 ;;
 
@@ -900,6 +910,91 @@ let request_view
    on every request while its stale blocks and front still answered the
    refusal path, which then retried the whole history without end. The cold
    seed is read only when no ledger answers. *)
+(* The marks judged again inside the turn, before every composition after
+   the first (RFC keeper-context-window-in-tokens §10.5, in-turn trigger).
+   The walk is floored at the turn's first atom: only blocks that lie wholly
+   before the turn leave. When that cannot bring the projected total under
+   the low-water mark, or nothing before the turn is left, the turn's own
+   tool results before the last measured atom count go out as markers from
+   the next composition on ([demote_from]); the boundary then stays until
+   the total passes the high-water mark again, so the prefix the provider
+   cached changes once per crossing. A ledger the history does not hold is
+   left to [carried_front], which drops or replaces it; the demotion
+   boundary that was read against it is dropped here. *)
+let evict_within_turn
+      ~keeper_name
+      ~runtime_id
+      ~context_marks
+      ~turn_first_atom
+      ~digest_at
+      ~(ledger : Keeper_model_input_ledger.t option ref)
+      ~(demote_from : int option ref)
+  =
+  match context_marks, !ledger with
+  | None, _ -> ()
+  | Some _, None -> demote_from := None
+  | Some (marks : Runtime_schema.context_marks), Some current ->
+    if not (Keeper_model_input_ledger.holds ~digest_at current)
+    then demote_from := None
+    else (
+      let projected, step =
+        Keeper_carried_range.apply_within_turn ~marks ~turn_first_atom current
+      in
+      ledger := Some projected;
+      (match step with
+       | Keeper_carried_range.Unchanged _ -> ()
+       | Keeper_carried_range.Evicted _ ->
+         Log.Keeper.info
+           ~keeper_name
+           "model input carried range evicted within turn runtime=%s turn_first_atom=%d %s"
+           runtime_id
+           turn_first_atom
+           (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step)));
+      let above_high =
+        match current.Keeper_model_input_ledger.total_tokens with
+        | Some total -> total > marks.high_water_tokens
+        | None -> false
+      in
+      let still_above_low =
+        above_high
+        && (match step with
+        | Keeper_carried_range.Unchanged
+            (Keeper_carried_range.Held_by_turn_floor | Keeper_carried_range.Nothing_evictable) ->
+          true
+        | Keeper_carried_range.Unchanged
+            (Keeper_carried_range.Total_unknown | Keeper_carried_range.Within_high_water) ->
+          false
+        | Keeper_carried_range.Evicted { projected_total = Some remaining; _ } ->
+          remaining > marks.low_water_tokens
+        | Keeper_carried_range.Evicted { projected_total = None; _ } ->
+          (* Unknown until the next usage: the walk ended on a block of
+             unknown size, and the next judgment reads the count. *)
+          false)
+      in
+      if still_above_low
+      then (
+        match current.Keeper_model_input_ledger.measured_end_atom with
+        | Some measured
+          when measured > turn_first_atom
+               && (match !demote_from with
+                   | None -> true
+                   | Some from_atom -> measured > from_atom) ->
+          demote_from := Some measured;
+          Log.Keeper.info
+            ~keeper_name
+            "model input turn results demoted runtime=%s before_atom=%d turn_first_atom=%d total_tokens=%s \
+             high_water_tokens=%d low_water_tokens=%d"
+            runtime_id
+            measured
+            turn_first_atom
+            (match current.Keeper_model_input_ledger.total_tokens with
+             | Some total -> string_of_int total
+             | None -> "unknown")
+            marks.high_water_tokens
+            marks.low_water_tokens
+        | Some _ | None -> ()))
+;;
+
 let carried_front ~ledger ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal ~cold =
   let after_refusal =
     Option.bind after_refusal (fun seed ->
@@ -1045,6 +1140,21 @@ let bounded_model_input_projection
       offload_model_input_cpu (fun () ->
         Runtime_model_input_tail_window.atom_opening_digest messages)
     in
+    (* Every composition after the attempt's first judges the marks again,
+       floored at the turn in progress: the turn-boundary judgment ran once
+       before the first, and a turn of many tool rounds outgrows the marks
+       from that one front with nothing else looking. *)
+    (match ctx.continuity, !(state.last_request) with
+     | Some _, _ | None, None -> ()
+     | None, Some _ ->
+       evict_within_turn
+         ~keeper_name:ctx.keeper_name
+         ~runtime_id:ctx.runtime_id
+         ~context_marks:ctx.context_marks
+         ~turn_first_atom:ctx.completed_end_atom
+         ~digest_at:history_digest_at
+         ~ledger:state.ledger
+         ~demote_from:state.demote_from);
     let front, dropped_ledger =
       match ctx.continuity with
       | Some _ -> None, None
@@ -1084,8 +1194,14 @@ let bounded_model_input_projection
     let last_resort = !(state.last_resort_armed) in
     state.last_resort_armed := false;
     (* Completed-turn evidence, not attempt seed length, protects unfinished
-       resumed tool work. Capacity refusal does not move this boundary. *)
-    let demote_before = ctx.completed_end_atom in
+       resumed tool work. Capacity refusal does not move this boundary. The
+       in-turn judgment above moves it later only after the marks were
+       passed and nothing before the turn was left to evict. *)
+    let demote_before =
+      match !(state.demote_from) with
+      | Some from_atom when from_atom > ctx.completed_end_atom -> from_atom
+      | Some _ | None -> ctx.completed_end_atom
+    in
     state.last_resort_probe :=
       (match ctx.input_policy, ctx.continuity with
        | Keeper_input_policy.Small, _ | _, Some _ -> None
@@ -2501,6 +2617,7 @@ module For_testing = struct
   let carried_front = carried_front
   let move_ledger_front = move_ledger_front
   let evict_at_turn_boundary = evict_at_turn_boundary
+  let evict_within_turn = evict_within_turn
   let halve_front = halve_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input

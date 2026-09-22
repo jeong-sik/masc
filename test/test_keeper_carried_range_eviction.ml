@@ -732,6 +732,128 @@ let test_stale_working_value_preserves_a_newer_table_observation () =
 ;;
 
 (* The pair table sits behind an Eio mutex. *)
+(* Inside a turn the marks are judged before every composition after the
+   attempt's first. Two completed turns (atoms 0..16) measured as one cold
+   block and one of 800 tokens, then a turn starting at atom 16 that keeps
+   appending rounds of 100 tokens an atom, marks 2,000 / 1,500. Each time
+   the total passes the high-water mark the walk takes what lies before the
+   turn: the cold block first (unknown size, so the walk ends there), the
+   800-token block next (projected 1,300, under the low-water mark). Once
+   only the turn's own blocks remain, the walk is held at the turn floor and
+   the turn's results before the last measured atom count go out as markers;
+   that boundary then holds until the marks are passed again. The front
+   never crosses atom 16. *)
+let test_within_a_turn_the_marks_evict_before_the_turn_then_demote_its_results () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "in-turn" and runtime_id = "a" and session_id = "trace-in-turn" in
+  let history = exchanges ~from:0 24 in
+  let digest_at = Window.atom_opening_digest history in
+  let turn_first_atom = 16 in
+  let marks : Runtime_schema.context_marks =
+    { high_water_tokens = 2_000; low_water_tokens = 1_500 }
+  in
+  let working = ref None and demote_from = ref None in
+  let observe ~first_atom ~atom_count ~demote_before ~tokens =
+    ignore
+      (Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
+         ~request:
+           { (request ~first_atom ~atom_count) with
+             ends = ends_from digest_at ~first_atom ~atom_count
+           ; demote_before
+           }
+         ~usage:(Some { Ledger.input_tokens = tokens; cache_read_input_tokens = 0 }));
+    working := Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id
+  in
+  let judge () =
+    Try_provider.For_testing.evict_within_turn
+      ~keeper_name ~runtime_id ~context_marks:(Some marks) ~turn_first_atom ~digest_at
+      ~ledger:working ~demote_from
+  in
+  let front () = Option.map (fun (value : Ledger.t) -> value.last.first_atom) !working in
+  (* The completed turns. *)
+  observe ~first_atom:0 ~atom_count:8 ~demote_before:0 ~tokens:800;
+  observe ~first_atom:0 ~atom_count:16 ~demote_before:0 ~tokens:1_600;
+  (* The turn's first rounds stay within the marks. *)
+  observe ~first_atom:0 ~atom_count:17 ~demote_before:16 ~tokens:1_700;
+  judge ();
+  check (option int) "within the marks: the front stays" (Some 0) (front ());
+  check (option int) "and nothing is demoted" None !demote_from;
+  (* Past the high-water mark: the cold block leaves whole, and its unknown
+     size ends the walk before the turn is reached. *)
+  observe ~first_atom:0 ~atom_count:21 ~demote_before:16 ~tokens:2_100;
+  judge ();
+  check (option int) "the cold block left" (Some 8) (front ());
+  check (option int) "an unknown projection demotes nothing" None !demote_from;
+  (* Measured again from the moved front and within the marks. *)
+  observe ~first_atom:8 ~atom_count:25 ~demote_before:16 ~tokens:1_700;
+  judge ();
+  check (option int) "within: the front holds" (Some 8) (front ());
+  (* Past again: the 800-token block leaves and the projected total, 1,300,
+     is under the low-water mark; the walk stops at the turn's first block. *)
+  observe ~first_atom:8 ~atom_count:29 ~demote_before:16 ~tokens:2_100;
+  judge ();
+  check (option int) "the front stops at the turn's first atom" (Some 16) (front ());
+  check (option int) "under the low-water mark: nothing demoted" None !demote_from;
+  (* Past a third time with only the turn's blocks left: held at the floor,
+     so the turn's results before the last measured count become markers. *)
+  observe ~first_atom:16 ~atom_count:33 ~demote_before:16 ~tokens:1_700;
+  judge ();
+  check (option int) "within again" None !demote_from;
+  observe ~first_atom:16 ~atom_count:37 ~demote_before:16 ~tokens:2_100;
+  judge ();
+  check (option int) "the front never crosses into the turn" (Some 16) (front ());
+  check (option int) "the turn's results before the last measured count are demoted"
+    (Some 37) !demote_from;
+  (* The same judgment again moves nothing: one change per crossing. *)
+  judge ();
+  check (option int) "sticky until the next crossing" (Some 37) !demote_from;
+  (* The demotion brought the total down; the boundary holds while within. *)
+  observe ~first_atom:16 ~atom_count:38 ~demote_before:37 ~tokens:1_200;
+  judge ();
+  check (option int) "held while within the marks" (Some 37) !demote_from;
+  check (option int) "front unchanged" (Some 16) (front ());
+  Ledger.Table.For_testing.reset ()
+;;
+
+(* Without declared marks the in-turn judgment does nothing, and a ledger
+   the composing history does not hold moves nothing and drops the demotion
+   boundary that was read against it. *)
+let test_within_a_turn_without_marks_or_a_held_ledger_nothing_moves () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "in-turn-none" and runtime_id = "a" and session_id = "trace-in-turn-none" in
+  let history = exchanges ~from:0 12 in
+  let digest_at = Window.atom_opening_digest history in
+  List.iter
+    (fun atom_count ->
+      ignore
+        (Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
+           ~request:
+             { (request ~first_atom:0 ~atom_count) with
+               ends = ends_from digest_at ~first_atom:0 ~atom_count }
+           ~usage:(Some { Ledger.input_tokens = atom_count * 100; cache_read_input_tokens = 0 })))
+    [ 8; 16; 20 ];
+  let working = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
+  let demote_from = ref (Some 18) in
+  Try_provider.For_testing.evict_within_turn
+    ~keeper_name ~runtime_id ~context_marks:None ~turn_first_atom:16 ~digest_at
+    ~ledger:working ~demote_from;
+  check (option int) "no marks: the front holds"
+    (Some 0) (Option.map (fun (value : Ledger.t) -> value.last.first_atom) !working);
+  check (option int) "no marks: the boundary is not touched" (Some 18) !demote_from;
+  let other_history = exchanges ~from:100 12 in
+  let marks : Runtime_schema.context_marks =
+    { high_water_tokens = 1_000; low_water_tokens = 500 }
+  in
+  Try_provider.For_testing.evict_within_turn
+    ~keeper_name ~runtime_id ~context_marks:(Some marks) ~turn_first_atom:16
+    ~digest_at:(Window.atom_opening_digest other_history)
+    ~ledger:working ~demote_from;
+  check (option int) "a ledger this history does not hold moves nothing"
+    (Some 0) (Option.map (fun (value : Ledger.t) -> value.last.first_atom) !working);
+  check (option int) "and its demotion boundary is dropped" None !demote_from;
+  Ledger.Table.For_testing.reset ()
+;;
+
 let () =
   Eio_main.run
   @@ fun _ ->
@@ -741,6 +863,10 @@ let () =
       , [ test_case "success asks once" `Quick test_success_asks_once
         ; test_case "boundary and cancellation preserve observed ledger" `Quick
             test_boundary_moves_and_cancellation_preserve_the_observed_ledger
+        ; test_case "within a turn: evict before the turn, then demote its results" `Quick
+            test_within_a_turn_the_marks_evict_before_the_turn_then_demote_its_results
+        ; test_case "within a turn: no marks or unheld ledger" `Quick
+            test_within_a_turn_without_marks_or_a_held_ledger_nothing_moves
         ; test_case "stale candidate preserves current observation" `Quick
             test_stale_working_value_preserves_a_newer_table_observation
         ; test_case "unrelated error" `Quick test_an_unrelated_error_never_retries

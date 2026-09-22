@@ -55,8 +55,9 @@ val absorbed_history :
     and are not sent again, and no summary stands in for them. [Some] only
     when the position names [trace_id] and the atom before it opens with the
     message the position recorded, so a position from another trace or
-    another history generation is [None]. Taken when a saved continuity
-    snapshot no longer fits the history (RFC keeper-context-window-in-tokens
+    another history generation is [None]. Taken when no saved continuity
+    snapshot fits the history: none is saved, it no longer fits, or it cannot
+    be used ({!continuity_for_request}) (RFC keeper-context-window-in-tokens
     section 13.6). *)
 
 val completed_history_end :
@@ -105,8 +106,11 @@ val continuity_for_request :
     [progress] when it is a place in this history ({!absorbed_history}), else
     {!without_snapshot}. There is no refusal: a snapshot that cannot be read,
     whose [lines] cannot be read, or whose covered bytes changed is one that
-    does not fit, and is logged as a warning. A refused turn would run no
-    Librarian round, so nothing would ever replace the snapshot (#37762).
+    does not fit, and is logged as a warning naming what is wrong (#37762). A
+    turn needs no snapshot to go out, and a refused turn ran no Librarian
+    round, so a snapshot whose covered bytes changed was never written again.
+    An unreadable snapshot file or boundary log stops the Librarian's
+    continuity pass too, so it stays until the file is fixed.
     [lines] is read only when a snapshot is saved. *)
 
 type try_provider_ctx =

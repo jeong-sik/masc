@@ -429,6 +429,35 @@ let test_an_unusable_snapshot_starts_without_it () =
        (Error "snapshot file is not JSON"));
   starts_at_the_position "an unreadable boundary log starts at the position"
     (select ~read_lines:(fun () -> Error "boundary log cannot be read") (Ok (Some snapshot)));
+  (* A refused line after the snapshot's boundary stops the range
+     (Range_stopped): no later restart settles it. *)
+  let stopped_lines = lines @ [2, Error (Boundary.Not_json "torn append")] in
+  (match Driver.prepare_continuity ~trace_id ~lines:stopped_lines ~messages snapshot with
+   | Error (Snapshot.Range_stopped _) -> ()
+   | Ok _ | Error _ -> fail "the fixture does not stop the range on a refused line");
+  starts_at_the_position "a stopped range starts at the position"
+    (select ~read_lines:(fun () -> Ok stopped_lines) (Ok (Some snapshot)));
+  starts_at_the_position "no saved snapshot starts at the position"
+    (select ~read_lines:(fun () -> fail "the boundary log was read with no snapshot saved")
+       (Ok None));
+  (* The history moved on from the snapshot (the goo-yang-bong branch): an
+     ordinary mismatch, and the position that fits this history is used. *)
+  let moved = [pinned; text T.User "Start over on the docs"; text T.Assistant "Docs drafted."; fresh] in
+  let moved_digest = Window.atom_opening_digest moved in
+  (match Driver.prepare_continuity ~trace_id ~lines ~messages:moved snapshot with
+   | Error (Snapshot.Trace_mismatch | Snapshot.History_changed | Snapshot.Uncovered_history) -> ()
+   | Ok _ | Error _ -> fail "the fixture's moved history still fits the snapshot");
+  (match
+     (absorbed_view
+        (Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id
+           ~messages:moved ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines)
+           ~progress:(fun () ->
+             Ok (Some (progress ~trace_id ~end_atom:2
+                         ~last_atom_digest:(Option.get (moved_digest 1))))))
+        moved).composed.origin
+   with
+   | Front.Librarian_progress {end_atom = 2} -> ()
+   | _ -> fail "a snapshot of a history that moved on did not fall back to the position");
   (match origin
            (Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id
               ~messages:(covered @ [fresh]) ~snapshot:(Ok (Some snapshot))

@@ -154,14 +154,16 @@ let validate_continuity ~messages = function
    history, else the Librarian's durable position when it is a place in this
    history, else this turn's own boundary.
 
-   The snapshot is derived state: the Librarian writes it again, and the
-   position and the turn boundary still say where a request starts. So a
-   snapshot that cannot be read, cannot be checked against the boundary log,
-   or covers bytes that have changed is one that does not fit, never a reason
-   to refuse the turn. A refused turn runs no Librarian round, so no snapshot
-   would ever replace it (#37762). Those cases are warnings, since each names
-   something wrong with a file rather than a history that moved on. A covered
-   prefix that changes while the request is in flight is still refused, by
+   A turn needs no snapshot to go out: the position and the turn boundary
+   still say where it starts. So a snapshot that cannot be read, cannot be
+   checked against the boundary log, or covers bytes that have changed is one
+   that does not fit, never a reason to refuse the turn (#37762). A refused
+   turn also ran no Librarian round, so a snapshot whose covered bytes changed
+   was never written again. A snapshot file or a boundary log that cannot be
+   read stops the Librarian's continuity pass as well, so those stay until the
+   file is fixed; they are warnings because each names a file to fix rather
+   than a history that moved on. A covered prefix or a read position that
+   changes while the request is in flight is still refused, by
    [validate_continuity].
 
    [lines] is read only when a snapshot is saved. *)

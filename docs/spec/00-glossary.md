@@ -100,7 +100,8 @@ status: reference
   - **Keeper Turn** — MASC가 하나의 Keeper 작업을 시도하는 단위. (아래 항목)
   - **agent core Turn** — 하나의 agent core Agent run 내부의 한 단계. Keeper turn과
     동일한 단위가 아니다. (아래 항목)
-  - **Turn Boundary** — 끝난 Keeper turn이 History에 남기는 한 줄. (아래 항목)
+  - **Turn Boundary** — 끝난 Keeper turn이 `turn-boundaries.jsonl`에 남기는 한 줄.
+    History 안에는 turn의 경계가 없다. (아래 항목)
   - **Turn Configuration Error** — Keeper turn이 typed Agent Core 구성 오류로 끝난
     latch된 실패 원인. (아래 항목)
 
@@ -246,11 +247,12 @@ status: reference
   - **Runtime Lane** — Keeper turn이 Runtime 후보를 시도할 순서. 제품의 사용자
     표면(TUI "pick a runtime lane", dashboard "runtime lane cost matrix")과 코드가
     쓰는 이름이다. 설정은 `[runtime.lanes.<name>]`의 `candidates`이고 Keeper
-    assignment가 이 lane을 지목한다. 제품 SSOT는 같은 메커니즘을 "Runtime slot"·
-    "frozen declared order"라 부른다(§2·§3·§5).
+    assignment가 이 lane을 지목한다. 제품 SSOT는 같은 메커니즘을 "Runtime slot"이라
+    부른다(§2·§3·§4).
     → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
   - **고정 Lane** — Keeper turn 밖에서 고정된 신원으로 도는 실행 경로.
-    `librarian`·`hitl_auto_judge`·`board_attention`·`verifier`가 있다. 설정은
+    `librarian`·`hitl_auto_judge`·`board_attention`·`workspace_curator`·`verifier`가
+    있다(`Runtime.exact_lane`). 설정은
     `[runtime.exact_output_lanes.<name>]`의 `slots`, durable 기록은
     `Exact_lane_run_registry.lane`(`Librarian`·`Hitl_auto_judge`·`Board_attention`·
     `Workspace_curator`)이다 — verifier exact lane은 이 registry 밖에 있다. 제품
@@ -261,11 +263,10 @@ status: reference
     → [Browser_lane](../../lib/browser_lane/browser_lane.ml),
     [Msx_lane](../../lib/msx_lane/msx_lane.mli)
   - **Official Client Lane** — 공식 클라이언트가 자기 프로세스에서 provider 요청을
-    보내고 MASC가 조율·관찰하는 실행 경로. (아래 항목)
+    보내고 MASC가 조율·관찰하는 실행 경로. (위 항목)
   - **Standalone Lane** — 고정 Lane의 읽기 전용 투영. (아래 항목)
   - **Lane Add-on** — 관측·조작 Lane 위에 붙는 선택적 관측·관계 레이어. (아래 항목)
-  Runtime Lane과 고정 Lane이 같은 단어를 쓰는 충돌은 미해결이다 — 개명 제안이
-  진행 중이다.
+  Runtime Lane과 고정 Lane이 같은 단어를 쓰는 충돌은 미해결이다.
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
@@ -640,15 +641,17 @@ status: reference
   message의 digest·작업 상태를 `Librarian_continuity_snapshot.restore`로 대조하고, 어긋나면
   이력을 돌려주지 않고 오류를 낸다. carried-front 씨앗은 남기지 않는다 — purge가 그
   atom의 여는 message를 다시 썼으면 씨앗이 안 맞아 요청은 마지막 완료 turn이 끝난 자리에서
-  시작한다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이 옮겨지는 것이 설계다.
+  시작한다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이 옮겨지는 것이
+  설계다. 그때 복구는 Librarian이 센 경계 줄(`witness_line`)이 말하는 마지막 turn
+  끝에서 이력을 끝내고, 그런 줄이 없으면 `Recovery_end_unwitnessed`로 거절한다.
 
   Librarian의 atom 위치(`librarian_rebase`)는 sound transcript면 그대로 돌려받고, 깨진
   transcript 복구에서만 새 끝으로 옮긴다. 어느 쪽이든 Librarian이 아직 읽을 atom을
-  남겼으면 재작성을 거부한다. Librarian의 continuity 스냅숏(`librarian-continuity.json`)은
-  적용이 설치 전에 지운다(`Keeper_librarian_continuity.discard`) — 그 스냅숏이 다시 쓴
-  바이트의 digest를 갖고 있어 그대로 두면 모든 Agent-Core turn이 `Prefix_changed`로
-  거절된다. 다음 Librarian 회차가 atom 0부터 다시 쓴다. 서버의 dashboard 청소 동작은
-  그 전에 Librarian lane을 취소하고 기다린다(`with_librarian_purge`).
+  남겼으면 재작성을 거부한다. continuity 스냅숏(`librarian-continuity.json`)은 지우지
+  않는다 — 스냅숏이 덮는 앞부분을 바이트 그대로 남겨 purge 뒤에도 맞는다. 복구가 그
+  부분을 버리면 `Continuity_no_longer_fits`로 거절되고, 서버를 멈춘 채
+  `librarian-continuity.json`을 지우면 통과한다. 서버의 dashboard 청소 동작은 그 전에
+  Librarian lane을 취소하고 기다린다(`with_librarian_purge`).
   → [Keeper_checkpoint_purge](../../lib/keeper/keeper_checkpoint_purge.mli),
   [Runbook](../CHECKPOINT-PURGE-RUNBOOK.md)
 
@@ -684,7 +687,7 @@ status: reference
   checkpoint를 저장하지 않으므로, 무슨 말을 했고 어떤 tool을 불렀는지는
   `<session_dir>/history.jsonl`과 `<session_dir>/history.internal.jsonl`에 남는다.
   각 줄은 자기를 쓴 turn(`Turn_ref`)과 종류(`message`|`tool_observation`)를 적는다.
-  `Turn_ref` 없는 줄은 그 표시가 생기기 전에 쓰인 `Untagged`로 어느 turn에도 속하지
+  `Turn_ref` 없는 줄은 `Untagged`로 어느 turn에도 속하지
   않으며 reader는 지나간다. `Turn_ref`가 있는데 decoder가 거부하는 줄은 `Error`이며
   untagged로 읽지 않는다. main 파일을 먼저, internal 파일을 다음으로, 각각 파일 순서로
   읽는다. Checkpoint의 `messages`(History)와 달리 이 줄들은 자기 turn을 안다.

@@ -79,6 +79,18 @@ status: reference
   `keeper_role {name, board_interests}`만 사용한다. 과거 post/comment thread,
   instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
 
+**Board Attention Candidate (Board 판정 후보)**
+: Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
+  저장되고, 생애가 `Pending → Judged → Consumed`다. exact-flow 실패가 확정되면 먼저
+  `Quarantine Quarantined`로 투영되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
+  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 판정은 소유 lane이 그 후보
+  판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
+  뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
+  다른 뜻이다** — 코드가 `candidate`라는 한 단어를 두 곳에 쓴다. 여기서는 판정 대상
+  게시물이고, 런타임 쪽(`Runtime_candidate_backpressure.candidate`)은 lane이 시도할
+  실행 후보다.
+  → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli)
+
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
@@ -193,7 +205,9 @@ status: reference
   → [Runtime_schema.provider](../../lib/runtime/runtime_schema.mli)
 
 **Runtime**
-: Provider·Model·Binding을 해석해 얻은 실행 후보 하나.
+: Provider·Model·Binding을 해석해 얻은 실행 후보 하나. 코드가 이 후보를 `candidate`라
+  부르는 자리가 있다(`Runtime_candidate_backpressure.candidate` — 시도한 런타임과 그
+  process-local 관측). Board Attention Candidate와 다른 뜻이다.
   → [Runtime.t](../../lib/runtime/runtime.mli)
 
 **Lane**

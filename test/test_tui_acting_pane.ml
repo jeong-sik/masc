@@ -1860,7 +1860,7 @@ let test_a_call_row_names_the_call_a_press_opens () =
 let cursor_targets =
   [| Pane.Target_next_tab
    ; Pane.Target_none
-   ; Pane.Target_keeper "rondo"
+   ; Pane.Target_keeper "pane-fixture-keeper"
    ; Pane.Target_none
    ; Pane.Target_none
    ; Pane.Target_call_order

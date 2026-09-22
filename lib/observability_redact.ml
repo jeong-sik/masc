@@ -97,3 +97,54 @@ let redacted_tool_output_json ~tool_name:_ output =
   in
   Some redacted
 
+(* A tool output that is a JSON document must not be cut at a byte boundary:
+   the stored string stops parsing, so the TUI falls back to raw bytes instead
+   of the structure (issue #37804). Shrink the document itself — drop trailing
+   members/elements and mark the cut — so the stored value stays valid JSON.
+   [budget] is a byte budget for the serialized form. *)
+let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Safe.t =
+  if String.length (Yojson.Safe.to_string json) <= budget then json
+  else
+    match json with
+    | `Assoc fields ->
+      let rec keep acc budget = function
+        | [] -> List.rev acc
+        | (key, value) :: rest ->
+          let value' = shrink_json_to_budget (max 8 (budget / 2)) value in
+          let acc' = (key, value') :: acc in
+          if String.length (Yojson.Safe.to_string (`Assoc (List.rev acc'))) <= budget
+          then keep acc' budget rest
+          else List.rev acc
+      in
+      `Assoc
+        (keep [] (max 8 (budget - 24)) fields @ [ ("_truncated", `Bool true) ])
+    | `List items ->
+      let rec keep acc budget = function
+        | [] -> List.rev acc
+        | value :: rest ->
+          let value' = shrink_json_to_budget (max 8 (budget / 2)) value in
+          let acc' = value' :: acc in
+          if String.length (Yojson.Safe.to_string (`List (List.rev acc'))) <= budget
+          then keep acc' budget rest
+          else List.rev acc
+      in
+      `List (keep [] (max 8 (budget - 24)) items @ [ `String "..." ])
+    | `String s ->
+      let cut =
+        String_util.utf8_char_boundary s
+          (min (String.length s) (max 0 (budget - 2)))
+      in
+      `String (String.sub s 0 cut)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as scalar -> scalar
+;;
+
+let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
+  if String.length s <= max_len then redact_preview ~max_len s
+  else
+    match Yojson.Safe.from_string s with
+    | exception Yojson.Json_error _ -> redact_preview ~max_len s
+    | json ->
+      json |> redact_json_value |> shrink_json_to_budget max_len
+      |> Yojson.Safe.to_string |> redact_patterns
+;;
+

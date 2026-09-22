@@ -351,6 +351,36 @@ let test_github_prefix_no_false_positive () =
       Alcotest.(check string) (input ^ " preserved") input r)
     inputs
 
+(* A JSON tool output larger than the byte budget must stay parseable: the
+   stored value is shrunk at member boundaries and marked, instead of being cut
+   mid-structure so the TUI renders raw bytes (issue #37804). *)
+let test_truncate_json_document_keeps_json_parseable () =
+  let big =
+    `Assoc
+      [ ( "items",
+          `List
+            (List.init 200 (fun i -> `String (Printf.sprintf "member-%d" i))) )
+      ; ("tail", `String (String.make 5000 'x'))
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let out = Observability_redact.truncate_json_document ~max_len:4000 big in
+  Alcotest.(check bool) "within budget" true (String.length out <= 4000);
+  (match Yojson.Safe.from_string out with
+   | _ -> ()
+   | exception Yojson.Json_error e ->
+     Alcotest.fail ("stored value is not JSON: " ^ e));
+  Alcotest.(check bool) "marks the cut" true
+    (String_util.contains_substring out "_truncated")
+
+(* A non-JSON output keeps the historical byte preview so nothing that used to
+   be readable changes shape. *)
+let test_truncate_json_document_passes_non_json_through () =
+  let raw = String.make 5000 'x' in
+  let out = Observability_redact.truncate_json_document ~max_len:4000 raw in
+  Alcotest.(check bool) "non-JSON falls back to the byte preview" true
+    (String_util.contains_substring out "(truncated)")
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -394,6 +424,10 @@ let () =
             test_github_prefix_no_false_positive;
           Alcotest.test_case "ordered passes cover a bearer value holding a url credential" `Quick
             test_ordered_passes_cover_a_bearer_value_holding_a_url_credential;
+          Alcotest.test_case "truncate_json_document keeps json parseable" `Quick
+            test_truncate_json_document_keeps_json_parseable;
+          Alcotest.test_case "truncate_json_document passes non-json through" `Quick
+            test_truncate_json_document_passes_non_json_through;
         ] );
       ( "tool_observability",
         [

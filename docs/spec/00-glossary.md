@@ -117,17 +117,19 @@ status: reference
   접수 응답은 실행 완료를 뜻하지 않는다.
 
 **Turn Row Source (턴 행 출처)**
-: 채팅 transcript가 한 turn의 행을 그리는 출처. 한 turn의 행은 한 번에 한 출처에서만
-  나온다. 넷이다 — `live`(이 pane이 연 요청의 SSE stream), `observed`(이 pane이 열지
-  않은 turn: operation journal을 읽어 따라간다), `settled`(stream이나 journal이 끝을
-  전한 held log), `committed only`(그 turn의 log가 없어 transcript page의 행을 그대로
-  그린다). log가 그 turn을 대신하면(`turn_log_holds_the_turn`: log가 committed이고
-  stream이 실패를 전했거나 기록된 reply와 함께 끝났을 때) 그 log가 스스로 그리는
-  committed 행은 timeline에서 빠지고(`rows_the_logs_do_not_draw`), 끝날 수 없게 된
-  Working log(journal을 못 읽거나 reply·failure가 기록됨)는 observed 집합에서 빠져
-  committed 행이 그 turn을 대신한다. `live`는 `log_projection ~committed:false`,
-  `observed`는 `held_projection ~committed:false`, `settled`는 `held_projection
-  ~committed:true`로 그린다.
+: 채팅 transcript가 한 turn의 행을 그리는 출처. 코드의 타입 이름이 아니라 이 문서와
+  [pane 해부도](../diagrams/tui-chat-pane-anatomy.html)가 쓰는 라벨이다. 한 turn의 행은
+  한 번에 한 출처에서만 나온다. 넷이다 — `live`(이 pane이 연 요청의 SSE stream),
+  `observed`(이 pane이 열지 않았거나, 열었다가 stream을 잃은 turn: operation journal을
+  읽어 따라간다), `settled`(stream이나 journal이 끝을 전한 held log), `committed only`(그
+  turn을 대신하는 log가 없어 transcript page의 행을 그대로 그린다 — log 없음 · reply 없이
+  끝난 취소 turn · 끝날 수 없게 된 Working log). log가 그 turn을 대신하면
+  (`turn_log_holds_the_turn`: log가 committed이고 stream이 실패를 전했거나 기록된 reply와
+  함께 끝났을 때) 그 log가 스스로 그리는 committed 행은 timeline에서 빠지고
+  (`rows_the_logs_do_not_draw`), 끝날 수 없게 된 Working log(journal을 못 읽거나
+  reply·failure가 기록됨)는 observed 집합에서 빠져 committed 행이 그 turn을 대신한다.
+  `live`는 `log_projection ~committed:false`, `observed`는 `held_projection
+  ~committed:false`, `settled`는 `held_projection ~committed:true`로 그린다.
   → [Masc_tui_types](../../bin/masc_tui_types.ml),
   [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
 

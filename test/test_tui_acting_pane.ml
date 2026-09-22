@@ -1489,10 +1489,10 @@ let test_each_model_response_gets_a_line_over_its_calls () =
         (List.combine view.Pane.rows view.Pane.targets))
     [ ( Pane.Oldest_first
       , "oldest first"
-      , [ "response Â· 2 calls"; "Read"; "Grep"; "response Â· 1 call"; "Execute" ] )
+      , [ "response · 2 calls"; "Read"; "Grep"; "response · 1 call"; "Execute" ] )
     ; ( Pane.Newest_first
       , "newest first"
-      , [ "response Â· 1 call"; "Execute"; "response Â· 2 calls"; "Grep"; "Read" ] )
+      , [ "response · 1 call"; "Execute"; "response · 2 calls"; "Grep"; "Read" ] )
     ]
 
 (* The planned index is not the response. A concurrent batch settles in any
@@ -1558,10 +1558,10 @@ let test_wire_calls_split_into_responses_too () =
   in
   let texts = List.map text (responses_view ~order:Pane.Oldest_first calls).Pane.rows in
   check bool "a line over the first response" true
-    (contains "response Â· 1 call" (List.nth texts first_call_row));
+    (contains "response · 1 call" (List.nth texts first_call_row));
   check bool "its call" true (contains "Read" (List.nth texts (first_call_row + 1)));
   check bool "a line over the second" true
-    (contains "response Â· 1 call" (List.nth texts (first_call_row + 2)));
+    (contains "response · 1 call" (List.nth texts (first_call_row + 2)));
   check bool "its call" true (contains "Execute" (List.nth texts (first_call_row + 3)))
 
 let test_a_call_row_names_the_call_a_press_opens () =

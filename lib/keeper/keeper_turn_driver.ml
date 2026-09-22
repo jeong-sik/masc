@@ -906,7 +906,8 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.No_progress_truncated
                 | Keeper_runtime_failure_route.Refusal_body_not_received
                 | Keeper_runtime_failure_route.Generation_repeated
-                | Keeper_runtime_failure_route.Attempt_rejected )
+                | Keeper_runtime_failure_route.Attempt_rejected
+                | Keeper_runtime_failure_route.Provider_reported_failure )
             } ->
           ()
         (* The turn's input or MASC itself failed; another candidate would not

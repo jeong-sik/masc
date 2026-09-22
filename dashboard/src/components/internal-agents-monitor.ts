@@ -747,7 +747,7 @@ export function InternalAgentsMonitor() {
                           ? 'JEV unavailable: Board lane is CLI-only'
                           : lane.jev.state === 'lane_unavailable'
                             ? 'JEV unavailable: Board lane is not ready'
-                            : `JEV CONFIGURED · ${lane.jev.models.join(', ')}`
+                            : `JEV CONFIGURED · ${lane.jev.destinations.map(d => `${d.destinationUri} (${d.model})`).join(', ')}`
                     return html`
                       <tr key=${lane.laneId}>
                         <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>

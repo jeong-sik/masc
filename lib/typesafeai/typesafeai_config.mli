@@ -84,10 +84,11 @@ val unknown_excluded_keepers : known:string list -> string list
 
 type readiness =
   | Off
-  | Configured of { models : string list }
+  | Configured of { destinations : Typesafeai_client.destination_id list }
 
 val readiness : unit -> readiness
 (** Credential-free Board attention readiness for operator projections. [Off]
     covers a disabled Board gate or lane and no armed destination;
-    [Configured] carries the model ids of the armed destinations in walk
-    order, never a key. *)
+    [Configured] carries the armed destinations in walk order, each as its
+    observation URL and the model id it is asked for, never a key. Two
+    destinations may share a model id, so the URL is what tells them apart. *)

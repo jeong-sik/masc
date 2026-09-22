@@ -424,15 +424,15 @@ let json_string_opt = function
 
 type jev_lane_readiness =
   | Jev_off
-  | Jev_configured of { models : string list }
+  | Jev_configured of { destinations : Typesafeai_client.destination_id list }
   | Jev_cli_only
   | Jev_lane_unavailable
 
 let jev_lane_readiness configuration = function
   | Typesafeai_config.Off -> Jev_off
-  | Typesafeai_config.Configured { models } ->
+  | Typesafeai_config.Configured { destinations } ->
     (match configuration with
-     | Configured { admitted_slots = _ :: _; _ } -> Jev_configured { models }
+     | Configured { admitted_slots = _ :: _; _ } -> Jev_configured { destinations }
      | Configured { admitted_slots = []; cli_slots = _ :: _; _ } -> Jev_cli_only
      | Configured { admitted_slots = []; cli_slots = []; _ }
      | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
@@ -442,10 +442,10 @@ let jev_readiness_json = function
   | Jev_off -> `Assoc [ "state", `String "off" ]
   | Jev_cli_only -> `Assoc [ "state", `String "cli_only" ]
   | Jev_lane_unavailable -> `Assoc [ "state", `String "lane_unavailable" ]
-  | Jev_configured { models } ->
+  | Jev_configured { destinations } ->
     `Assoc
       [ "state", `String "configured"
-      ; "models", `List (List.map (fun model -> `String model) models)
+      ; "destinations", `List (List.map Typesafeai_client.destination_id_to_yojson destinations)
       ]
 ;;
 

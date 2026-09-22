@@ -240,11 +240,22 @@ describe('InternalAgentsMonitor', () => {
     api.fetchStandaloneLanes.mockResolvedValue({
       ...laneSnapshot,
       lanes: laneSnapshot.lanes.map(item => item.laneId === 'board_attention_exact'
-        ? { ...item, jev: { state: 'configured' as const, models: ['jev-next', '~typesafe/jev-latest'] } }
+        ? {
+            ...item,
+            jev: {
+              state: 'configured' as const,
+              destinations: [
+                { destinationUri: 'https://jev.invalid/v1/systemone', model: 'jev-next' },
+                { destinationUri: 'https://reserve.invalid/api/v1/systemone', model: '~typesafe/jev-latest' },
+              ],
+            },
+          }
         : item),
     })
     sse.refresh?.()
-    expect(await within(matrix).findByText('JEV CONFIGURED · jev-next, ~typesafe/jev-latest')).toBeTruthy()
+    expect(await within(matrix).findByText(
+      'JEV CONFIGURED · https://jev.invalid/v1/systemone (jev-next), https://reserve.invalid/api/v1/systemone (~typesafe/jev-latest)',
+    )).toBeTruthy()
     expect(within(matrix).queryByText('JEV OFF')).toBeNull()
 
     for (const [state, label] of [

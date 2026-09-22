@@ -131,7 +131,7 @@ let unknown_excluded_keepers ~known =
 
 type readiness =
   | Off
-  | Configured of { models : string list }
+  | Configured of { destinations : Typesafeai_client.destination_id list }
 
 let readiness () =
   if not (policy ()).Runtime_schema.board_attention
@@ -145,10 +145,5 @@ let readiness () =
       (* [lane_destinations] answers only about the lane and its keys. *)
       Off
     | Ok (first, rest) ->
-      Configured
-        { models =
-            List.map
-              (fun (destination : Typesafeai_client.destination) -> destination.model)
-              (first :: rest)
-        })
+      Configured { destinations = List.map Typesafeai_client.identify (first :: rest) })
 ;;

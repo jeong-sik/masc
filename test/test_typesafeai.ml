@@ -422,12 +422,24 @@ let test_config_readiness_is_typed_and_credential_free () =
       match C.readiness () with
       | C.Off -> ()
       | C.Configured _ -> Alcotest.fail "a lane turned off reported JEV configured");
-    with_policy (policy ~destinations:(destination ~model:"jev-next" (), []) ()) (fun () ->
+    (* The projection names a destination by its observation URL: whatever the
+       configured endpoint carries in userinfo or query stays out of it. *)
+    let configured =
+      destination
+        ~endpoint:"https://user:url-secret@fixture.invalid/systemone?token=url-secret"
+        ~model:"jev-next"
+        ()
+    in
+    with_policy (policy ~destinations:(configured, []) ()) (fun () ->
       match C.readiness () with
       | C.Off -> Alcotest.fail "an enabled configuration reported JEV off"
-      | C.Configured { models } ->
-        Alcotest.(check (list string)) "readiness carries the armed models, never a key"
-          [ "jev-next" ] models))
+      | C.Configured { destinations } ->
+        Alcotest.(check (list (pair string string)))
+          "readiness carries the armed destinations, never a key"
+          [ "https://fixture.invalid/systemone", "jev-next" ]
+          (List.map
+             (fun (d : Masc.Typesafeai_client.destination_id) -> d.destination_uri, d.model)
+             destinations)))
 ;;
 
 (* Each gate has its own switch on top of the lane's: a key turns the lane

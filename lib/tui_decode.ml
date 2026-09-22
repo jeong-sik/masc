@@ -152,9 +152,14 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev_destination = {
+  sljd_destination_uri : string;
+  sljd_model : string;
+}
+
 type standalone_lane_jev =
   | Jev_off
-  | Jev_configured of { models : string list }
+  | Jev_configured of { destinations : standalone_lane_jev_destination list }
   | Jev_cli_only
   | Jev_lane_unavailable
 
@@ -6069,6 +6074,17 @@ let decode_standalone_lane_slot_count json =
   let* slsc_count = required_int_field json "count" in
   Ok { slsc_slot_id; slsc_count }
 
+let decode_standalone_lane_jev_destination json =
+  let non_blank key =
+    let* value = required_string_field json key in
+    match String.trim value with
+    | "" -> Error (Printf.sprintf "field '%s' must be a non-blank string" key)
+    | trimmed -> Ok trimmed
+  in
+  let* sljd_destination_uri = non_blank "destination_uri" in
+  let* sljd_model = non_blank "model" in
+  Ok { sljd_destination_uri; sljd_model }
+
 let decode_standalone_lane_jev json =
   let* state = required_string_field json "state" in
   match state with
@@ -6076,11 +6092,14 @@ let decode_standalone_lane_jev json =
   | "cli_only" -> Ok Jev_cli_only
   | "lane_unavailable" -> Ok Jev_lane_unavailable
   | "configured" ->
-    let* models = require_string_list json "models" in
-    let models = List.map String.trim models in
-    if models = [] || List.exists (String.equal "") models
-    then Error "standalone lane JEV models must be a non-empty list of non-empty strings"
-    else Ok (Jev_configured { models })
+    let* destinations = required_list_field json "destinations" in
+    let* destinations =
+      decode_list "destinations" decode_standalone_lane_jev_destination destinations
+    in
+    (* The server reports [configured] only with an armed destination. *)
+    (match destinations with
+     | [] -> Error "standalone lane JEV destinations must name at least one server"
+     | _ :: _ -> Ok (Jev_configured { destinations }))
   | other -> Error ("standalone lane JEV state: unknown value " ^ other)
 
 let decode_standalone_lane json =

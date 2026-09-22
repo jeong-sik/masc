@@ -1294,9 +1294,16 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev_destination = {
+  sljd_destination_uri : string;
+  sljd_model : string;
+}
+(** One armed Jev destination: the URL it is observed by and the model id it
+    is asked for. Two destinations may share a model id. *)
+
 type standalone_lane_jev =
   | Jev_off
-  | Jev_configured of { models : string list }
+  | Jev_configured of { destinations : standalone_lane_jev_destination list }
   | Jev_cli_only
   | Jev_lane_unavailable
 

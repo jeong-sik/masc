@@ -27,6 +27,37 @@ SOURCE_MODULES = (
 )
 
 
+PANE_BORDER = "\u2502".encode()
+OUTPUT_PANE_ROWS = re.compile(rb"RUN RESULT\s+\d+-\d+/(\d+)")
+
+
+def unwrapped(screen: bytes) -> bytes:
+    """The run result pane's rows joined end to end, without a separator.
+
+    The pane draws the report as a JSON code block and cuts a line wider than
+    itself where it runs out of cells, so a value deep in the report continues
+    on the next row. Joining the rows puts such a value back together,
+    whatever the pane's width. No needle spans two JSON lines, so joining
+    cannot make one match.
+    """
+    return b"".join(
+        row.rpartition(PANE_BORDER)[2].strip() for row in screen.split(b"\n")
+    )
+
+
+def output_pane_rows(screen: bytes) -> int:
+    """How many rows the run result pane holds, read from its title.
+
+    The title's window reads ``first-last/total`` over the rows the pane
+    actually draws. The report's JSON line count undercounts them: a line
+    wider than the pane takes two rows or more, and one ``j`` visits one row.
+    """
+    match = OUTPUT_PANE_ROWS.search(screen)
+    if match is None:
+        raise AssertionError(f"run result pane omitted its row window: {screen!r}")
+    return int(match.group(1))
+
+
 def run_case(executable: str, fixture_path: Path) -> None:
     encoded = fixture_path.read_bytes()
     fixture = cast(dict[str, Any], json.loads(encoded))
@@ -153,20 +184,17 @@ def run_case(executable: str, fixture_path: Path) -> None:
                 ).encode()
             )
         seen = first_screen
-        # Only the short report is searched. The unrelated exact_output can
-        # be much larger, so its size must not decide how far this test walks.
-        for _ in range(
-            len(
-                json.dumps(
-                    run["output"]
-                    if scenario in ("cancel-after-commit", "cancel-after-completion")
-                    else gate,
-                    indent=2,
-                ).splitlines()
-            )
-            + 1
-        ):
-            if all(needle in seen for needle in needles):
+        joined = unwrapped(first_screen)
+
+        def rendered(needle: bytes) -> bool:
+            return needle in seen or needle in joined
+
+        # One step visits one row, and the pane's title says how many rows
+        # there are. The gate report is at the top of the output, ahead of
+        # the exact_output, so the walk ends as soon as every needle has been
+        # seen; only a failure walks the pane to its last row.
+        for _ in range(output_pane_rows(first_screen)):
+            if all(rendered(needle) for needle in needles):
                 break
             h.read_available(fd, output)
             start = len(output)
@@ -175,9 +203,11 @@ def run_case(executable: str, fixture_path: Path) -> None:
             os.write(fd, b"j")
             h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
             h.drain_until_quiet(process, fd, output)
-            seen += b"\n" + h.screen_text(bytes(output))
+            screen = h.screen_text(bytes(output))
+            seen += b"\n" + screen
+            joined += b"\n" + unwrapped(screen)
         for needle in needles:
-            if needle not in seen:
+            if not rendered(needle):
                 raise AssertionError(f"{scenario} did not render {needle!r}")
 
         if scenario == "judged":

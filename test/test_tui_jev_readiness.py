@@ -21,8 +21,16 @@ def run(executable: str, captures: Path | None) -> None:
     cases = (
         ({"state": "off"}, "JEV OFF"),
         (
-            {"state": "configured", "models": ["jev-fixture"]},
-            "JEV CONFIGURED · jev-fixture",
+            {
+                "state": "configured",
+                "destinations": [
+                    {
+                        "destination_uri": "https://jev.invalid/v1/systemone",
+                        "model": "jev-fixture",
+                    }
+                ],
+            },
+            "JEV CONFIGURED · https://jev.invalid/v1/systemone (jev-fixture)",
         ),
         ({"state": "cli_only"}, "JEV unavailable: Board lane is CLI-only"),
         ({"state": "lane_unavailable"}, "JEV unavailable: Board lane is not ready"),

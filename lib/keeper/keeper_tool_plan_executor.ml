@@ -480,6 +480,7 @@ let execute_keeper_with_authority
       ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
+      ~keeper_turn_id
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -541,6 +542,7 @@ let execute_keeper_with_authority
         ~meta
         ~publication_recovery
         ~ctx_snapshot
+        ~keeper_turn_id
         ?turn_sandbox_factory
         ?clock
         ?continuation_channel

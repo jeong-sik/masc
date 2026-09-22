@@ -628,19 +628,7 @@ let wakeup_relevant_keeper_for_board_signal
        let board_ym = Eio_guard.create_yield_meter () in
        List.iter
          (fun (entry : Keeper_registry.registry_entry) ->
-            (* [read_meta] is the raw durable snapshot, where config-owned
-               fields decode as placeholders ([board_interests] among them
-               since #37586 -- see Keeper_meta_json_parse's "eleven config
-               fields" comment, pinned by test_keeper_meta_config_not_durable).
-               [Keeper_board_audience.route_for_keeper] now reads
-               [board_interests] to gate the Discoverable audience, so the
-               raw snapshot always routed to [Ignore]. [read_effective_meta]
-               overlays the Keeper's own TOML profile the way
-               [Keeper_meta_json_parse]'s adoption contract requires, which
-               restores every placeholder field (not just this one) and stays
-               the same call the durable-catchup stack (#37644) uses at this
-               site. *)
-            (match read_effective_meta config entry.name with
+            (match read_meta config entry.name with
              | Error detail ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -661,6 +649,17 @@ let wakeup_relevant_keeper_for_board_signal
                  "board signal Keeper metadata missing: keeper=%s"
                  entry.name
              | Ok (Some meta) ->
+               (* [read_meta] is the raw durable snapshot, where config-owned
+                  fields decode as placeholders ([board_interests] among them
+                  since #37586 -- see Keeper_meta_json_parse's "eleven config
+                  fields" comment, pinned by test_keeper_meta_config_not_durable).
+                  [Keeper_board_audience.route_for_keeper] now reads
+                  [board_interests] to gate the Discoverable audience, so the
+                  raw snapshot always routed to [Ignore]. The registry entry
+                  already carries the live meta this Keeper registered with;
+                  borrow just that one field rather than the whole snapshot,
+                  which stays authoritative for everything else here. *)
+               let meta = { meta with board_interests = entry.meta.board_interests } in
                (match route_for_keeper_with_bounded_retry ~audience ~meta signal with
                 | Keeper_world_observation_board_signal.Available
                     Keeper_board_audience.Judge_discoverable ->
@@ -712,10 +711,7 @@ let wakeup_relevant_keeper_for_board_signal
        List.iter
       (fun (entry : Keeper_registry.registry_entry) ->
          (try
-            (* Same reasoning as the Discoverable branch above: overlay via
-               [read_effective_meta] rather than borrowing one field from the
-               raw snapshot. *)
-            match read_effective_meta config entry.name with
+            match read_meta config entry.name with
         | Error detail ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -734,6 +730,11 @@ let wakeup_relevant_keeper_for_board_signal
             "board signal Keeper metadata missing: keeper=%s"
             entry.name
         | Ok (Some meta) ->
+          (* Same restoration as the Discoverable branch above: [read_meta]
+             cannot carry [board_interests] (a config-owned placeholder), and
+             the [Board_comment_added] check in [route_for_keeper] needs the
+             registering Keeper's actual value. *)
+          let meta = { meta with board_interests = entry.meta.board_interests } in
           (match route_for_keeper_with_bounded_retry ~audience ~meta signal with
            | Keeper_world_observation_board_signal.Unavailable unavailable ->
              Otel_metric_store.inc_counter

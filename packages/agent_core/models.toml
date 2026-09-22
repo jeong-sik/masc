@@ -2147,9 +2147,12 @@ supports_native_streaming = true
 [[models]]
 id_prefix = "grok-latest"
 base = "openai_chat_extended"
-# grok-latest is the alias to the newest grok, which cannot disable reasoning
-# and does accept "xhigh" (grok-4.7 today).
-accepted_reasoning_efforts = ["low", "medium", "high", "xhigh"]
+# No accepted_reasoning_efforts: xAI's model data does not document a
+# "grok-latest" alias (it lists grok-4.3-latest, grok-4.5-latest,
+# grok-build-latest), and this row mixed two models — grok-4.3's context
+# (1000000) with grok-4.7's ladder. Until the alias is confirmed or measured,
+# leaving it undeclared is the safe side: a request that carries an effort is
+# refused before it is sent, so a wrong value never goes out silently.
 provider_name = "xai"
 max_context_tokens = 1000000
 supports_tools = true

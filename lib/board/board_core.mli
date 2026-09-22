@@ -84,8 +84,8 @@ val create_store : unit -> store
 val with_lock : store -> (unit -> 'a) -> 'a
 
 (** [with_persist_lock store f] serializes JSONL writes. Callers must not hold
-    [with_lock] while acquiring it; compute any state snapshot under
-    [with_lock], release it, then acquire [with_persist_lock]. *)
+    [with_lock] while acquiring it. Acquire this lock before capturing a
+    snapshot under [with_lock], and retain it through the corresponding write. *)
 val with_persist_lock : store -> (unit -> 'a) -> 'a
 
 (** Clears [karma_cache] and [sorted_posts_cache].  Called

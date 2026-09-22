@@ -10,6 +10,7 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
+  ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_core.Types.message list
@@ -113,6 +114,7 @@ let build_turn_context
   (* 5. Build final turn system prompt via caller callback. *)
   let { Keeper_agent_prompt_metrics.system_prompt = turn_system_prompt
       ; dynamic_context
+      ; dynamic_context_for_tools
       } =
     build_turn_prompt
       ~base_system_prompt
@@ -173,6 +175,7 @@ let build_turn_context
    | Skip_already_checkpointed_user_turn -> ());
   { turn_system_prompt
   ; dynamic_context
+  ; dynamic_context_for_tools
   ; temporal_context
   ; prompt_metrics
   ; history_messages

@@ -68,3 +68,11 @@ val digest_failures : ?limit:int -> turn list -> failure_digest list
 (** Collapses the window's refusals into one row per distinct rejected
     (tool, input), counted, newest occurrence first, capped at [limit]
     (default 8). Pure. Empty when every call in the window succeeded. *)
+
+val externalize_failures :
+  base_path:string -> keeper_name:string -> policy:Keeper_input_policy.t ->
+  tools:Agent_core.Tool.t list -> turn list -> turn list
+(** Small transmission view of failed calls, preserving tool, outcome and turn.
+    Only a genuinely offered canonical artifact reader permits references.
+    Original rows are unchanged; Wide, missing readers and storage failures
+    retain exact input and detail. Performs blob I/O at the request boundary. *)

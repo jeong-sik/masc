@@ -253,11 +253,64 @@ let test_flush_failure_keeps_the_post_bump_scheduled () =
   Unix.putenv "MASC_BASE_PATH" working_base
 ;;
 
+let test_creation_commits_before_releasing_persistence () =
+  let store =
+    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
+  in
+  let counts store =
+    Board.with_lock store (fun () ->
+      [ Hashtbl.length store.Board.posts
+      ; Hashtbl.length store.Board.comments
+      ; Hashtbl.length store.Board.sub_boards
+      ])
+  in
+  let released_states = ref [] in
+  let noop : Board_metrics_hooks.observer =
+    { observe_persist_lock_acquire_sec = (fun _ -> ())
+    ; observe_persist_lock_held_sec = (fun _ -> ())
+    ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ())
+    }
+  in
+  Eio.Switch.run (fun sw ->
+    Eio.Switch.on_release sw (fun () -> Board_metrics_hooks.set_observer noop);
+    Board_metrics_hooks.set_observer
+      { noop with observe_persist_lock_held_sec = (fun _ ->
+          (* This existing observer runs at the end of the persistence
+             critical section. Every successful append must already be
+             visible to the next snapshot writer before it can enter. *)
+          released_states := counts store :: !released_states) };
+    let post = create_post_exn ~author:"commit-author" ~content:"durable post" in
+    (match Board_dispatch.add_comment
+       ~post_id:(Board.Post_id.to_string post.id)
+       ~author:"commit-commenter" ~content:"durable comment" () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Board.show_board_error e));
+    (match Board_dispatch.create_sub_board ~slug:"commit-board"
+       ~name:"Commit board" ~description:"Persistence boundary"
+       ~owner:"commit-author" () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Board.show_board_error e)));
+  Alcotest.(check (list (list int)))
+    "post, comment and sub-board are committed before persistence unlock"
+    [ [1; 0; 0]; [1; 1; 0]; [1; 1; 1] ]
+    (List.rev !released_states);
+  flush ();
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let reloaded =
+    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
+  in
+  Alcotest.(check (list int)) "all three creations survive snapshot and reload"
+    [1; 1; 1] (counts reloaded)
+
 let () =
   Alcotest.run "board_comment_post_write_ahead"
     [
       ( "durability",
         [
+          Alcotest.test_case "creations commit before persistence unlock" `Quick
+            (with_eio test_creation_commits_before_releasing_persistence);
           Alcotest.test_case
             "comment: failed append leaves nothing committed" `Quick
             (with_eio test_comment_append_failure_commits_nothing);

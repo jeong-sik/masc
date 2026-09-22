@@ -209,6 +209,93 @@ output_per_million = 10.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
+# The same six models, scoped to the native Anthropic provider ([[providers]]
+# id = "claude" below). A config that declares a provider id reads only rows
+# scoped to that provider: runtime_adapter.model_capabilities_override_of_model_spec
+# calls Capabilities.for_provider_model_id with allow_bare_fallback:false, so
+# the bare rows above never answered for it. The lookup fell to
+# capabilities_of_kind Anthropic, which declares no effort ladder, and every
+# request carrying reasoning-effort was refused as
+# Undeclared_reasoning_effort_capability (#37849). The official Claude Code
+# client does not come through here; it answers from the claude_code prefix row
+# below.
+#
+# Each row repeats its bare row plus provider_name, because the catalog has no
+# row inheritance. test_capabilities pins every pair equal, so a price or ladder
+# edit to one side cannot leave the other behind.
+
+[[models]]
+id_prefix = "claude-fable-5"
+base = "anthropic"
+provider_name = "claude"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-fable-5-1"
+base = "anthropic"
+provider_name = "claude"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.025
+
+[[models]]
+id_prefix = "claude-mythos-5"
+base = "anthropic"
+provider_name = "claude"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+
+[[models]]
+id_prefix = "claude-mythos-preview"
+base = "anthropic"
+provider_name = "claude"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+
+[[models]]
+id_prefix = "claude-opus-5"
+base = "anthropic"
+provider_name = "claude"
+anthropic_thinking_control = "adaptive_only"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 25.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-sonnet-5"
+base = "anthropic"
+provider_name = "claude"
+anthropic_thinking_control = "adaptive_default"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 [[models]]
 id_prefix = "claude_code"
 base = "anthropic"

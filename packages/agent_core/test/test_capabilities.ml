@@ -119,6 +119,89 @@ let test_openai_extended () =
   check bool "has min_p" true c.supports_min_p
 ;;
 
+(* #37849. A config that declares a provider id reads only rows scoped to that
+   provider: Runtime_adapter calls for_provider_model_id with
+   allow_bare_fallback:false. The bare Claude rows therefore never answered for
+   the native Anthropic provider ([[providers]] id "claude"); the lookup fell to
+   the Anthropic preset, which declares no effort ladder, and every request
+   carrying reasoning-effort was refused as
+   Undeclared_reasoning_effort_capability. *)
+let native_anthropic_models =
+  [ "claude-fable-5"
+  ; "claude-fable-5-1"
+  ; "claude-mythos-5"
+  ; "claude-mythos-preview"
+  ; "claude-opus-5"
+  ; "claude-sonnet-5"
+  ]
+;;
+
+let test_native_anthropic_provider_reads_each_models_ladder () =
+  List.iter
+    (fun model_id ->
+       match
+         ( Capabilities.for_provider_model_id
+             ~wire:(Some Provider_kind.Anthropic)
+             ~allow_bare_fallback:false
+             ~provider_label:"claude"
+             ~model_id
+         , Capabilities.for_model_id model_id )
+       with
+       | None, _ -> fail (model_id ^ ": provider claude has no row")
+       | _, None -> fail (model_id ^ ": no bare row to compare against")
+       | Some scoped, Some bare ->
+         check
+           bool
+           (model_id ^ " declares a ladder")
+           true
+           (Option.is_some scoped.Capabilities.accepted_reasoning_efforts);
+         check
+           (option (list string))
+           (model_id ^ " ladder matches the bare row")
+           (accepted_reasoning_effort_strings bare)
+           (accepted_reasoning_effort_strings scoped))
+    native_anthropic_models
+;;
+
+(* The catalog has no row inheritance, so each scoped row repeats its bare row.
+   Comparing whole entries catches a price, a limit or a ladder edited on one
+   side only. *)
+let test_native_anthropic_rows_repeat_their_bare_rows () =
+  match Model_catalog.global () with
+  | None -> fail "the embedded catalog did not load"
+  | Some catalog ->
+    let entries = Model_catalog.model_entries catalog in
+    let prefix (e : Model_catalog.model_entry) =
+      Model_identifiers.Id_prefix.to_string e.id_prefix
+    in
+    let scoped =
+      List.filter
+        (fun (e : Model_catalog.model_entry) -> e.provider_name = Some "claude")
+        entries
+    in
+    check
+      (list string)
+      "the scoped rows are the native Anthropic models"
+      native_anthropic_models
+      (List.map prefix scoped);
+    List.iter
+      (fun (s : Model_catalog.model_entry) ->
+         match
+           List.find_opt
+             (fun (b : Model_catalog.model_entry) ->
+                b.provider_name = None && String.equal (prefix b) (prefix s))
+             entries
+         with
+         | None -> fail (prefix s ^ ": scoped row has no bare row")
+         | Some b ->
+           check
+             bool
+             (prefix s ^ " repeats its bare row")
+             true
+             ({ s with provider_name = None } = b))
+      scoped
+;;
+
 let test_lookup_mimo_v25_pro () =
   match
     Capabilities.for_provider_model_id
@@ -3585,6 +3668,16 @@ let () =
             "a row with no policy rejects an explicit toggle"
             `Quick
             test_anthropic_no_policy_rejects_explicit_toggle
+        ] )
+    ; ( "native anthropic provider"
+      , [ test_case
+            "reads each model's effort ladder"
+            `Quick
+            test_native_anthropic_provider_reads_each_models_ladder
+        ; test_case
+            "scoped rows repeat their bare rows"
+            `Quick
+            test_native_anthropic_rows_repeat_their_bare_rows
         ] )
     ]
 ;;

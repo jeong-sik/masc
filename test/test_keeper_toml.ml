@@ -1193,19 +1193,40 @@ let rec ocaml_source_files path =
    Seven of the thirteen it reported were that.
 
    Quoted-string literals ({|...|}) count, and their bodies are taken
-   verbatim. Comments are not tracked: a quoted name inside one reads like a
-   fixture from here and there are none in the tree. *)
+   verbatim. Comments are skipped, and they nest: a quoted name inside one
+   is provenance, not a fixture. A string inside a comment is skipped too,
+   so a close-comment token in one does not end the comment early. *)
 let string_literals_of_ocaml source =
   let n = String.length source in
   let buf = Buffer.create 256 in
   let rec scan i =
     if i >= n
     then ()
+    else if i + 1 < n && source.[i] = '(' && source.[i + 1] = '*'
+    then comment (i + 2) 1
     else if source.[i] = '"'
     then quoted (i + 1)
     else if i + 1 < n && source.[i] = '{' && source.[i + 1] = '|'
     then braced (i + 2)
     else scan (i + 1)
+  and comment i depth =
+    if i >= n
+    then ()
+    else if i + 1 < n && source.[i] = '*' && source.[i + 1] = ')'
+    then if depth = 1 then scan (i + 2) else comment (i + 2) (depth - 1)
+    else if i + 1 < n && source.[i] = '(' && source.[i + 1] = '*'
+    then comment (i + 2) (depth + 1)
+    else if source.[i] = '"'
+    then comment_quoted (i + 1) depth
+    else comment (i + 1) depth
+  and comment_quoted i depth =
+    if i >= n
+    then ()
+    else if source.[i] = '\\' && i + 1 < n
+    then comment_quoted (i + 2) depth
+    else if source.[i] = '"'
+    then comment (i + 1) depth
+    else comment_quoted (i + 1) depth
   and quoted i =
     if i >= n
     then ()

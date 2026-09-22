@@ -767,6 +767,24 @@ status: reference
   저장 결과, 하나는 turn 경계 위치다.
   → [Keeper_turn_boundaries](../../lib/keeper/keeper_turn_boundaries.ml)
 
+**Turn Start (턴 시작 위치)**
+: 씨앗도 흡수 지점도 없을 때 이번 요청이 어디서 시작하는가를 정한 값
+  (`Keeper_carried_front.turn_start`). 닫힌 둘이고 wire `kind`가 이름이다 —
+  `Turn_boundary { end_atom }`(`turn_boundary`), `Turn_boundary_unknown { reason }`
+  (`turn_boundary_unknown`). `Turn_boundary`는 이 History에서 마지막으로 끝난 turn의
+  경계이고, 그 경계를 지금 History와 digest로 맞춰 본 값만 쓴다. 끝난 turn이 없는
+  History에서는 0이라 갖고 있는 전부를 싣는다(새 Keeper의 짧은 History). 경계
+  저장소를 못 읽었거나 어떤 경계도 지금 History와 맞지 않으면
+  `Turn_boundary_unknown`이고, 요청은 가장 새 Atom 하나만 싣는다 — 모르는 시작을
+  0으로 접어 History 전체를 보내지 않는다. 요청이 어디서 시작했는지는 `origin`이
+  따로 적는다(`Turn_start`·`Turn_start_unknown`).
+  **경고**: `turn_start`의 `Turn_boundary`·`Turn_boundary_unknown`과 `origin`의
+  `Turn_start`·`Turn_start_unknown`은 `Turn Boundary Position`의 닫힌 넷
+  (`Atom_history`·`Empty_atom_history`·`No_atom_history`·`Stale_noop`)과 **다른
+  타입**이다. 이름이 겹쳐 보여도 하나는 요청이 시작한 자리, 하나는 turn이 끝난
+  History의 끝 위치다.
+  → [Keeper_carried_front.turn_start](../../lib/keeper/keeper_carried_front.mli)
+
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
   Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.

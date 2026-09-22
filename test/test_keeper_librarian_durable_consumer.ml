@@ -997,16 +997,27 @@ let test_superseded_intervening_checkpoint_is_passed () =
   establish_progress config ~trace_id:trace_a "a";
   save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
   append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  (* [to_json] refuses a version this build does not write, which is what the
+     field is for, so the fixture cannot be built by handing it a retired
+     number. Only an older build leaves such a file, and this writes what that
+     build would have: the current document with the number put back. The
+     control below reads the file and fails if that did not take. *)
   let older =
-    { (checkpoint ~trace_id:trace_b [ message "b" ] 1) with
-      Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version - 1
-    }
+    match
+      Agent_core.Checkpoint.to_json (checkpoint ~trace_id:trace_b [ message "b" ] 1)
+    with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "version"
+             then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+             else key, value)
+           fields)
+    | _ -> fail "a checkpoint document is a JSON object"
   in
   let session_dir_b =
-    overwrite_checkpoint
-      config
-      ~trace_id:trace_b
-      (Yojson.Safe.to_string (Agent_core.Checkpoint.to_json older))
+    overwrite_checkpoint config ~trace_id:trace_b (Yojson.Safe.to_string older)
   in
   (* Positive control, as [damage_checkpoint] does: the real store calls this
      superseded, not damaged. *)

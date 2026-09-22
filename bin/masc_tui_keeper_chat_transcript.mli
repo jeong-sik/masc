@@ -308,7 +308,8 @@ val unreadable : t -> unreadable option
     reasoning strings are terminal-safe. *)
 type trail_item =
   | Trail_thinking of string list
-      (** Non-blank reasoning lines of one contiguous stretch. *)
+      (** Reasoning lines of one contiguous stretch. A paragraph break is one
+          empty line; the stretch never opens or closes on one. *)
   | Trail_skill of skill_activity
       (** A Skill-as-tool call separated from generic tools so the chat can
           give its delivery/usage semantics a distinct visual treatment. *)

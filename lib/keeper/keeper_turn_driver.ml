@@ -1569,8 +1569,41 @@ let run_named
             let config = Workspace.default_config base_path in
             let ( let* ) = Result.bind in
             let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
+            (* Where a request without a fitting snapshot starts: the
+               Librarian's durable position when it is a place in this history
+               (RFC keeper-context-window-in-tokens §13.6), else this turn's
+               own boundary (§13.4). *)
+            let absorbed_or_turn_start ~why =
+              let absorbed =
+                match
+                  Keeper_librarian_progress.read
+                    ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                    ~keeper_id:keeper_name
+                with
+                | Ok (Some progress) ->
+                  Keeper_turn_driver_try_provider.absorbed_history
+                    ~trace_id ~messages:initial_messages progress
+                | Ok None -> None
+                | Error error ->
+                  Log.Keeper.warn ~keeper_name
+                    "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
+                    why (Keeper_librarian_progress.read_error_to_string error);
+                  None
+              in
+              match absorbed with
+              | Some (end_atom, continuity) ->
+                Log.Keeper.info ~keeper_name
+                  "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
+                  why end_atom;
+                Ok (Some continuity)
+              | None ->
+                Log.Keeper.info ~keeper_name
+                  "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
+                  why;
+                Ok (Some Keeper_turn_driver_try_provider.without_snapshot)
+            in
             match saved with
-            | None -> Ok (Some Keeper_turn_driver_try_provider.without_snapshot)
+            | None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved"
             | Some snapshot ->
               let* lines = Keeper_turn_boundaries.read
                 ~keepers_dir:(Workspace.keepers_runtime_dir config)
@@ -1582,14 +1615,16 @@ let run_named
                   ((Librarian_continuity_snapshot.Trace_mismatch
                    | Librarian_continuity_snapshot.History_changed
                    | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
-                (* Three different mismatches used to share one sentence, so
-                   a keeper whose snapshot did not fit (goo-yang-bong,
-                   2026-09-22: 12,720 messages, 44 cycles in a row) left no
-                   way to tell a new trace from a changed history. *)
-                Log.Keeper.info ~keeper_name
-                  "Librarian continuity does not fit the current history (%s); the request starts at this turn's own boundary"
-                  (Librarian_continuity_snapshot.error_to_string mismatch);
-                Ok (Some Keeper_turn_driver_try_provider.without_snapshot)
+                (* The snapshot no longer fits this history. The Librarian's
+                   durable position may still: a purge renumbers the atoms and
+                   moves that position with them (Keeper_checkpoint_purge) but
+                   leaves the snapshot in the old numbering, which is how a
+                   keeper came to send its 12,720 atoms, 16.4 MB, 44 cycles in
+                   a row (goo-yang-bong, 2026-09-22). From the position the
+                   request carries what the Librarian has not read (RFC
+                   keeper-context-window-in-tokens §13.6); with no position it
+                   starts at this turn's own boundary (§13.4). *)
+                absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)
               | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
       in
 	  let refused_carried_front = ref None in

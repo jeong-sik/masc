@@ -413,6 +413,21 @@ let thinking_lines t =
   |> String.split_on_char '\n'
   |> List.filter (fun line -> String.trim line <> "")
 
+(* A stretch of reasoning as the lines the pane draws. Models separate
+   paragraphs with blank lines, often several; one empty line keeps the break
+   and the rest is padding. No line opens or closes the stretch blank: the
+   block's own rows already frame it. *)
+let paragraph_lines lines =
+  let blank line = String.trim line = "" in
+  let rec go acc ~pending_break = function
+    | [] -> List.rev acc
+    | line :: rest when blank line -> go acc ~pending_break:(acc <> []) rest
+    | line :: rest ->
+        let acc = if pending_break then line :: "" :: acc else line :: acc in
+        go acc ~pending_break:false rest
+  in
+  go [] ~pending_break:false lines
+
 let finished_marker = "✓"
 
 let marker_of_outcome = function
@@ -1132,7 +1147,7 @@ let trail t =
         let lines =
           Buffer.contents buffer
           |> String.split_on_char '\n'
-          |> List.filter (fun line -> String.trim line <> "")
+          |> paragraph_lines
           |> List.map safe_line
         in
         let acc =

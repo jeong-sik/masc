@@ -85,9 +85,16 @@ let elapsed_text ~now started_at = duration_text (now -. started_at)
 type chat_activity_row =
   { lead : string
   ; rest : string
+  ; keys : string
+        (** What a key does about this row -- " · Esc stops it · /queue" on
+            the row of a turn Esc can stop, empty elsewhere. Apart from
+            [rest] because [rest] carries the preview's status, whose length
+            is the server's: appended after it, the keys were the cells a
+            100-column pane cut first. The renderer fits [rest] to what the
+            lead and the keys leave. *)
   }
 
-let chat_activity_row_text row = row.lead ^ row.rest
+let chat_activity_row_text row = row.lead ^ row.rest ^ row.keys
 
 (* The same running turn must remain visible while a submitted chat waits
    behind it. No ETA can be inferred from the turn's elapsed age.
@@ -97,9 +104,12 @@ let chat_activity_row_text row = row.lead ^ row.rest
    still mark. [text_tail_drawn]: the pane is drawing the turn's reply text
    itself (an observed turn read from its journal on every stream frame),
    so the preview's tail of the same text is left out rather than said
-   twice on one screen. *)
-let chat_activity ?(frame = -1) ~now ~keeper_name ~error ~text_tail_drawn rows =
-  let plain text = { lead = text; rest = "" } in
+   twice on one screen. [stop_keys] rides the running turn's row and no
+   other: attached to whichever row came first, it once landed on
+   "Current turn unavailable" when the turns poll carried two rows for one
+   keeper. *)
+let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error ~text_tail_drawn rows =
+  let plain text = { lead = text; rest = ""; keys = "" } in
   let stale = match error with None -> [] | Some detail -> [plain ("Activity unavailable: " ^ detail)] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
     String.equal row.ktr_keeper_name keeper_name) rows with
@@ -118,7 +128,7 @@ let chat_activity ?(frame = -1) ~now ~keeper_name ~error ~text_tail_drawn rows =
     let text = match preview with
       | Some _ when text_tail_drawn -> []
       | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
-        [{ lead = ""; rest = "Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail }]
+        [{ lead = ""; rest = "Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail; keys = "" }]
       | Some _ | None -> []
     in
     (* "Current chat_operation turn · 14m43s · …" went: the mark says a turn
@@ -134,6 +144,7 @@ let chat_activity ?(frame = -1) ~now ~keeper_name ~error ~text_tail_drawn rows =
     @ [ { lead = Printf.sprintf "%s %s%s · %s" mark observed (lane_word lane)
                    (elapsed_text ~now started_at_unix)
         ; rest = " · " ^ Tui_decode.sanitize_terminal_text status
+        ; keys = stop_keys
         } ]
     @ text
 ;;

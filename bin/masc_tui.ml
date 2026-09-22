@@ -7393,18 +7393,26 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
       Some (launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
 ;;
 
-let launch_keeper_run_next ?observed_turn state ~mailbox request =
+(* Ask the server to run this queued message next. Run-next only reorders
+   the queue: it carries no interrupt token, so the turn the Keeper is on --
+   its own autonomous turn or another operator's message -- finishes its
+   tool work and yields at the next boundary. Until 2026-09-22 a promoted
+   line (a queued line sent again, /run-next, or Enter while the Keeper's
+   chat control token had not arrived) derived the observed autonomous turn
+   as the token, so the server cancelled that turn; the plain Enter path had
+   stopped doing so on 2026-09-14 and the footer promised the same for all
+   of them. Stopping a turn is an explicit act: Esc, or /steer, which
+   interrupts before it queues. *)
+let launch_keeper_run_next state ~mailbox request =
   if Option.is_some state.keeper_run_next_inflight then ()
   else begin
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
-    let interrupt_token = Option.value
-      ~default:(Option.map snd (keeper_observed_turn state keeper_name)) observed_turn in
     state.keeper_run_next_inflight <- Some request_id;
     append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
     let run () =
       let result = try Masc_tui_http.post_keeper_run_next ~host:server_peer_host
-        ~port:state.port ~keeper_name ~request_id ~interrupt_token
+        ~port:state.port ~keeper_name ~request_id
         with Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn) in
       enqueue_async mailbox (Keeper_run_next_done (request, result)) in
@@ -7657,7 +7665,7 @@ let inflight_for state keeper_name =
 
 let drop_inflight state request =
   (match state.keeper_run_next_pending with
-   | Some (pending, _) when Keeper_chat.same_request_identity pending request ->
+   | Some pending when Keeper_chat.same_request_identity pending request ->
      state.keeper_run_next_pending <- None
    | Some _ | None -> ());
   state.msg_inflight <-
@@ -7910,7 +7918,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                  | None -> add_event state "error" "Steer queue changed before submission"
                  | Some (item, rest) ->
                    state.msg_queued <- rest;
-                   state.keeper_run_next_pending <- Some (request, Option.map snd (keeper_observed_turn state keeper_name));
+                   state.keeper_run_next_pending <- Some request;
                    launch_keeper_request ~promoted:item state ~mailbox request))
 ;;
 (* Send one line to one keeper.
@@ -8006,7 +8014,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                             || Option.is_some (working_chat_for_keeper state target))
                         && Option.is_none state.keeper_run_next_pending
                         && Option.is_none state.keeper_run_next_inflight then
-                       state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state target));
+                       state.keeper_run_next_pending <- Some item.request;
                      launch_keeper_request ~promoted:item state ~mailbox
                        item.request)
       | Some _ ->
@@ -8064,7 +8072,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                            || Option.is_some (working_chat_for_keeper state target))
                        && Option.is_none state.keeper_run_next_pending
                        && Option.is_none state.keeper_run_next_inflight then
-                      state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state target));
+                      state.keeper_run_next_pending <- Some item.request;
                     launch_keeper_request ~promoted:item state ~mailbox item.request);
                  add_event state "info" "Message submitted without interruption; refreshing chat controls";
                  launch_keeper_turns_load state ~mailbox))))
@@ -9705,7 +9713,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | None -> notice ~role:Message_error "Local queue changed; inspect /queue again"
             | Some (_, rest) ->
               state.msg_queued <- rest;
-              state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state name));
+              state.keeper_run_next_pending <- Some item.request;
               launch_keeper_request ~promoted:item state ~mailbox item.request;
               notice ~role:Message_local "Submitting queued input; it will be prioritized once the server accepts it")
          | None ->
@@ -14086,14 +14094,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                Option.iter (append_chat_history state request Message_status) notice
              | _ -> ()) deltas;
            (match state.keeper_run_next_pending with
-            | Some (pending, observed_turn) when Keeper_chat.same_request_identity pending request ->
+            | Some pending when Keeper_chat.same_request_identity pending request ->
               let admission = List.find_map (fun (_, delta) -> match delta with
                 | Keeper_chat_live.Accepted {admission;_} -> Some admission
                 | _ -> None) deltas in
               (match admission with
                | Some Keeper_chat_live.Queued ->
                  state.keeper_run_next_pending <- None;
-                 launch_keeper_run_next ~observed_turn state ~mailbox request
+                 launch_keeper_run_next state ~mailbox request
                | Some (Running | Settled) ->
                  state.keeper_run_next_pending <- None;
                  append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"

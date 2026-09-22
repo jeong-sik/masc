@@ -2278,6 +2278,37 @@ let test_enter_does_not_derive_an_interrupt_target_from_the_running_turn () =
       n
 ;;
 
+(* Run-next asks the server for first place and stops nothing. Until
+   2026-09-22 the launcher read the observed autonomous turn's token when no
+   token was handed to it, and every promotion path handed none, so a queued
+   line sent again, /run-next, or Enter before the chat control token had
+   arrived cancelled the Keeper's own turn. The launcher now takes no token at
+   all; this pins that no run-next path reads the observed turn, by name. The
+   two remaining readers are the explicit interrupt (Esc) paths. *)
+let test_run_next_never_reads_the_observed_turn () =
+  let in_launcher =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"launch_keeper_run_next"
+      ~callee:"keeper_observed_turn"
+  in
+  if in_launcher <> 0 then
+    failf
+      "run-next must not read the observed turn; launch_keeper_run_next calls \
+       keeper_observed_turn %d time(s)"
+      in_launcher;
+  let in_http =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_http.ml"
+      ~binding_name:"post_keeper_run_next"
+      ~callee:"Option.fold"
+  in
+  if in_http <> 0 then
+    failf
+      "post_keeper_run_next must send no interrupt token; it folds an option %d time(s)"
+      in_http
+;;
+
 (* The operator pressed Enter, so the line belongs in the conversation now --
    not when the turn ahead of it settles. Keyed on the request id through the
    same call dispatch makes, so the row a queued line already has is the row it
@@ -2953,6 +2984,8 @@ let () =
             test_a_queued_line_takes_its_attachments_when_it_is_typed
         ; test_case "Enter does not derive an interrupt target from the running turn" `Quick
             test_enter_does_not_derive_an_interrupt_target_from_the_running_turn
+        ; test_case "run-next never reads the observed turn" `Quick
+            test_run_next_never_reads_the_observed_turn
         ; test_case "a transcript reload replaces only an exact user row" `Quick
             test_a_transcript_reload_replaces_only_an_exact_user_row
         ; test_case "cancel and edit take the row with them" `Quick

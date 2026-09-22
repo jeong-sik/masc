@@ -32,6 +32,24 @@ let test_a_bracketed_value_is_never_padded_inside () =
   Alcotest.(check int) "an overrun folds to the width, brackets aside" 8
     (Masc_tui_message_layout.display_width folded)
 
+(* The list holds one server page. The live board holds 107 posts and the page
+   carries 50 of them, with no key that reaches the rest, so "(50)" beside the
+   name said the board was fifty posts long. *)
+let test_a_page_says_what_the_board_holds () =
+  Alcotest.(check string) "the page, then the board"
+    "(50 of 107)"
+    (Masc_tui_render_prim.board_list_count_text ~loaded:50 ~holding:(Some 107))
+
+let test_a_page_that_carries_everything_says_it_once () =
+  Alcotest.(check string) "no difference to report" "(41)"
+    (Masc_tui_render_prim.board_list_count_text ~loaded:41 ~holding:(Some 41))
+
+(* Before the census answers there is no second number to give, and the count
+   of what is on screen is still true. *)
+let test_an_uncounted_board_keeps_the_page_count () =
+  Alcotest.(check string) "the page alone" "(50)"
+    (Masc_tui_render_prim.board_list_count_text ~loaded:50 ~holding:None)
+
 let () =
   Alcotest.run "tui_board_read_title"
     [ ( "board read title"
@@ -41,5 +59,11 @@ let () =
         ; Alcotest.test_case "replies have one spelling" `Quick test_replies_have_one_spelling
         ; Alcotest.test_case "a bracketed value is never padded inside" `Quick
             test_a_bracketed_value_is_never_padded_inside
+        ; Alcotest.test_case "a page says what the board holds" `Quick
+            test_a_page_says_what_the_board_holds
+        ; Alcotest.test_case "a page that carries everything says it once" `Quick
+            test_a_page_that_carries_everything_says_it_once
+        ; Alcotest.test_case "an uncounted board keeps the page count" `Quick
+            test_an_uncounted_board_keeps_the_page_count
         ] )
     ]

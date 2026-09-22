@@ -22,6 +22,11 @@ type server_behavior =
   | Reply of string
   | Stream_reply of string
   | Replies of string list
+  | Reply_with of (int -> string -> Cohttp.Code.status_code * string)
+      (** Answer each request from its zero-based index and its body. A target
+          that refuses bodies over a size stands in for a real input limit, so
+          a caller that answers a refusal by sending less can be watched
+          converging rather than counted. *)
   | Abort_after_request
   | Delay_then_reply of float * string
   | Stream_then_stall of string
@@ -105,6 +110,9 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
         | None -> Alcotest.failf "no fixture reply for request %d" request_index
       in
       Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    | Reply_with answer ->
+      let status, body = answer request_index request_body in
+      Cohttp_eio.Server.respond_string ~status ~body ()
     | Abort_after_request -> raise Exit
     | Delay_then_reply (delay_s, response) ->
       Eio.Time.sleep clock delay_s;

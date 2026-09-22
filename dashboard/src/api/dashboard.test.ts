@@ -733,7 +733,6 @@ describe('keeper tool telemetry fetchers', () => {
             record: {
               keeper: 'keeper-alpha',
               agent_name: 'keeper-keeper-alpha-agent',
-              generation: 1,
               turn_kind: 'autonomous',
               raw_trace_run_ref: null,
               trace_id: 'trace-grounded',
@@ -747,6 +746,8 @@ describe('keeper tool telemetry fetchers', () => {
               input_components: [],
               request_runtime_profile: null,
               request_body_bytes: null,
+              usage_scope: 'per_request',
+              response_observed_model_input: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -757,7 +758,6 @@ describe('keeper tool telemetry fetchers', () => {
             record: {
               keeper: 'keeper-alpha',
               agent_name: 'keeper-keeper-alpha-agent',
-              generation: 1,
               turn_kind: 'autonomous',
               raw_trace_run_ref: null,
               trace_id: 'trace-grounded',
@@ -769,6 +769,8 @@ describe('keeper tool telemetry fetchers', () => {
               input_components: [],
               request_runtime_profile: null,
               request_body_bytes: null,
+              usage_scope: 'per_request',
+              response_observed_model_input: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -3374,6 +3376,7 @@ describe('fetchKeeperConfig', () => {
       name: 'keeper-sangsu',
       config_revision: configRevision,
       activation_mode: 'manual',
+      input_policy: 'small',
       max_context_override: 64_000,
       sandbox_profile: 'docker',
       network_mode: 'none',
@@ -3580,7 +3583,8 @@ describe('fetchKeeperConfig', () => {
         JSON.stringify({
           name: 'keeper-sangsu',
           activation_mode: 'autonomous',
-      config_revision: configRevision,
+          input_policy: 'small',
+          config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
           prompt: {
@@ -3611,6 +3615,7 @@ describe('fetchKeeperConfig', () => {
         JSON.stringify({
           name: 'keeper-sangsu',
           activation_mode: 'autonomous',
+          input_policy: 'small',
           config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
@@ -3653,7 +3658,8 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
-          activation_mode: 'autonomous',
+            activation_mode: 'autonomous',
+            input_policy: 'small',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3691,7 +3697,8 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
-          activation_mode: 'autonomous',
+            activation_mode: 'autonomous',
+            input_policy: 'small',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3727,7 +3734,8 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
-          activation_mode: 'autonomous',
+        activation_mode: 'autonomous',
+        input_policy: 'small',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: null },
@@ -3772,7 +3780,8 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
-          activation_mode: 'autonomous',
+        activation_mode: 'autonomous',
+        input_policy: 'small',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },

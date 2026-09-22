@@ -206,8 +206,8 @@ let add_comment_with_audience
   else
     let* audience = Board_audience.audience_for_comment ~content in
     (* Write-ahead (PR #28934 class, #28952): validate under [with_lock]
-       with no mutation, durably append outside any lock, then commit
-       under [with_lock] from a fresh read. The previous shape mutated
+       with no mutation, then hold the persistence lock across the durable
+       append and commit under [with_lock] from a fresh read. The previous shape mutated
        first and appended second, so a racing [flush_dirty] could
        snapshot-write a comment whose durable append was about to fail
        and be rolled back — reviving it from the snapshot on restart.
@@ -248,11 +248,10 @@ let add_comment_with_audience
     (match staged with
      | Error _ as e -> e
      | Ok comment ->
-       (match with_persist_lock store (fun () -> append_comment comment) with
-        | Error _ as e -> e
-        | Ok () ->
-          let committed =
-            with_lock store (fun () ->
+        (match with_persist_lock store (fun () ->
+          match append_comment comment with
+          | Error _ as e -> e
+          | Ok () -> Ok (with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
                  while the append is in flight; bumping the stale staged
                  copy would clobber a concurrent unrelated mutation. The
@@ -296,8 +295,9 @@ let add_comment_with_audience
                    mark_dirty_comment store comment_key;
                    invalidate_post_caches store;
                    invalidate_comment_caches store;
-                   Ok { comment; audience }))
-          in
+                   Ok { comment; audience })))) with
+        | Error _ as e -> e
+        | Ok committed ->
           (match committed with
            | Ok _ as ok -> ok
            | Error _ as e ->
@@ -663,8 +663,9 @@ let save_sub_boards_jsonl content =
 ;;
 
 let rewrite_sub_boards store =
-  let content = with_lock store (fun () -> sub_boards_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_sub_boards_jsonl content)
+  with_persist_lock store (fun () ->
+    let content = with_lock store (fun () -> sub_boards_jsonl_unlocked store) in
+    save_sub_boards_jsonl content)
 ;;
 
 let append_sub_board (sb : sub_board) =
@@ -710,8 +711,8 @@ let create_sub_board
        | Error e -> Error e
        | Ok members ->
          (* Write-ahead (#29004, same class as #28934/#28952): validate
-            under [with_lock] with no mutation, durably append outside
-            the store mutex, then commit under [with_lock] from a fresh
+            under [with_lock] with no mutation, then hold the persistence
+            lock across append and commit under [with_lock] from a fresh
             read. The previous shape mutated first and swallowed the
             append error ([record_persist_error] + unit): a failed
             append still returned [Ok sb] whose sub-board existed only
@@ -739,11 +740,10 @@ let create_sub_board
          (match staged with
           | Error _ as e -> e
           | Ok sb ->
-            (match with_persist_lock store (fun () -> append_sub_board sb) with
-             | Error _ as e -> e
-             | Ok () ->
-               let committed =
-                 with_lock store (fun () ->
+            (match with_persist_lock store (fun () ->
+               match append_sub_board sb with
+               | Error _ as e -> e
+               | Ok () -> Ok (with_lock store (fun () ->
                    if Hashtbl.mem store.sub_boards_by_slug slug
                    then
                      Error
@@ -755,8 +755,9 @@ let create_sub_board
                        store.sub_boards_by_slug
                        slug
                        (Sub_board_id.to_string sb.id);
-                     Ok sb))
-               in
+                     Ok sb)))) with
+             | Error _ as e -> e
+             | Ok committed ->
                (match committed with
                 | Ok _ as ok -> ok
                 | Error _ as e ->
@@ -851,6 +852,7 @@ let list_sub_boards store : sub_board list =
 
 let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
   let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
+  with_persist_lock store (fun () ->
   let snapshot =
     with_lock store (fun () ->
     let resolved_opt =
@@ -888,8 +890,8 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
   match snapshot with
   | Error _ as e -> e
   | Ok content ->
-    with_persist_lock store (fun () -> save_sub_boards_jsonl content);
-    Ok ()
+    save_sub_boards_jsonl content;
+    Ok ())
 ;;
 
 (** {1 Voting - Deduplicated} *)

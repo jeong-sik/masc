@@ -1079,10 +1079,34 @@ let runtime_keepers_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
 ;;
 
+(* Journals and checkpoint locks live beside these directories. Their names
+   do not make them stores; inspect the entry itself without following links. *)
+let store_directories root =
+  match Fs_compat.exact_path_kind ~follow:false root with
+  | Fs_compat.Exact_missing -> Ok []
+  | Fs_compat.Exact_kind Unix.S_DIR ->
+    (match Sys.readdir root with
+     | exception Sys_error detail -> Error detail
+     | entries ->
+       Array.to_list entries |> List.sort String.compare
+       |> List.fold_left (fun result name ->
+         let* paths = result in
+         let path = Filename.concat root name in
+         match Fs_compat.exact_path_kind ~follow:false path with
+         | Fs_compat.Exact_kind Unix.S_DIR -> Ok (path :: paths)
+         | Fs_compat.Exact_kind Unix.S_REG -> Ok paths
+         | Fs_compat.Exact_missing | Fs_compat.Exact_unknown
+         | Fs_compat.Exact_kind _ -> Error ("store entry cannot be inspected safely: " ^ path))
+         (Ok [])
+       |> Result.map List.rev)
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ ->
+    Error ("store directory cannot be inspected safely: " ^ root)
+;;
+
 let scan_keeper_dirs ~base_path scan_keeper =
+  let* directories = store_directories (runtime_keepers_dir ~base_path) in
   Ok
-    (files_under (runtime_keepers_dir ~base_path) ~keep:(fun name ->
-       not (Filename.check_suffix name ".json"))
+    (directories
      |> List.fold_left
           (fun report keeper_dir ->
              scan_keeper report ~keeper_id:(Filename.basename keeper_dir))
@@ -1178,8 +1202,9 @@ let turn_fragment_store =
   ; scan =
       (fun ~base_path ->
          let root = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+         let* directories = store_directories root in
          Ok
-           (files_under root ~keep:(fun _name -> true)
+           (directories
             |> List.fold_left
                  (fun report session_dir ->
                     let trace_id = Filename.basename session_dir in

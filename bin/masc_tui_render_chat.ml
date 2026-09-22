@@ -97,7 +97,69 @@ let chat_markdown_streaming ~context ~width body =
     ~width body
 
 
-let cached_chat_markdown ~theme ~(entry : Message_layout.entry) ~width =
+(* Link cards must use the body budget supplied by Message_layout, after the
+   clock, role and rail have been accounted for. Preview discovery and metadata
+   fetching retain the existing link-preview cache policy. *)
+let chat_body_with_previews ~preview ~mode ~(entry : Message_layout.entry) ~width =
+  let body = entry.body in
+  match entry.style, entry.markdown_source with
+  | (Message_layout.Tool | Skill _), _
+  | _, (Message_layout.Markdown_growing _ | Markdown_streaming) -> body
+  | _, Message_layout.Markdown_stable _ ->
+    let seen = Hashtbl.create 4 in
+    let urls =
+      Message_layout.bare_urls body
+      |> List.filter (fun u ->
+             if Hashtbl.mem seen u then false
+             else begin
+               Hashtbl.add seen u ();
+               true
+             end)
+    in
+    match urls with
+    | [] -> body
+    | urls -> (
+        match mode with
+        | `Off -> body
+        | `Compact ->
+            let badges =
+              List.filter_map
+                (fun u ->
+                   let p = preview u in
+                   Masc_tui_link_preview.render_compact_badge p)
+                urls
+            in
+            (match badges with
+             | [] -> body
+             | _ -> body ^ "\n" ^ String.concat "\n" badges)
+        | `Rich ->
+            let cards =
+              List.filter_map
+                (fun u ->
+                   let p = preview u in
+                   if Masc_tui_link_preview.has_informative_preview p then
+                     Some (String.concat "\n" (Masc_tui_link_preview.render_inline_card ~width p))
+                   else None)
+                urls
+            in
+            (match cards with
+             | [] -> body
+             | _ -> body ^ "\n" ^ String.concat "\n" cards))
+
+let cached_chat_markdown ~link_previews_mode ~theme =
+  (* One render closure serves measurement and drawing. Metadata arriving
+     between them belongs to the next frame, not a second height for this one. *)
+  let previews = Hashtbl.create 4 in
+  let preview url =
+    match Hashtbl.find_opt previews url with
+    | Some value -> value
+    | None ->
+        let value = Masc_tui_link_preview.get_preview url in
+        Hashtbl.add previews url value;
+        value
+  in
+  fun ~(entry : Message_layout.entry) ~width ->
+  let body = chat_body_with_previews ~preview ~mode:link_previews_mode ~entry ~width in
   let context = Chat_theme.body_context theme entry.style in
   let palette_generation = context.palette_generation in
   match entry.markdown_source with
@@ -112,7 +174,7 @@ let cached_chat_markdown ~theme ~(entry : Message_layout.entry) ~width =
                 cmi_observed_at = Some observed_at;
                 cmi_entry_index = entry_index;
               };
-            text = entry.body;
+            text = body;
           }
       in
       Markdown_cache.render chat_markdown_cache
@@ -131,9 +193,9 @@ let cached_chat_markdown ~theme ~(entry : Message_layout.entry) ~width =
             cmi_observed_at = None;
             cmi_entry_index = entry_index;
         }
-        ~text:entry.body
+        ~text:body
   | Message_layout.Markdown_streaming ->
-      chat_markdown ~context ~width entry.body
+      chat_markdown ~context ~width body
 
 
 (* Conversation colour names the source, not the prose. A keeper can return a
@@ -1279,65 +1341,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           | Message_status | Message_local | Message_error ->
               message.me_text
         in
-        (* What the links in this message point at, on rows of their own
-           under it. Added here because this is before the layout wraps:
-           the pane's own link styling runs after wrapping and cannot add a
-           cell without moving the row it sits on.
-
-           Read out of the URL and never fetched. A keeper writes these
-           links, and following one because it was mentioned would turn
-           anything a keeper says into traffic this process sends.
-
-           Not on a tool block. Tool output arrives already structured and
-           already long, and a bare URL there sits in a row that says what
-           it is; a URL in prose is the one standing on its own. *)
-        let body =
-          match message.me_role with
-          | Message_tool | Message_skill _ -> body
-          | Message_thinking | Message_user _ | Message_keeper
-          | Message_autonomous | Message_status | Message_local
-          | Message_error | Message_memory -> (
-              let seen = Hashtbl.create 4 in
-              let urls =
-                Message_layout.bare_urls body
-                |> List.filter (fun u ->
-                       if Hashtbl.mem seen u then false
-                       else begin
-                         Hashtbl.add seen u ();
-                         true
-                       end)
-              in
-              match urls with
-              | [] -> body
-              | urls -> (
-                  match state.link_previews_mode with
-                  | `Off -> body
-                  | `Compact ->
-                      let badges =
-                        List.filter_map
-                          (fun u ->
-                             let p = Masc_tui_link_preview.get_preview u in
-                             Masc_tui_link_preview.render_compact_badge p)
-                          urls
-                      in
-                      (match badges with
-                       | [] -> body
-                       | _ -> body ^ "\n" ^ String.concat "\n" badges)
-                  | `Rich ->
-                      let inner = max 20 (chat_cols - role_label_column - 6) in
-                      let cards =
-                        List.filter_map
-                          (fun u ->
-                             let p = Masc_tui_link_preview.get_preview u in
-                             if Masc_tui_link_preview.has_informative_preview p then
-                               Some (String.concat "\n" (Masc_tui_link_preview.render_inline_card ~width:inner p))
-                             else None)
-                          urls
-                      in
-                      (match cards with
-                       | [] -> body
-                       | _ -> body ^ "\n" ^ String.concat "\n" cards)))
-        in
         ({ style;
              timestamp =
                Option.fold ~none:message.me_timestamp
@@ -1582,6 +1585,8 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
 type layout_entries_memo = {
   lem_keeper_name : string;
   lem_chat_cols : int;
+  lem_preview_mode : [ `Rich | `Compact | `Off ];
+  lem_preview_generation : int;
   lem_memory : memory_visibility;
   lem_reasoning : reasoning_visibility;
   lem_tools : tool_visibility;
@@ -1651,9 +1656,12 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     Masc_tui_terminal_palette.snapshot_generation
       (Masc_tui_terminal_palette.snapshot ())
   in
+  let preview_generation = Masc_tui_link_preview.cache_generation () in
   let same_inputs (memo : layout_entries_memo) =
     String.equal memo.lem_keeper_name keeper_name
     && memo.lem_chat_cols = chat_cols
+    && memo.lem_preview_mode = state.link_previews_mode
+    && memo.lem_preview_generation = preview_generation
     && memo.lem_memory = state.msg_memory_visibility
     && memo.lem_reasoning = state.msg_reasoning_visibility
     && memo.lem_tools = state.msg_tool_visibility
@@ -1707,6 +1715,8 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
         Some
           { lem_keeper_name = keeper_name;
             lem_chat_cols = chat_cols;
+            lem_preview_mode = state.link_previews_mode;
+            lem_preview_generation = preview_generation;
             lem_memory = state.msg_memory_visibility;
             lem_reasoning = state.msg_reasoning_visibility;
             lem_tools = state.msg_tool_visibility;
@@ -1790,7 +1800,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
         let newer = List.filteri (fun index _ -> index > at) entries in
         let scroll =
           Message_layout.total_rows
-            ~markdown:(cached_chat_markdown ~theme:(Chat_theme.snapshot ()))
+            ~markdown:(cached_chat_markdown ~link_previews_mode:state.link_previews_mode ~theme:(Chat_theme.snapshot ()))
             ~origin:state.msg_origin_display
             ~previous:matched_entry
             ~inner_width:(max 1 (framed_inner_width chat_cols))
@@ -2424,7 +2434,8 @@ let render_keeper_message (state : state) =
        under a scroll position that was legal before it. *)
     (* One capture, handed to both the measure and the draw, so the rows the
        pane counts are the rows it paints. *)
-    let markdown = cached_chat_markdown ~theme:chat_theme in
+    let link_previews_mode = state.link_previews_mode in
+    let markdown = cached_chat_markdown ~link_previews_mode ~theme:chat_theme in
     (* [msg_scroll] counts back from the row the operator was last looking at,
        not from whatever is newest now. Count the current structural suffix
        after that anchor: newly appended rows belong there, and a late input

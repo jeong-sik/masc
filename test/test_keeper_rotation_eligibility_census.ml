@@ -328,13 +328,13 @@ let expected_rotation =
   ; "provider:reported_error", true
   ; "api:context_overflow", true
   ; "internal:remote_command_failed", false
-  ; "api:invalid_request", false
+  ; "api:invalid_request", true
   ; "api:not_found", true
   ; "provider:not_found", true
   ; "api:auth_error", true
   ; "provider:authorization_error", true
   ; "api:attempt_rejected", true
-  ; "api:invalid_request_vendor_400", false
+  ; "api:invalid_request_vendor_400", true
   ; "api:turn_budget_timeout", true
   ; "provider:parse_error", false
   ; "provider:unknown_variant", false
@@ -440,11 +440,52 @@ let test_walk_rotates_where_the_route_says_it_does () =
         (rotates error))
     claimed
 
+let test_request_refusal_preserves_retry_authority () =
+  let refusal = Agent_core.Error.Api
+      (Agent_core.Retry.classify_error ~retry_after_header:None ~status:400
+        ~body:{|{"error":"The prompt is too long: 1054907, model maximum context length: 1048576 (ref: measured-refusal)"}|}) in
+  (match refusal with
+   | Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+       {reason=Agent_core.Retry.Unknown_invalid_request; _}) -> ()
+   | _ -> Alcotest.fail "provider prose was reclassified as capacity");
+  List.iter (fun (label, allow_retry, effect_disposition, expected) ->
+    let attempts = ref [] in
+    let result = Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"request-refusal" ~runtime_id_of:Fun.id
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> allow_retry)
+      ~emit_runtime_manifest:emit_manifest_ignored
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [runtime_id];
+        ( (if candidate = first_candidate then Error refusal else Ok runtime_id)
+        , None, effect_disposition, Masc.Keeper_attempt_dispatch.Dispatched ))
+      [first_candidate; second_candidate] in
+    Alcotest.(check int) (label ^ " candidate attempts") expected (List.length !attempts);
+    Alcotest.(check bool) (label ^ " served by next candidate") (expected = 2)
+      (result = Ok second_candidate))
+    [ "safe refusal", true, Masc.Keeper_provider_attempt_effect.No_effect_observed, 2
+    ; "caller forbids retry", false, Masc.Keeper_provider_attempt_effect.No_effect_observed, 1
+    ; "effect already attempted", true, Masc.Keeper_provider_attempt_effect.Effect_attempted, 1
+    ; "effect unknown", true, Masc.Keeper_provider_attempt_effect.Observation_unavailable, 1 ];
+  let attempts = ref 0 in
+  let result = Driver.For_testing.attempt_runtime_candidates
+    ~runtime_id:"all-refused" ~runtime_id_of:Fun.id
+    ~emit_runtime_manifest:emit_manifest_ignored
+    ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+      incr attempts;
+      (Error refusal, None, Masc.Keeper_provider_attempt_effect.No_effect_observed,
+       Masc.Keeper_attempt_dispatch.Dispatched))
+    [first_candidate; second_candidate] in
+  Alcotest.(check int) "each declared candidate is tried once" 2 !attempts;
+  Alcotest.(check bool) "last refusal keeps its original typed cause" true
+    (result = Error refusal)
+
 let () =
   Alcotest.run
     "keeper_rotation_eligibility_census"
     [ ( "census"
-      , [ Alcotest.test_case "report" `Quick test_census_report
+      , [ Alcotest.test_case "request refusal respects effect and caller authority" `Quick
+            test_request_refusal_preserves_retry_authority
+        ; Alcotest.test_case "report" `Quick test_census_report
         ; Alcotest.test_case
             "rows match baseline"
             `Quick

@@ -21,7 +21,13 @@ let origin_sentence = function
   | Inspector.Carried_evicted_after_refusal { retry } ->
       Printf.sprintf "front evicted after a refusal (retry %d)" retry
   | Inspector.Carried_turn_start { end_atom } ->
-      Printf.sprintf "no front to start from: this turn's own atoms, from atom %d" end_atom
+      (* The fact line ahead of this sentence already says which atom the
+         range opens on ([first_atom]); [end_atom] is the completed boundary
+         itself, which sits past the newest atom when the boundary record
+         is in an older numbering. *)
+      Printf.sprintf
+        "no front to start from: this turn's own atoms; the last completed turn ended at atom %d"
+        end_atom
 ;;
 
 (* A Unix epoch as a UTC clock reading, the day dropped: the band compares

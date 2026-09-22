@@ -53,6 +53,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
+  ; me_journal = []
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
@@ -78,6 +79,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = memory_summary
+  ; me_journal = []
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
@@ -1625,6 +1627,135 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       Tui_types.turn_log_add_journaled entry.log replay;
       check_output "overlapping replay")
       [None; Some "provider failed"; Some "operator interrupted the turn"])
+;;
+
+(* An Execute call under tools:full. The recorded result was drawn as its
+   whole JSON envelope -- cwd three times, the sandbox fields, and the
+   command's output folded inside an "output" member. It now leads with how
+   the command ended and what it printed, and the rest of the envelope is one
+   context line. *)
+let test_an_execute_call_leads_with_its_exit_and_output () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (60, 120);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_tool_visibility <- Tui_types.Tools_full;
+    let result =
+      {|{"ok":true,"status":{"kind":"exit","code":0},"cwd":"/p/alpha","output_completeness":"capture_only","output":"9feab5497  fix(test): pass\n272394615  feat(keeper): trim","typed":true,"execution_time_ms":808,"via":"microvm"}|}
+    in
+    let calls =
+      `Assoc
+        [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
+        ; ( "entries"
+          , `List
+              [ `Assoc
+                  [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
+                  ; "tool", `String "Execute"
+                  ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
+                  ; "output", `String result; "success", `Bool true
+                  ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
+                  ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
+                  ] ] ) ]
+    in
+    (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
+     | Ok snapshot ->
+         state.keeper_calls_keeper <- Some "alpha";
+         state.keeper_calls <- Some snapshot
+     | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
+    let activity =
+      Masc_tui_keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
+        ~call_id:(Some "call-1") ~tool_name:"Execute"
+        ~args:{|{"argv":["git","log"]}|} ~outcome:Masc_tui_keeper_chat_transcript.Returned
+        ~duration:None ()
+    in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_tool
+             ~text:"Execute git log" ~at:1_790_053_724. ())
+          with Tui_types.me_keeper_name = "alpha"
+             ; me_tool_block =
+                 Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ]) } ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    let screen = String.concat "\n" plain in
+    check bool ("how it ended and how long it ran:\n" ^ screen) true
+      (has "exit 0 \xc2\xb7 808 ms");
+    check bool "each line it printed" true
+      (has "9feab5497  fix(test): pass" && has "272394615  feat(keeper): trim");
+    check bool "the rest of the envelope on a context line" true
+      (has "output_completeness=capture_only" && has "via=microvm");
+    check bool "no JSON envelope member" false (has "\"output_completeness\""))
+;;
+
+(* A committed Memory revision under journal:full: the one-line summary, then
+   each fact with its sign and category in a column and the claim wrapped
+   under itself. The fence it replaced wrapped every claim back to the sign's
+   column, so a revision read as one wall of text. *)
+let test_a_journal_revision_draws_its_facts_in_columns () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 72);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    let summary = "Librarian \xc2\xb7 revision 454 \xc2\xb7 +1 \xe2\x88\x920 \xc2\xb7 63 retained" in
+    let claim =
+      "verifier_exact cannot read the GitHub Actions job log, so ancestry alone \
+       never satisfies the ran-on-main contract"
+    in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+             ~text:(summary ^ "\n+ [lesson] " ^ claim) ~at:1_790_053_724. ())
+          with Tui_types.me_memory_summary = Some summary
+             ; me_journal =
+                 [ Masc_tui_message_layout.Journal_fact
+                     { sign = Journal_added; category = "lesson"; tone = Tone_learning; claim } ] } ];
+    let draw visibility =
+      state.msg_memory_visibility <- visibility;
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+    in
+    let full = draw Tui_types.Memory_full in
+    let row_with affix = List.find_opt (Astring.String.is_infix ~affix) full in
+    (match row_with "+ lesson  verifier_exact", row_with "the ran-on-main contract" with
+     | Some first, Some wrapped ->
+         let column row affix =
+           match Astring.String.find_sub ~sub:affix row with
+           | Some index -> Masc_tui_message_layout.display_width (String.sub row 0 index)
+           | None -> -1
+         in
+         check int "the wrapped claim starts under the claim, not under the sign"
+           (column first "verifier_exact")
+           (column wrapped "the ran-on-main")
+     | _ -> fail ("the fact did not draw in columns: " ^ String.concat "\n" full));
+    (* The summary wraps at this width; its head is what the row opens on. *)
+    check bool "the summary heads the revision" true
+      (Option.is_some (row_with "Librarian \xc2\xb7 revision 454"));
+    check bool "no bracketed category from the old fence" false
+      (Option.is_some (row_with "[lesson]"));
+    let summarised = draw Tui_types.Memory_summary in
+    check bool "the summary mode draws the one line alone" false
+      (List.exists (Astring.String.is_infix ~affix:"verifier_exact") summarised))
 ;;
 
 (* The origin heading under Ctrl-F's metadata:full. The clock led the row
@@ -3373,8 +3504,12 @@ let () =
             test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
+        ; test_case "a journal revision draws its facts in columns" `Quick
+            test_a_journal_revision_draws_its_facts_in_columns
         ; test_case "a folded reasoning block is the count and the key" `Quick
             test_a_folded_reasoning_block_is_the_count_and_the_key
+        ; test_case "an execute call leads with its exit and output" `Quick
+            test_an_execute_call_leads_with_its_exit_and_output
         ; test_case "the origin heading spells the name and ends on the clock" `Quick
             test_origin_row_heading_spells_the_name_and_ends_on_the_clock
         ; test_case "an observed running turn is drawn from its journal" `Quick

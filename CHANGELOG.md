@@ -2,7 +2,7 @@
 
 ## [0.36.0] - 2026-09-23
 
-> Before you upgrade: read the four items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), TypeSafe AI settings moved into `runtime.toml` (#37453), the renamed configuration failure reason (#37457), and the removed tool-call `success` field (#37487).
+> Before you upgrade: read the five items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), TypeSafe AI settings moved into `runtime.toml` (#37453), the renamed configuration failure reason (#37457), the removed tool-call `success` field (#37487), and the removed `--dup-threshold` purge option (#37751).
 
 *Tag date is provisional and must be updated to the tag commit's UTC date before publishing.*
 
@@ -12,6 +12,7 @@
 - TypeSafe AI settings now live in `runtime.toml` under `[typesafeai]`; the previous `MASC_TYPESAFEAI_*` environment variables are no longer read. Only `TYPESAFEAI_API_KEY` stays in the environment (#37453).
 - Operator-facing failure reasons now separate invalid configuration from provider authorization refusal. Tooling that reads the old `preflight_config_error` reason must read the new reasons instead (#37457).
 - Tool-call log rows no longer carry the top-level `success` boolean. Every new row records `wire_outcome` (`unknown` when nothing was observed); tooling that reads `success` should read the typed disposition or `wire_outcome` instead (#37487).
+- `masc-checkpoint-purge` no longer takes `--dup-threshold`; a call that still passes it fails with `unknown argument`. The purge report no longer has `duplicates_dropped` or `reasoning_messages_dropped`, and the dashboard purge table drops the matching column, because a purge no longer removes messages (#37751).
 
 ### Added
 
@@ -29,7 +30,7 @@
 ### Changed
 
 - The shared keeper prompt is organized around the situations where a keeper's default goes wrong — a default stance, continuity across turns, where to speak, working with other keepers, finishing, setbacks and boundaries — and names the tools each one uses. The system prompt is assembled as system, worldview, the world's articles, identity, workspace and role. The identity, workspace and constitution blocks are written in Korean, and the English draft the prompt editor loads (`keeper.en`) mirrors the shared body (#37753).
-- A checkpoint purge now removes the keeper's continuity snapshot along with moving the Librarian position, since the rewrite leaves the snapshot in the old atom numbering; the purge result and the CLI say whether one was removed (#37755).
+- Checkpoint purge (dashboard and `masc-checkpoint-purge`) keeps every message, and keeps byte-exact the last atom, the reply each completed turn ended on, and whatever a fitting Librarian working state covers, so the Librarian position, turn-boundary lines, working state and request front all still match the purged checkpoint. The report counts stripped reasoning blocks and cleared tool results; a dashboard apply keeps new Librarian units out until it finishes (#37751).
 - A keeper request with no Librarian snapshot that fits the current history starts at the Librarian's read position when that position is a place in the history, and otherwise, with no seed, at the end of the last completed turn, instead of carrying the whole history; official-client lanes without a seed start at that boundary too. The Memory screen and dashboard show the position-only case as `absorbed`. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734, #37745).
 - The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.
 - The next-request band names the wake line in the same estimated tokens as its other figures instead of bytes.

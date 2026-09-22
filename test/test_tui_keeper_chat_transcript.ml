@@ -1426,19 +1426,32 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
     feed t [ Live.Stream_model_started { model = "new-model" } ];
-    check (option string) "model event names the new attempt" (Some "new-model")
+    (* A model name is not a runtime id: the header says which it has. *)
+    check (option string) "the model event does not name a runtime" None
       (Transcript.current_runtime_id t);
+    check string "the header labels the observed model as a model"
+      "model: new-model · configured: assigned-runtime"
+      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+         ~configured_runtime:"assigned-runtime" (Some t));
     feed t [ Live.Runtime_attempt_started
       { runtime_id = None; attempt_index = Some 1 } ];
-    check (option string) "same-attempt repeat preserves observed identity"
-      (Some "new-model") (Transcript.current_runtime_id t);
+    check string "same-attempt repeat preserves the observed model"
+      "model: new-model · configured: assigned-runtime"
+      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+         ~configured_runtime:"assigned-runtime" (Some t));
+    feed t [ Live.Runtime_attempt_started
+      { runtime_id = Some "named-runtime"; attempt_index = Some 1 } ];
+    check string "a runtime id named for the attempt takes the turn label"
+      "turn: named-runtime · configured: assigned-runtime"
+      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+         ~configured_runtime:"assigned-runtime" (Some t));
     (match Transcript.trail t with
      | [ Transcript.Trail_superseded { attempt = 0; runtime_id; _ } ] ->
        check (option string) "superseded block retains its old runtime"
          (Some "old-runtime") runtime_id
      | _ -> fail "old attempt boundary changed");
-    check string "header reports the newly observed runtime"
-      "turn: new-model · configured: assigned-runtime"
+    check string "header keeps the runtime named for this attempt"
+      "turn: named-runtime · configured: assigned-runtime"
       (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t)))
     [ Some 1; None ]

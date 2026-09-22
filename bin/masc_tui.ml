@@ -6984,6 +6984,7 @@ let open_context_inspector state ~mailbox ~keeper_name =
      would be a more dangerous lie than a loading row. Refreshing the same
      target keeps its reading; opening a target does not. *)
   state.context_inspector_reading <- None;
+  state.context_inspector_read_at <- None;
   state.context_inspector_tab <- Masc_tui_context_inspector.Composition;
   state.context_inspector_cursor <- 0;
   state.context_inspector_scroll <- 0;
@@ -14594,7 +14595,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.context_inspector_keeper
       then begin
         state.context_inspector_loading <- false;
-        state.context_inspector_reading <- Some (keeper_name, reading)
+        state.context_inspector_reading <- Some (keeper_name, reading);
+        state.context_inspector_read_at <- Some (Unix.gettimeofday ())
       end
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->

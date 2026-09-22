@@ -222,6 +222,12 @@ type t =
         (* 0-based runtime attempt the growing trail belongs to. *)
   ; mutable current_runtime_id : string option
         (* Currently observed runtime identity serving this attempt. *)
+  ; mutable observed_model : string option
+        (* The model the provider named in its stream for this attempt. A
+           model name and a runtime id are different namespaces (a runtime
+           binds a provider and a model under an operator-chosen id), so a
+           model observed without a runtime is shown as a model, never as the
+           runtime. Reset per attempt with the runtime. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches
@@ -275,6 +281,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; admission = None
   ; attempt = 0
   ; current_runtime_id = None
+  ; observed_model = None
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
@@ -288,12 +295,16 @@ let current_runtime_id t = t.current_runtime_id
 
 let runtime_identity_text ~keeper_name ~configured_runtime transcript =
   let configured = "configured: " ^ safe_line configured_runtime in
+  let named = function
+    | Some value when String.trim value <> "" -> Some value
+    | Some _ | None -> None
+  in
   match transcript with
   | Some t when String.equal t.keeper_name keeper_name ->
-    (match t.current_runtime_id with
-     | Some runtime when String.trim runtime <> "" ->
-       "turn: " ^ safe_line runtime ^ " · " ^ configured
-     | Some _ | None -> configured)
+    (match named t.current_runtime_id, named t.observed_model with
+     | Some runtime, _ -> "turn: " ^ safe_line runtime ^ " · " ^ configured
+     | None, Some model -> "model: " ^ safe_line model ^ " · " ^ configured
+     | None, None -> configured)
   | Some _ | None -> configured
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
@@ -1678,6 +1689,9 @@ let apply_delta ~now t (delta : Live.delta) =
          one. A repeated event for this same attempt adds no missing fact. *)
       if new_attempt || Option.is_some runtime_id then
         t.current_runtime_id <- runtime_id;
+      (* The model the stream named belongs to the attempt it was named in;
+         a repeated event for the same attempt keeps it. *)
+      if new_attempt then t.observed_model <- None;
       t.model_signal <- None;
       t.runtime_named_at <- Some now;
       t.awaiting <- None;
@@ -1685,7 +1699,7 @@ let apply_delta ~now t (delta : Live.delta) =
        | Waiting | Working -> t.phase <- Working
        | Stream_ended | Stream_failed _ -> ())
   | Live.Stream_model_started { model } ->
-      if Option.is_none t.current_runtime_id then t.current_runtime_id <- Some model;
+      t.observed_model <- Some model;
       t.model_signal <- Some (Model_started_at now)
   | Live.Text text ->
       t.model_signal <- Some (Answering_at now);

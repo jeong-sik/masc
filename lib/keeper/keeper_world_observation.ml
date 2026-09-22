@@ -21,7 +21,7 @@ type board_reaction_event =
 type pending_board_event_kind =
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added of { comment_id : string; parent_id : string option }
+  | Board_comment_added of Board_dispatch.board_comment_identity
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
@@ -62,7 +62,9 @@ let same_board_event_identity (left : pending_board_event) (right : pending_boar
   String.equal left.post_id right.post_id
   && match left.event_kind, right.event_kind with
      | Board_comment_added left_comment, Board_comment_added right_comment ->
-       String.equal left_comment.comment_id right_comment.comment_id
+       String.equal
+         (Board.Comment_id.to_string left_comment.Board_dispatch.comment_id)
+         (Board.Comment_id.to_string right_comment.Board_dispatch.comment_id)
      | Board_post_updated, Board_post_updated -> Float.equal left.updated_at right.updated_at
      | _ -> left.event_kind = right.event_kind
 ;;
@@ -575,8 +577,7 @@ let pending_board_event_kind_of_observation
   match observation.kind with
   | Board_signal.Observed_post_created -> Board_post_created
   | Board_signal.Observed_post_updated _ -> Board_post_updated
-  | Board_signal.Observed_comment_added { comment_id; parent_id } ->
-    Board_comment_added { comment_id; parent_id }
+  | Board_signal.Observed_comment_added identity -> Board_comment_added identity
   | Board_signal.Observed_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
   | Board_signal.Observed_vote_cast vote -> Board_vote_cast vote

@@ -264,7 +264,8 @@ data: [DONE]
   let comments, edits = List.fold_left
     (fun (comments, edits) (event : Keeper_world_observation.pending_board_event) ->
       match event.event_kind with
-      | Keeper_world_observation.Board_comment_added {comment_id; _} -> comment_id :: comments, edits
+      | Keeper_world_observation.Board_comment_added { Board_dispatch.comment_id; _ } ->
+        Board.Comment_id.to_string comment_id :: comments, edits
       | Keeper_world_observation.Board_post_updated -> comments, event.updated_at :: edits
       | _ -> failwith "unexpected event kind in follow-up intake")
     ([], []) intake.pending_board_events in

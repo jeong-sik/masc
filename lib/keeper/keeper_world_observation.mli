@@ -20,7 +20,7 @@ type board_reaction_event = {
 type pending_board_event_kind =
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added of { comment_id : string; parent_id : string option }
+  | Board_comment_added of Board_dispatch.board_comment_identity
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
       (** A vote landed on a post or comment this Keeper wrote. Payload-carrying

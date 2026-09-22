@@ -1347,6 +1347,16 @@
  (modules test_fusion_delivery_obligation)
  (libraries alcotest masc_test_deps masc.fusion_core))
 
+; RFC fusion-seat-routes §2.4 — masc_fusion per-run roster. A wrong argument
+; shape, an unresolvable route or a roster the preset check rejects creates no
+; run; an accepted roster reaches the computation, the delivery obligation and
+; the run registry unchanged.
+
+(test
+ (name test_fusion_tool_roster)
+ (modules test_fusion_tool_roster)
+ (libraries alcotest masc_test_deps masc.fusion_core))
+
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.
 ; Pins the poison/transient classification table and the reported incident

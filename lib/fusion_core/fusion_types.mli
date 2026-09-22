@@ -478,6 +478,22 @@ type fusion_trigger =
 
 (** {1 심의 요청} *)
 
+(** 이번 실행만 preset 의 명단 대신 쓰는 자리 경로 (RFC fusion-seat-routes §2.4).
+    [None] 인 칸은 preset 값을 그대로 쓴다. 명단을 preset 에 얹는 규칙과 검사는
+    {!Fusion_policy.with_roster} 한 곳에 있다. [panel_routes = Some []] 은 "바꾸지 않음"
+    이 아니라 빈 명단이고, 검사가 거절한다. *)
+type roster =
+  { judge_route : string option
+      (** preset 의 [judge] 자리 대신 쓸 경로 이름 (lane 이름 또는 런타임 id). JOJ 에서는
+          meta judge 자리다. 1차 judge 명단은 바꾸지 않는다. *)
+  ; panel_routes : string list option
+      (** preset 의 panel 명단 대신 쓸 경로 이름들. 라벨 없는 그룹 하나가 된다. *)
+  }
+[@@deriving yojson, show, eq]
+
+val preset_roster : roster
+(** 두 칸 모두 [None]: preset 명단을 그대로 쓴다. *)
+
 (** out-of-band 오케스트레이터에 전달되는 심의 요청. *)
 type fusion_request =
   { run_id : string  (** correlation: 패널 N + 심판 + board post를 하나로 묶음 *)
@@ -486,6 +502,7 @@ type fusion_request =
   ; preset : string  (** runtime.toml [fusion.presets.*] 이름 *)
   ; web_tools : bool
       (** web search/fetch 도구를 패널/심판에 주입할지 여부. preset을 오버라이드. *)
+  ; roster : roster  (** 이번 실행의 명단 바꾸기. 바꾸지 않으면 {!preset_roster}. *)
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
   }
@@ -498,6 +515,9 @@ type deny_reason =
   | Disabled  (** [fusion].enabled = false *)
   | Preset_unknown of string  (** preset 이름이 config에 없음 (fail-fast) *)
   | Depth_exceeded  (** depth = Nested *)
+  | Roster_invalid of string
+      (** 요청의 명단을 얹은 preset 이 검사를 통과하지 못했다
+          ({!Fusion_policy.with_roster}). payload 는 사람이 읽는 사유다. *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 짧은 라벨 (로깅·메트릭용). *)

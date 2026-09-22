@@ -470,7 +470,7 @@ let test_emit_success_projects_board_chat_and_registry () =
         }
       ]
     in
-    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test" ~topology:Fusion_types.Simple
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
       ~started_at:2.0;
     let result =
       Fusion_sink.emit ~source_context:None ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
@@ -682,7 +682,7 @@ let test_cancelled_delivery_reaches_the_keeper_as_cancelled () =
     let keeper = Printf.sprintf "fusion-cancel-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-cancel-%d" (Random.bits ()) in
     Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"trio"
-      ~topology:Fusion_types.Simple ~started_at:1.0;
+      ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
     let result =
       Fusion_sink.emit_failure ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel
@@ -717,7 +717,7 @@ let test_judge_failure_still_reaches_the_keeper_as_failed () =
     let keeper = Printf.sprintf "fusion-failed-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-failed-%d" (Random.bits ()) in
     Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"trio"
-      ~topology:Fusion_types.Simple ~started_at:1.0;
+      ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
     let result =
       Fusion_sink.emit_failure ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~failure:(Fusion_sink.Computation_failed "boom")

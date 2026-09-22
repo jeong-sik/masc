@@ -55,7 +55,8 @@ let ensure_registry_entry ~registry obligation =
   | None ->
     Fusion_run_registry.register_running registry ~run_id
       ~keeper:obligation.payload.keeper_name ~preset:obligation.payload.preset
-      ~topology:obligation.payload.topology ~started_at:obligation.accepted_at;
+      ~roster:obligation.payload.roster ~topology:obligation.payload.topology
+      ~started_at:obligation.accepted_at;
     Fusion_sink.broadcast_run_status ~registry ~run_id
 ;;
 
@@ -92,6 +93,7 @@ let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
     ; prompt = payload.prompt
     ; preset = payload.preset
     ; web_tools = payload.web_tools
+    ; roster = payload.roster
     ; depth = Fusion_types.Fusion_depth.Top
     ; trigger = Fusion_types.Explicit_tool_call
     }

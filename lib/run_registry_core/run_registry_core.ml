@@ -68,6 +68,26 @@ module Json = struct
            name
            (Yojson.Safe.to_string json))
   ;;
+
+  let optional_string_list_field name fields =
+    let expected_list json =
+      Error
+        (Printf.sprintf
+           "field %s expected a list of strings when present, got %s"
+           name
+           (Yojson.Safe.to_string json))
+    in
+    match List.assoc_opt name fields with
+    | None -> Ok None
+    | Some (`List items as json) ->
+      let rec strings acc = function
+        | [] -> Ok (Some (List.rev acc))
+        | `String value :: rest -> strings (value :: acc) rest
+        | _ :: _ -> expected_list json
+      in
+      strings [] items
+    | Some json -> expected_list json
+  ;;
 end
 
 module type Payload = sig
